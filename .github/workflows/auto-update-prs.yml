@@ -1,0 +1,53 @@
+name: Auto-update open PRs when main changes
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: auto-update-prs
+  cancel-in-progress: true
+
+jobs:
+  update-prs:
+    name: Merge main into open PR branches
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Update open PRs that are behind main
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 6); do
+            unknown=$(gh pr list --repo "${{ github.repository }}" --state open --base main \
+              --json number,mergeable \
+              --jq '[.[] | select(.mergeable == "UNKNOWN")] | length')
+            echo "Attempt $attempt: $unknown PR(s) still in UNKNOWN mergeability state"
+            [ "$unknown" -eq 0 ] && break
+            sleep 15
+          done
+
+          prs=$(gh pr list --repo "${{ github.repository }}" --state open --base main \
+            --json number,mergeable,isDraft,mergeStateStatus \
+            --jq '.[]
+                   | select(.isDraft == false)
+                   | select(.mergeable == "MERGEABLE")
+                   | select(.mergeStateStatus != "DIRTY")
+                   | .number')
+
+          if [ -z "$prs" ]; then
+            echo "No candidate PRs found."
+            exit 0
+          fi
+
+          for pr in $prs; do
+            echo "Attempting to update PR #$pr..."
+            gh pr update-branch "$pr" --repo "${{ github.repository }}" \
+              || echo "PR #$pr skipped (already up to date, fork branch not writable, or conflict)"
+          done
