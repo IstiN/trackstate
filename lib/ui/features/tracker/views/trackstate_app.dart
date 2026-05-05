@@ -355,47 +355,80 @@ Future<void> _showConnectDialog(
   TrackerViewModel viewModel,
 ) async {
   final controller = TextEditingController();
+  var rememberToken = true;
   await showDialog<void>(
     context: context,
     builder: (context) {
       final project = viewModel.project;
-      return AlertDialog(
-        title: const Text('Connect GitHub'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Repository: ${project?.repository ?? SetupTrackStateRepository.repositoryName}',
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Connect GitHub'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Repository: ${project?.repository ?? SetupTrackStateRepository.repositoryName}',
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Fine-grained token',
+                    helperText:
+                        'Needs Contents: read/write. Stored only on this device if remembered.',
+                  ),
+                  onSubmitted: (_) {
+                    Navigator.of(context).pop();
+                    viewModel.connectGitHub(
+                      controller.text,
+                      remember: rememberToken,
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: rememberToken,
+                  title: const Text('Remember on this browser'),
+                  subtitle: const Text(
+                    'Uses client storage. Do not enable on shared devices.',
+                  ),
+                  onChanged: (value) =>
+                      setDialogState(() => rememberToken = value ?? true),
+                ),
+                if (viewModel.isGitHubAppAuthAvailable) ...[
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      viewModel.startGitHubAppLogin();
+                    },
+                    child: const Text('Continue with GitHub App'),
+                  ),
+                ],
+              ],
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Fine-grained token',
-                helperText: 'Needs Contents: read/write for this repository.',
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
               ),
-              onSubmitted: (_) {
-                Navigator.of(context).pop();
-                viewModel.connectGitHub(controller.text);
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              viewModel.connectGitHub(controller.text);
-            },
-            child: const Text('Connect'),
-          ),
-        ],
+              FilledButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  viewModel.connectGitHub(
+                    controller.text,
+                    remember: rememberToken,
+                  );
+                },
+                child: const Text('Connect token'),
+              ),
+            ],
+          );
+        },
       );
     },
   );

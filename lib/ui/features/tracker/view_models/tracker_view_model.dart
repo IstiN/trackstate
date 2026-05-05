@@ -1,15 +1,22 @@
 import 'package:flutter/foundation.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../data/repositories/trackstate_repository.dart';
+import '../../../../data/services/trackstate_auth_store.dart';
 import '../../../../domain/models/trackstate_models.dart';
 
 enum TrackerSection { dashboard, board, search, hierarchy, settings }
 
 class TrackerViewModel extends ChangeNotifier {
-  TrackerViewModel({required TrackStateRepository repository})
-    : _repository = repository;
+  TrackerViewModel({
+    required TrackStateRepository repository,
+    TrackStateAuthStore authStore =
+        const SharedPreferencesTrackStateAuthStore(),
+  }) : _repository = repository,
+       _authStore = authStore;
 
   final TrackStateRepository _repository;
+  final TrackStateAuthStore _authStore;
 
   TrackerSnapshot? _snapshot;
   TrackerSection _section = TrackerSection.dashboard;
@@ -35,6 +42,8 @@ class TrackerViewModel extends ChangeNotifier {
   bool get isConnected => _isConnected;
   GitHubUser? get connectedUser => _connectedUser;
   String get profileInitials => _connectedUser?.initials ?? 'GH';
+  bool get isGitHubAppAuthAvailable =>
+      _githubAppClientId.isNotEmpty || _githubAuthProxyUrl.isNotEmpty;
 
   List<TrackStateIssue> get issues => _snapshot?.issues ?? const [];
   List<TrackStateIssue> get epics => _snapshot?.epics ?? const [];
@@ -76,9 +85,10 @@ class TrackerViewModel extends ChangeNotifier {
         orElse: () => issues.first,
       );
       _searchResults = await _repository.searchIssues(_jql);
+      await _restoreGitHubConnection();
     } on Object catch (error) {
       _message =
-          'TrackState data was not found. Run the setup install/update workflow so trackstate-data/index.json is published. $error';
+          'TrackState data was not found through the GitHub API. Check repository visibility, Pages build variables, and DEMO/project.json. $error';
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -109,9 +119,15 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> connectGitHub(String token) async {
+  Future<void> connectGitHub(String token, {bool remember = false}) async {
     final project = _snapshot?.project;
     if (project == null) return;
+    final normalizedToken = token.trim();
+    if (normalizedToken.isEmpty) {
+      _message = 'Token is empty.';
+      notifyListeners();
+      return;
+    }
     _isSaving = true;
     _message = null;
     notifyListeners();
@@ -120,9 +136,12 @@ class TrackerViewModel extends ChangeNotifier {
         GitHubConnection(
           repository: project.repository,
           branch: project.branch,
-          token: token.trim(),
+          token: normalizedToken,
         ),
       );
+      if (remember) {
+        await _authStore.saveToken(project.repository, normalizedToken);
+      }
       _isConnected = true;
       _connectedUser = user;
       _message =
@@ -161,16 +180,11 @@ class TrackerViewModel extends ChangeNotifier {
 
     try {
       final saved = await _repository.updateIssueStatus(issue, status);
-      _snapshot = TrackerSnapshot(
-        project: snapshot.project,
-        issues: [
-          for (final current in _snapshot!.issues)
-            if (current.key == saved.key) saved else current,
-        ],
+      _snapshot = await _repository.loadSnapshot();
+      _selectedIssue = _snapshot!.issues.firstWhere(
+        (current) => current.key == saved.key,
+        orElse: () => saved,
       );
-      _selectedIssue = _selectedIssue?.key == saved.key
-          ? saved
-          : _selectedIssue;
       _searchResults = await _repository.searchIssues(_jql);
       _message = _isConnected
           ? '${issue.key} moved to ${status.label} and committed to GitHub.'
@@ -190,6 +204,82 @@ class TrackerViewModel extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  Future<void> startGitHubAppLogin() async {
+    final project = _snapshot?.project;
+    if (project == null) return;
+    if (_githubAuthProxyUrl.isNotEmpty) {
+      final proxyUri = Uri.parse(_githubAuthProxyUrl).replace(
+        queryParameters: {
+          ...Uri.parse(_githubAuthProxyUrl).queryParameters,
+          'repository': project.repository,
+          'redirect_uri': Uri.base.removeFragment().toString(),
+        },
+      );
+      await launchUrl(proxyUri, webOnlyWindowName: '_self');
+      return;
+    }
+    if (_githubAppClientId.isNotEmpty) {
+      final authorizeUri = Uri.https('github.com', '/login/oauth/authorize', {
+        'client_id': _githubAppClientId,
+        'redirect_uri': Uri.base.removeFragment().toString(),
+        'scope': 'repo',
+        'state': project.repository,
+      });
+      await launchUrl(authorizeUri, webOnlyWindowName: '_self');
+      return;
+    }
+    _message =
+        'GitHub App login is not configured. Set TRACKSTATE_GITHUB_APP_CLIENT_ID and TRACKSTATE_GITHUB_AUTH_PROXY_URL in the setup repository variables.';
+    notifyListeners();
+  }
+
+  Future<void> _restoreGitHubConnection() async {
+    final project = _snapshot?.project;
+    if (project == null || _isConnected) return;
+    final callbackToken = _callbackToken();
+    final storedToken =
+        callbackToken ?? await _authStore.readToken(project.repository);
+    if (storedToken == null || storedToken.isEmpty) {
+      if (_callbackCode() != null) {
+        _message =
+            'GitHub returned an authorization code. Configure TRACKSTATE_GITHUB_AUTH_PROXY_URL so a backend can exchange it for a token safely.';
+      }
+      return;
+    }
+    try {
+      final user = await _repository.connect(
+        GitHubConnection(
+          repository: project.repository,
+          branch: project.branch,
+          token: storedToken,
+        ),
+      );
+      _connectedUser = user;
+      _isConnected = true;
+      if (callbackToken != null) {
+        await _authStore.saveToken(project.repository, callbackToken);
+      }
+      _message = 'Connected as ${user.login} to ${project.repository}.';
+    } on Object catch (error) {
+      _message = 'Stored GitHub token is no longer valid: $error';
+      await _authStore.clearToken(project.repository);
+    }
+  }
+
+  String? _callbackToken() {
+    final fragment = Uri.splitQueryString(Uri.base.fragment);
+    return fragment['trackstate_token'] ?? fragment['access_token'];
+  }
+
+  String? _callbackCode() => Uri.base.queryParameters['code'];
 }
 
 enum ThemePreference { light, dark }
+
+const _githubAppClientId = String.fromEnvironment(
+  'TRACKSTATE_GITHUB_APP_CLIENT_ID',
+);
+const _githubAuthProxyUrl = String.fromEnvironment(
+  'TRACKSTATE_GITHUB_AUTH_PROXY_URL',
+);

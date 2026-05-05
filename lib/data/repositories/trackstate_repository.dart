@@ -29,6 +29,10 @@ class SetupTrackStateRepository implements TrackStateRepository {
     'TRACKSTATE_SOURCE_REF',
     defaultValue: 'main',
   );
+  static const dataRef = String.fromEnvironment(
+    'TRACKSTATE_DATA_REF',
+    defaultValue: 'main',
+  );
 
   http.Client get _http => _client ?? http.Client();
 
@@ -199,7 +203,7 @@ class SetupTrackStateRepository implements TrackStateRepository {
       key: (projectJson['key'] as String?) ?? 'DEMO',
       name: (projectJson['name'] as String?) ?? 'TrackState Project',
       repository: repositoryName,
-      branch: sourceRef,
+      branch: dataRef,
       issueTypes: issueTypes,
       statuses: statuses,
       fields: fields,
@@ -210,7 +214,7 @@ class SetupTrackStateRepository implements TrackStateRepository {
   Future<List<_GitTreeEntry>> _loadRepositoryTree() async {
     final json =
         await _getGitHubJson(
-              '/repos/$repositoryName/git/trees/$sourceRef',
+              '/repos/$repositoryName/git/trees/$dataRef',
               queryParameters: {'recursive': '1'},
             )
             as Map<String, Object?>;
@@ -247,7 +251,7 @@ class SetupTrackStateRepository implements TrackStateRepository {
     final json =
         await _getGitHubJson(
               '/repos/$repositoryName/contents/$path',
-              queryParameters: {'ref': sourceRef},
+              queryParameters: {'ref': dataRef},
             )
             as Map<String, Object?>;
     final encoded = json['content']?.toString().replaceAll('\n', '');
