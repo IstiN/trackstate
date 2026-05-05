@@ -1,0 +1,121 @@
+enum IssueType { epic, story, task, subtask, bug }
+
+enum IssueStatus { todo, inProgress, inReview, done }
+
+enum IssuePriority { highest, high, medium, low }
+
+class TrackStateIssue {
+  const TrackStateIssue({
+    required this.key,
+    required this.project,
+    required this.issueType,
+    required this.status,
+    required this.priority,
+    required this.summary,
+    required this.description,
+    required this.assignee,
+    required this.reporter,
+    required this.labels,
+    required this.components,
+    required this.parentKey,
+    required this.epicKey,
+    required this.progress,
+    required this.updatedLabel,
+    required this.acceptanceCriteria,
+    required this.comments,
+  });
+
+  final String key;
+  final String project;
+  final IssueType issueType;
+  final IssueStatus status;
+  final IssuePriority priority;
+  final String summary;
+  final String description;
+  final String assignee;
+  final String reporter;
+  final List<String> labels;
+  final List<String> components;
+  final String? parentKey;
+  final String? epicKey;
+  final double progress;
+  final String updatedLabel;
+  final List<String> acceptanceCriteria;
+  final List<IssueComment> comments;
+
+  bool get isEpic => issueType == IssueType.epic;
+}
+
+class IssueComment {
+  const IssueComment({
+    required this.author,
+    required this.body,
+    required this.updatedLabel,
+  });
+
+  final String author;
+  final String body;
+  final String updatedLabel;
+}
+
+class ProjectConfig {
+  const ProjectConfig({
+    required this.key,
+    required this.name,
+    required this.repository,
+    required this.branch,
+    required this.issueTypes,
+    required this.statuses,
+    required this.fields,
+  });
+
+  final String key;
+  final String name;
+  final String repository;
+  final String branch;
+  final List<String> issueTypes;
+  final List<String> statuses;
+  final List<String> fields;
+}
+
+class TrackerSnapshot {
+  const TrackerSnapshot({required this.project, required this.issues});
+
+  final ProjectConfig project;
+  final List<TrackStateIssue> issues;
+
+  List<TrackStateIssue> get epics =>
+      issues.where((issue) => issue.issueType == IssueType.epic).toList();
+
+  List<TrackStateIssue> childrenOf(String key) => issues
+      .where((issue) => issue.parentKey == key || issue.epicKey == key)
+      .toList();
+}
+
+extension IssueTypeLabel on IssueType {
+  String get label => switch (this) {
+    IssueType.epic => 'Epic',
+    IssueType.story => 'Story',
+    IssueType.task => 'Task',
+    IssueType.subtask => 'Sub-task',
+    IssueType.bug => 'Bug',
+  };
+}
+
+extension IssueStatusLabel on IssueStatus {
+  String get label => switch (this) {
+    IssueStatus.todo => 'To Do',
+    IssueStatus.inProgress => 'In Progress',
+    IssueStatus.inReview => 'In Review',
+    IssueStatus.done => 'Done',
+  };
+}
+
+extension IssuePriorityLabel on IssuePriority {
+  String get label => switch (this) {
+    IssuePriority.highest => 'Highest',
+    IssuePriority.high => 'High',
+    IssuePriority.medium => 'Medium',
+    IssuePriority.low => 'Low',
+  };
+}

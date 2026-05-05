@@ -1,0 +1,63 @@
+{
+  "@@locale": "en",
+  "appTitle": "TrackState.AI",
+  "@appTitle": {
+    "description": "Application name"
+  },
+  "appTagline": "Git-native. Jira-compatible. Team-proven.",
+  "dashboard": "Dashboard",
+  "board": "Board",
+  "jqlSearch": "JQL Search",
+  "hierarchy": "Hierarchy",
+  "settings": "Settings",
+  "issueDetail": "Issue detail",
+  "createIssue": "Create issue",
+  "transition": "Transition",
+  "syncStatus": "Synced with Git",
+  "searchIssues": "Search issues",
+  "quickActions": "Quick actions",
+  "activeEpics": "Active Epics",
+  "recentActivity": "Recent Activity",
+  "issuesInProgress": "Issues in Progress",
+  "completed": "Completed",
+  "openIssues": "Open Issues",
+  "cycleTime": "Cycle Time",
+  "teamVelocity": "Team Velocity",
+  "toDo": "To Do",
+  "inProgress": "In Progress",
+  "inReview": "In Review",
+  "done": "Done",
+  "comments": "Comments",
+  "attachments": "Attachments",
+  "linkedIssues": "Linked issues",
+  "description": "Description",
+  "acceptanceCriteria": "Acceptance Criteria",
+  "details": "Details",
+  "status": "Status",
+  "priority": "Priority",
+  "assignee": "Assignee",
+  "reporter": "Reporter",
+  "repository": "Repository",
+  "branch": "Branch",
+  "projectSettings": "Project Settings",
+  "issueTypes": "Issue Types",
+  "workflow": "Workflow",
+  "fields": "Fields",
+  "language": "Language",
+  "theme": "Theme",
+  "lightTheme": "Light theme",
+  "darkTheme": "Dark theme",
+  "mobilePreview": "Mobile issue preview",
+  "noResults": "No issues match this query",
+  "queryUpdated": "Query updated",
+  "kanbanHint": "Drag-ready workflow columns backed by Git files",
+  "jqlPlaceholder": "project = TRACK AND status != Done ORDER BY priority DESC",
+  "issueCount": "{count, plural, =0{No issues} =1{1 issue} other{{count} issues}}",
+  "@issueCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  }
+}
