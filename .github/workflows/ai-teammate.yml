@@ -12,7 +12,7 @@ on:
         description: "Encoded or JSON Agent Config"
         required: false
       concurrency_key:
-        description: "Ticket key for concurrency grouping (e.g., TRACKSTATE-123)"
+        description: "Ticket key for concurrency grouping (e.g., TS-1)"
         required: true
       project_key:
         description: "Project key for multi-project config selection"
@@ -156,7 +156,7 @@ jobs:
           COPILOT_MODEL: ${{ vars.COPILOT_MODEL }}
           AI_AGENT_PROVIDER: ${{ vars.AI_AGENT_PROVIDER }}
 
-          DMTOOLS_INTEGRATIONS: "jira,confluence,ado,figma,ai,cli,file,github"
+          DMTOOLS_INTEGRATIONS: "jira,confluence,figma,ai,cli,file,github"
           ENCODED_CONFIG: ${{ inputs.encoded_config }}
           PROMPT_CHUNK_TOKEN_LIMIT: ${{ vars.PROMPT_CHUNK_TOKEN_LIMIT }}
           CLI_ALLOWED_COMMANDS: "find,ls,cat,mkdir,bash"

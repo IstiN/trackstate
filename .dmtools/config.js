@@ -2,7 +2,7 @@
  * TrackState project configuration for DMTools agents.
  *
  * The shared agents submodule resolves this file from ../.dmtools/config.js.
- * Update Jira placeholders below once the project values are finalized.
+ * Jira project values are wired to the TrackState Jira project.
  */
 const GOAL_INSTRUCTIONS = './.dmtools/instructions/goal/goal.md';
 const DESIGN_REFERENCE = './.dmtools/instructions/goal/DESIGN.md';
@@ -15,8 +15,8 @@ module.exports = {
     },
 
     jira: {
-        project: 'TRACKSTATE',
-        parentTicket: 'TRACKSTATE-1',
+        project: 'TS',
+        parentTicket: 'TS-1',
         questions: {
             fetchJql: 'parent = {ticketKey} AND issuetype = Subtask ORDER BY created ASC',
             answerField: 'Answer'
