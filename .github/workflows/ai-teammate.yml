@@ -137,10 +137,6 @@ jobs:
           CONFLUENCE_BASE_PATH: ${{ vars.CONFLUENCE_BASE_PATH }}
           CONFLUENCE_DEFAULT_SPACE: ${{ vars.CONFLUENCE_DEFAULT_SPACE }}
 
-          ADO_ORGANIZATION: ${{ vars.ADO_ORGANIZATION }}
-          ADO_PROJECT: ${{ vars.ADO_PROJECT }}
-          ADO_TOKEN: ${{ secrets.ADO_TOKEN }}
-
           FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
           FIGMA_BASE_PATH: ${{ vars.FIGMA_BASE_PATH }}
 
