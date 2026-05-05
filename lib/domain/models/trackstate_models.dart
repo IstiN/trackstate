@@ -136,6 +136,23 @@ class GitHubConnection {
   final String token;
 }
 
+class GitHubUser {
+  const GitHubUser({required this.login, required this.displayName});
+
+  final String login;
+  final String displayName;
+
+  String get initials {
+    final source = displayName.trim().isNotEmpty ? displayName : login;
+    final parts = source
+        .split(RegExp(r'[\s._-]+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return 'GH';
+    return parts.take(2).map((part) => part[0].toUpperCase()).join();
+  }
+}
+
 extension IssueTypeLabel on IssueType {
   String get label => switch (this) {
     IssueType.epic => 'Epic',

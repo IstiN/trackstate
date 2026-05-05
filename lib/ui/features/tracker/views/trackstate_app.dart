@@ -340,7 +340,7 @@ class _TopBar extends StatelessWidget {
             radius: 18,
             backgroundColor: colors.primarySoft,
             child: Text(
-              'UK',
+              viewModel.profileInitials,
               style: TextStyle(color: colors.text, fontWeight: FontWeight.w700),
             ),
           ),

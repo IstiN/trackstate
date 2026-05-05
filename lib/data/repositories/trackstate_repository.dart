@@ -7,7 +7,7 @@ import '../../domain/models/trackstate_models.dart';
 abstract interface class TrackStateRepository {
   Future<TrackerSnapshot> loadSnapshot();
   Future<List<TrackStateIssue>> searchIssues(String jql);
-  Future<void> connect(GitHubConnection connection);
+  Future<GitHubUser> connect(GitHubConnection connection);
   Future<TrackStateIssue> updateIssueStatus(
     TrackStateIssue issue,
     IssueStatus status,
@@ -33,17 +33,24 @@ class SetupTrackStateRepository implements TrackStateRepository {
   http.Client get _http => _client ?? http.Client();
 
   @override
-  Future<void> connect(GitHubConnection connection) async {
-    final response = await _http.get(
-      Uri.https('api.github.com', '/repos/${connection.repository}'),
+  Future<GitHubUser> connect(GitHubConnection connection) async {
+    final repoResponse = await _http.get(
+      _githubUri('/repos/${connection.repository}'),
       headers: _githubHeaders(connection.token),
     );
-    if (response.statusCode != 200) {
+    if (repoResponse.statusCode != 200) {
       throw TrackStateRepositoryException(
-        'GitHub connection failed (${response.statusCode}): ${response.body}',
+        'GitHub connection failed (${repoResponse.statusCode}): ${repoResponse.body}',
       );
     }
+    final userJson =
+        await _getGitHubJson('/user', token: connection.token)
+            as Map<String, Object?>;
     _connection = connection;
+    return GitHubUser(
+      login: userJson['login']?.toString() ?? 'github',
+      displayName: userJson['name']?.toString() ?? '',
+    );
   }
 
   @override
@@ -139,26 +146,51 @@ class SetupTrackStateRepository implements TrackStateRepository {
   }
 
   Future<TrackerSnapshot> _loadSetupSnapshot() async {
-    final index =
-        await _getJson('trackstate-data/index.json') as Map<String, Object?>;
-    final issuePaths = (index['issues'] as List<Object?>).cast<String>();
+    final tree = await _loadRepositoryTree();
+    final paths = tree.map((entry) => entry.path).toSet();
+    final projectPath = paths.firstWhere(
+      (path) => path.endsWith('/project.json') || path == 'project.json',
+      orElse: () => throw const TrackStateRepositoryException(
+        'project.json was not found in the repository.',
+      ),
+    );
+    final dataRoot = projectPath.contains('/')
+        ? projectPath.substring(0, projectPath.lastIndexOf('/'))
+        : '';
+    final configRoot = dataRoot.isEmpty ? 'config' : '$dataRoot/config';
     final projectJson =
-        await _getJson('trackstate-data/DEMO/project.json')
-            as Map<String, Object?>;
-    final statuses = await _getNamedConfig('statuses');
-    final issueTypes = await _getNamedConfig('issue-types');
-    final fields = await _getNamedConfig('fields');
+        await _getRepositoryJson(projectPath) as Map<String, Object?>;
+    final issuePaths =
+        tree
+            .where(
+              (entry) =>
+                  entry.type == 'blob' &&
+                  entry.path.startsWith(dataRoot.isEmpty ? '' : '$dataRoot/') &&
+                  entry.path.endsWith('/main.md'),
+            )
+            .map((entry) => entry.path)
+            .toList()
+          ..sort();
+    if (issuePaths.isEmpty) {
+      throw TrackStateRepositoryException(
+        'No issue markdown files were found under ${dataRoot.isEmpty ? 'repository root' : dataRoot}.',
+      );
+    }
+
+    final statuses = await _getNamedConfig('$configRoot/statuses.json');
+    final issueTypes = await _getNamedConfig('$configRoot/issue-types.json');
+    final fields = await _getNamedConfig('$configRoot/fields.json');
 
     final issues = <TrackStateIssue>[];
     for (final path in issuePaths) {
-      final markdown = await _getText('trackstate-data/$path');
+      final markdown = await _getRepositoryText(path);
       final acceptancePath = path.replaceAll(
         '/main.md',
         '/acceptance_criteria.md',
       );
-      final acceptance = await _getOptionalText(
-        'trackstate-data/$acceptancePath',
-      );
+      final acceptance = paths.contains(acceptancePath)
+          ? await _getRepositoryText(acceptancePath)
+          : null;
       issues.add(_parseIssue(path, markdown, acceptance));
     }
     issues.sort((a, b) => a.key.compareTo(b.key));
@@ -175,11 +207,30 @@ class SetupTrackStateRepository implements TrackStateRepository {
     return TrackerSnapshot(project: project, issues: issues);
   }
 
-  Future<Object?> _getJson(String relativePath) async =>
-      jsonDecode(await _getText(relativePath));
+  Future<List<_GitTreeEntry>> _loadRepositoryTree() async {
+    final json =
+        await _getGitHubJson(
+              '/repos/$repositoryName/git/trees/$sourceRef',
+              queryParameters: {'recursive': '1'},
+            )
+            as Map<String, Object?>;
+    final tree = json['tree'];
+    if (tree is! List) {
+      throw const TrackStateRepositoryException(
+        'GitHub tree response did not contain a file list.',
+      );
+    }
+    return tree
+        .whereType<Map<String, Object?>>()
+        .map(_GitTreeEntry.fromJson)
+        .toList();
+  }
 
-  Future<List<String>> _getNamedConfig(String name) async {
-    final json = await _getJson('trackstate-data/DEMO/config/$name.json');
+  Future<Object?> _getRepositoryJson(String path) async =>
+      jsonDecode(await _getRepositoryText(path));
+
+  Future<List<String>> _getNamedConfig(String path) async {
+    final json = await _getRepositoryJson(path);
     if (json is List) {
       return json
           .map(
@@ -192,19 +243,37 @@ class SetupTrackStateRepository implements TrackStateRepository {
     return const [];
   }
 
-  Future<String> _getText(String relativePath) async {
-    final response = await _http.get(Uri.base.resolve(relativePath));
-    if (response.statusCode != 200) {
+  Future<String> _getRepositoryText(String path) async {
+    final json =
+        await _getGitHubJson(
+              '/repos/$repositoryName/contents/$path',
+              queryParameters: {'ref': sourceRef},
+            )
+            as Map<String, Object?>;
+    final encoded = json['content']?.toString().replaceAll('\n', '');
+    if (encoded == null || encoded.isEmpty) {
       throw TrackStateRepositoryException(
-        'Could not load $relativePath (${response.statusCode})',
+        'GitHub content response for $path did not contain file content.',
       );
     }
-    return response.body;
+    return utf8.decode(base64Decode(encoded));
   }
 
-  Future<String?> _getOptionalText(String relativePath) async {
-    final response = await _http.get(Uri.base.resolve(relativePath));
-    return response.statusCode == 200 ? response.body : null;
+  Future<Object?> _getGitHubJson(
+    String path, {
+    Map<String, String>? queryParameters,
+    String? token,
+  }) async {
+    final response = await _http.get(
+      _githubUri(path, queryParameters),
+      headers: _githubHeaders(token ?? _connection?.token),
+    );
+    if (response.statusCode != 200) {
+      throw TrackStateRepositoryException(
+        'GitHub API request failed for $path (${response.statusCode}): ${response.body}',
+      );
+    }
+    return jsonDecode(response.body);
   }
 
   void _replaceCachedIssue(TrackStateIssue updatedIssue) {
@@ -224,7 +293,8 @@ class DemoTrackStateRepository implements TrackStateRepository {
   const DemoTrackStateRepository();
 
   @override
-  Future<void> connect(GitHubConnection connection) async {}
+  Future<GitHubUser> connect(GitHubConnection connection) async =>
+      const GitHubUser(login: 'demo-user', displayName: 'Demo User');
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
@@ -410,11 +480,26 @@ List<TrackStateIssue> _filterIssues(List<TrackStateIssue> issues, String jql) {
   return sorted;
 }
 
-Map<String, String> _githubHeaders(String token) => {
-  'authorization': 'Bearer $token',
+Map<String, String> _githubHeaders(String? token) => {
   'accept': 'application/vnd.github+json',
   'X-GitHub-Api-Version': '2022-11-28',
+  if (token != null && token.isNotEmpty) 'authorization': 'Bearer $token',
 };
+
+Uri _githubUri(String path, [Map<String, String>? queryParameters]) =>
+    Uri.https('api.github.com', path, queryParameters);
+
+class _GitTreeEntry {
+  const _GitTreeEntry({required this.path, required this.type});
+
+  factory _GitTreeEntry.fromJson(Map<String, Object?> json) => _GitTreeEntry(
+    path: json['path']?.toString() ?? '',
+    type: json['type']?.toString() ?? '',
+  );
+
+  final String path;
+  final String type;
+}
 
 int _priorityRank(IssuePriority priority) => switch (priority) {
   IssuePriority.highest => 4,

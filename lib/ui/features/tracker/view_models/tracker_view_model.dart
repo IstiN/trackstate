@@ -21,6 +21,7 @@ class TrackerViewModel extends ChangeNotifier {
   bool _isSaving = false;
   String? _message;
   bool _isConnected = false;
+  GitHubUser? _connectedUser;
 
   TrackerSnapshot? get snapshot => _snapshot;
   TrackerSection get section => _section;
@@ -32,6 +33,8 @@ class TrackerViewModel extends ChangeNotifier {
   bool get isSaving => _isSaving;
   String? get message => _message;
   bool get isConnected => _isConnected;
+  GitHubUser? get connectedUser => _connectedUser;
+  String get profileInitials => _connectedUser?.initials ?? 'GH';
 
   List<TrackStateIssue> get issues => _snapshot?.issues ?? const [];
   List<TrackStateIssue> get epics => _snapshot?.epics ?? const [];
@@ -62,6 +65,12 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
     try {
       _snapshot = await _repository.loadSnapshot();
+      if (_jql.contains('project = TRACK') && project?.key != 'TRACK') {
+        _jql = _jql.replaceFirst(
+          'project = TRACK',
+          'project = ${project!.key}',
+        );
+      }
       _selectedIssue = issues.firstWhere(
         (issue) => !issue.isEpic,
         orElse: () => issues.first,
@@ -107,7 +116,7 @@ class TrackerViewModel extends ChangeNotifier {
     _message = null;
     notifyListeners();
     try {
-      await _repository.connect(
+      final user = await _repository.connect(
         GitHubConnection(
           repository: project.repository,
           branch: project.branch,
@@ -115,8 +124,9 @@ class TrackerViewModel extends ChangeNotifier {
         ),
       );
       _isConnected = true;
+      _connectedUser = user;
       _message =
-          'Connected to ${project.repository}. Drag cards to commit status changes.';
+          'Connected as ${user.login} to ${project.repository}. Drag cards to commit status changes.';
     } on Object catch (error) {
       _message = 'GitHub connection failed: $error';
       _isConnected = false;
