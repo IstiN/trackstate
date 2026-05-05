@@ -1,0 +1,6 @@
+[submodule "agents"]
+	path = agents
+	url = git@github.com:IstiN/dmtools-agents.git
+[submodule "trackstate-setup"]
+	path = trackstate-setup
+	url = git@github.com:IstiN/trackstate-setup.git

@@ -1,0 +1,65 @@
+name: Unit Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Run detected unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ran_tests=0
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew test --no-daemon
+            ran_tests=1
+          elif [ -f "./mvnw" ]; then
+            chmod +x ./mvnw
+            ./mvnw test
+            ran_tests=1
+          elif [ -f "./pom.xml" ]; then
+            mvn test
+            ran_tests=1
+          elif [ -f "./package.json" ]; then
+            if [ -f "./package-lock.json" ]; then
+              npm ci
+            else
+              npm install
+            fi
+            npm test --if-present
+            ran_tests=1
+          elif [ -f "./go.mod" ]; then
+            go test ./...
+            ran_tests=1
+          elif [ -f "./Cargo.toml" ]; then
+            cargo test
+            ran_tests=1
+          elif [ -f "./pyproject.toml" ] || [ -f "./requirements.txt" ] || [ -d "./tests" ]; then
+            python -m pip install --upgrade pip
+            if [ -f "./requirements.txt" ]; then
+              python -m pip install -r requirements.txt
+            fi
+            if [ -f "./pyproject.toml" ]; then
+              python -m pip install .
+            fi
+            python -m pytest
+            ran_tests=1
+          fi
+
+          if [ "${ran_tests}" -eq 0 ]; then
+            echo "No supported unit test entrypoint detected; skipping."
+          fi
