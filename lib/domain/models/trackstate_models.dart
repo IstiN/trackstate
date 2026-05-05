@@ -23,6 +23,8 @@ class TrackStateIssue {
     required this.updatedLabel,
     required this.acceptanceCriteria,
     required this.comments,
+    this.storagePath = '',
+    this.rawMarkdown = '',
   });
 
   final String key;
@@ -42,8 +44,38 @@ class TrackStateIssue {
   final String updatedLabel;
   final List<String> acceptanceCriteria;
   final List<IssueComment> comments;
+  final String storagePath;
+  final String rawMarkdown;
 
   bool get isEpic => issueType == IssueType.epic;
+
+  TrackStateIssue copyWith({
+    IssueStatus? status,
+    String? rawMarkdown,
+    String? updatedLabel,
+  }) {
+    return TrackStateIssue(
+      key: key,
+      project: project,
+      issueType: issueType,
+      status: status ?? this.status,
+      priority: priority,
+      summary: summary,
+      description: description,
+      assignee: assignee,
+      reporter: reporter,
+      labels: labels,
+      components: components,
+      parentKey: parentKey,
+      epicKey: epicKey,
+      progress: progress,
+      updatedLabel: updatedLabel ?? this.updatedLabel,
+      acceptanceCriteria: acceptanceCriteria,
+      comments: comments,
+      storagePath: storagePath,
+      rawMarkdown: rawMarkdown ?? this.rawMarkdown,
+    );
+  }
 }
 
 class IssueComment {
@@ -90,6 +122,18 @@ class TrackerSnapshot {
   List<TrackStateIssue> childrenOf(String key) => issues
       .where((issue) => issue.parentKey == key || issue.epicKey == key)
       .toList();
+}
+
+class GitHubConnection {
+  const GitHubConnection({
+    required this.repository,
+    required this.branch,
+    required this.token,
+  });
+
+  final String repository;
+  final String branch;
+  final String token;
 }
 
 extension IssueTypeLabel on IssueType {

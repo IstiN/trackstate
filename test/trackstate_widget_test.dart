@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 void main() {
@@ -10,12 +12,14 @@ void main() {
     try {
       tester.view.physicalSize = const Size(1440, 960);
       tester.view.devicePixelRatio = 1;
-      await tester.pumpWidget(const TrackStateApp());
+      await tester.pumpWidget(
+        const TrackStateApp(repository: DemoTrackStateRepository()),
+      );
       await tester.pumpAndSettle();
 
       expect(find.bySemanticsLabel(RegExp('TrackState\\.AI')), findsWidgets);
       expect(find.bySemanticsLabel(RegExp('Dashboard')), findsWidgets);
-      expect(find.bySemanticsLabel(RegExp('Create issue')), findsWidgets);
+      expect(find.bySemanticsLabel(RegExp('Connect GitHub')), findsWidgets);
       expect(find.bySemanticsLabel(RegExp('Synced with Git')), findsWidgets);
       expect(find.textContaining('Platform Foundation'), findsWidgets);
     } finally {
@@ -32,7 +36,9 @@ void main() {
     try {
       tester.view.physicalSize = const Size(1440, 960);
       tester.view.devicePixelRatio = 1;
-      await tester.pumpWidget(const TrackStateApp());
+      await tester.pumpWidget(
+        const TrackStateApp(repository: DemoTrackStateRepository()),
+      );
       await tester.pumpAndSettle();
 
       await tester.tap(find.bySemanticsLabel(RegExp('Board')).first);
@@ -56,10 +62,45 @@ void main() {
     }
   });
 
+  testWidgets('dragging a board card moves it to another status', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+    try {
+      await tester.pumpWidget(
+        const TrackStateApp(repository: DemoTrackStateRepository()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('Board')).first);
+      await tester.pumpAndSettle();
+
+      final card = find.byWidgetPredicate(
+        (widget) => widget is Draggable && widget.data is TrackStateIssue,
+      );
+      final doneColumn = find.bySemanticsLabel(RegExp('Done column'));
+
+      await tester.timedDragFrom(
+        tester.getCenter(card.at(1)),
+        tester.getCenter(doneColumn) - tester.getCenter(card.at(1)),
+        const Duration(milliseconds: 500),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('TRACK-12 moved locally'), findsOneWidget);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    }
+  });
+
   testWidgets('theme toggle switches to dark mode', (tester) async {
     final semantics = tester.ensureSemantics();
     try {
-      await tester.pumpWidget(const TrackStateApp());
+      await tester.pumpWidget(
+        const TrackStateApp(repository: DemoTrackStateRepository()),
+      );
       await tester.pumpAndSettle();
 
       final context = tester.element(find.byType(Scaffold).first);

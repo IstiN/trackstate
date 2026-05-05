@@ -18,6 +18,9 @@ class TrackerViewModel extends ChangeNotifier {
   List<TrackStateIssue> _searchResults = const [];
   TrackStateIssue? _selectedIssue;
   bool _isLoading = false;
+  bool _isSaving = false;
+  String? _message;
+  bool _isConnected = false;
 
   TrackerSnapshot? get snapshot => _snapshot;
   TrackerSection get section => _section;
@@ -26,6 +29,9 @@ class TrackerViewModel extends ChangeNotifier {
   List<TrackStateIssue> get searchResults => _searchResults;
   TrackStateIssue? get selectedIssue => _selectedIssue;
   bool get isLoading => _isLoading;
+  bool get isSaving => _isSaving;
+  String? get message => _message;
+  bool get isConnected => _isConnected;
 
   List<TrackStateIssue> get issues => _snapshot?.issues ?? const [];
   List<TrackStateIssue> get epics => _snapshot?.epics ?? const [];
@@ -52,15 +58,22 @@ class TrackerViewModel extends ChangeNotifier {
 
   Future<void> load() async {
     _isLoading = true;
+    _message = null;
     notifyListeners();
-    _snapshot = await _repository.loadSnapshot();
-    _selectedIssue = issues.firstWhere(
-      (issue) => issue.key == 'TRACK-12',
-      orElse: () => issues.first,
-    );
-    _searchResults = await _repository.searchIssues(_jql);
-    _isLoading = false;
-    notifyListeners();
+    try {
+      _snapshot = await _repository.loadSnapshot();
+      _selectedIssue = issues.firstWhere(
+        (issue) => !issue.isEpic,
+        orElse: () => issues.first,
+      );
+      _searchResults = await _repository.searchIssues(_jql);
+    } on Object catch (error) {
+      _message =
+          'TrackState data was not found. Run the setup install/update workflow so trackstate-data/index.json is published. $error';
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
   }
 
   Future<void> updateQuery(String query) async {
@@ -85,6 +98,87 @@ class TrackerViewModel extends ChangeNotifier {
         ? ThemePreference.dark
         : ThemePreference.light;
     notifyListeners();
+  }
+
+  Future<void> connectGitHub(String token) async {
+    final project = _snapshot?.project;
+    if (project == null) return;
+    _isSaving = true;
+    _message = null;
+    notifyListeners();
+    try {
+      await _repository.connect(
+        GitHubConnection(
+          repository: project.repository,
+          branch: project.branch,
+          token: token.trim(),
+        ),
+      );
+      _isConnected = true;
+      _message =
+          'Connected to ${project.repository}. Drag cards to commit status changes.';
+    } on Object catch (error) {
+      _message = 'GitHub connection failed: $error';
+      _isConnected = false;
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> moveIssue(TrackStateIssue issue, IssueStatus status) async {
+    if (issue.status == status) return;
+    final snapshot = _snapshot;
+    if (snapshot == null) return;
+    final previousIssues = snapshot.issues;
+    final optimisticIssue = issue.copyWith(
+      status: status,
+      updatedLabel: 'saving...',
+    );
+    _snapshot = TrackerSnapshot(
+      project: snapshot.project,
+      issues: [
+        for (final current in previousIssues)
+          if (current.key == issue.key) optimisticIssue else current,
+      ],
+    );
+    _selectedIssue = _selectedIssue?.key == issue.key
+        ? optimisticIssue
+        : _selectedIssue;
+    _isSaving = true;
+    _message = null;
+    notifyListeners();
+
+    try {
+      final saved = await _repository.updateIssueStatus(issue, status);
+      _snapshot = TrackerSnapshot(
+        project: snapshot.project,
+        issues: [
+          for (final current in _snapshot!.issues)
+            if (current.key == saved.key) saved else current,
+        ],
+      );
+      _selectedIssue = _selectedIssue?.key == saved.key
+          ? saved
+          : _selectedIssue;
+      _searchResults = await _repository.searchIssues(_jql);
+      _message = _isConnected
+          ? '${issue.key} moved to ${status.label} and committed to GitHub.'
+          : '${issue.key} moved locally. Connect GitHub in Settings to persist.';
+    } on Object catch (error) {
+      _snapshot = TrackerSnapshot(
+        project: snapshot.project,
+        issues: previousIssues,
+      );
+      _selectedIssue = previousIssues.firstWhere(
+        (current) => current.key == issue.key,
+        orElse: () => issue,
+      );
+      _message = 'Move failed: $error';
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
   }
 }
 

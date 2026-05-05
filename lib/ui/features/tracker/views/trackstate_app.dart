@@ -10,10 +10,9 @@ import '../../../core/trackstate_theme.dart';
 import '../view_models/tracker_view_model.dart';
 
 class TrackStateApp extends StatefulWidget {
-  const TrackStateApp({super.key, TrackStateRepository? repository})
-    : repository = repository ?? const DemoTrackStateRepository();
+  const TrackStateApp({super.key, this.repository});
 
-  final TrackStateRepository repository;
+  final TrackStateRepository? repository;
 
   @override
   State<TrackStateApp> createState() => _TrackStateAppState();
@@ -25,7 +24,9 @@ class _TrackStateAppState extends State<TrackStateApp> {
   @override
   void initState() {
     super.initState();
-    viewModel = TrackerViewModel(repository: widget.repository)..load();
+    viewModel = TrackerViewModel(
+      repository: widget.repository ?? SetupTrackStateRepository(),
+    )..load();
   }
 
   @override
@@ -70,12 +71,27 @@ class _TrackerHome extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
-    if (viewModel.isLoading || viewModel.snapshot == null) {
+    if (viewModel.isLoading) {
       return Scaffold(
         body: Center(
           child: Semantics(
             label: l10n.appTitle,
             child: CircularProgressIndicator(color: colors.primary),
+          ),
+        ),
+      );
+    }
+    if (viewModel.snapshot == null) {
+      return Scaffold(
+        backgroundColor: colors.page,
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 720),
+              child: _MessageBanner(
+                message: viewModel.message ?? 'TrackState data was not found.',
+              ),
+            ),
           ),
         ),
       );
@@ -295,15 +311,19 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: 12),
           if (compact)
             _IconButtonSurface(
-              label: l10n.createIssue,
-              glyph: TrackStateIconGlyph.plus,
-              onPressed: () {},
+              label: viewModel.isConnected ? 'Connected' : 'Connect GitHub',
+              glyph: TrackStateIconGlyph.gitBranch,
+              onPressed: viewModel.isSaving
+                  ? () {}
+                  : () => _showConnectDialog(context, viewModel),
             )
           else
             _PrimaryButton(
-              label: l10n.createIssue,
-              icon: TrackStateIconGlyph.plus,
-              onPressed: () {},
+              label: viewModel.isConnected ? 'Connected' : 'Connect GitHub',
+              icon: TrackStateIconGlyph.gitBranch,
+              onPressed: viewModel.isSaving
+                  ? () {}
+                  : () => _showConnectDialog(context, viewModel),
             ),
           const SizedBox(width: 8),
           _IconButtonSurface(
@@ -330,6 +350,93 @@ class _TopBar extends StatelessWidget {
   }
 }
 
+Future<void> _showConnectDialog(
+  BuildContext context,
+  TrackerViewModel viewModel,
+) async {
+  final controller = TextEditingController();
+  await showDialog<void>(
+    context: context,
+    builder: (context) {
+      final project = viewModel.project;
+      return AlertDialog(
+        title: const Text('Connect GitHub'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Repository: ${project?.repository ?? SetupTrackStateRepository.repositoryName}',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Fine-grained token',
+                helperText: 'Needs Contents: read/write for this repository.',
+              ),
+              onSubmitted: (_) {
+                Navigator.of(context).pop();
+                viewModel.connectGitHub(controller.text);
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              viewModel.connectGitHub(controller.text);
+            },
+            child: const Text('Connect'),
+          ),
+        ],
+      );
+    },
+  );
+  controller.dispose();
+}
+
+class _MessageBanner extends StatelessWidget {
+  const _MessageBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final isError = message.toLowerCase().contains('failed');
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isError
+            ? colors.accent.withValues(alpha: .12)
+            : colors.primarySoft.withValues(alpha: .72),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: isError ? colors.accent : colors.primary),
+      ),
+      child: Row(
+        children: [
+          TrackStateIcon(
+            isError ? TrackStateIconGlyph.issue : TrackStateIconGlyph.gitBranch,
+            size: 18,
+            color: isError ? colors.accent : colors.primary,
+            semanticLabel: message,
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Text(message)),
+        ],
+      ),
+    );
+  }
+}
+
 class _SectionBody extends StatelessWidget {
   const _SectionBody({required this.viewModel, this.compact = false});
 
@@ -350,7 +457,22 @@ class _SectionBody extends StatelessWidget {
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1280),
-          child: body,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (viewModel.message != null) ...[
+                _MessageBanner(message: viewModel.message!),
+                const SizedBox(height: 12),
+              ],
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 240),
+                child: KeyedSubtree(
+                  key: ValueKey(viewModel.section),
+                  child: body,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -456,8 +578,10 @@ class _Board extends StatelessWidget {
             final columns = IssueStatus.values.map((status) {
               return _BoardColumn(
                 title: _statusLabel(l10n, status),
+                targetStatus: status,
                 issues: grouped[status]!,
                 onSelect: viewModel.selectIssue,
+                onMove: viewModel.moveIssue,
               );
             }).toList();
             if (compact) {
@@ -799,45 +923,86 @@ class _RecentActivity extends StatelessWidget {
 class _BoardColumn extends StatelessWidget {
   const _BoardColumn({
     required this.title,
+    required this.targetStatus,
     required this.issues,
     required this.onSelect,
+    required this.onMove,
   });
 
   final String title;
+  final IssueStatus targetStatus;
   final List<TrackStateIssue> issues;
   final ValueChanged<TrackStateIssue> onSelect;
+  final void Function(TrackStateIssue issue, IssueStatus status) onMove;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    return Semantics(
-      label: '$title column',
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: colors.surfaceAlt.withValues(alpha: .62),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: colors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+    return DragTarget<TrackStateIssue>(
+      onWillAcceptWithDetails: (details) => details.data.status != targetStatus,
+      onAcceptWithDetails: (details) => onMove(details.data, targetStatus),
+      builder: (context, candidateData, rejectedData) {
+        final isHovering = candidateData.isNotEmpty;
+        return Semantics(
+          label: '$title column',
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isHovering
+                  ? colors.primarySoft.withValues(alpha: .72)
+                  : colors.surfaceAlt.withValues(alpha: .62),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isHovering ? colors.primary : colors.border,
+                width: isHovering ? 1.5 : 1,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(width: 8),
-                _TinyCount('${issues.length}'),
+                Row(
+                  children: [
+                    Text(title, style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(width: 8),
+                    _TinyCount('${issues.length}'),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 220),
+                  alignment: Alignment.topCenter,
+                  child: Column(
+                    children: [
+                      for (final issue in issues)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _IssueCard(
+                            issue: issue,
+                            onTap: () => onSelect(issue),
+                          ),
+                        ),
+                      if (issues.isEmpty)
+                        Container(
+                          height: 96,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: colors.border),
+                          ),
+                          child: Text(
+                            'Drop issue here',
+                            style: TextStyle(color: colors.muted),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ],
             ),
-            const SizedBox(height: 12),
-            for (final issue in issues)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _IssueCard(issue: issue, onTap: () => onSelect(issue)),
-              ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
@@ -851,7 +1016,7 @@ class _IssueCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    return Semantics(
+    final card = Semantics(
       button: true,
       label: 'Open ${issue.key} ${issue.summary}',
       child: InkWell(
@@ -903,6 +1068,18 @@ class _IssueCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+    return Draggable<TrackStateIssue>(
+      data: issue,
+      feedback: Material(
+        color: Colors.transparent,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 260),
+          child: Opacity(opacity: .92, child: card),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: .35, child: card),
+      child: card,
     );
   }
 }

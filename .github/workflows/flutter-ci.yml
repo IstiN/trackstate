@@ -37,7 +37,28 @@ jobs:
         run: flutter test
 
       - name: Build GitHub Pages web app
-        run: flutter build web --release --base-href /trackstate/
+        run: |
+          flutter build web --release \
+            --base-href /trackstate/ \
+            --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup \
+            --dart-define TRACKSTATE_SOURCE_REF=main
+
+      - name: Copy demo setup data into web build
+        run: |
+          mkdir -p build/web/trackstate-data
+          cp -R trackstate-setup/DEMO build/web/trackstate-data/DEMO
+          cp trackstate-setup/project-template.json build/web/trackstate-data/project-template.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("trackstate-setup/DEMO")
+          issues = sorted(str(path.relative_to("trackstate-setup")) for path in root.rglob("main.md"))
+          Path("build/web/trackstate-data/index.json").write_text(
+              json.dumps({"issues": issues}, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
 
       - name: Upload web build artifact
         uses: actions/upload-artifact@v4

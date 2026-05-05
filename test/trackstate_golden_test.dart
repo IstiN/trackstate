@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 void main() {
@@ -16,7 +17,9 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(const TrackStateApp());
+    await tester.pumpWidget(
+      const TrackStateApp(repository: DemoTrackStateRepository()),
+    );
     await tester.pumpAndSettle();
 
     await expectLater(
@@ -31,7 +34,9 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(const TrackStateApp());
+    await tester.pumpWidget(
+      const TrackStateApp(repository: DemoTrackStateRepository()),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.bySemanticsLabel('Dark theme'));
     await tester.pumpAndSettle();
@@ -48,7 +53,9 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(const TrackStateApp());
+    await tester.pumpWidget(
+      const TrackStateApp(repository: DemoTrackStateRepository()),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Board').first);
     await tester.pumpAndSettle();
