@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -259,6 +260,48 @@ This comment demonstrates markdown-backed collaboration history.
   );
 
   test(
+    'checked-in setup template includes repository index artifacts and richer fixtures',
+    () async {
+      final files = _fixtureFilesFromDisk('trackstate-setup/DEMO');
+
+      expect(
+        files.keys,
+        containsAll([
+          'DEMO/.trackstate/index/issues.json',
+          'DEMO/.trackstate/index/deleted.json',
+          'DEMO/config/resolutions.json',
+          'DEMO/DEMO-1/DEMO-2/links.json',
+          'DEMO/DEMO-1/DEMO-2/attachments/board-preview.svg',
+        ]),
+      );
+
+      final repository = _mockSetupRepository(files: files);
+      final snapshot = await repository.loadSnapshot();
+      final boardIssue = snapshot.issues.firstWhere((entry) => entry.key == 'DEMO-2');
+      final doneIssue = snapshot.issues.firstWhere((entry) => entry.key == 'DEMO-4');
+
+      expect(snapshot.project.fieldLabel('storyPoints'), 'Story Points');
+      expect(snapshot.project.resolutionLabel('done'), 'Done');
+      expect(
+        snapshot.repositoryIndex.pathForKey('DEMO-2'),
+        'DEMO/DEMO-1/DEMO-2/main.md',
+      );
+      expect(snapshot.repositoryIndex.deleted.single.key, 'DEMO-99');
+      expect(boardIssue.issueTypeId, 'story');
+      expect(boardIssue.statusId, 'in-review');
+      expect(boardIssue.priorityId, 'high');
+      expect(boardIssue.fixVersionIds, ['mvp']);
+      expect(boardIssue.watchers, ['demo-admin', 'demo-user']);
+      expect(boardIssue.customFields['storyPoints'], 5);
+      expect(boardIssue.customFields['releaseTrain'], ['web', 'mobile']);
+      expect(boardIssue.links.single.targetKey, 'DEMO-4');
+      expect(boardIssue.attachments.single.name, 'board-preview.svg');
+      expect(doneIssue.statusId, 'done');
+      expect(doneIssue.resolutionId, 'done');
+    },
+  );
+
+  test(
     'setup repository keeps compatibility with legacy display labels',
     () async {
       final repository = _mockSetupRepository(
@@ -501,4 +544,19 @@ SetupTrackStateRepository _mockSetupRepository({
 http.Response _contentResponse(String content) {
   final encoded = base64Encode(utf8.encode(content));
   return http.Response('{"content":"$encoded","sha":"abc123"}', 200);
+}
+
+Map<String, String> _fixtureFilesFromDisk(String rootPath) {
+  final root = Directory(rootPath);
+  final normalizedRoot = root.path.replaceAll('\\', '/');
+  final files = <String, String>{};
+
+  for (final entity in root.listSync(recursive: true, followLinks: false)) {
+    if (entity is! File) continue;
+    final normalizedPath = entity.path.replaceAll('\\', '/');
+    final relativePath = normalizedPath.substring(normalizedRoot.length + 1);
+    files['DEMO/$relativePath'] = entity.readAsStringSync();
+  }
+
+  return files;
 }
