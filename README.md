@@ -21,12 +21,12 @@ Golden baselines are stored in `test/goldens/` and are exercised by `flutter tes
 
 ## GitHub artifacts
 
-`.github/workflows/flutter-ci.yml` runs on pull requests and pushes to `main`. It installs Flutter, analyzes, runs unit/widget/golden tests, builds the GitHub Pages web app, uploads the `trackstate-web` artifact, and deploys Pages from `main`.
+`.github/workflows/unit-tests.yml` runs Flutter required checks on pull requests. `.github/workflows/flutter-ci.yml` builds the GitHub Pages web app, uploads the `trackstate-web` artifact, and deploys Pages from `main`.
 
 ## Fork-and-run setup repository
 
 End users should not fork this full source repository. They should fork `IstiN/trackstate-setup`, enable **Settings > Pages > Source: GitHub Actions**, then run **Actions > Install / Update TrackState** in their fork.
 
-That setup workflow checks out a selected `IstiN/trackstate` ref (`main`, tag, or commit SHA), builds the Flutter web app with the fork repository as runtime context, copies the setup repository's demo/config data into the web artifact, and deploys it to the fork's GitHub Pages site.
+That setup workflow checks out a selected `IstiN/trackstate` ref (`main`, tag, or commit SHA), builds the Flutter web app with the fork repository as runtime context, and deploys it to the fork's GitHub Pages site. Runtime project data is read from the target repository through the GitHub API.
 
 Maintainers should mark `IstiN/trackstate-setup` as a GitHub template repository in repository settings.
