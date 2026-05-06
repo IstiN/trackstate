@@ -122,10 +122,7 @@ module.exports = {
                 './agents/instructions/test_cases/test_case_creation_rules.md',
                 './.dmtools/instructions/test_cases/trackstate_functional_test_case_rules.md'
             ]
-        }
-    },
-
-    agentParamPatches: {
+        },
         story_questions: {
             customParams: {
                 autoStartQuestionAnswer: true,
@@ -168,5 +165,7 @@ module.exports = {
                 autoStartReviewConfigFile: 'agents/pr_review.json'
             }
         }
-    }
+    },
+
+    agentParamPatches: {}
 };
