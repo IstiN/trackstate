@@ -3,25 +3,22 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
-import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
-import 'package:trackstate/data/providers/trackstate_provider.dart';
-import 'package:trackstate/domain/models/trackstate_models.dart';
 
 import '../../components/services/attachment_upload_probe.dart';
+import '../../core/config/attachment_upload_test_config.dart';
 
 void main() {
   test(
     'TS-44 reports an explicit unsupported outcome for LFS attachment uploads',
     () async {
+      final config = AttachmentUploadTestConfig.ts44;
       var uploadAttempts = 0;
-      final provider = GitHubTrackStateProvider(
-        repositoryName: 'IstiN/trackstate',
-        dataRef: 'main',
-        client: MockClient((request) async {
+      final probe = await AttachmentUploadProbe.createGitHub(
+        config: config,
+        responder: (request) async {
           final path = request.url.path;
 
-          if (path.endsWith('/repos/IstiN/trackstate') &&
+          if (path.endsWith('/repos/${config.repository}') &&
               request.method == 'GET') {
             return http.Response(
               '{"permissions":{"pull":true,"push":true,"admin":false}}',
@@ -40,30 +37,18 @@ void main() {
             );
           }
 
-          if (path.endsWith('/contents/attachments/screenshot.png') &&
+          if (path.endsWith('/contents/${config.path}') &&
               request.method == 'PUT') {
             uploadAttempts++;
             return http.Response('{"content":{"sha":"uploaded-sha"}}', 201);
           }
 
           return http.Response('', 404);
-        }),
+        },
       );
-
-      await provider.authenticate(
-        const RepositoryConnection(
-          repository: 'IstiN/trackstate',
-          branch: 'main',
-          token: 'test-token',
-        ),
-      );
-
-      final observation = await AttachmentUploadProbe(provider).upload(
-        RepositoryAttachmentWriteRequest(
-          path: 'attachments/screenshot.png',
-          bytes: Uint8List.fromList('binary-content'.codeUnits),
-          message: 'Upload screenshot attachment',
-          branch: 'main',
+      final observation = await probe.upload(
+        config.buildWriteRequest(
+          Uint8List.fromList('binary-content'.codeUnits),
         ),
       );
 
