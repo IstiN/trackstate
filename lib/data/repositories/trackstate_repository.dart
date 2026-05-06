@@ -161,9 +161,9 @@ class SetupTrackStateRepository implements TrackStateRepository {
     final dataRoot = projectPath.contains('/')
         ? projectPath.substring(0, projectPath.lastIndexOf('/'))
         : '';
-    final configRoot = dataRoot.isEmpty ? 'config' : '$dataRoot/config';
     final projectJson =
         await _getRepositoryJson(projectPath) as Map<String, Object?>;
+    final configRoot = _resolveConfigRoot(projectJson, dataRoot);
     final issuePaths =
         tree
             .where(
@@ -209,6 +209,23 @@ class SetupTrackStateRepository implements TrackStateRepository {
       fields: fields,
     );
     return TrackerSnapshot(project: project, issues: issues);
+  }
+
+  String _resolveConfigRoot(Map<String, Object?> projectJson, String dataRoot) {
+    final configuredPath = projectJson['configPath']?.toString().trim();
+    if (configuredPath == null || configuredPath.isEmpty) {
+      return dataRoot.isEmpty ? 'config' : '$dataRoot/config';
+    }
+    final normalizedPath = configuredPath
+        .replaceFirst(RegExp(r'^/'), '')
+        .replaceFirst(RegExp(r'/$'), '');
+    if (normalizedPath.isEmpty) {
+      return dataRoot.isEmpty ? 'config' : '$dataRoot/config';
+    }
+    if (dataRoot.isNotEmpty && !normalizedPath.startsWith('$dataRoot/')) {
+      return '$dataRoot/$normalizedPath';
+    }
+    return normalizedPath;
   }
 
   Future<List<_GitTreeEntry>> _loadRepositoryTree() async {

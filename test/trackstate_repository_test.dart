@@ -114,6 +114,69 @@ Loaded from setup data.
       expect(snapshot.issues.single.storagePath, 'DEMO/DEMO-1/main.md');
     },
   );
+
+  test('setup repository honors configPath from project.json', () async {
+    final repository = SetupTrackStateRepository(
+      client: MockClient((request) async {
+        final path = request.url.path;
+        if (path.endsWith('/git/trees/main')) {
+          return http.Response('''
+{
+  "tree": [
+    {"path": "DEMO/project.json", "type": "blob"},
+    {"path": "DEMO/tracker-config/statuses.json", "type": "blob"},
+    {"path": "DEMO/tracker-config/issue-types.json", "type": "blob"},
+    {"path": "DEMO/tracker-config/fields.json", "type": "blob"},
+    {"path": "DEMO/DEMO-1/main.md", "type": "blob"}
+  ]
+}
+''', 200);
+        }
+        if (path.endsWith('/contents/DEMO/project.json')) {
+          return _contentResponse(
+            '{"key":"DEMO","name":"Demo Project","configPath":"tracker-config"}',
+          );
+        }
+        if (path.endsWith('/contents/DEMO/tracker-config/statuses.json')) {
+          return _contentResponse('[{"name":"To Do"},{"name":"Done"}]');
+        }
+        if (path.endsWith('/contents/DEMO/tracker-config/issue-types.json')) {
+          return _contentResponse('[{"name":"Epic"},{"name":"Story"}]');
+        }
+        if (path.endsWith('/contents/DEMO/tracker-config/fields.json')) {
+          return _contentResponse('[{"name":"Summary"},{"name":"Priority"}]');
+        }
+        if (path.endsWith('/contents/DEMO/DEMO-1/main.md')) {
+          return _contentResponse('''
+---
+key: DEMO-1
+project: DEMO
+issueType: Story
+status: In Progress
+priority: High
+summary: Config-aware issue
+assignee: user
+reporter: admin
+parent: null
+epic: null
+updated: 2026-05-05T00:00:00Z
+---
+
+# Description
+
+Loaded from setup data.
+''');
+        }
+        return http.Response('', 404);
+      }),
+    );
+
+    final snapshot = await repository.loadSnapshot();
+
+    expect(snapshot.project.statuses, ['To Do', 'Done']);
+    expect(snapshot.project.issueTypes, ['Epic', 'Story']);
+    expect(snapshot.project.fields, ['Summary', 'Priority']);
+  });
 }
 
 http.Response _contentResponse(String content) {
