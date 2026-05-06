@@ -34,6 +34,7 @@ migrate_working_dir/
 /coverage/
 /cacheBasicJiraClient/
 /input/
+/outputs/
 
 # Symbolication related
 app.*.symbols

@@ -268,11 +268,11 @@ This comment demonstrates markdown-backed collaboration history.
             'name': 'Demo Project',
           }),
           'DEMO/config/statuses.json': jsonEncode([
-            {'id': 'todo', 'name': 'To Do'},
-            {'id': 'in-progress', 'name': 'In Progress'},
+            {'id': 'queued', 'name': 'To Do'},
+            {'id': 'building', 'name': 'In Progress'},
           ]),
           'DEMO/config/issue-types.json': jsonEncode([
-            {'id': 'story', 'name': 'Story'},
+            {'id': 'feature-story', 'name': 'Story'},
           ]),
           'DEMO/config/fields.json': jsonEncode([
             {
@@ -283,7 +283,7 @@ This comment demonstrates markdown-backed collaboration history.
             },
           ]),
           'DEMO/config/priorities.json': jsonEncode([
-            {'id': 'high', 'name': 'High'},
+            {'id': 'p1', 'name': 'High'},
           ]),
           'DEMO/config/versions.json': jsonEncode([]),
           'DEMO/config/components.json': jsonEncode([]),
@@ -312,16 +312,79 @@ Loaded from older demo data.
       final issue = snapshot.issues.single;
 
       expect(issue.issueType, IssueType.story);
-      expect(issue.issueTypeId, 'story');
+      expect(issue.issueTypeId, 'feature-story');
       expect(issue.status, IssueStatus.inProgress);
-      expect(issue.statusId, 'in-progress');
+      expect(issue.statusId, 'building');
       expect(issue.priority, IssuePriority.high);
-      expect(issue.priorityId, 'high');
+      expect(issue.priorityId, 'p1');
       expect(issue.storagePath, 'DEMO/DEMO-1/main.md');
     },
   );
 
-  test('updating an issue status writes the canonical status id', () async {
+  test(
+    'setup repository preserves stored config ids while reading semantic enums',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'queued', 'name': 'To Do'},
+            {'id': 'building', 'name': 'In Progress'},
+            {'id': 'accepted', 'name': 'Done'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'feature-story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/config/priorities.json': jsonEncode([
+            {'id': 'p1', 'name': 'High'},
+          ]),
+          'DEMO/config/versions.json': jsonEncode([]),
+          'DEMO/config/components.json': jsonEncode([]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: feature-story
+status: building
+priority: p1
+summary: Canonical ids stay intact
+assignee: user
+reporter: admin
+parent: null
+epic: null
+---
+
+# Description
+
+Machine ids should survive parsing.
+''',
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot();
+      final issue = snapshot.issues.single;
+
+      expect(issue.issueType, IssueType.story);
+      expect(issue.issueTypeId, 'feature-story');
+      expect(issue.status, IssueStatus.inProgress);
+      expect(issue.statusId, 'building');
+      expect(issue.priority, IssuePriority.high);
+      expect(issue.priorityId, 'p1');
+    },
+  );
+
+  test('updating an issue status writes the repository canonical status id', () async {
     String? putBody;
     final repository = SetupTrackStateRepository(
       client: MockClient((request) async {
@@ -338,9 +401,17 @@ Loaded from older demo data.
 ---
 key: DEMO-1
 project: DEMO
-status: in-progress
+status: building
 ---
 ''');
+        }
+        if (path == '/repos/owner/demo/contents/DEMO/config/statuses.json' &&
+            request.method == 'GET') {
+          return _contentResponse(jsonEncode([
+            {'id': 'queued', 'name': 'To Do'},
+            {'id': 'building', 'name': 'In Progress'},
+            {'id': 'accepted', 'name': 'Done'},
+          ]));
         }
         if (path == '/repos/owner/demo/contents/DEMO/DEMO-1/main.md' &&
             request.method == 'PUT') {
@@ -366,7 +437,7 @@ status: in-progress
         issueType: IssueType.story,
         issueTypeId: 'story',
         status: IssueStatus.inProgress,
-        statusId: 'in-progress',
+        statusId: 'building',
         priority: IssuePriority.high,
         priorityId: 'high',
         summary: 'Issue',
@@ -396,8 +467,8 @@ status: in-progress
 
     final body = jsonDecode(putBody!) as Map<String, Object?>;
     final content = utf8.decode(base64Decode(body['content']! as String));
-    expect(content, contains('status: done'));
-    expect(content, isNot(contains('status: Done')));
+    expect(content, contains('status: accepted'));
+    expect(content, isNot(contains('status: done')));
   });
 }
 

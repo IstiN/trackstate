@@ -113,10 +113,15 @@ class SetupTrackStateRepository implements TrackStateRepository {
     }
 
     final markdown = utf8.decode(base64Decode(encoded));
+    final statusId = await _resolveStatusIdForUpdate(
+      connection: connection,
+      issue: issue,
+      status: status,
+    );
     final updatedMarkdown = _replaceFrontmatterValue(
       markdown,
       'status',
-      status.id,
+      statusId,
     );
     final putResponse = await _http.put(
       Uri.https(
@@ -142,7 +147,7 @@ class SetupTrackStateRepository implements TrackStateRepository {
 
     final updatedIssue = issue.copyWith(
       status: status,
-      statusId: status.id,
+      statusId: statusId,
       rawMarkdown: updatedMarkdown,
       updatedLabel: 'just now',
     );
@@ -174,31 +179,6 @@ class SetupTrackStateRepository implements TrackStateRepository {
       configRoot: configRoot,
       locale: defaultLocale,
     );
-    final repositoryIndex = await _loadRepositoryIndex(
-      blobPaths: blobPaths,
-      dataRoot: dataRoot,
-    );
-    final issuePaths =
-        repositoryIndex.entries.isNotEmpty
-              ? repositoryIndex.entries.map((entry) => entry.path).toList()
-              : tree
-                    .where(
-                      (entry) =>
-                          entry.type == 'blob' &&
-                          entry.path.startsWith(
-                            dataRoot.isEmpty ? '' : '$dataRoot/',
-                          ) &&
-                          entry.path.endsWith('/main.md'),
-                    )
-                    .map((entry) => entry.path)
-                    .toList()
-          ..sort();
-    if (issuePaths.isEmpty) {
-      throw TrackStateRepositoryException(
-        'No issue markdown files were found under ${dataRoot.isEmpty ? 'repository root' : dataRoot}.',
-      );
-    }
-
     final issueTypes = await _getConfigEntries(
       _joinPath(configRoot, 'issue-types.json'),
       localizedLabels: localizedLabels['issueTypes'] ?? const {},
@@ -235,6 +215,31 @@ class SetupTrackStateRepository implements TrackStateRepository {
       localizedLabels: localizedLabels['resolutions'] ?? const {},
       locale: defaultLocale,
     );
+    final repositoryIndex = await _loadRepositoryIndex(
+      blobPaths: blobPaths,
+      dataRoot: dataRoot,
+      issueTypeDefinitions: issueTypes,
+    );
+    final issuePaths =
+        repositoryIndex.entries.isNotEmpty
+              ? repositoryIndex.entries.map((entry) => entry.path).toList()
+              : tree
+                    .where(
+                      (entry) =>
+                          entry.type == 'blob' &&
+                          entry.path.startsWith(
+                            dataRoot.isEmpty ? '' : '$dataRoot/',
+                          ) &&
+                          entry.path.endsWith('/main.md'),
+                    )
+                    .map((entry) => entry.path)
+                    .toList()
+          ..sort();
+    if (issuePaths.isEmpty) {
+      throw TrackStateRepositoryException(
+        'No issue markdown files were found under ${dataRoot.isEmpty ? 'repository root' : dataRoot}.',
+      );
+    }
 
     final indexEntriesByPath = {
       for (final entry in repositoryIndex.entries) entry.path: entry,
@@ -265,6 +270,10 @@ class SetupTrackStateRepository implements TrackStateRepository {
           links: links,
           attachments: attachments,
           repositoryIndexEntry: indexEntriesByPath[path],
+          issueTypeDefinitions: issueTypes,
+          statusDefinitions: statuses,
+          priorityDefinitions: priorities,
+          resolutionDefinitions: resolutions,
         ),
       );
     }
@@ -350,26 +359,11 @@ class SetupTrackStateRepository implements TrackStateRepository {
     required Map<String, String> localizedLabels,
     required String locale,
   }) async {
-    final json = await _getRepositoryJson(path);
-    if (json is! List) return const [];
-    return json
-        .whereType<Map>()
-        .map((entry) {
-          final rawId = entry['id']?.toString();
-          final id = rawId == null || rawId.isEmpty
-              ? _canonicalConfigId(entry['name']?.toString())
-              : rawId;
-          final fallbackName = entry['name']?.toString() ?? id;
-          final localizedLabel = localizedLabels[id];
-          return TrackStateConfigEntry(
-            id: id,
-            name: fallbackName,
-            localizedLabels: localizedLabel == null
-                ? const {}
-                : {locale: localizedLabel},
-          );
-        })
-        .toList(growable: false);
+    return _configEntriesFromJson(
+      await _getRepositoryJson(path),
+      localizedLabels: localizedLabels,
+      locale: locale,
+    );
   }
 
   Future<List<TrackStateConfigEntry>> _loadOptionalConfigEntries({
@@ -418,6 +412,7 @@ class SetupTrackStateRepository implements TrackStateRepository {
   Future<RepositoryIndex> _loadRepositoryIndex({
     required Set<String> blobPaths,
     required String dataRoot,
+    required List<TrackStateConfigEntry> issueTypeDefinitions,
   }) async {
     final issuesPath = _joinPath(dataRoot, '.trackstate/index/issues.json');
     final deletedPath = _joinPath(dataRoot, '.trackstate/index/deleted.json');
@@ -435,7 +430,12 @@ class SetupTrackStateRepository implements TrackStateRepository {
       final json = await _getRepositoryJson(deletedPath);
       if (json is List) {
         deleted.addAll(
-          json.whereType<Map>().map((entry) => _deletedIssueTombstone(entry)),
+          json.whereType<Map>().map(
+            (entry) => _deletedIssueTombstone(
+              entry,
+              issueTypeDefinitions: issueTypeDefinitions,
+            ),
+          ),
         );
       }
     }
@@ -553,6 +553,64 @@ class SetupTrackStateRepository implements TrackStateRepository {
       ],
     );
   }
+
+  Future<String> _resolveStatusIdForUpdate({
+    required GitHubConnection connection,
+    required TrackStateIssue issue,
+    required IssueStatus status,
+  }) async {
+    final statusDefinitions = await _loadConnectedStatusDefinitions(
+      connection: connection,
+      storagePath: issue.storagePath,
+    );
+    return _statusIdForStatus(
+      status,
+      definitions: statusDefinitions,
+      currentIssue: issue,
+    );
+  }
+
+  Future<List<TrackStateConfigEntry>> _loadConnectedStatusDefinitions({
+    required GitHubConnection connection,
+    required String storagePath,
+  }) async {
+    final projectRoot = storagePath.split('/').first;
+    if (projectRoot.isEmpty) {
+      return _snapshot?.project.statusDefinitions ?? const [];
+    }
+
+    final path = '$projectRoot/config/statuses.json';
+    final response = await _http.get(
+      Uri.https(
+        'api.github.com',
+        '/repos/${connection.repository}/contents/$path',
+        {'ref': connection.branch},
+      ),
+      headers: _githubHeaders(connection.token),
+    );
+    if (response.statusCode == 404) {
+      return _snapshot?.project.statusDefinitions ?? const [];
+    }
+    if (response.statusCode != 200) {
+      throw TrackStateRepositoryException(
+        'Could not read $path (${response.statusCode}): ${response.body}',
+      );
+    }
+
+    final fileJson = jsonDecode(response.body) as Map<String, Object?>;
+    final encoded = (fileJson['content'] as String?)?.replaceAll('\n', '');
+    if (encoded == null || encoded.isEmpty) {
+      throw TrackStateRepositoryException(
+        'GitHub response for $path is missing content.',
+      );
+    }
+
+    return _configEntriesFromJson(
+      jsonDecode(utf8.decode(base64Decode(encoded))),
+      localizedLabels: const {},
+      locale: 'en',
+    );
+  }
 }
 
 class DemoTrackStateRepository implements TrackStateRepository {
@@ -575,7 +633,11 @@ class DemoTrackStateRepository implements TrackStateRepository {
     IssueStatus status,
   ) async => issue.copyWith(
     status: status,
-    statusId: status.id,
+    statusId: _statusIdForStatus(
+      status,
+      definitions: _project.statusDefinitions,
+      currentIssue: issue,
+    ),
     updatedLabel: 'just now',
   );
 }
@@ -596,12 +658,28 @@ TrackStateIssue _parseIssue({
   required List<IssueLink> links,
   required List<IssueAttachment> attachments,
   RepositoryIssueIndexEntry? repositoryIndexEntry,
+  required List<TrackStateConfigEntry> issueTypeDefinitions,
+  required List<TrackStateConfigEntry> statusDefinitions,
+  required List<TrackStateConfigEntry> priorityDefinitions,
+  required List<TrackStateConfigEntry> resolutionDefinitions,
 }) {
   final frontmatter = _frontmatter(markdown);
   final body = _body(markdown);
-  final issueType = _issueType(frontmatter['issueType']?.toString());
-  final status = _issueStatus(frontmatter['status']?.toString());
-  final priority = _issuePriority(frontmatter['priority']?.toString());
+  final issueTypeId = _resolvedConfigId(
+    frontmatter['issueType']?.toString(),
+    definitions: issueTypeDefinitions,
+  );
+  final statusId = _resolvedConfigId(
+    frontmatter['status']?.toString(),
+    definitions: statusDefinitions,
+  );
+  final priorityId = _resolvedConfigId(
+    frontmatter['priority']?.toString(),
+    definitions: priorityDefinitions,
+  );
+  final issueType = _issueType(issueTypeId, issueTypeDefinitions);
+  final status = _issueStatus(statusId, statusDefinitions);
+  final priority = _issuePriority(priorityId, priorityDefinitions);
   final description = _section(
     body,
     'Description',
@@ -621,11 +699,11 @@ TrackStateIssue _parseIssue({
     key: frontmatter['key']?.toString() ?? 'UNKNOWN-0',
     project: frontmatter['project']?.toString() ?? 'DEMO',
     issueType: issueType,
-    issueTypeId: issueType.id,
+    issueTypeId: issueTypeId,
     status: status,
-    statusId: status.id,
+    statusId: statusId,
     priority: priority,
-    priorityId: priority.id,
+    priorityId: priorityId,
     summary: summary,
     description: description.ifEmpty(body),
     assignee: frontmatter['assignee']?.toString() ?? 'unassigned',
@@ -649,7 +727,10 @@ TrackStateIssue _parseIssue({
         _boolValue(frontmatter['archived']) ??
         repositoryIndexEntry?.isArchived ??
         false,
-    resolutionId: _nullableId(frontmatter['resolution']),
+    resolutionId: _nullableResolvedId(
+      frontmatter['resolution'],
+      definitions: resolutionDefinitions,
+    ),
     storagePath: storagePath,
     rawMarkdown: markdown,
   );
@@ -814,12 +895,6 @@ bool? _boolValue(Object? value) {
 String? _nullable(String? value) =>
     value == null || value == 'null' || value.isEmpty ? null : value;
 
-String? _nullableId(Object? value) {
-  final text = value?.toString();
-  if (text == null || text.isEmpty || text == 'null') return null;
-  return _canonicalConfigId(text);
-}
-
 String _body(String markdown) {
   final lines = const LineSplitter().convert(markdown);
   if (lines.isEmpty || lines.first.trim() != '---') return markdown.trim();
@@ -844,28 +919,148 @@ String _replaceFrontmatterValue(String markdown, String key, String value) {
   return markdown.replaceFirst('---\n', '---\n$key: $value\n');
 }
 
-IssueType _issueType(String? value) => switch (_canonicalConfigId(value)) {
-  'epic' => IssueType.epic,
-  'subtask' => IssueType.subtask,
-  'bug' => IssueType.bug,
-  'task' => IssueType.task,
-  _ => IssueType.story,
-};
+List<TrackStateConfigEntry> _configEntriesFromJson(
+  Object? json, {
+  required Map<String, String> localizedLabels,
+  required String locale,
+}) {
+  if (json is! List) return const [];
+  return json
+      .whereType<Map>()
+      .map((entry) {
+        final rawId = entry['id']?.toString();
+        final id = rawId == null || rawId.isEmpty
+            ? _canonicalConfigId(entry['name']?.toString())
+            : rawId;
+        final fallbackName = entry['name']?.toString() ?? id;
+        final localizedLabel = localizedLabels[id];
+        return TrackStateConfigEntry(
+          id: id,
+          name: fallbackName,
+          localizedLabels: localizedLabel == null
+              ? const {}
+              : {locale: localizedLabel},
+        );
+      })
+      .toList(growable: false);
+}
 
-IssueStatus _issueStatus(String? value) => switch (_canonicalConfigId(value)) {
-  'in-progress' => IssueStatus.inProgress,
-  'in-review' => IssueStatus.inReview,
-  'done' => IssueStatus.done,
-  _ => IssueStatus.todo,
-};
-
-IssuePriority _issuePriority(String? value) =>
-    switch (_canonicalConfigId(value)) {
-      'highest' => IssuePriority.highest,
-      'high' => IssuePriority.high,
-      'low' => IssuePriority.low,
-      _ => IssuePriority.medium,
+IssueType _issueType(
+  String? value, [
+  List<TrackStateConfigEntry> definitions = const [],
+]) =>
+    switch (_configSemanticToken(value, definitions)) {
+      'epic' => IssueType.epic,
+      'subtask' || 'sub-task' => IssueType.subtask,
+      'bug' => IssueType.bug,
+      'task' => IssueType.task,
+      _ => IssueType.story,
     };
+
+IssueStatus _issueStatus(
+  String? value, [
+  List<TrackStateConfigEntry> definitions = const [],
+]) {
+  final token = _configSemanticToken(value, definitions);
+  if (token == 'done' || token.contains('done')) {
+    return IssueStatus.done;
+  }
+  if (token == 'in-review' || token.contains('review')) {
+    return IssueStatus.inReview;
+  }
+  if (token == 'in-progress' || token.contains('progress')) {
+    return IssueStatus.inProgress;
+  }
+  if (token == 'todo' || token == 'to-do' || token.contains('backlog')) {
+    return IssueStatus.todo;
+  }
+  return IssueStatus.todo;
+}
+
+IssuePriority _issuePriority(
+  String? value, [
+  List<TrackStateConfigEntry> definitions = const [],
+]) {
+  final token = _configSemanticToken(value, definitions);
+  if (token == 'highest' || token.contains('highest')) {
+    return IssuePriority.highest;
+  }
+  if (token == 'high' || token.startsWith('high-')) {
+    return IssuePriority.high;
+  }
+  if (token == 'low' || token.contains('low')) {
+    return IssuePriority.low;
+  }
+  return IssuePriority.medium;
+}
+
+String _configSemanticToken(
+  String? value,
+  List<TrackStateConfigEntry> definitions,
+) {
+  final text = (value ?? '').trim();
+  if (text.isEmpty) return '';
+  final match = _matchingConfigEntry(text, definitions);
+  final semanticSource = match?.name ?? text;
+  final normalized = _canonicalConfigId(semanticSource);
+  if (normalized.isNotEmpty) return normalized;
+  return _canonicalConfigId(match?.id ?? text);
+}
+
+TrackStateConfigEntry? _matchingConfigEntry(
+  String value,
+  List<TrackStateConfigEntry> definitions,
+) {
+  if (definitions.isEmpty) return null;
+  final normalized = _canonicalConfigId(value);
+  for (final definition in definitions) {
+    if (definition.id == value ||
+        _canonicalConfigId(definition.id) == normalized ||
+        _canonicalConfigId(definition.name) == normalized ||
+        definition.localizedLabels.values.any(
+          (label) => _canonicalConfigId(label) == normalized,
+        )) {
+      return definition;
+    }
+  }
+  return null;
+}
+
+String _resolvedConfigId(
+  String? value, {
+  required List<TrackStateConfigEntry> definitions,
+}) {
+  final text = (value ?? '').trim();
+  if (text.isEmpty || text == 'null') return '';
+  final match = _matchingConfigEntry(text, definitions);
+  if (match != null) return match.id;
+  return definitions.isEmpty ? _canonicalConfigId(text) : text;
+}
+
+String? _nullableResolvedId(
+  Object? value, {
+  required List<TrackStateConfigEntry> definitions,
+}) {
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty || text == 'null') return null;
+  return _resolvedConfigId(text, definitions: definitions);
+}
+
+String _statusIdForStatus(
+  IssueStatus status, {
+  required List<TrackStateConfigEntry> definitions,
+  required TrackStateIssue currentIssue,
+}) {
+  if (currentIssue.status == status && currentIssue.statusId.isNotEmpty) {
+    return currentIssue.statusId;
+  }
+  for (final definition in definitions) {
+    if (_issueStatus(definition.id, definitions) == status) {
+      return definition.id;
+    }
+  }
+  return status.id;
+}
 
 String _canonicalConfigId(String? value) {
   final normalized = (value ?? '').trim().toLowerCase();
@@ -898,14 +1093,20 @@ RepositoryIssueIndexEntry _repositoryIndexEntry(Map entry) {
   );
 }
 
-DeletedIssueTombstone _deletedIssueTombstone(Map entry) =>
+DeletedIssueTombstone _deletedIssueTombstone(
+  Map entry, {
+  required List<TrackStateConfigEntry> issueTypeDefinitions,
+}) =>
     DeletedIssueTombstone(
       key: entry['key']?.toString() ?? '',
       project: entry['project']?.toString() ?? '',
       formerPath: entry['formerPath']?.toString() ?? '',
       deletedAt: entry['deletedAt']?.toString() ?? '',
       summary: _nullable(entry['summary']?.toString()),
-      issueTypeId: _nullableId(entry['issueType']),
+      issueTypeId: _nullableResolvedId(
+        entry['issueType'],
+        definitions: issueTypeDefinitions,
+      ),
       parentKey: _nullable(entry['parent']?.toString()),
       epicKey: _nullable(entry['epic']?.toString()),
     );
