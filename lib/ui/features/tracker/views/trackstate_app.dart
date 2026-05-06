@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../../../../../data/repositories/trackstate_repository.dart';
+import '../../../../../data/repositories/trackstate_repository_factory.dart';
 import '../../../../../domain/models/trackstate_models.dart';
 import '../../../../../l10n/generated/app_localizations.dart';
 import '../../../core/trackstate_icons.dart';
@@ -25,7 +26,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
   void initState() {
     super.initState();
     viewModel = TrackerViewModel(
-      repository: widget.repository ?? SetupTrackStateRepository(),
+      repository: widget.repository ?? createTrackStateRepository(),
     )..load();
   }
 
@@ -41,7 +42,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
       listenable: viewModel,
       builder: (context, _) {
         return MaterialApp(
-          title: 'TrackState.AI',
+          onGenerateTitle: (context) => AppLocalizations.of(context)!.appTitle,
           debugShowCheckedModeBanner: false,
           theme: TrackStateTheme.light(),
           darkTheme: TrackStateTheme.dark(),
@@ -89,7 +90,7 @@ class _TrackerHome extends StatelessWidget {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
               child: _MessageBanner(
-                message: viewModel.message ?? 'TrackState data was not found.',
+                message: viewModel.message,
               ),
             ),
           ),
@@ -265,6 +266,7 @@ class _TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
+    final repositoryAccessLabel = _repositoryAccessLabel(l10n, viewModel);
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 12, 12, 6),
       child: Row(
@@ -311,19 +313,19 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: 12),
           if (compact)
             _IconButtonSurface(
-              label: viewModel.isConnected ? 'Connected' : 'Connect GitHub',
+              label: repositoryAccessLabel,
               glyph: TrackStateIconGlyph.gitBranch,
               onPressed: viewModel.isSaving
                   ? () {}
-                  : () => _showConnectDialog(context, viewModel),
+                  : () => _showRepositoryAccessDialog(context, viewModel),
             )
           else
             _PrimaryButton(
-              label: viewModel.isConnected ? 'Connected' : 'Connect GitHub',
+              label: repositoryAccessLabel,
               icon: TrackStateIconGlyph.gitBranch,
               onPressed: viewModel.isSaving
                   ? () {}
-                  : () => _showConnectDialog(context, viewModel),
+                  : () => _showRepositoryAccessDialog(context, viewModel),
             ),
           const SizedBox(width: 8),
           _IconButtonSurface(
@@ -340,7 +342,7 @@ class _TopBar extends StatelessWidget {
             radius: 18,
             backgroundColor: colors.primarySoft,
             child: Text(
-              viewModel.profileInitials,
+              _profileInitials(l10n, viewModel),
               style: TextStyle(color: colors.text, fontWeight: FontWeight.w700),
             ),
           ),
@@ -350,10 +352,46 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-Future<void> _showConnectDialog(
+Future<void> _showRepositoryAccessDialog(
   BuildContext context,
   TrackerViewModel viewModel,
 ) async {
+  final l10n = AppLocalizations.of(context)!;
+  if (viewModel.usesLocalPersistence) {
+    final project = viewModel.project;
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(l10n.localGitRuntimeTitle),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${l10n.repository}: '
+                '${project?.repository ?? l10n.configuredRepositoryFallback}',
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${l10n.branch}: '
+                '${project?.branch ?? l10n.currentBranchFallback}',
+              ),
+              const SizedBox(height: 12),
+              Text(l10n.localGitRuntimeDescription),
+            ],
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(l10n.close),
+            ),
+          ],
+        );
+      },
+    );
+    return;
+  }
   final controller = TextEditingController();
   var rememberToken = true;
   await showDialog<void>(
@@ -363,22 +401,22 @@ Future<void> _showConnectDialog(
       return StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            title: const Text('Connect GitHub'),
+            title: Text(l10n.connectGitHub),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Repository: ${project?.repository ?? SetupTrackStateRepository.repositoryName}',
+                  '${l10n.repository}: '
+                  '${project?.repository ?? l10n.configuredRepositoryFallback}',
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: controller,
                   obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Fine-grained token',
-                    helperText:
-                        'Needs Contents: read/write. Stored only on this device if remembered.',
+                  decoration: InputDecoration(
+                    labelText: l10n.fineGrainedToken,
+                    helperText: l10n.fineGrainedTokenHelper,
                   ),
                   onSubmitted: (_) {
                     Navigator.of(context).pop();
@@ -392,10 +430,8 @@ Future<void> _showConnectDialog(
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   value: rememberToken,
-                  title: const Text('Remember on this browser'),
-                  subtitle: const Text(
-                    'Uses client storage. Do not enable on shared devices.',
-                  ),
+                  title: Text(l10n.rememberOnThisBrowser),
+                  subtitle: Text(l10n.rememberOnThisBrowserHelp),
                   onChanged: (value) =>
                       setDialogState(() => rememberToken = value ?? true),
                 ),
@@ -406,7 +442,7 @@ Future<void> _showConnectDialog(
                       Navigator.of(context).pop();
                       viewModel.startGitHubAppLogin();
                     },
-                    child: const Text('Continue with GitHub App'),
+                    child: Text(l10n.continueWithGitHubApp),
                   ),
                 ],
               ],
@@ -414,7 +450,7 @@ Future<void> _showConnectDialog(
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
+                child: Text(l10n.cancel),
               ),
               FilledButton(
                 onPressed: () {
@@ -424,7 +460,7 @@ Future<void> _showConnectDialog(
                     remember: rememberToken,
                   );
                 },
-                child: const Text('Connect token'),
+                child: Text(l10n.connectToken),
               ),
             ],
           );
@@ -435,15 +471,97 @@ Future<void> _showConnectDialog(
   controller.dispose();
 }
 
+String _repositoryAccessLabel(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  return switch (viewModel.repositoryAccessState) {
+    RepositoryAccessState.localGit => l10n.repositoryAccessLocalGit,
+    RepositoryAccessState.connected => l10n.repositoryAccessConnected,
+    RepositoryAccessState.connectGitHub => l10n.repositoryAccessConnectGitHub,
+  };
+}
+
+String _profileInitials(AppLocalizations l10n, TrackerViewModel viewModel) {
+  final userInitials = viewModel.connectedUser?.initials.trim();
+  if (userInitials != null && userInitials.isNotEmpty) {
+    return userInitials;
+  }
+  final repositoryFallback = _initialsFromText(
+    _repositoryAccessLabel(l10n, viewModel),
+  );
+  if (repositoryFallback.isNotEmpty) {
+    return repositoryFallback;
+  }
+  return _initialsFromText(l10n.appTitle);
+}
+
+String _initialsFromText(String value) {
+  final parts = value
+      .split(RegExp(r'[\s._-]+'))
+      .where((part) => part.isNotEmpty)
+      .toList();
+  if (parts.isNotEmpty) {
+    return parts.take(2).map((part) => part[0].toUpperCase()).join();
+  }
+  final compact = value.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+  if (compact.isEmpty) return '';
+  return compact.substring(0, compact.length < 2 ? compact.length : 2)
+      .toUpperCase();
+}
+
+String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
+  return switch (message.kind) {
+    TrackerMessageKind.dataLoadFailed => l10n.trackerDataLoadFailed(
+      message.error!,
+    ),
+    TrackerMessageKind.localGitTokensNotNeeded => l10n.localGitTokensNotNeeded,
+    TrackerMessageKind.tokenEmpty => l10n.tokenEmpty,
+    TrackerMessageKind.githubConnectedDragCards => l10n
+        .githubConnectedDragCards(message.login!, message.repository!),
+    TrackerMessageKind.githubConnectionFailed => l10n.githubConnectionFailed(
+      message.error!,
+    ),
+    TrackerMessageKind.localGitMoveCommitted => l10n.localGitMoveCommitted(
+      message.issueKey!,
+      message.statusLabel!,
+      message.branch!,
+    ),
+    TrackerMessageKind.githubMoveCommitted => l10n.githubMoveCommitted(
+      message.issueKey!,
+      message.statusLabel!,
+    ),
+    TrackerMessageKind.movePendingGitHubPersistence => l10n
+        .movePendingGitHubPersistence(message.issueKey!),
+    TrackerMessageKind.moveFailed => l10n.moveFailed(message.error!),
+    TrackerMessageKind.localGitHubAppUnavailable =>
+      l10n.localGitHubAppUnavailable,
+    TrackerMessageKind.githubAppLoginNotConfigured =>
+      l10n.githubAppLoginNotConfigured,
+    TrackerMessageKind.githubAuthorizationCodeReturned =>
+      l10n.githubAuthorizationCodeReturned,
+    TrackerMessageKind.githubConnected => l10n.githubConnected(
+      message.login!,
+      message.repository!,
+    ),
+    TrackerMessageKind.storedGitHubTokenInvalid => l10n
+        .storedGitHubTokenInvalid(message.error!),
+  };
+}
+
 class _MessageBanner extends StatelessWidget {
   const _MessageBanner({required this.message});
 
-  final String message;
+  final TrackerMessage? message;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
-    final isError = message.toLowerCase().contains('failed');
+    final resolvedMessage = message == null
+        ? l10n.trackerDataNotFound
+        : _trackerMessageText(l10n, message!);
+    final isError = message?.tone == TrackerMessageTone.error;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -460,10 +578,10 @@ class _MessageBanner extends StatelessWidget {
             isError ? TrackStateIconGlyph.issue : TrackStateIconGlyph.gitBranch,
             size: 18,
             color: isError ? colors.accent : colors.primary,
-            semanticLabel: message,
+            semanticLabel: resolvedMessage,
           ),
           const SizedBox(width: 10),
-          Expanded(child: Text(message)),
+          Expanded(child: Text(resolvedMessage)),
         ],
       ),
     );

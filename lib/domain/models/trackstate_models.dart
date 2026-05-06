@@ -124,8 +124,8 @@ class TrackerSnapshot {
       .toList();
 }
 
-class GitHubConnection {
-  const GitHubConnection({
+class RepositoryConnection {
+  const RepositoryConnection({
     required this.repository,
     required this.branch,
     required this.token,
@@ -136,8 +136,16 @@ class GitHubConnection {
   final String token;
 }
 
-class GitHubUser {
-  const GitHubUser({required this.login, required this.displayName});
+class GitHubConnection extends RepositoryConnection {
+  const GitHubConnection({
+    required super.repository,
+    required super.branch,
+    required super.token,
+  });
+}
+
+class RepositoryUser {
+  const RepositoryUser({required this.login, required this.displayName});
 
   final String login;
   final String displayName;
@@ -148,9 +156,18 @@ class GitHubUser {
         .split(RegExp(r'[\s._-]+'))
         .where((part) => part.isNotEmpty)
         .toList();
-    if (parts.isEmpty) return 'GH';
-    return parts.take(2).map((part) => part[0].toUpperCase()).join();
+    if (parts.isNotEmpty) {
+      return parts.take(2).map((part) => part[0].toUpperCase()).join();
+    }
+    final compact = source.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+    if (compact.isEmpty) return '';
+    return compact.substring(0, compact.length < 2 ? compact.length : 2)
+        .toUpperCase();
   }
+}
+
+class GitHubUser extends RepositoryUser {
+  const GitHubUser({required super.login, required super.displayName});
 }
 
 extension IssueTypeLabel on IssueType {

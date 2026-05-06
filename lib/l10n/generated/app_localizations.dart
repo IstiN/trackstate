@@ -388,6 +388,134 @@ abstract class AppLocalizations {
   /// **'project = TRACK AND status != Done ORDER BY priority DESC'**
   String get jqlPlaceholder;
 
+  /// In en, this message translates to:
+  /// **'Local Git'**
+  String get repositoryAccessLocalGit;
+
+  /// In en, this message translates to:
+  /// **'Connected'**
+  String get repositoryAccessConnected;
+
+  /// In en, this message translates to:
+  /// **'Connect GitHub'**
+  String get repositoryAccessConnectGitHub;
+
+  /// In en, this message translates to:
+  /// **'TrackState data was not found.'**
+  String get trackerDataNotFound;
+
+  /// In en, this message translates to:
+  /// **'TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. {error}'**
+  String trackerDataLoadFailed(String error);
+
+  /// In en, this message translates to:
+  /// **'This runtime uses local Git commits. GitHub tokens are not needed.'**
+  String get localGitTokensNotNeeded;
+
+  /// In en, this message translates to:
+  /// **'Token is empty.'**
+  String get tokenEmpty;
+
+  /// In en, this message translates to:
+  /// **'Connected as {login} to {repository}. Drag cards to commit status changes.'**
+  String githubConnectedDragCards(String login, String repository);
+
+  /// In en, this message translates to:
+  /// **'GitHub connection failed: {error}'**
+  String githubConnectionFailed(String error);
+
+  /// In en, this message translates to:
+  /// **'{issueKey} moved to {statusLabel} and committed to local Git branch {branch}.'**
+  String localGitMoveCommitted(
+    String issueKey,
+    String statusLabel,
+    String branch,
+  );
+
+  /// In en, this message translates to:
+  /// **'{issueKey} moved to {statusLabel} and committed to GitHub.'**
+  String githubMoveCommitted(String issueKey, String statusLabel);
+
+  /// In en, this message translates to:
+  /// **'{issueKey} moved locally. Connect GitHub in Settings to persist.'**
+  String movePendingGitHubPersistence(String issueKey);
+
+  /// In en, this message translates to:
+  /// **'Move failed: {error}'**
+  String moveFailed(String error);
+
+  /// In en, this message translates to:
+  /// **'This runtime uses local Git commits. GitHub App login is unavailable.'**
+  String get localGitHubAppUnavailable;
+
+  /// In en, this message translates to:
+  /// **'GitHub App login is not configured. Set TRACKSTATE_GITHUB_APP_CLIENT_ID and TRACKSTATE_GITHUB_AUTH_PROXY_URL in the setup repository variables.'**
+  String get githubAppLoginNotConfigured;
+
+  /// In en, this message translates to:
+  /// **'GitHub returned an authorization code. Configure TRACKSTATE_GITHUB_AUTH_PROXY_URL so a backend can exchange it for a token safely.'**
+  String get githubAuthorizationCodeReturned;
+
+  /// In en, this message translates to:
+  /// **'Connected as {login} to {repository}.'**
+  String githubConnected(String login, String repository);
+
+  /// In en, this message translates to:
+  /// **'Stored GitHub token is no longer valid: {error}'**
+  String storedGitHubTokenInvalid(String error);
+
+  /// In en, this message translates to:
+  /// **'Local Git runtime'**
+  String get localGitRuntimeTitle;
+
+  /// In en, this message translates to:
+  /// **'configured repository'**
+  String get configuredRepositoryFallback;
+
+  /// In en, this message translates to:
+  /// **'current branch'**
+  String get currentBranchFallback;
+
+  /// In en, this message translates to:
+  /// **'Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.'**
+  String get localGitRuntimeDescription;
+
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get close;
+
+  /// In en, this message translates to:
+  /// **'Connect GitHub'**
+  String get connectGitHub;
+
+  /// In en, this message translates to:
+  /// **'Fine-grained token'**
+  String get fineGrainedToken;
+
+  /// In en, this message translates to:
+  /// **'Needs Contents: read/write. Stored only on this device if remembered.'**
+  String get fineGrainedTokenHelper;
+
+  /// In en, this message translates to:
+  /// **'Remember on this browser'**
+  String get rememberOnThisBrowser;
+
+  /// In en, this message translates to:
+  /// **'Uses client storage. Do not enable on shared devices.'**
+  String get rememberOnThisBrowserHelp;
+
+  /// In en, this message translates to:
+  /// **'Continue with GitHub App'**
+  String get continueWithGitHubApp;
+
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get cancel;
+
+  /// In en, this message translates to:
+  /// **'Connect token'**
+  String get connectToken;
+
   /// No description provided for @issueCount.
   ///
   /// In en, this message translates to:

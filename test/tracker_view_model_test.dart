@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.dart';
 
 void main() {
@@ -44,6 +45,64 @@ void main() {
     await viewModel.load();
 
     expect(viewModel.isConnected, isTrue);
-    expect(viewModel.profileInitials, 'DU');
+    expect(viewModel.connectedUser?.initials, 'DU');
   });
+
+  test('view model loads the local repository user for avatar details', () async {
+    final viewModel = TrackerViewModel(
+      repository: const _LocalRuntimeRepository(),
+    );
+
+    await viewModel.load();
+
+    expect(viewModel.connectedUser?.displayName, 'Local User');
+    expect(viewModel.connectedUser?.initials, 'LU');
+  });
+
+  test(
+    'view model reports local persistence after a successful move',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: const _LocalRuntimeRepository(),
+      );
+
+      await viewModel.load();
+      await viewModel.moveIssue(viewModel.selectedIssue!, IssueStatus.done);
+
+      expect(
+        viewModel.message?.kind,
+        TrackerMessageKind.localGitMoveCommitted,
+      );
+    },
+  );
+}
+
+class _LocalRuntimeRepository implements TrackStateRepository {
+  const _LocalRuntimeRepository();
+
+  static const _demoRepository = DemoTrackStateRepository();
+
+  @override
+  bool get supportsGitHubAuth => false;
+
+  @override
+  bool get usesLocalPersistence => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async =>
+      const RepositoryUser(login: 'local-user', displayName: 'Local User');
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async =>
+      _demoRepository.loadSnapshot();
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) async =>
+      _demoRepository.searchIssues(jql);
+
+  @override
+  Future<TrackStateIssue> updateIssueStatus(
+    TrackStateIssue issue,
+    IssueStatus status,
+  ) async => issue.copyWith(status: status, updatedLabel: 'just now');
 }
