@@ -26,6 +26,7 @@ class RuntimeStartupObservation {
 class RuntimeOverrideObservation {
   const RuntimeOverrideObservation({
     required this.isBlocked,
+    this.configuredRuntimeName,
     this.repositoryType,
     this.usesLocalPersistence,
     this.supportsGitHubAuth,
@@ -33,6 +34,7 @@ class RuntimeOverrideObservation {
   });
 
   final bool isBlocked;
+  final String? configuredRuntimeName;
   final String? repositoryType;
   final bool? usesLocalPersistence;
   final bool? supportsGitHubAuth;
@@ -40,6 +42,7 @@ class RuntimeOverrideObservation {
 
   bool get matchesLocalRuntime =>
       isBlocked == false &&
+      configuredRuntimeName == 'local-git' &&
       repositoryType == 'LocalTrackStateRepository' &&
       usesLocalPersistence == true &&
       supportsGitHubAuth == false;

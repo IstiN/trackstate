@@ -1,5 +1,8 @@
 class RuntimeUiObservation {
   const RuntimeUiObservation({
+    required this.repositoryType,
+    required this.usesLocalPersistence,
+    required this.supportsGitHubAuth,
     required this.repositoryAccessVisible,
     required this.connectGitHubDialogVisible,
     required this.fineGrainedTokenVisible,
@@ -8,6 +11,9 @@ class RuntimeUiObservation {
     required this.localRuntimeMessagingVisible,
   });
 
+  final String repositoryType;
+  final bool usesLocalPersistence;
+  final bool supportsGitHubAuth;
   final bool repositoryAccessVisible;
   final bool connectGitHubDialogVisible;
   final bool fineGrainedTokenVisible;
@@ -16,6 +22,9 @@ class RuntimeUiObservation {
   final bool localRuntimeMessagingVisible;
 
   bool get matchesHostedRuntimeExperience =>
+      repositoryType == 'SetupTrackStateRepository' &&
+      usesLocalPersistence == false &&
+      supportsGitHubAuth &&
       repositoryAccessVisible &&
       connectGitHubDialogVisible &&
       fineGrainedTokenVisible &&

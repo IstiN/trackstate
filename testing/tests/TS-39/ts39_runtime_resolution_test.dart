@@ -3,13 +3,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../components/services/trackstate_runtime_service.dart';
-import '../../frameworks/flutter/runtime_probes.dart';
 
 void main() {
-  const service = TrackStateRuntimeService(
-    startupProbe: FlutterRuntimeStartupProbe(),
-    uiProbe: FlutterRuntimeUiProbe(),
-  );
+  final service = TrackStateRuntimeService.flutter();
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -17,9 +13,9 @@ void main() {
 
   test(
     'default startup resolves the hosted GitHub runtime without auto-detection',
-    () {
+    () async {
       final startup = service.inspectStartupResolution();
-      final localOverride = service.inspectLocalGitOverrideAttempt();
+      final localOverride = await service.inspectLocalGitOverrideAttempt();
 
       expect(startup.matchesHostedRuntime, isTrue);
       expect(startup.configuredRuntimeName, 'github');
@@ -31,11 +27,12 @@ void main() {
         expect(localOverride.isBlocked, isTrue);
         expect(
           localOverride.blockedReason,
-          contains('The local Git runtime is not available in web builds.'),
+          contains('IO test subprocess'),
         );
       } else {
         expect(localOverride.matchesLocalRuntime, isTrue);
-        expect(localOverride.repositoryType, isNot(startup.repositoryType));
+        expect(localOverride.configuredRuntimeName, 'local-git');
+        expect(localOverride.repositoryType, 'LocalTrackStateRepository');
       }
     },
   );
@@ -46,6 +43,9 @@ void main() {
     final observation = await service.inspectHostedRuntimeExperience(tester);
 
     expect(observation.matchesHostedRuntimeExperience, isTrue);
+    expect(observation.repositoryType, 'SetupTrackStateRepository');
+    expect(observation.usesLocalPersistence, isFalse);
+    expect(observation.supportsGitHubAuth, isTrue);
     expect(observation.repositoryAccessVisible, isTrue);
     expect(observation.connectGitHubDialogVisible, isTrue);
     expect(observation.fineGrainedTokenVisible, isTrue);
