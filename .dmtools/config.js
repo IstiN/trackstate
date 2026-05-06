@@ -123,5 +123,50 @@ module.exports = {
                 './.dmtools/instructions/test_cases/trackstate_functional_test_case_rules.md'
             ]
         }
+    },
+
+    agentParamPatches: {
+        story_questions: {
+            customParams: {
+                autoStartQuestionAnswer: true,
+                autoStartQuestionAnswerConfigFile: 'agents/po_refinement.json'
+            }
+        },
+        story_acceptance_criteria: {
+            customParams: {
+                autoStartSolution: true,
+                autoStartSolutionConfigFile: 'agents/story_solution.json'
+            }
+        },
+        story_acceptance_criterias: {
+            customParams: {
+                autoStartSolution: true,
+                autoStartSolutionConfigFile: 'agents/story_solution.json'
+            }
+        },
+        story_solution: {
+            customParams: {
+                autoStartDevelopment: true,
+                autoStartDevelopmentConfigFile: 'agents/story_development.json'
+            }
+        },
+        story_development: {
+            customParams: {
+                autoStartReview: true,
+                autoStartReviewConfigFile: 'agents/pr_review.json'
+            }
+        },
+        pr_review: {
+            customParams: {
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/pr_rework.json'
+            }
+        },
+        pr_rework: {
+            customParams: {
+                autoStartReview: true,
+                autoStartReviewConfigFile: 'agents/pr_review.json'
+            }
+        }
     }
 };
