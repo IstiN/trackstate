@@ -1,0 +1,8 @@
+name: ts38_provider_contract_probe
+publish_to: none
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  http: ^1.6.0
