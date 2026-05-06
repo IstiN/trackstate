@@ -4,4 +4,3 @@
 [submodule "trackstate-setup"]
 	path = trackstate-setup
 	url = git@github.com:IstiN/trackstate-setup.git
-	ignore = dirty
