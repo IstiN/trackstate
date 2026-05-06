@@ -28,7 +28,7 @@ class TrackerViewModel extends ChangeNotifier {
   bool _isSaving = false;
   String? _message;
   bool _isConnected = false;
-  GitHubUser? _connectedUser;
+  RepositoryUser? _connectedUser;
 
   TrackerSnapshot? get snapshot => _snapshot;
   TrackerSection get section => _section;
@@ -40,7 +40,7 @@ class TrackerViewModel extends ChangeNotifier {
   bool get isSaving => _isSaving;
   String? get message => _message;
   bool get isConnected => _isConnected;
-  GitHubUser? get connectedUser => _connectedUser;
+  RepositoryUser? get connectedUser => _connectedUser;
   String get profileInitials => _connectedUser?.initials ?? 'GH';
   bool get isGitHubAppAuthAvailable =>
       _githubAppClientId.isNotEmpty || _githubAuthProxyUrl.isNotEmpty;
@@ -88,7 +88,7 @@ class TrackerViewModel extends ChangeNotifier {
       await _restoreGitHubConnection();
     } on Object catch (error) {
       _message =
-          'TrackState data was not found through the GitHub API. Check repository visibility, Pages build variables, and DEMO/project.json. $error';
+          'TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. $error';
     } finally {
       _isLoading = false;
       notifyListeners();

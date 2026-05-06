@@ -124,8 +124,8 @@ class TrackerSnapshot {
       .toList();
 }
 
-class GitHubConnection {
-  const GitHubConnection({
+class RepositoryConnection {
+  const RepositoryConnection({
     required this.repository,
     required this.branch,
     required this.token,
@@ -136,8 +136,16 @@ class GitHubConnection {
   final String token;
 }
 
-class GitHubUser {
-  const GitHubUser({required this.login, required this.displayName});
+class GitHubConnection extends RepositoryConnection {
+  const GitHubConnection({
+    required super.repository,
+    required super.branch,
+    required super.token,
+  });
+}
+
+class RepositoryUser {
+  const RepositoryUser({required this.login, required this.displayName});
 
   final String login;
   final String displayName;
@@ -151,6 +159,10 @@ class GitHubUser {
     if (parts.isEmpty) return 'GH';
     return parts.take(2).map((part) => part[0].toUpperCase()).join();
   }
+}
+
+class GitHubUser extends RepositoryUser {
+  const GitHubUser({required super.login, required super.displayName});
 }
 
 extension IssueTypeLabel on IssueType {

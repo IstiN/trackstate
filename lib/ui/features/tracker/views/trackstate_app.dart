@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../../../../../data/repositories/trackstate_repository.dart';
+import '../../../../../data/repositories/trackstate_repository_factory.dart';
 import '../../../../../domain/models/trackstate_models.dart';
 import '../../../../../l10n/generated/app_localizations.dart';
 import '../../../core/trackstate_icons.dart';
@@ -25,7 +26,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
   void initState() {
     super.initState();
     viewModel = TrackerViewModel(
-      repository: widget.repository ?? SetupTrackStateRepository(),
+      repository: widget.repository ?? createTrackStateRepository(),
     )..load();
   }
 
@@ -369,7 +370,7 @@ Future<void> _showConnectDialog(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Repository: ${project?.repository ?? SetupTrackStateRepository.repositoryName}',
+                  'Repository: ${project?.repository ?? 'configured repository'}',
                 ),
                 const SizedBox(height: 12),
                 TextField(
