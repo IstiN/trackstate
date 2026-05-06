@@ -45,7 +45,18 @@ void main() {
     await viewModel.load();
 
     expect(viewModel.isConnected, isTrue);
-    expect(viewModel.profileInitials, 'DU');
+    expect(viewModel.connectedUser?.initials, 'DU');
+  });
+
+  test('view model loads the local repository user for avatar details', () async {
+    final viewModel = TrackerViewModel(
+      repository: const _LocalRuntimeRepository(),
+    );
+
+    await viewModel.load();
+
+    expect(viewModel.connectedUser?.displayName, 'Local User');
+    expect(viewModel.connectedUser?.initials, 'LU');
   });
 
   test(

@@ -342,7 +342,7 @@ class _TopBar extends StatelessWidget {
             radius: 18,
             backgroundColor: colors.primarySoft,
             child: Text(
-              viewModel.profileInitials,
+              _profileInitials(l10n, viewModel),
               style: TextStyle(color: colors.text, fontWeight: FontWeight.w700),
             ),
           ),
@@ -480,6 +480,34 @@ String _repositoryAccessLabel(
     RepositoryAccessState.connected => l10n.repositoryAccessConnected,
     RepositoryAccessState.connectGitHub => l10n.repositoryAccessConnectGitHub,
   };
+}
+
+String _profileInitials(AppLocalizations l10n, TrackerViewModel viewModel) {
+  final userInitials = viewModel.connectedUser?.initials.trim();
+  if (userInitials != null && userInitials.isNotEmpty) {
+    return userInitials;
+  }
+  final repositoryFallback = _initialsFromText(
+    _repositoryAccessLabel(l10n, viewModel),
+  );
+  if (repositoryFallback.isNotEmpty) {
+    return repositoryFallback;
+  }
+  return _initialsFromText(l10n.appTitle);
+}
+
+String _initialsFromText(String value) {
+  final parts = value
+      .split(RegExp(r'[\s._-]+'))
+      .where((part) => part.isNotEmpty)
+      .toList();
+  if (parts.isNotEmpty) {
+    return parts.take(2).map((part) => part[0].toUpperCase()).join();
+  }
+  final compact = value.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+  if (compact.isEmpty) return '';
+  return compact.substring(0, compact.length < 2 ? compact.length : 2)
+      .toUpperCase();
 }
 
 String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {

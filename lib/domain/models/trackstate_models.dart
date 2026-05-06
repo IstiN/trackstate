@@ -156,8 +156,13 @@ class RepositoryUser {
         .split(RegExp(r'[\s._-]+'))
         .where((part) => part.isNotEmpty)
         .toList();
-    if (parts.isEmpty) return 'GH';
-    return parts.take(2).map((part) => part[0].toUpperCase()).join();
+    if (parts.isNotEmpty) {
+      return parts.take(2).map((part) => part[0].toUpperCase()).join();
+    }
+    final compact = source.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+    if (compact.isEmpty) return '';
+    return compact.substring(0, compact.length < 2 ? compact.length : 2)
+        .toUpperCase();
   }
 }
 

@@ -134,6 +134,7 @@ void main() {
 
       expect(find.bySemanticsLabel(RegExp('Local Git')), findsWidgets);
       expect(find.bySemanticsLabel(RegExp('Connect GitHub')), findsNothing);
+      expect(find.text('LU'), findsOneWidget);
 
       await tester.tap(find.bySemanticsLabel(RegExp('Local Git')).first);
       await tester.pumpAndSettle();

@@ -191,8 +191,6 @@ class TrackerViewModel extends ChangeNotifier {
       : _isConnected
       ? RepositoryAccessState.connected
       : RepositoryAccessState.connectGitHub;
-  String get profileInitials =>
-      _connectedUser?.initials ?? (usesLocalPersistence ? 'LG' : 'GH');
   bool get isGitHubAppAuthAvailable =>
       supportsGitHubAuth &&
       (_githubAppClientId.isNotEmpty || _githubAuthProxyUrl.isNotEmpty);
@@ -237,7 +235,9 @@ class TrackerViewModel extends ChangeNotifier {
         orElse: () => issues.first,
       );
       _searchResults = await _repository.searchIssues(_jql);
-      if (supportsGitHubAuth) {
+      if (usesLocalPersistence) {
+        await _loadLocalRepositoryUser();
+      } else if (supportsGitHubAuth) {
         await _restoreGitHubConnection();
       }
     } on Object catch (error) {
@@ -440,6 +440,18 @@ class TrackerViewModel extends ChangeNotifier {
       _message = TrackerMessage.storedGitHubTokenInvalid(error);
       await _authStore.clearToken(project.repository);
     }
+  }
+
+  Future<void> _loadLocalRepositoryUser() async {
+    final project = _snapshot?.project;
+    if (project == null || _connectedUser != null) return;
+    _connectedUser = await _repository.connect(
+      RepositoryConnection(
+        repository: project.repository,
+        branch: project.branch,
+        token: '',
+      ),
+    );
   }
 
   String? _callbackToken() {
