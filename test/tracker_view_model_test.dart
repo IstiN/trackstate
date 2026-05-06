@@ -58,7 +58,10 @@ void main() {
       await viewModel.load();
       await viewModel.moveIssue(viewModel.selectedIssue!, IssueStatus.done);
 
-      expect(viewModel.message, contains('committed to local Git branch'));
+      expect(
+        viewModel.message?.kind,
+        TrackerMessageKind.localGitMoveCommitted,
+      );
     },
   );
 }

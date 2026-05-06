@@ -157,6 +157,128 @@ class AppLocalizationsEn extends AppLocalizations {
       'project = TRACK AND status != Done ORDER BY priority DESC';
 
   @override
+  String get repositoryAccessLocalGit => 'Local Git';
+
+  @override
+  String get repositoryAccessConnected => 'Connected';
+
+  @override
+  String get repositoryAccessConnectGitHub => 'Connect GitHub';
+
+  @override
+  String get trackerDataNotFound => 'TrackState data was not found.';
+
+  @override
+  String trackerDataLoadFailed(String error) {
+    return 'TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. $error';
+  }
+
+  @override
+  String get localGitTokensNotNeeded =>
+      'This runtime uses local Git commits. GitHub tokens are not needed.';
+
+  @override
+  String get tokenEmpty => 'Token is empty.';
+
+  @override
+  String githubConnectedDragCards(String login, String repository) {
+    return 'Connected as $login to $repository. Drag cards to commit status changes.';
+  }
+
+  @override
+  String githubConnectionFailed(String error) {
+    return 'GitHub connection failed: $error';
+  }
+
+  @override
+  String localGitMoveCommitted(
+    String issueKey,
+    String statusLabel,
+    String branch,
+  ) {
+    return '$issueKey moved to $statusLabel and committed to local Git branch $branch.';
+  }
+
+  @override
+  String githubMoveCommitted(String issueKey, String statusLabel) {
+    return '$issueKey moved to $statusLabel and committed to GitHub.';
+  }
+
+  @override
+  String movePendingGitHubPersistence(String issueKey) {
+    return '$issueKey moved locally. Connect GitHub in Settings to persist.';
+  }
+
+  @override
+  String moveFailed(String error) {
+    return 'Move failed: $error';
+  }
+
+  @override
+  String get localGitHubAppUnavailable =>
+      'This runtime uses local Git commits. GitHub App login is unavailable.';
+
+  @override
+  String get githubAppLoginNotConfigured =>
+      'GitHub App login is not configured. Set TRACKSTATE_GITHUB_APP_CLIENT_ID and TRACKSTATE_GITHUB_AUTH_PROXY_URL in the setup repository variables.';
+
+  @override
+  String get githubAuthorizationCodeReturned =>
+      'GitHub returned an authorization code. Configure TRACKSTATE_GITHUB_AUTH_PROXY_URL so a backend can exchange it for a token safely.';
+
+  @override
+  String githubConnected(String login, String repository) {
+    return 'Connected as $login to $repository.';
+  }
+
+  @override
+  String storedGitHubTokenInvalid(String error) {
+    return 'Stored GitHub token is no longer valid: $error';
+  }
+
+  @override
+  String get localGitRuntimeTitle => 'Local Git runtime';
+
+  @override
+  String get configuredRepositoryFallback => 'configured repository';
+
+  @override
+  String get currentBranchFallback => 'current branch';
+
+  @override
+  String get localGitRuntimeDescription =>
+      'Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.';
+
+  @override
+  String get close => 'Close';
+
+  @override
+  String get connectGitHub => 'Connect GitHub';
+
+  @override
+  String get fineGrainedToken => 'Fine-grained token';
+
+  @override
+  String get fineGrainedTokenHelper =>
+      'Needs Contents: read/write. Stored only on this device if remembered.';
+
+  @override
+  String get rememberOnThisBrowser => 'Remember on this browser';
+
+  @override
+  String get rememberOnThisBrowserHelp =>
+      'Uses client storage. Do not enable on shared devices.';
+
+  @override
+  String get continueWithGitHubApp => 'Continue with GitHub App';
+
+  @override
+  String get cancel => 'Cancel';
+
+  @override
+  String get connectToken => 'Connect token';
+
+  @override
   String issueCount(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

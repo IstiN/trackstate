@@ -6,6 +6,149 @@ import '../../../../data/services/trackstate_auth_store.dart';
 import '../../../../domain/models/trackstate_models.dart';
 
 enum TrackerSection { dashboard, board, search, hierarchy, settings }
+enum RepositoryAccessState { localGit, connected, connectGitHub }
+enum TrackerMessageTone { info, error }
+enum TrackerMessageKind {
+  dataLoadFailed,
+  localGitTokensNotNeeded,
+  tokenEmpty,
+  githubConnectedDragCards,
+  githubConnectionFailed,
+  localGitMoveCommitted,
+  githubMoveCommitted,
+  movePendingGitHubPersistence,
+  moveFailed,
+  localGitHubAppUnavailable,
+  githubAppLoginNotConfigured,
+  githubAuthorizationCodeReturned,
+  githubConnected,
+  storedGitHubTokenInvalid,
+}
+
+class TrackerMessage {
+  const TrackerMessage._(
+    this.kind, {
+    required this.tone,
+    this.issueKey,
+    this.statusLabel,
+    this.branch,
+    this.login,
+    this.repository,
+    this.error,
+  });
+
+  final TrackerMessageKind kind;
+  final TrackerMessageTone tone;
+  final String? issueKey;
+  final String? statusLabel;
+  final String? branch;
+  final String? login;
+  final String? repository;
+  final String? error;
+
+  factory TrackerMessage.dataLoadFailed(Object error) => TrackerMessage._(
+    TrackerMessageKind.dataLoadFailed,
+    tone: TrackerMessageTone.error,
+    error: '$error',
+  );
+
+  factory TrackerMessage.localGitTokensNotNeeded() => const TrackerMessage._(
+    TrackerMessageKind.localGitTokensNotNeeded,
+    tone: TrackerMessageTone.info,
+  );
+
+  factory TrackerMessage.tokenEmpty() => const TrackerMessage._(
+    TrackerMessageKind.tokenEmpty,
+    tone: TrackerMessageTone.error,
+  );
+
+  factory TrackerMessage.githubConnectedDragCards({
+    required String login,
+    required String repository,
+  }) => TrackerMessage._(
+    TrackerMessageKind.githubConnectedDragCards,
+    tone: TrackerMessageTone.info,
+    login: login,
+    repository: repository,
+  );
+
+  factory TrackerMessage.githubConnectionFailed(Object error) =>
+      TrackerMessage._(
+        TrackerMessageKind.githubConnectionFailed,
+        tone: TrackerMessageTone.error,
+        error: '$error',
+      );
+
+  factory TrackerMessage.localGitMoveCommitted({
+    required String issueKey,
+    required String statusLabel,
+    required String branch,
+  }) => TrackerMessage._(
+    TrackerMessageKind.localGitMoveCommitted,
+    tone: TrackerMessageTone.info,
+    issueKey: issueKey,
+    statusLabel: statusLabel,
+    branch: branch,
+  );
+
+  factory TrackerMessage.githubMoveCommitted({
+    required String issueKey,
+    required String statusLabel,
+  }) => TrackerMessage._(
+    TrackerMessageKind.githubMoveCommitted,
+    tone: TrackerMessageTone.info,
+    issueKey: issueKey,
+    statusLabel: statusLabel,
+  );
+
+  factory TrackerMessage.movePendingGitHubPersistence({
+    required String issueKey,
+  }) => TrackerMessage._(
+    TrackerMessageKind.movePendingGitHubPersistence,
+    tone: TrackerMessageTone.info,
+    issueKey: issueKey,
+  );
+
+  factory TrackerMessage.moveFailed(Object error) => TrackerMessage._(
+    TrackerMessageKind.moveFailed,
+    tone: TrackerMessageTone.error,
+    error: '$error',
+  );
+
+  factory TrackerMessage.localGitHubAppUnavailable() => const TrackerMessage._(
+    TrackerMessageKind.localGitHubAppUnavailable,
+    tone: TrackerMessageTone.info,
+  );
+
+  factory TrackerMessage.githubAppLoginNotConfigured() =>
+      const TrackerMessage._(
+        TrackerMessageKind.githubAppLoginNotConfigured,
+        tone: TrackerMessageTone.error,
+      );
+
+  factory TrackerMessage.githubAuthorizationCodeReturned() =>
+      const TrackerMessage._(
+        TrackerMessageKind.githubAuthorizationCodeReturned,
+        tone: TrackerMessageTone.info,
+      );
+
+  factory TrackerMessage.githubConnected({
+    required String login,
+    required String repository,
+  }) => TrackerMessage._(
+    TrackerMessageKind.githubConnected,
+    tone: TrackerMessageTone.info,
+    login: login,
+    repository: repository,
+  );
+
+  factory TrackerMessage.storedGitHubTokenInvalid(Object error) =>
+      TrackerMessage._(
+        TrackerMessageKind.storedGitHubTokenInvalid,
+        tone: TrackerMessageTone.error,
+        error: '$error',
+      );
+}
 
 class TrackerViewModel extends ChangeNotifier {
   TrackerViewModel({
@@ -26,7 +169,7 @@ class TrackerViewModel extends ChangeNotifier {
   TrackStateIssue? _selectedIssue;
   bool _isLoading = false;
   bool _isSaving = false;
-  String? _message;
+  TrackerMessage? _message;
   bool _isConnected = false;
   RepositoryUser? _connectedUser;
 
@@ -38,16 +181,16 @@ class TrackerViewModel extends ChangeNotifier {
   TrackStateIssue? get selectedIssue => _selectedIssue;
   bool get isLoading => _isLoading;
   bool get isSaving => _isSaving;
-  String? get message => _message;
+  TrackerMessage? get message => _message;
   bool get isConnected => _isConnected;
   RepositoryUser? get connectedUser => _connectedUser;
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
   bool get supportsGitHubAuth => _repository.supportsGitHubAuth;
-  String get repositoryAccessLabel => usesLocalPersistence
-      ? 'Local Git'
+  RepositoryAccessState get repositoryAccessState => usesLocalPersistence
+      ? RepositoryAccessState.localGit
       : _isConnected
-      ? 'Connected'
-      : 'Connect GitHub';
+      ? RepositoryAccessState.connected
+      : RepositoryAccessState.connectGitHub;
   String get profileInitials =>
       _connectedUser?.initials ?? (usesLocalPersistence ? 'LG' : 'GH');
   bool get isGitHubAppAuthAvailable =>
@@ -98,8 +241,7 @@ class TrackerViewModel extends ChangeNotifier {
         await _restoreGitHubConnection();
       }
     } on Object catch (error) {
-      _message =
-          'TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. $error';
+      _message = TrackerMessage.dataLoadFailed(error);
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -132,8 +274,7 @@ class TrackerViewModel extends ChangeNotifier {
 
   Future<void> connectGitHub(String token, {bool remember = false}) async {
     if (!supportsGitHubAuth) {
-      _message =
-          'This runtime uses local Git commits. GitHub tokens are not needed.';
+      _message = TrackerMessage.localGitTokensNotNeeded();
       notifyListeners();
       return;
     }
@@ -141,7 +282,7 @@ class TrackerViewModel extends ChangeNotifier {
     if (project == null) return;
     final normalizedToken = token.trim();
     if (normalizedToken.isEmpty) {
-      _message = 'Token is empty.';
+      _message = TrackerMessage.tokenEmpty();
       notifyListeners();
       return;
     }
@@ -161,10 +302,12 @@ class TrackerViewModel extends ChangeNotifier {
       }
       _isConnected = true;
       _connectedUser = user;
-      _message =
-          'Connected as ${user.login} to ${project.repository}. Drag cards to commit status changes.';
+      _message = TrackerMessage.githubConnectedDragCards(
+        login: user.login,
+        repository: project.repository,
+      );
     } on Object catch (error) {
-      _message = 'GitHub connection failed: $error';
+      _message = TrackerMessage.githubConnectionFailed(error);
       _isConnected = false;
     } finally {
       _isSaving = false;
@@ -204,10 +347,17 @@ class TrackerViewModel extends ChangeNotifier {
       );
       _searchResults = await _repository.searchIssues(_jql);
       _message = usesLocalPersistence
-          ? '${issue.key} moved to ${status.label} and committed to local Git branch ${_snapshot!.project.branch}.'
+          ? TrackerMessage.localGitMoveCommitted(
+              issueKey: issue.key,
+              statusLabel: status.label,
+              branch: _snapshot!.project.branch,
+            )
           : _isConnected
-          ? '${issue.key} moved to ${status.label} and committed to GitHub.'
-          : '${issue.key} moved locally. Connect GitHub in Settings to persist.';
+          ? TrackerMessage.githubMoveCommitted(
+              issueKey: issue.key,
+              statusLabel: status.label,
+            )
+          : TrackerMessage.movePendingGitHubPersistence(issueKey: issue.key);
     } on Object catch (error) {
       _snapshot = TrackerSnapshot(
         project: snapshot.project,
@@ -217,7 +367,7 @@ class TrackerViewModel extends ChangeNotifier {
         (current) => current.key == issue.key,
         orElse: () => issue,
       );
-      _message = 'Move failed: $error';
+      _message = TrackerMessage.moveFailed(error);
     } finally {
       _isSaving = false;
       notifyListeners();
@@ -226,8 +376,7 @@ class TrackerViewModel extends ChangeNotifier {
 
   Future<void> startGitHubAppLogin() async {
     if (!supportsGitHubAuth) {
-      _message =
-          'This runtime uses local Git commits. GitHub App login is unavailable.';
+      _message = TrackerMessage.localGitHubAppUnavailable();
       notifyListeners();
       return;
     }
@@ -254,8 +403,7 @@ class TrackerViewModel extends ChangeNotifier {
       await launchUrl(authorizeUri, webOnlyWindowName: '_self');
       return;
     }
-    _message =
-        'GitHub App login is not configured. Set TRACKSTATE_GITHUB_APP_CLIENT_ID and TRACKSTATE_GITHUB_AUTH_PROXY_URL in the setup repository variables.';
+    _message = TrackerMessage.githubAppLoginNotConfigured();
     notifyListeners();
   }
 
@@ -267,8 +415,7 @@ class TrackerViewModel extends ChangeNotifier {
         callbackToken ?? await _authStore.readToken(project.repository);
     if (storedToken == null || storedToken.isEmpty) {
       if (_callbackCode() != null) {
-        _message =
-            'GitHub returned an authorization code. Configure TRACKSTATE_GITHUB_AUTH_PROXY_URL so a backend can exchange it for a token safely.';
+        _message = TrackerMessage.githubAuthorizationCodeReturned();
       }
       return;
     }
@@ -285,9 +432,12 @@ class TrackerViewModel extends ChangeNotifier {
       if (callbackToken != null) {
         await _authStore.saveToken(project.repository, callbackToken);
       }
-      _message = 'Connected as ${user.login} to ${project.repository}.';
+      _message = TrackerMessage.githubConnected(
+        login: user.login,
+        repository: project.repository,
+      );
     } on Object catch (error) {
-      _message = 'Stored GitHub token is no longer valid: $error';
+      _message = TrackerMessage.storedGitHubTokenInvalid(error);
       await _authStore.clearToken(project.repository);
     }
   }
