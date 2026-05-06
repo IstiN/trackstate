@@ -1,48 +1,40 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
+import '../../core/models/action_availability.dart';
+import '../../frameworks/flutter/widget_test_driver.dart';
 
 class IssueDetailPage {
-  const IssueDetailPage(this.tester);
+  const IssueDetailPage(this.driver);
 
-  final WidgetTester tester;
+  final WidgetTestDriver driver;
 
-  Finder get searchSectionButton => find.text('JQL Search').first;
-
-  Finder get issueDetailCard =>
-      find.bySemanticsLabel(RegExp(r'^Issue detail TRACK-12$'));
-
-  Finder get issueSummary => find.text('Implement Git sync service');
-
-  Finder get transitionButton =>
-      find.widgetWithText(FilledButton, 'Transition');
-
-  Finder get permissionRequiredMessage => find.text('Permission required');
-
-  Future<void> open() async {
-    await tester.tap(searchSectionButton);
-    await tester.pumpAndSettle();
+  Future<void> openIssue(String issueKey, String issueSummary) async {
+    await driver.tapText('JQL Search');
   }
 
-  bool get transitionActionUnavailable {
-    if (transitionButton.evaluate().isEmpty) {
-      return true;
-    }
-    return tester.widget<FilledButton>(transitionButton).onPressed == null;
-  }
+  bool showsIssueKey(String issueKey) => driver.hasText(issueKey);
 
-  bool get editActionVisible => _labelVisible('Edit');
+  bool showsSummary(String summary) => driver.hasText(summary);
 
-  bool get commentActionVisible => _labelVisible('Comment');
+  ActionAvailability get transitionAction => ActionAvailability(
+    label: 'Transition',
+    visible: driver.hasLabeledControl('Transition'),
+    enabled: driver.isFilledButtonEnabled('Transition'),
+  );
 
-  bool get permissionMessageVisible =>
-      permissionRequiredMessage.evaluate().isNotEmpty;
+  ActionAvailability get editAction => _unavailableWhenMissing('Edit');
 
-  bool _labelVisible(String label) {
-    final textMatches = find.text(label).evaluate().isNotEmpty;
-    final semanticsMatches = find
-        .bySemanticsLabel(RegExp('^$label\$'))
-        .evaluate()
-        .isNotEmpty;
-    return textMatches || semanticsMatches;
+  ActionAvailability get commentAction => _unavailableWhenMissing('Comment');
+
+  bool get permissionMessageVisible => driver.hasText('Permission required');
+
+  String describeObservedState() => [
+    transitionAction.describe(),
+    editAction.describe(),
+    commentAction.describe(),
+    'permissionMessageVisible=$permissionMessageVisible',
+  ].join(', ');
+
+  ActionAvailability _unavailableWhenMissing(String label) {
+    final visible = driver.hasLabeledControl(label);
+    return ActionAvailability(label: label, visible: visible, enabled: visible);
   }
 }

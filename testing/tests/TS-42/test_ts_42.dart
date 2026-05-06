@@ -5,10 +5,13 @@ import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../components/pages/issue_detail_page.dart';
 import '../../core/fakes/read_only_trackstate_repository.dart';
+import '../../frameworks/flutter/widget_test_driver.dart';
 
 void main() {
   setUp(() {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({
+      'trackstate.githubToken.trackstate.trackstate': 'read-only-token',
+    });
   });
 
   testWidgets(
@@ -19,34 +22,65 @@ void main() {
       tester.view.devicePixelRatio = 1;
 
       try {
-        await tester.pumpWidget(
-          const TrackStateApp(repository: ReadOnlyTrackStateRepository()),
+        final driver = WidgetTestDriver(tester);
+        await driver.pumpApp(
+          TrackStateApp(repository: ReadOnlyTrackStateRepository()),
         );
-        await tester.pumpAndSettle();
 
-        final issueDetailPage = IssueDetailPage(tester);
-        await issueDetailPage.open();
+        final issueDetailPage = IssueDetailPage(driver);
+        await issueDetailPage.openIssue(
+          'TRACK-12',
+          'Implement Git sync service',
+        );
 
-        expect(issueDetailPage.issueSummary, findsWidgets);
+        expect(
+          issueDetailPage.showsIssueKey('TRACK-12'),
+          isTrue,
+          reason:
+              'Expected the TRACK-12 issue key to be visible in issue detail.',
+        );
+        expect(
+          issueDetailPage.showsSummary('Implement Git sync service'),
+          isTrue,
+          reason:
+              'Expected the TRACK-12 summary to be visible in issue detail.',
+        );
 
-        final transitionVisible = issueDetailPage.transitionButton
-            .evaluate()
-            .isNotEmpty;
-        final transitionDisabled = issueDetailPage.transitionActionUnavailable;
-        final editVisible = issueDetailPage.editActionVisible;
-        final commentVisible = issueDetailPage.commentActionVisible;
-        final permissionMessageVisible =
-            issueDetailPage.permissionMessageVisible;
+        final transition = issueDetailPage.transitionAction;
+        final edit = issueDetailPage.editAction;
+        final comment = issueDetailPage.commentAction;
+        final failures = <String>[];
 
-        if (!transitionDisabled || !permissionMessageVisible) {
+        if (!transition.isUnavailable) {
+          failures.add(
+            'Transition should be disabled or hidden when canWrite=false. '
+            'Observed ${transition.describe()}.',
+          );
+        }
+        if (!edit.isUnavailable) {
+          failures.add(
+            'Edit should be disabled or hidden when canWrite=false. '
+            'Observed ${edit.describe()}.',
+          );
+        }
+        if (!comment.isUnavailable) {
+          failures.add(
+            'Comment should be disabled or hidden when canWrite=false. '
+            'Observed ${comment.describe()}.',
+          );
+        }
+        if (!issueDetailPage.permissionMessageVisible) {
+          failures.add(
+            'A visible "Permission required" explanation should be rendered '
+            'for the read-only session.',
+          );
+        }
+
+        if (failures.isNotEmpty) {
           fail(
-            'Expected read-only issue detail UI to disable or hide write '
-            'actions and show an explanatory permission message. Observed '
-            'transitionVisible=$transitionVisible, '
-            'transitionDisabled=$transitionDisabled, '
-            'editVisible=$editVisible, '
-            'commentVisible=$commentVisible, '
-            'permissionMessageVisible=$permissionMessageVisible.',
+            'Expected read-only issue detail UI to guard all write actions '
+            'up front for canWrite=false. ${failures.join(' ')} Observed '
+            '${issueDetailPage.describeObservedState()}.',
           );
         }
       } finally {

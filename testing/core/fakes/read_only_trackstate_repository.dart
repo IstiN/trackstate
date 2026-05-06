@@ -1,36 +1,183 @@
+import 'dart:typed_data';
+
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
-class ReadOnlyTrackStateRepository implements TrackStateRepository {
-  const ReadOnlyTrackStateRepository();
+class ReadOnlyTrackStateRepository extends ProviderBackedTrackStateRepository {
+  ReadOnlyTrackStateRepository()
+    : super(provider: const _ReadOnlyTrackStateProvider());
+}
 
-  static const DemoTrackStateRepository _demoRepository =
-      DemoTrackStateRepository();
+class _ReadOnlyTrackStateProvider implements TrackStateProviderAdapter {
+  const _ReadOnlyTrackStateProvider();
+
+  static const String _revision = 'read-only-test-revision';
+
+  static const Map<String, String> _files = {
+    'project.json': '''
+{
+  "key": "TRACK",
+  "name": "TrackState.AI",
+  "defaultLocale": "en",
+  "issueKeyPattern": "TRACK-{number}",
+  "dataModel": "nested-tree",
+  "configPath": "config"
+}
+''',
+    'config/statuses.json': '''
+[
+  {"id": "todo", "name": "To Do", "category": "new"},
+  {"id": "in-progress", "name": "In Progress", "category": "indeterminate"},
+  {"id": "in-review", "name": "In Review", "category": "indeterminate"},
+  {"id": "done", "name": "Done", "category": "done"}
+]
+''',
+    'config/issue-types.json': '''
+[
+  {"id": "epic", "name": "Epic", "hierarchyLevel": 1, "icon": "epic"},
+  {"id": "story", "name": "Story", "hierarchyLevel": 0, "icon": "story"},
+  {"id": "task", "name": "Task", "hierarchyLevel": 0, "icon": "task"},
+  {"id": "subtask", "name": "Sub-task", "hierarchyLevel": -1, "icon": "subtask"},
+  {"id": "bug", "name": "Bug", "hierarchyLevel": 0, "icon": "bug"}
+]
+''',
+    'config/fields.json': '''
+[
+  {"id": "summary", "name": "Summary", "type": "string", "required": true},
+  {"id": "description", "name": "Description", "type": "markdown", "required": false},
+  {"id": "acceptanceCriteria", "name": "Acceptance Criteria", "type": "markdown", "required": false},
+  {"id": "priority", "name": "Priority", "type": "option", "required": false},
+  {"id": "assignee", "name": "Assignee", "type": "user", "required": false},
+  {"id": "labels", "name": "Labels", "type": "array", "required": false}
+]
+''',
+    'TRACK-12/main.md': '''
+---
+key: TRACK-12
+project: TRACK
+issueType: Story
+status: In Progress
+priority: High
+summary: Implement Git sync service
+assignee: Denis
+reporter: Ana
+labels:
+  - sync
+components:
+  - storage
+updated: 5 minutes ago
+---
+
+# Description
+Read and write tracker files through GitHub Contents API.
+''',
+    'TRACK-12/acceptance_criteria.md': '''
+- Push issue updates as commits.
+''',
+  };
 
   @override
-  bool get supportsGitHubAuth => true;
+  String get dataRef => 'main';
 
   @override
-  bool get usesLocalPersistence => false;
+  String get repositoryLabel => 'trackstate/trackstate';
 
   @override
-  Future<RepositoryUser> connect(RepositoryConnection connection) =>
-      _demoRepository.connect(connection);
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async =>
+      const RepositoryUser(
+        login: 'read-only-user',
+        displayName: 'Read Only User',
+      );
 
   @override
-  Future<TrackerSnapshot> loadSnapshot() => _demoRepository.loadSnapshot();
+  Future<RepositoryBranch> getBranch(String name) async =>
+      RepositoryBranch(name: name, exists: true, isCurrent: name == dataRef);
 
   @override
-  Future<List<TrackStateIssue>> searchIssues(String jql) =>
-      _demoRepository.searchIssues(jql);
+  Future<RepositoryPermission> getPermission() async =>
+      const RepositoryPermission(
+        canRead: true,
+        canWrite: false,
+        isAdmin: false,
+      );
 
   @override
-  Future<TrackStateIssue> updateIssueStatus(
-    TrackStateIssue issue,
-    IssueStatus status,
+  Future<bool> isLfsTracked(String path) async => false;
+
+  @override
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async => [
+    for (final path in _files.keys)
+      RepositoryTreeEntry(path: path, type: 'blob'),
+  ];
+
+  @override
+  Future<RepositoryAttachment> readAttachment(
+    String path, {
+    required String ref,
+  }) async {
+    throw const TrackStateProviderException(
+      'Attachment access is not required for the TS-42 widget test.',
+    );
+  }
+
+  @override
+  Future<RepositoryTextFile> readTextFile(
+    String path, {
+    required String ref,
+  }) async {
+    final content = _files[path];
+    if (content == null) {
+      throw TrackStateProviderException('Missing fixture for $path.');
+    }
+    return const RepositoryTextFile(
+      path: '',
+      content: '',
+      revision: _revision,
+    ).copyWith(path: path, content: content);
+  }
+
+  @override
+  Future<String> resolveWriteBranch() async => dataRef;
+
+  @override
+  Future<RepositoryCommitResult> createCommit(
+    RepositoryCommitRequest request,
   ) async {
-    throw const TrackStateRepositoryException(
-      'Connect a repository session with write access first.',
+    throw const TrackStateProviderException(
+      'TS-42 should not attempt to create commits in a read-only session.',
+    );
+  }
+
+  @override
+  Future<RepositoryWriteResult> writeTextFile(
+    RepositoryWriteRequest request,
+  ) async {
+    throw const TrackStateProviderException(
+      'TS-42 should not attempt to write issue files in a read-only session.',
+    );
+  }
+
+  @override
+  Future<RepositoryAttachmentWriteResult> writeAttachment(
+    RepositoryAttachmentWriteRequest request,
+  ) async {
+    throw const TrackStateProviderException(
+      'TS-42 should not attempt to write attachments in a read-only session.',
+    );
+  }
+}
+
+extension on RepositoryTextFile {
+  RepositoryTextFile copyWith({
+    String? path,
+    String? content,
+    String? revision,
+  }) {
+    return RepositoryTextFile(
+      path: path ?? this.path,
+      content: content ?? this.content,
+      revision: revision ?? this.revision,
     );
   }
 }
