@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 
@@ -78,7 +77,7 @@ void main() {
       final focusOrder = await robot.collectFocusOrder(
         candidates: {
           'Search issues': robot.searchIssuesField,
-          'Connect GitHub': robot.connectGitHubSemanticControl,
+          'Connect GitHub': robot.connectGitHubControl,
           'Dark theme': robot.darkThemeControl,
         },
       );
@@ -93,7 +92,10 @@ void main() {
       }
 
       final placeholderContrast = contrastRatio(
-        robot.renderedTextColor(robot.placeholderText),
+        robot.renderedTextColorWithin(
+          robot.searchIssuesField,
+          SettingsScreenRobot.jqlPlaceholderText,
+        ),
         robot.colors().surface,
       );
       if (placeholderContrast < 3.0) {
@@ -119,7 +121,7 @@ void main() {
       }
 
       final connectedContrast = contrastRatio(
-        const Color(0xFFFAF8F4),
+        robot.renderedTextColorWithin(robot.connectedControl, 'Connected'),
         robot.colors().primary,
       );
       if (connectedContrast < 4.5) {

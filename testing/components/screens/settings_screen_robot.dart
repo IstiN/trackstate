@@ -10,6 +10,8 @@ class SettingsScreenRobot {
   SettingsScreenRobot(this.tester);
 
   final WidgetTester tester;
+  static const jqlPlaceholderText =
+      'project = TRACK AND status != Done ORDER BY priority DESC';
 
   Finder get settingsNavigation => find.text('Settings').first;
   Finder get projectSettingsHeading => find.text('Project Settings');
@@ -17,16 +19,26 @@ class SettingsScreenRobot {
   Finder get workflowCard => find.text('Workflow');
   Finder get fieldsCard => find.text('Fields');
   Finder get languageCard => find.text('Language');
-  Finder get localGitControl => find.text('Local Git');
-  Finder get connectGitHubControl => find.text('Connect GitHub');
-  Finder get connectedControl => find.text('Connected');
-  Finder get searchIssuesField => find.bySemanticsLabel('Search issues').first;
+  Finder get localGitControl => find.ancestor(
+    of: find.text('Local Git'),
+    matching: find.bySubtype<ButtonStyleButton>(),
+  );
+  Finder get connectGitHubControl => find.ancestor(
+    of: find.text('Connect GitHub'),
+    matching: find.bySubtype<ButtonStyleButton>(),
+  );
+  Finder get connectedControl => find.ancestor(
+    of: find.text('Connected'),
+    matching: find.bySubtype<ButtonStyleButton>(),
+  );
+  Finder get searchIssuesField => find.byWidgetPredicate(
+    (widget) =>
+        widget is TextField &&
+        widget.decoration?.hintText == jqlPlaceholderText,
+    description: 'Settings top-bar search field',
+  );
   Finder get darkThemeControl => find.bySemanticsLabel('Dark theme').first;
-  Finder get connectGitHubSemanticControl =>
-      find.bySemanticsLabel('Connect GitHub');
-  Finder get placeholderText =>
-      find.text('project = TRACK AND status != Done ORDER BY priority DESC');
-  Finder get connectedText => find.text('Connected');
+  Finder get placeholderText => find.text(jqlPlaceholderText);
 
   Future<void> pumpApp({
     required TrackStateRepository repository,
@@ -107,6 +119,49 @@ class SettingsScreenRobot {
       }
     }
     throw StateError('No rendered text color found for $finder');
+  }
+
+  Color renderedTextColorWithin(Finder scope, String text) {
+    final richTextFinder = find.descendant(
+      of: scope,
+      matching: find.byType(RichText),
+    );
+    for (final element in richTextFinder.evaluate()) {
+      final widget = element.widget as RichText;
+      if (widget.text.toPlainText().trim() == text) {
+        final color =
+            widget.text.style?.color ??
+            DefaultTextStyle.of(element).style.color ??
+            _fallbackTextColor(scope);
+        if (color != null) {
+          return color;
+        }
+      }
+    }
+    final textFinder = find.descendant(of: scope, matching: find.text(text));
+    for (final element in textFinder.evaluate()) {
+      final widget = element.widget;
+      if (widget is Text) {
+        final color =
+            widget.style?.color ??
+            DefaultTextStyle.of(element).style.color ??
+            _fallbackTextColor(scope);
+        if (color != null) {
+          return color;
+        }
+      }
+    }
+    throw StateError('No rendered text "$text" found within $scope');
+  }
+
+  Color? _fallbackTextColor(Finder scope) {
+    for (final element in scope.evaluate()) {
+      final widget = element.widget;
+      if (widget is ButtonStyleButton) {
+        return widget.style?.foregroundColor?.resolve(<WidgetState>{});
+      }
+    }
+    return null;
   }
 
   String semanticsLabelOf(Finder finder) {
