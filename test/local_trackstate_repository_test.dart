@@ -96,6 +96,45 @@ void main() {
     },
   );
 
+  test('local provider rejects dirty text writes before committing', () async {
+    final repo = await _createLocalRepository();
+    addTearDown(() => repo.delete(recursive: true));
+    final provider = LocalGitTrackStateProvider(repositoryPath: repo.path);
+    final branch = await provider.resolveWriteBranch();
+    final original = await provider.readTextFile(
+      'DEMO/DEMO-1/main.md',
+      ref: branch,
+    );
+
+    await _writeFile(
+      repo,
+      'DEMO/DEMO-1/main.md',
+      '${original.content}\nDirty worktree change.\n',
+    );
+
+    await expectLater(
+      () => provider.writeTextFile(
+        RepositoryWriteRequest(
+          path: 'DEMO/DEMO-1/main.md',
+          content: original.content.replaceFirst(
+            'status: In Progress',
+            'status: Done',
+          ),
+          message: 'Attempt overwrite dirty file',
+          branch: branch,
+          expectedRevision: original.revision,
+        ),
+      ),
+      throwsA(
+        isA<TrackStateProviderException>().having(
+          (error) => error.message,
+          'message',
+          contains('staged or unstaged local changes'),
+        ),
+      ),
+    );
+  });
+
   test(
     'local provider rejects stale attachment writes with expected revisions',
     () async {
@@ -132,6 +171,87 @@ void main() {
           ),
         ),
       );
+    },
+  );
+
+  test(
+    'local provider rejects dirty attachment writes before committing',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+      final provider = LocalGitTrackStateProvider(repositoryPath: repo.path);
+      final branch = await provider.resolveWriteBranch();
+      final original = await provider.readAttachment(
+        'attachments/screenshot.png',
+        ref: branch,
+      );
+
+      await File(
+        '${repo.path}/attachments/screenshot.png',
+      ).writeAsBytes(Uint8List.fromList('dirty-binary'.codeUnits));
+
+      await expectLater(
+        () => provider.writeAttachment(
+          RepositoryAttachmentWriteRequest(
+            path: 'attachments/screenshot.png',
+            bytes: Uint8List.fromList('replacement-binary'.codeUnits),
+            message: 'Attempt overwrite dirty attachment',
+            branch: branch,
+            expectedRevision: original.revision,
+          ),
+        ),
+        throwsA(
+          isA<TrackStateProviderException>().having(
+            (error) => error.message,
+            'message',
+            contains('staged or unstaged local changes'),
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'local provider falls back when git identity is not configured',
+    () async {
+      final provider = LocalGitTrackStateProvider(
+        repositoryPath: '/tmp/fake-repo',
+        processRunner: _FakeGitProcessRunner(
+          results: {
+            'show-ref --verify --quiet refs/heads/main': GitCommandResult(
+              exitCode: 0,
+              stdout: '',
+              stdoutBytes: Uint8List(0),
+              stderr: '',
+            ),
+            'rev-parse --abbrev-ref HEAD': GitCommandResult(
+              exitCode: 0,
+              stdout: 'main\n',
+              stdoutBytes: Uint8List(0),
+              stderr: '',
+            ),
+            'config user.name': GitCommandResult(
+              exitCode: 1,
+              stdout: '',
+              stdoutBytes: Uint8List(0),
+              stderr: '',
+            ),
+            'config user.email': GitCommandResult(
+              exitCode: 1,
+              stdout: '',
+              stdoutBytes: Uint8List(0),
+              stderr: '',
+            ),
+          },
+        ),
+      );
+
+      final user = await provider.authenticate(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+
+      expect(user.login, 'local-user');
+      expect(user.displayName, 'Local User');
     },
   );
 }
@@ -209,5 +329,21 @@ Future<void> _git(String repositoryPath, List<String> args) async {
   final result = await Process.run('git', ['-C', repositoryPath, ...args]);
   if (result.exitCode != 0) {
     throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
+  }
+}
+
+class _FakeGitProcessRunner implements GitProcessRunner {
+  const _FakeGitProcessRunner({required this.results});
+
+  final Map<String, GitCommandResult> results;
+
+  @override
+  Future<GitCommandResult> run(
+    String repositoryPath,
+    List<String> args, {
+    bool binaryOutput = false,
+  }) async {
+    return results[args.join(' ')] ??
+        (throw StateError('Unexpected git command: ${args.join(' ')}'));
   }
 }

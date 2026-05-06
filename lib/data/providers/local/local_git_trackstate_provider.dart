@@ -29,8 +29,8 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
         'Local branch ${connection.branch} was not found in $repositoryPath.',
       );
     }
-    final name = (await _runGit(['config', 'user.name'])).stdout.trim();
-    final email = (await _runGit(['config', 'user.email'])).stdout.trim();
+    final name = await _gitConfigValue('user.name');
+    final email = await _gitConfigValue('user.email');
     return RepositoryUser(
       login: email.ifEmpty('local-user'),
       displayName: name.ifEmpty(email.ifEmpty('Local User')),
@@ -93,6 +93,7 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
     RepositoryWriteRequest request,
   ) async {
     await _ensureOnBranch(request.branch);
+    await _ensurePathClean(request.path);
     _ensureExpectedRevisionMatches(
       path: request.path,
       expectedRevision: request.expectedRevision,
@@ -169,6 +170,7 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
     RepositoryAttachmentWriteRequest request,
   ) async {
     await _ensureOnBranch(request.branch);
+    await _ensurePathClean(request.path);
     _ensureExpectedRevisionMatches(
       path: request.path,
       expectedRevision: request.expectedRevision,
@@ -219,6 +221,19 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
       path,
     ]);
     return result.stdout.trim().isNotEmpty;
+  }
+
+  Future<String> _gitConfigValue(String key) async =>
+      (await _tryGit(['config', key]))?.stdout.trim() ?? '';
+
+  Future<void> _ensurePathClean(String path) async {
+    final result = await _runGit(['status', '--porcelain', '--', path]);
+    if (result.stdout.trim().isEmpty) {
+      return;
+    }
+    throw TrackStateProviderException(
+      'Cannot save $path because it has staged or unstaged local changes.',
+    );
   }
 
   Future<String?> _currentHeadRevision(String path) async {
