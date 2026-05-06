@@ -73,12 +73,12 @@ No backend server is required. The Flutter SPA communicates directly with the Gi
 
 ## Agent guidance
 
-When working on stories or tasks related to `trackstate-setup`:
+When working in the main `trackstate` repository:
 
-- Agents are explicitly allowed to **modify files inside the `trackstate-setup/` submodule** when the task requires changes to the deployable template, demo data, Pages setup, or published app artifacts.
-- Treat `trackstate-setup` as an actively maintained companion repository, not a read-only reference. If a change belongs in the deployable template, make it in `trackstate-setup` instead of forcing it into the main `trackstate` repo.
-- When a task spans both repositories, agents should update both sides coherently: source/build logic in `trackstate`, deployable template/demo content in `trackstate-setup`.
-- Keep repository boundaries clear: reusable source code, agent config, and build logic stay in `trackstate`; generated deployable assets, sample project content, and fork experience updates belong in `trackstate-setup`.
+- Treat `trackstate-setup/` as a **read-only output/template submodule**. Do not edit files inside this path from a `trackstate` development, review, or rework PR.
+- Keep repository boundaries clear: reusable source code, agent config, and build logic stay in `trackstate`; generated deployable assets, sample project content, and fork experience updates belong in the separate `trackstate-setup` repository or release automation.
+- If a task explicitly requires changing the deployable template, demo data, Pages setup, or published app artifacts, handle that as dedicated work in `IstiN/trackstate-setup` instead of leaving dirty submodule content in a `trackstate` PR.
+- A `trackstate` PR may update the `trackstate-setup` submodule pointer only when the corresponding setup repository change has already been committed and pushed there.
 - The setup repo is the **user-facing product package** — treat it with the same quality bar as a shipped product
 - Sample data must be realistic and demonstrate core features (hierarchy, JQL search, workflow transitions, comments, attachments)
 - The fork experience must work end-to-end without manual setup steps beyond fork → enable Pages → open URL
@@ -91,7 +91,7 @@ When working on stories or tasks related to `trackstate-setup`:
 
 ## Working agreement for multi-repo changes
 
-If `trackstate-setup` is checked out and writable, agents may edit it directly as part of the same task. Those changes should be intentional, scoped to the setup repository's role, and reflected in any related instructions, workflows, or release process kept in the main `trackstate` repository.
+Do not leave uncommitted or untracked changes inside `trackstate-setup/` during `trackstate` agent runs. The parent repository ignores dirty content in this submodule so accidental local edits do not block `trackstate` rework/review automation, but those edits are not part of the parent PR.
 
 ## Relationship to the main repository
 
