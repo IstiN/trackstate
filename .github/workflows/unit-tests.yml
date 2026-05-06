@@ -16,9 +16,33 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: true
 
+      - name: Detect Flutter changes
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          head_sha="${{ github.event.pull_request.head.sha }}"
+
+          changed_files="$(git diff --name-only "$base_sha" "$head_sha")"
+          echo "$changed_files"
+
+          if echo "$changed_files" | grep -Eq '^(lib/|test/|android/|ios/|web/|linux/|macos/|windows/|pubspec\.yaml$|pubspec\.lock$|analysis_options\.yaml$|l10n\.yaml$|\.github/workflows/unit-tests\.yml$)'; then
+            echo "flutter_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "flutter_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip full Flutter validation
+        if: steps.changes.outputs.flutter_changed != 'true'
+        run: echo "No Flutter-related changes detected; skipping heavy Flutter validation."
+
       - name: Setup Flutter
+        if: steps.changes.outputs.flutter_changed == 'true'
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.35.3'
@@ -26,15 +50,19 @@ jobs:
           cache: true
 
       - name: Install dependencies
+        if: steps.changes.outputs.flutter_changed == 'true'
         run: flutter pub get
 
       - name: Analyze
+        if: steps.changes.outputs.flutter_changed == 'true'
         run: flutter analyze
 
       - name: Run unit and golden tests
+        if: steps.changes.outputs.flutter_changed == 'true'
         run: flutter test --coverage
 
       - name: Build web app
+        if: steps.changes.outputs.flutter_changed == 'true'
         run: |
           flutter build web --release \
             --base-href /trackstate/ \
