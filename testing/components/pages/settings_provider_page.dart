@@ -1,41 +1,57 @@
-import 'package:flutter_test/flutter_test.dart';
-
-import '../../core/utils/trackstate_test_harness.dart';
+import '../../core/models/settings_provider_state.dart';
+import '../../frameworks/flutter/trackstate_widget_framework.dart';
 
 class SettingsProviderPage {
-  SettingsProviderPage(this.tester);
+  SettingsProviderPage(this._framework);
 
-  final WidgetTester tester;
-
-  Finder get settingsNavigationButton => find.text('Settings');
-
-  Finder get settingsHeading => find.text('Project Settings');
-  Finder get localGitOption => find.text('Local Git');
-  Finder get repositoryPathField => find.text('Repository Path');
-  Finder get writeBranchField => find.text('Write Branch');
-  Finder get githubTokenField => find.text('Fine-grained token');
-  Finder get issueTypesCard => find.text('Issue Types');
-  Finder get workflowCard => find.text('Workflow');
-  Finder get fieldsCard => find.text('Fields');
-  Finder get languageCard => find.text('Language');
+  final TrackStateWidgetFramework _framework;
 
   Future<void> open() async {
-    await tester.tap(settingsNavigationButton.first);
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(settingsHeading);
+    await _framework.tapLabeledElement('Settings');
   }
 
-  Future<void> tapLocalGitProvider() async {
-    await tester.ensureVisible(localGitOption.first);
-    await tester.tap(localGitOption.first);
-    await tester.pumpAndSettle();
+  Future<void> showHostedProviderConfiguration() async {
+    await _framework.tapLabeledElement('Connect GitHub');
   }
 
-  Future<void> scrollSettingsBody() async {
-    await tester.drag(
-      TrackStateTestHarness.scrollableBody(),
-      const Offset(0, -400),
+  Future<void> showLocalGitConfiguration() async {
+    await _framework.tapLabeledElement('Local Git');
+    await _framework.scrollBodyBy(-400);
+  }
+
+  SettingsProviderState captureState() {
+    final repositoryPathRect = _framework.rectForText('Repository Path');
+    final writeBranchRect = _framework.rectForText('Write Branch');
+    final connectGitHubRect = _framework.rectForText('Connect GitHub');
+    final localGitRect = _framework.rectForText('Local Git');
+
+    return SettingsProviderState(
+      isProjectSettingsVisible: _framework.isTextVisible('Project Settings'),
+      connectGitHubOption: ProviderOptionState(
+        label: 'Connect GitHub',
+        visibleCount: _framework.visibleTextCount('Connect GitHub'),
+        isSelected: _framework.isSelected('Connect GitHub'),
+        top: connectGitHubRect?.top,
+        bottom: connectGitHubRect?.bottom,
+        left: connectGitHubRect?.left,
+      ),
+      localGitOption: ProviderOptionState(
+        label: 'Local Git',
+        visibleCount: _framework.visibleTextCount('Local Git'),
+        isSelected: _framework.isSelected('Local Git'),
+        top: localGitRect?.top,
+        bottom: localGitRect?.bottom,
+        left: localGitRect?.left,
+      ),
+      isFineGrainedTokenVisible: _framework.isTextVisible('Fine-grained token'),
+      isRepositoryPathVisible: _framework.isTextVisible('Repository Path'),
+      isWriteBranchVisible: _framework.isTextVisible('Write Branch'),
+      repositoryPathTop: repositoryPathRect?.top,
+      repositoryPathBottom: repositoryPathRect?.bottom,
+      repositoryPathLeft: repositoryPathRect?.left,
+      writeBranchTop: writeBranchRect?.top,
+      writeBranchBottom: writeBranchRect?.bottom,
+      writeBranchLeft: writeBranchRect?.left,
     );
-    await tester.pumpAndSettle();
   }
 }

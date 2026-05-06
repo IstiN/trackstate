@@ -1,80 +1,99 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../components/pages/settings_provider_page.dart';
-import '../../core/utils/trackstate_test_harness.dart';
+import '../../frameworks/flutter/trackstate_widget_framework.dart';
 
 void main() {
   testWidgets('TS-45: Settings provider selector shows Local Git stacked config fields', (
     tester,
   ) async {
     final semantics = tester.ensureSemantics();
+    final framework = TrackStateWidgetFramework(tester);
     try {
-      await TrackStateTestHarness.pumpApp(tester);
-      final settingsPage = SettingsProviderPage(tester);
+      await framework.launchApp();
+      final settingsPage = SettingsProviderPage(framework);
 
       await settingsPage.open();
+      final initialState = settingsPage.captureState();
 
       expect(
-        settingsPage.settingsHeading,
-        findsOneWidget,
+        initialState.isProjectSettingsVisible,
+        isTrue,
         reason:
             'The Settings screen should open with the Project Settings heading.',
       );
       expect(
-        settingsPage.localGitOption,
-        findsAtLeastNWidgets(1),
+        initialState.connectGitHubOption.isVisible,
+        isTrue,
+        reason:
+            'The Settings screen should show a hosted provider row so the previous provider configuration can be established before switching.',
+      );
+      expect(
+        initialState.localGitOption.isVisible,
+        isTrue,
         reason:
             'The Settings screen should show a Local Git provider row inside the provider selector.',
       );
 
-      await settingsPage.tapLocalGitProvider();
-      await settingsPage.scrollSettingsBody();
+      await settingsPage.showHostedProviderConfiguration();
+      final hostedState = settingsPage.captureState();
 
       expect(
-        settingsPage.repositoryPathField,
-        findsOneWidget,
+        hostedState.isFineGrainedTokenVisible,
+        isTrue,
+        reason:
+            'Selecting the hosted provider should reveal the Fine-grained token field before Local Git clears it.',
+      );
+
+      await settingsPage.showLocalGitConfiguration();
+      final localGitState = settingsPage.captureState();
+
+      expect(
+        localGitState.localGitOption.isSelected,
+        isTrue,
+        reason:
+            'Selecting Local Git should explicitly mark that provider as selected in the radio-list.',
+      );
+      expect(
+        localGitState.isRepositoryPathVisible,
+        isTrue,
         reason:
             'Selecting Local Git should reveal the Repository Path field below the provider row.',
       );
       expect(
-        settingsPage.writeBranchField,
-        findsOneWidget,
+        localGitState.isWriteBranchVisible,
+        isTrue,
         reason:
             'Selecting Local Git should reveal the Write Branch field below the provider row.',
       );
       expect(
-        settingsPage.githubTokenField,
-        findsNothing,
+        localGitState.isFineGrainedTokenVisible,
+        isFalse,
         reason:
             'Selecting Local Git should clear any previously active hosted-provider configuration.',
       );
 
-      final localGitRect = tester.getRect(settingsPage.localGitOption.first);
-      final repositoryPathRect = tester.getRect(
-        settingsPage.repositoryPathField,
-      );
-      final writeBranchRect = tester.getRect(settingsPage.writeBranchField);
-
       expect(
-        repositoryPathRect.top,
-        greaterThan(localGitRect.bottom),
+        localGitState.repositoryPathTop,
+        greaterThan(localGitState.localGitOption.bottom!),
         reason:
             'Repository Path should be rendered below the selected Local Git option.',
       );
       expect(
-        writeBranchRect.top,
-        greaterThan(repositoryPathRect.bottom),
+        localGitState.writeBranchTop,
+        greaterThan(localGitState.repositoryPathBottom!),
         reason:
             'Write Branch should be stacked below Repository Path in the active Local Git configuration.',
       );
       expect(
-        (repositoryPathRect.left - writeBranchRect.left).abs(),
+        (localGitState.repositoryPathLeft! - localGitState.writeBranchLeft!)
+            .abs(),
         lessThan(24),
         reason:
             'Repository Path and Write Branch should align as stacked fields in a single column.',
       );
     } finally {
-      TrackStateTestHarness.resetView(tester);
+      framework.resetView();
       semantics.dispose();
     }
   });
