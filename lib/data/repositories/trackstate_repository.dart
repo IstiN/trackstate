@@ -7,6 +7,8 @@ import '../providers/github/github_trackstate_provider.dart';
 import '../providers/trackstate_provider.dart';
 
 abstract interface class TrackStateRepository {
+  bool get usesLocalPersistence;
+  bool get supportsGitHubAuth;
   Future<TrackerSnapshot> loadSnapshot();
   Future<List<TrackStateIssue>> searchIssues(String jql);
   Future<RepositoryUser> connect(RepositoryConnection connection);
@@ -19,9 +21,15 @@ abstract interface class TrackStateRepository {
 class ProviderBackedTrackStateRepository implements TrackStateRepository {
   ProviderBackedTrackStateRepository({
     required TrackStateProviderAdapter provider,
+    this.usesLocalPersistence = false,
+    this.supportsGitHubAuth = true,
   }) : _provider = provider;
 
   final TrackStateProviderAdapter _provider;
+  @override
+  final bool usesLocalPersistence;
+  @override
+  final bool supportsGitHubAuth;
   TrackerSnapshot? _snapshot;
 
   @override
@@ -212,6 +220,12 @@ class SetupTrackStateRepository extends ProviderBackedTrackStateRepository {
 
 class DemoTrackStateRepository implements TrackStateRepository {
   const DemoTrackStateRepository();
+
+  @override
+  bool get usesLocalPersistence => false;
+
+  @override
+  bool get supportsGitHubAuth => true;
 
   @override
   Future<RepositoryUser> connect(RepositoryConnection connection) async =>

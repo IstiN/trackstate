@@ -41,9 +41,18 @@ class TrackerViewModel extends ChangeNotifier {
   String? get message => _message;
   bool get isConnected => _isConnected;
   RepositoryUser? get connectedUser => _connectedUser;
-  String get profileInitials => _connectedUser?.initials ?? 'GH';
+  bool get usesLocalPersistence => _repository.usesLocalPersistence;
+  bool get supportsGitHubAuth => _repository.supportsGitHubAuth;
+  String get repositoryAccessLabel => usesLocalPersistence
+      ? 'Local Git'
+      : _isConnected
+      ? 'Connected'
+      : 'Connect GitHub';
+  String get profileInitials =>
+      _connectedUser?.initials ?? (usesLocalPersistence ? 'LG' : 'GH');
   bool get isGitHubAppAuthAvailable =>
-      _githubAppClientId.isNotEmpty || _githubAuthProxyUrl.isNotEmpty;
+      supportsGitHubAuth &&
+      (_githubAppClientId.isNotEmpty || _githubAuthProxyUrl.isNotEmpty);
 
   List<TrackStateIssue> get issues => _snapshot?.issues ?? const [];
   List<TrackStateIssue> get epics => _snapshot?.epics ?? const [];
@@ -85,7 +94,9 @@ class TrackerViewModel extends ChangeNotifier {
         orElse: () => issues.first,
       );
       _searchResults = await _repository.searchIssues(_jql);
-      await _restoreGitHubConnection();
+      if (supportsGitHubAuth) {
+        await _restoreGitHubConnection();
+      }
     } on Object catch (error) {
       _message =
           'TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. $error';
@@ -120,6 +131,12 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   Future<void> connectGitHub(String token, {bool remember = false}) async {
+    if (!supportsGitHubAuth) {
+      _message =
+          'This runtime uses local Git commits. GitHub tokens are not needed.';
+      notifyListeners();
+      return;
+    }
     final project = _snapshot?.project;
     if (project == null) return;
     final normalizedToken = token.trim();
@@ -186,7 +203,9 @@ class TrackerViewModel extends ChangeNotifier {
         orElse: () => saved,
       );
       _searchResults = await _repository.searchIssues(_jql);
-      _message = _isConnected
+      _message = usesLocalPersistence
+          ? '${issue.key} moved to ${status.label} and committed to local Git branch ${_snapshot!.project.branch}.'
+          : _isConnected
           ? '${issue.key} moved to ${status.label} and committed to GitHub.'
           : '${issue.key} moved locally. Connect GitHub in Settings to persist.';
     } on Object catch (error) {
@@ -206,6 +225,12 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   Future<void> startGitHubAppLogin() async {
+    if (!supportsGitHubAuth) {
+      _message =
+          'This runtime uses local Git commits. GitHub App login is unavailable.';
+      notifyListeners();
+      return;
+    }
     final project = _snapshot?.project;
     if (project == null) return;
     if (_githubAuthProxyUrl.isNotEmpty) {

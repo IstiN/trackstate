@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/local/local_git_trackstate_provider.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
@@ -49,6 +51,89 @@ void main() {
     expect(await provider.isLfsTracked('attachments/screenshot.png'), isTrue);
     expect(await provider.isLfsTracked('README.md'), isFalse);
   });
+
+  test(
+    'local provider rejects stale text writes with expected revisions',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+      final provider = LocalGitTrackStateProvider(repositoryPath: repo.path);
+      final branch = await provider.resolveWriteBranch();
+      final original = await provider.readTextFile(
+        'DEMO/DEMO-1/main.md',
+        ref: branch,
+      );
+
+      await _writeFile(
+        repo,
+        'DEMO/DEMO-1/main.md',
+        original.content.replaceFirst('status: In Progress', 'status: Done'),
+      );
+      await _git(repo.path, ['add', 'DEMO/DEMO-1/main.md']);
+      await _git(repo.path, ['commit', '-m', 'External update']);
+
+      await expectLater(
+        () => provider.writeTextFile(
+          RepositoryWriteRequest(
+            path: 'DEMO/DEMO-1/main.md',
+            content: original.content.replaceFirst(
+              'status: In Progress',
+              'status: To Do',
+            ),
+            message: 'Stale update',
+            branch: branch,
+            expectedRevision: original.revision,
+          ),
+        ),
+        throwsA(
+          isA<TrackStateProviderException>().having(
+            (error) => error.message,
+            'message',
+            contains('changed in the current branch'),
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'local provider rejects stale attachment writes with expected revisions',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+      final provider = LocalGitTrackStateProvider(repositoryPath: repo.path);
+      final branch = await provider.resolveWriteBranch();
+      final original = await provider.readAttachment(
+        'attachments/screenshot.png',
+        ref: branch,
+      );
+
+      await File(
+        '${repo.path}/attachments/screenshot.png',
+      ).writeAsBytes(Uint8List.fromList('newer-binary'.codeUnits));
+      await _git(repo.path, ['add', 'attachments/screenshot.png']);
+      await _git(repo.path, ['commit', '-m', 'Update attachment']);
+
+      await expectLater(
+        () => provider.writeAttachment(
+          RepositoryAttachmentWriteRequest(
+            path: 'attachments/screenshot.png',
+            bytes: Uint8List.fromList('stale-binary'.codeUnits),
+            message: 'Stale attachment update',
+            branch: branch,
+            expectedRevision: original.revision,
+          ),
+        ),
+        throwsA(
+          isA<TrackStateProviderException>().having(
+            (error) => error.message,
+            'message',
+            contains('changed in the current branch'),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 Future<Directory> _createLocalRepository() async {

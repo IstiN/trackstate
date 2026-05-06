@@ -271,8 +271,8 @@ class GitHubTrackStateProvider implements TrackStateProviderAdapter {
   Future<bool> isLfsTracked(String path) async {
     try {
       final attributes = await readTextFile('.gitattributes', ref: dataRef);
-      return attributes.content.contains('filter=lfs');
-    } on Object {
+      return _isLfsTrackedByAttributes(attributes.content, path);
+    } on TrackStateProviderException {
       return false;
     }
   }
@@ -329,3 +329,65 @@ Map<String, String> _githubHeaders(String? token) => {
 
 Uri _githubUri(String path, [Map<String, String>? queryParameters]) =>
     Uri.https('api.github.com', path, queryParameters);
+
+bool _isLfsTrackedByAttributes(String attributes, String path) {
+  final normalizedPath = path
+      .replaceAll('\\', '/')
+      .replaceFirst(RegExp(r'^/+'), '');
+  var isTracked = false;
+  for (final rawLine in LineSplitter.split(attributes)) {
+    final line = rawLine.trim();
+    if (line.isEmpty || line.startsWith('#')) {
+      continue;
+    }
+    final parts = line.split(RegExp(r'\s+'));
+    if (parts.length < 2 ||
+        !_attributePatternMatches(parts.first, normalizedPath)) {
+      continue;
+    }
+    for (final attribute in parts.skip(1)) {
+      if (attribute == 'filter=lfs') {
+        isTracked = true;
+      } else if (attribute == '-filter' ||
+          attribute == '!filter' ||
+          attribute == 'filter') {
+        isTracked = false;
+      }
+    }
+  }
+  return isTracked;
+}
+
+bool _attributePatternMatches(String pattern, String path) {
+  final normalizedPattern = pattern.replaceAll('\\', '/');
+  final anchored = normalizedPattern.startsWith('/');
+  final candidate = anchored
+      ? normalizedPattern.substring(1)
+      : normalizedPattern;
+  final hasDirectorySeparator = candidate.contains('/');
+  final expression = StringBuffer('^');
+  if (!anchored && !hasDirectorySeparator) {
+    expression.write(r'(?:.*/)?');
+  }
+  for (var index = 0; index < candidate.length; index++) {
+    final character = candidate[index];
+    if (character == '*') {
+      final isDoubleStar =
+          index + 1 < candidate.length && candidate[index + 1] == '*';
+      if (isDoubleStar) {
+        expression.write('.*');
+        index++;
+      } else {
+        expression.write(r'[^/]*');
+      }
+      continue;
+    }
+    if (character == '?') {
+      expression.write(r'[^/]');
+      continue;
+    }
+    expression.write(RegExp.escape(character));
+  }
+  expression.write(r'$');
+  return RegExp(expression.toString()).hasMatch(path);
+}

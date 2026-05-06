@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
@@ -211,6 +212,29 @@ Loaded from setup data.
         utf8.decode(base64Decode(savedBody['content']! as String)),
         contains('status: Done'),
       );
+    },
+  );
+
+  test(
+    'github provider evaluates LFS rules against the requested path',
+    () async {
+      final provider = GitHubTrackStateProvider(
+        client: MockClient((request) async {
+          if (request.url.path.endsWith('/contents/.gitattributes')) {
+            return _contentResponse('''
+*.png filter=lfs diff=lfs merge=lfs -text
+docs/**/*.zip filter=lfs diff=lfs merge=lfs -text
+README.md -filter
+''');
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      expect(await provider.isLfsTracked('attachments/screenshot.png'), isTrue);
+      expect(await provider.isLfsTracked('docs/releases/archive.zip'), isTrue);
+      expect(await provider.isLfsTracked('README.md'), isFalse);
+      expect(await provider.isLfsTracked('notes/todo.txt'), isFalse);
     },
   );
 }

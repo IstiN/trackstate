@@ -12,5 +12,7 @@ class LocalTrackStateRepository extends ProviderBackedTrackStateRepository {
            dataRef: dataRef,
            processRunner: processRunner,
          ),
+         usesLocalPersistence: true,
+         supportsGitHubAuth: false,
        );
 }

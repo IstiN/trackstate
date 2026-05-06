@@ -312,19 +312,19 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: 12),
           if (compact)
             _IconButtonSurface(
-              label: viewModel.isConnected ? 'Connected' : 'Connect GitHub',
+              label: viewModel.repositoryAccessLabel,
               glyph: TrackStateIconGlyph.gitBranch,
               onPressed: viewModel.isSaving
                   ? () {}
-                  : () => _showConnectDialog(context, viewModel),
+                  : () => _showRepositoryAccessDialog(context, viewModel),
             )
           else
             _PrimaryButton(
-              label: viewModel.isConnected ? 'Connected' : 'Connect GitHub',
+              label: viewModel.repositoryAccessLabel,
               icon: TrackStateIconGlyph.gitBranch,
               onPressed: viewModel.isSaving
                   ? () {}
-                  : () => _showConnectDialog(context, viewModel),
+                  : () => _showRepositoryAccessDialog(context, viewModel),
             ),
           const SizedBox(width: 8),
           _IconButtonSurface(
@@ -351,10 +351,43 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-Future<void> _showConnectDialog(
+Future<void> _showRepositoryAccessDialog(
   BuildContext context,
   TrackerViewModel viewModel,
 ) async {
+  if (viewModel.usesLocalPersistence) {
+    final project = viewModel.project;
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Local Git runtime'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Repository: ${project?.repository ?? 'configured repository'}',
+              ),
+              const SizedBox(height: 8),
+              Text('Branch: ${project?.branch ?? 'current branch'}'),
+              const SizedBox(height: 12),
+              const Text(
+                'Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.',
+              ),
+            ],
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+    return;
+  }
   final controller = TextEditingController();
   var rememberToken = true;
   await showDialog<void>(

@@ -93,6 +93,11 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
     RepositoryWriteRequest request,
   ) async {
     await _ensureOnBranch(request.branch);
+    _ensureExpectedRevisionMatches(
+      path: request.path,
+      expectedRevision: request.expectedRevision,
+      currentRevision: await _currentHeadRevision(request.path),
+    );
     final file = File(_absolutePath(request.path));
     await file.parent.create(recursive: true);
     await file.writeAsString(request.content);
@@ -164,6 +169,11 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
     RepositoryAttachmentWriteRequest request,
   ) async {
     await _ensureOnBranch(request.branch);
+    _ensureExpectedRevisionMatches(
+      path: request.path,
+      expectedRevision: request.expectedRevision,
+      currentRevision: await _currentHeadRevision(request.path),
+    );
     final file = File(_absolutePath(request.path));
     await file.parent.create(recursive: true);
     await file.writeAsBytes(request.bytes);
@@ -209,6 +219,26 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
       path,
     ]);
     return result.stdout.trim().isNotEmpty;
+  }
+
+  Future<String?> _currentHeadRevision(String path) async {
+    final revision = await _tryGit(['rev-parse', 'HEAD:$path']);
+    return revision?.stdout.trim();
+  }
+
+  void _ensureExpectedRevisionMatches({
+    required String path,
+    required String? expectedRevision,
+    required String? currentRevision,
+  }) {
+    if (expectedRevision == currentRevision) {
+      return;
+    }
+    throw TrackStateProviderException(
+      'Cannot save $path because it changed in the current branch. '
+      'Expected revision ${expectedRevision ?? 'for a new file'}, '
+      'found ${currentRevision ?? 'no file at HEAD'}.',
+    );
   }
 
   Future<GitCommandResult> _runGit(
