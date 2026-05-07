@@ -55,6 +55,9 @@
   "repositoryAccessLocalGit": "Local Git",
   "repositoryAccessConnected": "Connected",
   "repositoryAccessConnectGitHub": "Connect GitHub",
+  "repositoryAccessSettings": "Repository access",
+  "repositoryPath": "Repository Path",
+  "writeBranch": "Write Branch",
   "trackerDataNotFound": "TrackState data was not found.",
   "trackerDataLoadFailed": "TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. {error}",
   "@trackerDataLoadFailed": {

@@ -388,42 +388,80 @@ abstract class AppLocalizations {
   /// **'project = TRACK AND status != Done ORDER BY priority DESC'**
   String get jqlPlaceholder;
 
+  /// No description provided for @repositoryAccessLocalGit.
+  ///
   /// In en, this message translates to:
   /// **'Local Git'**
   String get repositoryAccessLocalGit;
 
+  /// No description provided for @repositoryAccessConnected.
+  ///
   /// In en, this message translates to:
   /// **'Connected'**
   String get repositoryAccessConnected;
 
+  /// No description provided for @repositoryAccessConnectGitHub.
+  ///
   /// In en, this message translates to:
   /// **'Connect GitHub'**
   String get repositoryAccessConnectGitHub;
 
+  /// No description provided for @repositoryAccessSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Repository access'**
+  String get repositoryAccessSettings;
+
+  /// No description provided for @repositoryPath.
+  ///
+  /// In en, this message translates to:
+  /// **'Repository Path'**
+  String get repositoryPath;
+
+  /// No description provided for @writeBranch.
+  ///
+  /// In en, this message translates to:
+  /// **'Write Branch'**
+  String get writeBranch;
+
+  /// No description provided for @trackerDataNotFound.
+  ///
   /// In en, this message translates to:
   /// **'TrackState data was not found.'**
   String get trackerDataNotFound;
 
+  /// No description provided for @trackerDataLoadFailed.
+  ///
   /// In en, this message translates to:
   /// **'TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. {error}'**
   String trackerDataLoadFailed(String error);
 
+  /// No description provided for @localGitTokensNotNeeded.
+  ///
   /// In en, this message translates to:
   /// **'This runtime uses local Git commits. GitHub tokens are not needed.'**
   String get localGitTokensNotNeeded;
 
+  /// No description provided for @tokenEmpty.
+  ///
   /// In en, this message translates to:
   /// **'Token is empty.'**
   String get tokenEmpty;
 
+  /// No description provided for @githubConnectedDragCards.
+  ///
   /// In en, this message translates to:
   /// **'Connected as {login} to {repository}. Drag cards to commit status changes.'**
   String githubConnectedDragCards(String login, String repository);
 
+  /// No description provided for @githubConnectionFailed.
+  ///
   /// In en, this message translates to:
   /// **'GitHub connection failed: {error}'**
   String githubConnectionFailed(String error);
 
+  /// No description provided for @localGitMoveCommitted.
+  ///
   /// In en, this message translates to:
   /// **'{issueKey} moved to {statusLabel} and committed to local Git branch {branch}.'**
   String localGitMoveCommitted(
@@ -432,86 +470,128 @@ abstract class AppLocalizations {
     String branch,
   );
 
+  /// No description provided for @githubMoveCommitted.
+  ///
   /// In en, this message translates to:
   /// **'{issueKey} moved to {statusLabel} and committed to GitHub.'**
   String githubMoveCommitted(String issueKey, String statusLabel);
 
+  /// No description provided for @movePendingGitHubPersistence.
+  ///
   /// In en, this message translates to:
   /// **'{issueKey} moved locally. Connect GitHub in Settings to persist.'**
   String movePendingGitHubPersistence(String issueKey);
 
+  /// No description provided for @moveFailed.
+  ///
   /// In en, this message translates to:
   /// **'Move failed: {error}'**
   String moveFailed(String error);
 
+  /// No description provided for @localGitHubAppUnavailable.
+  ///
   /// In en, this message translates to:
   /// **'This runtime uses local Git commits. GitHub App login is unavailable.'**
   String get localGitHubAppUnavailable;
 
+  /// No description provided for @githubAppLoginNotConfigured.
+  ///
   /// In en, this message translates to:
   /// **'GitHub App login is not configured. Set TRACKSTATE_GITHUB_APP_CLIENT_ID and TRACKSTATE_GITHUB_AUTH_PROXY_URL in the setup repository variables.'**
   String get githubAppLoginNotConfigured;
 
+  /// No description provided for @githubAuthorizationCodeReturned.
+  ///
   /// In en, this message translates to:
   /// **'GitHub returned an authorization code. Configure TRACKSTATE_GITHUB_AUTH_PROXY_URL so a backend can exchange it for a token safely.'**
   String get githubAuthorizationCodeReturned;
 
+  /// No description provided for @githubConnected.
+  ///
   /// In en, this message translates to:
   /// **'Connected as {login} to {repository}.'**
   String githubConnected(String login, String repository);
 
+  /// No description provided for @storedGitHubTokenInvalid.
+  ///
   /// In en, this message translates to:
   /// **'Stored GitHub token is no longer valid: {error}'**
   String storedGitHubTokenInvalid(String error);
 
+  /// No description provided for @localGitRuntimeTitle.
+  ///
   /// In en, this message translates to:
   /// **'Local Git runtime'**
   String get localGitRuntimeTitle;
 
+  /// No description provided for @configuredRepositoryFallback.
+  ///
   /// In en, this message translates to:
   /// **'configured repository'**
   String get configuredRepositoryFallback;
 
+  /// No description provided for @currentBranchFallback.
+  ///
   /// In en, this message translates to:
   /// **'current branch'**
   String get currentBranchFallback;
 
+  /// No description provided for @localGitRuntimeDescription.
+  ///
   /// In en, this message translates to:
   /// **'Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.'**
   String get localGitRuntimeDescription;
 
+  /// No description provided for @close.
+  ///
   /// In en, this message translates to:
   /// **'Close'**
   String get close;
 
+  /// No description provided for @connectGitHub.
+  ///
   /// In en, this message translates to:
   /// **'Connect GitHub'**
   String get connectGitHub;
 
+  /// No description provided for @fineGrainedToken.
+  ///
   /// In en, this message translates to:
   /// **'Fine-grained token'**
   String get fineGrainedToken;
 
+  /// No description provided for @fineGrainedTokenHelper.
+  ///
   /// In en, this message translates to:
   /// **'Needs Contents: read/write. Stored only on this device if remembered.'**
   String get fineGrainedTokenHelper;
 
+  /// No description provided for @rememberOnThisBrowser.
+  ///
   /// In en, this message translates to:
   /// **'Remember on this browser'**
   String get rememberOnThisBrowser;
 
+  /// No description provided for @rememberOnThisBrowserHelp.
+  ///
   /// In en, this message translates to:
   /// **'Uses client storage. Do not enable on shared devices.'**
   String get rememberOnThisBrowserHelp;
 
+  /// No description provided for @continueWithGitHubApp.
+  ///
   /// In en, this message translates to:
   /// **'Continue with GitHub App'**
   String get continueWithGitHubApp;
 
+  /// No description provided for @cancel.
+  ///
   /// In en, this message translates to:
   /// **'Cancel'**
   String get cancel;
 
+  /// No description provided for @connectToken.
+  ///
   /// In en, this message translates to:
   /// **'Connect token'**
   String get connectToken;
