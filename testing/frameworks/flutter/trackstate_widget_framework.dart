@@ -38,6 +38,16 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
   }
 
   @override
+  Future<void> enterTextIntoField(String label, String text) async {
+    final finder = _textFieldFinder(label);
+    await tester.ensureVisible(finder);
+    await tester.tap(finder, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(finder, text);
+    await tester.pumpAndSettle();
+  }
+
+  @override
   Future<void> scrollBodyBy(double dy) async {
     final scrollableFinder = find.byType(SingleChildScrollView).first;
     await tester.drag(scrollableFinder, Offset(0, dy));
@@ -79,6 +89,26 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
     return tester.getRect(finder.first);
   }
 
+  @override
+  String? textFieldValue(String label) {
+    final editableTextFinder = _editableTextFinder(label);
+    if (editableTextFinder.evaluate().isEmpty) {
+      return null;
+    }
+    final editableText = tester.widget<EditableText>(editableTextFinder.first);
+    return editableText.controller.text;
+  }
+
+  @override
+  bool isTextFieldReadOnly(String label) {
+    final editableTextFinder = _editableTextFinder(label);
+    if (editableTextFinder.evaluate().isEmpty) {
+      return false;
+    }
+    final editableText = tester.widget<EditableText>(editableTextFinder.first);
+    return editableText.readOnly;
+  }
+
   Finder _bestTapTarget(String label) {
     final buttonFinder = find.ancestor(
       of: _textFinder(label),
@@ -111,4 +141,12 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
       find.bySemanticsLabel(RegExp(RegExp.escape(label)));
 
   Finder _textFinder(String text) => find.text(text);
+
+  Finder _textFieldFinder(String label) =>
+      find.widgetWithText(TextFormField, label);
+
+  Finder _editableTextFinder(String label) => find.descendant(
+    of: _textFieldFinder(label),
+    matching: find.byType(EditableText),
+  );
 }
