@@ -18,9 +18,5 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> expectIssueDetailText(String key, String text);
 
-  Future<void> expectIssueDetailDescriptionEditorAbsent(String key);
-
-  Future<void> expectIssueDetailActionAbsent(String key, String label);
-
   Future<void> expectTextVisible(String text);
 }

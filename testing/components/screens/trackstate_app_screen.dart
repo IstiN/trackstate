@@ -72,6 +72,42 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     );
   }
 
+  Future<void> expectIssueDetailDescriptionEditorVisible(
+    String key, {
+    Duration timeout = const Duration(seconds: 1),
+  }) async {
+    await expectIssueDetailVisible(key);
+    await _waitForAny(
+      _issueDetailEditor(key),
+      timeout: timeout,
+      failureMessage:
+          'TS-41 requires the live $key issue detail to expose an editable '
+          'description field before the save attempt, but no editor was '
+          'rendered.',
+    );
+  }
+
+  Future<void> replaceIssueDetailDescription(
+    String key,
+    String description,
+  ) async {
+    await expectIssueDetailDescriptionEditorVisible(key);
+    await tester.enterText(_issueDetailEditor(key).first, description);
+    await _pumpFrames();
+  }
+
+  Future<void> tapIssueDetailAction(
+    String key,
+    String label, {
+    Duration timeout = const Duration(seconds: 1),
+  }) async {
+    await expectIssueDetailVisible(key);
+    final action = _issueDetailAction(key, label);
+    await _waitForVisible(action, timeout: timeout);
+    await tester.tap(action.first);
+    await _pumpFrames();
+  }
+
   @override
   Future<void> pump(TrackStateRepository repository) async {
     SharedPreferences.setMockInitialValues({});
@@ -171,18 +207,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
-  Future<void> expectIssueDetailDescriptionEditorAbsent(String key) async {
-    await expectIssueDetailVisible(key);
-    expect(_issueDetailEditor(key), findsNothing);
-  }
-
-  @override
-  Future<void> expectIssueDetailActionAbsent(String key, String label) async {
-    await expectIssueDetailVisible(key);
-    expect(_issueDetailAction(key, label), findsNothing);
-  }
-
-  @override
   Future<void> expectTextVisible(String text) async {
     final finder = _text(text);
     await _waitForVisible(finder);
@@ -238,6 +262,23 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       }
     }
     expect(finder, findsOneWidget);
+  }
+
+  Future<void> _waitForAny(
+    Finder finder, {
+    required String failureMessage,
+    Duration timeout = const Duration(seconds: 5),
+    Duration step = const Duration(milliseconds: 50),
+  }) async {
+    final end = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(end)) {
+      await tester.pump(step);
+      if (finder.evaluate().isNotEmpty) {
+        await _pumpFrames();
+        return;
+      }
+    }
+    fail(failureMessage);
   }
 
   Future<void> _pumpFrames([int count = 12]) async {

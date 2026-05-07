@@ -6,4 +6,4 @@ dependencies: []
 notes:
   - Verifies the local Git adapter blocks a save when issue main.md has dirty local edits.
   - Keeps the provider-backed description save assertion as a direct AC3 check.
-  - Uses the real TrackStateApp UI to verify the current DEMO-1 issue detail is still read-only and exposes no Save action in local Git mode.
+  - Uses the real TrackStateApp UI to attempt the ticketed DEMO-1 description edit-and-save flow and fails fast if the live editor or Save control is missing.
