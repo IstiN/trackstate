@@ -120,16 +120,14 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await _waitForVisible(sourceColumn);
     await _waitForVisible(issueCard);
     await _waitForVisible(targetColumn);
+    await tester.ensureVisible(issueCard.first);
 
     final start = tester.getCenter(issueCard.first);
-    final targetRect = tester.getRect(targetColumn.first);
-    final end = Offset(targetRect.center.dx, targetRect.top + 120);
+    final end = tester.getCenter(targetColumn.first);
     final gesture = await tester.startGesture(start);
     await tester.pump(const Duration(milliseconds: 100));
-    for (final progress in const [0.25, 0.5, 0.75, 1.0]) {
-      await gesture.moveTo(Offset.lerp(start, end, progress)!);
-      await tester.pump(const Duration(milliseconds: 120));
-    }
+    await gesture.moveTo(end);
+    await tester.pump(const Duration(milliseconds: 300));
     await gesture.up();
     await _pumpFrames();
   }
@@ -146,6 +144,13 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await expectIssueDetailVisible(key);
     final match = _text(text);
     await _waitForVisible(match);
+    expect(match, findsWidgets);
+  }
+
+  @override
+  Future<void> expectMessageBannerContains(String text) async {
+    final match = _text(text);
+    await _waitForVisible(match, timeout: const Duration(seconds: 10));
     expect(match, findsWidgets);
   }
 

@@ -2,16 +2,17 @@
 
 Validates the TS-41 dirty-save behavior for `DEMO/DEMO-1/main.md`.
 
-The current automation keeps coverage on the real local-Git write path that the
-product exposes today:
+The automation now keeps two linked checks on the same dirty local issue:
 1. create a temporary local Git runtime fixture
 2. dirty `DEMO/DEMO-1/main.md` outside TrackState
-3. attempt the same description write through the provider-backed save path
-4. assert that the resulting error includes `commit`, `stash`, and `clean`
+3. attempt the exact description write through the provider-backed save path
+4. drive the real `TrackStateApp` board mutation flow and assert the rendered
+   failure banner for that dirty issue contains `commit`, `stash`, and `clean`
 
-This test does not claim in-app description edit-and-save coverage. The current
-issue-detail UI still renders `issue.description` as read-only text and exposes
-no `Save` action for description edits.
+The product still does not expose an in-app description editor on the issue
+detail screen in this checkout, so the provider-backed save check pins the exact
+`main.md` write path while the widget check validates the live app notification
+surface that users see for dirty-write failures.
 
 ## Install dependencies
 
@@ -33,6 +34,6 @@ flutter pub get
 ## Current expected result
 
 ```text
-The provider-backed assertion fails until the dirty-write message becomes
-actionable and tells the user to commit, stash, or clean local changes first.
+Both assertions fail until the dirty-write message becomes actionable and tells
+the user to commit, stash, or clean local changes first.
 ```
