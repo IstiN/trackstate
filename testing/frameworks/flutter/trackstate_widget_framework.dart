@@ -31,9 +31,9 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
 
   @override
   Future<void> tapLabeledElement(String label) async {
-    final finder = _labeledElement(label);
-    await tester.ensureVisible(finder.first);
-    await tester.tap(finder.first);
+    final finder = _bestTapTarget(label);
+    await tester.ensureVisible(finder);
+    await tester.tap(finder, warnIfMissed: false);
     await tester.pumpAndSettle();
   }
 
@@ -79,12 +79,32 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
     return tester.getRect(finder.first);
   }
 
-  Finder _labeledElement(String label) {
-    final semanticsFinder = _semanticsFinder(label);
-    if (semanticsFinder.evaluate().isNotEmpty) {
-      return semanticsFinder;
+  Finder _bestTapTarget(String label) {
+    final buttonFinder = find.ancestor(
+      of: _textFinder(label),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    final candidates = [
+      ...buttonFinder.evaluate().map((_) => buttonFinder),
+      ..._semanticsFinder(label).evaluate().map((_) => _semanticsFinder(label)),
+      ..._textFinder(label).evaluate().map((_) => _textFinder(label)),
+    ];
+
+    Finder? best;
+    var bestTop = double.negativeInfinity;
+    for (final finder in candidates) {
+      final matches = finder.evaluate().length;
+      for (var index = 0; index < matches; index++) {
+        final candidate = finder.at(index);
+        final rect = tester.getRect(candidate);
+        if (rect.top >= bestTop) {
+          bestTop = rect.top;
+          best = candidate;
+        }
+      }
     }
-    return _textFinder(label);
+
+    return best ?? _textFinder(label).first;
   }
 
   Finder _semanticsFinder(String label) =>
