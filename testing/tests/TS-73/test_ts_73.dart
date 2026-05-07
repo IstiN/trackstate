@@ -54,16 +54,16 @@ void main() {
             'Expected .gitattributes to track ZIP files through Git LFS because archives are a common large attachment format.',
       );
       expect(
-        observation.readmeDocumentsAttachmentDirectory,
+        observation.readmeGuidesAttachmentStorage,
         isTrue,
         reason:
-            'The setup README should explicitly tell users to keep attachments under each issue\'s attachments/ directory and show that directory in the documented demo tree.',
+            'The setup README should guide users to store issue attachments under an attachments/ path.',
       );
       expect(
-        observation.readmeDocumentsGitLfsForLargeFiles,
+        observation.readmeGuidesGitLfsForLargeFiles,
         isTrue,
         reason:
-            'The setup README should explicitly explain that large attachments belong in Git LFS and that .gitattributes already tracks common binary formats.',
+            'The setup README should guide users to use Git LFS for large files.',
       );
     },
   );

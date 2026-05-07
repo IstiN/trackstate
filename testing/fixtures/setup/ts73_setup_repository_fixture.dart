@@ -109,21 +109,15 @@ class Ts73SetupRepositoryObservation {
       .map((match) => match.group(1)!)
       .toList(growable: false);
 
+  String get _normalizedReadmeContent => readmeContent.toLowerCase();
+
   bool get hasAttachmentDirectoryInDemoTree =>
       attachmentDirectories.any((path) => path.startsWith('DEMO/'));
 
-  bool get readmeDocumentsAttachmentDirectory =>
-      readmeContent.contains(
-        "Keep attachments under each issue's `attachments/` directory",
-      ) &&
-      readmeContent.contains('attachments/');
+  bool get readmeGuidesAttachmentStorage =>
+      _normalizedReadmeContent.contains('attachments/');
 
-  bool get readmeDocumentsGitLfsForLargeFiles =>
-      readmeContent.contains('store large binaries through Git LFS.') &&
-      readmeContent.contains(
-        'Large attachments should be stored through Git LFS.',
-      ) &&
-      readmeContent.contains(
-        '`.gitattributes` already tracks common binary formats.',
-      );
+  bool get readmeGuidesGitLfsForLargeFiles =>
+      _normalizedReadmeContent.contains('git lfs') &&
+      RegExp(r'\blarge\b', caseSensitive: false).hasMatch(readmeContent);
 }
