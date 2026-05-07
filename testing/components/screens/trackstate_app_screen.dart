@@ -16,11 +16,11 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   final WidgetTester tester;
   final LocalGitRepositoryPort _repositoryService;
 
-  Finder get localGitAccessButton =>
-      find.bySemanticsLabel(RegExp('Local Git')).first;
+  Finder get localGitAccessButton => find.bySemanticsLabel(RegExp('Local Git'));
 
-  Finder get topBar =>
-      find.ancestor(of: localGitAccessButton, matching: find.byType(Row)).first;
+  Finder get topBar => find
+      .ancestor(of: localGitAccessButton.first, matching: find.byType(Row))
+      .first;
 
   Finder get profileAvatar =>
       find.descendant(of: topBar, matching: find.byType(CircleAvatar));
@@ -91,7 +91,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   Future<void> openRepositoryAccess() async {
-    await tester.tap(localGitAccessButton);
+    await tester.tap(localGitAccessButton.first);
     await tester.pumpAndSettle();
   }
 
@@ -128,16 +128,21 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await _waitForVisible(sourceColumn);
     await _waitForVisible(issueCard);
     await _waitForVisible(targetColumn);
-    await tester.ensureVisible(issueCard.first);
 
     final start = tester.getCenter(issueCard.first);
-    final end = tester.getCenter(targetColumn.first);
+    final targetRect = tester.getRect(targetColumn.first);
+    final end = Offset(targetRect.center.dx, targetRect.top + 120);
     final gesture = await tester.startGesture(start);
     await tester.pump(const Duration(milliseconds: 100));
-    await gesture.moveTo(end);
-    await tester.pump(const Duration(milliseconds: 300));
+    for (final progress in const [0.25, 0.5, 0.75, 1.0]) {
+      await gesture.moveTo(Offset.lerp(start, end, progress)!);
+      await tester.pump(const Duration(milliseconds: 120));
+    }
     await gesture.up();
-    await _pumpFrames();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 500)),
+    );
+    await tester.pumpAndSettle();
   }
 
   Future<void> searchIssues(String query) async {
