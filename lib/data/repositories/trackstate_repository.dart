@@ -18,28 +18,6 @@ abstract interface class TrackStateRepository {
   );
 }
 
-class ProviderSession {
-  const ProviderSession({
-    required this.providerType,
-    required this.connectionState,
-    required this.resolvedUserIdentity,
-    required this.canRead,
-    required this.canWrite,
-    required this.canCreateBranch,
-    required this.canManageAttachments,
-    required this.canCheckCollaborators,
-  });
-
-  final String providerType;
-  final String connectionState;
-  final String resolvedUserIdentity;
-  final bool canRead;
-  final bool canWrite;
-  final bool canCreateBranch;
-  final bool canManageAttachments;
-  final bool canCheckCollaborators;
-}
-
 class ProviderBackedTrackStateRepository implements TrackStateRepository {
   ProviderBackedTrackStateRepository({
     required TrackStateProviderAdapter provider,
@@ -53,26 +31,10 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   @override
   final bool supportsGitHubAuth;
   TrackerSnapshot? _snapshot;
-  ProviderSession? _session;
-
-  ProviderSession? get session => _session;
 
   @override
-  Future<RepositoryUser> connect(RepositoryConnection connection) async {
-    final user = await _provider.authenticate(connection);
-    final permission = await _provider.getPermission();
-    _session = ProviderSession(
-      providerType: usesLocalPersistence ? 'local-git' : 'github',
-      connectionState: 'connected',
-      resolvedUserIdentity: user.login,
-      canRead: permission.canRead,
-      canWrite: permission.canWrite,
-      canCreateBranch: permission.canWrite,
-      canManageAttachments: permission.canWrite,
-      canCheckCollaborators: supportsGitHubAuth && permission.canRead,
-    );
-    return user;
-  }
+  Future<RepositoryUser> connect(RepositoryConnection connection) =>
+      _provider.authenticate(connection);
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async {

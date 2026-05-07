@@ -374,46 +374,6 @@ README.md -filter
     },
   );
 
-  test(
-    'provider-backed repository exposes a neutral provider session',
-    () async {
-      final repository = SetupTrackStateRepository(
-        client: MockClient((request) async {
-          final path = request.url.path;
-          if (path.endsWith(
-            '/repos/${SetupTrackStateRepository.repositoryName}',
-          )) {
-            return http.Response(
-              '{"permissions":{"pull":true,"push":true,"admin":false}}',
-              200,
-            );
-          }
-          if (path.endsWith('/user')) {
-            return http.Response('{"login":"octocat","name":"Mona"}', 200);
-          }
-          return http.Response('', 404);
-        }),
-      );
-
-      await repository.connect(
-        const RepositoryConnection(
-          repository: SetupTrackStateRepository.repositoryName,
-          branch: 'main',
-          token: 'token',
-        ),
-      );
-
-      expect(repository.session, isNotNull);
-      expect(repository.session!.providerType, 'github');
-      expect(repository.session!.connectionState, 'connected');
-      expect(repository.session!.resolvedUserIdentity, 'octocat');
-      expect(repository.session!.canRead, isTrue);
-      expect(repository.session!.canWrite, isTrue);
-      expect(repository.session!.canCreateBranch, isTrue);
-      expect(repository.session!.canManageAttachments, isTrue);
-      expect(repository.session!.canCheckCollaborators, isTrue);
-    },
-  );
 }
 
 http.Response _contentResponse(String content) {
