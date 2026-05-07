@@ -20,6 +20,14 @@ class AttachmentUploadTestConfig {
     message: 'Upload screenshot attachment',
   );
 
+  static const ts61 = AttachmentUploadTestConfig(
+    repository: 'IstiN/trackstate',
+    branch: 'main',
+    token: 'test-token',
+    path: 'attachments/notes.txt',
+    message: 'Upload text attachment when gitattributes is missing',
+  );
+
   static const ts60 = AttachmentUploadTestConfig(
     repository: 'IstiN/trackstate',
     branch: 'main',
