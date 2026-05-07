@@ -1,51 +1,64 @@
 import 'dart:convert';
-import 'dart:io';
-
 import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
+import 'package:trackstate/domain/models/trackstate_models.dart';
 
 import '../../components/services/issue_resolution_service.dart';
+import '../../core/interfaces/issue_resolution_repository.dart';
+import '../../core/utils/local_git_repository_fixture.dart';
 
 class Ts63CustomFieldsRepositoryFixture {
   Ts63CustomFieldsRepositoryFixture._({
-    required Directory repositoryDirectory,
+    required LocalGitRepositoryFixture repositoryFixture,
     required this.issueService,
-  }) : _repositoryDirectory = repositoryDirectory;
+  }) : _repositoryFixture = repositoryFixture;
 
-  final Directory _repositoryDirectory;
+  final LocalGitRepositoryFixture _repositoryFixture;
   final IssueResolutionService issueService;
 
   static const issueKey = 'DEMO-63';
   static const issuePath = 'DEMO/DEMO-63/main.md';
 
   static Future<Ts63CustomFieldsRepositoryFixture> create() async {
-    final repositoryDirectory = await Directory.systemTemp.createTemp(
-      'trackstate-ts-63-',
+    final repositoryFixture = await LocalGitRepositoryFixture.create(
+      userName: 'TS-63 Tester',
+      userEmail: 'ts63@example.com',
+    );
+    await _seedRepository(repositoryFixture);
+    final repository = LocalTrackStateRepository(
+      repositoryPath: repositoryFixture.directory.path,
     );
 
-    _writeFile(
-      repositoryDirectory,
-      'DEMO/project.json',
-      jsonEncode({'key': 'DEMO', 'name': 'Demo Project'}),
+    return Ts63CustomFieldsRepositoryFixture._(
+      repositoryFixture: repositoryFixture,
+      issueService: IssueResolutionService(
+        _TrackStateIssueResolutionRepository(repository),
+      ),
     );
-    _writeFile(
-      repositoryDirectory,
+  }
+
+  static Future<void> _seedRepository(
+    LocalGitRepositoryFixture repositoryFixture,
+  ) async {
+    await repositoryFixture.writeFile(
+      'DEMO/project.json',
+      '${jsonEncode({'key': 'DEMO', 'name': 'Demo Project'})}\n',
+    );
+    await repositoryFixture.writeFile(
       'DEMO/config/statuses.json',
-      jsonEncode([
+      '${jsonEncode([
         {'id': 'todo', 'name': 'To Do'},
         {'id': 'done', 'name': 'Done'},
-      ]),
+      ])}\n',
     );
-    _writeFile(
-      repositoryDirectory,
+    await repositoryFixture.writeFile(
       'DEMO/config/issue-types.json',
-      jsonEncode([
+      '${jsonEncode([
         {'id': 'story', 'name': 'Story'},
-      ]),
+      ])}\n',
     );
-    _writeFile(
-      repositoryDirectory,
+    await repositoryFixture.writeFile(
       'DEMO/config/fields.json',
-      jsonEncode([
+      '${jsonEncode([
         {
           'id': 'summary',
           'name': 'Summary',
@@ -64,17 +77,15 @@ class Ts63CustomFieldsRepositoryFixture {
           'type': 'option',
           'required': false,
         },
-      ]),
+      ])}\n',
     );
-    _writeFile(
-      repositoryDirectory,
+    await repositoryFixture.writeFile(
       'DEMO/config/priorities.json',
-      jsonEncode([
+      '${jsonEncode([
         {'id': 'high', 'name': 'High'},
-      ]),
+      ])}\n',
     );
-    _writeFile(
-      repositoryDirectory,
+    await repositoryFixture.writeFile(
       issuePath,
       '''
 ---
@@ -95,24 +106,8 @@ updated: 2026-05-07T00:00:00Z
 Created from inline frontmatter custom fields.
 ''',
     );
-
-    _git(repositoryDirectory.path, ['init', '-b', 'main']);
-    _git(repositoryDirectory.path, ['config', 'user.name', 'TS-63 Tester']);
-    _git(
-      repositoryDirectory.path,
-      ['config', 'user.email', 'ts63@example.com'],
-    );
-    _git(repositoryDirectory.path, ['add', '.']);
-    _git(repositoryDirectory.path, ['commit', '-m', 'Seed TS-63 fixture']);
-
-    final repository = LocalTrackStateRepository(
-      repositoryPath: repositoryDirectory.path,
-    );
-
-    return Ts63CustomFieldsRepositoryFixture._(
-      repositoryDirectory: repositoryDirectory,
-      issueService: IssueResolutionService(repository),
-    );
+    await repositoryFixture.stageAll();
+    await repositoryFixture.commit('Seed TS-63 fixture');
   }
 
   Future<IssueResolutionResult> resolveIssueByKey() {
@@ -120,30 +115,18 @@ Created from inline frontmatter custom fields.
   }
 
   Future<void> dispose() async {
-    if (await _repositoryDirectory.exists()) {
-      await _repositoryDirectory.delete(recursive: true);
-    }
+    await _repositoryFixture.dispose();
   }
+}
 
-  static void _writeFile(
-    Directory root,
-    String relativePath,
-    String content,
-  ) {
-    final file = File('${root.path}/$relativePath');
-    file.parent.createSync(recursive: true);
-    file.writeAsStringSync(content);
-  }
+class _TrackStateIssueResolutionRepository
+    implements IssueResolutionRepository {
+  const _TrackStateIssueResolutionRepository(this._repository);
 
-  static void _git(String repositoryPath, List<String> args) {
-    final result = Process.runSync(
-      'git',
-      ['-C', repositoryPath, ...args],
-      stdoutEncoding: utf8,
-      stderrEncoding: utf8,
-    );
-    if (result.exitCode != 0) {
-      throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
-    }
+  final LocalTrackStateRepository _repository;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() {
+    return _repository.loadSnapshot();
   }
 }

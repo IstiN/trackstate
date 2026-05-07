@@ -1,10 +1,11 @@
-import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
+
+import '../../core/interfaces/issue_resolution_repository.dart';
 
 class IssueResolutionService {
   const IssueResolutionService(this._repository);
 
-  final TrackStateRepository _repository;
+  final IssueResolutionRepository _repository;
 
   Future<IssueResolutionResult> resolveIssueByKey(String key) async {
     final snapshot = await _repository.loadSnapshot();
