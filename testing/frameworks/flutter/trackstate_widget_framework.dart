@@ -69,8 +69,7 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
     for (final finder in [_semanticsFinder(label), _textFinder(label)]) {
       final matches = finder.evaluate().toList();
       for (var index = 0; index < matches.length; index++) {
-        final semantics = tester.getSemantics(finder.at(index));
-        final flags = semantics.flagsCollection;
+        final flags = tester.getSemantics(finder.at(index)).flagsCollection;
         final hasSelectionState =
             flags.hasCheckedState || flags.hasSelectedState;
         if (!hasSelectionState) {
@@ -91,6 +90,16 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
       return null;
     }
     return tester.getRect(finder.first);
+  }
+
+  @override
+  List<String> visibleTexts() {
+    return tester
+        .widgetList<Text>(find.byType(Text))
+        .map((widget) => widget.data?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .toList();
   }
 
   @override

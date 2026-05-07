@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'settings_provider_test_context.dart';
@@ -12,6 +13,14 @@ void main() {
       await settingsPage.open();
       final initialState = settingsPage.captureState();
 
+      debugPrint('VISIBLE|${initialState.visibleTextSummary}');
+      debugPrint(
+        'OBSERVE|Local Git|${initialState.localGitOption.visibleCount}|'
+        'Connect GitHub|${initialState.connectGitHubOption.visibleCount}|'
+        'Repository Path|${initialState.isRepositoryPathVisible}|'
+        'Write Branch|${initialState.isWriteBranchVisible}|'
+        'Fine-grained token|${initialState.isFineGrainedTokenVisible}',
+      );
       expect(
         initialState.isProjectSettingsVisible,
         isTrue,
@@ -28,7 +37,8 @@ void main() {
         initialState.localGitOption.isVisible,
         isTrue,
         reason:
-            'The Settings screen should show a Local Git provider row inside the provider selector.',
+            'The Settings screen should show a Local Git provider row inside the provider selector. '
+            'Visible text on screen: ${initialState.visibleTextSummary}',
       );
 
       await settingsPage.showHostedProviderConfiguration();

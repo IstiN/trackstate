@@ -13,7 +13,6 @@ abstract class SettingsProviderDriver {
   Future<void> tapLabeledElement(String label);
 
   Future<void> enterTextIntoField(String label, String text);
-
   Future<void> scrollBodyBy(double dy);
 
   bool isTextVisible(String text);
@@ -24,6 +23,7 @@ abstract class SettingsProviderDriver {
 
   Rect? rectForText(String text);
 
+  List<String> visibleTexts();
   String? textFieldValue(String label);
 
   bool isTextFieldReadOnly(String label);

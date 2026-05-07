@@ -31,6 +31,7 @@ class SettingsProviderState {
     required this.isFineGrainedTokenVisible,
     required this.isRepositoryPathVisible,
     required this.isWriteBranchVisible,
+    required this.visibleTexts,
     required this.repositoryPathValue,
     required this.writeBranchValue,
     required this.isRepositoryPathReadOnly,
@@ -50,6 +51,7 @@ class SettingsProviderState {
   final bool isFineGrainedTokenVisible;
   final bool isRepositoryPathVisible;
   final bool isWriteBranchVisible;
+  final List<String> visibleTexts;
   final String? repositoryPathValue;
   final String? writeBranchValue;
   final bool isRepositoryPathReadOnly;
@@ -71,4 +73,6 @@ class SettingsProviderState {
 
   ProviderOptionState optionState(SettingsProviderOption option) =>
       providerOptions[option]!;
+
+  String get visibleTextSummary => visibleTexts.join(' | ');
 }
