@@ -7,6 +7,7 @@
 const GOAL_INSTRUCTIONS = './.dmtools/instructions/goal/goal.md';
 const DESIGN_REFERENCE = './.dmtools/instructions/goal/DESIGN.md';
 const SETUP_REPO_INSTRUCTIONS = './.dmtools/instructions/product/trackstate_setup_repo.md';
+const TRACKSTATE_SETUP_SUBMODULES = [{ path: 'trackstate-setup', branch: 'main' }];
 
 module.exports = {
     repository: {
@@ -150,7 +151,13 @@ module.exports = {
         story_development: {
             customParams: {
                 autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_review.json'
+                autoStartReviewConfigFile: 'agents/pr_review.json',
+                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
+            }
+        },
+        bug_development: {
+            customParams: {
+                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
             }
         },
         pr_review: {
@@ -162,7 +169,8 @@ module.exports = {
         pr_rework: {
             customParams: {
                 autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_review.json'
+                autoStartReviewConfigFile: 'agents/pr_review.json',
+                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
             }
         }
     },
