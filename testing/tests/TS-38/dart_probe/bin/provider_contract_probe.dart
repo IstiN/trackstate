@@ -1,4 +1,7 @@
+// ignore_for_file: avoid_relative_lib_imports
+
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import '../../../../../lib/data/providers/trackstate_provider.dart';
@@ -92,13 +95,14 @@ Future<void> main() async {
 
   final ProviderSession? session = repository.session;
   final activeSession =
-      session ?? (throw StateError('Repository session was null after connect.'));
+      session ??
+      (throw StateError('Repository session was null after connect.'));
 
-  print(
+  stdout.write(
     jsonEncode({
-      'providerType': activeSession.providerType.toString(),
-      'connectionState': activeSession.connectionState.toString(),
-      'resolvedUserIdentity': activeSession.resolvedUserIdentity.toString(),
+      'providerType': activeSession.providerType,
+      'connectionState': activeSession.connectionState,
+      'resolvedUserIdentity': activeSession.resolvedUserIdentity,
       'canRead': activeSession.canRead,
       'canWrite': activeSession.canWrite,
       'canCreateBranch': activeSession.canCreateBranch,

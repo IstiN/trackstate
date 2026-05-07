@@ -302,6 +302,118 @@ README.md -filter
       expect(putAttempted, isFalse);
     },
   );
+
+  test(
+    'github provider evaluates LFS upload rules against the target branch',
+    () async {
+      var putAttempted = false;
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path.endsWith('/repos/IstiN/trackstate') &&
+              request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path.endsWith('/user') && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path.endsWith('/contents/.gitattributes') &&
+              request.method == 'GET') {
+            final ref = request.url.queryParameters['ref'];
+            if (ref == 'feature/lfs') {
+              return _contentResponse(
+                '*.png filter=lfs diff=lfs merge=lfs -text\n',
+              );
+            }
+            return _contentResponse('README.md -filter\n');
+          }
+          if (path.endsWith('/contents/attachments/screenshot.png') &&
+              request.method == 'PUT') {
+            putAttempted = true;
+            return http.Response('{"content":{"sha":"uploaded-sha"}}', 201);
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'feature/lfs',
+          token: 'token',
+        ),
+      );
+
+      expect(
+        await provider.isLfsTracked('attachments/screenshot.png'),
+        isFalse,
+      );
+      await expectLater(
+        () => provider.writeAttachment(
+          RepositoryAttachmentWriteRequest(
+            path: 'attachments/screenshot.png',
+            bytes: Uint8List.fromList(const [1, 2, 3]),
+            message: 'Upload screenshot',
+            branch: 'feature/lfs',
+          ),
+        ),
+        throwsA(
+          isA<TrackStateProviderException>().having(
+            (error) => error.message,
+            'message',
+            contains('not yet implemented'),
+          ),
+        ),
+      );
+      expect(putAttempted, isFalse);
+    },
+  );
+
+  test(
+    'provider-backed repository exposes a neutral provider session',
+    () async {
+      final repository = SetupTrackStateRepository(
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path.endsWith(
+            '/repos/${SetupTrackStateRepository.repositoryName}',
+          )) {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path.endsWith('/user')) {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await repository.connect(
+        const RepositoryConnection(
+          repository: SetupTrackStateRepository.repositoryName,
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      expect(repository.session, isNotNull);
+      expect(repository.session!.providerType, 'github');
+      expect(repository.session!.connectionState, 'connected');
+      expect(repository.session!.resolvedUserIdentity, 'octocat');
+      expect(repository.session!.canRead, isTrue);
+      expect(repository.session!.canWrite, isTrue);
+      expect(repository.session!.canCreateBranch, isTrue);
+      expect(repository.session!.canManageAttachments, isTrue);
+      expect(repository.session!.canCheckCollaborators, isTrue);
+    },
+  );
 }
 
 http.Response _contentResponse(String content) {
