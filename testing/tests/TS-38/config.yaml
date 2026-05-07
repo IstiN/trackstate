@@ -3,8 +3,8 @@ type: api
 framework: unittest
 platform: python
 dependencies:
-  - TS-38 auto-provisions a cached Dart SDK when dart is not already available on PATH or via TS38_DART_BIN
+  - shared Python Dart runtime bootstrap in testing/frameworks/python/dart_probe_runtime.py
   - offline dart pub get in testing/tests/TS-38/dart_probe
 runtime_bootstrap:
-  - cached Dart SDK root defaults to ~/.cache/trackstate-test-tools and can be overridden with TS38_TOOL_CACHE
-  - Dart SDK archive/checksum metadata lives in testing/tests/TS-38/dart_probe/runtime_manifest.json
+  - cached Dart SDK root defaults to ~/.cache/trackstate-test-tools and can be overridden with TS38_TOOL_CACHE or TRACKSTATE_TOOL_CACHE
+  - Dart SDK archive/checksum metadata lives in testing/core/config/dart_sdk_runtime.json
