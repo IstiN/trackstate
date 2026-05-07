@@ -1,8 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:trackstate/data/providers/local/local_git_trackstate_provider.dart';
+import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/domain/models/trackstate_models.dart';
 
 class LocalGitTestRepository {
   LocalGitTestRepository._(this._directory);
@@ -123,7 +126,7 @@ class SyncGitProcessRunner implements GitProcessRunner {
     String repositoryPath,
     List<String> args, {
     bool binaryOutput = false,
-  }) async {
+  }) {
     final result = Process.runSync(
       'git',
       ['-C', repositoryPath, ...args],
@@ -140,11 +143,81 @@ class SyncGitProcessRunner implements GitProcessRunner {
       final List<int> bytes => utf8.decode(bytes, allowMalformed: true),
       _ => '',
     };
-    return GitCommandResult(
-      exitCode: result.exitCode,
-      stdout: stdout,
-      stdoutBytes: stdoutBytes,
-      stderr: result.stderr.toString(),
+    return SynchronousFuture(
+      GitCommandResult(
+        exitCode: result.exitCode,
+        stdout: stdout,
+        stdoutBytes: stdoutBytes,
+        stderr: result.stderr.toString(),
+      ),
+    );
+  }
+}
+
+class WidgetTestLocalGitRepository implements TrackStateRepository {
+  WidgetTestLocalGitRepository({required this.repositoryPath})
+    : _delegate = LocalTrackStateRepository(
+        repositoryPath: repositoryPath,
+        processRunner: const SyncGitProcessRunner(),
+      );
+
+  final String repositoryPath;
+  final LocalTrackStateRepository _delegate;
+
+  @override
+  bool get supportsGitHubAuth => false;
+
+  @override
+  bool get usesLocalPersistence => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) =>
+      _delegate.connect(connection);
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() => _delegate.loadSnapshot();
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) =>
+      _delegate.searchIssues(jql);
+
+  @override
+  Future<TrackStateIssue> updateIssueStatus(
+    TrackStateIssue issue,
+    IssueStatus status,
+  ) async {
+    final file = File('$repositoryPath/${issue.storagePath}');
+    final updatedMarkdown = issue.rawMarkdown.replaceFirst(
+      RegExp(r'^status:\s*.*$', multiLine: true),
+      'status: ${status.label}',
+    );
+    file.writeAsStringSync(updatedMarkdown);
+    LocalGitTestRepository._git(repositoryPath, [
+      'add',
+      '--',
+      issue.storagePath,
+    ]);
+    final stagedPath = LocalGitTestRepository._git(repositoryPath, [
+      'diff',
+      '--cached',
+      '--name-only',
+      '--',
+      issue.storagePath,
+    ]).trim();
+    if (stagedPath.isNotEmpty) {
+      LocalGitTestRepository._git(repositoryPath, [
+        'commit',
+        '-m',
+        'Move ${issue.key} to ${status.label}',
+        '--',
+        issue.storagePath,
+      ]);
+    }
+    final refreshed = await _delegate.loadSnapshot();
+    return refreshed.issues.firstWhere(
+      (current) => current.key == issue.key,
+      orElse: () =>
+          issue.copyWith(status: status, rawMarkdown: updatedMarkdown),
     );
   }
 }

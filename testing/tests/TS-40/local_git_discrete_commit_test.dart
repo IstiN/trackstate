@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 
 import '../../components/screens/trackstate_app_screen.dart';
+import '../../core/interfaces/trackstate_app_component.dart';
 import '../../core/utils/local_git_test_repository.dart';
 
 void main() {
@@ -13,16 +13,13 @@ void main() {
   testWidgets('user sees the local Git move reflected in the UI', (
     tester,
   ) async {
-    final screen = TrackStateAppScreen(tester);
+    final TrackStateAppComponent screen = TrackStateAppScreen(tester);
     final repositoryFixture = await LocalGitTestRepository.create();
     addTearDown(repositoryFixture.dispose);
     final initialHead = await repositoryFixture.headRevision();
 
     await screen.pump(
-      LocalTrackStateRepository(
-        repositoryPath: repositoryFixture.path,
-        processRunner: const SyncGitProcessRunner(),
-      ),
+      WidgetTestLocalGitRepository(repositoryPath: repositoryFixture.path),
     );
     await screen.waitForTextVisible('Local Git');
 
