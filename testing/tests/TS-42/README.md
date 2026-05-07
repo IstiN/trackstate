@@ -27,4 +27,7 @@ flutter test testing/tests/TS-42/test_ts_42.dart
 
 The test passes when the issue detail screen disables or hides write actions for
 the read-only session and shows a visible read-only explanation, such as text or
-tooltip that mentions permission, read-only mode, or write access.
+tooltip that mentions permission, read-only mode, or write access. The harness
+also compares that behavior with a writable baseline so the test only treats an
+action as capability-guarded if the same control is actually exposed when
+`canWrite=true`.

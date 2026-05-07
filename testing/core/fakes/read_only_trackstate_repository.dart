@@ -6,11 +6,18 @@ import 'package:trackstate/domain/models/trackstate_models.dart';
 
 class ReadOnlyTrackStateRepository extends ProviderBackedTrackStateRepository {
   ReadOnlyTrackStateRepository()
-    : super(provider: const _ReadOnlyTrackStateProvider());
+    : super(provider: const _IssueDetailTrackStateProvider(canWrite: false));
 }
 
-class _ReadOnlyTrackStateProvider implements TrackStateProviderAdapter {
-  const _ReadOnlyTrackStateProvider();
+class WritableTrackStateRepository extends ProviderBackedTrackStateRepository {
+  WritableTrackStateRepository()
+    : super(provider: const _IssueDetailTrackStateProvider(canWrite: true));
+}
+
+class _IssueDetailTrackStateProvider implements TrackStateProviderAdapter {
+  const _IssueDetailTrackStateProvider({required this.canWrite});
+
+  final bool canWrite;
 
   static const String _revision = 'read-only-test-revision';
 
@@ -108,9 +115,9 @@ Read and write tracker files through GitHub Contents API.
 
   @override
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async =>
-      const RepositoryUser(
-        login: 'read-only-user',
-        displayName: 'Read Only User',
+      RepositoryUser(
+        login: canWrite ? 'write-enabled-user' : 'read-only-user',
+        displayName: canWrite ? 'Write Enabled User' : 'Read Only User',
       );
 
   @override
@@ -119,11 +126,7 @@ Read and write tracker files through GitHub Contents API.
 
   @override
   Future<RepositoryPermission> getPermission() async =>
-      const RepositoryPermission(
-        canRead: true,
-        canWrite: false,
-        isAdmin: false,
-      );
+      RepositoryPermission(canRead: true, canWrite: canWrite, isAdmin: false);
 
   @override
   Future<bool> isLfsTracked(String path) async => false;

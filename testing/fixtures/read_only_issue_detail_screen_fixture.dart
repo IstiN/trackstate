@@ -8,3 +8,9 @@ Future<ReadOnlyIssueDetailScreenHandle> launchReadOnlyIssueDetailFixture(
 ) {
   return launchReadOnlyIssueDetailWidgetScreen(tester);
 }
+
+Future<ReadOnlyIssueDetailScreenHandle> launchWritableIssueDetailFixture(
+  WidgetTester tester,
+) {
+  return launchWritableIssueDetailWidgetScreen(tester);
+}

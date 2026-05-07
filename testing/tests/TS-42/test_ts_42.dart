@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../core/interfaces/read_only_issue_detail_screen.dart';
+import '../../core/models/action_availability.dart';
 import '../../fixtures/read_only_issue_detail_screen_fixture.dart';
 
 void main() {
@@ -8,100 +9,78 @@ void main() {
     'TS-42 shows read-only issue detail actions as unavailable before save',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      ReadOnlyIssueDetailScreenHandle? screen;
+      ReadOnlyIssueDetailScreenHandle? writableScreen;
+      ReadOnlyIssueDetailScreenHandle? readOnlyScreen;
 
       try {
         const targetIssueKey = 'TRACK-12';
         const targetSummary = 'Implement Git sync service';
         const previousIssueKey = 'TRACK-11';
-        screen = await launchReadOnlyIssueDetailFixture(tester);
-        await screen.openSearch();
-        expect(
-          screen.showsAcceptanceCriterion(
-            previousIssueKey,
-            'Dashboard cards stay interactive during refresh.',
-          ),
-          isTrue,
-          reason:
-              'Expected JQL Search to open with a different issue selected so '
-              'TS-42 must navigate into TRACK-12 through the search results.',
+        const previousSummary = 'Stabilize dashboard polling';
+        writableScreen = await launchWritableIssueDetailFixture(tester);
+        final writableState = await _openTargetIssue(
+          screen: writableScreen,
+          previousIssueKey: previousIssueKey,
+          previousSummary: previousSummary,
+          targetIssueKey: targetIssueKey,
+          targetSummary: targetSummary,
+          requireNavigationProof: false,
         );
-        expect(
-          screen.showsAcceptanceCriterion(
-            targetIssueKey,
-            'Push issue updates as commits.',
-          ),
-          isFalse,
-          reason:
-              'Expected TRACK-12-specific detail content to be absent before '
-              'opening TRACK-12 from the search results.',
-        );
-        await screen.selectIssue(targetIssueKey, targetSummary);
+        writableScreen.dispose();
+        writableScreen = null;
 
-        expect(
-          screen.showsIssueDetail(targetIssueKey),
-          isTrue,
-          reason:
-              'Expected opening the TRACK-12 search result to render the '
-              'TRACK-12 issue-detail surface.',
-        );
-        expect(
-          screen.showsAcceptanceCriterion(
-            targetIssueKey,
-            'Push issue updates as commits.',
-          ),
-          isTrue,
-          reason:
-              'Expected tapping the TRACK-12 search result to replace the '
-              'detail panel with TRACK-12-specific content.',
-        );
-        expect(
-          screen.showsAcceptanceCriterion(
-            targetIssueKey,
-            'Dashboard cards stay interactive during refresh.',
-          ),
-          isFalse,
-          reason:
-              'Expected TRACK-11-specific detail content to disappear after '
-              'opening TRACK-12 from the search results.',
-        );
-        expect(
-          screen.showsIssueKey(targetIssueKey),
-          isTrue,
-          reason:
-              'Expected the TRACK-12 issue key to be visible in issue detail.',
-        );
-        expect(
-          screen.showsSummary(targetIssueKey, targetSummary),
-          isTrue,
-          reason:
-              'Expected the TRACK-12 summary to be visible in issue detail.',
+        readOnlyScreen = await launchReadOnlyIssueDetailFixture(tester);
+        final readOnlyState = await _openTargetIssue(
+          screen: readOnlyScreen,
+          previousIssueKey: previousIssueKey,
+          previousSummary: previousSummary,
+          targetIssueKey: targetIssueKey,
+          targetSummary: targetSummary,
+          requireNavigationProof: true,
         );
 
-        final transition = screen.transitionAction(targetIssueKey);
-        final edit = screen.editAction(targetIssueKey);
-        final comment = screen.commentAction(targetIssueKey);
         final failures = <String>[];
 
-        if (!transition.isUnavailable) {
+        if (!writableState.transition.enabled) {
+          failures.add(
+            'TS-42 requires Transition to be a real write action before the '
+            'read-only check, but the writable baseline did not expose it as '
+            'enabled. Observed ${writableState.transition.describe()}.',
+          );
+        }
+        if (!readOnlyState.transition.isUnavailable) {
           failures.add(
             'Transition should be disabled or hidden when canWrite=false. '
-            'Observed ${transition.describe()}.',
+            'Observed ${readOnlyState.transition.describe()}.',
           );
         }
-        if (!edit.isUnavailable) {
+        if (!writableState.edit.enabled) {
+          failures.add(
+            'TS-42 cannot verify Edit is capability-guarded because the '
+            'writable baseline does not expose Edit as an enabled action. '
+            'Observed ${writableState.edit.describe()}.',
+          );
+        } else if (!readOnlyState.edit.isUnavailable) {
           failures.add(
             'Edit should be disabled or hidden when canWrite=false. '
-            'Observed ${edit.describe()}.',
+            'Observed ${readOnlyState.edit.describe()}.',
           );
         }
-        if (!comment.isUnavailable) {
+        if (!writableState.comment.enabled) {
+          failures.add(
+            'TS-42 cannot verify Comments is capability-guarded because the '
+            'writable baseline does not expose Comments as an enabled action. '
+            'Observed ${writableState.comment.describe()}.',
+          );
+        } else if (!readOnlyState.comment.isUnavailable) {
           failures.add(
             'Comments should be disabled or hidden when canWrite=false. '
-            'Observed ${comment.describe()}.',
+            'Observed ${readOnlyState.comment.describe()}.',
           );
         }
-        if (!screen.hasReadOnlyExplanation(targetIssueKey)) {
+        if (readOnlyState.hasReadOnlyExplanation) {
+          // no-op
+        } else {
           failures.add(
             'A visible read-only explanation should be rendered as text or '
             'tooltip, for example messaging that mentions permission, '
@@ -113,13 +92,125 @@ void main() {
           fail(
             'Expected read-only issue detail UI to guard all write actions '
             'up front for canWrite=false. ${failures.join(' ')} Observed '
-            '${screen.describeObservedState(targetIssueKey)}.',
+            'writable baseline: ${writableState.describe()}. Observed '
+            'read-only state: ${readOnlyState.describe()}.',
           );
         }
       } finally {
-        screen?.dispose();
+        writableScreen?.dispose();
+        readOnlyScreen?.dispose();
         semantics.dispose();
       }
     },
   );
+}
+
+Future<_IssueDetailState> _openTargetIssue({
+  required ReadOnlyIssueDetailScreenHandle screen,
+  required String previousIssueKey,
+  required String previousSummary,
+  required String targetIssueKey,
+  required String targetSummary,
+  required bool requireNavigationProof,
+}) async {
+  await screen.openSearch();
+  if (requireNavigationProof) {
+    await screen.selectIssue(previousIssueKey, previousSummary);
+    expect(
+      screen.showsIssueDetail(previousIssueKey),
+      isTrue,
+      reason:
+          'Expected the search result for TRACK-11 to open its issue-detail '
+          'surface before navigating to TRACK-12.',
+    );
+    expect(
+      screen.showsAcceptanceCriterion(
+        previousIssueKey,
+        'Dashboard cards stay interactive during refresh.',
+      ),
+      isTrue,
+      reason:
+          'Expected TRACK-11 to render its own issue detail after selecting '
+          'it from the search results.',
+    );
+    expect(
+      screen.showsAcceptanceCriterion(
+        targetIssueKey,
+        'Push issue updates as commits.',
+      ),
+      isFalse,
+      reason:
+          'Expected TRACK-12-specific detail content to stay absent until '
+          'the test opens TRACK-12 from the search results.',
+    );
+  }
+  await screen.selectIssue(targetIssueKey, targetSummary);
+
+  expect(
+    screen.showsIssueDetail(targetIssueKey),
+    isTrue,
+    reason:
+        'Expected opening the TRACK-12 search result to render the '
+        'TRACK-12 issue-detail surface.',
+  );
+  expect(
+    screen.showsAcceptanceCriterion(
+      targetIssueKey,
+      'Push issue updates as commits.',
+    ),
+    isTrue,
+    reason:
+        'Expected tapping the TRACK-12 search result to replace the '
+        'detail panel with TRACK-12-specific content.',
+  );
+  if (requireNavigationProof) {
+    expect(
+      screen.showsAcceptanceCriterion(
+        targetIssueKey,
+        'Dashboard cards stay interactive during refresh.',
+      ),
+      isFalse,
+      reason:
+          'Expected TRACK-11-specific detail content to disappear after '
+          'opening TRACK-12 from the search results.',
+    );
+  }
+  expect(
+    screen.showsIssueKey(targetIssueKey),
+    isTrue,
+    reason: 'Expected the TRACK-12 issue key to be visible in issue detail.',
+  );
+  expect(
+    screen.showsSummary(targetIssueKey, targetSummary),
+    isTrue,
+    reason: 'Expected the TRACK-12 summary to be visible in issue detail.',
+  );
+
+  return _IssueDetailState(
+    transition: screen.transitionAction(targetIssueKey),
+    edit: screen.editAction(targetIssueKey),
+    comment: screen.commentAction(targetIssueKey),
+    hasReadOnlyExplanation: screen.hasReadOnlyExplanation(targetIssueKey),
+  );
+}
+
+class _IssueDetailState {
+  const _IssueDetailState({
+    required this.transition,
+    required this.edit,
+    required this.comment,
+    required this.hasReadOnlyExplanation,
+  });
+
+  final ActionAvailability transition;
+  final ActionAvailability edit;
+  final ActionAvailability comment;
+  final bool hasReadOnlyExplanation;
+
+  String describe() => [
+    transition.describe(),
+    edit.describe(),
+    comment.describe(),
+    'readOnlyExplanationVisible=$hasReadOnlyExplanation',
+  ].join(', ');
 }
