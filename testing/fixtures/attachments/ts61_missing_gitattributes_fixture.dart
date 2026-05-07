@@ -2,20 +2,20 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 
-import '../../components/services/attachment_upload_probe.dart';
 import '../../core/config/attachment_upload_test_config.dart';
 import '../../frameworks/api/github/github_attachment_upload_framework.dart';
 
 class Ts61MissingGitattributesFixture {
   Ts61MissingGitattributesFixture._({
     required this.config,
-    required this.probe,
+    required this.framework,
     required List<RecordedGitHubRequest> recordedRequests,
   }) : _recordedRequests = recordedRequests;
 
   final AttachmentUploadTestConfig config;
-  final AttachmentUploadProbe probe;
+  final GitHubAttachmentUploadFramework framework;
   final List<RecordedGitHubRequest> _recordedRequests;
 
   static Future<Ts61MissingGitattributesFixture> create() async {
@@ -57,54 +57,82 @@ class Ts61MissingGitattributesFixture {
       },
     );
 
+    recordedRequests.clear();
+
     return Ts61MissingGitattributesFixture._(
       config: config,
-      probe: AttachmentUploadProbe(framework),
+      framework: framework,
       recordedRequests: recordedRequests,
     );
   }
 
   Future<Ts61UploadScenarioObservation> uploadSampleAttachment() async {
-    final observation = await probe.upload(
-      config.buildWriteRequest(
-        Uint8List.fromList(utf8.encode('text attachment content')),
-      ),
-    );
-    return Ts61UploadScenarioObservation(
-      uploadObservation: observation,
-      recordedRequests: List<RecordedGitHubRequest>.unmodifiable(
-        _recordedRequests,
-      ),
-    );
+    try {
+      final result = await framework.writeAttachment(
+        config.buildWriteRequest(
+          Uint8List.fromList(utf8.encode('text attachment content')),
+        ),
+      );
+      return Ts61UploadScenarioObservation(
+        config: config,
+        uploadResult: result,
+        recordedRequests: List<RecordedGitHubRequest>.unmodifiable(
+          _recordedRequests,
+        ),
+      );
+    } catch (error, stackTrace) {
+      return Ts61UploadScenarioObservation(
+        config: config,
+        error: error,
+        stackTrace: stackTrace,
+        recordedRequests: List<RecordedGitHubRequest>.unmodifiable(
+          _recordedRequests,
+        ),
+      );
+    }
   }
 }
 
 class Ts61UploadScenarioObservation {
   const Ts61UploadScenarioObservation({
-    required this.uploadObservation,
+    required this.config,
+    this.uploadResult,
+    this.error,
+    this.stackTrace,
     required this.recordedRequests,
   });
 
-  final AttachmentUploadObservation uploadObservation;
+  final AttachmentUploadTestConfig config;
+  final RepositoryAttachmentWriteResult? uploadResult;
+  final Object? error;
+  final StackTrace? stackTrace;
   final List<RecordedGitHubRequest> recordedRequests;
 
-  RecordedGitHubRequest? get gitattributesLookup => recordedRequests
+  List<RecordedGitHubRequest> get gitattributesLookups => recordedRequests
       .where(
         (request) =>
             request.method == 'GET' &&
             request.path.endsWith('/contents/.gitattributes'),
       )
-      .cast<RecordedGitHubRequest?>()
-      .firstWhere((request) => request != null, orElse: () => null);
+      .toList(growable: false);
 
-  RecordedGitHubRequest? get contentsUpload => recordedRequests
+  RecordedGitHubRequest? get gitattributesLookup =>
+      gitattributesLookups.isEmpty ? null : gitattributesLookups.first;
+
+  List<RecordedGitHubRequest> get contentsUploads => recordedRequests
       .where(
         (request) =>
             request.method == 'PUT' &&
-            request.path.endsWith('/contents/${uploadObservation.path}'),
+            request.path.endsWith('/contents/${config.path}'),
       )
-      .cast<RecordedGitHubRequest?>()
-      .firstWhere((request) => request != null, orElse: () => null);
+      .toList(growable: false);
+
+  RecordedGitHubRequest? get contentsUpload =>
+      contentsUploads.isEmpty ? null : contentsUploads.first;
+
+  List<String> get requestSequence => recordedRequests
+      .map((request) => '${request.method} ${request.path}')
+      .toList(growable: false);
 
   bool get attemptedStandardUpload => contentsUpload != null;
 }

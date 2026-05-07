@@ -8,46 +8,54 @@ void main() {
     () async {
       final fixture = await Ts61MissingGitattributesFixture.create();
       final scenario = await fixture.uploadSampleAttachment();
-      final observation = scenario.uploadObservation;
       final gitattributesLookup = scenario.gitattributesLookup;
       final contentsUpload = scenario.contentsUpload;
       final uploadPayload = contentsUpload?.jsonBody as Map<String, Object?>?;
 
       expect(
-        observation.isLfsTracked,
-        isFalse,
-        reason:
-            'A missing .gitattributes file should be treated as not LFS-tracked so the upload can continue.',
-      );
-      expect(
-        observation.error,
+        scenario.error,
         isNull,
         reason:
             'The upload should not surface an unsupported or provider error when tracking configuration is absent.',
       );
       expect(
-        observation.result,
+        scenario.uploadResult,
         isNotNull,
         reason:
             'The user-facing outcome should be a successful attachment upload result.',
       );
       expect(
-        observation.result?.revision,
+        scenario.uploadResult?.revision,
         'uploaded-notes-sha',
         reason:
             'A standard contents upload should return the revision reported by the GitHub Contents API.',
       );
       expect(
-        gitattributesLookup,
-        isNotNull,
+        scenario.gitattributesLookups,
+        hasLength(1),
         reason:
-            'The provider should still check for .gitattributes before deciding whether the file is LFS-tracked.',
+            'writeAttachment() itself should perform exactly one .gitattributes lookup while deciding whether the upload is LFS-tracked.',
       );
       expect(
-        gitattributesLookup?.query['ref'],
-        fixture.config.branch,
+        scenario.contentsUploads,
+        hasLength(1),
         reason:
-            'The .gitattributes lookup should target the configured branch.',
+            'After handling the missing .gitattributes response, writeAttachment() should perform exactly one standard Contents API upload.',
+      );
+      expect(
+        scenario.requestSequence,
+        [
+          'GET /repos/${fixture.config.repository}/contents/.gitattributes',
+          'PUT /repos/${fixture.config.repository}/contents/${fixture.config.path}',
+        ],
+        reason:
+            'The upload-time guard should check .gitattributes and then continue directly into the standard Contents API write path.',
+      );
+      expect(
+        gitattributesLookup?.query,
+        {'ref': fixture.config.branch},
+        reason:
+            'The upload-time .gitattributes lookup should target the configured branch.',
       );
       expect(
         scenario.attemptedStandardUpload,
@@ -63,7 +71,7 @@ void main() {
       );
       expect(
         uploadPayload?['branch'],
-        fixture.config.branch,
+        scenario.uploadResult?.branch,
         reason:
             'The standard upload request should preserve the branch selected by the user.',
       );
