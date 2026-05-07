@@ -3,17 +3,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
-import '../../components/pages/issue_detail_page.dart';
-import '../../components/screens/read_only_issue_detail_screen.dart';
+import '../../components/screens/read_only_issue_detail_screen_component.dart';
 import '../../core/fakes/read_only_trackstate_repository.dart';
+import '../../core/interfaces/read_only_issue_detail_harness.dart';
+import '../../core/interfaces/read_only_issue_detail_screen.dart';
 import 'widget_test_driver.dart';
 
-class ReadOnlyIssueDetailWidgetFramework {
+class ReadOnlyIssueDetailWidgetFramework implements ReadOnlyIssueDetailHarness {
   ReadOnlyIssueDetailWidgetFramework(this.tester);
 
   final WidgetTester tester;
 
-  Future<ReadOnlyIssueDetailScreen> launch() async {
+  @override
+  Future<void> launch() async {
     SharedPreferences.setMockInitialValues({
       'trackstate.githubToken.trackstate.trackstate': 'read-only-token',
     });
@@ -25,13 +27,20 @@ class ReadOnlyIssueDetailWidgetFramework {
     await driver.pumpApp(
       TrackStateApp(repository: ReadOnlyTrackStateRepository()),
     );
-
-    return ReadOnlyIssueDetailScreen(
-      page: IssueDetailPage(driver),
-      onDispose: () {
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
-      },
-    );
   }
+
+  @override
+  void dispose() {
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+  }
+}
+
+Future<ReadOnlyIssueDetailScreenHandle> launchReadOnlyIssueDetailWidgetScreen(
+  WidgetTester tester,
+) {
+  return createReadOnlyIssueDetailScreen(
+    driver: WidgetTestDriver(tester),
+    harness: ReadOnlyIssueDetailWidgetFramework(tester),
+  );
 }

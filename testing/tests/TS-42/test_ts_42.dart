@@ -1,24 +1,23 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../components/screens/read_only_issue_detail_screen.dart';
-import 'issue_detail_test_context.dart';
+import '../../core/interfaces/read_only_issue_detail_screen.dart';
+import '../../fixtures/read_only_issue_detail_screen_fixture.dart';
 
 void main() {
   testWidgets(
     'TS-42 shows read-only issue detail actions as unavailable before save',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      ReadOnlyIssueDetailScreen? screen;
+      ReadOnlyIssueDetailScreenHandle? screen;
 
       try {
-        screen = await launchReadOnlyIssueDetailScreen(tester);
-        final issueDetailPage = screen.page;
         const targetIssueKey = 'TRACK-12';
         const targetSummary = 'Implement Git sync service';
         const previousIssueKey = 'TRACK-11';
-        await issueDetailPage.openSearch();
+        screen = await launchReadOnlyIssueDetailFixture(tester);
+        await screen.openSearch();
         expect(
-          issueDetailPage.showsAcceptanceCriterion(
+          screen.showsAcceptanceCriterion(
             previousIssueKey,
             'Dashboard cards stay interactive during refresh.',
           ),
@@ -28,7 +27,7 @@ void main() {
               'TS-42 must navigate into TRACK-12 through the search results.',
         );
         expect(
-          issueDetailPage.showsAcceptanceCriterion(
+          screen.showsAcceptanceCriterion(
             targetIssueKey,
             'Push issue updates as commits.',
           ),
@@ -37,17 +36,17 @@ void main() {
               'Expected TRACK-12-specific detail content to be absent before '
               'opening TRACK-12 from the search results.',
         );
-        await issueDetailPage.selectIssue(targetIssueKey, targetSummary);
+        await screen.selectIssue(targetIssueKey, targetSummary);
 
         expect(
-          issueDetailPage.showsIssueDetail(targetIssueKey),
+          screen.showsIssueDetail(targetIssueKey),
           isTrue,
           reason:
               'Expected opening the TRACK-12 search result to render the '
               'TRACK-12 issue-detail surface.',
         );
         expect(
-          issueDetailPage.showsAcceptanceCriterion(
+          screen.showsAcceptanceCriterion(
             targetIssueKey,
             'Push issue updates as commits.',
           ),
@@ -57,7 +56,7 @@ void main() {
               'detail panel with TRACK-12-specific content.',
         );
         expect(
-          issueDetailPage.showsAcceptanceCriterion(
+          screen.showsAcceptanceCriterion(
             targetIssueKey,
             'Dashboard cards stay interactive during refresh.',
           ),
@@ -67,21 +66,21 @@ void main() {
               'opening TRACK-12 from the search results.',
         );
         expect(
-          issueDetailPage.showsIssueKey(targetIssueKey),
+          screen.showsIssueKey(targetIssueKey),
           isTrue,
           reason:
               'Expected the TRACK-12 issue key to be visible in issue detail.',
         );
         expect(
-          issueDetailPage.showsSummary(targetIssueKey, targetSummary),
+          screen.showsSummary(targetIssueKey, targetSummary),
           isTrue,
           reason:
               'Expected the TRACK-12 summary to be visible in issue detail.',
         );
 
-        final transition = issueDetailPage.transitionAction(targetIssueKey);
-        final edit = issueDetailPage.editAction(targetIssueKey);
-        final comment = issueDetailPage.commentAction(targetIssueKey);
+        final transition = screen.transitionAction(targetIssueKey);
+        final edit = screen.editAction(targetIssueKey);
+        final comment = screen.commentAction(targetIssueKey);
         final failures = <String>[];
 
         if (!transition.isUnavailable) {
@@ -102,7 +101,7 @@ void main() {
             'Observed ${comment.describe()}.',
           );
         }
-        if (!issueDetailPage.hasReadOnlyExplanation(targetIssueKey)) {
+        if (!screen.hasReadOnlyExplanation(targetIssueKey)) {
           failures.add(
             'A visible read-only explanation should be rendered as text or '
             'tooltip, for example messaging that mentions permission, '
@@ -114,7 +113,7 @@ void main() {
           fail(
             'Expected read-only issue detail UI to guard all write actions '
             'up front for canWrite=false. ${failures.join(' ')} Observed '
-            '${issueDetailPage.describeObservedState(targetIssueKey)}.',
+            '${screen.describeObservedState(targetIssueKey)}.',
           );
         }
       } finally {
