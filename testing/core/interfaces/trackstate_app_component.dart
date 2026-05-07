@@ -1,7 +1,6 @@
-import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 
-abstract class TrackStateAppComponent {
+abstract interface class TrackStateAppComponent {
   Future<void> pump(TrackStateRepository repository);
 
   Future<void> openSection(String label);
@@ -15,15 +14,9 @@ abstract class TrackStateAppComponent {
     required String statusLabel,
   });
 
-  void expectIssueDetailVisible(String key);
+  Future<void> expectIssueDetailVisible(String key);
 
-  void expectIssueDetailText(String key, String text);
+  Future<void> expectIssueDetailText(String key, String text);
 
-  void expectTextVisible(String text);
-
-  Future<void> waitForIssueDetailVisible(String key);
-
-  Future<void> waitForTextVisible(String text);
-
-  Future<void> waitForVisible(Finder finder, {Duration timeout, Duration step});
+  Future<void> expectTextVisible(String text);
 }

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 
 import '../../components/screens/trackstate_app_screen.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
@@ -19,19 +20,22 @@ void main() {
     final initialHead = await repositoryFixture.headRevision();
 
     await screen.pump(
-      WidgetTestLocalGitRepository(repositoryPath: repositoryFixture.path),
+      LocalTrackStateRepository(
+        repositoryPath: repositoryFixture.path,
+        processRunner: const SyncGitProcessRunner(),
+      ),
     );
-    await screen.waitForTextVisible('Local Git');
-
-    screen.expectTextVisible('Local Git');
+    await screen.expectTextVisible('Local Git');
 
     await screen.openSection('JQL Search');
-    await screen.waitForIssueDetailVisible('DEMO-1');
-    screen.expectIssueDetailVisible('DEMO-1');
-    expect(find.text('Local issue'), findsWidgets);
-    expect(find.textContaining('Loaded from local git.'), findsOneWidget);
-    screen.expectTextVisible('Can be loaded from local Git');
-    expect(find.text('In Progress'), findsWidgets);
+    await screen.openIssue('DEMO-1', 'Local issue');
+    await screen.expectIssueDetailText('DEMO-1', 'Local issue');
+    await screen.expectIssueDetailText('DEMO-1', 'Loaded from local git.');
+    await screen.expectIssueDetailText(
+      'DEMO-1',
+      'Can be loaded from local Git',
+    );
+    await screen.expectIssueDetailText('DEMO-1', 'In Progress');
 
     await screen.openSection('Board');
     await screen.dragIssueToStatusColumn(
@@ -43,8 +47,7 @@ void main() {
 
     const successMessage =
         'DEMO-1 moved to Done and committed to local Git branch main.';
-    await screen.waitForTextVisible(successMessage);
-    screen.expectTextVisible(successMessage);
+    await screen.expectTextVisible(successMessage);
 
     expect(await repositoryFixture.headRevision(), isNot(initialHead));
     expect(await repositoryFixture.parentOfHead(), initialHead);
@@ -62,7 +65,7 @@ void main() {
     );
 
     await screen.openSection('JQL Search');
-    await screen.waitForIssueDetailVisible('DEMO-1');
-    expect(find.text('Done'), findsWidgets);
+    await screen.openIssue('DEMO-1', 'Local issue');
+    await screen.expectIssueDetailText('DEMO-1', 'Done');
   });
 }

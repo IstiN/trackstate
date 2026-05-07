@@ -1,4 +1,4 @@
-import 'dart:ui';
+import 'dart:ui' show Size;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -11,6 +11,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   final WidgetTester tester;
 
+  Finder _text(String text) => find.textContaining(text, findRichText: true);
+
+  Finder _issueDetail(String key) =>
+      find.bySemanticsLabel(RegExp('Issue detail ${RegExp.escape(key)}'));
+
+  Finder _issue(String key, String summary) => find.bySemanticsLabel(
+    RegExp('Open ${RegExp.escape(key)} ${RegExp.escape(summary)}'),
+  );
+
+  Finder _statusColumn(String label) =>
+      find.bySemanticsLabel(RegExp('${RegExp.escape(label)} column'));
+
   @override
   Future<void> pump(TrackStateRepository repository) async {
     tester.view.physicalSize = Size(1440, 960);
@@ -21,7 +33,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     });
 
     await tester.pumpWidget(TrackStateApp(repository: repository));
-    await tester.pumpAndSettle();
+    await tester.pump();
   }
 
   @override
@@ -32,12 +44,10 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> openIssue(String key, String summary) async {
-    final issues = find.bySemanticsLabel(
-      RegExp('Open ${RegExp.escape(key)} ${RegExp.escape(summary)}'),
-    );
-    await waitForVisible(issues);
-    await tester.tap(issues.first);
-    await waitForIssueDetailVisible(key);
+    final issue = _issue(key, summary);
+    await _waitForVisible(issue);
+    await tester.tap(issue.first);
+    await expectIssueDetailVisible(key);
   }
 
   @override
@@ -47,26 +57,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     required String sourceStatusLabel,
     required String statusLabel,
   }) async {
-    final sourceColumn = find.bySemanticsLabel(
-      RegExp('${RegExp.escape(sourceStatusLabel)} column'),
-    );
-    final issueCard = find.bySemanticsLabel(
-      RegExp('Open ${RegExp.escape(key)} ${RegExp.escape(summary)}'),
-    );
-    final targetColumn = find.bySemanticsLabel(
-      RegExp('${RegExp.escape(statusLabel)} column'),
-    );
-    await waitForVisible(sourceColumn);
-    await waitForVisible(issueCard);
-    await waitForVisible(targetColumn);
+    final sourceColumn = _statusColumn(sourceStatusLabel);
+    final issueCard = _issue(key, summary);
+    final targetColumn = _statusColumn(statusLabel);
+    await _waitForVisible(sourceColumn);
+    await _waitForVisible(issueCard);
+    await _waitForVisible(targetColumn);
 
     final start = tester.getCenter(issueCard.first);
     final targetRect = tester.getRect(targetColumn.first);
     final end = Offset(targetRect.center.dx, targetRect.top + 120);
-    final gesture = await tester.startGesture(
-      start,
-      kind: PointerDeviceKind.mouse,
-    );
+    final gesture = await tester.startGesture(start);
     await tester.pump(const Duration(milliseconds: 100));
     for (final progress in const [0.25, 0.5, 0.75, 1.0]) {
       await gesture.moveTo(Offset.lerp(start, end, progress)!);
@@ -77,43 +78,28 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
-  void expectIssueDetailVisible(String key) {
-    expect(
-      find.bySemanticsLabel(RegExp('Issue detail ${RegExp.escape(key)}')),
-      findsOneWidget,
-    );
+  Future<void> expectIssueDetailVisible(String key) async {
+    final detail = _issueDetail(key);
+    await _waitForVisible(detail);
+    expect(detail, findsOneWidget);
   }
 
   @override
-  void expectIssueDetailText(String key, String text) {
-    final detail = find.bySemanticsLabel(
-      RegExp('Issue detail ${RegExp.escape(key)}'),
-    );
-    expect(
-      find.descendant(of: detail, matching: find.text(text)),
-      findsWidgets,
-    );
+  Future<void> expectIssueDetailText(String key, String text) async {
+    await expectIssueDetailVisible(key);
+    final match = _text(text);
+    await _waitForVisible(match);
+    expect(match, findsWidgets);
   }
 
   @override
-  void expectTextVisible(String text) {
-    expect(find.text(text), findsOneWidget);
+  Future<void> expectTextVisible(String text) async {
+    final finder = _text(text);
+    await _waitForVisible(finder);
+    expect(finder, findsWidgets);
   }
 
-  @override
-  Future<void> waitForIssueDetailVisible(String key) async {
-    await waitForVisible(
-      find.bySemanticsLabel(RegExp('Issue detail ${RegExp.escape(key)}')),
-    );
-  }
-
-  @override
-  Future<void> waitForTextVisible(String text) async {
-    await waitForVisible(find.text(text));
-  }
-
-  @override
-  Future<void> waitForVisible(
+  Future<void> _waitForVisible(
     Finder finder, {
     Duration timeout = const Duration(seconds: 5),
     Duration step = const Duration(milliseconds: 50),
