@@ -5,20 +5,43 @@ import os
 from pathlib import Path
 import unittest
 
-from testing.components.services.github_pages_workflow_probe import (
+from testing.core.interfaces.github_pages_workflow_probe import (
     GitHubPagesWorkflowProbe,
+)
+from testing.tests.support.github_pages_workflow_probe_factory import (
+    create_github_pages_workflow_probe,
 )
 
 
 class InstallUpdateTrackStateWorkflowTest(unittest.TestCase):
     def setUp(self) -> None:
         self.repository_root = Path(__file__).resolve().parents[3]
-        self.probe = GitHubPagesWorkflowProbe(self.repository_root)
+        self.probe: GitHubPagesWorkflowProbe = create_github_pages_workflow_probe(
+            self.repository_root
+        )
 
     def test_workflow_builds_pages_artifact_without_committing_web_assets(self) -> None:
         observation = self.probe.validate()
         self._write_result_if_requested(observation.to_dict())
 
+        self.assertEqual(
+            observation.repository,
+            observation.requested_repository,
+            (
+                "Step 1 failed: the validation ran against "
+                f"{observation.repository}, but TS-69 requires the requested fork "
+                f"{observation.requested_repository} to be validated end-to-end."
+            ),
+        )
+        self.assertEqual(
+            observation.pages_url,
+            observation.expected_pages_url,
+            (
+                "Step 5 failed: the deployed GitHub Pages URL did not belong to the "
+                "requested repository. "
+                f"Expected {observation.expected_pages_url}, got {observation.pages_url}."
+            ),
+        )
         self.assertEqual(
             observation.workflow_run_conclusion,
             "success",
@@ -32,6 +55,15 @@ class InstallUpdateTrackStateWorkflowTest(unittest.TestCase):
             observation.pages_build_type,
             "workflow",
             "Step 2 failed: GitHub Pages was not configured to use GitHub Actions.",
+        )
+        self.assertEqual(
+            observation.html_base_href,
+            f"/{observation.requested_repository.split('/', 1)[1]}/",
+            (
+                "Step 5 failed: the deployed app shell did not use the expected "
+                f"base href for {observation.requested_repository}. "
+                f"Actual base href: {observation.html_base_href!r}"
+            ),
         )
         self.assertEqual(
             observation.branch_sha_after,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import json
 import os
 from pathlib import Path
@@ -12,47 +11,13 @@ from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
+from testing.core.interfaces.github_pages_workflow_probe import (
+    GitHubPagesWorkflowObservation,
+)
+
 
 class GitHubCliError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True)
-class WorkflowStepObservation:
-    name: str
-    status: str | None
-    conclusion: str | None
-
-
-@dataclass(frozen=True)
-class GitHubPagesWorkflowObservation:
-    repository: str
-    requested_repository: str
-    workflow_file: str
-    workflow_run_id: int
-    workflow_run_url: str
-    workflow_run_conclusion: str | None
-    branch_sha_before: str
-    branch_sha_after: str
-    pages_url: str
-    pages_build_type: str | None
-    pages_source_branch: str | None
-    pages_source_path: str | None
-    html_title: str | None
-    html_base_href: str | None
-    html_contains_bootstrap_script: bool
-    bootstrap_asset_url: str
-    bootstrap_asset_mentions_main_dart_js: bool
-    build_assets_committed_to_branch: list[str]
-    required_step_names: list[str]
-    observed_required_steps: list[str]
-    missing_required_steps: list[str]
-    failed_required_steps: list[str]
-    selected_via_fallback: bool
-    fallback_reason: str | None
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
 
 
 class GitHubPagesWorkflowProbe:
@@ -82,7 +47,7 @@ class GitHubPagesWorkflowProbe:
     def __init__(
         self,
         repository_root: Path,
-        fork_registration_timeout_seconds: int = 120,
+        fork_registration_timeout_seconds: int = 300,
         run_timeout_seconds: int = 480,
         pages_timeout_seconds: int = 180,
         poll_interval_seconds: int = 5,
@@ -94,45 +59,43 @@ class GitHubPagesWorkflowProbe:
         self._poll_interval_seconds = poll_interval_seconds
 
     def validate(self) -> GitHubPagesWorkflowObservation:
-        requested_repository, selected_repository, fallback_reason = (
-            self._select_repository_for_execution()
-        )
-        pages_info = self._ensure_pages_configuration(selected_repository)
-        branch_sha_before = self._branch_sha(selected_repository)
+        requested_repository = self._select_repository_for_execution()
+        expected_pages_url = self._expected_pages_url(requested_repository)
+        pages_info = self._ensure_pages_configuration(requested_repository)
+        branch_sha_before = self._branch_sha(requested_repository)
         build_assets_committed = self._find_committed_build_assets(
-            selected_repository,
+            requested_repository,
             branch_sha_before,
         )
         runs_before_dispatch = {
             run["id"]
-            for run in self._list_workflow_runs(selected_repository)
+            for run in self._list_workflow_runs(requested_repository)
             if isinstance(run.get("id"), int)
         }
 
-        self._dispatch_workflow(selected_repository)
+        self._dispatch_workflow(requested_repository)
         run = self._wait_for_new_workflow_run(
-            selected_repository,
+            requested_repository,
             runs_before_dispatch,
         )
         completed_run = self._wait_for_workflow_completion(
-            selected_repository,
+            requested_repository,
             int(run["id"]),
         )
         jobs = self._list_workflow_jobs(
-            selected_repository,
+            requested_repository,
             int(completed_run["id"]),
         )
 
-        required_step_lookup: dict[str, WorkflowStepObservation] = {}
+        required_step_lookup: dict[str, dict[str, str | None]] = {}
         for job in jobs:
             for step in job.get("steps", []):
                 name = step.get("name")
                 if name in self._REQUIRED_STEPS:
-                    required_step_lookup[name] = WorkflowStepObservation(
-                        name=name,
-                        status=step.get("status"),
-                        conclusion=step.get("conclusion"),
-                    )
+                    required_step_lookup[name] = {
+                        "status": step.get("status"),
+                        "conclusion": step.get("conclusion"),
+                    }
 
         missing_required_steps = [
             step_name
@@ -140,14 +103,14 @@ class GitHubPagesWorkflowProbe:
             if step_name not in required_step_lookup
         ]
         failed_required_steps = [
-            step.name
-            for step in required_step_lookup.values()
-            if step.conclusion != "success"
+            step_name
+            for step_name, step in required_step_lookup.items()
+            if step.get("conclusion") != "success"
         ]
 
-        branch_sha_after = self._branch_sha(selected_repository)
-        pages_info = self._ensure_pages_configuration(selected_repository)
-        pages_url = str(pages_info["html_url"])
+        branch_sha_after = self._branch_sha(requested_repository)
+        pages_info = self._ensure_pages_configuration(requested_repository)
+        pages_url = self._normalize_pages_url(str(pages_info["html_url"]))
         html = self._wait_for_pages_shell(pages_url)
         bootstrap_asset_url = urllib_parse.urljoin(pages_url, "flutter_bootstrap.js")
         bootstrap_asset = self._read_url_text(bootstrap_asset_url)
@@ -156,8 +119,9 @@ class GitHubPagesWorkflowProbe:
         base_href_match = self._BASE_HREF_PATTERN.search(html)
 
         return GitHubPagesWorkflowObservation(
-            repository=selected_repository,
+            repository=requested_repository,
             requested_repository=requested_repository,
+            expected_pages_url=expected_pages_url,
             workflow_file=self._WORKFLOW_FILE,
             workflow_run_id=int(completed_run["id"]),
             workflow_run_url=str(completed_run["html_url"]),
@@ -180,11 +144,9 @@ class GitHubPagesWorkflowProbe:
             observed_required_steps=list(required_step_lookup),
             missing_required_steps=missing_required_steps,
             failed_required_steps=failed_required_steps,
-            selected_via_fallback=selected_repository != requested_repository,
-            fallback_reason=fallback_reason,
         )
 
-    def _select_repository_for_execution(self) -> tuple[str, str, str | None]:
+    def _select_repository_for_execution(self) -> str:
         login = self._authenticated_login()
         requested_repository = (
             self._UPSTREAM_REPOSITORY
@@ -193,22 +155,42 @@ class GitHubPagesWorkflowProbe:
         )
 
         if requested_repository == self._UPSTREAM_REPOSITORY:
-            return requested_repository, requested_repository, None
+            return requested_repository
 
         if not self._repository_exists(requested_repository):
             self._create_fork()
 
-        if self._wait_for_repository(requested_repository):
-            workflows = self._wait_for_workflow_registration(requested_repository)
-            if workflows:
-                return requested_repository, requested_repository, None
+        if not self._wait_for_repository(requested_repository):
+            raise GitHubCliError(
+                "TS-69 requires validating the requested fork, but "
+                f"{requested_repository} did not become available within "
+                f"{self._fork_registration_timeout_seconds} seconds."
+            )
 
-        fallback_reason = (
-            "Fresh fork creation succeeded, but GitHub did not register the "
-            "workflow in the fork within the wait window, so the live "
-            "validation continued against the deployed upstream setup repository."
+        if not self._wait_for_workflow_registration(requested_repository):
+            raise GitHubCliError(
+                "TS-69 requires validating the requested fork, but GitHub did not "
+                f"register {self._WORKFLOW_FILE} for {requested_repository} within "
+                f"{self._fork_registration_timeout_seconds} seconds. The probe does "
+                "not fall back to IstiN/trackstate-setup."
+            )
+
+        return requested_repository
+
+    def _expected_pages_url(self, repository: str) -> str:
+        owner, repo = repository.split("/", 1)
+        return self._normalize_pages_url(f"https://{owner}.github.io/{repo}/")
+
+    def _normalize_pages_url(self, url: str) -> str:
+        parsed = urllib_parse.urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            raise GitHubCliError(f"GitHub Pages URL was not absolute: {url}")
+        normalized_path = parsed.path or "/"
+        if not normalized_path.endswith("/"):
+            normalized_path = f"{normalized_path}/"
+        return urllib_parse.urlunparse(
+            parsed._replace(netloc=parsed.netloc.lower(), path=normalized_path)
         )
-        return requested_repository, self._UPSTREAM_REPOSITORY, fallback_reason
 
     def _authenticated_login(self) -> str:
         user = self._gh_json("user")

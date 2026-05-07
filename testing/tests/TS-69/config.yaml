@@ -1,0 +1,11 @@
+test_id: TS-69
+type: web
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI authenticated for a user that can create or access a fork of IstiN/trackstate-setup
+  - network access to GitHub APIs and the deployed GitHub Pages site
+runtime_inputs:
+  workflow_file: install-update-trackstate.yml
+  workflow_ref: main
+  trackstate_ref: main
