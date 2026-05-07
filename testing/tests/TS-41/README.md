@@ -7,8 +7,6 @@ issue:
 1. create a temporary local Git runtime fixture
 2. dirty `DEMO/DEMO-1/main.md` outside TrackState
 3. attempt the exact description write through the provider-backed save path
-4. launch the real `TrackStateApp`, open `DEMO-1`, try to edit the description,
-   click `Save`, and verify visible `commit` / `stash` / `clean` guidance
 
 ## Install dependencies
 
@@ -30,7 +28,7 @@ flutter pub get
 ## Current expected result
 
 ```text
-Once TS-41 is fixed, both tests pass:
-- the provider-backed dirty-write failure becomes actionable
-- the real issue-detail save flow surfaces visible commit/stash/clean guidance
+Current coverage stays on the real local Git write path for DEMO-1/main.md.
+The test passes only once the provider-backed dirty-write failure becomes
+actionable and tells the user to commit, stash, or clean local changes first.
 ```
