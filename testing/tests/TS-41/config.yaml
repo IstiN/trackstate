@@ -7,4 +7,4 @@ notes:
   - Verifies the local Git adapter blocks a save when issue main.md has dirty local edits.
   - Keeps the provider-backed description save assertion as the exact main.md write-path AC3 check.
   - Uses shared fixtures and app-screen abstractions instead of ticket-local framework wiring.
-  - Attempts the real TrackState issue-detail Edit/Save flow for the same dirty local issue.
+  - Verifies the current TrackState issue detail for the same dirty local issue is still read-only and exposes no Edit/Save controls.

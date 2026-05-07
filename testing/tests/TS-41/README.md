@@ -1,16 +1,20 @@
 # TS-41
 
-Validates the TS-41 dirty-write behavior for `DEMO/DEMO-1/main.md`.
+Validates the TS-41 dirty-write behavior for `DEMO/DEMO-1/main.md` against the
+current product surface in this checkout.
 
-The automation covers the exact provider-backed write path and the live app
-issue-detail save flow:
+The automation covers the exact provider-backed write path and a live app probe
+of the same issue detail:
 1. create a temporary local Git runtime fixture
 2. dirty `DEMO/DEMO-1/main.md` outside TrackState
 3. attempt the exact provider-backed description write path
 4. open the same issue in the real `TrackStateApp`
-5. attempt the in-app description edit and `Save` flow
-6. verify the rendered recovery guidance mentions `commit`, `stash`, and
-   `clean`
+5. verify the current issue detail is still read-only and exposes no `Edit` or
+   `Save` action
+
+The executable failure signal remains the provider-backed save assertion: the
+product still throws a non-actionable dirty-file message instead of telling the
+user to `commit`, `stash`, or `clean` local changes first.
 
 The ticket wiring follows the shared testing layers via reusable fixtures under
 `testing/fixtures/` and shared app-screen abstractions.
@@ -39,7 +43,7 @@ flutter pub get
 ## Current expected result
 
 ```text
-The test should pass once both the provider-backed write path and the real
-issue-detail save flow surface actionable recovery guidance to commit, stash,
-or clean local changes first.
+The widget probe should pass against the current read-only issue detail.
+The provider-backed dirty-write assertion should keep failing until the product
+message tells the user to commit, stash, or clean local changes first.
 ```

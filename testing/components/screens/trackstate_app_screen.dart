@@ -216,32 +216,8 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
-  Future<void> tapIssueDetailAction({
-    required String key,
-    required String label,
-  }) async {
-    await expectIssueDetailActionVisible(key: key, label: label);
-    await tester.tap(_issueDetailAction(key, label).first);
-    await _pumpFrames();
-  }
-
-  @override
-  Future<void> enterIssueDetailDescription({
-    required String key,
-    required String text,
-  }) async {
-    await _waitForVisible(_issueDetail(key));
-    final editor = _issueDetailEditor(key);
-    if (editor.evaluate().isEmpty) {
-      fail(
-        'Expected issue detail $key to render an editable description field '
-        'during the TS-41 save flow, but no editor was visible.',
-      );
-    }
-    await tester.tap(editor.first);
-    await tester.pump();
-    await tester.enterText(editor.first, text);
-    await _pumpFrames();
+  void expectIssueDetailDescriptionReadOnly(String key) {
+    expect(_issueDetailEditor(key), findsNothing);
   }
 
   @override
