@@ -14,10 +14,16 @@ void main() {
           .singleWhere((entry) => entry.key == 'TRACK-123');
 
       expect(
-        observation.deletedIndexExistsBeforeDeletion,
+        observation.tombstoneArtifactExistsBeforeDeletion,
         isFalse,
         reason:
-            'The fixture should start without a tombstone index so the test exercises the delete transition instead of loading a prewritten deleted state.',
+            'The fixture should start without a tombstone artifact so the test exercises the delete transition instead of loading a prewritten deleted state.',
+      );
+      expect(
+        observation.tombstoneIndexExistsBeforeDeletion,
+        isFalse,
+        reason:
+            'The fixture should start without a tombstone index so the delete operation is responsible for reserving the deleted key.',
       );
       expect(
         observation.deletedIssueSearchResultsBeforeDeletion
@@ -28,34 +34,58 @@ void main() {
             'TRACK-123 should be discoverable through standard repository search before the delete operation runs.',
       );
       expect(
-        observation.deletedIndexExists,
+        observation.tombstoneArtifactExists,
         isTrue,
         reason:
-            'Deleting TRACK-123 should persist a tombstone artifact in ${observation.deletedIndexPath}.',
+            'Deleting TRACK-123 should persist a tombstone artifact in ${observation.tombstoneArtifactPath}.',
       );
       expect(
-        observation.deletedIndexEntries,
-        hasLength(1),
-        reason:
-            'The tombstone index should contain exactly one reserved-key record for the deleted issue in this fixture.',
-      );
-      expect(
-        observation.deletedIndexEntries.single['key'],
+        observation.tombstoneArtifact['key'],
         'TRACK-123',
         reason:
-            'The persisted tombstone artifact should keep the original issue key reserved after deletion.',
+            'The tombstone artifact should keep the original issue key reserved after deletion.',
       );
       expect(
-        observation.deletedIndexEntries.single['formerPath'],
+        observation.tombstoneArtifact['formerPath'],
         'TRACK/TRACK-123/main.md',
         reason:
             'The tombstone artifact should preserve the original repository path so the deleted issue stays traceable.',
       );
       expect(
-        observation.deletedIndexEntries.single['deletedAt'],
+        observation.tombstoneArtifact['deletedAt'],
         '2026-05-06T12:00:00Z',
         reason:
             'The tombstone artifact should include deletion metadata that records when the issue was removed.',
+      );
+      expect(
+        observation.tombstoneIndexExists,
+        isTrue,
+        reason:
+            'Deleting TRACK-123 should reserve the key in ${observation.tombstoneIndexPath}.',
+      );
+      expect(
+        observation.tombstoneIndexEntries,
+        hasLength(1),
+        reason:
+            'The tombstone index should contain exactly one reserved-key record for the deleted issue in this fixture.',
+      );
+      expect(
+        observation.tombstoneIndexEntries.single['key'],
+        'TRACK-123',
+        reason:
+            'The tombstone index should keep the original issue key reserved after deletion.',
+      );
+      expect(
+        observation.tombstoneIndexEntries.single['formerPath'],
+        'TRACK/TRACK-123/main.md',
+        reason:
+            'The tombstone index should preserve the original repository path so the deleted issue stays traceable.',
+      );
+      expect(
+        observation.tombstoneIndexEntries.single['deletedAt'],
+        '2026-05-06T12:00:00Z',
+        reason:
+            'The tombstone index should include deletion metadata that records when the issue was removed.',
       );
 
       expect(
