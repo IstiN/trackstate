@@ -3,18 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from testing.components.services.provider_contract_inspector import ProviderContractInspector
+from testing.components.services.provider_contract_inspector import create_provider_contract_probe
 from testing.core.interfaces.provider_contract_probe import ProviderContractProbe
-from testing.frameworks.python.dart_probe_runtime import PythonDartProbeRuntime
 
 
 class ProviderAbstractionBoundaryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.repository_root = Path(__file__).resolve().parents[3]
-        self.inspector: ProviderContractProbe = ProviderContractInspector(
-            self.repository_root,
-            runtime=PythonDartProbeRuntime(self.repository_root),
-        )
+        self.inspector: ProviderContractProbe = create_provider_contract_probe(self.repository_root)
 
     def test_repository_depends_on_neutral_session_and_capability_flags(self) -> None:
         result = self.inspector.inspect()

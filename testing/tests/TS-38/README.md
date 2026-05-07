@@ -7,7 +7,7 @@ This test verifies the repository abstraction boundary through a Dart probe that
 3. Reads the repository's `ProviderSession` contract from the repository instance.
 4. Verifies the neutral session fields and capability flags through that contract.
 
-The Python test remains the entrypoint for CI, but it delegates the product-facing assertion to the Dart probe via `testing/core/interfaces/provider_contract_probe.py`.
+The Python test remains the entrypoint for CI, but it delegates the product-facing assertion to the Dart probe via `testing/core/interfaces/provider_contract_probe.py` and component-layer wiring in `testing/components/services/provider_contract_inspector.py`.
 
 ## Install dependencies
 

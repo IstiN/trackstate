@@ -25,3 +25,12 @@ class ProviderContractInspector(ProviderContractProbe):
             run_output=execution.run_output,
             session_payload=execution.session_payload,
         )
+
+
+def create_provider_contract_probe(repository_root: Path) -> ProviderContractProbe:
+    from testing.frameworks.python.dart_probe_runtime import PythonDartProbeRuntime
+
+    return ProviderContractInspector(
+        repository_root,
+        runtime=PythonDartProbeRuntime(repository_root),
+    )
