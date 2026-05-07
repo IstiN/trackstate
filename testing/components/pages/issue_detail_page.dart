@@ -6,7 +6,9 @@ class IssueDetailPage {
 
   final TestDriver driver;
 
-  Future<void> openSearch() => driver.tapSemanticsLabel(RegExp('JQL Search'));
+  static final RegExp _searchPanelLabel = RegExp('^JQL Search\$');
+
+  Future<void> openSearch() => driver.tapText('JQL Search');
 
   Future<void> openIssue(String issueKey, String issueSummary) async {
     await openSearch();
@@ -14,7 +16,10 @@ class IssueDetailPage {
   }
 
   Future<void> selectIssue(String issueKey, String issueSummary) =>
-      driver.tapText(issueSummary);
+      driver.tapSemanticsLabel(
+        openIssueLink(issueKey, issueSummary),
+        within: _searchPanelLabel,
+      );
 
   Pattern openIssueLink(String issueKey, String issueSummary) => RegExp(
     '^Open ${RegExp.escape(issueKey)} ${RegExp.escape(issueSummary)}\$',
@@ -27,33 +32,40 @@ class IssueDetailPage {
       driver.hasSemanticsLabel(issueDetailLabel(issueKey));
 
   bool showsIssueLink(String issueKey, String issueSummary) =>
-      driver.hasSemanticsLabel(openIssueLink(issueKey, issueSummary));
+      driver.hasSemanticsLabel(
+        openIssueLink(issueKey, issueSummary),
+        within: _searchPanelLabel,
+      );
 
-  bool showsIssueKey(String issueKey) => driver.hasText(issueKey);
+  bool showsIssueKey(String issueKey) =>
+      driver.hasText(issueKey, within: issueDetailLabel(issueKey));
 
-  bool showsSummary(String summary) => driver.hasText(summary);
+  bool showsSummary(String issueKey, String summary) =>
+      driver.hasText(summary, within: issueDetailLabel(issueKey));
 
-  bool showsAcceptanceCriterion(String criterion) => driver.hasText(criterion);
+  bool showsAcceptanceCriterion(String issueKey, String criterion) =>
+      driver.hasText(criterion, within: issueDetailLabel(issueKey));
 
-  ActionAvailability get transitionAction =>
-      driver.getActionAvailability('Transition');
+  ActionAvailability transitionAction(String issueKey) => driver
+      .getActionAvailability('Transition', within: issueDetailLabel(issueKey));
 
-  ActionAvailability get editAction => driver.getActionAvailability('Edit');
+  ActionAvailability editAction(String issueKey) =>
+      driver.getActionAvailability('Edit', within: issueDetailLabel(issueKey));
 
-  ActionAvailability get commentAction =>
-      driver.getActionAvailability('Comments');
+  ActionAvailability commentAction(String issueKey) => driver
+      .getActionAvailability('Comments', within: issueDetailLabel(issueKey));
 
-  bool get hasReadOnlyExplanation => driver.hasAnyMessage([
+  bool hasReadOnlyExplanation(String issueKey) => driver.hasAnyMessage([
     RegExp('permission required', caseSensitive: false),
     RegExp('write access', caseSensitive: false),
     RegExp('write permission', caseSensitive: false),
     RegExp('read[- ]only (repository|session|access)', caseSensitive: false),
-  ]);
+  ], within: issueDetailLabel(issueKey));
 
-  String describeObservedState() => [
-    transitionAction.describe(),
-    editAction.describe(),
-    commentAction.describe(),
-    'readOnlyExplanationVisible=$hasReadOnlyExplanation',
+  String describeObservedState(String issueKey) => [
+    transitionAction(issueKey).describe(),
+    editAction(issueKey).describe(),
+    commentAction(issueKey).describe(),
+    'readOnlyExplanationVisible=${hasReadOnlyExplanation(issueKey)}',
   ].join(', ');
 }
