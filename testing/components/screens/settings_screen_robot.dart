@@ -22,6 +22,10 @@ class SettingsScreenRobot {
   Finder get workflowCard => find.text('Workflow');
   Finder get fieldsCard => find.text('Fields');
   Finder get languageCard => find.text('Language');
+  Finder get repositoryAccessSection => find.ancestor(
+    of: find.text('Repository access'),
+    matching: find.byType(Column),
+  ).first;
   Finder get localGitControl => find.ancestor(
     of: find.text('Local Git'),
     matching: find.bySubtype<ButtonStyleButton>(),
@@ -34,9 +38,12 @@ class SettingsScreenRobot {
     of: find.text('Connected'),
     matching: find.bySubtype<ButtonStyleButton>(),
   );
-  Finder get settingsConnectedControl => find.ancestor(
-    of: find.text('Connected').last,
-    matching: find.bySubtype<ButtonStyleButton>(),
+  Finder get settingsConnectedControl => find.descendant(
+    of: repositoryAccessSection,
+    matching: find.ancestor(
+      of: find.text('Connected'),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    ),
   );
   Finder get searchIssuesField => find.byWidgetPredicate(
     (widget) =>
