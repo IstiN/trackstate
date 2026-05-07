@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -93,14 +94,26 @@ class SettingsScreenRobot {
   }
 
   String? focusedLabel(Map<String, Finder> candidates) {
+    final focusedSemantics = find.semantics.byPredicate(
+      (node) => node.flagsCollection.isFocused,
+      describeMatch: (_) => 'focused semantics node',
+    );
+    if (focusedSemantics.evaluate().isEmpty) {
+      return null;
+    }
     for (final entry in candidates.entries) {
       final matches = entry.value.evaluate().length;
       if (matches == 0) {
         continue;
       }
       for (var index = 0; index < matches; index++) {
-        final semantics = tester.getSemantics(entry.value.at(index));
-        if (semantics.flagsCollection.isFocused) {
+        final candidateSemantics = _semanticsFinderFor(entry.value.at(index));
+        final ownsFocusedNode = find.semantics.descendant(
+          of: candidateSemantics,
+          matching: focusedSemantics,
+          matchRoot: true,
+        );
+        if (ownsFocusedNode.evaluate().isNotEmpty) {
           return entry.key;
         }
       }
@@ -166,6 +179,14 @@ class SettingsScreenRobot {
 
   String semanticsLabelOf(Finder finder) {
     return tester.getSemantics(finder.first).label;
+  }
+
+  FinderBase<SemanticsNode> _semanticsFinderFor(Finder finder) {
+    final semanticsId = tester.getSemantics(finder).id;
+    return find.semantics.byPredicate(
+      (node) => node.id == semanticsId,
+      describeMatch: (_) => 'semantics node for $finder',
+    );
   }
 
   List<String> visibleTexts() {
