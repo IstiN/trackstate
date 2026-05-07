@@ -1,13 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../components/pages/settings_provider_page.dart';
+import 'settings_provider_test_context.dart';
 
 void main() {
   testWidgets('TS-45: Settings provider selector shows Local Git stacked config fields', (
     tester,
   ) async {
     final semantics = tester.ensureSemantics();
-    final settingsPage = SettingsProviderPage.create(tester);
+    final settingsPage = createSettingsProviderPage(tester);
     try {
       await settingsPage.open();
       final initialState = settingsPage.captureState();

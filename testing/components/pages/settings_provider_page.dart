@@ -1,14 +1,8 @@
-import 'package:flutter_test/flutter_test.dart';
-
 import '../../core/interfaces/settings_provider_driver.dart';
 import '../../core/models/settings_provider_state.dart';
-import '../../frameworks/flutter/trackstate_widget_framework.dart';
 
 class SettingsProviderPage {
-  SettingsProviderPage._(this._driver);
-
-  factory SettingsProviderPage.create(WidgetTester tester) =>
-      SettingsProviderPage._(TrackStateWidgetFramework(tester));
+  SettingsProviderPage(this._driver);
 
   final SettingsProviderDriver _driver;
 
