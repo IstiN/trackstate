@@ -2,10 +2,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 
 import '../../components/screens/trackstate_app_screen.dart';
-import '../../components/services/dirty_local_issue_save_component.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'support/ts41_dirty_local_issue_component_factory.dart';
 
 void main() {
   setUp(() {
@@ -17,12 +17,7 @@ void main() {
     () async {
       final fixture = await LocalTrackStateFixture.create();
       addTearDown(fixture.dispose);
-      final saveComponent = DirtyLocalIssueSaveComponent.create(
-        provider: fixture.provider,
-        issueKey: LocalTrackStateFixture.issueKey,
-        issuePath: LocalTrackStateFixture.issuePath,
-        originalDescription: LocalTrackStateFixture.originalDescription,
-      );
+      final saveComponent = createTs41DirtyLocalIssueSaveComponent(fixture);
 
       await fixture.makeDirtyMainFileChange();
 
@@ -42,7 +37,7 @@ void main() {
   );
 
   testWidgets(
-    'TS-41 real app description flow is blocked because TrackState issue detail is read-only',
+    'TS-41 surfaces actionable dirty-save guidance from the real app description flow',
     (tester) async {
       final TrackStateAppComponent screen = TrackStateAppScreen(tester);
       final fixture = await LocalTrackStateFixture.create();
@@ -61,7 +56,18 @@ void main() {
         LocalTrackStateFixture.issueKey,
         'In Progress',
       );
+      await screen.enterIssueDetailDescription(
+        LocalTrackStateFixture.issueKey,
+        LocalTrackStateFixture.updatedDescription,
+      );
+      await screen.tapIssueDetailAction(
+        LocalTrackStateFixture.issueKey,
+        'Save',
+      );
+      await screen.expectTextVisible('commit');
+      await screen.expectTextVisible('stash');
+      await screen.expectTextVisible('clean');
     },
-    skip: true,
+    timeout: const Timeout(Duration(seconds: 20)),
   );
 }

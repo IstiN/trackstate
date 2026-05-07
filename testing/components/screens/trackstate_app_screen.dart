@@ -1,5 +1,7 @@
 import 'dart:ui' show Size;
 
+import 'package:flutter/material.dart'
+    show EditableText, TextField, TextFormField;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
@@ -22,6 +24,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   Finder _statusColumn(String label) =>
       find.bySemanticsLabel(RegExp('${RegExp.escape(label)} column'));
+
+  Finder _issueDetailEditor(String key) => find.descendant(
+    of: _issueDetail(key),
+    matching: find.byWidgetPredicate(
+      (widget) =>
+          widget is EditableText ||
+          widget is TextField ||
+          widget is TextFormField,
+      description: 'editable issue detail field',
+    ),
+  );
 
   @override
   Future<void> pump(TrackStateRepository repository) async {
@@ -91,6 +104,32 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final match = _text(text);
     await _waitForVisible(match);
     expect(match, findsWidgets);
+  }
+
+  @override
+  Future<void> enterIssueDetailDescription(String key, String value) async {
+    final editor = _issueDetailEditor(key);
+    await _waitForVisible(editor);
+    await tester.enterText(editor.first, value);
+    await _pumpFrames();
+  }
+
+  @override
+  Future<void> tapIssueDetailAction(String key, String label) async {
+    final detail = _issueDetail(key);
+    await expectIssueDetailVisible(key);
+
+    var action = find.descendant(of: detail, matching: find.text(label));
+    if (action.evaluate().isEmpty) {
+      action = find.descendant(
+        of: detail,
+        matching: find.bySemanticsLabel(RegExp(RegExp.escape(label))),
+      );
+    }
+
+    await _waitForVisible(action);
+    await tester.tap(action.first);
+    await _pumpFrames();
   }
 
   @override

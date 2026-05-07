@@ -5,5 +5,5 @@ platform: linux
 dependencies: []
 notes:
   - Verifies the local Git adapter blocks a save when issue main.md has dirty local edits.
-  - Keeps the provider-backed description save assertion as the live AC3 signal.
-  - Leaves the real TrackStateApp description-edit path skipped because the issue detail is still read-only in this branch and on main.
+  - Keeps the provider-backed description save assertion as a direct AC3 check.
+  - Uses the real TrackStateApp issue-detail flow to attempt description edit/save and verify visible commit/stash/clean guidance.
