@@ -20,18 +20,11 @@ class SettingsScreenRobot {
   Finder get workflowCard => find.text('Workflow');
   Finder get fieldsCard => find.text('Fields');
   Finder get languageCard => find.text('Language');
-  Finder get localGitControl => find.ancestor(
-    of: find.text('Local Git'),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
-  Finder get connectGitHubControl => find.ancestor(
-    of: find.text('Connect GitHub'),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
-  Finder get connectedControl => find.ancestor(
-    of: find.text('Connected'),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
+  Finder get repositoryAccessSection =>
+      find.bySemanticsLabel(RegExp('Repository access'));
+  Finder get localGitControl => providerControl('Local Git');
+  Finder get connectGitHubControl => providerControl('Connect GitHub');
+  Finder get connectedControl => providerControl('Connected');
   Finder get searchIssuesField => find.byWidgetPredicate(
     (widget) =>
         widget is TextField &&
@@ -58,6 +51,14 @@ class SettingsScreenRobot {
     await tester.tap(settingsNavigation);
     await tester.pumpAndSettle();
   }
+
+  Finder providerControl(String label) => find.descendant(
+    of: repositoryAccessSection,
+    matching: find.ancestor(
+      of: find.text(label),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    ),
+  );
 
   Future<void> clearFocus() async {
     FocusManager.instance.primaryFocus?.unfocus();
@@ -179,6 +180,19 @@ class SettingsScreenRobot {
 
   String semanticsLabelOf(Finder finder) {
     return tester.getSemantics(finder.first).label;
+  }
+
+  List<String> visibleProviderLabels(Iterable<String> candidateLabels) {
+    final rows = <({String label, double top})>[];
+    for (final label in candidateLabels) {
+      final control = providerControl(label);
+      if (control.evaluate().isEmpty) {
+        continue;
+      }
+      rows.add((label: label, top: tester.getRect(control.first).top));
+    }
+    rows.sort((left, right) => left.top.compareTo(right.top));
+    return rows.map((row) => row.label).toList();
   }
 
   FinderBase<SemanticsNode> _semanticsFinderFor(Finder finder) {
