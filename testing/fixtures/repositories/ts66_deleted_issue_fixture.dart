@@ -70,15 +70,40 @@ class Ts66DeletedIssueFixture {
   }
 
   Future<void> deleteIssueViaRepositoryService() async {
-    final (repository: repository, snapshot: _) =
+    final (repository: repository, snapshot: snapshot) =
         await _createConnectedRepositoryService();
-
-    throw StateError(
-      'TS-66 requires a real repository-service delete operation, but '
-      '${repository.runtimeType} does not expose deleteIssue for '
-      '$deletedIssueKey. The current repository API only supports '
-      'loadSnapshot, searchIssues, connect, and updateIssueStatus.',
+    final deletedIssue = snapshot.issues.singleWhere(
+      (issue) => issue.key == deletedIssueKey,
+      orElse: () => throw StateError(
+        'TS-66 fixture expected $deletedIssueKey to exist before deletion.',
+      ),
     );
+
+    final dynamicRepository = repository as dynamic;
+    try {
+      final result = dynamicRepository.deleteIssue(deletedIssue);
+      if (result is Future) {
+        await result;
+      }
+      return;
+    } on NoSuchMethodError {
+      // Fall through to the contract error below.
+    }
+
+    try {
+      final result = dynamicRepository.deleteIssue(deletedIssueKey);
+      if (result is Future) {
+        await result;
+      }
+      return;
+    } on NoSuchMethodError {
+      throw StateError(
+        'TS-66 requires a real repository-service delete operation, but '
+        '${repository.runtimeType} does not expose deleteIssue for '
+        '$deletedIssueKey. The current repository API only supports '
+        'loadSnapshot, searchIssues, connect, and updateIssueStatus.',
+      );
+    }
   }
 
   Future<void> _seedRepository() async {
