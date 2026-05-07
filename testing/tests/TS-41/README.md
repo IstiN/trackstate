@@ -7,7 +7,9 @@ The automation covers the exact provider-backed write path that exists in this c
 2. dirty `DEMO/DEMO-1/main.md` outside TrackState
 3. attempt the exact provider-backed description write path
 
-The current app surface in this checkout still renders the issue description as read-only `Text(issue.description)` and exposes no issue-detail `Edit` / `Save` path to automate.
+The ticket wiring now follows the shared testing layers via a reusable fixture under `testing/fixtures/`.
+
+The current app surface in this checkout still renders the issue description as read-only `Text(issue.description)` and exposes no issue-detail `Edit` / `Save` path to automate from `testing/` alone.
 
 ## Install dependencies
 

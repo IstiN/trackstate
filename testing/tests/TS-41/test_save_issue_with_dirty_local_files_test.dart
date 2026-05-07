@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
-import 'support/ts41_dirty_local_issue_component_factory.dart';
+import '../../fixtures/dirty_local_issue_save_component_fixture.dart';
 
 void main() {
   setUp(() {
@@ -14,7 +14,7 @@ void main() {
     () async {
       final fixture = await LocalTrackStateFixture.create();
       addTearDown(fixture.dispose);
-      final saveComponent = createTs41DirtyLocalIssueSaveComponent(fixture);
+      final saveComponent = createDirtyLocalIssueSaveComponentFixture(fixture);
 
       await fixture.makeDirtyMainFileChange();
 
