@@ -16,7 +16,7 @@
 
 - Flutter SDK 3.35.3 available at `/tmp/flutter/bin/flutter` or on `PATH`
 - No extra environment variables are required
-- The test creates a temporary local Git repository that contains only the moved `PROJECT-1` path plus regenerated `.trackstate/index/issues.json` and `.trackstate/index/hierarchy.json`
+- The test creates a temporary local Git repository with a valid legacy index, moves `PROJECT-1` to `PROJECT/NEW-PARENT/PROJECT-1/`, rebuilds `.trackstate/index/issues.json` and `.trackstate/index/hierarchy.json`, and then verifies lookup by key through the rebuilt artifacts
 
 ## Expected passing output
 

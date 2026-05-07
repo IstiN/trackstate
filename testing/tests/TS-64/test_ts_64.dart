@@ -5,7 +5,7 @@ import '../../fixtures/repositories/ts64_moved_issue_fixture.dart';
 
 void main() {
   testWidgets(
-    'TS-64 resolves a moved issue by key from the regenerated repository index',
+    'TS-64 resolves a moved issue by key after the fixture moves it and rebuilds repository indexes',
     (tester) async {
       final semantics = tester.ensureSemantics();
       final screen = TrackStateAppScreen(tester);
@@ -17,6 +17,12 @@ void main() {
           throw StateError('TS-64 fixture creation did not complete.');
         }
 
+        final rebuiltArtifacts = await tester.runAsync(
+          fixture.observeRebuiltIndexes,
+        );
+        if (rebuiltArtifacts == null) {
+          throw StateError('TS-64 rebuilt-index observation did not complete.');
+        }
         final resolution = await tester.runAsync(
           () => fixture!.service.resolveIssueByKey(
             Ts64MovedIssueFixture.movedIssueKey,
@@ -25,7 +31,9 @@ void main() {
         if (resolution == null) {
           throw StateError('TS-64 key-resolution probe did not complete.');
         }
-        final legacyIssueExists = await tester.runAsync(fixture.legacyIssueExists);
+        final legacyIssueExists = await tester.runAsync(
+          fixture.legacyIssueExists,
+        );
 
         expect(
           legacyIssueExists,
@@ -34,10 +42,46 @@ void main() {
               'The legacy PROJECT-1 path should stay absent so the test proves the lookup depends on the regenerated index entry.',
         );
         expect(
+          rebuiltArtifacts.issueIndexPath,
+          Ts64MovedIssueFixture.movedIssuePath,
+          reason:
+              'Rebuilding issues.json after the move should rewrite PROJECT-1 to PROJECT/NEW-PARENT/PROJECT-1/main.md.',
+        );
+        expect(
+          rebuiltArtifacts.issueIndexParentPath,
+          Ts64MovedIssueFixture.parentIssuePath,
+          reason:
+              'The rebuilt issues index should point PROJECT-1 at the new parent path so AC3 matches the moved filesystem structure.',
+        );
+        expect(
+          rebuiltArtifacts.issueIndexParentChildKeys,
+          contains(Ts64MovedIssueFixture.movedIssueKey),
+          reason:
+              'The rebuilt issues index should still list PROJECT-1 under PROJECT-9 after the directory move.',
+        );
+        expect(
+          rebuiltArtifacts.hierarchyPath,
+          Ts64MovedIssueFixture.movedIssuePath,
+          reason:
+              'Rebuilding hierarchy.json should point PROJECT-1 at the moved directory instead of the legacy path.',
+        );
+        expect(
+          rebuiltArtifacts.hierarchyParentChildKeys,
+          contains(Ts64MovedIssueFixture.movedIssueKey),
+          reason:
+              'The rebuilt hierarchy should keep PROJECT-1 nested under PROJECT-9 after the move.',
+        );
+        expect(
+          rebuiltArtifacts.legacyPathReferenced,
+          isFalse,
+          reason:
+              'Rebuilt repository index artifacts should stop referencing the former PROJECT/PROJECT-1 path.',
+        );
+        expect(
           resolution.indexPath,
           Ts64MovedIssueFixture.movedIssuePath,
           reason:
-              'Resolving PROJECT-1 should use the updated path written to .trackstate/index/issues.json after the move.',
+              'Resolving PROJECT-1 should use the updated path written to .trackstate/index/issues.json after the move and rebuild.',
         );
         expect(
           resolution.storagePath,
@@ -73,6 +117,23 @@ void main() {
         await screen.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
         screen.expectLocalRuntimeChrome();
         await screen.openSection('Search');
+        await screen.expectIssueSearchResultVisible(
+          Ts64MovedIssueFixture.movedIssueKey,
+          Ts64MovedIssueFixture.movedIssueSummary,
+        );
+        await screen.expectIssueSearchResultVisible(
+          Ts64MovedIssueFixture.siblingIssueKey,
+          Ts64MovedIssueFixture.siblingIssueSummary,
+        );
+        await screen.searchIssues(Ts64MovedIssueFixture.movedIssueKey);
+        await screen.expectIssueSearchResultVisible(
+          Ts64MovedIssueFixture.movedIssueKey,
+          Ts64MovedIssueFixture.movedIssueSummary,
+        );
+        screen.expectIssueSearchResultAbsent(
+          Ts64MovedIssueFixture.siblingIssueKey,
+          Ts64MovedIssueFixture.siblingIssueSummary,
+        );
         await screen.openIssue(
           Ts64MovedIssueFixture.movedIssueKey,
           Ts64MovedIssueFixture.movedIssueSummary,
