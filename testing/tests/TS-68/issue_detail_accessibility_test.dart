@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../components/screens/issue_detail_accessibility_robot.dart';
-import '../../core/utils/color_contrast.dart';
+import '../../core/interfaces/issue_detail_accessibility_screen.dart';
 import '../../fixtures/issue_detail_accessibility_screen_fixture.dart';
 
 void main() {
@@ -17,23 +16,23 @@ void main() {
           'Use repository indexes for key lookup instead of full-tree scans.';
 
       try {
-        final IssueDetailAccessibilityRobot robot =
+        final IssueDetailAccessibilityScreenHandle screen =
             await launchIssueDetailAccessibilityFixture(tester);
-        await robot.openSearch();
-        await robot.openIssue(issueKey, issueSummary);
+        await screen.openSearch();
+        await screen.selectIssue(issueKey, issueSummary);
 
         expect(
-          robot.issueDetail(issueKey),
-          findsOneWidget,
+          screen.showsIssueDetail(issueKey),
+          isTrue,
           reason:
               'The test fixture must open the TRACK-12 issue detail before accessibility can be checked.',
         );
 
-        final visibleTexts = robot.visibleTextsWithinIssueDetail(issueKey);
-        final semanticsTraversal = robot.semanticsLabelsInIssueDetailTraversal(
+        final visibleTexts = screen.visibleTextsWithinIssueDetail(issueKey);
+        final semanticsTraversal = screen.semanticsLabelsInIssueDetailTraversal(
           issueKey,
         );
-        final commentActionLabels = robot.commentActionLabels(issueKey);
+        final commentActionLabels = screen.commentActionLabels(issueKey);
 
         for (final requiredText in [
           issueKey,
@@ -118,13 +117,15 @@ void main() {
           );
         }
 
-        final inProgressContrast = contrastRatio(
-          robot.colors().accent,
-          robot.colors().accentSoft,
+        final inProgressContrast = screen.observeStatusBadgeContrast(
+          issueKey,
+          'In Progress',
         );
-        if (inProgressContrast < 4.5) {
+        if (inProgressContrast.contrastRatio < 4.5) {
           failures.add(
-            'The visible In Progress status badge contrast was ${inProgressContrast.toStringAsFixed(2)}:1, below the required WCAG AA 4.5:1 threshold.',
+            'The visible In Progress status badge contrast was '
+            '${inProgressContrast.contrastRatio.toStringAsFixed(2)}:1 '
+            '(${inProgressContrast.describe()}), below the required WCAG AA 4.5:1 threshold.',
           );
         }
 

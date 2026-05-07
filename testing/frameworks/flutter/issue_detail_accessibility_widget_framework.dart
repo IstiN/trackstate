@@ -5,6 +5,7 @@ import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../components/screens/issue_detail_accessibility_robot.dart';
+import '../../core/interfaces/issue_detail_accessibility_screen.dart';
 
 class IssueDetailAccessibilityWidgetFramework {
   IssueDetailAccessibilityWidgetFramework(
@@ -17,7 +18,7 @@ class IssueDetailAccessibilityWidgetFramework {
   final TrackStateRepository repository;
   final Map<String, Object> sharedPreferences;
 
-  Future<IssueDetailAccessibilityRobot> launch() async {
+  Future<IssueDetailAccessibilityScreenHandle> launch() async {
     SharedPreferences.setMockInitialValues(sharedPreferences);
     tester.view.physicalSize = const Size(1440, 960);
     tester.view.devicePixelRatio = 1;
@@ -35,7 +36,7 @@ class IssueDetailAccessibilityWidgetFramework {
   }
 }
 
-Future<IssueDetailAccessibilityRobot>
+Future<IssueDetailAccessibilityScreenHandle>
 launchIssueDetailAccessibilityWidgetScreen(
   WidgetTester tester, {
   TrackStateRepository repository = const DemoTrackStateRepository(),
