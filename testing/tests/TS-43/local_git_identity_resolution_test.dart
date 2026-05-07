@@ -22,12 +22,10 @@ void main() {
         screen.expectLocalRuntimeChrome();
 
         expect(screen.currentViewModel().usesLocalPersistence, isTrue);
-        screen.expectInitials('LT');
-
-        await screen.openJqlSearch();
-        screen.expectVisibleLocalAuthorIdentity(
+        screen.expectResolvedLocalAuthorIdentity(
           userName: fixture!.userName,
           userEmail: fixture!.userEmail,
+          initials: 'LT',
         );
 
         await screen.openRepositoryAccess();

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
@@ -17,12 +18,22 @@ class TrackStateAppScreen {
   Finder get localGitAccessButton =>
       find.bySemanticsLabel(RegExp('Local Git')).first;
 
-  Finder get jqlSearchButton =>
-      find.bySemanticsLabel(RegExp('JQL Search')).first;
+  Finder get topBar => find.ancestor(
+    of: localGitAccessButton,
+    matching: find.byType(Row),
+  ).first;
 
   Finder initialsBadge(String initials) => find.descendant(
     of: find.byType(CircleAvatar),
     matching: find.text(initials),
+  );
+
+  Finder profileInitialsBadge(String initials) => find.descendant(
+    of: topBar,
+    matching: find.descendant(
+      of: find.byType(CircleAvatar),
+      matching: find.text(initials),
+    ),
   );
 
   Future<void> pumpApp(TrackStateRepository repository) async {
@@ -52,14 +63,17 @@ class TrackStateAppScreen {
     await tester.pumpAndSettle();
   }
 
-  Future<void> openJqlSearch() async {
-    await tester.tap(jqlSearchButton);
-    await tester.pumpAndSettle();
-  }
-
   TrackerViewModel currentViewModel() {
     final dynamic state = tester.state(find.byType(TrackStateApp));
     return state.viewModel as TrackerViewModel;
+  }
+
+  RepositoryUser resolvedUser() {
+    final user = currentViewModel().connectedUser;
+    if (user == null) {
+      throw StateError('Expected a resolved repository user.');
+    }
+    return user;
   }
 
   void expectLocalRuntimeChrome() {
@@ -68,17 +82,15 @@ class TrackStateAppScreen {
     expect(find.text('Connect GitHub'), findsNothing);
   }
 
-  void expectInitials(String initials) {
-    expect(initialsBadge(initials), findsOneWidget);
-  }
-
-  void expectVisibleLocalAuthorIdentity({
+  void expectResolvedLocalAuthorIdentity({
     required String userName,
     required String userEmail,
+    required String initials,
   }) {
-    expect(find.text(userName), findsWidgets);
-    expect(find.text(userEmail), findsWidgets);
-    expect(find.textContaining('$userName <$userEmail>'), findsOneWidget);
+    final user = resolvedUser();
+    expect(user.displayName, userName);
+    expect(user.login, userEmail);
+    expect(profileInitialsBadge(initials), findsOneWidget);
   }
 
   void expectLocalRuntimeDialog({
