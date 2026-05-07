@@ -843,15 +843,74 @@ class _Hierarchy extends StatelessWidget {
   }
 }
 
-class _Settings extends StatelessWidget {
+class _Settings extends StatefulWidget {
   const _Settings({required this.viewModel});
 
   final TrackerViewModel viewModel;
 
   @override
+  State<_Settings> createState() => _SettingsState();
+}
+
+class _SettingsState extends State<_Settings> {
+  late _SettingsProviderSelection _selectedProvider;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedProvider = _initialProvider(widget.viewModel);
+  }
+
+  @override
+  void didUpdateWidget(covariant _Settings oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.viewModel.supportsGitHubAuth &&
+        _selectedProvider != _SettingsProviderSelection.localGit) {
+      _selectedProvider = _SettingsProviderSelection.localGit;
+    }
+  }
+
+  _SettingsProviderSelection _initialProvider(TrackerViewModel viewModel) {
+    return viewModel.usesLocalPersistence
+        ? _SettingsProviderSelection.localGit
+        : _SettingsProviderSelection.hosted;
+  }
+
+  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final project = viewModel.project!;
+    final project = widget.viewModel.project!;
+    final hostedLabel = _repositoryAccessLabel(l10n, widget.viewModel);
+    final selectorChildren = <Widget>[
+      if (widget.viewModel.supportsGitHubAuth) ...[
+        _SettingsProviderButton(
+          label: hostedLabel,
+          selected: _selectedProvider == _SettingsProviderSelection.hosted,
+          onPressed: () {
+            setState(() => _selectedProvider = _SettingsProviderSelection.hosted);
+          },
+        ),
+        if (_selectedProvider == _SettingsProviderSelection.hosted) ...[
+          const SizedBox(height: 12),
+          _HostedProviderConfiguration(
+            viewModel: widget.viewModel,
+            providerLabel: hostedLabel,
+          ),
+        ],
+        const SizedBox(height: 12),
+      ],
+      _SettingsProviderButton(
+        label: l10n.repositoryAccessLocalGit,
+        selected: _selectedProvider == _SettingsProviderSelection.localGit,
+        onPressed: () {
+          setState(() => _selectedProvider = _SettingsProviderSelection.localGit);
+        },
+      ),
+      if (_selectedProvider == _SettingsProviderSelection.localGit) ...[
+        const SizedBox(height: 12),
+        _LocalGitConfiguration(project: project),
+      ],
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -859,6 +918,18 @@ class _Settings extends StatelessWidget {
           title: l10n.projectSettings,
           subtitle: project.repository,
         ),
+        _SurfaceCard(
+          semanticLabel: l10n.repositoryAccessSettings,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SectionTitle(l10n.repositoryAccessSettings),
+              const SizedBox(height: 8),
+              ...selectorChildren,
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
         LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 860;
@@ -889,6 +960,8 @@ class _Settings extends StatelessWidget {
     );
   }
 }
+
+enum _SettingsProviderSelection { hosted, localGit }
 
 class _IssueDetail extends StatelessWidget {
   const _IssueDetail({required this.issue});
@@ -1363,6 +1436,139 @@ class _ConfigCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SettingsProviderButton extends StatelessWidget {
+  const _SettingsProviderButton({
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final style = selected
+        ? FilledButton.styleFrom(
+            backgroundColor: colors.primary,
+            foregroundColor: const Color(0xFFFAF8F4),
+            alignment: Alignment.centerLeft,
+            minimumSize: const Size.fromHeight(52),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          )
+        : OutlinedButton.styleFrom(
+            foregroundColor: colors.text,
+            alignment: Alignment.centerLeft,
+            minimumSize: const Size.fromHeight(52),
+            side: BorderSide(color: colors.border),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          );
+
+    return Semantics(
+      container: true,
+      button: true,
+      selected: selected,
+      label: label,
+      excludeSemantics: true,
+      child: SizedBox(
+        width: double.infinity,
+        child: selected
+            ? FilledButton(onPressed: onPressed, style: style, child: Text(label))
+            : OutlinedButton(
+                onPressed: onPressed,
+                style: style,
+                child: Text(label),
+              ),
+      ),
+    );
+  }
+}
+
+class _HostedProviderConfiguration extends StatelessWidget {
+  const _HostedProviderConfiguration({
+    required this.viewModel,
+    required this.providerLabel,
+  });
+
+  final TrackerViewModel viewModel;
+  final String providerLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextFormField(
+          initialValue: '',
+          obscureText: true,
+          decoration: InputDecoration(
+            labelText: l10n.fineGrainedToken,
+            helperText: l10n.fineGrainedTokenHelper,
+          ),
+        ),
+        if (viewModel.connectedUser != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            l10n.githubConnected(
+              viewModel.connectedUser!.login,
+              viewModel.project!.repository,
+            ),
+          ),
+        ] else if (providerLabel != l10n.connectGitHub) ...[
+          const SizedBox(height: 12),
+          Text(providerLabel),
+        ],
+      ],
+    );
+  }
+}
+
+class _LocalGitConfiguration extends StatelessWidget {
+  const _LocalGitConfiguration({required this.project});
+
+  final ProjectConfig project;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Column(
+      children: [
+        _SettingsValueField(
+          label: l10n.repositoryPath,
+          value: project.repository,
+        ),
+        const SizedBox(height: 12),
+        _SettingsValueField(label: l10n.writeBranch, value: project.branch),
+      ],
+    );
+  }
+}
+
+class _SettingsValueField extends StatelessWidget {
+  const _SettingsValueField({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      initialValue: value,
+      readOnly: true,
+      decoration: InputDecoration(labelText: label),
     );
   }
 }
