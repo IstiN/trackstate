@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
+import 'dart:ui' show Tristate;
 
 class SettingsScreenRobot {
   SettingsScreenRobot(this.tester);
@@ -20,18 +21,9 @@ class SettingsScreenRobot {
   Finder get workflowCard => find.text('Workflow');
   Finder get fieldsCard => find.text('Fields');
   Finder get languageCard => find.text('Language');
-  Finder get localGitControl => find.ancestor(
-    of: find.text('Local Git'),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
-  Finder get connectGitHubControl => find.ancestor(
-    of: find.text('Connect GitHub'),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
-  Finder get connectedControl => find.ancestor(
-    of: find.text('Connected'),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
+  Finder get localGitControl => _settingsProviderButton('Local Git');
+  Finder get connectGitHubControl => _settingsProviderButton('Connect GitHub');
+  Finder get connectedControl => _settingsProviderButton('Connected');
   Finder get searchIssuesField => find.byWidgetPredicate(
     (widget) =>
         widget is TextField &&
@@ -44,13 +36,13 @@ class SettingsScreenRobot {
   Future<void> pumpApp({
     required TrackStateRepository repository,
     Map<String, Object> sharedPreferences = const {},
+    Widget Function(Widget child)? appWrapper,
   }) async {
     SharedPreferences.setMockInitialValues(sharedPreferences);
     tester.view.physicalSize = const Size(1440, 960);
     tester.view.devicePixelRatio = 1;
-    await tester.pumpWidget(
-      TrackStateApp(key: UniqueKey(), repository: repository),
-    );
+    final app = TrackStateApp(key: UniqueKey(), repository: repository);
+    await tester.pumpWidget(appWrapper == null ? app : appWrapper(app));
     await tester.pumpAndSettle();
   }
 
@@ -95,7 +87,8 @@ class SettingsScreenRobot {
 
   String? focusedLabel(Map<String, Finder> candidates) {
     final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.flagsCollection.isFocused,
+      (node) =>
+          node.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue,
       describeMatch: (_) => 'focused semantics node',
     );
     if (focusedSemantics.evaluate().isEmpty) {
@@ -187,6 +180,28 @@ class SettingsScreenRobot {
       (node) => node.id == semanticsId,
       describeMatch: (_) => 'semantics node for $finder',
     );
+  }
+
+  Finder _settingsProviderButton(String label) {
+    final buttons = find.ancestor(
+      of: find.text(label),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    final matches = buttons.evaluate().length;
+    if (matches == 0) {
+      return buttons;
+    }
+
+    var bestIndex = 0;
+    var bestTop = double.negativeInfinity;
+    for (var index = 0; index < matches; index++) {
+      final top = tester.getRect(buttons.at(index)).top;
+      if (top > bestTop) {
+        bestTop = top;
+        bestIndex = index;
+      }
+    }
+    return buttons.at(bestIndex);
   }
 
   List<String> visibleTexts() {
