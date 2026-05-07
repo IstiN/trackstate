@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.dart';
 
-import '../../components/screens/trackstate_app_screen.dart';
+import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../fixtures/ts65_issue_metadata_fixture.dart';
 
@@ -12,7 +12,9 @@ void main() {
   ) async {
     final fixture = Ts65IssueMetadataFixture.create();
     final snapshot = await fixture.repository.loadSnapshot();
-    final issue = snapshot.issues.singleWhere((entry) => entry.key == 'TRACK-65');
+    final issue = snapshot.issues.singleWhere(
+      (entry) => entry.key == 'TRACK-65',
+    );
 
     expect(
       snapshot.project.statusDefinitions.map((entry) => entry.id),
@@ -68,7 +70,8 @@ void main() {
           'TrackerViewModel should expose the resolved semantic status that drives the localized UI badge.',
     );
 
-    final TrackStateAppComponent screen = TrackStateAppScreen(tester);
+    final TrackStateAppComponent screen = defaultTestingDependencies
+        .createTrackStateAppScreen(tester);
     await screen.pump(fixture.repository);
     await screen.expectTextVisible('JQL Search');
     await screen.openSection('JQL Search');
