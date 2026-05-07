@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shlex
 import subprocess
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -43,14 +45,19 @@ class GitHubCliProjectFramework(ProjectCliProbe):
             json_payload=payload,
         )
 
-    def get_project(self, repository: str, project_path: str) -> CliCommandResult:
-        command = (
-            "gh",
-            "api",
-            f"repos/{repository}/contents/{project_path}",
-            "-H",
-            "Accept: application/vnd.github.raw+json",
+    def get_project(
+        self,
+        repository: str,
+        default_branch: str,
+        project_path: str,
+    ) -> CliCommandResult:
+        endpoint = f"repos/{repository}/contents/{project_path}?ref={default_branch}"
+        command_text = (
+            "set -o pipefail && "
+            f"gh api {shlex.quote(endpoint)} --jq '.content' | "
+            "tr -d '\\n' | base64 --decode"
         )
+        command = ("bash", "-lc", command_text)
         result = self._run(command)
         payload: dict[str, object] | None = None
         if result.succeeded:
@@ -88,7 +95,7 @@ class GitHubCliProjectFramework(ProjectCliProbe):
                 stderr="",
                 json_payload=payload,
             )
-        except Exception as error:
+        except (HTTPError, URLError, json.JSONDecodeError) as error:
             return CliCommandResult(
                 command=command,
                 exit_code=1,

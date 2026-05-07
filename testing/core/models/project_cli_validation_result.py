@@ -11,6 +11,7 @@ class ProjectCliValidationResult:
     upstream_repository: str
     project_path: str
     quick_start_section: str
+    project_template: dict[str, object]
     expected_project: dict[str, object]
     auth_status: CliCommandResult
     viewer_login: CliCommandResult
@@ -23,6 +24,41 @@ class ProjectCliValidationResult:
         if isinstance(self.repository_info.json_payload, dict):
             return self.repository_info.json_payload
         return {}
+
+    @property
+    def template_trackstate(self) -> dict[str, object]:
+        trackstate = self.project_template.get("trackstate")
+        if isinstance(trackstate, dict):
+            return trackstate
+        return {}
+
+    @property
+    def documented_source_repository(self) -> str | None:
+        source_repository = self.template_trackstate.get("sourceRepository")
+        if isinstance(source_repository, str):
+            return source_repository
+        return None
+
+    @property
+    def documented_project_file(self) -> str | None:
+        project_file = self.template_trackstate.get("projectFile")
+        if isinstance(project_file, str):
+            return project_file
+        return None
+
+    @property
+    def documented_config_path(self) -> str | None:
+        config_path = self.template_trackstate.get("configPath")
+        if isinstance(config_path, str):
+            return config_path
+        return None
+
+    @property
+    def documented_default_ref(self) -> str | None:
+        default_ref = self.template_trackstate.get("defaultRef")
+        if isinstance(default_ref, str):
+            return default_ref
+        return None
 
     @property
     def repository_parent(self) -> str | None:

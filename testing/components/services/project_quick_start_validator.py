@@ -24,23 +24,30 @@ class ProjectQuickStartValidator:
         config: ProjectCliValidationConfig,
     ) -> ProjectCliValidationResult:
         quick_start_section = self._read_quick_start_section(config.readme_path)
+        project_template = self._read_project_template(config.project_template_path)
         auth_status = self._probe.auth_status()
         viewer_login = self._probe.viewer_login()
         target_repository = self._resolve_target_repository(config, viewer_login)
         repository_info = self._probe.repository_metadata(target_repository)
         default_branch = self._repository_default_branch(repository_info)
-        project_fetch = self._probe.get_project(target_repository, config.project_path)
+        project_path = self._project_path_from_template(project_template, config)
+        project_fetch = self._probe.get_project(
+            target_repository,
+            default_branch,
+            project_path,
+        )
         expected_project_fetch = self._probe.get_raw_project(
             target_repository,
             default_branch,
-            config.project_path,
+            project_path,
         )
         expected_project = self._parse_expected_project(expected_project_fetch)
         return ProjectCliValidationResult(
             target_repository=target_repository,
             upstream_repository=config.upstream_repository,
-            project_path=config.project_path,
+            project_path=project_path,
             quick_start_section=quick_start_section,
+            project_template=project_template,
             expected_project=expected_project,
             auth_status=auth_status,
             viewer_login=viewer_login,
@@ -59,6 +66,15 @@ class ProjectQuickStartValidator:
         if match is None:
             return ""
         return match.group(0).strip()
+
+    def _read_project_template(self, project_template_path: Path) -> dict[str, object]:
+        project_template_text = (self._repository_root / project_template_path).read_text(
+            encoding="utf-8",
+        )
+        parsed = json.loads(project_template_text)
+        if isinstance(parsed, dict):
+            return parsed
+        return {}
 
     def _resolve_target_repository(
         self,
@@ -84,6 +100,18 @@ class ProjectQuickStartValidator:
             if isinstance(default_branch, str):
                 return default_branch
         return "main"
+
+    def _project_path_from_template(
+        self,
+        project_template: dict[str, object],
+        config: ProjectCliValidationConfig,
+    ) -> str:
+        trackstate = project_template.get("trackstate")
+        if isinstance(trackstate, dict):
+            project_file = trackstate.get("projectFile")
+            if isinstance(project_file, str) and project_file:
+                return project_file
+        return config.project_path
 
     def _parse_expected_project(
         self,

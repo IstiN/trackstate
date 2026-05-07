@@ -49,6 +49,28 @@ class QuickStartCliValidationTest(unittest.TestCase):
             "Step 2 failed: `trackstate-setup/README.md` does not contain a "
             "`CLI quick start` section to validate.",
         )
+        self.assertEqual(
+            result.documented_project_file,
+            result.project_path,
+            "Step 2 failed: the setup template no longer points the quick-start "
+            "flow at the same project file used by this validation.\n"
+            f"Documented project file: {result.documented_project_file}\n"
+            f"Validated project file: {result.project_path}",
+        )
+        self.assertEqual(
+            result.documented_config_path,
+            "DEMO/config",
+            "Step 2 failed: the setup template no longer documents the expected "
+            "config directory for the quick-start flow.\n"
+            f"Observed config path: {result.documented_config_path}",
+        )
+        self.assertEqual(
+            result.documented_source_repository,
+            "IstiN/trackstate",
+            "Step 2 failed: the setup template no longer documents the expected "
+            "default runtime repository in the quick-start contract.\n"
+            f"Observed source repository: {result.documented_source_repository}",
+        )
         for fragment in self.config.required_quick_start_fragments:
             self.assertIn(
                 fragment,
@@ -88,14 +110,15 @@ class QuickStartCliValidationTest(unittest.TestCase):
         self.assertEqual(
             result.project_fetch.command,
             (
-                "gh",
-                "api",
-                f"repos/{result.target_repository}/contents/{self.config.project_path}",
-                "-H",
-                "Accept: application/vnd.github.raw+json",
+                "bash",
+                "-lc",
+                "set -o pipefail && "
+                f"gh api 'repos/{result.target_repository}/contents/{result.project_path}"
+                f"?ref={result.repository_default_branch}' --jq '.content' | "
+                "tr -d '\\n' | base64 --decode",
             ),
             "Step 4 failed: the validation flow did not execute the expected "
-            "GitHub CLI project fetch for the forked setup repository.",
+            "CLI project read for the forked setup repository.",
         )
         self.assertTrue(
             result.project_fetch.succeeded,

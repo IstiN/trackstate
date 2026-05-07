@@ -12,6 +12,7 @@ class ProjectCliValidationConfig:
     fork_repository_name: str
     project_path: str
     readme_path: Path
+    project_template_path: Path
     required_quick_start_fragments: tuple[str, ...]
     visible_project_fields: tuple[str, ...]
 
@@ -33,6 +34,7 @@ class ProjectCliValidationConfig:
             ),
             project_path=os.environ.get("TS74_PROJECT_PATH", "DEMO/project.json"),
             readme_path=Path("trackstate-setup/README.md"),
+            project_template_path=Path("trackstate-setup/project-template.json"),
             required_quick_start_fragments=(
                 "CLI quick start",
                 "IstiN/trackstate",

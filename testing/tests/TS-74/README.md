@@ -2,9 +2,12 @@
 
 Validates the CLI quick-start fork connectivity path by reading the
 `trackstate-setup/README.md` quick-start section, resolving the authenticated
-user's `trackstate-setup` fork by default, and executing the GitHub CLI project
-fetch against that fork. The CLI JSON is then compared with the same
-`DEMO/project.json` file fetched directly from the fork's default branch.
+user's `trackstate-setup` fork by default, reading the setup template contract
+from `trackstate-setup/project-template.json`, and executing the GitHub CLI
+contents read against that fork and branch. The command decodes the returned
+repository content to JSON so the terminal output matches the documented
+`DEMO/project.json` payload. The CLI JSON is then compared with the same
+project file fetched directly from the fork's default branch.
 
 ## Install dependencies
 

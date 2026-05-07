@@ -12,7 +12,12 @@ class ProjectCliProbe(Protocol):
 
     def repository_metadata(self, repository: str) -> CliCommandResult: ...
 
-    def get_project(self, repository: str, project_path: str) -> CliCommandResult: ...
+    def get_project(
+        self,
+        repository: str,
+        default_branch: str,
+        project_path: str,
+    ) -> CliCommandResult: ...
 
     def get_raw_project(
         self,
