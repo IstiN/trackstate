@@ -10,10 +10,16 @@ import 'package:trackstate/ui/core/trackstate_icons.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../../core/interfaces/local_git_repository_factory.dart';
+
 class SettingsScreenRobot {
-  SettingsScreenRobot(this.tester);
+  SettingsScreenRobot(
+    this.tester, {
+    LocalGitRepositoryFactory? localGitRepositoryFactory,
+  }) : _localGitRepositoryFactory = localGitRepositoryFactory;
 
   final WidgetTester tester;
+  final LocalGitRepositoryFactory? _localGitRepositoryFactory;
   static const jqlPlaceholderText =
       'project = TRACK AND status != Done ORDER BY priority DESC';
 
@@ -64,6 +70,24 @@ class SettingsScreenRobot {
     await tester.pumpAndSettle();
   }
 
+  Future<void> pumpLocalGitApp({
+    required String repositoryPath,
+    Map<String, Object> sharedPreferences = const {},
+    Widget Function(Widget child)? appWrapper,
+  }) async {
+    final localGitRepositoryFactory = _localGitRepositoryFactory;
+    if (localGitRepositoryFactory == null) {
+      throw StateError('Local Git repository factory is not configured.');
+    }
+    await pumpApp(
+      repository: await localGitRepositoryFactory.create(
+        repositoryPath: repositoryPath,
+      ),
+      sharedPreferences: sharedPreferences,
+      appWrapper: appWrapper,
+    );
+  }
+
   Future<void> openSettings() async {
     await tester.tap(settingsNavigation);
     await tester.pumpAndSettle();
@@ -76,6 +100,13 @@ class SettingsScreenRobot {
       matching: find.bySubtype<ButtonStyleButton>(),
     ),
   );
+
+  Finder configCard(String title) => _smallestByArea(
+    find.ancestor(of: find.text(title), matching: find.byType(Column)),
+  );
+
+  Finder configCardItem(String title, String item) =>
+      find.descendant(of: configCard(title), matching: find.text(item));
 
   Future<void> clearFocus() async {
     FocusManager.instance.primaryFocus?.unfocus();
@@ -129,8 +160,7 @@ class SettingsScreenRobot {
 
   String? focusedLabel(Map<String, Finder> candidates) {
     final focusedSemantics = find.semantics.byPredicate(
-      (node) =>
-          node.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
+      (node) => node.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
       describeMatch: (_) => 'focused semantics node',
     );
     if (focusedSemantics.evaluate().isEmpty) {
@@ -332,6 +362,25 @@ class SettingsScreenRobot {
     return buttons.at(bestIndex);
   }
 
+  Finder _smallestByArea(Finder candidates) {
+    final matches = candidates.evaluate().length;
+    if (matches == 0) {
+      return candidates;
+    }
+
+    var bestIndex = 0;
+    var bestArea = double.infinity;
+    for (var index = 0; index < matches; index++) {
+      final rect = tester.getRect(candidates.at(index));
+      final area = rect.width * rect.height;
+      if (area <= bestArea) {
+        bestArea = area;
+        bestIndex = index;
+      }
+    }
+    return candidates.at(bestIndex);
+  }
+
   List<String> visibleTexts() {
     return tester
         .widgetList<Text>(find.byType(Text))
@@ -339,6 +388,23 @@ class SettingsScreenRobot {
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .toList();
+  }
+
+  List<String> visibleConfigItems(String title) {
+    final texts = find.descendant(
+      of: configCard(title),
+      matching: find.byType(Text),
+    );
+    final values = <String>[];
+    for (final element in texts.evaluate()) {
+      final widget = element.widget as Text;
+      final value = widget.data?.trim();
+      if (value == null || value.isEmpty || value == title) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
   }
 
   ButtonStyle _effectiveButtonStyle(Finder scope) {
@@ -365,7 +431,9 @@ class SettingsScreenRobot {
         theme: button.themeStyleOf(element),
         defaults: button.defaultStyleOf(element),
       ),
-      _ => throw StateError('No button style available for ${widget.runtimeType}'),
+      _ => throw StateError(
+        'No button style available for ${widget.runtimeType}',
+      ),
     };
   }
 
