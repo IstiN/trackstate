@@ -35,7 +35,9 @@ void main() {
         );
       }
 
-      final connectedButtonCount = robot.connectedControl.evaluate().length;
+      final connectedButtonCount = robot.selectedConnectedControl
+          .evaluate()
+          .length;
       if (connectedButtonCount != 1) {
         failures.add(
           'Expected exactly one visible Connected status control, found $connectedButtonCount.',
@@ -43,7 +45,7 @@ void main() {
       }
 
       final visibleConnectedLabel = find.descendant(
-        of: robot.connectedControl,
+        of: robot.selectedConnectedControl,
         matching: find.text('Connected'),
       );
       if (visibleConnectedLabel.evaluate().length != 1) {
@@ -56,11 +58,13 @@ void main() {
       if (connectedButtonCount == 1 &&
           visibleConnectedLabel.evaluate().isNotEmpty) {
         final renderedColor = robot.renderedTextColorWithin(
-          robot.connectedControl,
+          robot.selectedConnectedControl,
           'Connected',
         );
         final paletteSuccess = robot.colors().success;
-        final buttonBackground = robot.colors().primary;
+        final buttonBackground = robot.renderedButtonBackground(
+          robot.selectedConnectedControl,
+        );
 
         final renderedHex = _rgbHex(renderedColor);
         final paletteHex = _rgbHex(paletteSuccess);

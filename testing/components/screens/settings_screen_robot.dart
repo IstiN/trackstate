@@ -20,10 +20,11 @@ class SettingsScreenRobot {
   Finder get workflowCard => find.text('Workflow');
   Finder get fieldsCard => find.text('Fields');
   Finder get languageCard => find.text('Language');
-  Finder get localGitControl => find.widgetWithText(FilledButton, 'Local Git');
-  Finder get connectGitHubControl =>
-      find.widgetWithText(FilledButton, 'Connect GitHub');
-  Finder get connectedControl => find.widgetWithText(FilledButton, 'Connected');
+  Finder get localGitControl => _providerControl('Local Git');
+  Finder get connectGitHubControl => _providerControl('Connect GitHub');
+  Finder get connectedControl => _providerControl('Connected');
+  Finder get selectedConnectedControl =>
+      find.widgetWithText(FilledButton, 'Connected');
   Finder get searchIssuesField => find.byWidgetPredicate(
     (widget) =>
         widget is TextField &&
@@ -159,6 +160,32 @@ class SettingsScreenRobot {
     throw StateError('No rendered text "$text" found within $scope');
   }
 
+  Color renderedButtonBackground(Finder scope) {
+    for (final element in scope.evaluate()) {
+      final widget = element.widget;
+      if (widget is ButtonStyleButton) {
+        final color = widget.style?.backgroundColor?.resolve(
+          _buttonStates(widget),
+        );
+        if (color != null) {
+          return color;
+        }
+      }
+    }
+    final materialFinder = find.descendant(
+      of: scope,
+      matching: find.byType(Material),
+      matchRoot: true,
+    );
+    for (final element in materialFinder.evaluate()) {
+      final widget = element.widget;
+      if (widget is Material && widget.color != null) {
+        return widget.color!;
+      }
+    }
+    throw StateError('No rendered button background found for $scope');
+  }
+
   Color? _fallbackTextColor(Finder scope) {
     for (final element in scope.evaluate()) {
       final widget = element.widget;
@@ -167,6 +194,25 @@ class SettingsScreenRobot {
       }
     }
     return null;
+  }
+
+  Finder _providerControl(String label) => find
+      .ancestor(
+        of: find.text(label),
+        matching: find.bySubtype<ButtonStyleButton>(),
+      )
+      .first;
+
+  Set<WidgetState> _buttonStates(ButtonStyleButton button) {
+    final states = <WidgetState>{};
+    final controller = button.statesController;
+    if (controller != null) {
+      states.addAll(controller.value);
+    }
+    if (!button.enabled) {
+      states.add(WidgetState.disabled);
+    }
+    return states;
   }
 
   String semanticsLabelOf(Finder finder) {
