@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../../core/interfaces/local_git_repository_port.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../services/local_git_repository_service.dart';
 
@@ -70,11 +71,11 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   Future<void> pumpLocalGitApp({required String repositoryPath}) async {
-    final repositoryService = LocalGitRepositoryService(tester);
+    final LocalGitRepositoryPort repositoryService = LocalGitRepositoryService(
+      tester,
+    );
     await pump(
-      await repositoryService.openRepository(
-        repositoryPath: repositoryPath,
-      ),
+      await repositoryService.openRepository(repositoryPath: repositoryPath),
     );
     await _waitForVisible(localGitAccessButton);
   }

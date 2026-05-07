@@ -1,11 +1,14 @@
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
-class IssueAggregateProbe {
+import '../../core/interfaces/issue_aggregate_loader.dart';
+
+class IssueAggregateProbe implements IssueAggregateLoader {
   const IssueAggregateProbe(this._repository);
 
   final TrackStateRepository _repository;
 
+  @override
   Future<TrackStateIssue> loadIssue(String issueKey) async {
     final snapshot = await _repository.loadSnapshot();
     try {
