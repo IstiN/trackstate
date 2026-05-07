@@ -1642,6 +1642,7 @@ class _PrimaryButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final onPrimary = Theme.of(context).colorScheme.onPrimary;
     return Semantics(
       button: true,
       label: label,
@@ -1649,11 +1650,11 @@ class _PrimaryButton extends StatelessWidget {
         onPressed: onPressed,
         style: FilledButton.styleFrom(
           backgroundColor: colors.primary,
-          foregroundColor: const Color(0xFFFAF8F4),
+          foregroundColor: onPrimary,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         ),
-        icon: TrackStateIcon(icon, size: 16, color: const Color(0xFFFAF8F4)),
+        icon: TrackStateIcon(icon, size: 16, color: onPrimary),
         label: Text(label),
       ),
     );
