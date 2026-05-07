@@ -2,9 +2,11 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 
 import '../../components/screens/settings_screen_robot.dart';
+import 'support/browser_callback_url.dart';
 import 'support/recording_url_launcher_platform.dart';
 import 'support/ts71_broker_login_fixture.dart';
 
@@ -26,6 +28,7 @@ void main() {
     'TS-71 launches the broker login and restores a user-scoped token with tracker data visible',
     (tester) async {
       final robot = SettingsScreenRobot(tester);
+      final originalBrowserUri = currentBrowserUri();
       final loggedOutFixture = Ts71BrokerLoginFixture();
 
       try {
@@ -138,14 +141,35 @@ void main() {
         );
 
         final connectedFixture = Ts71BrokerLoginFixture();
+        final callbackFragment =
+            'trackstate_token='
+            '${Uri.encodeQueryComponent(Ts71BrokerLoginFixture.exchangedToken)}';
+        expect(
+          setBrowserCallbackUri(
+            queryParameters: const {'code': 'broker-auth-code'},
+            fragment: callbackFragment,
+          ),
+          isTrue,
+          reason:
+              'This test must run in a browser-backed Flutter environment so it can exercise the callback URL handoff instead of preloading SharedPreferences.',
+        );
         await robot.pumpApp(
           repository: connectedFixture.createRepository(),
-          sharedPreferences: {
-            connectedFixture.tokenPreferenceKey:
-                Ts71BrokerLoginFixture.exchangedToken,
-          },
         );
 
+        final preferences = await SharedPreferences.getInstance();
+        expect(
+          currentBrowserUri().fragment,
+          callbackFragment,
+          reason:
+              'The reconnection phase should run from a broker-style callback URL so the app reads the exchanged token from the callback fragment instead of a preloaded store value.',
+        );
+        expect(
+          preferences.getString(connectedFixture.tokenPreferenceKey),
+          Ts71BrokerLoginFixture.exchangedToken,
+          reason:
+              'After receiving the broker callback token, the app should persist the exchanged user-scoped token through the auth store before future restores.',
+        );
         expect(
           find.text(
             'Connected as ${Ts71BrokerLoginFixture.connectedLogin} '
@@ -153,7 +177,7 @@ void main() {
           ),
           findsOneWidget,
           reason:
-              'When the exchanged user token is present in browser storage, the app should restore the GitHub connection and show the connected banner text to the user.',
+              'When the broker callback returns the exchanged user token, the app should restore the GitHub connection and show the connected banner text to the user.',
         );
         expect(
           find.text(
@@ -173,7 +197,7 @@ void main() {
             'GET /user',
           ]),
           reason:
-              'Restoring the user-scoped token should observe both the repository metadata call and the repository contents reads the UI depends on.',
+              'Handling the callback token should observe both the repository metadata call and the repository contents reads the UI depends on.',
         );
         expect(
           connectedFixture.bearerTokensForPath(
@@ -205,6 +229,7 @@ void main() {
               'The Settings repository access section should mirror the Connected state after broker login restoration.',
         );
       } finally {
+        restoreBrowserUri(originalBrowserUri);
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
       }
