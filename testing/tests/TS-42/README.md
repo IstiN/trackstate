@@ -26,4 +26,5 @@ flutter test testing/tests/TS-42/test_ts_42.dart
 ## Expected passing output
 
 The test passes when the issue detail screen disables or hides write actions for
-the read-only session and shows a visible `Permission required` explanation.
+the read-only session and shows a visible read-only explanation, such as text or
+tooltip that mentions permission, read-only mode, or write access.

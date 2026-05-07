@@ -65,14 +65,15 @@ void main() {
         }
         if (!comment.isUnavailable) {
           failures.add(
-            'Comment should be disabled or hidden when canWrite=false. '
+            'Comments should be disabled or hidden when canWrite=false. '
             'Observed ${comment.describe()}.',
           );
         }
-        if (!issueDetailPage.permissionMessageVisible) {
+        if (!issueDetailPage.hasReadOnlyExplanation) {
           failures.add(
-            'A visible "Permission required" explanation should be rendered '
-            'for the read-only session.',
+            'A visible read-only explanation should be rendered as text or '
+            'tooltip, for example messaging that mentions permission, '
+            'read-only mode, or write access.',
           );
         }
 

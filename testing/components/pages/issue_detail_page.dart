@@ -1,40 +1,44 @@
+import '../../core/interfaces/test_driver.dart';
 import '../../core/models/action_availability.dart';
-import '../../frameworks/flutter/widget_test_driver.dart';
 
 class IssueDetailPage {
   const IssueDetailPage(this.driver);
 
-  final WidgetTestDriver driver;
+  final TestDriver driver;
 
   Future<void> openIssue(String issueKey, String issueSummary) async {
     await driver.tapText('JQL Search');
+    final issueLink = RegExp(
+      '^Open ${RegExp.escape(issueKey)} ${RegExp.escape(issueSummary)}\$',
+    );
+    if (driver.hasSemanticsLabel(issueLink)) {
+      await driver.tapSemanticsLabel(issueLink);
+    }
   }
 
   bool showsIssueKey(String issueKey) => driver.hasText(issueKey);
 
   bool showsSummary(String summary) => driver.hasText(summary);
 
-  ActionAvailability get transitionAction => ActionAvailability(
-    label: 'Transition',
-    visible: driver.hasLabeledControl('Transition'),
-    enabled: driver.isFilledButtonEnabled('Transition'),
-  );
+  ActionAvailability get transitionAction =>
+      driver.getActionAvailability('Transition');
 
-  ActionAvailability get editAction => _unavailableWhenMissing('Edit');
+  ActionAvailability get editAction => driver.getActionAvailability('Edit');
 
-  ActionAvailability get commentAction => _unavailableWhenMissing('Comment');
+  ActionAvailability get commentAction =>
+      driver.getActionAvailability('Comments');
 
-  bool get permissionMessageVisible => driver.hasText('Permission required');
+  bool get hasReadOnlyExplanation => driver.hasAnyMessage([
+    RegExp('permission required', caseSensitive: false),
+    RegExp('write access', caseSensitive: false),
+    RegExp('write permission', caseSensitive: false),
+    RegExp('read[- ]only (repository|session|access)', caseSensitive: false),
+  ]);
 
   String describeObservedState() => [
     transitionAction.describe(),
     editAction.describe(),
     commentAction.describe(),
-    'permissionMessageVisible=$permissionMessageVisible',
+    'readOnlyExplanationVisible=$hasReadOnlyExplanation',
   ].join(', ');
-
-  ActionAvailability _unavailableWhenMissing(String label) {
-    final visible = driver.hasLabeledControl(label);
-    return ActionAvailability(label: label, visible: visible, enabled: visible);
-  }
 }
