@@ -1,4 +1,4 @@
-import 'dart:ui' show Tristate;
+import 'dart:ui' show SemanticsFlag;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -110,7 +110,7 @@ class SettingsScreenRobot {
   String? focusedLabel(Map<String, Finder> candidates) {
     final focusedSemantics = find.semantics.byPredicate(
       (node) =>
-          node.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue,
+          node.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
       describeMatch: (_) => 'focused semantics node',
     );
     if (focusedSemantics.evaluate().isEmpty) {
