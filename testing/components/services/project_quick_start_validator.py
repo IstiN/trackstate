@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 from pathlib import Path
@@ -23,22 +24,43 @@ class ProjectQuickStartValidator:
         *,
         config: ProjectCliValidationConfig,
     ) -> ProjectCliValidationResult:
-        readme_text = self._read_readme_text(config.readme_path)
-        quick_start_section = self._read_quick_start_section(readme_text)
-        project_template = self._read_project_template(config.project_template_path)
         auth_status = self._probe.auth_status()
         viewer_login = self._probe.viewer_login()
         target_repository = self._resolve_target_repository(config, viewer_login)
         repository_info = self._probe.repository_metadata(target_repository)
         default_branch = self._repository_default_branch(repository_info)
-        project_path = self._project_path_from_template(project_template, config)
+        readme_fetch = self._probe.get_contents(
+            target_repository,
+            default_branch,
+            config.readme_path.name,
+        )
+        readme_text = self._decode_repository_text(readme_fetch)
+        quick_start_section = self._read_quick_start_section(readme_text)
+        project_template_fetch = self._probe.get_contents(
+            target_repository,
+            default_branch,
+            config.project_template_path.name,
+        )
+        project_template = self._parse_json_contents(project_template_fetch)
+        documented_source_repository = self._documented_source_repository(
+            quick_start_section,
+        )
+        documented_project_file = self._documented_project_file(quick_start_section)
+        documented_config_glob = self._documented_config_glob(quick_start_section)
+        documented_tree_route, documented_contents_route = self._documented_api_routes(
+            readme_text,
+        )
+        project_path = documented_project_file or self._project_path_from_template(
+            project_template,
+            config,
+        )
         tree_fetch = self._probe.list_tree(target_repository, default_branch)
         project_fetch = self._probe.get_project(
             target_repository,
             default_branch,
             project_path,
         )
-        expected_project_fetch = self._probe.get_raw_project(
+        expected_project_fetch = self._probe.get_raw_file(
             target_repository,
             default_branch,
             project_path,
@@ -52,16 +74,20 @@ class ProjectQuickStartValidator:
             quick_start_section=quick_start_section,
             project_template=project_template,
             expected_project=expected_project,
+            documented_source_repository=documented_source_repository,
+            documented_project_file=documented_project_file,
+            documented_config_glob=documented_config_glob,
+            documented_tree_route=documented_tree_route,
+            documented_contents_route=documented_contents_route,
             auth_status=auth_status,
             viewer_login=viewer_login,
             repository_info=repository_info,
+            readme_fetch=readme_fetch,
+            project_template_fetch=project_template_fetch,
             tree_fetch=tree_fetch,
             project_fetch=project_fetch,
             expected_project_fetch=expected_project_fetch,
         )
-
-    def _read_readme_text(self, readme_path: Path) -> str:
-        return (self._repository_root / readme_path).read_text(encoding="utf-8")
 
     def _read_quick_start_section(self, readme_text: str) -> str:
         match = re.search(
@@ -73,14 +99,31 @@ class ProjectQuickStartValidator:
             return ""
         return match.group(0).strip()
 
-    def _read_project_template(self, project_template_path: Path) -> dict[str, object]:
-        project_template_text = (self._repository_root / project_template_path).read_text(
-            encoding="utf-8",
-        )
-        parsed = json.loads(project_template_text)
+    def _decode_repository_text(self, contents_result: object) -> str:
+        if hasattr(contents_result, "json_payload") and isinstance(
+            contents_result.json_payload,
+            dict,
+        ):
+            content = contents_result.json_payload.get("content")
+            if isinstance(content, str):
+                return self._decode_base64_text(content)
+        return ""
+
+    def _parse_json_contents(self, contents_result: object) -> dict[str, object]:
+        decoded_text = self._decode_repository_text(contents_result)
+        if not decoded_text:
+            return {}
+        try:
+            parsed = json.loads(decoded_text)
+        except json.JSONDecodeError:
+            return {}
         if isinstance(parsed, dict):
             return parsed
         return {}
+
+    def _decode_base64_text(self, content: str) -> str:
+        normalized = content.replace("\n", "")
+        return base64.b64decode(normalized).decode("utf-8")
 
     def _resolve_target_repository(
         self,
@@ -106,6 +149,34 @@ class ProjectQuickStartValidator:
             if isinstance(default_branch, str):
                 return default_branch
         return "main"
+
+    def _documented_source_repository(self, quick_start_section: str) -> str | None:
+        match = re.search(r"reads from\s+`([^`]+)`\s+by default", quick_start_section)
+        if match is None:
+            return None
+        return match.group(1)
+
+    def _documented_project_file(self, quick_start_section: str) -> str | None:
+        match = re.search(r"uses\s+`([^`]+)`\s+plus\s+`([^`]+)`", quick_start_section)
+        if match is None:
+            return None
+        return match.group(1)
+
+    def _documented_config_glob(self, quick_start_section: str) -> str | None:
+        match = re.search(r"uses\s+`([^`]+)`\s+plus\s+`([^`]+)`", quick_start_section)
+        if match is None:
+            return None
+        return match.group(2)
+
+    def _documented_api_routes(self, readme_text: str) -> tuple[str | None, str | None]:
+        match = re.search(
+            r"GitHub API \(`([^`]+)` for file discovery and `([^`]+)` for "
+            r"markdown/config reads\)",
+            readme_text,
+        )
+        if match is None:
+            return None, None
+        return match.group(1), match.group(2)
 
     def _project_path_from_template(
         self,

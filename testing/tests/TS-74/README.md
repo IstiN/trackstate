@@ -1,15 +1,15 @@
 # TS-74
 
-Validates the CLI quick-start fork connectivity path by reading the
-`trackstate-setup/README.md` quick-start section, resolving the authenticated
-user's `trackstate-setup` fork by default, reading the setup template contract
-from `trackstate-setup/project-template.json`, and executing the README-
-documented GitHub API read flow against that fork and branch. The test first
-lists the recursive repository tree with `git/trees` to confirm the documented
-`DEMO/project.json` and `DEMO/config/*.json` paths exist, then runs the basic
-`contents` read command for `DEMO/project.json`. The returned GitHub contents
-JSON is decoded and compared with the same project file fetched directly from
-the fork's default branch.
+Validates the CLI quick-start fork connectivity path by reading `README.md`
+and `project-template.json` from the actual fork under test, resolving the
+authenticated user's `trackstate-setup` fork by default, extracting the
+documented quick-start contract from that fork's docs, and executing the
+documented GitHub CLI read flow against that fork and branch. The test first
+lists the recursive repository tree with the README-documented `git/trees`
+route to confirm the documented `DEMO/project.json` and `DEMO/config/*.json`
+paths exist, then runs the README-documented `contents` read for
+`DEMO/project.json`. The returned GitHub contents JSON is decoded and compared
+with the same project file fetched directly from the fork's default branch.
 
 ## Install dependencies
 

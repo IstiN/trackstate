@@ -16,9 +16,16 @@ class ProjectCliValidationResult:
     quick_start_section: str
     project_template: dict[str, object]
     expected_project: dict[str, object]
+    documented_source_repository: str | None
+    documented_project_file: str | None
+    documented_config_glob: str | None
+    documented_tree_route: str | None
+    documented_contents_route: str | None
     auth_status: CliCommandResult
     viewer_login: CliCommandResult
     repository_info: CliCommandResult
+    readme_fetch: CliCommandResult
+    project_template_fetch: CliCommandResult
     tree_fetch: CliCommandResult
     project_fetch: CliCommandResult
     expected_project_fetch: CliCommandResult
@@ -37,25 +44,10 @@ class ProjectCliValidationResult:
         return {}
 
     @property
-    def documented_source_repository(self) -> str | None:
-        source_repository = self.template_trackstate.get("sourceRepository")
-        if isinstance(source_repository, str):
-            return source_repository
-        return None
-
-    @property
-    def documented_project_file(self) -> str | None:
-        project_file = self.template_trackstate.get("projectFile")
-        if isinstance(project_file, str):
-            return project_file
-        return None
-
-    @property
     def documented_config_path(self) -> str | None:
-        config_path = self.template_trackstate.get("configPath")
-        if isinstance(config_path, str):
-            return config_path
-        return None
+        if self.documented_config_glob is None:
+            return None
+        return self.documented_config_glob.removesuffix("/*.json")
 
     @property
     def documented_default_ref(self) -> str | None:

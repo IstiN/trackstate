@@ -44,6 +44,26 @@ class GitHubCliProjectFramework(ProjectCliProbe):
             json_payload=payload,
         )
 
+    def get_contents(
+        self,
+        repository: str,
+        ref: str,
+        path: str,
+    ) -> CliCommandResult:
+        endpoint = f"repos/{repository}/contents/{path}?ref={ref}"
+        command = ("gh", "api", endpoint)
+        result = self._run(command)
+        payload: dict[str, object] | None = None
+        if result.succeeded:
+            payload = json.loads(result.stdout)
+        return CliCommandResult(
+            command=result.command,
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            json_payload=payload,
+        )
+
     def list_tree(
         self,
         repository: str,
@@ -68,29 +88,17 @@ class GitHubCliProjectFramework(ProjectCliProbe):
         default_branch: str,
         project_path: str,
     ) -> CliCommandResult:
-        endpoint = f"repos/{repository}/contents/{project_path}?ref={default_branch}"
-        command = ("gh", "api", endpoint)
-        result = self._run(command)
-        payload: dict[str, object] | None = None
-        if result.succeeded:
-            payload = json.loads(result.stdout)
-        return CliCommandResult(
-            command=result.command,
-            exit_code=result.exit_code,
-            stdout=result.stdout,
-            stderr=result.stderr,
-            json_payload=payload,
-        )
+        return self.get_contents(repository, default_branch, project_path)
 
-    def get_raw_project(
+    def get_raw_file(
         self,
         repository: str,
-        default_branch: str,
-        project_path: str,
+        ref: str,
+        path: str,
     ) -> CliCommandResult:
-        encoded_path = quote(project_path)
+        encoded_path = quote(path)
         url = (
-            f"https://raw.githubusercontent.com/{repository}/{default_branch}/"
+            f"https://raw.githubusercontent.com/{repository}/{ref}/"
             f"{encoded_path}"
         )
         command = ("GET", url)
@@ -98,7 +106,11 @@ class GitHubCliProjectFramework(ProjectCliProbe):
             request = Request(url, headers={"Accept": "application/json"})
             with urlopen(request) as response:
                 stdout = response.read().decode("utf-8")
-            payload = json.loads(stdout)
+            payload: object | None = None
+            try:
+                payload = json.loads(stdout)
+            except json.JSONDecodeError:
+                payload = None
             return CliCommandResult(
                 command=command,
                 exit_code=0,
@@ -106,7 +118,7 @@ class GitHubCliProjectFramework(ProjectCliProbe):
                 stderr="",
                 json_payload=payload,
             )
-        except (HTTPError, URLError, json.JSONDecodeError) as error:
+        except (HTTPError, URLError) as error:
             return CliCommandResult(
                 command=command,
                 exit_code=1,

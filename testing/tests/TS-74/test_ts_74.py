@@ -45,30 +45,48 @@ class QuickStartCliValidationTest(unittest.TestCase):
             f"stderr:\n{result.viewer_login.stderr}",
         )
         self.assertTrue(
+            result.readme_fetch.succeeded,
+            "Step 2 failed: the test could not read README.md from the forked "
+            "setup repository, so it could not validate the documented quick-start flow.\n"
+            f"Command: {result.readme_fetch.command_text}\n"
+            f"Exit code: {result.readme_fetch.exit_code}\n"
+            f"stdout:\n{result.readme_fetch.stdout}\n"
+            f"stderr:\n{result.readme_fetch.stderr}",
+        )
+        self.assertTrue(
             result.quick_start_section,
-            "Step 2 failed: `trackstate-setup/README.md` does not contain a "
-            "`CLI quick start` section to validate.",
+            "Step 2 failed: the fork README does not contain a `CLI quick start` "
+            "section to validate.",
+        )
+        self.assertTrue(
+            result.project_template_fetch.succeeded,
+            "Step 2 failed: the test could not read project-template.json from the "
+            "forked setup repository.\n"
+            f"Command: {result.project_template_fetch.command_text}\n"
+            f"Exit code: {result.project_template_fetch.exit_code}\n"
+            f"stdout:\n{result.project_template_fetch.stdout}\n"
+            f"stderr:\n{result.project_template_fetch.stderr}",
         )
         self.assertEqual(
             result.documented_project_file,
             result.project_path,
-            "Step 2 failed: the setup template no longer points the quick-start "
-            "flow at the same project file used by this validation.\n"
+            "Step 2 failed: the README quick-start section no longer points at the "
+            "same project file used by this validation.\n"
             f"Documented project file: {result.documented_project_file}\n"
             f"Validated project file: {result.project_path}",
         )
         self.assertEqual(
             result.documented_config_path,
             "DEMO/config",
-            "Step 2 failed: the setup template no longer documents the expected "
-            "config directory for the quick-start flow.\n"
+            "Step 2 failed: the README quick-start section no longer documents the "
+            "expected config directory for the quick-start flow.\n"
             f"Observed config path: {result.documented_config_path}",
         )
         self.assertEqual(
             result.documented_source_repository,
             "IstiN/trackstate",
-            "Step 2 failed: the setup template no longer documents the expected "
-            "default runtime repository in the quick-start contract.\n"
+            "Step 2 failed: the README quick-start section no longer documents the "
+            "expected default runtime repository.\n"
             f"Observed source repository: {result.documented_source_repository}",
         )
         for fragment in self.config.required_quick_start_fragments:
@@ -79,15 +97,20 @@ class QuickStartCliValidationTest(unittest.TestCase):
                 f"{fragment!r}, so the validation path is incomplete.\n"
                 f"Observed section:\n{result.quick_start_section}",
             )
-        for fragment in self.config.required_runtime_readme_fragments:
-            self.assertIn(
-                fragment,
-                result.readme_text,
-                "Step 2 failed: `trackstate-setup/README.md` no longer documents "
-                f"the runtime GitHub API read path {fragment!r} used by the "
-                "quick-start setup repository.\n"
-                f"Observed README:\n{result.readme_text}",
-            )
+        self.assertEqual(
+            result.documented_tree_route,
+            "git/trees",
+            "Step 2 failed: the fork README no longer documents the GitHub API "
+            "tree discovery route used by the quick-start flow.\n"
+            f"Observed README:\n{result.readme_text}",
+        )
+        self.assertEqual(
+            result.documented_contents_route,
+            "contents",
+            "Step 2 failed: the fork README no longer documents the GitHub API "
+            "contents route used by the quick-start flow.\n"
+            f"Observed README:\n{result.readme_text}",
+        )
         self.assertTrue(
             result.repository_info.succeeded,
             "Step 3 failed: the test could not inspect the configured setup "
@@ -129,7 +152,7 @@ class QuickStartCliValidationTest(unittest.TestCase):
             (
                 "gh",
                 "api",
-                f"repos/{result.target_repository}/git/trees/"
+                f"repos/{result.target_repository}/{result.documented_tree_route}/"
                 f"{result.repository_default_branch}?recursive=1",
             ),
             "Step 4 failed: the validation flow did not execute the README-"
@@ -159,7 +182,8 @@ class QuickStartCliValidationTest(unittest.TestCase):
             (
                 "gh",
                 "api",
-                f"repos/{result.target_repository}/contents/{result.project_path}"
+                f"repos/{result.target_repository}/{result.documented_contents_route}/"
+                f"{result.project_path}"
                 f"?ref={result.repository_default_branch}",
             ),
             "Step 5 failed: the validation flow did not execute the README-"
