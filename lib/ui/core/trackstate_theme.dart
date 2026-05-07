@@ -40,7 +40,7 @@ class TrackStateColors extends ThemeExtension<TrackStateColors> {
   final Color shadow;
 
   static const light = TrackStateColors(
-    primary: Color(0xFFCD5B3B),
+    primary: Color(0xFFB24328),
     primarySoft: Color(0xFFF2D2C4),
     secondary: Color(0xFF6D7F4F),
     secondarySoft: Color(0xFFE7EED8),

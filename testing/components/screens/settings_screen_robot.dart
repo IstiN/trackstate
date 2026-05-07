@@ -1,4 +1,4 @@
-import 'dart:ui';
+import 'dart:ui' show PointerDeviceKind, SemanticsFlag;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -23,6 +23,8 @@ class SettingsScreenRobot {
   Finder get workflowCard => find.text('Workflow');
   Finder get fieldsCard => find.text('Fields');
   Finder get languageCard => find.text('Language');
+  Finder get repositoryAccessSection =>
+      find.bySemanticsLabel(RegExp('Repository access'));
   Finder get localGitTopBarControl => topBarProviderControl('Local Git');
   Finder get localGitSettingsControl => settingsProviderControl('Local Git');
   Finder get connectGitHubTopBarControl =>
@@ -31,12 +33,15 @@ class SettingsScreenRobot {
       settingsProviderControl('Connect GitHub');
   Finder get connectedTopBarControl => topBarProviderControl('Connected');
   Finder get connectedSettingsControl => settingsProviderControl('Connected');
-  Finder get localGitControl => _settingsProviderButton('Local Git');
-  Finder get connectGitHubControl => _settingsProviderButton('Connect GitHub');
-  Finder get connectedControl => _settingsProviderButton('Connected');
+  Finder get localGitControl => providerControl('Local Git');
+  Finder get connectGitHubControl => providerControl('Connect GitHub');
+  Finder get connectedControl => providerControl('Connected');
   Finder get selectedConnectedControl =>
       _filledSettingsProviderButton('Connected');
-  Finder get settingsConnectedControl => selectedConnectedControl;
+  Finder get settingsConnectedControl => find.descendant(
+    of: repositoryAccessSection,
+    matching: find.widgetWithText(FilledButton, 'Connected'),
+  );
   Finder get searchIssuesField => find.byWidgetPredicate(
     (widget) =>
         widget is TextField &&
@@ -63,6 +68,14 @@ class SettingsScreenRobot {
     await tester.tap(settingsNavigation);
     await tester.pumpAndSettle();
   }
+
+  Finder providerControl(String label) => find.descendant(
+    of: repositoryAccessSection,
+    matching: find.ancestor(
+      of: find.text(label),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    ),
+  );
 
   Future<void> clearFocus() async {
     FocusManager.instance.primaryFocus?.unfocus();
@@ -116,7 +129,8 @@ class SettingsScreenRobot {
 
   String? focusedLabel(Map<String, Finder> candidates) {
     final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().flagsCollection.isFocused,
+      (node) =>
+          node.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
       describeMatch: (_) => 'focused semantics node',
     );
     if (focusedSemantics.evaluate().isEmpty) {
@@ -260,6 +274,19 @@ class SettingsScreenRobot {
     return tester.getSemantics(finder.first).label;
   }
 
+  List<String> visibleProviderLabels(Iterable<String> candidateLabels) {
+    final rows = <({String label, double top})>[];
+    for (final label in candidateLabels) {
+      final control = providerControl(label);
+      if (control.evaluate().isEmpty) {
+        continue;
+      }
+      rows.add((label: label, top: tester.getRect(control.first).top));
+    }
+    rows.sort((left, right) => left.top.compareTo(right.top));
+    return rows.map((row) => row.label).toList();
+  }
+
   Finder topBarProviderControl(String label) =>
       _buttonControlWithText(label, requiresTrackStateIcon: true);
 
@@ -318,24 +345,38 @@ class SettingsScreenRobot {
     final element = scope.evaluate().first;
     final widget = element.widget;
     return switch (widget) {
-      FilledButton button => button
-          .defaultStyleOf(element)
-          .merge(button.themeStyleOf(element))
-          .merge(button.style),
-      OutlinedButton button => button
-          .defaultStyleOf(element)
-          .merge(button.themeStyleOf(element))
-          .merge(button.style),
-      TextButton button => button
-          .defaultStyleOf(element)
-          .merge(button.themeStyleOf(element))
-          .merge(button.style),
-      ElevatedButton button => button
-          .defaultStyleOf(element)
-          .merge(button.themeStyleOf(element))
-          .merge(button.style),
+      FilledButton button => _mergedButtonStyle(
+        style: button.style,
+        theme: button.themeStyleOf(element),
+        defaults: button.defaultStyleOf(element),
+      ),
+      OutlinedButton button => _mergedButtonStyle(
+        style: button.style,
+        theme: button.themeStyleOf(element),
+        defaults: button.defaultStyleOf(element),
+      ),
+      TextButton button => _mergedButtonStyle(
+        style: button.style,
+        theme: button.themeStyleOf(element),
+        defaults: button.defaultStyleOf(element),
+      ),
+      ElevatedButton button => _mergedButtonStyle(
+        style: button.style,
+        theme: button.themeStyleOf(element),
+        defaults: button.defaultStyleOf(element),
+      ),
       _ => throw StateError('No button style available for ${widget.runtimeType}'),
     };
+  }
+
+  ButtonStyle _mergedButtonStyle({
+    required ButtonStyle? style,
+    required ButtonStyle? theme,
+    required ButtonStyle? defaults,
+  }) {
+    return (style?.merge(theme) ?? theme ?? const ButtonStyle()).merge(
+      defaults,
+    );
   }
 
   Finder _buttonControlWithText(
