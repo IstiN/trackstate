@@ -59,87 +59,39 @@ class IssueDetailAccessibilityRobot
 
   @override
   List<String> semanticsLabelsInIssueDetail(String issueKey) {
-    final issueDetail = _issueDetail(issueKey);
     final rootLabel = 'Issue detail $issueKey';
-    final targets = <_AccessibilityTarget>[];
-
-    for (final element in find
-        .descendant(of: issueDetail, matching: find.byType(Semantics))
-        .evaluate()) {
-      final widget = element.widget as Semantics;
-      final label = _normalizedLabel(widget.properties.label);
-      if (label.isEmpty || label == rootLabel) {
-        continue;
-      }
-      targets.add(
-        _AccessibilityTarget(
-          label: label,
-          rect: _rectFor(element),
-          priority: 0,
-        ),
-      );
-    }
-
-    return _sortedLabels(targets);
+    return _screenReaderTargets(
+      issueKey,
+      rootLabel,
+    ).map((target) => target.label).toList();
   }
 
   @override
   List<String> semanticsLabelsInIssueDetailTraversal(String issueKey) {
-    final issueDetail = _issueDetail(issueKey);
-    final semanticsTargets = _accessibilityTargetsFromSemantics(issueKey);
-    final traversalTargets = <_AccessibilityTarget>[...semanticsTargets];
-
-    for (final element in find
-        .descendant(of: issueDetail, matching: find.byType(RichText))
-        .evaluate()) {
-      final widget = element.widget as RichText;
-      final label = _normalizedLabel(widget.text.toPlainText());
-      if (label.isEmpty) {
-        continue;
-      }
-      final rect = _rectFor(element);
-      if (_isRepresentedByNearbySemanticsTarget(label, rect, semanticsTargets)) {
-        continue;
-      }
-      traversalTargets.add(
-        _AccessibilityTarget(label: label, rect: rect, priority: 1),
-      );
-    }
-
-    return _sortedLabels(traversalTargets);
+    final rootLabel = 'Issue detail $issueKey';
+    return _dedupeConsecutive(
+      _screenReaderTargets(
+        issueKey,
+        rootLabel,
+      ).map((target) => target.label).toList(),
+    );
   }
 
   @override
   List<String> commentActionLabels(String issueKey) {
-    final heading = find.descendant(
-      of: _issueDetail(issueKey),
-      matching: find.text('Comments'),
+    final rootLabel = 'Issue detail $issueKey';
+    final targets = _screenReaderTargets(issueKey, rootLabel);
+    final commentsIndex = targets.indexWhere(
+      (target) => target.label == 'Comments',
     );
-    if (heading.evaluate().isEmpty) {
+    if (commentsIndex == -1) {
       return const [];
     }
-
-    final commentsTop = tester.getRect(heading.first).top;
-    final buttonFinders = find.descendant(
-      of: _issueDetail(issueKey),
-      matching: find.byWidgetPredicate(
-        (widget) => widget is Semantics && widget.properties.button == true,
-        description: 'button semantics',
-      ),
-    );
-    final labels = <String>[];
-    final count = buttonFinders.evaluate().length;
-    for (var index = 0; index < count; index++) {
-      final candidate = buttonFinders.at(index);
-      if (tester.getRect(candidate).top <= commentsTop) {
-        continue;
-      }
-      final label = tester.getSemantics(candidate).label.trim();
-      if (label.isNotEmpty) {
-        labels.add(label);
-      }
-    }
-    return labels;
+    return targets
+        .skip(commentsIndex + 1)
+        .where((target) => target.isButton)
+        .map((target) => target.label)
+        .toList();
   }
 
   @override
@@ -257,79 +209,72 @@ class IssueDetailAccessibilityRobot
     return '#${rgb.toRadixString(16).padLeft(6, '0').toUpperCase()}';
   }
 
-  List<_AccessibilityTarget> _accessibilityTargetsFromSemantics(
+  List<_SemanticsTarget> _screenReaderTargets(
     String issueKey,
+    String rootLabel,
   ) {
-    final issueDetail = _issueDetail(issueKey);
-    final rootLabel = 'Issue detail $issueKey';
-    final targets = <_AccessibilityTarget>[];
+    final rootNode = tester.getSemantics(_issueDetail(issueKey).first);
+    final targets = <_SemanticsTarget>[];
 
-    for (final element in find
-        .descendant(of: issueDetail, matching: find.byType(Semantics))
-        .evaluate()) {
-      final widget = element.widget as Semantics;
-      final label = _normalizedLabel(widget.properties.label);
-      if (label.isEmpty || label == rootLabel) {
-        continue;
-      }
-      targets.add(
-        _AccessibilityTarget(
-          label: label,
-          rect: _rectFor(element),
-          priority: 0,
-        ),
+    void visit(SemanticsNode node) {
+      final children = node.debugListChildrenInOrder(
+        DebugSemanticsDumpOrder.traversalOrder,
       );
+      final label = _normalizedLabel(node.label);
+      if (label.isNotEmpty &&
+          label != rootLabel &&
+          !node.isInvisible &&
+          !node.isMergedIntoParent &&
+          !_isMergedContainerLabel(label, children) &&
+          (_isScreenReaderTarget(node) || children.isEmpty)) {
+        targets.add(
+          _SemanticsTarget(
+            label: label,
+            isButton: node.flagsCollection.isButton,
+          ),
+        );
+      }
+      for (final child in children) {
+        visit(child);
+      }
     }
 
+    visit(rootNode);
     return targets;
   }
 
-  Rect _rectFor(Element element) {
-    final renderObject = element.renderObject;
-    if (renderObject is! RenderBox) {
-      return Rect.zero;
-    }
-    final topLeft = renderObject.localToGlobal(Offset.zero);
-    return topLeft & renderObject.size;
+  bool _isScreenReaderTarget(SemanticsNode node) {
+    return node.flagsCollection.isButton;
   }
 
-  bool _isRepresentedByNearbySemanticsTarget(
-    String label,
-    Rect rect,
-    List<_AccessibilityTarget> semanticsTargets,
-  ) {
-    for (final target in semanticsTargets) {
-      if (target.label != label) {
+  bool _isMergedContainerLabel(String label, List<SemanticsNode> children) {
+    if (children.isEmpty) {
+      return false;
+    }
+
+    var matchedChildLabels = 0;
+    for (final child in children) {
+      final childLabel = _normalizedLabel(child.label);
+      if (childLabel.isEmpty ||
+          childLabel == label ||
+          !label.contains(childLabel)) {
         continue;
       }
-      final topDelta = (target.rect.top - rect.top).abs();
-      final leftDelta = (target.rect.left - rect.left).abs();
-      if (target.rect.overlaps(rect) || (topDelta <= 24 && leftDelta <= 120)) {
+      matchedChildLabels += 1;
+      if (matchedChildLabels >= 2) {
         return true;
       }
     }
     return false;
   }
 
-  List<String> _sortedLabels(List<_AccessibilityTarget> targets) {
-    targets.sort((left, right) {
-      final topOrder = left.rect.top.compareTo(right.rect.top);
-      if (topOrder != 0) {
-        return topOrder;
-      }
-      final leftOrder = left.rect.left.compareTo(right.rect.left);
-      if (leftOrder != 0) {
-        return leftOrder;
-      }
-      return left.priority.compareTo(right.priority);
-    });
-
+  List<String> _dedupeConsecutive(List<String> labels) {
     final ordered = <String>[];
-    for (final target in targets) {
-      if (ordered.isNotEmpty && ordered.last == target.label) {
+    for (final label in labels) {
+      if (ordered.isNotEmpty && ordered.last == label) {
         continue;
       }
-      ordered.add(target.label);
+      ordered.add(label);
     }
     return ordered;
   }
@@ -338,14 +283,9 @@ class IssueDetailAccessibilityRobot
       (label ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
 }
 
-class _AccessibilityTarget {
-  const _AccessibilityTarget({
-    required this.label,
-    required this.rect,
-    required this.priority,
-  });
+class _SemanticsTarget {
+  const _SemanticsTarget({required this.label, required this.isButton});
 
   final String label;
-  final Rect rect;
-  final int priority;
+  final bool isButton;
 }
