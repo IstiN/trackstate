@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../../components/services/attachment_upload_probe.dart';
 import '../../core/config/attachment_upload_test_config.dart';
+import '../../frameworks/api/github/github_attachment_upload_framework.dart';
 
 void main() {
   test(
@@ -13,7 +14,7 @@ void main() {
     () async {
       final config = AttachmentUploadTestConfig.ts44;
       var uploadAttempts = 0;
-      final probe = await AttachmentUploadProbe.createGitHub(
+      final framework = await GitHubAttachmentUploadFramework.create(
         config: config,
         responder: (request) async {
           final path = request.url.path;
@@ -46,6 +47,7 @@ void main() {
           return http.Response('', 404);
         },
       );
+      final probe = AttachmentUploadProbe(framework);
       final observation = await probe.upload(
         config.buildWriteRequest(
           Uint8List.fromList('binary-content'.codeUnits),

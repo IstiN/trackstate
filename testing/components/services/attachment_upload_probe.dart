@@ -1,23 +1,11 @@
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 
-import '../../core/config/attachment_upload_test_config.dart';
 import '../../core/interfaces/attachment_upload_port.dart';
-import '../../frameworks/api/github/github_attachment_upload_framework.dart';
 
 class AttachmentUploadProbe {
   const AttachmentUploadProbe(this._attachmentPort);
 
   final AttachmentUploadPort _attachmentPort;
-
-  static Future<AttachmentUploadProbe> createGitHub({
-    required AttachmentUploadTestConfig config,
-    required GitHubHttpResponder responder,
-  }) async => AttachmentUploadProbe(
-    await GitHubAttachmentUploadFramework.create(
-      config: config,
-      responder: responder,
-    ),
-  );
 
   Future<AttachmentUploadObservation> upload(
     RepositoryAttachmentWriteRequest request,
