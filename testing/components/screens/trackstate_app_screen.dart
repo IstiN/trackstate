@@ -7,6 +7,8 @@ import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../../frameworks/flutter/trackstate_test_runtime.dart';
+
 class TrackStateAppScreen {
   TrackStateAppScreen(this.tester);
 
@@ -28,6 +30,15 @@ class TrackStateAppScreen {
     await _waitForAppToLoad();
   }
 
+  Future<void> pumpLocalGitApp({required String repositoryPath}) async {
+    await pumpApp(
+      await createLocalGitTestRepository(
+        tester: tester,
+        repositoryPath: repositoryPath,
+      ),
+    );
+  }
+
   void resetView() {
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
@@ -35,8 +46,7 @@ class TrackStateAppScreen {
 
   Future<void> openRepositoryAccess() async {
     await tester.tap(localGitAccessButton);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
   }
 
   TrackerViewModel currentViewModel() {
@@ -68,7 +78,7 @@ class TrackStateAppScreen {
   }
 
   Future<void> _waitForAppToLoad() async {
-    for (var i = 0; i < 50; i++) {
+    for (var i = 0; i < 100; i++) {
       await tester.pump(const Duration(milliseconds: 100));
       if (!currentViewModel().isLoading) {
         await tester.pump(const Duration(milliseconds: 100));

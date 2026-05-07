@@ -42,11 +42,23 @@ class LocalGitRepositoryFixture {
   }
 
   Future<void> _seedRepository() async {
-    await _writeFile('.gitattributes', '*.png filter=lfs diff=lfs merge=lfs -text\n');
-    await _writeFile('DEMO/project.json', '{"key":"DEMO","name":"Local Demo"}\n');
-    await _writeFile('DEMO/config/statuses.json', '[{"name":"To Do"},{"name":"Done"}]\n');
+    await _writeFile(
+      '.gitattributes',
+      '*.png filter=lfs diff=lfs merge=lfs -text\n',
+    );
+    await _writeFile(
+      'DEMO/project.json',
+      '{"key":"DEMO","name":"Local Demo"}\n',
+    );
+    await _writeFile(
+      'DEMO/config/statuses.json',
+      '[{"name":"To Do"},{"name":"Done"}]\n',
+    );
     await _writeFile('DEMO/config/issue-types.json', '[{"name":"Story"}]\n');
-    await _writeFile('DEMO/config/fields.json', '[{"name":"Summary"},{"name":"Priority"}]\n');
+    await _writeFile(
+      'DEMO/config/fields.json',
+      '[{"name":"Summary"},{"name":"Priority"}]\n',
+    );
     await _writeFile('DEMO/DEMO-1/main.md', '''
 ---
 key: DEMO-1
