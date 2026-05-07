@@ -2,7 +2,7 @@ TS-50 validates that the Settings screen keeps the selected `Connected` provider
 
 - Reuses the shared Settings screen robot and hosted-provider fixture state.
 - Wraps the app in grayscale and protanopia color filters to simulate color-vision-deficiency viewing conditions.
-- Verifies the selected provider control still exposes and visibly renders the `Connected` text label in each filtered scenario.
+- Verifies the post-filter rendered Settings view with golden baselines so the `Connected` state is proven from actual pixels, not only the widget or semantics tree.
 
 Install dependencies with:
 

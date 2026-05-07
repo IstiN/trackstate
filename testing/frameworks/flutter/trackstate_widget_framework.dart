@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
-import 'dart:ui' show CheckedState, Tristate;
 
 import '../../core/interfaces/settings_provider_driver.dart';
 
@@ -56,16 +55,13 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
     for (final finder in [_semanticsFinder(label), _textFinder(label)]) {
       final matches = finder.evaluate().toList();
       for (var index = 0; index < matches.length; index++) {
-        final semantics = tester.getSemantics(finder.at(index));
-        final flags = semantics.getSemanticsData().flagsCollection;
+        final flags = tester.getSemantics(finder.at(index)).flagsCollection;
         final hasSelectionState =
-            flags.isChecked != CheckedState.none ||
-            flags.isSelected != Tristate.none;
+            flags.hasCheckedState || flags.hasSelectedState;
         if (!hasSelectionState) {
           continue;
         }
-        if (flags.isChecked == CheckedState.isTrue ||
-            flags.isSelected == Tristate.isTrue) {
+        if (flags.isChecked || flags.isSelected) {
           return true;
         }
       }
