@@ -23,6 +23,19 @@ class LocalGitRepositoryFixture {
 
   Future<void> dispose() => directory.delete(recursive: true);
 
+  Future<void> configureAuthor({String? userName, String? userEmail}) async {
+    if (userName == null) {
+      await _git(['config', '--unset-all', 'user.name']);
+    } else {
+      await _git(['config', 'user.name', userName]);
+    }
+    if (userEmail == null) {
+      await _git(['config', '--unset-all', 'user.email']);
+    } else {
+      await _git(['config', 'user.email', userEmail]);
+    }
+  }
+
   static Future<LocalGitRepositoryFixture> create({
     String userName = 'Local Tester',
     String userEmail = 'local@example.com',
