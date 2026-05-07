@@ -1,5 +1,3 @@
-import 'dart:ui' show Size;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -181,7 +179,8 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<void> enterIssueDetailDescription(String key, String value) async {
     final editor = _issueDetailEditor(key);
-    await _waitForVisible(editor);
+    await expectIssueDetailVisible(key);
+    expect(editor, findsWidgets);
     await tester.enterText(editor.first, value);
     await _pumpFrames();
   }
@@ -190,7 +189,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Future<void> expectIssueDetailActionVisible(String key, String label) async {
     await expectIssueDetailVisible(key);
     final action = _issueDetailAction(key, label);
-    await _waitForVisible(action);
     expect(action, findsWidgets);
   }
 
@@ -204,7 +202,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Future<void> tapIssueDetailAction(String key, String label) async {
     final action = _issueDetailAction(key, label);
     await expectIssueDetailVisible(key);
-    await _waitForVisible(action);
+    expect(action, findsWidgets);
     await tester.tap(action.first);
     await _pumpFrames();
   }

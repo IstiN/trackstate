@@ -4,9 +4,9 @@ Validates the TS-41 dirty-save behavior for `DEMO/DEMO-1/main.md`.
 
 The TS-41 automation exercises the current local-Git behavior in two ways:
 1. a provider-backed description save attempt against the dirty `main.md`
-2. a real `TrackStateApp` widget check that opens `DEMO-1` and verifies the issue detail still exposes `Transition`, not a description editor plus `Save`
+2. a real `TrackStateApp` widget attempt that dirties the same file, opens `DEMO-1`, edits the description, clicks `Save`, and waits for visible `commit` / `stash` / `clean` guidance
 
-The second check uses the live app UI rather than a synthetic harness or source-file assertion. It documents the current blocker for the ticketed flow: the issue detail is still read-only in local Git mode.
+The second check uses the live app UI rather than a synthetic harness or source-file assertion. In the current checkout it still fails because the issue detail does not expose a description editor plus `Save`, and the provider message is still non-actionable.
 
 ## Install dependencies
 
@@ -17,7 +17,7 @@ flutter pub get
 ## Run this test
 
 ```bash
-flutter test testing/tests/TS-41/test_save_issue_with_dirty_local_files_test.dart --reporter expanded
+/tmp/flutter/bin/flutter test testing/tests/TS-41/test_save_issue_with_dirty_local_files_test.dart --reporter expanded
 ```
 
 ## Required environment and config
@@ -28,5 +28,5 @@ flutter test testing/tests/TS-41/test_save_issue_with_dirty_local_files_test.dar
 ## Current expected result
 
 ```text
-1 passed, 1 failed
+0 passed, 2 failed
 ```

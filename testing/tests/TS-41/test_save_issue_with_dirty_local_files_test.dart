@@ -31,7 +31,7 @@ void main() {
   );
 
   testWidgets(
-    'TS-41 shows the current issue detail remains read-only in the real app UI',
+    'TS-41 attempts the real app description save flow for the same dirty issue',
     (tester) async {
       final fixture = (await tester.runAsync(LocalTrackStateFixture.create))!;
       addTearDown(fixture.dispose);
@@ -42,9 +42,17 @@ void main() {
       await screen.openSection('JQL Search');
       await screen.openIssue('DEMO-1', 'Local issue');
       await screen.expectIssueDetailText('DEMO-1', 'Loaded from local git.');
-      await screen.expectIssueDetailActionVisible('DEMO-1', 'Transition');
-      await screen.expectIssueDetailDescriptionEditorAbsent('DEMO-1');
-      await screen.expectIssueDetailActionAbsent('DEMO-1', 'Save');
+      await fixture.makeDirtyMainFileChange();
+      await screen.enterIssueDetailDescription(
+        'DEMO-1',
+        LocalTrackStateFixture.updatedDescription,
+      );
+      await screen.expectIssueDetailActionVisible('DEMO-1', 'Save');
+      await screen.tapIssueDetailAction('DEMO-1', 'Save');
+      await screen.expectTextVisible('commit');
+      await screen.expectTextVisible('stash');
+      await screen.expectTextVisible('clean');
     },
+    timeout: const Timeout(Duration(seconds: 20)),
   );
 }
