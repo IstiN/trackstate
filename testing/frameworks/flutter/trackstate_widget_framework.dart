@@ -90,6 +90,16 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
   }
 
   @override
+  List<String> visibleTexts() {
+    return tester
+        .widgetList<Text>(find.byType(Text))
+        .map((widget) => widget.data?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
+
+  @override
   String? textFieldValue(String label) {
     final editableTextFinder = _editableTextFinder(label);
     if (editableTextFinder.evaluate().isEmpty) {
