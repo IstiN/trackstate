@@ -7,7 +7,6 @@ class Ts73SetupRepositoryFixture {
     required this.demoRoot,
     required this.readmeFile,
     required this.gitattributesFile,
-    required this.demoIssueAttachmentReadmeFile,
   });
 
   final Directory repositoryRoot;
@@ -15,7 +14,6 @@ class Ts73SetupRepositoryFixture {
   final Directory demoRoot;
   final File readmeFile;
   final File gitattributesFile;
-  final File demoIssueAttachmentReadmeFile;
 
   static Ts73SetupRepositoryFixture create() {
     final repositoryRoot = _locateRepositoryRoot();
@@ -33,13 +31,6 @@ class Ts73SetupRepositoryFixture {
       gitattributesFile: File(
         '${setupRoot.path}${Platform.pathSeparator}.gitattributes',
       ),
-      demoIssueAttachmentReadmeFile: File(
-        '${setupRoot.path}${Platform.pathSeparator}DEMO'
-        '${Platform.pathSeparator}DEMO-1'
-        '${Platform.pathSeparator}DEMO-5'
-        '${Platform.pathSeparator}attachments'
-        '${Platform.pathSeparator}README.md',
-      ),
     );
   }
 
@@ -55,14 +46,11 @@ class Ts73SetupRepositoryFixture {
 
     final readmeContent = await readmeFile.readAsString();
     final gitattributesContent = await gitattributesFile.readAsString();
-    final demoIssueAttachmentReadmeContent = await demoIssueAttachmentReadmeFile
-        .readAsString();
 
     return Ts73SetupRepositoryObservation(
       attachmentDirectories: attachmentDirectories,
       readmeContent: readmeContent,
       gitattributesContent: gitattributesContent,
-      demoIssueAttachmentReadmeContent: demoIssueAttachmentReadmeContent,
     );
   }
 
@@ -105,13 +93,11 @@ class Ts73SetupRepositoryObservation {
     required this.attachmentDirectories,
     required this.readmeContent,
     required this.gitattributesContent,
-    required this.demoIssueAttachmentReadmeContent,
   });
 
   final List<String> attachmentDirectories;
   final String readmeContent;
   final String gitattributesContent;
-  final String demoIssueAttachmentReadmeContent;
 
   static final RegExp _lfsRulePattern = RegExp(
     r'^\s*(\*\.[^\s]+)\s+filter=lfs\b',
@@ -126,9 +112,6 @@ class Ts73SetupRepositoryObservation {
   bool get hasAttachmentDirectoryInDemoTree =>
       attachmentDirectories.any((path) => path.startsWith('DEMO/'));
 
-  bool get hasDocumentedDemoIssueAttachmentDirectory =>
-      attachmentDirectories.contains('DEMO/DEMO-1/DEMO-5/attachments');
-
   bool get readmeDocumentsAttachmentDirectory =>
       readmeContent.contains(
         "Keep attachments under each issue's `attachments/` directory",
@@ -142,13 +125,5 @@ class Ts73SetupRepositoryObservation {
       ) &&
       readmeContent.contains(
         '`.gitattributes` already tracks common binary formats.',
-      );
-
-  bool get demoIssueAttachmentReadmeDocumentsUsage =>
-      demoIssueAttachmentReadmeContent.contains(
-        'Place small issue attachments in this directory.',
-      ) &&
-      demoIssueAttachmentReadmeContent.contains(
-        'through Git LFS so repository clones and Pages builds stay lightweight.',
       );
 }
