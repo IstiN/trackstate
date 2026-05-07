@@ -55,6 +55,11 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
   );
 
+  Finder _issueDetailEditor(String key) => find.descendant(
+    of: _issueDetail(key),
+    matching: find.byType(EditableText),
+  );
+
   Finder get _jqlSearchPanel => find.bySemanticsLabel(RegExp('^JQL Search\$'));
 
   Finder get _jqlSearchField => find.byType(TextField).last;
@@ -187,11 +192,56 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<void> expectIssueDetailActionVisible({
+    required String key,
+    required String label,
+  }) async {
+    final action = _issueDetailAction(key, label);
+    await _waitForVisible(_issueDetail(key));
+    if (action.evaluate().isEmpty) {
+      fail(
+        'Expected issue detail $key to expose a "$label" action for the '
+        'TS-41 save flow, but no matching control was rendered.',
+      );
+    }
+    expect(action, findsWidgets);
+  }
+
+  @override
   void expectIssueDetailActionAbsent({
     required String key,
     required String label,
   }) {
     expect(_issueDetailAction(key, label), findsNothing);
+  }
+
+  @override
+  Future<void> tapIssueDetailAction({
+    required String key,
+    required String label,
+  }) async {
+    await expectIssueDetailActionVisible(key: key, label: label);
+    await tester.tap(_issueDetailAction(key, label).first);
+    await _pumpFrames();
+  }
+
+  @override
+  Future<void> enterIssueDetailDescription({
+    required String key,
+    required String text,
+  }) async {
+    await _waitForVisible(_issueDetail(key));
+    final editor = _issueDetailEditor(key);
+    if (editor.evaluate().isEmpty) {
+      fail(
+        'Expected issue detail $key to render an editable description field '
+        'during the TS-41 save flow, but no editor was visible.',
+      );
+    }
+    await tester.tap(editor.first);
+    await tester.pump();
+    await tester.enterText(editor.first, text);
+    await _pumpFrames();
   }
 
   @override

@@ -35,7 +35,7 @@ void main() {
   );
 
   testWidgets(
-    'TS-41 current TrackState issue detail exposes no live Edit/Save path for main.md',
+    'TS-41 shows actionable recovery guidance from the real issue-detail save flow',
     (tester) async {
       final semantics = tester.ensureSemantics();
       final screen = defaultTestingDependencies.createTrackStateAppScreen(
@@ -60,14 +60,29 @@ void main() {
           LocalTrackStateFixture.issueKey,
           LocalTrackStateFixture.originalDescription,
         );
-        screen.expectIssueDetailActionAbsent(
+        await screen.expectIssueDetailActionVisible(
           key: LocalTrackStateFixture.issueKey,
           label: 'Edit',
         );
-        screen.expectIssueDetailActionAbsent(
+        await screen.tapIssueDetailAction(
+          key: LocalTrackStateFixture.issueKey,
+          label: 'Edit',
+        );
+        await screen.enterIssueDetailDescription(
+          key: LocalTrackStateFixture.issueKey,
+          text: LocalTrackStateFixture.updatedDescription,
+        );
+        await screen.expectIssueDetailActionVisible(
           key: LocalTrackStateFixture.issueKey,
           label: 'Save',
         );
+        await screen.tapIssueDetailAction(
+          key: LocalTrackStateFixture.issueKey,
+          label: 'Save',
+        );
+        await screen.expectTextVisible('commit');
+        await screen.expectTextVisible('stash');
+        await screen.expectTextVisible('clean');
       } finally {
         await tester.runAsync(() async {
           if (fixture != null) {

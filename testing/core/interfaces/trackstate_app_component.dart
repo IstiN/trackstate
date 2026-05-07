@@ -22,9 +22,24 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> expectIssueDetailText(String key, String text);
 
+  Future<void> expectIssueDetailActionVisible({
+    required String key,
+    required String label,
+  });
+
   void expectIssueDetailActionAbsent({
     required String key,
     required String label,
+  });
+
+  Future<void> tapIssueDetailAction({
+    required String key,
+    required String label,
+  });
+
+  Future<void> enterIssueDetailDescription({
+    required String key,
+    required String text,
   });
 
   void expectLocalRuntimeChrome();
