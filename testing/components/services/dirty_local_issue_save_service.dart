@@ -1,4 +1,4 @@
-import 'package:trackstate/data/providers/trackstate_provider.dart';
+import '../../core/interfaces/dirty_local_issue_write_client.dart';
 
 class DirtyLocalIssueSaveService {
   const DirtyLocalIssueSaveService({
@@ -8,7 +8,7 @@ class DirtyLocalIssueSaveService {
     required this.originalDescription,
   });
 
-  final TrackStateProviderAdapter provider;
+  final DirtyLocalIssueWriteClient provider;
   final String issueKey;
   final String issuePath;
   final String originalDescription;
@@ -22,7 +22,7 @@ class DirtyLocalIssueSaveService {
     );
 
     await provider.writeTextFile(
-      RepositoryWriteRequest(
+      DirtyLocalIssueWriteRequest(
         path: issuePath,
         content: updatedContent,
         message: 'Update $issueKey description',

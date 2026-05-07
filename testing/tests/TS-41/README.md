@@ -2,7 +2,9 @@
 
 Validates that TrackState blocks mutations when `DEMO/DEMO-1/main.md` has local dirty changes.
 
-The current app surface in this repository still renders issue descriptions read-only, so this ticket automation stays on the real local Git adapter path and does not invent a synthetic Save UI.
+The TS-41 automation keeps two checks in sync with AC3:
+1. a provider-backed description save attempt against the dirty `main.md`
+2. a real `TrackStateApp` widget flow that triggers a user-visible failure banner after a board move hits the same dirty file
 
 ## Install dependencies
 
@@ -24,5 +26,5 @@ flutter test testing/tests/TS-41/test_save_issue_with_dirty_local_files_test.dar
 ## Expected passing output
 
 ```text
-00:00 +1: All tests passed!
+00:00 +2: All tests passed!
 ```

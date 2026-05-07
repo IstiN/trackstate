@@ -5,4 +5,4 @@ platform: linux
 dependencies: []
 notes:
   - Verifies the local Git adapter blocks a save when issue main.md has dirty local edits.
-  - Avoids a synthetic description-save harness because the current app surface still renders issue descriptions read-only.
+  - Covers the provider-backed description save path and the real TrackStateApp board mutation flow against the same dirty file.
