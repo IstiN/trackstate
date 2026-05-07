@@ -79,6 +79,15 @@ class QuickStartCliValidationTest(unittest.TestCase):
                 f"{fragment!r}, so the validation path is incomplete.\n"
                 f"Observed section:\n{result.quick_start_section}",
             )
+        for fragment in self.config.required_runtime_readme_fragments:
+            self.assertIn(
+                fragment,
+                result.readme_text,
+                "Step 2 failed: `trackstate-setup/README.md` no longer documents "
+                f"the runtime GitHub API read path {fragment!r} used by the "
+                "quick-start setup repository.\n"
+                f"Observed README:\n{result.readme_text}",
+            )
         self.assertTrue(
             result.repository_info.succeeded,
             "Step 3 failed: the test could not inspect the configured setup "
@@ -106,43 +115,94 @@ class QuickStartCliValidationTest(unittest.TestCase):
             "expected upstream template.\n"
             f"Observed repository metadata:\n{result.repository_info.stdout}",
         )
+        self.assertTrue(
+            result.tree_fetch.succeeded,
+            "Step 4 failed: the README-documented repository discovery command "
+            "did not complete successfully.\n"
+            f"Command: {result.tree_fetch.command_text}\n"
+            f"Exit code: {result.tree_fetch.exit_code}\n"
+            f"stdout:\n{result.tree_fetch.stdout}\n"
+            f"stderr:\n{result.tree_fetch.stderr}",
+        )
+        self.assertEqual(
+            result.tree_fetch.command,
+            (
+                "gh",
+                "api",
+                f"repos/{result.target_repository}/git/trees/"
+                f"{result.repository_default_branch}?recursive=1",
+            ),
+            "Step 4 failed: the validation flow did not execute the README-"
+            "documented repository tree discovery command for the fork.",
+        )
+        self.assertIn(
+            result.project_path,
+            result.tree_paths,
+            "Step 4 failed: the README-documented repository tree read did not "
+            "show the configured project file in the fork.\n"
+            f"Observed tree paths:\n{result.tree_fetch.stdout}",
+        )
+        self.assertTrue(
+            any(
+                path == result.documented_config_path
+                or path.startswith(f"{result.documented_config_path}/")
+                for path in result.tree_paths
+                if result.documented_config_path is not None
+            ),
+            "Step 4 failed: the README-documented repository tree read did not "
+            "show the configured tracker config directory in the fork.\n"
+            f"Observed tree paths:\n{result.tree_fetch.stdout}",
+        )
 
         self.assertEqual(
             result.project_fetch.command,
             (
-                "bash",
-                "-lc",
-                "set -o pipefail && "
-                f"gh api 'repos/{result.target_repository}/contents/{result.project_path}"
-                f"?ref={result.repository_default_branch}' --jq '.content' | "
-                "tr -d '\\n' | base64 --decode",
+                "gh",
+                "api",
+                f"repos/{result.target_repository}/contents/{result.project_path}"
+                f"?ref={result.repository_default_branch}",
             ),
-            "Step 4 failed: the validation flow did not execute the expected "
-            "CLI project read for the forked setup repository.",
+            "Step 5 failed: the validation flow did not execute the README-"
+            "documented contents read for the forked setup repository.",
         )
         self.assertTrue(
             result.project_fetch.succeeded,
-            "Step 4 failed: the quick-start validation command did not complete "
+            "Step 5 failed: the quick-start validation command did not complete "
             "successfully.\n"
             f"Command: {result.project_fetch.command_text}\n"
             f"Exit code: {result.project_fetch.exit_code}\n"
             f"stdout:\n{result.project_fetch.stdout}\n"
             f"stderr:\n{result.project_fetch.stderr}",
         )
+        self.assertEqual(
+            result.project_fetch_path,
+            result.project_path,
+            "Step 5 failed: the CLI response path did not match the quick-start "
+            "project file.\n"
+            f"Observed response:\n{result.project_fetch.stdout}",
+        )
+        self.assertEqual(
+            result.project_fetch_encoding,
+            "base64",
+            "Step 5 failed: the CLI response no longer returned the documented "
+            "GitHub contents payload encoding.\n"
+            f"Observed response:\n{result.project_fetch.stdout}",
+        )
         self.assertTrue(
             result.expected_project_fetch.succeeded,
-            "Step 5 failed: the test could not read the same project file directly "
+            "Step 6 failed: the test could not read the same project file directly "
             "from the forked repository for independent comparison.\n"
             f"Command: {result.expected_project_fetch.command_text}\n"
             f"stderr:\n{result.expected_project_fetch.stderr}",
         )
         self.assertIsNotNone(
             result.actual_project,
-            "Step 5 failed: the CLI command did not return parseable JSON output.",
+            "Step 6 failed: the CLI contents response did not decode to parseable "
+            "project JSON.",
         )
         self.assertTrue(
             result.project_fetch.stdout.lstrip().startswith("{"),
-            "Step 5 failed: the CLI output did not render as a JSON object in the terminal.\n"
+            "Step 6 failed: the CLI output did not render as a JSON object in the terminal.\n"
             f"Observed output:\n{result.project_fetch.stdout}",
         )
         self.assertDictEqual(
@@ -156,10 +216,10 @@ class QuickStartCliValidationTest(unittest.TestCase):
         for visible_snippet in self.config.visible_project_fields:
             self.assertIn(
                 visible_snippet,
-                result.project_fetch.stdout,
-                "Human-style verification failed: the user-visible CLI output "
+                result.actual_project_text,
+                "Human-style verification failed: the decoded project payload "
                 f"did not show {visible_snippet!r}.\n"
-                f"Observed output:\n{result.project_fetch.stdout}",
+                f"Observed payload:\n{result.actual_project_text}",
             )
 
 

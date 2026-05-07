@@ -12,6 +12,12 @@ class ProjectCliProbe(Protocol):
 
     def repository_metadata(self, repository: str) -> CliCommandResult: ...
 
+    def list_tree(
+        self,
+        repository: str,
+        ref: str,
+    ) -> CliCommandResult: ...
+
     def get_project(
         self,
         repository: str,

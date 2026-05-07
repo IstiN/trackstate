@@ -14,6 +14,7 @@ class ProjectCliValidationConfig:
     readme_path: Path
     project_template_path: Path
     required_quick_start_fragments: tuple[str, ...]
+    required_runtime_readme_fragments: tuple[str, ...]
     visible_project_fields: tuple[str, ...]
 
     @classmethod
@@ -40,6 +41,10 @@ class ProjectCliValidationConfig:
                 "IstiN/trackstate",
                 "DEMO/project.json",
                 "DEMO/config/*.json",
+            ),
+            required_runtime_readme_fragments=(
+                "`git/trees` for file discovery",
+                "`contents` for markdown/config reads",
             ),
             visible_project_fields=(
                 '"key": "DEMO"',

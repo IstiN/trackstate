@@ -23,7 +23,8 @@ class ProjectQuickStartValidator:
         *,
         config: ProjectCliValidationConfig,
     ) -> ProjectCliValidationResult:
-        quick_start_section = self._read_quick_start_section(config.readme_path)
+        readme_text = self._read_readme_text(config.readme_path)
+        quick_start_section = self._read_quick_start_section(readme_text)
         project_template = self._read_project_template(config.project_template_path)
         auth_status = self._probe.auth_status()
         viewer_login = self._probe.viewer_login()
@@ -31,6 +32,7 @@ class ProjectQuickStartValidator:
         repository_info = self._probe.repository_metadata(target_repository)
         default_branch = self._repository_default_branch(repository_info)
         project_path = self._project_path_from_template(project_template, config)
+        tree_fetch = self._probe.list_tree(target_repository, default_branch)
         project_fetch = self._probe.get_project(
             target_repository,
             default_branch,
@@ -46,18 +48,22 @@ class ProjectQuickStartValidator:
             target_repository=target_repository,
             upstream_repository=config.upstream_repository,
             project_path=project_path,
+            readme_text=readme_text,
             quick_start_section=quick_start_section,
             project_template=project_template,
             expected_project=expected_project,
             auth_status=auth_status,
             viewer_login=viewer_login,
             repository_info=repository_info,
+            tree_fetch=tree_fetch,
             project_fetch=project_fetch,
             expected_project_fetch=expected_project_fetch,
         )
 
-    def _read_quick_start_section(self, readme_path: Path) -> str:
-        readme_text = (self._repository_root / readme_path).read_text(encoding="utf-8")
+    def _read_readme_text(self, readme_path: Path) -> str:
+        return (self._repository_root / readme_path).read_text(encoding="utf-8")
+
+    def _read_quick_start_section(self, readme_text: str) -> str:
         match = re.search(
             r"^## CLI quick start\s*(.*?)(?=^## |\Z)",
             readme_text,

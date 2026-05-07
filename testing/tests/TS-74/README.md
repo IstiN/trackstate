@@ -3,11 +3,13 @@
 Validates the CLI quick-start fork connectivity path by reading the
 `trackstate-setup/README.md` quick-start section, resolving the authenticated
 user's `trackstate-setup` fork by default, reading the setup template contract
-from `trackstate-setup/project-template.json`, and executing the GitHub CLI
-contents read against that fork and branch. The command decodes the returned
-repository content to JSON so the terminal output matches the documented
-`DEMO/project.json` payload. The CLI JSON is then compared with the same
-project file fetched directly from the fork's default branch.
+from `trackstate-setup/project-template.json`, and executing the README-
+documented GitHub API read flow against that fork and branch. The test first
+lists the recursive repository tree with `git/trees` to confirm the documented
+`DEMO/project.json` and `DEMO/config/*.json` paths exist, then runs the basic
+`contents` read command for `DEMO/project.json`. The returned GitHub contents
+JSON is decoded and compared with the same project file fetched directly from
+the fork's default branch.
 
 ## Install dependencies
 

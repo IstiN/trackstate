@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import shlex
 import subprocess
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -45,6 +44,24 @@ class GitHubCliProjectFramework(ProjectCliProbe):
             json_payload=payload,
         )
 
+    def list_tree(
+        self,
+        repository: str,
+        ref: str,
+    ) -> CliCommandResult:
+        command = ("gh", "api", f"repos/{repository}/git/trees/{ref}?recursive=1")
+        result = self._run(command)
+        payload: dict[str, object] | None = None
+        if result.succeeded:
+            payload = json.loads(result.stdout)
+        return CliCommandResult(
+            command=result.command,
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            json_payload=payload,
+        )
+
     def get_project(
         self,
         repository: str,
@@ -52,24 +69,18 @@ class GitHubCliProjectFramework(ProjectCliProbe):
         project_path: str,
     ) -> CliCommandResult:
         endpoint = f"repos/{repository}/contents/{project_path}?ref={default_branch}"
-        command_text = (
-            "set -o pipefail && "
-            f"gh api {shlex.quote(endpoint)} --jq '.content' | "
-            "tr -d '\\n' | base64 --decode"
-        )
-        command = ("bash", "-lc", command_text)
+        command = ("gh", "api", endpoint)
         result = self._run(command)
         payload: dict[str, object] | None = None
         if result.succeeded:
             payload = json.loads(result.stdout)
-            result = CliCommandResult(
-                command=result.command,
-                exit_code=result.exit_code,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                json_payload=payload,
-            )
-        return result
+        return CliCommandResult(
+            command=result.command,
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            json_payload=payload,
+        )
 
     def get_raw_project(
         self,
