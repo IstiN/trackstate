@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/ui/core/trackstate_icons.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
@@ -20,6 +21,14 @@ class SettingsScreenRobot {
   Finder get workflowCard => find.text('Workflow');
   Finder get fieldsCard => find.text('Fields');
   Finder get languageCard => find.text('Language');
+  Finder get localGitTopBarControl => topBarProviderControl('Local Git');
+  Finder get localGitSettingsControl => settingsProviderControl('Local Git');
+  Finder get connectGitHubTopBarControl =>
+      topBarProviderControl('Connect GitHub');
+  Finder get connectGitHubSettingsControl =>
+      settingsProviderControl('Connect GitHub');
+  Finder get connectedTopBarControl => topBarProviderControl('Connected');
+  Finder get connectedSettingsControl => settingsProviderControl('Connected');
   Finder get localGitControl => _settingsProviderButton('Local Git');
   Finder get connectGitHubControl => _settingsProviderButton('Connect GitHub');
   Finder get connectedControl => _settingsProviderButton('Connected');
@@ -212,6 +221,12 @@ class SettingsScreenRobot {
     return tester.getSemantics(finder.first).label;
   }
 
+  Finder topBarProviderControl(String label) =>
+      _buttonControlWithText(label, requiresTrackStateIcon: true);
+
+  Finder settingsProviderControl(String label) =>
+      _buttonControlWithText(label, requiresTrackStateIcon: false);
+
   FinderBase<SemanticsNode> _semanticsFinderFor(Finder finder) {
     final semanticsId = tester.getSemantics(finder).id;
     return find.semantics.byPredicate(
@@ -258,5 +273,48 @@ class SettingsScreenRobot {
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .toList();
+  }
+
+  Finder _buttonControlWithText(
+    String label, {
+    required bool requiresTrackStateIcon,
+  }) {
+    return find.byElementPredicate(
+      (element) =>
+          element.widget is ButtonStyleButton &&
+          _subtreeContainsWidget(
+            element,
+            (widget) => widget is Text && widget.data?.trim() == label,
+          ) &&
+          _subtreeContainsWidget(
+                element,
+                (widget) => widget is TrackStateIcon,
+              ) ==
+              requiresTrackStateIcon,
+      description:
+          '${requiresTrackStateIcon ? 'top-bar' : 'settings'} '
+          'button control "$label"',
+    );
+  }
+
+  bool _subtreeContainsWidget(Element root, bool Function(Widget) matches) {
+    if (matches(root.widget)) {
+      return true;
+    }
+
+    var found = false;
+    void visit(Element element) {
+      if (found) {
+        return;
+      }
+      if (matches(element.widget)) {
+        found = true;
+        return;
+      }
+      element.visitChildren(visit);
+    }
+
+    root.visitChildren(visit);
+    return found;
   }
 }
