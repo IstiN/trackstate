@@ -2,10 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../components/services/trackstate_runtime_service.dart';
+import 'support/ts39_runtime_service_factory.dart';
 
 void main() {
-  final service = TrackStateRuntimeService.flutter();
+  final service = createTrackStateRuntimeService();
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -25,10 +25,7 @@ void main() {
 
       if (kIsWeb) {
         expect(localOverride.isBlocked, isTrue);
-        expect(
-          localOverride.blockedReason,
-          contains('IO test subprocess'),
-        );
+        expect(localOverride.blockedReason, contains('IO test subprocess'));
       } else {
         expect(localOverride.matchesLocalRuntime, isTrue);
         expect(localOverride.configuredRuntimeName, 'local-git');
