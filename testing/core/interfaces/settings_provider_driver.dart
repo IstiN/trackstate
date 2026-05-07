@@ -1,7 +1,12 @@
 import 'dart:ui' show Rect;
 
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
+
 abstract class SettingsProviderDriver {
-  Future<void> launchApp();
+  Future<void> launchApp({
+    required TrackStateRepository repository,
+    Map<String, Object> sharedPreferences = const {},
+  });
 
   void resetView();
 
@@ -22,4 +27,10 @@ abstract class SettingsProviderDriver {
   String? textFieldValue(String label);
 
   bool isTextFieldReadOnly(String label);
+
+  List<String> visibleProviderLabels();
+
+  bool isProviderSelected(String label);
+
+  Rect? rectForProviderLabel(String label);
 }
