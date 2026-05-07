@@ -26,18 +26,11 @@ class SettingsScreenRobot {
     of: find.text('Repository access'),
     matching: find.byType(Column),
   ).first;
-  Finder get localGitControl => find.ancestor(
-    of: find.text('Local Git'),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
-  Finder get connectGitHubControl => find.ancestor(
-    of: find.text('Connect GitHub'),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
-  Finder get connectedControl => find.ancestor(
-    of: find.text('Connected'),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
+  Finder get localGitControl => _settingsProviderButton('Local Git');
+  Finder get connectGitHubControl => _settingsProviderButton('Connect GitHub');
+  Finder get connectedControl => _settingsProviderButton('Connected');
+  Finder get selectedConnectedControl =>
+      _filledSettingsProviderButton('Connected');
   Finder get settingsConnectedControl => find.descendant(
     of: repositoryAccessSection,
     matching: find.ancestor(
@@ -57,13 +50,13 @@ class SettingsScreenRobot {
   Future<void> pumpApp({
     required TrackStateRepository repository,
     Map<String, Object> sharedPreferences = const {},
+    Widget Function(Widget child)? appWrapper,
   }) async {
     SharedPreferences.setMockInitialValues(sharedPreferences);
     tester.view.physicalSize = const Size(1440, 960);
     tester.view.devicePixelRatio = 1;
-    await tester.pumpWidget(
-      TrackStateApp(key: UniqueKey(), repository: repository),
-    );
+    final app = TrackStateApp(key: UniqueKey(), repository: repository);
+    await tester.pumpWidget(appWrapper == null ? app : appWrapper(app));
     await tester.pumpAndSettle();
   }
 
@@ -124,7 +117,7 @@ class SettingsScreenRobot {
 
   String? focusedLabel(Map<String, Finder> candidates) {
     final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.flagsCollection.isFocused,
+      (node) => node.getSemanticsData().flagsCollection.isFocused,
       describeMatch: (_) => 'focused semantics node',
     );
     if (focusedSemantics.evaluate().isEmpty) {
@@ -216,6 +209,32 @@ class SettingsScreenRobot {
     return Color.alphaBlend(overlay, background);
   }
 
+  Color renderedButtonBackground(Finder scope) {
+    for (final element in scope.evaluate()) {
+      final widget = element.widget;
+      if (widget is ButtonStyleButton) {
+        final color = widget.style?.backgroundColor?.resolve(
+          _buttonStates(widget),
+        );
+        if (color != null) {
+          return color;
+        }
+      }
+    }
+    final materialFinder = find.descendant(
+      of: scope,
+      matching: find.byType(Material),
+      matchRoot: true,
+    );
+    for (final element in materialFinder.evaluate()) {
+      final widget = element.widget;
+      if (widget is Material && widget.color != null) {
+        return widget.color!;
+      }
+    }
+    throw StateError('No rendered button background found for $scope');
+  }
+
   Color? _fallbackTextColor(Finder scope) {
     for (final element in scope.evaluate()) {
       final widget = element.widget;
@@ -224,6 +243,18 @@ class SettingsScreenRobot {
       }
     }
     return null;
+  }
+
+  Set<WidgetState> _buttonStates(ButtonStyleButton button) {
+    final states = <WidgetState>{};
+    final controller = button.statesController;
+    if (controller != null) {
+      states.addAll(controller.value);
+    }
+    if (!button.enabled) {
+      states.add(WidgetState.disabled);
+    }
+    return states;
   }
 
   String semanticsLabelOf(Finder finder) {
@@ -236,6 +267,37 @@ class SettingsScreenRobot {
       (node) => node.id == semanticsId,
       describeMatch: (_) => 'semantics node for $finder',
     );
+  }
+
+  Finder _settingsProviderButton(String label) {
+    return _lowestButton(
+      find.ancestor(
+        of: find.text(label),
+        matching: find.bySubtype<ButtonStyleButton>(),
+      ),
+    );
+  }
+
+  Finder _filledSettingsProviderButton(String label) {
+    return _lowestButton(find.widgetWithText(FilledButton, label));
+  }
+
+  Finder _lowestButton(Finder buttons) {
+    final matches = buttons.evaluate().length;
+    if (matches == 0) {
+      return buttons;
+    }
+
+    var bestIndex = 0;
+    var bestTop = double.negativeInfinity;
+    for (var index = 0; index < matches; index++) {
+      final top = tester.getRect(buttons.at(index)).top;
+      if (top > bestTop) {
+        bestTop = top;
+        bestIndex = index;
+      }
+    }
+    return buttons.at(bestIndex);
   }
 
   List<String> visibleTexts() {
