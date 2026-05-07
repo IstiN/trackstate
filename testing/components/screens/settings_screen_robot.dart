@@ -10,12 +10,16 @@ import 'package:trackstate/ui/core/trackstate_icons.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
-import '../../frameworks/flutter/trackstate_test_runtime.dart';
+import '../../core/interfaces/local_git_repository_factory.dart';
 
 class SettingsScreenRobot {
-  SettingsScreenRobot(this.tester);
+  SettingsScreenRobot(
+    this.tester, {
+    LocalGitRepositoryFactory? localGitRepositoryFactory,
+  }) : _localGitRepositoryFactory = localGitRepositoryFactory;
 
   final WidgetTester tester;
+  final LocalGitRepositoryFactory? _localGitRepositoryFactory;
   static const jqlPlaceholderText =
       'project = TRACK AND status != Done ORDER BY priority DESC';
 
@@ -71,9 +75,12 @@ class SettingsScreenRobot {
     Map<String, Object> sharedPreferences = const {},
     Widget Function(Widget child)? appWrapper,
   }) async {
+    final localGitRepositoryFactory = _localGitRepositoryFactory;
+    if (localGitRepositoryFactory == null) {
+      throw StateError('Local Git repository factory is not configured.');
+    }
     await pumpApp(
-      repository: await createLocalGitTestRepository(
-        tester: tester,
+      repository: await localGitRepositoryFactory.create(
         repositoryPath: repositoryPath,
       ),
       sharedPreferences: sharedPreferences,

@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -37,19 +36,15 @@ class LocalGitRepositoryFixture {
     }
   }
 
-  Future<void> replaceIssueTypes(List<String> issueTypes) async {
-    await _writeFile(
-      'DEMO/config/issue-types.json',
-      '${jsonEncode([
-        for (final issueType in issueTypes) {'name': issueType},
-      ])}\n',
-    );
+  Future<void> writeFile(String relativePath, String content) async {
+    final file = File('${directory.path}/$relativePath');
+    await file.parent.create(recursive: true);
+    await file.writeAsString(content);
   }
 
-  Future<void> commitChanges(String message) async {
-    await _git(['add', '.']);
-    await _git(['commit', '-m', message]);
-  }
+  Future<void> stageAll() => _git(['add', '.']);
+
+  Future<void> commit(String message) => _git(['commit', '-m', message]);
 
   static Future<LocalGitRepositoryFixture> create({
     String userName = 'Local Tester',
@@ -70,24 +65,24 @@ class LocalGitRepositoryFixture {
   }
 
   Future<void> _seedRepository() async {
-    await _writeFile(
+    await writeFile(
       '.gitattributes',
       '*.png filter=lfs diff=lfs merge=lfs -text\n',
     );
-    await _writeFile(
+    await writeFile(
       'DEMO/project.json',
       '{"key":"DEMO","name":"Local Demo"}\n',
     );
-    await _writeFile(
+    await writeFile(
       'DEMO/config/statuses.json',
       '[{"name":"To Do"},{"name":"Done"}]\n',
     );
-    await _writeFile('DEMO/config/issue-types.json', '[{"name":"Story"}]\n');
-    await _writeFile(
+    await writeFile('DEMO/config/issue-types.json', '[{"name":"Story"}]\n');
+    await writeFile(
       'DEMO/config/fields.json',
       '[{"name":"Summary"},{"name":"Priority"}]\n',
     );
-    await _writeFile('DEMO/DEMO-1/main.md', '''
+    await writeFile('DEMO/DEMO-1/main.md', '''
 ---
 key: DEMO-1
 project: DEMO
@@ -104,7 +99,7 @@ updated: 2026-05-05T00:00:00Z
 
 Loaded from local Git.
 ''');
-    await _writeFile(
+    await writeFile(
       'DEMO/DEMO-1/acceptance_criteria.md',
       '- Loads through the local Git runtime\n',
     );
@@ -112,14 +107,8 @@ Loaded from local Git.
     await _git(['init', '-b', branch]);
     await _git(['config', 'user.name', userName]);
     await _git(['config', 'user.email', userEmail]);
-    await _git(['add', '.']);
-    await _git(['commit', '-m', 'Initial local runtime fixture']);
-  }
-
-  Future<void> _writeFile(String relativePath, String content) async {
-    final file = File('${directory.path}/$relativePath');
-    await file.parent.create(recursive: true);
-    await file.writeAsString(content);
+    await stageAll();
+    await commit('Initial local runtime fixture');
   }
 
   Future<void> _git(List<String> args) async {
