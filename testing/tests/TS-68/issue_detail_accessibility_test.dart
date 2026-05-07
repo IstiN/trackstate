@@ -57,22 +57,21 @@ void main() {
           }
         }
 
-        final inProgressLabelCount = semanticsLabels
-            .where((label) => label == 'In Progress')
-            .length;
-        if (inProgressLabelCount != 1) {
-          failures.add(
-            'The issue detail must expose exactly one "In Progress" semantics label, but found $inProgressLabelCount.',
-          );
-        }
-
-        final componentLabelCount = semanticsLabels
-            .where((label) => label == 'tracker-core')
-            .length;
-        if (componentLabelCount != 1) {
-          failures.add(
-            'The issue detail must expose exactly one "tracker-core" semantics label, but found $componentLabelCount.',
-          );
+        for (final label in const [
+          'In Progress',
+          'tracker-core',
+          '8',
+          'web',
+          'mobile',
+        ]) {
+          final labelCount = semanticsLabels
+              .where((candidate) => candidate == label)
+              .length;
+          if (labelCount != 1) {
+            failures.add(
+              'The issue detail must expose exactly one "$label" semantics label, but found $labelCount.',
+            );
+          }
         }
 
         if (commentActionLabels.isEmpty) {
@@ -108,7 +107,13 @@ void main() {
         final traversalFailure = _logicalTraversalFailure(
           semanticsTraversal,
           issueSummary: issueSummary,
-          metadataLabels: const ['In Progress', 'tracker-core', '8', 'web', 'mobile'],
+          metadataLabels: const [
+            'In Progress',
+            'tracker-core',
+            '8',
+            'web',
+            'mobile',
+          ],
           commentsHeading: 'Comments',
           commentAuthor: 'ana',
           commentBody: expectedCommentBody,
@@ -151,8 +156,16 @@ String? _logicalTraversalFailure(
 }) {
   final summaryIndex = traversal.indexOf(issueSummary);
   final commentsIndex = traversal.indexOf(commentsHeading);
-  final authorIndex = traversal.indexOf(commentAuthor);
-  final bodyIndex = traversal.indexOf(commentBody);
+  final authorIndex = _indexOfAfter(
+    traversal,
+    commentAuthor,
+    afterIndex: commentsIndex,
+  );
+  final bodyIndex = _indexOfAfter(
+    traversal,
+    commentBody,
+    afterIndex: authorIndex,
+  );
 
   if (summaryIndex == -1 ||
       commentsIndex == -1 ||
@@ -175,4 +188,21 @@ String? _logicalTraversalFailure(
   }
 
   return null;
+}
+
+int _indexOfAfter(
+  List<String> traversal,
+  String label, {
+  required int afterIndex,
+}) {
+  if (afterIndex < 0) {
+    return -1;
+  }
+
+  for (var index = afterIndex + 1; index < traversal.length; index++) {
+    if (traversal[index] == label) {
+      return index;
+    }
+  }
+  return -1;
 }
