@@ -1,18 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../components/pages/settings_provider_page.dart';
-import '../../frameworks/flutter/trackstate_widget_framework.dart';
 
 void main() {
   testWidgets('TS-45: Settings provider selector shows Local Git stacked config fields', (
     tester,
   ) async {
     final semantics = tester.ensureSemantics();
-    final framework = TrackStateWidgetFramework(tester);
+    final settingsPage = SettingsProviderPage.create(tester);
     try {
-      await framework.launchApp();
-      final settingsPage = SettingsProviderPage(framework);
-
       await settingsPage.open();
       final initialState = settingsPage.captureState();
 
@@ -93,7 +89,7 @@ void main() {
             'Repository Path and Write Branch should align as stacked fields in a single column.',
       );
     } finally {
-      framework.resetView();
+      settingsPage.dispose();
       semantics.dispose();
     }
   });

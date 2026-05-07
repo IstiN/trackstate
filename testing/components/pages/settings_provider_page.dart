@@ -1,51 +1,62 @@
+import 'package:flutter_test/flutter_test.dart';
+
+import '../../core/interfaces/settings_provider_driver.dart';
 import '../../core/models/settings_provider_state.dart';
 import '../../frameworks/flutter/trackstate_widget_framework.dart';
 
 class SettingsProviderPage {
-  SettingsProviderPage(this._framework);
+  SettingsProviderPage._(this._driver);
 
-  final TrackStateWidgetFramework _framework;
+  factory SettingsProviderPage.create(WidgetTester tester) =>
+      SettingsProviderPage._(TrackStateWidgetFramework(tester));
+
+  final SettingsProviderDriver _driver;
 
   Future<void> open() async {
-    await _framework.tapLabeledElement('Settings');
+    await _driver.launchApp();
+    await _driver.tapLabeledElement('Settings');
   }
 
   Future<void> showHostedProviderConfiguration() async {
-    await _framework.tapLabeledElement('Connect GitHub');
+    await _driver.tapLabeledElement('Connect GitHub');
   }
 
   Future<void> showLocalGitConfiguration() async {
-    await _framework.tapLabeledElement('Local Git');
-    await _framework.scrollBodyBy(-400);
+    await _driver.tapLabeledElement('Local Git');
+    await _driver.scrollBodyBy(-400);
+  }
+
+  void dispose() {
+    _driver.resetView();
   }
 
   SettingsProviderState captureState() {
-    final repositoryPathRect = _framework.rectForText('Repository Path');
-    final writeBranchRect = _framework.rectForText('Write Branch');
-    final connectGitHubRect = _framework.rectForText('Connect GitHub');
-    final localGitRect = _framework.rectForText('Local Git');
+    final repositoryPathRect = _driver.rectForText('Repository Path');
+    final writeBranchRect = _driver.rectForText('Write Branch');
+    final connectGitHubRect = _driver.rectForText('Connect GitHub');
+    final localGitRect = _driver.rectForText('Local Git');
 
     return SettingsProviderState(
-      isProjectSettingsVisible: _framework.isTextVisible('Project Settings'),
+      isProjectSettingsVisible: _driver.isTextVisible('Project Settings'),
       connectGitHubOption: ProviderOptionState(
         label: 'Connect GitHub',
-        visibleCount: _framework.visibleTextCount('Connect GitHub'),
-        isSelected: _framework.isSelected('Connect GitHub'),
+        visibleCount: _driver.visibleTextCount('Connect GitHub'),
+        isSelected: _driver.isSelected('Connect GitHub'),
         top: connectGitHubRect?.top,
         bottom: connectGitHubRect?.bottom,
         left: connectGitHubRect?.left,
       ),
       localGitOption: ProviderOptionState(
         label: 'Local Git',
-        visibleCount: _framework.visibleTextCount('Local Git'),
-        isSelected: _framework.isSelected('Local Git'),
+        visibleCount: _driver.visibleTextCount('Local Git'),
+        isSelected: _driver.isSelected('Local Git'),
         top: localGitRect?.top,
         bottom: localGitRect?.bottom,
         left: localGitRect?.left,
       ),
-      isFineGrainedTokenVisible: _framework.isTextVisible('Fine-grained token'),
-      isRepositoryPathVisible: _framework.isTextVisible('Repository Path'),
-      isWriteBranchVisible: _framework.isTextVisible('Write Branch'),
+      isFineGrainedTokenVisible: _driver.isTextVisible('Fine-grained token'),
+      isRepositoryPathVisible: _driver.isTextVisible('Repository Path'),
+      isWriteBranchVisible: _driver.isTextVisible('Write Branch'),
       repositoryPathTop: repositoryPathRect?.top,
       repositoryPathBottom: repositoryPathRect?.bottom,
       repositoryPathLeft: repositoryPathRect?.left,

@@ -1,19 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
-class TrackStateWidgetFramework {
+import '../../core/interfaces/settings_provider_driver.dart';
+
+class TrackStateWidgetFramework implements SettingsProviderDriver {
   TrackStateWidgetFramework(this.tester);
 
   final WidgetTester tester;
 
-  Future<void> launchApp({
-    TrackStateRepository repository = const DemoTrackStateRepository(),
-    Size size = const Size(1440, 960),
-  }) async {
+  @override
+  Future<void> launchApp() async {
+    const repository = DemoTrackStateRepository();
+    const size = Size(1440, 960);
     SharedPreferences.setMockInitialValues({});
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -22,11 +23,13 @@ class TrackStateWidgetFramework {
     await tester.pumpAndSettle();
   }
 
+  @override
   void resetView() {
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
   }
 
+  @override
   Future<void> tapLabeledElement(String label) async {
     final finder = _labeledElement(label);
     await tester.ensureVisible(finder.first);
@@ -34,29 +37,32 @@ class TrackStateWidgetFramework {
     await tester.pumpAndSettle();
   }
 
+  @override
   Future<void> scrollBodyBy(double dy) async {
     final scrollableFinder = find.byType(SingleChildScrollView).first;
     await tester.drag(scrollableFinder, Offset(0, dy));
     await tester.pumpAndSettle();
   }
 
+  @override
   bool isTextVisible(String text) => _textFinder(text).evaluate().isNotEmpty;
 
+  @override
   int visibleTextCount(String text) => _textFinder(text).evaluate().length;
 
+  @override
   bool isSelected(String label) {
     for (final finder in [_semanticsFinder(label), _textFinder(label)]) {
       final matches = finder.evaluate().toList();
       for (var index = 0; index < matches.length; index++) {
         final semantics = tester.getSemantics(finder.at(index));
+        final flags = semantics.flagsCollection;
         final hasSelectionState =
-            semantics.hasFlag(SemanticsFlag.hasCheckedState) ||
-            semantics.hasFlag(SemanticsFlag.hasSelectedState);
+            flags.hasCheckedState || flags.hasSelectedState;
         if (!hasSelectionState) {
           continue;
         }
-        if (semantics.hasFlag(SemanticsFlag.isChecked) ||
-            semantics.hasFlag(SemanticsFlag.isSelected)) {
+        if (flags.isChecked || flags.isSelected) {
           return true;
         }
       }
@@ -64,6 +70,7 @@ class TrackStateWidgetFramework {
     return false;
   }
 
+  @override
   Rect? rectForText(String text) {
     final finder = _textFinder(text);
     if (finder.evaluate().isEmpty) {
