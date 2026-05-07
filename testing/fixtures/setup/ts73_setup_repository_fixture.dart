@@ -109,13 +109,24 @@ class Ts73SetupRepositoryObservation {
       .map((match) => match.group(1)!)
       .toList(growable: false);
 
-  String get _normalizedReadmeContent => readmeContent.toLowerCase();
+  String get _normalizedReadmeContent =>
+      readmeContent.toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+  Iterable<String> get _readmeSentences => _normalizedReadmeContent
+      .split(RegExp(r'[.!?]'))
+      .map((sentence) => sentence.trim())
+      .where((sentence) => sentence.isNotEmpty);
 
   bool get hasAttachmentDirectoryInDemoTree =>
       attachmentDirectories.any((path) => path.startsWith('DEMO/'));
 
-  bool get readmeGuidesAttachmentStorage =>
-      _normalizedReadmeContent.contains('attachments/');
+  bool get readmeGuidesAttachmentStorage => _readmeSentences.any(
+    (sentence) =>
+        sentence.contains('attachments/') &&
+        RegExp(r'\battachments?\b').hasMatch(sentence) &&
+        RegExp(r'\b(keep|store|place|put|save|upload)\b').hasMatch(sentence) &&
+        RegExp(r'\b(under|in|inside|within|to)\b').hasMatch(sentence),
+  );
 
   bool get readmeGuidesGitLfsForLargeFiles =>
       _normalizedReadmeContent.contains('git lfs') &&
