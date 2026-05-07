@@ -1,15 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
-import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
-
-import '../../components/factories/testing_dependencies.dart';
-import '../../core/interfaces/trackstate_app_component.dart';
-import '../../core/utils/local_git_test_repository.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
-import 'support/ts41_dirty_local_issue_app_flow_component_factory.dart';
 import 'support/ts41_dirty_local_issue_component_factory.dart';
-import 'support/ts41_live_app_repository.dart';
 
 void main() {
   setUp(() {
@@ -37,49 +30,6 @@ void main() {
           ),
         ),
       );
-    },
-  );
-
-  testWidgets(
-    'TS-41 drives the real issue-detail description save flow for the dirty main.md',
-    (tester) async {
-      final TrackStateAppComponent screen = defaultTestingDependencies
-          .createTrackStateAppScreen(tester);
-      final semantics = tester.ensureSemantics();
-      LocalTrackStateFixture? fixture;
-
-      try {
-        fixture = await tester.runAsync(LocalTrackStateFixture.create);
-        if (fixture == null) {
-          throw StateError('TS-41 fixture creation did not complete.');
-        }
-
-        await tester.runAsync(() => fixture!.makeDirtyMainFileChange());
-        final appFlow = createTs41DirtyLocalIssueAppFlowComponent(screen);
-
-        await screen.pump(
-          createTs41LiveAppRepository(
-            tester: tester,
-            repository: LocalTrackStateRepository(
-              repositoryPath: fixture.repositoryPath,
-              processRunner: const SyncGitProcessRunner(),
-            ),
-          ),
-        );
-
-        await appFlow.attemptDescriptionSave(
-          LocalTrackStateFixture.updatedDescription,
-        );
-        await screen.expectTrackerMessageContaining('commit');
-        await screen.expectTrackerMessageContaining('stash');
-        await screen.expectTrackerMessageContaining('clean');
-      } finally {
-        if (fixture != null) {
-          await fixture.dispose();
-        }
-        screen.resetView();
-        semantics.dispose();
-      }
     },
   );
 }

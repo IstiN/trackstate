@@ -2,11 +2,12 @@
 
 Validates the TS-41 dirty-write behavior for `DEMO/DEMO-1/main.md`.
 
-The automation covers the exact write path and a real TrackState issue-detail flow probe:
+The automation covers the exact provider-backed write path that exists in this checkout:
 1. create a temporary local Git runtime fixture
 2. dirty `DEMO/DEMO-1/main.md` outside TrackState
 3. attempt the exact provider-backed description write path
-4. open the same issue in the real `TrackStateApp`, attempt the issue-detail description edit/save flow, and assert the visible recovery guidance if the UI exposes it
+
+The current app surface in this checkout still renders the issue description as read-only `Text(issue.description)` and exposes no issue-detail `Edit` / `Save` path to automate.
 
 ## Install dependencies
 
@@ -28,8 +29,6 @@ flutter pub get
 ## Current expected result
 
 ```text
-The provider-backed description save and the real issue-detail save flow both
-pass once TrackState exposes the edit/save controls in the app and the
-dirty-write failure tells the user to commit, stash, or clean local changes
-first.
+The provider-backed dirty-write assertion still fails until the product error
+message tells the user to commit, stash, or clean local changes first.
 ```

@@ -11,16 +11,6 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openIssue(String key, String summary);
 
-  Future<void> tapIssueDetailAction({
-    required String key,
-    required String label,
-  });
-
-  Future<void> enterIssueDetailDescription({
-    required String key,
-    required String text,
-  });
-
   Future<void> dragIssueToStatusColumn({
     required String key,
     required String summary,
@@ -31,8 +21,6 @@ abstract interface class TrackStateAppComponent {
   Future<void> expectIssueDetailVisible(String key);
 
   Future<void> expectIssueDetailText(String key, String text);
-
-  Future<void> expectTrackerMessageContaining(String text);
 
   Future<void> expectTextVisible(String text);
 }
