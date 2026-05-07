@@ -2,11 +2,11 @@
 
 Validates the TS-41 dirty-save behavior for `DEMO/DEMO-1/main.md`.
 
-The TS-41 automation exercises the real local-Git path in two ways:
+The TS-41 automation exercises the current local-Git behavior in two ways:
 1. a provider-backed description save attempt against the dirty `main.md`
-2. a source-backed guard that documents the current issue-detail implementation still renders the description read-only with no `Save` action
+2. a real `TrackStateApp` widget check that opens `DEMO-1` and verifies the issue detail still exposes `Transition`, not a description editor plus `Save`
 
-The secondary check documents the current blocker for the ticketed UI flow: `lib/ui/features/tracker/views/trackstate_app.dart` still renders `Text(issue.description)` and exposes `Transition`, not an issue-detail `Save` action.
+The second check uses the live app UI rather than a synthetic harness or source-file assertion. It documents the current blocker for the ticketed flow: the issue detail is still read-only in local Git mode.
 
 ## Install dependencies
 

@@ -6,4 +6,4 @@ dependencies: []
 notes:
   - Verifies the local Git adapter blocks a save when issue main.md has dirty local edits.
   - Keeps the provider-backed description save assertion as a direct AC3 check.
-  - Documents the current issue-detail implementation still renders the description read-only and exposes no Save action yet.
+  - Uses the real TrackStateApp UI to confirm the current issue detail remains read-only and exposes no Save action yet.

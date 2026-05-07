@@ -1,8 +1,7 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 
+import '../../components/screens/trackstate_app_screen.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
 import 'support/ts41_dirty_local_issue_component_factory.dart';
 
@@ -31,29 +30,21 @@ void main() {
     },
   );
 
-  test(
-    'TS-41 documents that the current issue detail implementation is read-only',
-    () async {
-      final source = await File(
-        'lib/ui/features/tracker/views/trackstate_app.dart',
-      ).readAsString();
+  testWidgets(
+    'TS-41 shows the current issue detail remains read-only in the real app UI',
+    (tester) async {
+      final fixture = (await tester.runAsync(LocalTrackStateFixture.create))!;
+      addTearDown(fixture.dispose);
+      final screen = TrackStateAppScreen(tester);
 
-      expect(
-        source,
-        contains('Text(issue.description)'),
-        reason:
-            'The current issue detail still renders the description as text.',
-      );
-      expect(
-        source,
-        contains('label: l10n.transition'),
-        reason: 'The current issue detail exposes Transition as its action.',
-      );
-      expect(
-        source,
-        isNot(contains('label: l10n.save')),
-        reason: 'The current issue detail does not expose a Save action yet.',
-      );
+      await screen.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
+      await screen.expectTextVisible('Local Git');
+      await screen.openSection('JQL Search');
+      await screen.openIssue('DEMO-1', 'Local issue');
+      await screen.expectIssueDetailText('DEMO-1', 'Loaded from local git.');
+      await screen.expectIssueDetailActionVisible('DEMO-1', 'Transition');
+      await screen.expectIssueDetailDescriptionEditorAbsent('DEMO-1');
+      await screen.expectIssueDetailActionAbsent('DEMO-1', 'Save');
     },
   );
 }

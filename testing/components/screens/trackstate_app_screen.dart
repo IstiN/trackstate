@@ -62,6 +62,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     ),
   );
 
+  Finder _issueDetailAction(String key, String label) {
+    final detail = _issueDetail(key);
+    var action = find.descendant(of: detail, matching: find.text(label));
+    if (action.evaluate().isNotEmpty) {
+      return action;
+    }
+    return find.descendant(
+      of: detail,
+      matching: find.bySemanticsLabel(RegExp(RegExp.escape(label))),
+    );
+  }
+
   @override
   Future<void> pump(TrackStateRepository repository) async {
     SharedPreferences.setMockInitialValues({});
@@ -161,6 +173,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<void> expectIssueDetailDescriptionEditorAbsent(String key) async {
+    await expectIssueDetailVisible(key);
+    expect(_issueDetailEditor(key), findsNothing);
+  }
+
+  @override
   Future<void> enterIssueDetailDescription(String key, String value) async {
     final editor = _issueDetailEditor(key);
     await _waitForVisible(editor);
@@ -169,18 +187,23 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
-  Future<void> tapIssueDetailAction(String key, String label) async {
-    final detail = _issueDetail(key);
+  Future<void> expectIssueDetailActionVisible(String key, String label) async {
     await expectIssueDetailVisible(key);
+    final action = _issueDetailAction(key, label);
+    await _waitForVisible(action);
+    expect(action, findsWidgets);
+  }
 
-    var action = find.descendant(of: detail, matching: find.text(label));
-    if (action.evaluate().isEmpty) {
-      action = find.descendant(
-        of: detail,
-        matching: find.bySemanticsLabel(RegExp(RegExp.escape(label))),
-      );
-    }
+  @override
+  Future<void> expectIssueDetailActionAbsent(String key, String label) async {
+    await expectIssueDetailVisible(key);
+    expect(_issueDetailAction(key, label), findsNothing);
+  }
 
+  @override
+  Future<void> tapIssueDetailAction(String key, String label) async {
+    final action = _issueDetailAction(key, label);
+    await expectIssueDetailVisible(key);
     await _waitForVisible(action);
     await tester.tap(action.first);
     await _pumpFrames();
