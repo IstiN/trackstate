@@ -1,0 +1,23 @@
+{
+  "dart": {
+    "version": "3.9.2",
+    "archives": {
+      "linux-x64": {
+        "url": "https://storage.googleapis.com/dart-archive/channels/stable/release/3.9.2/sdk/dartsdk-linux-x64-release.zip",
+        "sha256Url": "https://storage.googleapis.com/dart-archive/channels/stable/release/3.9.2/sdk/dartsdk-linux-x64-release.zip.sha256sum"
+      },
+      "linux-arm64": {
+        "url": "https://storage.googleapis.com/dart-archive/channels/stable/release/3.9.2/sdk/dartsdk-linux-arm64-release.zip",
+        "sha256Url": "https://storage.googleapis.com/dart-archive/channels/stable/release/3.9.2/sdk/dartsdk-linux-arm64-release.zip.sha256sum"
+      },
+      "macos-x64": {
+        "url": "https://storage.googleapis.com/dart-archive/channels/stable/release/3.9.2/sdk/dartsdk-macos-x64-release.zip",
+        "sha256Url": "https://storage.googleapis.com/dart-archive/channels/stable/release/3.9.2/sdk/dartsdk-macos-x64-release.zip.sha256sum"
+      },
+      "macos-arm64": {
+        "url": "https://storage.googleapis.com/dart-archive/channels/stable/release/3.9.2/sdk/dartsdk-macos-arm64-release.zip",
+        "sha256Url": "https://storage.googleapis.com/dart-archive/channels/stable/release/3.9.2/sdk/dartsdk-macos-arm64-release.zip.sha256sum"
+      }
+    }
+  }
+}

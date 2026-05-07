@@ -52,6 +52,118 @@
   "queryUpdated": "Query updated",
   "kanbanHint": "Drag-ready workflow columns backed by Git files",
   "jqlPlaceholder": "project = TRACK AND status != Done ORDER BY priority DESC",
+  "repositoryAccessLocalGit": "Local Git",
+  "repositoryAccessConnected": "Connected",
+  "repositoryAccessConnectGitHub": "Connect GitHub",
+  "repositoryAccessSettings": "Repository access",
+  "repositoryPath": "Repository Path",
+  "writeBranch": "Write Branch",
+  "trackerDataNotFound": "TrackState data was not found.",
+  "trackerDataLoadFailed": "TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. {error}",
+  "@trackerDataLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "localGitTokensNotNeeded": "This runtime uses local Git commits. GitHub tokens are not needed.",
+  "tokenEmpty": "Token is empty.",
+  "githubConnectedDragCards": "Connected as {login} to {repository}. Drag cards to commit status changes.",
+  "@githubConnectedDragCards": {
+    "placeholders": {
+      "login": {
+        "type": "String"
+      },
+      "repository": {
+        "type": "String"
+      }
+    }
+  },
+  "githubConnectionFailed": "GitHub connection failed: {error}",
+  "@githubConnectionFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "localGitMoveCommitted": "{issueKey} moved to {statusLabel} and committed to local Git branch {branch}.",
+  "@localGitMoveCommitted": {
+    "placeholders": {
+      "issueKey": {
+        "type": "String"
+      },
+      "statusLabel": {
+        "type": "String"
+      },
+      "branch": {
+        "type": "String"
+      }
+    }
+  },
+  "githubMoveCommitted": "{issueKey} moved to {statusLabel} and committed to GitHub.",
+  "@githubMoveCommitted": {
+    "placeholders": {
+      "issueKey": {
+        "type": "String"
+      },
+      "statusLabel": {
+        "type": "String"
+      }
+    }
+  },
+  "movePendingGitHubPersistence": "{issueKey} moved locally. Connect GitHub in Settings to persist.",
+  "@movePendingGitHubPersistence": {
+    "placeholders": {
+      "issueKey": {
+        "type": "String"
+      }
+    }
+  },
+  "moveFailed": "Move failed: {error}",
+  "@moveFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "localGitHubAppUnavailable": "This runtime uses local Git commits. GitHub App login is unavailable.",
+  "githubAppLoginNotConfigured": "GitHub App login is not configured. Set TRACKSTATE_GITHUB_APP_CLIENT_ID and TRACKSTATE_GITHUB_AUTH_PROXY_URL in the setup repository variables.",
+  "githubAuthorizationCodeReturned": "GitHub returned an authorization code. Configure TRACKSTATE_GITHUB_AUTH_PROXY_URL so a backend can exchange it for a token safely.",
+  "githubConnected": "Connected as {login} to {repository}.",
+  "@githubConnected": {
+    "placeholders": {
+      "login": {
+        "type": "String"
+      },
+      "repository": {
+        "type": "String"
+      }
+    }
+  },
+  "storedGitHubTokenInvalid": "Stored GitHub token is no longer valid: {error}",
+  "@storedGitHubTokenInvalid": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "localGitRuntimeTitle": "Local Git runtime",
+  "configuredRepositoryFallback": "configured repository",
+  "currentBranchFallback": "current branch",
+  "localGitRuntimeDescription": "Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.",
+  "close": "Close",
+  "connectGitHub": "Connect GitHub",
+  "fineGrainedToken": "Fine-grained token",
+  "fineGrainedTokenHelper": "Needs Contents: read/write. Stored only on this device if remembered.",
+  "rememberOnThisBrowser": "Remember on this browser",
+  "rememberOnThisBrowserHelp": "Uses client storage. Do not enable on shared devices.",
+  "continueWithGitHubApp": "Continue with GitHub App",
+  "cancel": "Cancel",
+  "connectToken": "Connect token",
   "issueCount": "{count, plural, =0{No issues} =1{1 issue} other{{count} issues}}",
   "@issueCount": {
     "placeholders": {
