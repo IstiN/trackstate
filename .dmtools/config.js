@@ -160,6 +160,12 @@ module.exports = {
                 managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
             }
         },
+        test_case_automation: {
+            customParams: {
+                autoStartReview: true,
+                autoStartReviewConfigFile: 'agents/pr_test_automation_review.json'
+            }
+        },
         pr_review: {
             customParams: {
                 autoStartRework: true,
@@ -171,6 +177,12 @@ module.exports = {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
                 managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
+            }
+        },
+        pr_test_automation_rework: {
+            customParams: {
+                autoStartReview: true,
+                autoStartReviewConfigFile: 'agents/pr_test_automation_review.json'
             }
         }
     },
