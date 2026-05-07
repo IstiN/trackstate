@@ -9,7 +9,7 @@ class CliCommandResult:
     exit_code: int
     stdout: str
     stderr: str
-    json_payload: dict[str, object] | None = None
+    json_payload: object | None = None
 
     @property
     def succeeded(self) -> bool:

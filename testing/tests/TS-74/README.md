@@ -1,8 +1,10 @@
 # TS-74
 
-Validates the CLI quick-start fork connectivity path by executing a GitHub CLI
-command that reads the setup repository project definition and comparing the
-JSON output to the checked-in `trackstate-setup/DEMO/project.json` fixture.
+Validates the CLI quick-start fork connectivity path by reading the
+`trackstate-setup/README.md` quick-start section, resolving the authenticated
+user's `trackstate-setup` fork by default, and executing the GitHub CLI project
+fetch against that fork. The CLI JSON is then compared with the same
+`DEMO/project.json` file fetched directly from the fork's default branch.
 
 ## Install dependencies
 
@@ -12,6 +14,9 @@ are available before running the test:
 1. `python3`
 2. `gh`
 3. An authenticated GitHub CLI session (`gh auth status`)
+4. A fork of `IstiN/trackstate-setup` for the authenticated GitHub user, or a
+   `TS74_SETUP_REPOSITORY` / `TRACKSTATE_SETUP_REPOSITORY` override that points
+   to a fork of `IstiN/trackstate-setup`
 
 ## Run this test
 
@@ -22,11 +27,14 @@ python3 -m unittest discover -s testing/tests/TS-74 -p 'test_*.py'
 ## Environment variables
 
 - `TS74_SETUP_REPOSITORY` or `TRACKSTATE_SETUP_REPOSITORY` (optional): setup
-  repository to validate. Defaults to `IstiN/trackstate-setup`.
+  repository to validate. When omitted, the test targets
+  `<authenticated-login>/trackstate-setup`.
+- `TS74_UPSTREAM_SETUP_REPOSITORY` (optional): upstream template repository
+  that the fork must point to. Defaults to `IstiN/trackstate-setup`.
+- `TS74_FORK_REPOSITORY_NAME` (optional): repository name used when deriving the
+  default fork from the authenticated login. Defaults to `trackstate-setup`.
 - `TS74_PROJECT_PATH` (optional): project file path inside the setup repository.
   Defaults to `DEMO/project.json`.
-- `TS74_EXPECTED_PROJECT_FILE` (optional): repository-relative path to the
-  expected JSON fixture. Defaults to `trackstate-setup/DEMO/project.json`.
 
 ## Expected passing output
 
