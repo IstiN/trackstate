@@ -8,6 +8,8 @@ class Ts66DeletedIssueFixture {
   Ts66DeletedIssueFixture._(this.directory);
 
   final Directory directory;
+  bool _deletedIndexExistsBeforeDeletion = false;
+  List<TrackStateIssue> _deletedIssueSearchResultsBeforeDeletion = const [];
 
   static Future<Ts66DeletedIssueFixture> create() async {
     final directory = await Directory.systemTemp.createTemp(
@@ -15,6 +17,10 @@ class Ts66DeletedIssueFixture {
     );
     final fixture = Ts66DeletedIssueFixture._(directory);
     await fixture._seedRepository();
+    await fixture._deleteIssue(
+      key: 'TRACK-123',
+      deletedAt: '2026-05-06T12:00:00Z',
+    );
     return fixture;
   }
 
@@ -27,18 +33,24 @@ class Ts66DeletedIssueFixture {
     final snapshot = await repository.loadSnapshot();
     final deletedIndexPath = 'TRACK/.trackstate/index/deleted.json';
     final deletedIndexFile = File('${directory.path}/$deletedIndexPath');
-    final deletedIndexContent = await deletedIndexFile.readAsString();
-    final deletedIndexEntries =
-        (jsonDecode(deletedIndexContent) as List<Object?>)
-            .cast<Map<String, Object?>>();
+    final deletedIndexExists = await deletedIndexFile.exists();
+    final deletedIndexEntries = deletedIndexExists
+        ? (jsonDecode(await deletedIndexFile.readAsString()) as List<Object?>)
+              .cast<Map<String, Object?>>()
+        : const <Map<String, Object?>>[];
 
     return Ts66DeletedIssueObservation(
       snapshot: snapshot,
       deletedIndexPath: deletedIndexPath,
-      deletedIndexExists: await deletedIndexFile.exists(),
+      deletedIndexExists: deletedIndexExists,
+      deletedIndexExistsBeforeDeletion: _deletedIndexExistsBeforeDeletion,
       deletedIndexEntries: List<Map<String, Object?>>.unmodifiable(
         deletedIndexEntries,
       ),
+      deletedIssueSearchResultsBeforeDeletion:
+          List<TrackStateIssue>.unmodifiable(
+            _deletedIssueSearchResultsBeforeDeletion,
+          ),
       deletedIssueSearchResults: List<TrackStateIssue>.unmodifiable(
         await repository.searchIssues('project = TRACK TRACK-123'),
       ),
@@ -80,20 +92,13 @@ class Ts66DeletedIssueFixture {
           'children': <String>[],
           'archived': false,
         },
-      ]),
-    );
-    await _writeFile(
-      'TRACK/.trackstate/index/deleted.json',
-      jsonEncode([
         {
           'key': 'TRACK-123',
-          'project': 'TRACK',
-          'formerPath': 'TRACK/TRACK-123/main.md',
-          'deletedAt': '2026-05-06T12:00:00Z',
-          'summary': 'Deleted story',
-          'issueType': 'story',
+          'path': 'TRACK/TRACK-123/main.md',
           'parent': null,
           'epic': null,
+          'children': <String>[],
+          'archived': false,
         },
       ]),
     );
@@ -111,12 +116,108 @@ updated: 2026-05-06T10:00:00Z
 
 This issue remains active after TRACK-123 is deleted.
 ''');
+    await _writeFile('TRACK/TRACK-123/main.md', '''
+---
+key: TRACK-123
+project: TRACK
+issueType: story
+status: done
+summary: Deleted story
+updated: 2026-05-06T12:00:00Z
+---
+
+# Description
+
+This issue will be deleted through the fixture workflow.
+''');
 
     await _git(['init', '-b', 'main']);
     await _git(['config', 'user.name', 'Local Tester']);
     await _git(['config', 'user.email', 'local@example.com']);
     await _git(['add', '.']);
-    await _git(['commit', '-m', 'Seed deleted issue tombstone fixture']);
+    await _git(['commit', '-m', 'Seed active issues for deletion fixture']);
+  }
+
+  Future<void> _deleteIssue({
+    required String key,
+    required String deletedAt,
+  }) async {
+    final repository = LocalTrackStateRepository(
+      repositoryPath: directory.path,
+    );
+    _deletedIssueSearchResultsBeforeDeletion =
+        List<TrackStateIssue>.unmodifiable(
+          await repository.searchIssues('project = TRACK $key'),
+        );
+
+    final deletedIndexFile = File(
+      '${directory.path}/TRACK/.trackstate/index/deleted.json',
+    );
+    _deletedIndexExistsBeforeDeletion = await deletedIndexFile.exists();
+
+    final issueRootPath = 'TRACK/$key';
+    final issueMainPath = '$issueRootPath/main.md';
+    final issueFile = File('${directory.path}/$issueMainPath');
+    if (!await issueFile.exists()) {
+      throw StateError('Expected $issueMainPath to exist before deletion.');
+    }
+
+    final frontmatter = _parseFrontmatter(await issueFile.readAsString());
+    final issuesIndexFile = File(
+      '${directory.path}/TRACK/.trackstate/index/issues.json',
+    );
+    final issuesIndex =
+        (jsonDecode(await issuesIndexFile.readAsString()) as List<Object?>)
+            .cast<Map<String, Object?>>();
+    final updatedIssuesIndex = issuesIndex
+        .where((entry) => entry['key'] != key)
+        .toList(growable: false);
+    if (updatedIssuesIndex.length != issuesIndex.length - 1) {
+      throw StateError('Expected $key to be removed from issues.json.');
+    }
+
+    final deletedIndex = _deletedIndexExistsBeforeDeletion
+        ? (jsonDecode(await deletedIndexFile.readAsString()) as List<Object?>)
+              .cast<Map<String, Object?>>()
+        : <Map<String, Object?>>[];
+    deletedIndex.add({
+      'key': key,
+      'project': frontmatter['project'],
+      'formerPath': issueMainPath,
+      'deletedAt': deletedAt,
+      'summary': frontmatter['summary'],
+      'issueType': frontmatter['issueType'],
+      'parent': frontmatter['parent'],
+      'epic': frontmatter['epic'],
+    });
+
+    await Directory('${directory.path}/$issueRootPath').delete(recursive: true);
+    await issuesIndexFile.writeAsString(jsonEncode(updatedIssuesIndex));
+    await deletedIndexFile.parent.create(recursive: true);
+    await deletedIndexFile.writeAsString(jsonEncode(deletedIndex));
+
+    await _git(['add', '-A']);
+    await _git(['commit', '-m', 'Delete TRACK-123 and reserve tombstone key']);
+  }
+
+  Map<String, String?> _parseFrontmatter(String content) {
+    final lines = const LineSplitter().convert(content);
+    if (lines.length < 3 || lines.first.trim() != '---') {
+      throw StateError('Issue content is missing frontmatter.');
+    }
+
+    final frontmatter = <String, String?>{};
+    for (final line in lines.skip(1)) {
+      if (line.trim() == '---') {
+        break;
+      }
+      final separatorIndex = line.indexOf(':');
+      if (separatorIndex == -1) continue;
+      final key = line.substring(0, separatorIndex).trim();
+      final value = line.substring(separatorIndex + 1).trim();
+      frontmatter[key] = value == 'null' ? null : value;
+    }
+    return frontmatter;
   }
 
   Future<void> _writeFile(String relativePath, String content) async {
@@ -138,7 +239,9 @@ class Ts66DeletedIssueObservation {
     required this.snapshot,
     required this.deletedIndexPath,
     required this.deletedIndexExists,
+    required this.deletedIndexExistsBeforeDeletion,
     required this.deletedIndexEntries,
+    required this.deletedIssueSearchResultsBeforeDeletion,
     required this.deletedIssueSearchResults,
     required this.activeIssueSearchResults,
   });
@@ -146,7 +249,9 @@ class Ts66DeletedIssueObservation {
   final TrackerSnapshot snapshot;
   final String deletedIndexPath;
   final bool deletedIndexExists;
+  final bool deletedIndexExistsBeforeDeletion;
   final List<Map<String, Object?>> deletedIndexEntries;
+  final List<TrackStateIssue> deletedIssueSearchResultsBeforeDeletion;
   final List<TrackStateIssue> deletedIssueSearchResults;
   final List<TrackStateIssue> activeIssueSearchResults;
 }

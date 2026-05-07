@@ -4,7 +4,7 @@ import '../../fixtures/repositories/ts66_deleted_issue_fixture.dart';
 
 void main() {
   test(
-    'TS-66 deleted issue stays reserved in the tombstone index and disappears from active search results',
+    'TS-66 deleting an issue reserves its key in the tombstone index and removes it from active search results',
     () async {
       final fixture = await Ts66DeletedIssueFixture.create();
       addTearDown(fixture.dispose);
@@ -13,6 +13,20 @@ void main() {
       final tombstone = observation.snapshot.repositoryIndex.deleted
           .singleWhere((entry) => entry.key == 'TRACK-123');
 
+      expect(
+        observation.deletedIndexExistsBeforeDeletion,
+        isFalse,
+        reason:
+            'The fixture should start without a tombstone index so the test exercises the delete transition instead of loading a prewritten deleted state.',
+      );
+      expect(
+        observation.deletedIssueSearchResultsBeforeDeletion
+            .map((issue) => issue.key)
+            .toList(),
+        ['TRACK-123'],
+        reason:
+            'TRACK-123 should be discoverable through standard repository search before the delete operation runs.',
+      );
       expect(
         observation.deletedIndexExists,
         isTrue,
