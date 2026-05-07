@@ -7,14 +7,16 @@ class DirtyLocalIssueSaveService {
 
   final LocalTrackStateFixture fixture;
 
-  Future<void> attemptDescriptionSave() async {
+  Future<void> attemptDescriptionSave(String updatedDescription) async {
     final provider = fixture.provider;
     final branch = await provider.resolveWriteBranch();
     final original = await provider.readTextFile(
       LocalTrackStateFixture.issuePath,
       ref: branch,
     );
-    final updatedContent = await fixture.buildUpdatedDescriptionMarkdown();
+    final updatedContent = await fixture.buildUpdatedDescriptionMarkdown(
+      updatedDescription,
+    );
 
     await provider.writeTextFile(
       RepositoryWriteRequest(

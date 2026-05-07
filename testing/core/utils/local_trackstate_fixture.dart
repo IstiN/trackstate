@@ -46,15 +46,26 @@ class LocalTrackStateFixture {
     );
   }
 
-  Future<String> buildUpdatedDescriptionMarkdown() async {
+  Future<String> buildUpdatedDescriptionMarkdown(
+    String updatedDescription,
+  ) async {
     final branch = await provider.resolveWriteBranch();
     final original = await provider.readTextFile(issuePath, ref: branch);
-    return original.content.replaceFirst(originalDescription, updatedDescription);
+    return original.content.replaceFirst(
+      originalDescription,
+      updatedDescription,
+    );
   }
 
   Future<void> _seedRepository() async {
-    await _writeFile('.gitattributes', '*.png filter=lfs diff=lfs merge=lfs -text\n');
-    await _writeFile('DEMO/project.json', '{"key":"DEMO","name":"Local Demo"}\n');
+    await _writeFile(
+      '.gitattributes',
+      '*.png filter=lfs diff=lfs merge=lfs -text\n',
+    );
+    await _writeFile(
+      'DEMO/project.json',
+      '{"key":"DEMO","name":"Local Demo"}\n',
+    );
     await _writeFile(
       'DEMO/config/statuses.json',
       '[{"name":"To Do"},{"name":"In Progress"},{"name":"Done"}]\n',
