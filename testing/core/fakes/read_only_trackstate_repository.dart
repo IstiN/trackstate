@@ -52,6 +52,29 @@ class _ReadOnlyTrackStateProvider implements TrackStateProviderAdapter {
   {"id": "labels", "name": "Labels", "type": "array", "required": false}
 ]
 ''',
+    'TRACK-11/main.md': '''
+---
+key: TRACK-11
+project: TRACK
+issueType: Story
+status: To Do
+priority: Highest
+summary: Stabilize dashboard polling
+assignee: Denis
+reporter: Ana
+labels:
+  - dashboard
+components:
+  - ui
+updated: 2 minutes ago
+---
+
+# Description
+Keep the dashboard responsive when background refreshes are running.
+''',
+    'TRACK-11/acceptance_criteria.md': '''
+- Dashboard cards stay interactive during refresh.
+''',
     'TRACK-12/main.md': '''
 ---
 key: TRACK-12

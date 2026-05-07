@@ -6,19 +6,34 @@ class IssueDetailPage {
 
   final TestDriver driver;
 
+  Future<void> openSearch() => driver.tapSemanticsLabel(RegExp('JQL Search'));
+
   Future<void> openIssue(String issueKey, String issueSummary) async {
-    await driver.tapText('JQL Search');
-    final issueLink = RegExp(
-      '^Open ${RegExp.escape(issueKey)} ${RegExp.escape(issueSummary)}\$',
-    );
-    if (driver.hasSemanticsLabel(issueLink)) {
-      await driver.tapSemanticsLabel(issueLink);
-    }
+    await openSearch();
+    await selectIssue(issueKey, issueSummary);
   }
+
+  Future<void> selectIssue(String issueKey, String issueSummary) =>
+      driver.tapText(issueSummary);
+
+  Pattern openIssueLink(String issueKey, String issueSummary) => RegExp(
+    '^Open ${RegExp.escape(issueKey)} ${RegExp.escape(issueSummary)}\$',
+  );
+
+  Pattern issueDetailLabel(String issueKey) =>
+      RegExp('^Issue detail ${RegExp.escape(issueKey)}\$');
+
+  bool showsIssueDetail(String issueKey) =>
+      driver.hasSemanticsLabel(issueDetailLabel(issueKey));
+
+  bool showsIssueLink(String issueKey, String issueSummary) =>
+      driver.hasSemanticsLabel(openIssueLink(issueKey, issueSummary));
 
   bool showsIssueKey(String issueKey) => driver.hasText(issueKey);
 
   bool showsSummary(String summary) => driver.hasText(summary);
+
+  bool showsAcceptanceCriterion(String criterion) => driver.hasText(criterion);
 
   ActionAvailability get transitionAction =>
       driver.getActionAvailability('Transition');

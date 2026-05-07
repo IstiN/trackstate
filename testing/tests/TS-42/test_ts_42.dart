@@ -28,11 +28,48 @@ void main() {
         );
 
         final issueDetailPage = IssueDetailPage(driver);
-        await issueDetailPage.openIssue(
+        await issueDetailPage.openSearch();
+        expect(
+          issueDetailPage.showsAcceptanceCriterion(
+            'Dashboard cards stay interactive during refresh.',
+          ),
+          isTrue,
+          reason:
+              'Expected JQL Search to open with a different issue selected so '
+              'TS-42 must navigate into TRACK-12 through the search results.',
+        );
+        expect(
+          issueDetailPage.showsAcceptanceCriterion(
+            'Push issue updates as commits.',
+          ),
+          isFalse,
+          reason:
+              'Expected TRACK-12-specific detail content to be absent before '
+              'opening TRACK-12 from the search results.',
+        );
+        await issueDetailPage.selectIssue(
           'TRACK-12',
           'Implement Git sync service',
         );
 
+        expect(
+          issueDetailPage.showsAcceptanceCriterion(
+            'Push issue updates as commits.',
+          ),
+          isTrue,
+          reason:
+              'Expected tapping the TRACK-12 search result to replace the '
+              'detail panel with TRACK-12-specific content.',
+        );
+        expect(
+          issueDetailPage.showsAcceptanceCriterion(
+            'Dashboard cards stay interactive during refresh.',
+          ),
+          isFalse,
+          reason:
+              'Expected TRACK-11-specific detail content to disappear after '
+              'opening TRACK-12 from the search results.',
+        );
         expect(
           issueDetailPage.showsIssueKey('TRACK-12'),
           isTrue,
