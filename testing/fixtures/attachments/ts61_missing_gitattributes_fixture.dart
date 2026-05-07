@@ -4,18 +4,19 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 
+import '../../components/services/attachment_write_probe.dart';
 import '../../core/config/attachment_upload_test_config.dart';
 import '../../frameworks/api/github/github_attachment_upload_framework.dart';
 
 class Ts61MissingGitattributesFixture {
   Ts61MissingGitattributesFixture._({
     required this.config,
-    required this.framework,
+    required this.probe,
     required List<RecordedGitHubRequest> recordedRequests,
   }) : _recordedRequests = recordedRequests;
 
   final AttachmentUploadTestConfig config;
-  final GitHubAttachmentUploadFramework framework;
+  final AttachmentWriteProbe probe;
   final List<RecordedGitHubRequest> _recordedRequests;
 
   static Future<Ts61MissingGitattributesFixture> create() async {
@@ -61,35 +62,36 @@ class Ts61MissingGitattributesFixture {
 
     return Ts61MissingGitattributesFixture._(
       config: config,
-      framework: framework,
+      probe: AttachmentWriteProbe(framework),
       recordedRequests: recordedRequests,
     );
   }
 
   Future<Ts61UploadScenarioObservation> uploadSampleAttachment() async {
-    try {
-      final result = await framework.writeAttachment(
-        config.buildWriteRequest(
-          Uint8List.fromList(utf8.encode('text attachment content')),
-        ),
-      );
+    final observation = await probe.upload(
+      config.buildWriteRequest(
+        Uint8List.fromList(utf8.encode('text attachment content')),
+      ),
+    );
+
+    final recordedRequests = List<RecordedGitHubRequest>.unmodifiable(
+      _recordedRequests,
+    );
+
+    if (observation.error != null) {
       return Ts61UploadScenarioObservation(
         config: config,
-        uploadResult: result,
-        recordedRequests: List<RecordedGitHubRequest>.unmodifiable(
-          _recordedRequests,
-        ),
-      );
-    } catch (error, stackTrace) {
-      return Ts61UploadScenarioObservation(
-        config: config,
-        error: error,
-        stackTrace: stackTrace,
-        recordedRequests: List<RecordedGitHubRequest>.unmodifiable(
-          _recordedRequests,
-        ),
+        error: observation.error,
+        stackTrace: observation.stackTrace,
+        recordedRequests: recordedRequests,
       );
     }
+
+    return Ts61UploadScenarioObservation(
+      config: config,
+      uploadResult: observation.result,
+      recordedRequests: recordedRequests,
+    );
   }
 }
 
