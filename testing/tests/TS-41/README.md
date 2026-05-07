@@ -2,11 +2,16 @@
 
 Validates the TS-41 dirty-save behavior for `DEMO/DEMO-1/main.md`.
 
-The TS-41 automation exercises the current local-Git behavior in two ways:
-1. a provider-backed description save attempt against the dirty `main.md`
-2. a real `TrackStateApp` widget attempt that dirties the same file, opens `DEMO-1`, edits the description, clicks `Save`, and expects `commit` / `stash` / `clean` recovery guidance on the rendered message banner
+The current automation keeps coverage on the real local-Git write path that the
+product exposes today:
+1. create a temporary local Git runtime fixture
+2. dirty `DEMO/DEMO-1/main.md` outside TrackState
+3. attempt the same description write through the provider-backed save path
+4. assert that the resulting error includes `commit`, `stash`, and `clean`
 
-The second check now follows the ticketed UI flow directly and fails fast if the live issue-detail surface still does not expose the editor or `Save` control needed for that flow.
+This test does not claim in-app description edit-and-save coverage. The current
+issue-detail UI still renders `issue.description` as read-only text and exposes
+no `Save` action for description edits.
 
 ## Install dependencies
 
@@ -28,5 +33,6 @@ flutter pub get
 ## Current expected result
 
 ```text
-The exact result depends on the current product surface. On this branch the provider assertion still fails if the dirty-write message is non-actionable, and the widget check also fails if the live issue detail does not yet expose the editor/save flow.
+The provider-backed assertion fails until the dirty-write message becomes
+actionable and tells the user to commit, stash, or clean local changes first.
 ```

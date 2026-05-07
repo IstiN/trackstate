@@ -49,72 +49,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Finder _statusColumn(String label) =>
       find.bySemanticsLabel(RegExp('${RegExp.escape(label)} column'));
 
-  Finder get _messageBanner => find.byWidgetPredicate(
-    (widget) => widget.runtimeType.toString() == '_MessageBanner',
-    description: 'tracker message banner',
-  );
-
-  Finder _issueDetailEditor(String key) => find.descendant(
-    of: _issueDetail(key),
-    matching: find.byWidgetPredicate(
-      (widget) =>
-          widget is EditableText ||
-          widget is TextField ||
-          widget is TextFormField,
-      description: 'editable issue detail field',
-    ),
-  );
-
-  Finder _issueDetailAction(String key, String label) {
-    final detail = _issueDetail(key);
-    var action = find.descendant(of: detail, matching: find.text(label));
-    if (action.evaluate().isNotEmpty) {
-      return action;
-    }
-    return find.descendant(
-      of: detail,
-      matching: find.bySemanticsLabel(RegExp(RegExp.escape(label))),
-    );
-  }
-
-  Future<void> expectIssueDetailDescriptionEditorVisible(
-    String key, {
-    Duration timeout = const Duration(seconds: 1),
-  }) async {
-    await expectIssueDetailVisible(key);
-    await _waitForAny(
-      _issueDetailEditor(key),
-      timeout: timeout,
-      failureMessage:
-          'TS-41 requires the live $key issue detail to expose an editable '
-          'description field before the save attempt, but no editor was '
-          'rendered.',
-    );
-  }
-
-  @override
-  Future<void> replaceIssueDetailDescription(
-    String key,
-    String description,
-  ) async {
-    await expectIssueDetailDescriptionEditorVisible(key);
-    await tester.enterText(_issueDetailEditor(key).first, description);
-    await _pumpFrames();
-  }
-
-  @override
-  Future<void> tapIssueDetailAction(
-    String key,
-    String label, {
-    Duration timeout = const Duration(seconds: 1),
-  }) async {
-    await expectIssueDetailVisible(key);
-    final action = _issueDetailAction(key, label);
-    await _waitForVisible(action, timeout: timeout);
-    await tester.tap(action.first);
-    await _pumpFrames();
-  }
-
   @override
   Future<void> pumpLocalGitApp({required String repositoryPath}) async {
     await pump(
@@ -216,14 +150,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
-  Future<void> expectMessageBannerText(String text) async {
-    await _waitForVisible(_messageBanner);
-    final match = find.descendant(of: _messageBanner, matching: _text(text));
-    await _waitForVisible(match);
-    expect(match, findsWidgets);
-  }
-
-  @override
   Future<void> expectTextVisible(String text) async {
     final finder = _text(text);
     await _waitForVisible(finder);
@@ -279,23 +205,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       }
     }
     expect(finder, findsOneWidget);
-  }
-
-  Future<void> _waitForAny(
-    Finder finder, {
-    required String failureMessage,
-    Duration timeout = const Duration(seconds: 5),
-    Duration step = const Duration(milliseconds: 50),
-  }) async {
-    final end = DateTime.now().add(timeout);
-    while (DateTime.now().isBefore(end)) {
-      await tester.pump(step);
-      if (finder.evaluate().isNotEmpty) {
-        await _pumpFrames();
-        return;
-      }
-    }
-    fail(failureMessage);
   }
 
   Future<void> _pumpFrames([int count = 12]) async {

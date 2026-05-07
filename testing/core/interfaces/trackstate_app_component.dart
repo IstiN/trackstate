@@ -22,15 +22,5 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> expectIssueDetailText(String key, String text);
 
-  Future<void> replaceIssueDetailDescription(String key, String description);
-
-  Future<void> tapIssueDetailAction(
-    String key,
-    String label, {
-    Duration timeout = const Duration(seconds: 1),
-  });
-
-  Future<void> expectMessageBannerText(String text);
-
   Future<void> expectTextVisible(String text);
 }
