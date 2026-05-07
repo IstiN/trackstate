@@ -1,15 +1,41 @@
-import 'dart:ui' show Size;
-
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/trackstate_app_component.dart';
+import '../../frameworks/flutter/trackstate_test_runtime.dart';
 
 class TrackStateAppScreen implements TrackStateAppComponent {
   TrackStateAppScreen(this.tester);
 
   final WidgetTester tester;
+
+  Finder get localGitAccessButton =>
+      find.bySemanticsLabel(RegExp('Local Git')).first;
+
+  Finder get topBar =>
+      find.ancestor(of: localGitAccessButton, matching: find.byType(Row)).first;
+
+  Finder get profileAvatar =>
+      find.descendant(of: topBar, matching: find.byType(CircleAvatar));
+
+  Finder initialsBadge(String initials) => find.descendant(
+    of: find.byType(CircleAvatar),
+    matching: find.text(initials),
+  );
+
+  Finder profileInitialsBadge(String initials) =>
+      find.descendant(of: profileAvatar, matching: find.text(initials));
+
+  Finder profileSurfaceText(String text) =>
+      find.descendant(of: topBar, matching: _text(text));
+
+  Finder profileSurfaceSemantics(String label) => find.descendant(
+    of: topBar,
+    matching: find.bySemanticsLabel(RegExp(RegExp.escape(label))),
+  );
 
   Finder _text(String text) => find.textContaining(text, findRichText: true);
 
@@ -25,15 +51,43 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> pump(TrackStateRepository repository) async {
-    tester.view.physicalSize = Size(1440, 960);
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(1440, 960);
     tester.view.devicePixelRatio = 1;
     addTearDown(() {
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
     });
 
-    await tester.pumpWidget(TrackStateApp(repository: repository));
+    await tester.pumpWidget(
+      TrackStateApp(key: UniqueKey(), repository: repository),
+    );
     await tester.pump();
+  }
+
+  Future<void> pumpLocalGitApp({required String repositoryPath}) async {
+    await pump(
+      await createLocalGitTestRepository(
+        tester: tester,
+        repositoryPath: repositoryPath,
+      ),
+    );
+    await _waitForVisible(localGitAccessButton);
+  }
+
+  void resetView() {
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+  }
+
+  Future<void> openRepositoryAccess() async {
+    await tester.tap(localGitAccessButton);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> closeDialog(String actionLabel) async {
+    await tester.tap(find.text(actionLabel).first);
+    await tester.pumpAndSettle();
   }
 
   @override
@@ -97,6 +151,41 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final finder = _text(text);
     await _waitForVisible(finder);
     expect(finder, findsWidgets);
+  }
+
+  void expectLocalRuntimeChrome() {
+    expect(localGitAccessButton, findsOneWidget);
+    expect(find.text('Local Git'), findsOneWidget);
+    expect(find.text('Connect GitHub'), findsNothing);
+  }
+
+  void expectProfileInitials(String initials) {
+    expect(profileInitialsBadge(initials), findsOneWidget);
+  }
+
+  void expectProfileIdentityVisible({
+    required String displayName,
+    required String login,
+    required String initials,
+  }) {
+    expectProfileInitials(initials);
+    expect(profileSurfaceText(displayName), findsOneWidget);
+    expect(profileSurfaceText(login), findsOneWidget);
+    expect(profileSurfaceSemantics(displayName), findsOneWidget);
+    expect(profileSurfaceSemantics(login), findsOneWidget);
+  }
+
+  void expectLocalRuntimeDialog({
+    required String repositoryPath,
+    required String branch,
+  }) {
+    expect(find.text('Local Git runtime'), findsOneWidget);
+    expect(find.text('Repository: $repositoryPath'), findsOneWidget);
+    expect(find.text('Branch: $branch'), findsOneWidget);
+    expect(
+      find.textContaining('GitHub tokens are not used in this runtime'),
+      findsOneWidget,
+    );
   }
 
   Future<void> _waitForVisible(
