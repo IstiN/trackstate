@@ -1,7 +1,7 @@
-import 'dart:ui';
-
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 class TrackStateAppScreen {
@@ -18,41 +18,66 @@ class TrackStateAppScreen {
     });
 
     await tester.pumpWidget(TrackStateApp(repository: repository));
-    await tester.pumpAndSettle();
+    await tester.pump();
   }
 
   Future<void> openSection(String label) async {
     await tester.tap(find.bySemanticsLabel(RegExp(RegExp.escape(label))).first);
-    await _pumpUi();
+    await tester.pump();
   }
 
   Future<void> openIssue(String key, String summary) async {
-    await tester.tap(
-      find.bySemanticsLabel(
-        RegExp('Open ${RegExp.escape(key)} ${RegExp.escape(summary)}'),
-      ),
-    );
-    await _pumpUi();
+    final issues = find.bySemanticsLabel('Open $key $summary');
+    await waitForVisible(issues);
+    await tester.tap(issues.first);
+    await waitForIssueDetailVisible(key);
   }
 
   Future<void> dragIssueToStatusColumn({
     required String key,
     required String summary,
+    required String sourceStatusLabel,
     required String statusLabel,
   }) async {
-    final issue = find.bySemanticsLabel(
-      RegExp('Open ${RegExp.escape(key)} ${RegExp.escape(summary)}'),
+    final draggables = find.descendant(
+      of: find.byType(TrackStateApp),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is Draggable<TrackStateIssue>,
+      ),
     );
-    final column = find.bySemanticsLabel(
-      RegExp('${RegExp.escape(statusLabel)} column'),
+    await waitForVisible(draggables);
+    final dropZones = find.byWidgetPredicate(
+      (widget) => widget is DragTarget<TrackStateIssue>,
     );
-
-    await tester.timedDragFrom(
-      tester.getCenter(issue),
-      tester.getCenter(column) - tester.getCenter(issue),
-      const Duration(milliseconds: 500),
+    await waitForVisible(dropZones);
+    final issue = tester
+        .widgetList<Draggable<TrackStateIssue>>(draggables)
+        .firstWhere(
+          (widget) =>
+              widget.data?.key == key && widget.data?.summary == summary,
+        );
+    final targets = tester
+        .widgetList<DragTarget<TrackStateIssue>>(dropZones)
+        .toList();
+    final target = switch (statusLabel) {
+      'To Do' => targets[0],
+      'In Progress' => targets[1],
+      'In Review' => targets[2],
+      _ => targets[3],
+    };
+    final targetLabels = find.byWidgetPredicate(
+      (widget) =>
+          widget is Semantics &&
+          widget.properties.label == '$statusLabel column',
     );
-    await _pumpUi();
+    await waitForVisible(targetLabels);
+    target.onAcceptWithDetails?.call(
+      DragTargetDetails<TrackStateIssue>(
+        data: issue.data!,
+        offset: tester.getCenter(targetLabels.first),
+      ),
+    );
+    await tester.pump();
   }
 
   void expectIssueDetailVisible(String key) {
@@ -76,8 +101,28 @@ class TrackStateAppScreen {
     expect(find.text(text), findsOneWidget);
   }
 
-  Future<void> _pumpUi() async {
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+  Future<void> waitForIssueDetailVisible(String key) async {
+    await waitForVisible(
+      find.bySemanticsLabel(RegExp('Issue detail ${RegExp.escape(key)}')),
+    );
+  }
+
+  Future<void> waitForTextVisible(String text) async {
+    await waitForVisible(find.text(text));
+  }
+
+  Future<void> waitForVisible(
+    Finder finder, {
+    Duration timeout = const Duration(seconds: 5),
+    Duration step = const Duration(milliseconds: 50),
+  }) async {
+    final end = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(end)) {
+      await tester.pump(step);
+      if (finder.evaluate().isNotEmpty) {
+        return;
+      }
+    }
+    expect(finder, findsOneWidget);
   }
 }
