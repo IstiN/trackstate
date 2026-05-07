@@ -5,6 +5,7 @@ import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 import '../../components/services/issue_deletion_service.dart';
+import 'ts66_issue_deletion_port.dart';
 
 class Ts66DeletedIssueFixture {
   Ts66DeletedIssueFixture._(this.directory);
@@ -40,8 +41,10 @@ class Ts66DeletedIssueFixture {
       '${directory.path}/$tombstoneIndexPath',
     ).exists();
     await IssueDeletionService(
-      repository: repository,
-      repositoryPath: directory.path,
+      Ts66IssueDeletionPort(
+        repository: repository,
+        repositoryPath: directory.path,
+      ),
     ).deleteIssue(key: deletedIssueKey, deletedAt: '2026-05-06T12:00:00Z');
     return fixture;
   }
