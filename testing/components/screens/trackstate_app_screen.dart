@@ -177,34 +177,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
-  Future<void> enterIssueDetailDescription(String key, String value) async {
-    final editor = _issueDetailEditor(key);
-    await expectIssueDetailVisible(key);
-    expect(editor, findsWidgets);
-    await tester.enterText(editor.first, value);
-    await _pumpFrames();
-  }
-
-  @override
-  Future<void> expectIssueDetailActionVisible(String key, String label) async {
-    await expectIssueDetailVisible(key);
-    final action = _issueDetailAction(key, label);
-    expect(action, findsWidgets);
-  }
-
-  @override
   Future<void> expectIssueDetailActionAbsent(String key, String label) async {
     await expectIssueDetailVisible(key);
     expect(_issueDetailAction(key, label), findsNothing);
-  }
-
-  @override
-  Future<void> tapIssueDetailAction(String key, String label) async {
-    final action = _issueDetailAction(key, label);
-    await expectIssueDetailVisible(key);
-    expect(action, findsWidgets);
-    await tester.tap(action.first);
-    await _pumpFrames();
   }
 
   @override
