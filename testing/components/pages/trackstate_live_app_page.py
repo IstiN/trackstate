@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 
-from playwright.sync_api import Page
+from testing.core.interfaces.web_app_session import WebAppSession, WebAppTimeoutError
 
 
 @dataclass(frozen=True)
@@ -12,72 +11,99 @@ class RuntimeState:
     body_text: str
 
 
+@dataclass(frozen=True)
+class ConnectDialogState:
+    body_text: str
+    fine_grained_token_input_count: int
+    remember_browser_option_count: int
+
+
 class TrackStateLiveAppPage:
-    def __init__(self, page: Page, app_url: str) -> None:
-        self.page = page
+    LOAD_ERROR_TEXT = (
+        "TrackState data was not found in the configured repository runtime."
+    )
+    CONNECT_READY_TEXT = "Connect GitHub"
+    TOKEN_INPUT_SELECTOR = 'input[aria-label="Fine-grained token"]'
+    CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"]'
+    REMEMBER_BROWSER_SELECTOR = (
+        'flt-semantics[role="checkbox"][aria-label*="Remember on this browser"]'
+    )
+
+    def __init__(self, session: WebAppSession, app_url: str) -> None:
+        self.session = session
         self.app_url = app_url
 
     def open(self) -> None:
-        self.page.goto(
+        self.session.goto(
             self.app_url,
             wait_until="domcontentloaded",
-            timeout=120_000,
+            timeout_ms=120_000,
         )
-        self.page.wait_for_timeout(8_000)
-        self.page.eval_on_selector("flt-semantics-placeholder", "el => el.click()")
-        self.page.wait_for_timeout(3_000)
+        self.session.activate_accessibility()
 
     def wait_for_runtime_state(self, timeout_seconds: int = 90) -> RuntimeState:
-        deadline = time.time() + timeout_seconds
-        while time.time() < deadline:
-            body_text = self.page.locator("body").inner_text()
-            if "TrackState data was not found in the configured repository runtime." in body_text:
-                return RuntimeState(kind="data-load-failed", body_text=body_text)
-            if "Connect GitHub" in body_text:
-                return RuntimeState(kind="connect-ready", body_text=body_text)
-            self.page.wait_for_timeout(1_000)
-        return RuntimeState(
-            kind="timeout",
-            body_text=self.page.locator("body").inner_text(),
-        )
+        try:
+            wait_match = self.session.wait_for_any_text(
+                [self.LOAD_ERROR_TEXT, self.CONNECT_READY_TEXT],
+                timeout_ms=timeout_seconds * 1_000,
+            )
+        except WebAppTimeoutError:
+            return RuntimeState(
+                kind="timeout",
+                body_text=self.session.body_text(),
+            )
+
+        if wait_match.matched_text == self.LOAD_ERROR_TEXT:
+            return RuntimeState(kind="data-load-failed", body_text=wait_match.body_text)
+        return RuntimeState(kind="connect-ready", body_text=wait_match.body_text)
 
     def screenshot(self, path: str) -> None:
-        self.page.screenshot(path=path, full_page=True)
+        self.session.screenshot(path)
 
     def body_text(self) -> str:
-        return self.page.locator("body").inner_text()
+        return self.session.body_text()
 
     def open_connect_dialog(self) -> None:
-        self.page.locator('flt-semantics[aria-label="Connect GitHub"]').first.click()
-        self.page.wait_for_timeout(2_000)
+        self.session.click('flt-semantics[aria-label="Connect GitHub"]')
+        self.session.wait_for_selector(self.TOKEN_INPUT_SELECTOR, timeout_ms=30_000)
+
+    def read_connect_dialog_state(self) -> ConnectDialogState:
+        return ConnectDialogState(
+            body_text=self.session.body_text(),
+            fine_grained_token_input_count=self.session.count(self.TOKEN_INPUT_SELECTOR),
+            remember_browser_option_count=self.session.count(
+                self.REMEMBER_BROWSER_SELECTOR,
+            ),
+        )
 
     def fill_fine_grained_token(self, token: str) -> None:
-        self.page.locator('input[aria-label="Fine-grained token"]').fill(token)
+        self.session.fill(self.TOKEN_INPUT_SELECTOR, token)
 
     def submit_connect_token(self) -> None:
-        self.page.locator(
-            'flt-semantics[role="button"]',
+        self.session.click(
+            self.CONNECT_BUTTON_SELECTOR,
             has_text="Connect token",
-        ).click()
+            timeout_ms=30_000,
+        )
 
     def open_settings(self) -> None:
-        self.page.locator(
-            'flt-semantics[role="button"]',
+        self.session.click(
+            self.CONNECT_BUTTON_SELECTOR,
             has_text="Settings",
-        ).click()
-        self.page.wait_for_timeout(2_000)
+            timeout_ms=30_000,
+        )
 
     def wait_for_body_text(
         self,
         text: str,
         timeout_seconds: int = 60,
     ) -> str:
-        deadline = time.time() + timeout_seconds
-        while time.time() < deadline:
-            body_text = self.body_text()
-            if text in body_text:
-                return body_text
-            self.page.wait_for_timeout(1_000)
-        raise AssertionError(
-            f'Timed out waiting for "{text}". Visible body text: {self.body_text()}',
-        )
+        try:
+            return self.session.wait_for_text(
+                text,
+                timeout_ms=timeout_seconds * 1_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'Timed out waiting for "{text}". Visible body text: {self.body_text()}',
+            ) from error

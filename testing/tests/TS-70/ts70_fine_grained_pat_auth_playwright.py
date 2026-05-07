@@ -5,14 +5,14 @@ import sys
 import traceback
 from pathlib import Path
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-from playwright.sync_api import sync_playwright
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from testing.components.pages.trackstate_live_app_page import TrackStateLiveAppPage
+from testing.frameworks.python.playwright_web_app_session import (
+    PlaywrightWebAppRuntime,
+)
 from testing.components.services.live_setup_repository_service import (
     LiveSetupRepositoryService,
 )
@@ -47,20 +47,8 @@ def main() -> None:
     }
 
     try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            context = browser.new_context(viewport={"width": 1440, "height": 960})
-
-            def add_github_auth(route) -> None:
-                headers = dict(route.request.headers)
-                headers["authorization"] = f"Bearer {token}"
-                headers["accept"] = "application/vnd.github+json"
-                headers["x-github-api-version"] = "2022-11-28"
-                route.continue_(headers=headers)
-
-            context.route("https://api.github.com/**", add_github_auth)
-            page = context.new_page()
-            live_page = TrackStateLiveAppPage(page, APP_URL)
+        with PlaywrightWebAppRuntime() as session:
+            live_page = TrackStateLiveAppPage(session, APP_URL)
 
             live_page.open()
             state = live_page.wait_for_runtime_state()
@@ -86,7 +74,8 @@ def main() -> None:
                 )
 
             live_page.open_connect_dialog()
-            dialog_text = live_page.body_text()
+            dialog_state = live_page.read_connect_dialog_state()
+            dialog_text = dialog_state.body_text
             result["dialog_text"] = dialog_text
             for expected_text in [
                 f"Repository: {metadata.repository}",
@@ -98,16 +87,11 @@ def main() -> None:
                         f'Step 2 failed: missing dialog text "{expected_text}". '
                         f"Observed dialog/body text: {dialog_text}"
                     )
-            if page.locator('input[aria-label="Fine-grained token"]').count() != 1:
+            if dialog_state.fine_grained_token_input_count != 1:
                 raise AssertionError(
                     "Step 2 failed: the Connect GitHub dialog did not expose exactly one Fine-grained token input.",
                 )
-            if (
-                page.locator(
-                    'flt-semantics[role="checkbox"][aria-label*="Remember on this browser"]',
-                ).count()
-                != 1
-            ):
+            if dialog_state.remember_browser_option_count != 1:
                 raise AssertionError(
                     "Step 2 failed: the Connect GitHub dialog did not expose the Remember on this browser option.",
                 )
@@ -150,7 +134,7 @@ def main() -> None:
                         f'Step 4 failed: expected metadata item "{expected_item}" was not rendered. '
                         f"Observed Settings text: {settings_text}"
                     )
-    except (AssertionError, PlaywrightTimeoutError) as error:
+    except AssertionError as error:
         result["error"] = str(error)
         result["traceback"] = traceback.format_exc()
         print(json.dumps(result, indent=2))
