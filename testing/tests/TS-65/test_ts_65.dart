@@ -11,11 +11,31 @@ void main() {
     tester,
   ) async {
     final fixture = Ts65IssueMetadataFixture.create();
-    final issue = await fixture.loadIssue();
+    final snapshot = await fixture.repository.loadSnapshot();
+    final issue = snapshot.issues.singleWhere((entry) => entry.key == 'TRACK-65');
+
+    expect(
+      snapshot.project.statusDefinitions.map((entry) => entry.id),
+      contains('wip'),
+      reason:
+          'The fixture must define a non-semantic catalog ID so this test depends on config/statuses.json for read-time resolution.',
+    );
+    expect(
+      snapshot.project.statusDefinitions.map((entry) => entry.id),
+      isNot(contains('in-progress')),
+      reason:
+          'The catalog should not reuse the built-in semantic ID, otherwise fallback parsing could satisfy the test without catalog participation.',
+    );
+    expect(
+      snapshot.project.statusLabel('wip'),
+      'In Progress',
+      reason:
+          'The config catalog should provide the user-facing label for the stored custom status ID.',
+    );
 
     expect(
       issue.statusId,
-      'in-progress',
+      'wip',
       reason:
           'The repository snapshot should preserve the canonical machine ID stored in frontmatter.',
     );
@@ -37,7 +57,7 @@ void main() {
     );
     expect(
       viewModel.selectedIssue?.statusId,
-      'in-progress',
+      'wip',
       reason:
           'TrackerViewModel should keep the canonical stable ID when it receives the issue aggregate.',
     );
@@ -75,6 +95,12 @@ void main() {
       findsNothing,
       reason:
           'The raw stable ID should remain internal data and must not leak into the rendered issue detail text.',
+    );
+    expect(
+      find.descendant(of: issueDetail, matching: find.text('wip')),
+      findsNothing,
+      reason:
+          'The custom catalog ID should remain internal data and must not leak into the rendered issue detail text.',
     );
   });
 }

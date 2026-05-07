@@ -41,7 +41,7 @@ class _Ts65TrackStateProvider implements TrackStateProviderAdapter {
     'config/statuses.json': '''
 [
   {"id": "todo", "name": "To Do", "category": "new"},
-  {"id": "in-progress", "name": "In Progress", "category": "indeterminate"},
+  {"id": "wip", "name": "In Progress", "category": "indeterminate"},
   {"id": "done", "name": "Done", "category": "done"}
 ]
 ''',
@@ -63,7 +63,7 @@ class _Ts65TrackStateProvider implements TrackStateProviderAdapter {
 key: TRACK-65
 project: TRACK
 issueType: story
-status: in-progress
+status: wip
 priority: high
 summary: Resolve issue metadata from stable status IDs
 assignee: Metadata Reader
@@ -80,7 +80,7 @@ updated: just now
 The UI should resolve the stored status ID to the localized status label.
 ''',
     'TRACK-65/acceptance_criteria.md': '''
-- Render "In Progress" while keeping the canonical status ID in the data model.
+- Render "In Progress" while keeping the canonical custom status ID in the data model.
 ''',
   };
 

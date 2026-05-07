@@ -15,7 +15,7 @@
 ## Environment requirements
 
 - No additional environment variables are required.
-- The test uses a ticket-specific in-memory repository fixture that stores the stable status ID `in-progress` in `TRACK-65/main.md`.
+- The test uses a ticket-specific in-memory repository fixture that stores the custom stable status ID `wip` in `TRACK-65/main.md` and resolves it through `config/statuses.json`.
 
 ## Expected passing output
 
