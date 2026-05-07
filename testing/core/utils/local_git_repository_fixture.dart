@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -34,6 +35,20 @@ class LocalGitRepositoryFixture {
     } else {
       await _git(['config', 'user.email', userEmail]);
     }
+  }
+
+  Future<void> replaceIssueTypes(List<String> issueTypes) async {
+    await _writeFile(
+      'DEMO/config/issue-types.json',
+      '${jsonEncode([
+        for (final issueType in issueTypes) {'name': issueType},
+      ])}\n',
+    );
+  }
+
+  Future<void> commitChanges(String message) async {
+    await _git(['add', '.']);
+    await _git(['commit', '-m', message]);
   }
 
   static Future<LocalGitRepositoryFixture> create({

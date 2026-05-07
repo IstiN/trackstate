@@ -77,6 +77,13 @@ class SettingsScreenRobot {
     ),
   );
 
+  Finder configCard(String title) => _smallestByArea(
+    find.ancestor(of: find.text(title), matching: find.byType(Column)),
+  );
+
+  Finder configCardItem(String title, String item) =>
+      find.descendant(of: configCard(title), matching: find.text(item));
+
   Future<void> clearFocus() async {
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump();
@@ -129,8 +136,7 @@ class SettingsScreenRobot {
 
   String? focusedLabel(Map<String, Finder> candidates) {
     final focusedSemantics = find.semantics.byPredicate(
-      (node) =>
-          node.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
+      (node) => node.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
       describeMatch: (_) => 'focused semantics node',
     );
     if (focusedSemantics.evaluate().isEmpty) {
@@ -332,6 +338,25 @@ class SettingsScreenRobot {
     return buttons.at(bestIndex);
   }
 
+  Finder _smallestByArea(Finder candidates) {
+    final matches = candidates.evaluate().length;
+    if (matches == 0) {
+      return candidates;
+    }
+
+    var bestIndex = 0;
+    var bestArea = double.infinity;
+    for (var index = 0; index < matches; index++) {
+      final rect = tester.getRect(candidates.at(index));
+      final area = rect.width * rect.height;
+      if (area <= bestArea) {
+        bestArea = area;
+        bestIndex = index;
+      }
+    }
+    return candidates.at(bestIndex);
+  }
+
   List<String> visibleTexts() {
     return tester
         .widgetList<Text>(find.byType(Text))
@@ -339,6 +364,23 @@ class SettingsScreenRobot {
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .toList();
+  }
+
+  List<String> visibleConfigItems(String title) {
+    final texts = find.descendant(
+      of: configCard(title),
+      matching: find.byType(Text),
+    );
+    final values = <String>[];
+    for (final element in texts.evaluate()) {
+      final widget = element.widget as Text;
+      final value = widget.data?.trim();
+      if (value == null || value.isEmpty || value == title) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
   }
 
   ButtonStyle _effectiveButtonStyle(Finder scope) {
@@ -365,7 +407,9 @@ class SettingsScreenRobot {
         theme: button.themeStyleOf(element),
         defaults: button.defaultStyleOf(element),
       ),
-      _ => throw StateError('No button style available for ${widget.runtimeType}'),
+      _ => throw StateError(
+        'No button style available for ${widget.runtimeType}',
+      ),
     };
   }
 
