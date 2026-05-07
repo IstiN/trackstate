@@ -1,4 +1,4 @@
-import 'dart:ui' show SemanticsFlag;
+import 'dart:ui' show PointerDeviceKind, SemanticsFlag;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -38,6 +38,10 @@ class SettingsScreenRobot {
   Finder get connectedControl => providerControl('Connected');
   Finder get selectedConnectedControl =>
       _filledSettingsProviderButton('Connected');
+  Finder get settingsConnectedControl => find.descendant(
+    of: repositoryAccessSection,
+    matching: find.widgetWithText(FilledButton, 'Connected'),
+  );
   Finder get searchIssuesField => find.byWidgetPredicate(
     (widget) =>
         widget is TextField &&
@@ -89,6 +93,22 @@ class SettingsScreenRobot {
   TrackStateColors colors() {
     final context = tester.element(find.byType(Scaffold).first);
     return context.ts;
+  }
+
+  Offset centerOf(Finder finder) => tester.getCenter(finder);
+
+  Future<TestGesture> hover(Finder finder) async {
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: const Offset(-1, -1));
+    await gesture.moveTo(centerOf(finder));
+    await tester.pump();
+    return gesture;
+  }
+
+  Future<TestGesture> pressAndHold(Finder finder) async {
+    final gesture = await tester.startGesture(centerOf(finder));
+    await tester.pump();
+    return gesture;
   }
 
   Future<List<String>> collectFocusOrder({
@@ -180,6 +200,26 @@ class SettingsScreenRobot {
       }
     }
     throw StateError('No rendered text "$text" found within $scope');
+  }
+
+  Color resolvedButtonForeground(
+    Finder scope,
+    Set<WidgetState> states, {
+    String? text,
+  }) {
+    final style = _effectiveButtonStyle(scope);
+    return style.foregroundColor?.resolve(states) ??
+        (text == null
+            ? renderedTextColor(scope)
+            : renderedTextColorWithin(scope, text));
+  }
+
+  Color resolvedButtonBackground(Finder scope, Set<WidgetState> states) {
+    final style = _effectiveButtonStyle(scope);
+    final background =
+        style.backgroundColor?.resolve(states) ?? Colors.transparent;
+    final overlay = style.overlayColor?.resolve(states) ?? Colors.transparent;
+    return Color.alphaBlend(overlay, background);
   }
 
   Color renderedButtonBackground(Finder scope) {
@@ -299,6 +339,44 @@ class SettingsScreenRobot {
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .toList();
+  }
+
+  ButtonStyle _effectiveButtonStyle(Finder scope) {
+    final element = scope.evaluate().first;
+    final widget = element.widget;
+    return switch (widget) {
+      FilledButton button => _mergedButtonStyle(
+        style: button.style,
+        theme: button.themeStyleOf(element),
+        defaults: button.defaultStyleOf(element),
+      ),
+      OutlinedButton button => _mergedButtonStyle(
+        style: button.style,
+        theme: button.themeStyleOf(element),
+        defaults: button.defaultStyleOf(element),
+      ),
+      TextButton button => _mergedButtonStyle(
+        style: button.style,
+        theme: button.themeStyleOf(element),
+        defaults: button.defaultStyleOf(element),
+      ),
+      ElevatedButton button => _mergedButtonStyle(
+        style: button.style,
+        theme: button.themeStyleOf(element),
+        defaults: button.defaultStyleOf(element),
+      ),
+      _ => throw StateError('No button style available for ${widget.runtimeType}'),
+    };
+  }
+
+  ButtonStyle _mergedButtonStyle({
+    required ButtonStyle? style,
+    required ButtonStyle? theme,
+    required ButtonStyle? defaults,
+  }) {
+    return (style?.merge(theme) ?? theme ?? const ButtonStyle()).merge(
+      defaults,
+    );
   }
 
   Finder _buttonControlWithText(
