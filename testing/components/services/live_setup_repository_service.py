@@ -6,6 +6,11 @@ import os
 import urllib.request
 from dataclasses import dataclass
 
+from testing.core.config.live_setup_test_config import (
+    LiveSetupTestConfig,
+    load_live_setup_test_config,
+)
+
 
 @dataclass(frozen=True)
 class LiveHostedRepositoryMetadata:
@@ -27,12 +32,12 @@ class GitHubAuthenticatedUser:
 class LiveSetupRepositoryService:
     def __init__(
         self,
-        repository: str = "IstiN/trackstate-setup",
-        ref: str = "main",
+        config: LiveSetupTestConfig | None = None,
         token: str | None = None,
     ) -> None:
-        self.repository = repository
-        self.ref = ref
+        self.config = config or load_live_setup_test_config()
+        self.repository = self.config.repository
+        self.ref = self.config.ref
         self.token = token or os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
 
     def fetch_demo_metadata(self) -> LiveHostedRepositoryMetadata:

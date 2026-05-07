@@ -18,7 +18,11 @@ python testing/tests/TS-70/ts70_fine_grained_pat_auth_playwright.py
 - Python 3.12+
 - Playwright for Python with Chromium installed
 - `GH_TOKEN` or `GITHUB_TOKEN` set to a GitHub token that can authenticate against the hosted setup repository
-- The script targets the deployed GitHub Pages app at `https://istin.github.io/trackstate-setup/`
+- Defaults come from `testing/core/config/live_setup_test_config.py`
+- Optional overrides:
+  - `TRACKSTATE_LIVE_APP_URL`
+  - `TRACKSTATE_LIVE_SETUP_REPOSITORY`
+  - `TRACKSTATE_LIVE_SETUP_REF`
 
 ## Expected passing output
 

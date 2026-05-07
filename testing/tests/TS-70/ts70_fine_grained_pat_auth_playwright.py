@@ -9,16 +9,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from testing.components.pages.trackstate_live_app_page import TrackStateLiveAppPage
-from testing.frameworks.python.playwright_web_app_session import (
-    PlaywrightWebAppRuntime,
-)
 from testing.components.services.live_setup_repository_service import (
     LiveSetupRepositoryService,
 )
+from testing.core.config.live_setup_test_config import load_live_setup_test_config
+from testing.tests.support.live_setup_app_factory import create_live_setup_app
 
 
-APP_URL = "https://istin.github.io/trackstate-setup/"
 OUTPUTS_DIR = Path("outputs")
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts70_failure.png"
 
@@ -26,7 +23,8 @@ SCREENSHOT_PATH = OUTPUTS_DIR / "ts70_failure.png"
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    service = LiveSetupRepositoryService()
+    config = load_live_setup_test_config()
+    service = LiveSetupRepositoryService(config=config)
     metadata = service.fetch_demo_metadata()
     user = service.fetch_authenticated_user()
     token = service.token
@@ -37,7 +35,7 @@ def main() -> None:
 
     result: dict[str, object] = {
         "status": "failed",
-        "app_url": APP_URL,
+        "app_url": config.app_url,
         "repository": metadata.repository,
         "repository_ref": metadata.ref,
         "expected_issue_types": metadata.issue_types,
@@ -47,9 +45,7 @@ def main() -> None:
     }
 
     try:
-        with PlaywrightWebAppRuntime() as session:
-            live_page = TrackStateLiveAppPage(session, APP_URL)
-
+        with create_live_setup_app(config) as live_page:
             live_page.open()
             state = live_page.wait_for_runtime_state()
             result["runtime_state"] = state.kind
