@@ -1,135 +1,145 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
-import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.dart';
 
-import '../../components/screens/settings_screen_robot.dart';
+import '../../core/models/settings_provider_state.dart';
+import '../../fixtures/settings/settings_provider_test_context.dart';
 import '../../fixtures/repositories/local_runtime_repository.dart';
 
 class _ProviderSelectorScenario {
   const _ProviderSelectorScenario({
     required this.name,
     required this.repository,
-    required this.activeState,
-    required this.expectedVisibleRows,
+    required this.expectedVisibleOptions,
+    required this.expectedVisibleLabels,
+    required this.expectedSelectedOption,
     this.sharedPreferences = const {},
   });
 
   final String name;
   final TrackStateRepository repository;
-  final RepositoryAccessState activeState;
-  final List<String> expectedVisibleRows;
+  final List<SettingsProviderOption> expectedVisibleOptions;
+  final List<String> expectedVisibleLabels;
+  final SettingsProviderOption expectedSelectedOption;
   final Map<String, Object> sharedPreferences;
-}
-
-String _labelForState(RepositoryAccessState state) {
-  return switch (state) {
-    RepositoryAccessState.localGit => 'Local Git',
-    RepositoryAccessState.connected => 'Connected',
-    RepositoryAccessState.connectGitHub => 'Connect GitHub',
-  };
 }
 
 void main() {
   testWidgets(
-    'TS-53 Settings provider selector renders a selectable row for every repository access state',
+    'TS-53 Settings provider selector renders a selectable row for every provider option',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      final robot = SettingsScreenRobot(tester);
-      final allProviderLabels = {
-        for (final state in RepositoryAccessState.values) _labelForState(state),
-      };
-      final observedSelectorRows = <String>{};
+      final observedProviderOptions = <SettingsProviderOption>{};
 
       const hostedTokenKey = 'trackstate.githubToken.trackstate.trackstate';
       final scenarios = [
         const _ProviderSelectorScenario(
           name: 'hosted runtime before connecting GitHub',
           repository: DemoTrackStateRepository(),
-          activeState: RepositoryAccessState.connectGitHub,
-          expectedVisibleRows: ['Connect GitHub', 'Local Git'],
+          expectedVisibleOptions: [
+            SettingsProviderOption.hosted,
+            SettingsProviderOption.localGit,
+          ],
+          expectedVisibleLabels: ['Connect GitHub', 'Local Git'],
+          expectedSelectedOption: SettingsProviderOption.hosted,
         ),
         const _ProviderSelectorScenario(
           name: 'hosted runtime after connecting GitHub',
           repository: DemoTrackStateRepository(),
-          activeState: RepositoryAccessState.connected,
-          expectedVisibleRows: ['Connected', 'Local Git'],
+          expectedVisibleOptions: [
+            SettingsProviderOption.hosted,
+            SettingsProviderOption.localGit,
+          ],
+          expectedVisibleLabels: ['Connected', 'Local Git'],
+          expectedSelectedOption: SettingsProviderOption.hosted,
           sharedPreferences: {hostedTokenKey: 'stored-token'},
         ),
         const _ProviderSelectorScenario(
           name: 'local Git runtime',
           repository: const LocalRuntimeRepository(),
-          activeState: RepositoryAccessState.localGit,
-          expectedVisibleRows: ['Local Git'],
+          expectedVisibleOptions: [SettingsProviderOption.localGit],
+          expectedVisibleLabels: ['Local Git'],
+          expectedSelectedOption: SettingsProviderOption.localGit,
         ),
       ];
 
       try {
         for (final scenario in scenarios) {
-          await robot.pumpApp(
+          final settingsPage = createSettingsProviderPage(
+            tester,
             repository: scenario.repository,
             sharedPreferences: scenario.sharedPreferences,
           );
-          await robot.openSettings();
+          try {
+            await settingsPage.open();
+            final state = settingsPage.captureState();
 
-          expect(
-            robot.projectSettingsHeading,
-            findsOneWidget,
-            reason:
-                'Scenario "${scenario.name}" should open the Settings screen with the Project Settings heading visible to the user.',
-          );
-          expect(
-            robot.repositoryAccessSection,
-            findsOneWidget,
-            reason:
-                'Scenario "${scenario.name}" should render a Repository access section that contains the provider selector rows.',
-          );
-
-          final visibleSelectorRows = robot.visibleProviderLabels(
-            allProviderLabels,
-          );
-          observedSelectorRows.addAll(visibleSelectorRows);
-
-          expect(
-            visibleSelectorRows,
-            orderedEquals(scenario.expectedVisibleRows),
-            reason:
-                'Scenario "${scenario.name}" should show selectable provider rows ${scenario.expectedVisibleRows.join(', ')} in the Repository access selector, but displayed ${visibleSelectorRows.join(', ')}.',
-          );
-
-          final activeLabel = _labelForState(scenario.activeState);
-          expect(
-            visibleSelectorRows,
-            contains(activeLabel),
-            reason:
-                'Scenario "${scenario.name}" should expose the ${scenario.activeState.name} state as a selectable row labelled "$activeLabel".',
-          );
-
-          for (final label in scenario.expectedVisibleRows) {
-            final control = robot.providerControl(label);
             expect(
-              control,
-              findsOneWidget,
+              state.isProjectSettingsVisible,
+              isTrue,
               reason:
-                  'Scenario "${scenario.name}" should render "$label" as exactly one selectable row in the provider selector.',
+                  'Scenario "${scenario.name}" should open the Settings screen with the Project Settings heading visible to the user.',
             );
             expect(
-              robot.semanticsLabelOf(control),
-              label,
+              state.visibleOptionOrder,
+              orderedEquals(scenario.expectedVisibleOptions),
               reason:
-                  'Scenario "${scenario.name}" should expose "$label" to assistive technology with the same visible label the user sees.',
+                  'Scenario "${scenario.name}" should show exactly the provider options ${scenario.expectedVisibleOptions.map((option) => option.name).join(', ')} in selector order.',
             );
+            expect(
+              state.visibleProviderLabels,
+              orderedEquals(scenario.expectedVisibleLabels),
+              reason:
+                  'Scenario "${scenario.name}" should show the provider selector row labels ${scenario.expectedVisibleLabels.join(', ')}, but displayed ${state.visibleProviderLabels.join(', ')}.',
+            );
+
+            observedProviderOptions.addAll(state.visibleOptionOrder);
+            expect(
+              state.optionState(scenario.expectedSelectedOption).isSelected,
+              isTrue,
+              reason:
+                  'Scenario "${scenario.name}" should mark ${scenario.expectedSelectedOption.name} as the selected provider option.',
+            );
+
+            for (
+              var index = 0;
+              index < scenario.expectedVisibleOptions.length;
+              index++
+            ) {
+              final option = scenario.expectedVisibleOptions[index];
+              final expectedLabel = scenario.expectedVisibleLabels[index];
+              final optionState = state.optionState(option);
+
+              expect(
+                optionState.isVisible,
+                isTrue,
+                reason:
+                    'Scenario "${scenario.name}" should render the ${option.name} provider option as a selectable row.',
+              );
+              expect(
+                optionState.visibleCount,
+                1,
+                reason:
+                    'Scenario "${scenario.name}" should render exactly one selectable row for the ${option.name} provider option.',
+              );
+              expect(
+                optionState.label,
+                expectedLabel,
+                reason:
+                    'Scenario "${scenario.name}" should expose the ${option.name} provider row to users as "$expectedLabel".',
+              );
+            }
+          } finally {
+            settingsPage.dispose();
           }
         }
 
         expect(
-          observedSelectorRows,
-          equals(allProviderLabels),
+          observedProviderOptions,
+          equals(SettingsProviderOption.values.toSet()),
           reason:
-              'Across live repository states, every RepositoryAccessState value must have a corresponding selectable row in the Settings provider selector.',
+              'Across supported runtime states, every Settings provider option should appear as a selectable row in the Settings provider selector.',
         );
       } finally {
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
         semantics.dispose();
       }
     },
