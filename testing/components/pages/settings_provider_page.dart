@@ -20,6 +20,14 @@ class SettingsProviderPage {
     await _driver.scrollBodyBy(-400);
   }
 
+  Future<void> enterLocalGitConfiguration({
+    required String repositoryPath,
+    required String writeBranch,
+  }) async {
+    await _driver.enterTextIntoField('Repository Path', repositoryPath);
+    await _driver.enterTextIntoField('Write Branch', writeBranch);
+  }
+
   void dispose() {
     _driver.resetView();
   }
@@ -51,6 +59,10 @@ class SettingsProviderPage {
       isFineGrainedTokenVisible: _driver.isTextVisible('Fine-grained token'),
       isRepositoryPathVisible: _driver.isTextVisible('Repository Path'),
       isWriteBranchVisible: _driver.isTextVisible('Write Branch'),
+      repositoryPathValue: _driver.textFieldValue('Repository Path'),
+      writeBranchValue: _driver.textFieldValue('Write Branch'),
+      isRepositoryPathReadOnly: _driver.isTextFieldReadOnly('Repository Path'),
+      isWriteBranchReadOnly: _driver.isTextFieldReadOnly('Write Branch'),
       repositoryPathTop: repositoryPathRect?.top,
       repositoryPathBottom: repositoryPathRect?.bottom,
       repositoryPathLeft: repositoryPathRect?.left,
