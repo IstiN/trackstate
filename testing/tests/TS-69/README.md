@@ -10,7 +10,7 @@ python -m unittest discover -s testing/tests/TS-69 -p 'test_*.py' -v
 ## Required environment
 
 - `gh` must be installed and authenticated for a GitHub user that can dispatch
-  workflows on `IstiN/trackstate-setup`.
+  workflows on the fork configured in `testing/tests/TS-69/config.yaml`.
 - Network access to GitHub REST APIs and the deployed Pages URL is required.
 
 ## Expected passing output

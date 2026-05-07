@@ -14,6 +14,9 @@ from urllib import request as urllib_request
 from testing.core.interfaces.github_pages_workflow_probe import (
     GitHubPagesWorkflowObservation,
 )
+from testing.core.models.github_pages_workflow_probe_config import (
+    GitHubPagesWorkflowProbeConfig,
+)
 
 
 class GitHubCliError(RuntimeError):
@@ -21,10 +24,6 @@ class GitHubCliError(RuntimeError):
 
 
 class GitHubPagesWorkflowProbe:
-    _UPSTREAM_REPOSITORY = "IstiN/trackstate-setup"
-    _WORKFLOW_FILE = "install-update-trackstate.yml"
-    _WORKFLOW_REF = "main"
-    _TRACKSTATE_REF = "main"
     _REQUIRED_STEPS = (
         "Build Flutter web app for this fork",
         "Upload Pages artifact",
@@ -47,12 +46,14 @@ class GitHubPagesWorkflowProbe:
     def __init__(
         self,
         repository_root: Path,
+        config: GitHubPagesWorkflowProbeConfig,
         fork_registration_timeout_seconds: int = 300,
         run_timeout_seconds: int = 480,
         pages_timeout_seconds: int = 180,
         poll_interval_seconds: int = 5,
     ) -> None:
         self._repository_root = Path(repository_root)
+        self._config = config
         self._fork_registration_timeout_seconds = fork_registration_timeout_seconds
         self._run_timeout_seconds = run_timeout_seconds
         self._pages_timeout_seconds = pages_timeout_seconds
@@ -122,7 +123,7 @@ class GitHubPagesWorkflowProbe:
             repository=requested_repository,
             requested_repository=requested_repository,
             expected_pages_url=expected_pages_url,
-            workflow_file=self._WORKFLOW_FILE,
+            workflow_file=self._config.workflow_file,
             workflow_run_id=int(completed_run["id"]),
             workflow_run_url=str(completed_run["html_url"]),
             workflow_run_conclusion=completed_run.get("conclusion"),
@@ -147,17 +148,28 @@ class GitHubPagesWorkflowProbe:
         )
 
     def _select_repository_for_execution(self) -> str:
-        login = self._authenticated_login()
-        requested_repository = (
-            self._UPSTREAM_REPOSITORY
-            if login == self._UPSTREAM_REPOSITORY.split("/")[0]
-            else f"{login}/trackstate-setup"
-        )
+        requested_repository = self._config.requested_repository
+        upstream_repository = self._config.upstream_repository
+        if requested_repository == upstream_repository:
+            raise GitHubCliError(
+                "TS-69 requires validating a forked repository, but "
+                f"runtime_inputs.requested_repository points to the upstream "
+                f"repository {upstream_repository}."
+            )
 
-        if requested_repository == self._UPSTREAM_REPOSITORY:
-            return requested_repository
+        login = self._authenticated_login()
+        requested_owner = requested_repository.split("/", 1)[0]
 
         if not self._repository_exists(requested_repository):
+            if login != requested_owner:
+                raise GitHubCliError(
+                    "TS-69 requires validating the configured fork "
+                    f"{requested_repository}, but it does not exist and the "
+                    f"authenticated login {login} cannot create a fork in that "
+                    "owner namespace. Either pre-create the configured fork or "
+                    "update runtime_inputs.requested_repository to a fork owned "
+                    "by the authenticated account."
+                )
             self._create_fork()
 
         if not self._wait_for_repository(requested_repository):
@@ -170,9 +182,10 @@ class GitHubPagesWorkflowProbe:
         if not self._wait_for_workflow_registration(requested_repository):
             raise GitHubCliError(
                 "TS-69 requires validating the requested fork, but GitHub did not "
-                f"register {self._WORKFLOW_FILE} for {requested_repository} within "
+                f"register {self._config.workflow_file} for {requested_repository} "
+                "within "
                 f"{self._fork_registration_timeout_seconds} seconds. The probe does "
-                "not fall back to IstiN/trackstate-setup."
+                f"not fall back to {upstream_repository}."
             )
 
         return requested_repository
@@ -210,7 +223,7 @@ class GitHubPagesWorkflowProbe:
 
     def _create_fork(self) -> None:
         self._gh_json(
-            f"repos/{self._UPSTREAM_REPOSITORY}/forks",
+            f"repos/{self._config.upstream_repository}/forks",
             method="POST",
             field_args=["-f", "default_branch_only=true"],
         )
@@ -228,7 +241,7 @@ class GitHubPagesWorkflowProbe:
         while time.time() < deadline:
             workflows = self._gh_json(f"repos/{repository}/actions/workflows")
             for workflow in workflows.get("workflows", []):
-                if workflow.get("path", "").endswith(self._WORKFLOW_FILE):
+                if workflow.get("path", "").endswith(self._config.workflow_file):
                     return True
             time.sleep(self._poll_interval_seconds)
         return False
@@ -245,7 +258,7 @@ class GitHubPagesWorkflowProbe:
                 method="POST",
                 stdin_json={
                     "build_type": "workflow",
-                    "source": {"branch": self._WORKFLOW_REF, "path": "/"},
+                    "source": {"branch": self._config.workflow_ref, "path": "/"},
                 },
             )
 
@@ -255,7 +268,7 @@ class GitHubPagesWorkflowProbe:
                 method="PATCH",
                 stdin_json={
                     "build_type": "workflow",
-                    "source": {"branch": self._WORKFLOW_REF, "path": "/"},
+                    "source": {"branch": self._config.workflow_ref, "path": "/"},
                 },
             )
 
@@ -263,19 +276,19 @@ class GitHubPagesWorkflowProbe:
 
     def _dispatch_workflow(self, repository: str) -> None:
         self._gh_text(
-            f"repos/{repository}/actions/workflows/{self._WORKFLOW_FILE}/dispatches",
+            f"repos/{repository}/actions/workflows/{self._config.workflow_file}/dispatches",
             method="POST",
             field_args=[
                 "-f",
-                f"ref={self._WORKFLOW_REF}",
+                f"ref={self._config.workflow_ref}",
                 "-F",
-                f"inputs[trackstate_ref]={self._TRACKSTATE_REF}",
+                f"inputs[trackstate_ref]={self._config.trackstate_ref}",
             ],
         )
 
     def _list_workflow_runs(self, repository: str) -> list[dict[str, Any]]:
         payload = self._gh_json(
-            f"repos/{repository}/actions/workflows/{self._WORKFLOW_FILE}/runs"
+            f"repos/{repository}/actions/workflows/{self._config.workflow_file}/runs"
             "?event=workflow_dispatch&per_page=20"
         )
         workflow_runs = payload.get("workflow_runs", [])
