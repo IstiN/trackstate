@@ -9,6 +9,8 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
 
   List<String> visibleTextsWithinIssueDetail(String issueKey);
 
+  List<String> semanticsLabelsInIssueDetail(String issueKey);
+
   List<String> semanticsLabelsInIssueDetailTraversal(String issueKey);
 
   List<String> commentActionLabels(String issueKey);

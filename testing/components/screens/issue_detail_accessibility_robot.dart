@@ -58,24 +58,55 @@ class IssueDetailAccessibilityRobot
   }
 
   @override
-  List<String> semanticsLabelsInIssueDetailTraversal(String issueKey) {
-    final labels = <String>[];
-    final root = tester.getSemantics(_issueDetail(issueKey));
+  List<String> semanticsLabelsInIssueDetail(String issueKey) {
+    final issueDetail = _issueDetail(issueKey);
+    final rootLabel = 'Issue detail $issueKey';
+    final targets = <_AccessibilityTarget>[];
 
-    void visit(SemanticsNode node) {
-      final label = node.label.replaceAll(RegExp(r'\s+'), ' ').trim();
-      if (label.isNotEmpty) {
-        labels.add(label);
+    for (final element in find
+        .descendant(of: issueDetail, matching: find.byType(Semantics))
+        .evaluate()) {
+      final widget = element.widget as Semantics;
+      final label = _normalizedLabel(widget.properties.label);
+      if (label.isEmpty || label == rootLabel) {
+        continue;
       }
-      for (final child in node.debugListChildrenInOrder(
-        DebugSemanticsDumpOrder.traversalOrder,
-      )) {
-        visit(child);
-      }
+      targets.add(
+        _AccessibilityTarget(
+          label: label,
+          rect: _rectFor(element),
+          priority: 0,
+        ),
+      );
     }
 
-    visit(root);
-    return labels;
+    return _sortedLabels(targets);
+  }
+
+  @override
+  List<String> semanticsLabelsInIssueDetailTraversal(String issueKey) {
+    final issueDetail = _issueDetail(issueKey);
+    final semanticsTargets = _accessibilityTargetsFromSemantics(issueKey);
+    final traversalTargets = <_AccessibilityTarget>[...semanticsTargets];
+
+    for (final element in find
+        .descendant(of: issueDetail, matching: find.byType(RichText))
+        .evaluate()) {
+      final widget = element.widget as RichText;
+      final label = _normalizedLabel(widget.text.toPlainText());
+      if (label.isEmpty) {
+        continue;
+      }
+      final rect = _rectFor(element);
+      if (_isRepresentedByNearbySemanticsTarget(label, rect, semanticsTargets)) {
+        continue;
+      }
+      traversalTargets.add(
+        _AccessibilityTarget(label: label, rect: rect, priority: 1),
+      );
+    }
+
+    return _sortedLabels(traversalTargets);
   }
 
   @override
@@ -225,4 +256,96 @@ class IssueDetailAccessibilityRobot
     final rgb = color.toARGB32() & 0x00FFFFFF;
     return '#${rgb.toRadixString(16).padLeft(6, '0').toUpperCase()}';
   }
+
+  List<_AccessibilityTarget> _accessibilityTargetsFromSemantics(
+    String issueKey,
+  ) {
+    final issueDetail = _issueDetail(issueKey);
+    final rootLabel = 'Issue detail $issueKey';
+    final targets = <_AccessibilityTarget>[];
+
+    for (final element in find
+        .descendant(of: issueDetail, matching: find.byType(Semantics))
+        .evaluate()) {
+      final widget = element.widget as Semantics;
+      final label = _normalizedLabel(widget.properties.label);
+      if (label.isEmpty || label == rootLabel) {
+        continue;
+      }
+      targets.add(
+        _AccessibilityTarget(
+          label: label,
+          rect: _rectFor(element),
+          priority: 0,
+        ),
+      );
+    }
+
+    return targets;
+  }
+
+  Rect _rectFor(Element element) {
+    final renderObject = element.renderObject;
+    if (renderObject is! RenderBox) {
+      return Rect.zero;
+    }
+    final topLeft = renderObject.localToGlobal(Offset.zero);
+    return topLeft & renderObject.size;
+  }
+
+  bool _isRepresentedByNearbySemanticsTarget(
+    String label,
+    Rect rect,
+    List<_AccessibilityTarget> semanticsTargets,
+  ) {
+    for (final target in semanticsTargets) {
+      if (target.label != label) {
+        continue;
+      }
+      final topDelta = (target.rect.top - rect.top).abs();
+      final leftDelta = (target.rect.left - rect.left).abs();
+      if (target.rect.overlaps(rect) || (topDelta <= 24 && leftDelta <= 120)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  List<String> _sortedLabels(List<_AccessibilityTarget> targets) {
+    targets.sort((left, right) {
+      final topOrder = left.rect.top.compareTo(right.rect.top);
+      if (topOrder != 0) {
+        return topOrder;
+      }
+      final leftOrder = left.rect.left.compareTo(right.rect.left);
+      if (leftOrder != 0) {
+        return leftOrder;
+      }
+      return left.priority.compareTo(right.priority);
+    });
+
+    final ordered = <String>[];
+    for (final target in targets) {
+      if (ordered.isNotEmpty && ordered.last == target.label) {
+        continue;
+      }
+      ordered.add(target.label);
+    }
+    return ordered;
+  }
+
+  String _normalizedLabel(String? label) =>
+      (label ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
+class _AccessibilityTarget {
+  const _AccessibilityTarget({
+    required this.label,
+    required this.rect,
+    required this.priority,
+  });
+
+  final String label;
+  final Rect rect;
+  final int priority;
 }

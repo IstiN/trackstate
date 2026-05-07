@@ -29,6 +29,7 @@ void main() {
         );
 
         final visibleTexts = screen.visibleTextsWithinIssueDetail(issueKey);
+        final semanticsLabels = screen.semanticsLabelsInIssueDetail(issueKey);
         final semanticsTraversal = screen.semanticsLabelsInIssueDetailTraversal(
           issueKey,
         );
@@ -56,7 +57,7 @@ void main() {
           }
         }
 
-        final inProgressLabelCount = semanticsTraversal
+        final inProgressLabelCount = semanticsLabels
             .where((label) => label == 'In Progress')
             .length;
         if (inProgressLabelCount != 1) {
@@ -65,7 +66,7 @@ void main() {
           );
         }
 
-        final componentLabelCount = semanticsTraversal
+        final componentLabelCount = semanticsLabels
             .where((label) => label == 'tracker-core')
             .length;
         if (componentLabelCount != 1) {
@@ -93,7 +94,7 @@ void main() {
             );
           }
           for (final label in commentActionLabels.toSet()) {
-            final exactCount = semanticsTraversal
+            final exactCount = semanticsLabels
                 .where((candidate) => candidate == label)
                 .length;
             if (exactCount != 1) {
@@ -104,16 +105,17 @@ void main() {
           }
         }
 
-        if (!containsAllInOrder([
-          issueSummary,
-          'In Progress',
-          'Details',
-          'Comments',
-          'ana',
-          expectedCommentBody,
-        ]).matches(semanticsTraversal, <dynamic, dynamic>{})) {
+        final traversalFailure = _logicalTraversalFailure(
+          semanticsTraversal,
+          issueSummary: issueSummary,
+          metadataLabels: const ['In Progress', 'tracker-core', '8', 'web', 'mobile'],
+          commentsHeading: 'Comments',
+          commentAuthor: 'ana',
+          commentBody: expectedCommentBody,
+        );
+        if (traversalFailure != null) {
           failures.add(
-            'Issue detail semantics traversal did not move logically from summary through metadata into comments. Observed traversal labels: ${semanticsTraversal.join(' -> ')}.',
+            '$traversalFailure Observed traversal labels: ${semanticsTraversal.join(' -> ')}.',
           );
         }
 
@@ -137,4 +139,40 @@ void main() {
       }
     },
   );
+}
+
+String? _logicalTraversalFailure(
+  List<String> traversal, {
+  required String issueSummary,
+  required List<String> metadataLabels,
+  required String commentsHeading,
+  required String commentAuthor,
+  required String commentBody,
+}) {
+  final summaryIndex = traversal.indexOf(issueSummary);
+  final commentsIndex = traversal.indexOf(commentsHeading);
+  final authorIndex = traversal.indexOf(commentAuthor);
+  final bodyIndex = traversal.indexOf(commentBody);
+
+  if (summaryIndex == -1 ||
+      commentsIndex == -1 ||
+      authorIndex == -1 ||
+      bodyIndex == -1) {
+    return 'Issue detail semantics traversal did not expose the expected summary, comments heading, author, and comment body targets in screen-reader order.';
+  }
+
+  for (final label in metadataLabels) {
+    final index = traversal.indexOf(label);
+    if (index == -1 || index <= summaryIndex || index >= commentsIndex) {
+      return 'Issue detail semantics traversal did not keep rich metadata between the summary and comments. Missing or misplaced metadata target: $label.';
+    }
+  }
+
+  if (!(summaryIndex < commentsIndex &&
+      commentsIndex < authorIndex &&
+      authorIndex < bodyIndex)) {
+    return 'Issue detail semantics traversal did not move logically from summary through comments into the comment content.';
+  }
+
+  return null;
 }
