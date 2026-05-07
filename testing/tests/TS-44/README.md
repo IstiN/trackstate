@@ -14,7 +14,7 @@ flutter test testing/tests/TS-44/attachment_capability_check_test.dart -r expand
 
 ## Required configuration
 
-This test uses the in-repo stubbed GitHub framework adapter in `testing/frameworks/api/github/` and does not require external credentials or environment variables.
+This test uses the reusable TS-44 fixture in `testing/fixtures/attachments/` to assemble the stubbed GitHub framework adapter below the test layer, so no external credentials or environment variables are required.
 
 ## Expected passing output
 
