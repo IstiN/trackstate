@@ -1655,7 +1655,7 @@ class _PrimaryButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         ),
         icon: TrackStateIcon(icon, size: 16, color: onPrimary),
-        label: Text(label),
+        label: Text(label, style: TextStyle(color: onPrimary)),
       ),
     );
   }
