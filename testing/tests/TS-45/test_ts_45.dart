@@ -21,7 +21,6 @@ void main() {
         'Write Branch|${initialState.isWriteBranchVisible}|'
         'Fine-grained token|${initialState.isFineGrainedTokenVisible}',
       );
-
       expect(
         initialState.isProjectSettingsVisible,
         isTrue,

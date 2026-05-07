@@ -31,9 +31,19 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
 
   @override
   Future<void> tapLabeledElement(String label) async {
-    final finder = _labeledElement(label);
-    await tester.ensureVisible(finder.first);
-    await tester.tap(finder.first);
+    final finder = _bestTapTarget(label);
+    await tester.ensureVisible(finder);
+    await tester.tap(finder, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> enterTextIntoField(String label, String text) async {
+    final finder = _textFieldFinder(label);
+    await tester.ensureVisible(finder);
+    await tester.tap(finder, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(finder, text);
     await tester.pumpAndSettle();
   }
 
@@ -89,16 +99,64 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
         .toList();
   }
 
-  Finder _labeledElement(String label) {
-    final semanticsFinder = _semanticsFinder(label);
-    if (semanticsFinder.evaluate().isNotEmpty) {
-      return semanticsFinder;
+  @override
+  String? textFieldValue(String label) {
+    final editableTextFinder = _editableTextFinder(label);
+    if (editableTextFinder.evaluate().isEmpty) {
+      return null;
     }
-    return _textFinder(label);
+    final editableText = tester.widget<EditableText>(editableTextFinder.first);
+    return editableText.controller.text;
+  }
+
+  @override
+  bool isTextFieldReadOnly(String label) {
+    final editableTextFinder = _editableTextFinder(label);
+    if (editableTextFinder.evaluate().isEmpty) {
+      return false;
+    }
+    final editableText = tester.widget<EditableText>(editableTextFinder.first);
+    return editableText.readOnly;
+  }
+
+  Finder _bestTapTarget(String label) {
+    final buttonFinder = find.ancestor(
+      of: _textFinder(label),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    final candidates = [
+      ...buttonFinder.evaluate().map((_) => buttonFinder),
+      ..._semanticsFinder(label).evaluate().map((_) => _semanticsFinder(label)),
+      ..._textFinder(label).evaluate().map((_) => _textFinder(label)),
+    ];
+
+    Finder? best;
+    var bestTop = double.negativeInfinity;
+    for (final finder in candidates) {
+      final matches = finder.evaluate().length;
+      for (var index = 0; index < matches; index++) {
+        final candidate = finder.at(index);
+        final rect = tester.getRect(candidate);
+        if (rect.top >= bestTop) {
+          bestTop = rect.top;
+          best = candidate;
+        }
+      }
+    }
+
+    return best ?? _textFinder(label).first;
   }
 
   Finder _semanticsFinder(String label) =>
       find.bySemanticsLabel(RegExp(RegExp.escape(label)));
 
   Finder _textFinder(String text) => find.text(text);
+
+  Finder _textFieldFinder(String label) =>
+      find.widgetWithText(TextFormField, label);
+
+  Finder _editableTextFinder(String label) => find.descendant(
+    of: _textFieldFinder(label),
+    matching: find.byType(EditableText),
+  );
 }

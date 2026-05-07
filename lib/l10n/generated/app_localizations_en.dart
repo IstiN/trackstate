@@ -166,6 +166,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get repositoryAccessConnectGitHub => 'Connect GitHub';
 
   @override
+  String get repositoryAccessSettings => 'Repository access';
+
+  @override
+  String get repositoryPath => 'Repository Path';
+
+  @override
+  String get writeBranch => 'Write Branch';
+
+  @override
   String get trackerDataNotFound => 'TrackState data was not found.';
 
   @override
