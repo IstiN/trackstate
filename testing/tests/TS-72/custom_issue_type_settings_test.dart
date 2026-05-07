@@ -2,15 +2,15 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../fixtures/settings/local_git_settings_screen_context.dart';
 import '../../core/utils/local_git_repository_fixture.dart';
-import 'support/ts72_settings_robot.dart';
 
 void main() {
   testWidgets(
     'TS-72 repository issue-type customization appears on the Settings discovery surface',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      final robot = createTs72SettingsScreenRobot(tester);
+      final robot = createLocalGitSettingsScreenRobot(tester);
 
       try {
         final fixture = (await tester.runAsync(
