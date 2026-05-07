@@ -8,6 +8,8 @@ void main() {
     () async {
       final fixture = await Ts60AttachmentUploadFixture.create();
       final run = await fixture.uploadSampleAttachment();
+      final expectedGitAttributesRequest =
+          'GET /repos/${fixture.config.repository}/contents/.gitattributes';
       final expectedUploadRequest =
           'PUT /repos/${fixture.config.repository}/contents/${fixture.config.path}';
 
@@ -70,6 +72,18 @@ void main() {
         [expectedUploadRequest],
         reason:
             'The provider should upload the file through the standard GitHub Contents API endpoint exactly once.',
+      );
+      expect(
+        run.gitAttributesRequestDescriptions,
+        [expectedGitAttributesRequest, expectedGitAttributesRequest],
+        reason:
+            'The probe preflight and writeAttachment() should each read .gitattributes so the upload flow re-checks the LFS guard before uploading.',
+      );
+      expect(
+        run.requestDescriptionsImmediatelyBeforeUpload,
+        [expectedGitAttributesRequest, expectedUploadRequest],
+        reason:
+            'writeAttachment() should re-read .gitattributes immediately before the single PUT upload request.',
       );
     },
   );

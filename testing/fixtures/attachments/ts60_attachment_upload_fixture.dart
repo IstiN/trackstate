@@ -85,11 +85,25 @@ class Ts60AttachmentUploadRun {
   final AttachmentUploadObservation observation;
   final List<ObservedHttpRequest> observedRequests;
 
+  static bool _isGitAttributesRequest(ObservedHttpRequest request) =>
+      request.method == 'GET' &&
+      request.path.endsWith('/contents/.gitattributes');
+
+  static bool _isUploadRequest(
+    ObservedHttpRequest request,
+    String attachmentPath,
+  ) =>
+      request.method == 'PUT' &&
+      request.path.endsWith('/contents/$attachmentPath');
+
   bool get queriedGitAttributes => observedRequests.any(
-    (request) =>
-        request.method == 'GET' &&
-        request.path.endsWith('/contents/.gitattributes'),
+    _isGitAttributesRequest,
   );
+
+  List<String> get gitAttributesRequestDescriptions => observedRequests
+      .where(_isGitAttributesRequest)
+      .map((request) => request.describe())
+      .toList(growable: false);
 
   List<String> get requestDescriptions => observedRequests
       .map((request) => request.describe())
@@ -97,12 +111,23 @@ class Ts60AttachmentUploadRun {
 
   List<String> get uploadRequestDescriptions => observedRequests
       .where(
-        (request) =>
-            request.method == 'PUT' &&
-            request.path.endsWith('/contents/${observation.path}'),
+        (request) => _isUploadRequest(request, observation.path),
       )
       .map((request) => request.describe())
       .toList(growable: false);
+
+  List<String> get requestDescriptionsImmediatelyBeforeUpload {
+    final uploadIndex = observedRequests.indexWhere(
+      (request) => _isUploadRequest(request, observation.path),
+    );
+    if (uploadIndex < 1) {
+      return const [];
+    }
+    return observedRequests
+        .sublist(uploadIndex - 1, uploadIndex + 1)
+        .map((request) => request.describe())
+        .toList(growable: false);
+  }
 }
 
 class ObservedHttpRequest {
