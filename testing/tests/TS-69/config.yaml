@@ -7,7 +7,6 @@ dependencies:
   - network access to GitHub APIs and the deployed GitHub Pages site
 runtime_inputs:
   upstream_repository: IstiN/trackstate-setup
-  requested_repository: ai-teammate/trackstate-setup
   workflow_file: install-update-trackstate.yml
   workflow_ref: main
   trackstate_ref: main

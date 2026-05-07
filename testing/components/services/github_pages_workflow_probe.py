@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 import re
-import subprocess
 import time
 from typing import Any
-from urllib import error as urllib_error
 from urllib import parse as urllib_parse
-from urllib import request as urllib_request
 
+from testing.core.interfaces.github_api_client import (
+    GitHubApiClient,
+    GitHubApiClientError,
+)
 from testing.core.interfaces.github_pages_workflow_probe import (
     GitHubPagesWorkflowObservation,
 )
+from testing.core.interfaces.url_text_reader import UrlTextReader, UrlTextReaderError
 from testing.core.models.github_pages_workflow_probe_config import (
     GitHubPagesWorkflowProbeConfig,
 )
@@ -45,15 +45,17 @@ class GitHubPagesWorkflowProbe:
 
     def __init__(
         self,
-        repository_root: Path,
         config: GitHubPagesWorkflowProbeConfig,
+        github_api_client: GitHubApiClient,
+        url_text_reader: UrlTextReader,
         fork_registration_timeout_seconds: int = 300,
         run_timeout_seconds: int = 480,
         pages_timeout_seconds: int = 180,
         poll_interval_seconds: int = 5,
     ) -> None:
-        self._repository_root = Path(repository_root)
         self._config = config
+        self._github_api_client = github_api_client
+        self._url_text_reader = url_text_reader
         self._fork_registration_timeout_seconds = fork_registration_timeout_seconds
         self._run_timeout_seconds = run_timeout_seconds
         self._pages_timeout_seconds = pages_timeout_seconds
@@ -148,28 +150,14 @@ class GitHubPagesWorkflowProbe:
         )
 
     def _select_repository_for_execution(self) -> str:
-        requested_repository = self._config.requested_repository
-        upstream_repository = self._config.upstream_repository
-        if requested_repository == upstream_repository:
-            raise GitHubCliError(
-                "TS-69 requires validating a forked repository, but "
-                f"runtime_inputs.requested_repository points to the upstream "
-                f"repository {upstream_repository}."
-            )
-
         login = self._authenticated_login()
-        requested_owner = requested_repository.split("/", 1)[0]
+        upstream_repository = self._config.upstream_repository
+        try:
+            requested_repository = self._config.requested_repository_for(login)
+        except ValueError as error:
+            raise GitHubCliError(str(error)) from error
 
         if not self._repository_exists(requested_repository):
-            if login != requested_owner:
-                raise GitHubCliError(
-                    "TS-69 requires validating the configured fork "
-                    f"{requested_repository}, but it does not exist and the "
-                    f"authenticated login {login} cannot create a fork in that "
-                    "owner namespace. Either pre-create the configured fork or "
-                    "update runtime_inputs.requested_repository to a fork owned "
-                    "by the authenticated account."
-                )
             self._create_fork()
 
         if not self._wait_for_repository(requested_repository):
@@ -395,21 +383,17 @@ class GitHubPagesWorkflowProbe:
         )
 
     def _read_url_text(self, url: str) -> str:
-        request = urllib_request.Request(
-            url,
-            headers={
-                "User-Agent": "trackstate-ts69-test",
-                "Accept": "text/html,application/javascript;q=0.9,*/*;q=0.8",
-            },
-        )
         try:
-            with urllib_request.urlopen(request, timeout=30) as response:
-                body = response.read().decode("utf-8")
-        except urllib_error.HTTPError as error:
-            raise GitHubCliError(f"GET {url} failed with HTTP {error.code}.") from error
-        except urllib_error.URLError as error:
-            raise GitHubCliError(f"GET {url} failed: {error.reason}") from error
-        return body
+            return self._url_text_reader.read_text(
+                url=url,
+                headers={
+                    "User-Agent": "trackstate-ts69-test",
+                    "Accept": "text/html,application/javascript;q=0.9,*/*;q=0.8",
+                },
+                timeout_seconds=30,
+            )
+        except UrlTextReaderError as error:
+            raise GitHubCliError(str(error)) from error
 
     def _gh_json(
         self,
@@ -440,29 +424,12 @@ class GitHubPagesWorkflowProbe:
         field_args: list[str] | None = None,
         stdin_json: dict[str, Any] | None = None,
     ) -> str:
-        command = ["gh", "api", "-X", method, endpoint]
-        if field_args:
-            command.extend(field_args)
-        input_text: str | None = None
-        if stdin_json is not None:
-            command.extend(["--input", "-"])
-            input_text = json.dumps(stdin_json)
-
-        environment = os.environ.copy()
-        environment.setdefault("GH_PAGER", "cat")
-        completed = subprocess.run(
-            command,
-            cwd=self._repository_root,
-            env=environment,
-            check=False,
-            capture_output=True,
-            text=True,
-            input=input_text,
-        )
-        if completed.returncode != 0:
-            raise GitHubCliError(
-                f"gh api {' '.join(command[2:])} failed with exit code "
-                f"{completed.returncode}.\nSTDOUT:\n{completed.stdout}\nSTDERR:\n"
-                f"{completed.stderr}"
+        try:
+            return self._github_api_client.request_text(
+                endpoint=endpoint,
+                method=method,
+                field_args=field_args,
+                stdin_json=stdin_json,
             )
-        return completed.stdout
+        except GitHubApiClientError as error:
+            raise GitHubCliError(str(error)) from error

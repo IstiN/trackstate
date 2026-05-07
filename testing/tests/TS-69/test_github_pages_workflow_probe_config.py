@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
 
 from testing.components.services.github_pages_workflow_probe import (
@@ -10,6 +9,18 @@ from testing.components.services.github_pages_workflow_probe import (
 from testing.core.models.github_pages_workflow_probe_config import (
     GitHubPagesWorkflowProbeConfig,
 )
+
+
+class _UnusedGitHubApiClient:
+    def request_text(self, **_: object) -> str:
+        raise AssertionError("Repository selection tests should not hit the gh client.")
+
+
+class _UnusedUrlTextReader:
+    def read_text(self, **_: object) -> str:
+        raise AssertionError(
+            "Repository selection tests should not fetch live page content."
+        )
 
 
 class _RepositorySelectionProbe(GitHubPagesWorkflowProbe):
@@ -22,7 +33,12 @@ class _RepositorySelectionProbe(GitHubPagesWorkflowProbe):
         workflow_registered: bool = True,
         repository_available: bool = True,
     ) -> None:
-        super().__init__(Path.cwd(), config, poll_interval_seconds=0)
+        super().__init__(
+            config,
+            github_api_client=_UnusedGitHubApiClient(),
+            url_text_reader=_UnusedUrlTextReader(),
+            poll_interval_seconds=0,
+        )
         self._authenticated_login_value = authenticated_login
         self._repository_exists_value = repository_exists
         self._workflow_registered_value = workflow_registered
@@ -46,11 +62,10 @@ class _RepositorySelectionProbe(GitHubPagesWorkflowProbe):
 
 
 class GitHubPagesWorkflowProbeConfigTest(unittest.TestCase):
-    def test_rejects_upstream_repository_as_requested_repository(self) -> None:
+    def test_rejects_upstream_owner_login(self) -> None:
         probe = _RepositorySelectionProbe(
             config=GitHubPagesWorkflowProbeConfig(
                 upstream_repository="IstiN/trackstate-setup",
-                requested_repository="IstiN/trackstate-setup",
                 workflow_file="install-update-trackstate.yml",
                 workflow_ref="main",
                 trackstate_ref="main",
@@ -61,36 +76,32 @@ class GitHubPagesWorkflowProbeConfigTest(unittest.TestCase):
 
         with self.assertRaisesRegex(
             GitHubCliError,
-            "requires validating a forked repository",
+            "authenticated login IstiN owns the upstream repository",
         ):
             probe._select_repository_for_execution()
 
-    def test_rejects_missing_fork_when_authenticated_login_cannot_create_it(self) -> None:
+    def test_creates_missing_fork_for_authenticated_login_namespace(self) -> None:
         probe = _RepositorySelectionProbe(
             config=GitHubPagesWorkflowProbeConfig(
                 upstream_repository="IstiN/trackstate-setup",
-                requested_repository="ai-teammate/trackstate-setup",
                 workflow_file="install-update-trackstate.yml",
                 workflow_ref="main",
                 trackstate_ref="main",
             ),
-            authenticated_login="IstiN",
+            authenticated_login="ai-teammate",
             repository_exists=False,
         )
 
-        with self.assertRaisesRegex(
-            GitHubCliError,
-            "cannot create a fork in that owner namespace",
-        ):
-            probe._select_repository_for_execution()
+        self.assertEqual(
+            probe._select_repository_for_execution(),
+            "ai-teammate/trackstate-setup",
+        )
+        self.assertEqual(probe.create_fork_calls, 1)
 
-        self.assertEqual(probe.create_fork_calls, 0)
-
-    def test_uses_configured_fork_repository_when_it_is_registered(self) -> None:
+    def test_uses_authenticated_login_fork_when_it_is_registered(self) -> None:
         probe = _RepositorySelectionProbe(
             config=GitHubPagesWorkflowProbeConfig(
                 upstream_repository="IstiN/trackstate-setup",
-                requested_repository="ai-teammate/trackstate-setup",
                 workflow_file="install-update-trackstate.yml",
                 workflow_ref="main",
                 trackstate_ref="main",

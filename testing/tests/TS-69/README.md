@@ -10,8 +10,12 @@ python -m unittest discover -s testing/tests/TS-69 -p 'test_*.py' -v
 ## Required environment
 
 - `gh` must be installed and authenticated for a GitHub user that can dispatch
-  workflows on the fork configured in `testing/tests/TS-69/config.yaml`.
+  workflows on their fork of the upstream repository configured in
+  `testing/tests/TS-69/config.yaml`.
 - Network access to GitHub REST APIs and the deployed Pages URL is required.
+
+The test derives the fork repository from the authenticated `gh` login instead
+of pinning a specific fork owner in source control.
 
 ## Expected passing output
 
