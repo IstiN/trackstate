@@ -5,4 +5,5 @@ environment:
   sdk: ^3.9.2
 
 dependencies:
-  http: ^1.6.0
+  http:
+    path: packages/http

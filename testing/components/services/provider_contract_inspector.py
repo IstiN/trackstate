@@ -3,10 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import os
+import shutil
 import subprocess
-import tempfile
-import urllib.request
-import zipfile
 
 from testing.core.interfaces.provider_contract_probe import (
     ProviderContractProbe,
@@ -15,24 +13,14 @@ from testing.core.interfaces.provider_contract_probe import (
 
 
 class ProviderContractInspector(ProviderContractProbe):
-    _dart_version = "3.9.2"
-    _dart_sdk_url = (
-        "https://storage.googleapis.com/dart-archive/channels/stable/release/"
-        f"{_dart_version}/sdk/dartsdk-linux-x64-release.zip"
-    )
-
     def __init__(self, repository_root: Path) -> None:
         self._repository_root = repository_root
         self._probe_root = repository_root / "testing/tests/TS-38/dart_probe"
-        self._dart_root = (
-            Path.home() / ".cache/trackstate-test-tools" / f"dart-sdk-{self._dart_version}"
-        )
-        self._dart_bin = self._dart_root / "dart-sdk/bin/dart"
+        self._dart_bin = self._resolve_dart_bin()
 
     def inspect(self) -> ProviderContractProbeResult:
-        self._ensure_dart_sdk()
         self._run(
-            [str(self._dart_bin), "--disable-analytics", "pub", "get"],
+            [str(self._dart_bin), "--disable-analytics", "pub", "get", "--offline"],
             cwd=self._probe_root,
         )
 
@@ -60,25 +48,37 @@ class ProviderContractInspector(ProviderContractProbe):
             session_payload=json.loads(execution.stdout),
         )
 
-    def _ensure_dart_sdk(self) -> None:
-        if self._dart_bin.exists():
-            self._make_sdk_binaries_executable()
-            return
+    def _resolve_dart_bin(self) -> Path:
+        for env_key in ("TS38_DART_BIN", "TRACKSTATE_DART_BIN"):
+            configured = os.environ.get(env_key)
+            if not configured:
+                continue
+            dart_bin = self._resolve_command(configured)
+            if dart_bin is not None:
+                return dart_bin
 
-        self._dart_root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="trackstate-dart-sdk-") as temp_dir:
-            archive_path = Path(temp_dir) / "dartsdk.zip"
-            with urllib.request.urlopen(self._dart_sdk_url) as response:
-                archive_path.write_bytes(response.read())
-            with zipfile.ZipFile(archive_path) as archive:
-                archive.extractall(self._dart_root)
-        self._make_sdk_binaries_executable()
+        path_dart = self._resolve_command("dart")
+        if path_dart is not None:
+            return path_dart
 
-    def _make_sdk_binaries_executable(self) -> None:
-        bin_dir = self._dart_root / "dart-sdk/bin"
-        for binary in bin_dir.rglob("*"):
-            if binary.is_file():
-                binary.chmod(binary.stat().st_mode | 0o111)
+        cache_root = Path.home() / ".cache/trackstate-test-tools"
+        for dart_bin in sorted(cache_root.glob("dart-sdk-*/dart-sdk/bin/dart"), reverse=True):
+            if dart_bin.is_file():
+                return dart_bin
+
+        raise AssertionError(
+            "Dart SDK is required for TS-38. Provide a preinstalled dart binary on PATH "
+            "or set TS38_DART_BIN to an existing dart executable."
+        )
+
+    @staticmethod
+    def _resolve_command(command: str) -> Path | None:
+        candidate = Path(command).expanduser()
+        if candidate.is_file():
+            return candidate
+
+        resolved = shutil.which(command)
+        return Path(resolved) if resolved else None
 
     def _run(
         self,
