@@ -1,17 +1,17 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'issue_detail_test_context.dart';
+import '../../components/screens/read_only_issue_detail_screen.dart';
 
 void main() {
   testWidgets(
     'TS-42 shows read-only issue detail actions as unavailable before save',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      IssueDetailTestContext? context;
+      ReadOnlyIssueDetailScreen? screen;
 
       try {
-        context = await IssueDetailTestContext.launch(tester);
-        final issueDetailPage = context.page;
+        screen = await ReadOnlyIssueDetailScreen.launch(tester);
+        final issueDetailPage = screen.page;
         const targetIssueKey = 'TRACK-12';
         const targetSummary = 'Implement Git sync service';
         const previousIssueKey = 'TRACK-11';
@@ -117,7 +117,7 @@ void main() {
           );
         }
       } finally {
-        context?.resetView();
+        screen?.dispose();
         semantics.dispose();
       }
     },
