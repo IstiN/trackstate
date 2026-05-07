@@ -6,5 +6,4 @@ dependencies: []
 notes:
   - Verifies the local Git adapter blocks a save when issue main.md has dirty local edits.
   - Keeps the provider-backed description save assertion as the exact main.md write-path AC3 check.
-  - Uses the real TrackState board mutation flow to assert the rendered error banner for the same dirty issue.
-  - The current issue detail still renders the description read-only, so the exact description-save path is validated through the provider-backed component.
+  - The current issue-detail surface still renders the description read-only and exposes no description-save action in this checkout.
