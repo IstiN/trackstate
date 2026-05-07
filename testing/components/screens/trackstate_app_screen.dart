@@ -46,6 +46,10 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     RegExp('Open ${RegExp.escape(key)} ${RegExp.escape(summary)}'),
   );
 
+  Finder get _jqlSearchPanel => find.bySemanticsLabel(RegExp('^JQL Search\$'));
+
+  Finder get _jqlSearchField => find.byType(TextField).last;
+
   Finder _statusColumn(String label) =>
       find.bySemanticsLabel(RegExp('${RegExp.escape(label)} column'));
 
@@ -129,6 +133,29 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     }
     await gesture.up();
     await tester.pumpAndSettle();
+  }
+
+  Future<void> searchIssues(String query) async {
+    await _waitForVisible(_jqlSearchPanel);
+    await _waitForVisible(_jqlSearchField);
+    await tester.tap(_jqlSearchField.first);
+    await tester.pump();
+    await tester.enterText(_jqlSearchField.first, query);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> expectIssueSearchResultVisible(
+    String key,
+    String summary,
+  ) async {
+    final issue = _issue(key, summary);
+    await _waitForVisible(issue);
+    expect(issue, findsOneWidget);
+  }
+
+  void expectIssueSearchResultAbsent(String key, String summary) {
+    expect(_issue(key, summary), findsNothing);
   }
 
   @override
