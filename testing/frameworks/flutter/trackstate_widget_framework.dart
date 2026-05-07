@@ -79,6 +79,16 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
     return tester.getRect(finder.first);
   }
 
+  @override
+  List<String> visibleTexts() {
+    return tester
+        .widgetList<Text>(find.byType(Text))
+        .map((widget) => widget.data?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
+
   Finder _labeledElement(String label) {
     final semanticsFinder = _semanticsFinder(label);
     if (semanticsFinder.evaluate().isNotEmpty) {

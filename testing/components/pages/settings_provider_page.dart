@@ -51,6 +51,7 @@ class SettingsProviderPage {
       isFineGrainedTokenVisible: _driver.isTextVisible('Fine-grained token'),
       isRepositoryPathVisible: _driver.isTextVisible('Repository Path'),
       isWriteBranchVisible: _driver.isTextVisible('Write Branch'),
+      visibleTexts: _driver.visibleTexts(),
       repositoryPathTop: repositoryPathRect?.top,
       repositoryPathBottom: repositoryPathRect?.bottom,
       repositoryPathLeft: repositoryPathRect?.left,

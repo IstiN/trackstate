@@ -16,4 +16,6 @@ abstract class SettingsProviderDriver {
   bool isSelected(String label);
 
   Rect? rectForText(String text);
+
+  List<String> visibleTexts();
 }
