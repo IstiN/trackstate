@@ -4,6 +4,36 @@ import '../../fixtures/setup/ts73_setup_repository_fixture.dart';
 
 void main() {
   test(
+    'TS-73 requires guidance-level Git LFS README instructions for large attachments',
+    () {
+      const unrelatedObservation = Ts73SetupRepositoryObservation(
+        attachmentDirectories: <String>[],
+        readmeContent:
+            'Git LFS keeps binary history lightweight. Large attachments can be shared with the team.',
+        gitattributesContent: '',
+      );
+      const guidanceObservation = Ts73SetupRepositoryObservation(
+        attachmentDirectories: <String>[],
+        readmeContent: 'Store large attachments through Git LFS.',
+        gitattributesContent: '',
+      );
+
+      expect(
+        unrelatedObservation.readmeGuidesGitLfsForLargeFiles,
+        isFalse,
+        reason:
+            'Separate mentions of Git LFS and large attachments should not satisfy TS-73 without actual guidance to use Git LFS.',
+      );
+      expect(
+        guidanceObservation.readmeGuidesGitLfsForLargeFiles,
+        isTrue,
+        reason:
+            'Direct README guidance to store large attachments through Git LFS should satisfy TS-73.',
+      );
+    },
+  );
+
+  test(
     'TS-73 verifies attachment path and Git LFS guidance align with the setup repository structure',
     () async {
       final fixture = Ts73SetupRepositoryFixture.create();

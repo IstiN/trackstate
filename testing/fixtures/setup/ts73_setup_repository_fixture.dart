@@ -128,7 +128,13 @@ class Ts73SetupRepositoryObservation {
         RegExp(r'\b(under|in|inside|within|to)\b').hasMatch(sentence),
   );
 
-  bool get readmeGuidesGitLfsForLargeFiles =>
-      _normalizedReadmeContent.contains('git lfs') &&
-      RegExp(r'\blarge\b', caseSensitive: false).hasMatch(readmeContent);
+  bool get readmeGuidesGitLfsForLargeFiles => _readmeSentences.any(
+    (sentence) =>
+        sentence.contains('git lfs') &&
+        RegExp(r'\b(large|binary)\b').hasMatch(sentence) &&
+        RegExp(r'\b(attachments?|binaries?|files?|assets?|archives?)\b')
+            .hasMatch(sentence) &&
+        RegExp(r'\b(use|stor(?:e|ed)|keep|put|save|upload|move|track)\b')
+            .hasMatch(sentence),
+  );
 }
