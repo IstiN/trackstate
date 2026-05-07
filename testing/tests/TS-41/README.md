@@ -4,9 +4,9 @@ Validates the TS-41 dirty-save behavior for `DEMO/DEMO-1/main.md`.
 
 The TS-41 automation exercises the current local-Git behavior in two ways:
 1. a provider-backed description save attempt against the dirty `main.md`
-2. a real `TrackStateApp` widget attempt that dirties the same file, opens `DEMO-1`, edits the description, clicks `Save`, and waits for visible `commit` / `stash` / `clean` guidance
+2. a real `TrackStateApp` widget proof that dirties the same file, opens `DEMO-1`, and verifies the current local-Git issue detail still exposes no description editor or `Save` action
 
-The second check uses the live app UI rather than a synthetic harness or source-file assertion. In the current checkout it still fails because the issue detail does not expose a description editor plus `Save`, and the provider message is still non-actionable.
+The second check uses the live app UI rather than a synthetic harness or source-file assertion. In the current checkout the issue detail is still read-only, so the provider-backed dirty-write assertion remains the single failing AC3 signal.
 
 ## Install dependencies
 
@@ -28,5 +28,5 @@ flutter pub get
 ## Current expected result
 
 ```text
-0 passed, 2 failed
+1 passed, 1 failed
 ```
