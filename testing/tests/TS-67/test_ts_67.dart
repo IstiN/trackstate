@@ -1,11 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
-import '../../components/screens/trackstate_app_screen.dart';
-import '../../components/services/issue_aggregate_probe.dart';
-import '../../components/services/local_git_repository_service.dart';
+import '../../core/dependencies/testing_dependencies.dart';
 import '../../core/interfaces/issue_aggregate_loader.dart';
 import '../../core/interfaces/local_git_repository_port.dart';
+import '../../core/interfaces/testing_dependency_factory.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../fixtures/repositories/ts67_issue_artifacts_fixture.dart';
 
@@ -16,13 +15,14 @@ void main() {
     final fixture = await Ts67IssueArtifactsFixture.create();
     addTearDown(fixture.dispose);
 
-    final LocalGitRepositoryPort repositoryPort = LocalGitRepositoryService(
-      tester,
-    );
+    const TestingDependencyFactory dependencies = defaultTestingDependencies;
+    final LocalGitRepositoryPort repositoryPort = dependencies
+        .createLocalGitRepositoryPort(tester);
     final repository = await repositoryPort.openRepository(
       repositoryPath: fixture.path,
     );
-    final IssueAggregateLoader aggregateProbe = IssueAggregateProbe(repository);
+    final IssueAggregateLoader aggregateProbe = dependencies
+        .createIssueAggregateLoader(repository);
     final TrackStateIssue issue = await aggregateProbe.loadIssue(
       Ts67IssueArtifactsFixture.issueKey,
     );
@@ -103,7 +103,8 @@ void main() {
       );
     }
 
-    final TrackStateAppComponent screen = TrackStateAppScreen(tester);
+    final TrackStateAppComponent screen = dependencies
+        .createTrackStateAppScreen(tester);
     await screen.pump(repository);
     await screen.expectTextVisible('Local Git');
     await screen.openSection('JQL Search');

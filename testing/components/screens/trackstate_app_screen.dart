@@ -6,12 +6,15 @@ import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/local_git_repository_port.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
-import '../services/local_git_repository_service.dart';
 
 class TrackStateAppScreen implements TrackStateAppComponent {
-  TrackStateAppScreen(this.tester);
+  TrackStateAppScreen(
+    this.tester, {
+    required LocalGitRepositoryPort repositoryService,
+  }) : _repositoryService = repositoryService;
 
   final WidgetTester tester;
+  final LocalGitRepositoryPort _repositoryService;
 
   Finder get localGitAccessButton =>
       find.bySemanticsLabel(RegExp('Local Git')).first;
@@ -71,11 +74,8 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   Future<void> pumpLocalGitApp({required String repositoryPath}) async {
-    final LocalGitRepositoryPort repositoryService = LocalGitRepositoryService(
-      tester,
-    );
     await pump(
-      await repositoryService.openRepository(repositoryPath: repositoryPath),
+      await _repositoryService.openRepository(repositoryPath: repositoryPath),
     );
     await _waitForVisible(localGitAccessButton);
   }

@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../components/screens/trackstate_app_screen.dart';
+import '../../core/dependencies/testing_dependencies.dart';
 import '../../core/utils/local_git_repository_fixture.dart';
 
 void main() {
@@ -8,7 +8,9 @@ void main() {
     'TS-43 local git mode renders the resolved local author on the profile surface',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      final screen = TrackStateAppScreen(tester);
+      final screen = defaultTestingDependencies.createTrackStateAppScreen(
+        tester,
+      );
 
       try {
         final namedAuthorFixture = (await tester.runAsync(
