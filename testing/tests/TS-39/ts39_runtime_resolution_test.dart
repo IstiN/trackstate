@@ -5,8 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'support/ts39_runtime_service_factory.dart';
 
 void main() {
-  final service = createTrackStateRuntimeService();
-
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
@@ -14,6 +12,7 @@ void main() {
   test(
     'default startup resolves the hosted GitHub runtime without auto-detection',
     () async {
+      final service = createTrackStateStartupService();
       final startup = service.inspectStartupResolution();
       final localOverride = await service.inspectLocalGitOverrideAttempt();
 
@@ -37,7 +36,8 @@ void main() {
   testWidgets('hosted runtime presents GitHub repository access to the user', (
     tester,
   ) async {
-    final observation = await service.inspectHostedRuntimeExperience(tester);
+    final service = createTrackStateRuntimeUiService(tester);
+    final observation = await service.inspectHostedRuntimeExperience();
 
     expect(observation.matchesHostedRuntimeExperience, isTrue);
     expect(observation.repositoryType, 'SetupTrackStateRepository');

@@ -36,14 +36,17 @@ class FlutterRuntimeStartupProbe implements RuntimeStartupProbe {
 }
 
 class FlutterRuntimeUiProbe implements RuntimeUiProbe {
-  const FlutterRuntimeUiProbe({required this.createRepository});
+  const FlutterRuntimeUiProbe({
+    required WidgetTester tester,
+    required this.createRepository,
+  }) : _tester = tester;
 
+  final WidgetTester _tester;
   final TrackStateRepository Function() createRepository;
 
   @override
-  Future<RuntimeUiObservation> inspectHostedRuntimeExperience(
-    WidgetTester tester,
-  ) async {
+  Future<RuntimeUiObservation> inspectHostedRuntimeExperience() async {
+    final tester = _tester;
     tester.view.physicalSize = const Size(1440, 960);
     tester.view.devicePixelRatio = 1;
     try {
