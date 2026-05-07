@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 
-import '../../core/dependencies/testing_dependencies.dart';
+import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../core/utils/local_git_test_repository.dart';
 

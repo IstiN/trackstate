@@ -1,10 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
-import '../../core/dependencies/testing_dependencies.dart';
+import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/issue_aggregate_loader.dart';
 import '../../core/interfaces/local_git_repository_port.dart';
-import '../../core/interfaces/testing_dependency_factory.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../fixtures/repositories/ts67_issue_artifacts_fixture.dart';
 
@@ -15,7 +14,7 @@ void main() {
     final fixture = await Ts67IssueArtifactsFixture.create();
     addTearDown(fixture.dispose);
 
-    const TestingDependencyFactory dependencies = defaultTestingDependencies;
+    const dependencies = defaultTestingDependencies;
     final LocalGitRepositoryPort repositoryPort = dependencies
         .createLocalGitRepositoryPort(tester);
     final repository = await repositoryPort.openRepository(

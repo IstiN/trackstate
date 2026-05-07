@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../core/dependencies/testing_dependencies.dart';
+import '../../components/factories/testing_dependencies.dart';
 import '../../fixtures/repositories/ts64_moved_issue_fixture.dart';
 
 void main() {

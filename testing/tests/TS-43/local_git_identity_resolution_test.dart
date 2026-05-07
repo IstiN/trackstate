@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../core/dependencies/testing_dependencies.dart';
+import '../../components/factories/testing_dependencies.dart';
 import '../../core/utils/local_git_repository_fixture.dart';
 
 void main() {

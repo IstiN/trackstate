@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.dart';
 
-import '../../core/dependencies/testing_dependencies.dart';
+import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../fixtures/ts65_issue_metadata_fixture.dart';
 
