@@ -2,13 +2,13 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../../components/screens/issue_detail_accessibility_robot.dart';
 import '../../core/utils/color_contrast.dart';
+import '../../fixtures/issue_detail_accessibility_screen_fixture.dart';
 
 void main() {
   testWidgets(
     'TS-68 issue detail exposes accessible semantics labels and logical traversal for rich fields',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      final robot = IssueDetailAccessibilityRobot(tester);
       final failures = <String>[];
 
       const issueKey = 'TRACK-12';
@@ -17,7 +17,8 @@ void main() {
           'Use repository indexes for key lookup instead of full-tree scans.';
 
       try {
-        await robot.pumpApp();
+        final IssueDetailAccessibilityRobot robot =
+            await launchIssueDetailAccessibilityFixture(tester);
         await robot.openSearch();
         await robot.openIssue(issueKey, issueSummary);
 
@@ -34,7 +35,13 @@ void main() {
         );
         final commentActionLabels = robot.commentActionLabels(issueKey);
 
-        for (final requiredText in [issueKey, issueSummary, 'Comments', 'ana', expectedCommentBody]) {
+        for (final requiredText in [
+          issueKey,
+          issueSummary,
+          'Comments',
+          'ana',
+          expectedCommentBody,
+        ]) {
           if (!visibleTexts.contains(requiredText)) {
             failures.add(
               'Human-visible issue detail text "$requiredText" was not rendered. Visible issue-detail text: ${visibleTexts.join(' | ')}.',
@@ -50,15 +57,21 @@ void main() {
           }
         }
 
-        if (robot.semanticsLabelCountInIssueDetail(issueKey, 'In Progress') == 0) {
+        final inProgressLabelCount = semanticsTraversal
+            .where((label) => label == 'In Progress')
+            .length;
+        if (inProgressLabelCount != 1) {
           failures.add(
-            'The status badge did not expose an "In Progress" semantics label inside the issue detail semantics tree.',
+            'The issue detail must expose exactly one "In Progress" semantics label, but found $inProgressLabelCount.',
           );
         }
 
-        if (robot.semanticsLabelCountInIssueDetail(issueKey, 'tracker-core') == 0) {
+        final componentLabelCount = semanticsTraversal
+            .where((label) => label == 'tracker-core')
+            .length;
+        if (componentLabelCount != 1) {
           failures.add(
-            'The component tag "tracker-core" did not expose any semantics label inside the issue detail semantics tree.',
+            'The issue detail must expose exactly one "tracker-core" semantics label, but found $componentLabelCount.',
           );
         }
 
@@ -69,12 +82,26 @@ void main() {
         } else {
           final duplicateLabels = <String>{
             for (final label in commentActionLabels)
-              if (commentActionLabels.where((candidate) => candidate == label).length > 1) label,
+              if (commentActionLabels
+                      .where((candidate) => candidate == label)
+                      .length >
+                  1)
+                label,
           };
           if (duplicateLabels.isNotEmpty) {
             failures.add(
               'Comment action semantics labels must be unique, but duplicates were observed: ${duplicateLabels.join(', ')}.',
             );
+          }
+          for (final label in commentActionLabels.toSet()) {
+            final exactCount = semanticsTraversal
+                .where((candidate) => candidate == label)
+                .length;
+            if (exactCount != 1) {
+              failures.add(
+                'Comment action "$label" must expose exactly one semantics label, but found $exactCount.',
+              );
+            }
           }
         }
 
@@ -105,8 +132,6 @@ void main() {
           fail(failures.join('\n'));
         }
       } finally {
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
         semantics.dispose();
       }
     },

@@ -1,25 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
-import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 class IssueDetailAccessibilityRobot {
   IssueDetailAccessibilityRobot(this.tester);
 
   final WidgetTester tester;
-
-  Future<void> pumpApp() async {
-    SharedPreferences.setMockInitialValues({});
-    tester.view.physicalSize = const Size(1440, 960);
-    tester.view.devicePixelRatio = 1;
-    await tester.pumpWidget(
-      const TrackStateApp(key: ValueKey('ts-68-app'), repository: DemoTrackStateRepository()),
-    );
-    await tester.pumpAndSettle();
-  }
 
   Future<void> openSearch() async {
     await tester.tap(find.text('JQL Search').first);
@@ -35,13 +22,23 @@ class IssueDetailAccessibilityRobot {
     await tester.pumpAndSettle();
   }
 
-  Finder issueDetail(String issueKey) =>
-      find.bySemanticsLabel(RegExp('Issue detail ${RegExp.escape(issueKey)}'));
+  Finder issueDetail(String issueKey) {
+    final label = 'Issue detail $issueKey';
+    return find.byWidgetPredicate((widget) {
+      if (widget is! Semantics) {
+        return false;
+      }
+      return widget.properties.label == label;
+    }, description: 'Semantics widget labeled $label');
+  }
 
   List<String> visibleTextsWithinIssueDetail(String issueKey) {
     return tester
         .widgetList<Text>(
-          find.descendant(of: issueDetail(issueKey), matching: find.byType(Text)),
+          find.descendant(
+            of: issueDetail(issueKey),
+            matching: find.byType(Text),
+          ),
         )
         .map((widget) => widget.data?.trim())
         .whereType<String>()
@@ -73,19 +70,16 @@ class IssueDetailAccessibilityRobot {
     final semanticsRoot = _semanticsFinderFor(issueDetail(issueKey));
     final matches = find.semantics.descendant(
       of: semanticsRoot,
-      matching: find.semantics.byPredicate(
-        (node) {
-          final nodeLabel = node.label;
-          if (nodeLabel.isEmpty) {
-            return false;
-          }
-          return switch (label) {
-            RegExp regExp => regExp.hasMatch(nodeLabel),
-            _ => nodeLabel.contains(label.toString()),
-          };
-        },
-        describeMatch: (_) => 'semantics node matching $label',
-      ),
+      matching: find.semantics.byPredicate((node) {
+        final nodeLabel = node.label;
+        if (nodeLabel.isEmpty) {
+          return false;
+        }
+        return switch (label) {
+          RegExp regExp => regExp.hasMatch(nodeLabel),
+          _ => nodeLabel.contains(label.toString()),
+        };
+      }, describeMatch: (_) => 'semantics node matching $label'),
       matchRoot: true,
     );
     return matches.evaluate().length;
