@@ -5,4 +5,4 @@ platform: linux
 dependencies: []
 notes:
   - Verifies the local Git adapter blocks a save when issue main.md has dirty local edits.
-  - Verifies the user-visible mutation failure banner uses actionable recovery guidance.
+  - Avoids a synthetic description-save harness because the current app surface still renders issue descriptions read-only.
