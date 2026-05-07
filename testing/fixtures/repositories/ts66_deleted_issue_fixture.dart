@@ -1,22 +1,23 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:trackstate/data/providers/local/local_git_trackstate_provider.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
-
-import '../../components/services/issue_deletion_service.dart';
-import 'ts66_issue_deletion_port.dart';
 
 class Ts66DeletedIssueFixture {
   Ts66DeletedIssueFixture._(this.directory);
 
   final Directory directory;
+  bool _deletedIssueFileExistedBeforeDeletion = false;
   bool _tombstoneArtifactExistsBeforeDeletion = false;
   bool _tombstoneIndexExistsBeforeDeletion = false;
   List<TrackStateIssue> _deletedIssueSearchResultsBeforeDeletion = const [];
 
   static const deletedIssueKey = 'TRACK-123';
   static const survivingIssueKey = 'TRACK-122';
+  static const deletedIssuePath = 'TRACK/$deletedIssueKey/main.md';
   static const tombstoneArtifactPath =
       'TRACK/.trackstate/tombstones/$deletedIssueKey.json';
   static const tombstoneIndexPath = 'TRACK/.trackstate/index/tombstones.json';
@@ -34,18 +35,18 @@ class Ts66DeletedIssueFixture {
         List<TrackStateIssue>.unmodifiable(
           await repository.searchIssues('project = TRACK $deletedIssueKey'),
         );
+    fixture._deletedIssueFileExistedBeforeDeletion = await File(
+      '${directory.path}/$deletedIssuePath',
+    ).exists();
     fixture._tombstoneArtifactExistsBeforeDeletion = await File(
       '${directory.path}/$tombstoneArtifactPath',
     ).exists();
     fixture._tombstoneIndexExistsBeforeDeletion = await File(
       '${directory.path}/$tombstoneIndexPath',
     ).exists();
-    await IssueDeletionService(
-      Ts66IssueDeletionPort(
-        repository: repository,
-        repositoryPath: directory.path,
-      ),
-    ).deleteIssue(key: deletedIssueKey, deletedAt: '2026-05-06T12:00:00Z');
+    await fixture._deleteIssueThroughRepositoryState(
+      deletedAt: '2026-05-06T12:00:00Z',
+    );
     return fixture;
   }
 
@@ -56,6 +57,9 @@ class Ts66DeletedIssueFixture {
       repositoryPath: directory.path,
     );
     final snapshot = await repository.loadSnapshot();
+    final deletedIssueFileExists = await File(
+      '${directory.path}/$deletedIssuePath',
+    ).exists();
     final tombstoneArtifactFile = File(
       '${directory.path}/$tombstoneArtifactPath',
     );
@@ -71,6 +75,10 @@ class Ts66DeletedIssueFixture {
 
     return Ts66DeletedIssueObservation(
       snapshot: snapshot,
+      deletedIssuePath: deletedIssuePath,
+      deletedIssueFileExistedBeforeDeletion:
+          _deletedIssueFileExistedBeforeDeletion,
+      deletedIssueFileExists: deletedIssueFileExists,
       tombstoneArtifactPath: tombstoneArtifactPath,
       tombstoneArtifactExistsBeforeDeletion:
           _tombstoneArtifactExistsBeforeDeletion,
@@ -116,27 +124,6 @@ class Ts66DeletedIssueFixture {
       'TRACK/config/fields.json',
       '[{"id":"summary","name":"Summary","type":"string","required":true}]\n',
     );
-    await _writeFile(
-      'TRACK/.trackstate/index/issues.json',
-      jsonEncode([
-        {
-          'key': survivingIssueKey,
-          'path': 'TRACK/$survivingIssueKey/main.md',
-          'parent': null,
-          'epic': null,
-          'children': <String>[],
-          'archived': false,
-        },
-        {
-          'key': deletedIssueKey,
-          'path': 'TRACK/$deletedIssueKey/main.md',
-          'parent': null,
-          'epic': null,
-          'children': <String>[],
-          'archived': false,
-        },
-      ]),
-    );
     await _writeFile('TRACK/$survivingIssueKey/main.md', '''
 ---
 key: $survivingIssueKey
@@ -151,7 +138,7 @@ updated: 2026-05-06T10:00:00Z
 
 This issue remains active after TRACK-123 is deleted.
 ''');
-    await _writeFile('TRACK/$deletedIssueKey/main.md', '''
+    await _writeFile(deletedIssuePath, '''
 ---
 key: $deletedIssueKey
 project: TRACK
@@ -173,6 +160,67 @@ This issue will be deleted through the fixture workflow.
     await _git(['commit', '-m', 'Seed active issues for deletion fixture']);
   }
 
+  Future<void> _deleteIssueThroughRepositoryState({
+    required String deletedAt,
+  }) async {
+    final repository = LocalTrackStateRepository(
+      repositoryPath: directory.path,
+    );
+    final snapshot = await repository.loadSnapshot();
+    final issue = snapshot.issues.singleWhere(
+      (entry) => entry.key == deletedIssueKey,
+    );
+    await _git(['rm', issue.storagePath]);
+    await _git(['commit', '-m', 'Delete $deletedIssueKey from the repository']);
+
+    final provider = LocalGitTrackStateProvider(repositoryPath: directory.path);
+    final permission = await provider.getPermission();
+    if (!permission.canWrite) {
+      throw StateError(
+        'TS-66 requires write access to persist tombstone files.',
+      );
+    }
+    final branch = await provider.resolveWriteBranch();
+    final tombstoneEntry = <String, Object?>{
+      'key': issue.key,
+      'project': issue.project,
+      'formerPath': issue.storagePath,
+      'deletedAt': deletedAt,
+      'summary': issue.summary,
+      'issueType': issue.issueTypeId,
+      'parent': issue.parentKey,
+      'epic': issue.epicKey,
+    };
+    final tombstoneIndexEntries = [
+      ...await _readOptionalJsonList(
+        provider: provider,
+        path: tombstoneIndexPath,
+        ref: branch,
+      ),
+      tombstoneEntry,
+    ];
+    await _writeJsonFile(
+      provider: provider,
+      path: tombstoneArtifactPath,
+      value: tombstoneEntry,
+      branch: branch,
+      message: 'Write tombstone artifact for $deletedIssueKey',
+      expectedRevision: null,
+    );
+    await _writeJsonFile(
+      provider: provider,
+      path: tombstoneIndexPath,
+      value: tombstoneIndexEntries,
+      branch: branch,
+      message: 'Reserve deleted key $deletedIssueKey in tombstones index',
+      expectedRevision: await _expectedRevisionForOptionalPath(
+        provider: provider,
+        path: tombstoneIndexPath,
+        ref: branch,
+      ),
+    );
+  }
+
   Future<void> _writeFile(String relativePath, String content) async {
     final file = File('${directory.path}/$relativePath');
     await file.parent.create(recursive: true);
@@ -184,6 +232,49 @@ This issue will be deleted through the fixture workflow.
     if (result.exitCode != 0) {
       throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
     }
+  }
+
+  Future<List<Map<String, Object?>>> _readOptionalJsonList({
+    required LocalGitTrackStateProvider provider,
+    required String path,
+    required String ref,
+  }) async {
+    if (!await File('${directory.path}/$path').exists()) {
+      return const <Map<String, Object?>>[];
+    }
+    final file = await provider.readTextFile(path, ref: ref);
+    return _jsonList(file.content);
+  }
+
+  Future<String?> _expectedRevisionForOptionalPath({
+    required LocalGitTrackStateProvider provider,
+    required String path,
+    required String ref,
+  }) async {
+    if (!await File('${directory.path}/$path').exists()) {
+      return null;
+    }
+    final file = await provider.readTextFile(path, ref: ref);
+    return file.revision;
+  }
+
+  Future<void> _writeJsonFile({
+    required LocalGitTrackStateProvider provider,
+    required String path,
+    required Object value,
+    required String branch,
+    required String message,
+    required String? expectedRevision,
+  }) async {
+    await provider.writeTextFile(
+      RepositoryWriteRequest(
+        path: path,
+        content: '${const JsonEncoder.withIndent('  ').convert(value)}\n',
+        message: message,
+        branch: branch,
+        expectedRevision: expectedRevision,
+      ),
+    );
   }
 
   Map<String, Object?> _jsonMap(String content) {
@@ -216,6 +307,9 @@ This issue will be deleted through the fixture workflow.
 class Ts66DeletedIssueObservation {
   const Ts66DeletedIssueObservation({
     required this.snapshot,
+    required this.deletedIssuePath,
+    required this.deletedIssueFileExistedBeforeDeletion,
+    required this.deletedIssueFileExists,
     required this.tombstoneArtifactPath,
     required this.tombstoneArtifactExistsBeforeDeletion,
     required this.tombstoneArtifactExists,
@@ -230,6 +324,9 @@ class Ts66DeletedIssueObservation {
   });
 
   final TrackerSnapshot snapshot;
+  final String deletedIssuePath;
+  final bool deletedIssueFileExistedBeforeDeletion;
+  final bool deletedIssueFileExists;
   final String tombstoneArtifactPath;
   final bool tombstoneArtifactExistsBeforeDeletion;
   final bool tombstoneArtifactExists;
