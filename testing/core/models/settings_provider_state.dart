@@ -26,6 +26,10 @@ class SettingsProviderState {
     required this.isFineGrainedTokenVisible,
     required this.isRepositoryPathVisible,
     required this.isWriteBranchVisible,
+    required this.repositoryPathValue,
+    required this.writeBranchValue,
+    required this.isRepositoryPathReadOnly,
+    required this.isWriteBranchReadOnly,
     this.repositoryPathTop,
     this.repositoryPathBottom,
     this.repositoryPathLeft,
@@ -40,6 +44,10 @@ class SettingsProviderState {
   final bool isFineGrainedTokenVisible;
   final bool isRepositoryPathVisible;
   final bool isWriteBranchVisible;
+  final String? repositoryPathValue;
+  final String? writeBranchValue;
+  final bool isRepositoryPathReadOnly;
+  final bool isWriteBranchReadOnly;
   final double? repositoryPathTop;
   final double? repositoryPathBottom;
   final double? repositoryPathLeft;
