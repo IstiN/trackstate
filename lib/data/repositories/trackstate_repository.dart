@@ -3,59 +3,38 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../domain/models/trackstate_models.dart';
+import '../providers/github/github_trackstate_provider.dart';
+import '../providers/trackstate_provider.dart';
 
 abstract interface class TrackStateRepository {
+  bool get usesLocalPersistence;
+  bool get supportsGitHubAuth;
   Future<TrackerSnapshot> loadSnapshot();
   Future<List<TrackStateIssue>> searchIssues(String jql);
-  Future<GitHubUser> connect(GitHubConnection connection);
+  Future<RepositoryUser> connect(RepositoryConnection connection);
   Future<TrackStateIssue> updateIssueStatus(
     TrackStateIssue issue,
     IssueStatus status,
   );
 }
 
-class SetupTrackStateRepository implements TrackStateRepository {
-  SetupTrackStateRepository({http.Client? client}) : _client = client;
+class ProviderBackedTrackStateRepository implements TrackStateRepository {
+  ProviderBackedTrackStateRepository({
+    required TrackStateProviderAdapter provider,
+    this.usesLocalPersistence = false,
+    this.supportsGitHubAuth = true,
+  }) : _provider = provider;
 
-  final http.Client? _client;
+  final TrackStateProviderAdapter _provider;
+  @override
+  final bool usesLocalPersistence;
+  @override
+  final bool supportsGitHubAuth;
   TrackerSnapshot? _snapshot;
-  GitHubConnection? _connection;
-
-  static const repositoryName = String.fromEnvironment(
-    'TRACKSTATE_REPOSITORY',
-    defaultValue: 'trackstate/trackstate',
-  );
-  static const sourceRef = String.fromEnvironment(
-    'TRACKSTATE_SOURCE_REF',
-    defaultValue: 'main',
-  );
-  static const dataRef = String.fromEnvironment(
-    'TRACKSTATE_DATA_REF',
-    defaultValue: 'main',
-  );
-
-  http.Client get _http => _client ?? http.Client();
 
   @override
-  Future<GitHubUser> connect(GitHubConnection connection) async {
-    final repoResponse = await _http.get(
-      _githubUri('/repos/${connection.repository}'),
-      headers: _githubHeaders(connection.token),
-    );
-    if (repoResponse.statusCode != 200) {
-      throw TrackStateRepositoryException(
-        'GitHub connection failed (${repoResponse.statusCode}): ${repoResponse.body}',
-      );
-    }
-    final userJson =
-        await _getGitHubJson('/user', token: connection.token)
-            as Map<String, Object?>;
-    _connection = connection;
-    return GitHubUser(
-      login: userJson['login']?.toString() ?? 'github',
-      displayName: userJson['name']?.toString() ?? '',
-    );
-  }
+  Future<RepositoryUser> connect(RepositoryConnection connection) =>
+      _provider.authenticate(connection);
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async {
@@ -80,70 +59,37 @@ class SetupTrackStateRepository implements TrackStateRepository {
         'This issue has no repository file path and cannot be saved.',
       );
     }
-    final connection = _connection;
-    if (connection == null) {
+    final permission = await _provider.getPermission();
+    if (!permission.canWrite) {
       throw const TrackStateRepositoryException(
-        'Connect a GitHub token with repository Contents write access first.',
+        'Connect a repository session with write access first.',
       );
     }
 
-    final path = issue.storagePath;
-    final getUri = Uri.https(
-      'api.github.com',
-      '/repos/${connection.repository}/contents/$path',
-      {'ref': connection.branch},
+    final writeBranch = await _provider.resolveWriteBranch();
+    final file = await _provider.readTextFile(
+      issue.storagePath,
+      ref: writeBranch,
     );
-    final getResponse = await _http.get(
-      getUri,
-      headers: _githubHeaders(connection.token),
-    );
-    if (getResponse.statusCode != 200) {
-      throw TrackStateRepositoryException(
-        'Could not read $path (${getResponse.statusCode}): ${getResponse.body}',
-      );
-    }
-
-    final fileJson = jsonDecode(getResponse.body) as Map<String, Object?>;
-    final sha = fileJson['sha'] as String?;
-    final encoded = (fileJson['content'] as String?)?.replaceAll('\n', '');
-    if (sha == null || encoded == null) {
-      throw TrackStateRepositoryException(
-        'GitHub response for $path is missing sha/content.',
-      );
-    }
-
-    final markdown = utf8.decode(base64Decode(encoded));
     final statusId = await _resolveStatusIdForUpdate(
-      connection: connection,
       issue: issue,
       status: status,
+      writeBranch: writeBranch,
     );
     final updatedMarkdown = _replaceFrontmatterValue(
-      markdown,
+      file.content,
       'status',
       statusId,
     );
-    final putResponse = await _http.put(
-      Uri.https(
-        'api.github.com',
-        '/repos/${connection.repository}/contents/$path',
+    await _provider.writeTextFile(
+      RepositoryWriteRequest(
+        path: issue.storagePath,
+        content: updatedMarkdown,
+        message: 'Move ${issue.key} to ${status.label}',
+        branch: writeBranch,
+        expectedRevision: file.revision,
       ),
-      headers: {
-        ..._githubHeaders(connection.token),
-        'content-type': 'application/json; charset=utf-8',
-      },
-      body: jsonEncode({
-        'message': 'Move ${issue.key} to ${status.label}',
-        'content': base64Encode(utf8.encode(updatedMarkdown)),
-        'sha': sha,
-        'branch': connection.branch,
-      }),
     );
-    if (putResponse.statusCode != 200 && putResponse.statusCode != 201) {
-      throw TrackStateRepositoryException(
-        'Could not save $path (${putResponse.statusCode}): ${putResponse.body}',
-      );
-    }
 
     final updatedIssue = issue.copyWith(
       status: status,
@@ -156,7 +102,7 @@ class SetupTrackStateRepository implements TrackStateRepository {
   }
 
   Future<TrackerSnapshot> _loadSetupSnapshot() async {
-    final tree = await _loadRepositoryTree();
+    final tree = await _provider.listTree(ref: _provider.dataRef);
     final blobPaths = tree
         .where((entry) => entry.type == 'blob')
         .map((entry) => entry.path)
@@ -194,18 +140,21 @@ class SetupTrackStateRepository implements TrackStateRepository {
       localizedLabels: localizedLabels['fields'] ?? const {},
       locale: defaultLocale,
     );
-    final priorities = await _getConfigEntries(
-      _joinPath(configRoot, 'priorities.json'),
+    final priorities = await _loadOptionalConfigEntries(
+      blobPaths: blobPaths,
+      path: _joinPath(configRoot, 'priorities.json'),
       localizedLabels: localizedLabels['priorities'] ?? const {},
       locale: defaultLocale,
     );
-    final versions = await _getConfigEntries(
-      _joinPath(configRoot, 'versions.json'),
+    final versions = await _loadOptionalConfigEntries(
+      blobPaths: blobPaths,
+      path: _joinPath(configRoot, 'versions.json'),
       localizedLabels: localizedLabels['versions'] ?? const {},
       locale: defaultLocale,
     );
-    final components = await _getConfigEntries(
-      _joinPath(configRoot, 'components.json'),
+    final components = await _loadOptionalConfigEntries(
+      blobPaths: blobPaths,
+      path: _joinPath(configRoot, 'components.json'),
       localizedLabels: localizedLabels['components'] ?? const {},
       locale: defaultLocale,
     );
@@ -293,8 +242,8 @@ class SetupTrackStateRepository implements TrackStateRepository {
     final project = ProjectConfig(
       key: (projectJson['key'] as String?) ?? 'DEMO',
       name: (projectJson['name'] as String?) ?? 'TrackState Project',
-      repository: repositoryName,
-      branch: dataRef,
+      repository: _provider.repositoryLabel,
+      branch: await _provider.resolveWriteBranch(),
       defaultLocale: defaultLocale,
       issueTypeDefinitions: issueTypes,
       statusDefinitions: statuses,
@@ -311,24 +260,8 @@ class SetupTrackStateRepository implements TrackStateRepository {
     );
   }
 
-  Future<List<_GitTreeEntry>> _loadRepositoryTree() async {
-    final json =
-        await _getGitHubJson(
-              '/repos/$repositoryName/git/trees/$dataRef',
-              queryParameters: {'recursive': '1'},
-            )
-            as Map<String, Object?>;
-    final tree = json['tree'];
-    if (tree is! List) {
-      throw const TrackStateRepositoryException(
-        'GitHub tree response did not contain a file list.',
-      );
-    }
-    return tree
-        .whereType<Map<String, Object?>>()
-        .map(_GitTreeEntry.fromJson)
-        .toList();
-  }
+  Future<String> _getRepositoryText(String path) async =>
+      (await _provider.readTextFile(path, ref: _provider.dataRef)).content;
 
   Future<Object?> _getRepositoryJson(String path) async =>
       jsonDecode(await _getRepositoryText(path));
@@ -486,7 +419,7 @@ class SetupTrackStateRepository implements TrackStateRepository {
   }
 
   List<IssueAttachment> _loadAttachments({
-    required List<_GitTreeEntry> tree,
+    required List<RepositoryTreeEntry> tree,
     required String issueRoot,
   }) {
     final attachmentPrefix = _joinPath(issueRoot, 'attachments/');
@@ -508,39 +441,6 @@ class SetupTrackStateRepository implements TrackStateRepository {
       ..sort((a, b) => a.name.compareTo(b.name));
   }
 
-  Future<String> _getRepositoryText(String path) async {
-    final json =
-        await _getGitHubJson(
-              '/repos/$repositoryName/contents/$path',
-              queryParameters: {'ref': dataRef},
-            )
-            as Map<String, Object?>;
-    final encoded = json['content']?.toString().replaceAll('\n', '');
-    if (encoded == null || encoded.isEmpty) {
-      throw TrackStateRepositoryException(
-        'GitHub content response for $path did not contain file content.',
-      );
-    }
-    return utf8.decode(base64Decode(encoded));
-  }
-
-  Future<Object?> _getGitHubJson(
-    String path, {
-    Map<String, String>? queryParameters,
-    String? token,
-  }) async {
-    final response = await _http.get(
-      _githubUri(path, queryParameters),
-      headers: _githubHeaders(token ?? _connection?.token),
-    );
-    if (response.statusCode != 200) {
-      throw TrackStateRepositoryException(
-        'GitHub API request failed for $path (${response.statusCode}): ${response.body}',
-      );
-    }
-    return jsonDecode(response.body);
-  }
-
   void _replaceCachedIssue(TrackStateIssue updatedIssue) {
     final snapshot = _snapshot;
     if (snapshot == null) return;
@@ -555,13 +455,13 @@ class SetupTrackStateRepository implements TrackStateRepository {
   }
 
   Future<String> _resolveStatusIdForUpdate({
-    required GitHubConnection connection,
     required TrackStateIssue issue,
     required IssueStatus status,
+    required String writeBranch,
   }) async {
     final statusDefinitions = await _loadConnectedStatusDefinitions(
-      connection: connection,
       storagePath: issue.storagePath,
+      ref: writeBranch,
     );
     return _statusIdForStatus(
       status,
@@ -571,8 +471,8 @@ class SetupTrackStateRepository implements TrackStateRepository {
   }
 
   Future<List<TrackStateConfigEntry>> _loadConnectedStatusDefinitions({
-    required GitHubConnection connection,
     required String storagePath,
+    required String ref,
   }) async {
     final projectRoot = storagePath.split('/').first;
     if (projectRoot.isEmpty) {
@@ -580,45 +480,51 @@ class SetupTrackStateRepository implements TrackStateRepository {
     }
 
     final path = '$projectRoot/config/statuses.json';
-    final response = await _http.get(
-      Uri.https(
-        'api.github.com',
-        '/repos/${connection.repository}/contents/$path',
-        {'ref': connection.branch},
-      ),
-      headers: _githubHeaders(connection.token),
-    );
-    if (response.statusCode == 404) {
+    try {
+      final file = await _provider.readTextFile(path, ref: ref);
+      return _configEntriesFromJson(
+        jsonDecode(file.content),
+        localizedLabels: const {},
+        locale: 'en',
+      );
+    } on TrackStateProviderException {
       return _snapshot?.project.statusDefinitions ?? const [];
     }
-    if (response.statusCode != 200) {
-      throw TrackStateRepositoryException(
-        'Could not read $path (${response.statusCode}): ${response.body}',
-      );
-    }
-
-    final fileJson = jsonDecode(response.body) as Map<String, Object?>;
-    final encoded = (fileJson['content'] as String?)?.replaceAll('\n', '');
-    if (encoded == null || encoded.isEmpty) {
-      throw TrackStateRepositoryException(
-        'GitHub response for $path is missing content.',
-      );
-    }
-
-    return _configEntriesFromJson(
-      jsonDecode(utf8.decode(base64Decode(encoded))),
-      localizedLabels: const {},
-      locale: 'en',
-    );
   }
+}
+
+class SetupTrackStateRepository extends ProviderBackedTrackStateRepository {
+  SetupTrackStateRepository({
+    http.Client? client,
+    String repositoryName = GitHubTrackStateProvider.defaultRepositoryName,
+    String sourceRef = GitHubTrackStateProvider.defaultSourceRef,
+    String dataRef = GitHubTrackStateProvider.defaultDataRef,
+  }) : super(
+         provider: GitHubTrackStateProvider(
+           client: client,
+           repositoryName: repositoryName,
+           sourceRef: sourceRef,
+           dataRef: dataRef,
+         ),
+       );
+
+  static const repositoryName = GitHubTrackStateProvider.defaultRepositoryName;
+  static const sourceRef = GitHubTrackStateProvider.defaultSourceRef;
+  static const dataRef = GitHubTrackStateProvider.defaultDataRef;
 }
 
 class DemoTrackStateRepository implements TrackStateRepository {
   const DemoTrackStateRepository();
 
   @override
-  Future<GitHubUser> connect(GitHubConnection connection) async =>
-      const GitHubUser(login: 'demo-user', displayName: 'Demo User');
+  bool get usesLocalPersistence => false;
+
+  @override
+  bool get supportsGitHubAuth => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async =>
+      const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
@@ -642,12 +548,8 @@ class DemoTrackStateRepository implements TrackStateRepository {
   );
 }
 
-class TrackStateRepositoryException implements Exception {
-  const TrackStateRepositoryException(this.message);
-  final String message;
-
-  @override
-  String toString() => message;
+class TrackStateRepositoryException extends TrackStateProviderException {
+  const TrackStateRepositoryException(super.message);
 }
 
 TrackStateIssue _parseIssue({
@@ -948,14 +850,13 @@ List<TrackStateConfigEntry> _configEntriesFromJson(
 IssueType _issueType(
   String? value, [
   List<TrackStateConfigEntry> definitions = const [],
-]) =>
-    switch (_configSemanticToken(value, definitions)) {
-      'epic' => IssueType.epic,
-      'subtask' || 'sub-task' => IssueType.subtask,
-      'bug' => IssueType.bug,
-      'task' => IssueType.task,
-      _ => IssueType.story,
-    };
+]) => switch (_configSemanticToken(value, definitions)) {
+  'epic' => IssueType.epic,
+  'subtask' || 'sub-task' => IssueType.subtask,
+  'bug' => IssueType.bug,
+  'task' => IssueType.task,
+  _ => IssueType.story,
+};
 
 IssueStatus _issueStatus(
   String? value, [
@@ -1096,20 +997,19 @@ RepositoryIssueIndexEntry _repositoryIndexEntry(Map entry) {
 DeletedIssueTombstone _deletedIssueTombstone(
   Map entry, {
   required List<TrackStateConfigEntry> issueTypeDefinitions,
-}) =>
-    DeletedIssueTombstone(
-      key: entry['key']?.toString() ?? '',
-      project: entry['project']?.toString() ?? '',
-      formerPath: entry['formerPath']?.toString() ?? '',
-      deletedAt: entry['deletedAt']?.toString() ?? '',
-      summary: _nullable(entry['summary']?.toString()),
-      issueTypeId: _nullableResolvedId(
-        entry['issueType'],
-        definitions: issueTypeDefinitions,
-      ),
-      parentKey: _nullable(entry['parent']?.toString()),
-      epicKey: _nullable(entry['epic']?.toString()),
-    );
+}) => DeletedIssueTombstone(
+  key: entry['key']?.toString() ?? '',
+  project: entry['project']?.toString() ?? '',
+  formerPath: entry['formerPath']?.toString() ?? '',
+  deletedAt: entry['deletedAt']?.toString() ?? '',
+  summary: _nullable(entry['summary']?.toString()),
+  issueTypeId: _nullableResolvedId(
+    entry['issueType'],
+    definitions: issueTypeDefinitions,
+  ),
+  parentKey: _nullable(entry['parent']?.toString()),
+  epicKey: _nullable(entry['epic']?.toString()),
+);
 
 RepositoryIndex _deriveRepositoryIndex(
   List<TrackStateIssue> issues,
@@ -1232,15 +1132,6 @@ List<TrackStateIssue> _filterIssues(List<TrackStateIssue> issues, String jql) {
   return sorted;
 }
 
-Map<String, String> _githubHeaders(String? token) => {
-  'accept': 'application/vnd.github+json',
-  'X-GitHub-Api-Version': '2022-11-28',
-  if (token != null && token.isNotEmpty) 'authorization': 'Bearer $token',
-};
-
-Uri _githubUri(String path, [Map<String, String>? queryParameters]) =>
-    Uri.https('api.github.com', path, queryParameters);
-
 String _mediaTypeForPath(String path) {
   final normalized = path.toLowerCase();
   if (normalized.endsWith('.svg')) return 'image/svg+xml';
@@ -1252,18 +1143,6 @@ String _mediaTypeForPath(String path) {
   if (normalized.endsWith('.md')) return 'text/markdown';
   if (normalized.endsWith('.txt')) return 'text/plain';
   return 'application/octet-stream';
-}
-
-class _GitTreeEntry {
-  const _GitTreeEntry({required this.path, required this.type});
-
-  factory _GitTreeEntry.fromJson(Map<String, Object?> json) => _GitTreeEntry(
-    path: json['path']?.toString() ?? '',
-    type: json['type']?.toString() ?? '',
-  );
-
-  final String path;
-  final String type;
 }
 
 int _priorityRank(IssuePriority priority) => switch (priority) {

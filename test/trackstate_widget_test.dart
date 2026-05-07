@@ -120,4 +120,63 @@ void main() {
       semantics.dispose();
     }
   });
+
+  testWidgets('local runtime shows repository access instead of GitHub auth', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+    try {
+      await tester.pumpWidget(
+        TrackStateApp(repository: _LocalRuntimeRepository()),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.bySemanticsLabel(RegExp('Local Git')), findsWidgets);
+      expect(find.bySemanticsLabel(RegExp('Connect GitHub')), findsNothing);
+      expect(find.text('LU'), findsOneWidget);
+
+      await tester.tap(find.bySemanticsLabel(RegExp('Local Git')).first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Local Git runtime'), findsOneWidget);
+      expect(
+        find.textContaining('GitHub tokens are not used in this runtime'),
+        findsOneWidget,
+      );
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    }
+  });
+}
+
+class _LocalRuntimeRepository implements TrackStateRepository {
+  const _LocalRuntimeRepository();
+
+  static const _demoRepository = DemoTrackStateRepository();
+
+  @override
+  bool get supportsGitHubAuth => false;
+
+  @override
+  bool get usesLocalPersistence => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async =>
+      const RepositoryUser(login: 'local-user', displayName: 'Local User');
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async =>
+      _demoRepository.loadSnapshot();
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) async =>
+      _demoRepository.searchIssues(jql);
+
+  @override
+  Future<TrackStateIssue> updateIssueStatus(
+    TrackStateIssue issue,
+    IssueStatus status,
+  ) async => issue.copyWith(status: status, updatedLabel: 'just now');
 }

@@ -91,7 +91,7 @@ When working on stories or tasks related to `trackstate-setup`:
 
 ## Working agreement for multi-repo changes
 
-If `trackstate-setup` is checked out and writable, agents may edit it directly as part of the same task. Those changes should be intentional, scoped to the setup repository's role, and reflected in any related instructions, workflows, or release process kept in the main `trackstate` repository.
+If `trackstate-setup` is checked out and writable, agents may edit it directly as part of the same task. Those changes should be intentional, scoped to the setup repository's role, and reflected in any related instructions, workflows, or release process kept in the main `trackstate` repository. Agent post-actions are responsible for committing and pushing configured setup submodule changes before committing the updated submodule hash in the parent `trackstate` PR.
 
 ## Relationship to the main repository
 

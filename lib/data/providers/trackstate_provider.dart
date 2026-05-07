@@ -1,0 +1,197 @@
+import 'dart:typed_data';
+
+import '../../domain/models/trackstate_models.dart';
+
+abstract interface class RepositoryFileReader {
+  Future<RepositoryTextFile> readTextFile(String path, {required String ref});
+}
+
+abstract interface class RepositoryTreeLister {
+  Future<List<RepositoryTreeEntry>> listTree({required String ref});
+}
+
+abstract interface class RepositorySessionManager {
+  Future<RepositoryUser> authenticate(RepositoryConnection connection);
+}
+
+abstract interface class RepositoryCommitManager {
+  Future<String> resolveWriteBranch();
+  Future<RepositoryBranch> getBranch(String name);
+  Future<RepositoryWriteResult> writeTextFile(RepositoryWriteRequest request);
+  Future<RepositoryCommitResult> createCommit(RepositoryCommitRequest request);
+}
+
+abstract interface class RepositoryPermissionChecker {
+  Future<RepositoryPermission> getPermission();
+}
+
+abstract interface class RepositoryAttachmentStore {
+  Future<RepositoryAttachment> readAttachment(
+    String path, {
+    required String ref,
+  });
+  Future<RepositoryAttachmentWriteResult> writeAttachment(
+    RepositoryAttachmentWriteRequest request,
+  );
+  Future<bool> isLfsTracked(String path);
+}
+
+abstract interface class TrackStateProviderAdapter
+    implements
+        RepositoryFileReader,
+        RepositoryTreeLister,
+        RepositorySessionManager,
+        RepositoryCommitManager,
+        RepositoryPermissionChecker,
+        RepositoryAttachmentStore {
+  String get repositoryLabel;
+  String get dataRef;
+}
+
+class RepositoryTreeEntry {
+  const RepositoryTreeEntry({required this.path, required this.type});
+
+  final String path;
+  final String type;
+}
+
+class RepositoryTextFile {
+  const RepositoryTextFile({
+    required this.path,
+    required this.content,
+    this.revision,
+  });
+
+  final String path;
+  final String content;
+  final String? revision;
+}
+
+class RepositoryWriteRequest {
+  const RepositoryWriteRequest({
+    required this.path,
+    required this.content,
+    required this.message,
+    required this.branch,
+    this.expectedRevision,
+  });
+
+  final String path;
+  final String content;
+  final String message;
+  final String branch;
+  final String? expectedRevision;
+}
+
+class RepositoryWriteResult {
+  const RepositoryWriteResult({
+    required this.path,
+    required this.branch,
+    this.revision,
+  });
+
+  final String path;
+  final String branch;
+  final String? revision;
+}
+
+class RepositoryCommitRequest {
+  const RepositoryCommitRequest({
+    required this.path,
+    required this.content,
+    required this.message,
+    required this.branch,
+    this.expectedRevision,
+  });
+
+  final String path;
+  final String content;
+  final String message;
+  final String branch;
+  final String? expectedRevision;
+}
+
+class RepositoryCommitResult {
+  const RepositoryCommitResult({
+    required this.branch,
+    required this.message,
+    this.revision,
+  });
+
+  final String branch;
+  final String message;
+  final String? revision;
+}
+
+class RepositoryBranch {
+  const RepositoryBranch({
+    required this.name,
+    required this.exists,
+    required this.isCurrent,
+  });
+
+  final String name;
+  final bool exists;
+  final bool isCurrent;
+}
+
+class RepositoryPermission {
+  const RepositoryPermission({
+    required this.canRead,
+    required this.canWrite,
+    required this.isAdmin,
+  });
+
+  final bool canRead;
+  final bool canWrite;
+  final bool isAdmin;
+}
+
+class RepositoryAttachment {
+  const RepositoryAttachment({
+    required this.path,
+    required this.bytes,
+    this.revision,
+  });
+
+  final String path;
+  final Uint8List bytes;
+  final String? revision;
+}
+
+class RepositoryAttachmentWriteRequest {
+  const RepositoryAttachmentWriteRequest({
+    required this.path,
+    required this.bytes,
+    required this.message,
+    required this.branch,
+    this.expectedRevision,
+  });
+
+  final String path;
+  final Uint8List bytes;
+  final String message;
+  final String branch;
+  final String? expectedRevision;
+}
+
+class RepositoryAttachmentWriteResult {
+  const RepositoryAttachmentWriteResult({
+    required this.path,
+    required this.branch,
+    this.revision,
+  });
+
+  final String path;
+  final String branch;
+  final String? revision;
+}
+
+class TrackStateProviderException implements Exception {
+  const TrackStateProviderException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}

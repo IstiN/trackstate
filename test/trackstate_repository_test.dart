@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
@@ -277,8 +278,12 @@ This comment demonstrates markdown-backed collaboration history.
 
       final repository = _mockSetupRepository(files: files);
       final snapshot = await repository.loadSnapshot();
-      final boardIssue = snapshot.issues.firstWhere((entry) => entry.key == 'DEMO-2');
-      final doneIssue = snapshot.issues.firstWhere((entry) => entry.key == 'DEMO-4');
+      final boardIssue = snapshot.issues.firstWhere(
+        (entry) => entry.key == 'DEMO-2',
+      );
+      final doneIssue = snapshot.issues.firstWhere(
+        (entry) => entry.key == 'DEMO-4',
+      );
 
       expect(snapshot.project.fieldLabel('storyPoints'), 'Story Points');
       expect(snapshot.project.resolutionLabel('done'), 'Done');
@@ -427,92 +432,152 @@ Machine ids should survive parsing.
     },
   );
 
-  test('updating an issue status writes the repository canonical status id', () async {
-    String? putBody;
-    final repository = SetupTrackStateRepository(
-      client: MockClient((request) async {
-        final path = request.url.path;
-        if (path == '/repos/owner/demo') {
-          return http.Response('{"full_name":"owner/demo"}', 200);
-        }
-        if (path == '/user') {
-          return http.Response('{"login":"demo-user","name":"Demo User"}', 200);
-        }
-        if (path == '/repos/owner/demo/contents/DEMO/DEMO-1/main.md' &&
-            request.method == 'GET') {
-          return _contentResponse('''
+  test(
+    'setup repository writes the repository canonical status id through the provider adapter',
+    () async {
+      Map<String, Object?>? savedBody;
+      final repository = SetupTrackStateRepository(
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path.endsWith('/git/trees/main')) {
+            return http.Response('''
+{
+  "tree": [
+    {"path": "DEMO/project.json", "type": "blob"},
+    {"path": "DEMO/config/statuses.json", "type": "blob"},
+    {"path": "DEMO/config/issue-types.json", "type": "blob"},
+    {"path": "DEMO/config/fields.json", "type": "blob"},
+    {"path": "DEMO/config/priorities.json", "type": "blob"},
+    {"path": "DEMO/config/versions.json", "type": "blob"},
+    {"path": "DEMO/config/components.json", "type": "blob"},
+    {"path": "DEMO/DEMO-1/main.md", "type": "blob"}
+  ]
+}
+''', 200);
+          }
+          if (path == '/repos/${SetupTrackStateRepository.repositoryName}') {
+            return http.Response('''
+{"full_name":"${SetupTrackStateRepository.repositoryName}","permissions":{"pull":true,"push":true,"admin":false}}
+''', 200);
+          }
+          if (path == '/user') {
+            return http.Response(
+              '{"login":"demo-user","name":"Demo User"}',
+              200,
+            );
+          }
+          if (path ==
+              '/repos/${SetupTrackStateRepository.repositoryName}/contents/DEMO/project.json') {
+            return _contentResponse('{"key":"DEMO","name":"Demo Project"}');
+          }
+          if (path ==
+              '/repos/${SetupTrackStateRepository.repositoryName}/contents/DEMO/config/statuses.json') {
+            return _contentResponse(
+              jsonEncode([
+                {'id': 'queued', 'name': 'To Do'},
+                {'id': 'building', 'name': 'In Progress'},
+                {'id': 'accepted', 'name': 'Done'},
+              ]),
+            );
+          }
+          if (path ==
+              '/repos/${SetupTrackStateRepository.repositoryName}/contents/DEMO/config/issue-types.json') {
+            return _contentResponse(
+              '[{"id":"epic","name":"Epic"},{"id":"story","name":"Story"}]',
+            );
+          }
+          if (path ==
+              '/repos/${SetupTrackStateRepository.repositoryName}/contents/DEMO/config/fields.json') {
+            return _contentResponse(
+              '[{"id":"summary","name":"Summary","type":"string","required":true}]',
+            );
+          }
+          if (path ==
+              '/repos/${SetupTrackStateRepository.repositoryName}/contents/DEMO/config/priorities.json') {
+            return _contentResponse('[{"id":"high","name":"High"}]');
+          }
+          if (path ==
+              '/repos/${SetupTrackStateRepository.repositoryName}/contents/DEMO/config/versions.json') {
+            return _contentResponse('[]');
+          }
+          if (path ==
+              '/repos/${SetupTrackStateRepository.repositoryName}/contents/DEMO/config/components.json') {
+            return _contentResponse('[]');
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/contents/DEMO/DEMO-1/main.md' &&
+              request.method == 'GET') {
+            return _contentResponse('''
 ---
 key: DEMO-1
 project: DEMO
+issueType: story
 status: building
+priority: high
+summary: Issue
+assignee: demo-user
+reporter: demo-admin
 ---
 ''');
-        }
-        if (path == '/repos/owner/demo/contents/DEMO/config/statuses.json' &&
-            request.method == 'GET') {
-          return _contentResponse(jsonEncode([
-            {'id': 'queued', 'name': 'To Do'},
-            {'id': 'building', 'name': 'In Progress'},
-            {'id': 'accepted', 'name': 'Done'},
-          ]));
-        }
-        if (path == '/repos/owner/demo/contents/DEMO/DEMO-1/main.md' &&
-            request.method == 'PUT') {
-          putBody = request.body;
-          return http.Response('{"content":{"sha":"next"}}', 200);
-        }
-        return http.Response('', 404);
-      }),
-    );
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/contents/DEMO/DEMO-1/main.md' &&
+              request.method == 'PUT') {
+            savedBody = jsonDecode(request.body) as Map<String, Object?>;
+            return http.Response('{"content":{"sha":"next"}}', 200);
+          }
+          return http.Response('', 404);
+        }),
+      );
 
-    await repository.connect(
-      const GitHubConnection(
-        repository: 'owner/demo',
-        branch: 'main',
-        token: 'secret',
-      ),
-    );
+      final snapshot = await repository.loadSnapshot();
+      final user = await repository.connect(
+        const RepositoryConnection(
+          repository: SetupTrackStateRepository.repositoryName,
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final updated = await repository.updateIssueStatus(
+        snapshot.issues.single,
+        IssueStatus.done,
+      );
 
-    await repository.updateIssueStatus(
-      const TrackStateIssue(
-        key: 'DEMO-1',
-        project: 'DEMO',
-        issueType: IssueType.story,
-        issueTypeId: 'story',
-        status: IssueStatus.inProgress,
-        statusId: 'building',
-        priority: IssuePriority.high,
-        priorityId: 'high',
-        summary: 'Issue',
-        description: 'Description',
-        assignee: 'demo-user',
-        reporter: 'demo-admin',
-        labels: [],
-        components: [],
-        fixVersionIds: [],
-        watchers: [],
-        customFields: {},
-        parentKey: null,
-        epicKey: null,
-        parentPath: null,
-        epicPath: null,
-        progress: 0.5,
-        updatedLabel: 'now',
-        acceptanceCriteria: [],
-        comments: [],
-        links: [],
-        attachments: [],
-        isArchived: false,
-        storagePath: 'DEMO/DEMO-1/main.md',
-      ),
-      IssueStatus.done,
-    );
+      expect(user.login, 'demo-user');
+      expect(updated.status, IssueStatus.done);
+      expect(updated.statusId, 'accepted');
+      expect(savedBody?['branch'], 'main');
+      expect(savedBody?['message'], 'Move DEMO-1 to Done');
+      final content = utf8.decode(
+        base64Decode(savedBody?['content']! as String),
+      );
+      expect(content, contains('status: accepted'));
+      expect(content, isNot(contains('status: done')));
+    },
+  );
 
-    final body = jsonDecode(putBody!) as Map<String, Object?>;
-    final content = utf8.decode(base64Decode(body['content']! as String));
-    expect(content, contains('status: accepted'));
-    expect(content, isNot(contains('status: done')));
-  });
+  test(
+    'github provider evaluates LFS rules against the requested path',
+    () async {
+      final provider = GitHubTrackStateProvider(
+        client: MockClient((request) async {
+          if (request.url.path.endsWith('/contents/.gitattributes')) {
+            return _contentResponse('''
+*.png filter=lfs diff=lfs merge=lfs -text
+docs/**/*.zip filter=lfs diff=lfs merge=lfs -text
+README.md -filter
+''');
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      expect(await provider.isLfsTracked('attachments/screenshot.png'), isTrue);
+      expect(await provider.isLfsTracked('docs/releases/archive.zip'), isTrue);
+      expect(await provider.isLfsTracked('README.md'), isFalse);
+      expect(await provider.isLfsTracked('notes/todo.txt'), isFalse);
+    },
+  );
 }
 
 SetupTrackStateRepository _mockSetupRepository({
