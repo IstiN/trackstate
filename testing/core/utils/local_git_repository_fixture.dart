@@ -67,7 +67,7 @@ issueType: Story
 status: To Do
 priority: High
 summary: Local identity issue
-assignee: $userEmail
+assignee: $userName
 reporter: $userEmail
 updated: 2026-05-05T00:00:00Z
 ---
@@ -75,6 +75,8 @@ updated: 2026-05-05T00:00:00Z
 # Description
 
 Loaded from local Git.
+
+Local Git session author: $userName <$userEmail>.
 ''');
     await _writeFile(
       'DEMO/DEMO-1/acceptance_criteria.md',

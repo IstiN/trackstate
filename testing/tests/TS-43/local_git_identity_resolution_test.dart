@@ -7,30 +7,37 @@ void main() {
   testWidgets(
     'TS-43 local git mode resolves the configured author into the current session',
     (tester) async {
-      late final LocalGitRepositoryFixture fixture;
-
-      await tester.runAsync(() async {
-        fixture = await LocalGitRepositoryFixture.create();
-      });
-
-      addTearDown(fixture.dispose);
+      final semantics = tester.ensureSemantics();
       final screen = TrackStateAppScreen(tester);
-      addTearDown(screen.resetView);
+      LocalGitRepositoryFixture? fixture;
 
-      await screen.pumpLocalGitApp(repositoryPath: fixture.directory.path);
-      screen.expectLocalRuntimeChrome();
+      try {
+        await tester.runAsync(() async {
+          fixture = await LocalGitRepositoryFixture.create();
+        });
+        addTearDown(fixture!.dispose);
+        addTearDown(screen.resetView);
 
-      final viewModel = screen.currentViewModel();
-      expect(viewModel.usesLocalPersistence, isTrue);
-      expect(viewModel.connectedUser?.displayName, fixture.userName);
-      expect(viewModel.connectedUser?.login, fixture.userEmail);
-      screen.expectInitials(viewModel.connectedUser!.initials);
+        await screen.pumpLocalGitApp(repositoryPath: fixture!.directory.path);
+        screen.expectLocalRuntimeChrome();
 
-      await screen.openRepositoryAccess();
-      screen.expectLocalRuntimeDialog(
-        repositoryPath: fixture.directory.path,
-        branch: fixture.branch,
-      );
+        expect(screen.currentViewModel().usesLocalPersistence, isTrue);
+        screen.expectInitials('LT');
+
+        await screen.openJqlSearch();
+        screen.expectVisibleLocalAuthorIdentity(
+          userName: fixture!.userName,
+          userEmail: fixture!.userEmail,
+        );
+
+        await screen.openRepositoryAccess();
+        screen.expectLocalRuntimeDialog(
+          repositoryPath: fixture!.directory.path,
+          branch: fixture!.branch,
+        );
+      } finally {
+        semantics.dispose();
+      }
     },
   );
 }

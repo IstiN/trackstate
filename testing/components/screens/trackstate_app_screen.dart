@@ -17,6 +17,9 @@ class TrackStateAppScreen {
   Finder get localGitAccessButton =>
       find.bySemanticsLabel(RegExp('Local Git')).first;
 
+  Finder get jqlSearchButton =>
+      find.bySemanticsLabel(RegExp('JQL Search')).first;
+
   Finder initialsBadge(String initials) => find.descendant(
     of: find.byType(CircleAvatar),
     matching: find.text(initials),
@@ -49,6 +52,11 @@ class TrackStateAppScreen {
     await tester.pumpAndSettle();
   }
 
+  Future<void> openJqlSearch() async {
+    await tester.tap(jqlSearchButton);
+    await tester.pumpAndSettle();
+  }
+
   TrackerViewModel currentViewModel() {
     final dynamic state = tester.state(find.byType(TrackStateApp));
     return state.viewModel as TrackerViewModel;
@@ -62,6 +70,15 @@ class TrackStateAppScreen {
 
   void expectInitials(String initials) {
     expect(initialsBadge(initials), findsOneWidget);
+  }
+
+  void expectVisibleLocalAuthorIdentity({
+    required String userName,
+    required String userEmail,
+  }) {
+    expect(find.text(userName), findsWidgets);
+    expect(find.text(userEmail), findsWidgets);
+    expect(find.textContaining('$userName <$userEmail>'), findsOneWidget);
   }
 
   void expectLocalRuntimeDialog({
