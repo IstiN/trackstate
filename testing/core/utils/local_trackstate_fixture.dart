@@ -9,6 +9,7 @@ class LocalTrackStateFixture {
 
   static const issuePath = 'DEMO/DEMO-1/main.md';
   static const issueKey = 'DEMO-1';
+  static const issueSummary = 'Local issue';
   static const originalDescription = 'Loaded from local git.';
   static const updatedDescription =
       'Updated description from TrackState save flow.';

@@ -53,6 +53,25 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Finder _statusColumn(String label) =>
       find.bySemanticsLabel(RegExp('${RegExp.escape(label)} column'));
 
+  Finder _issueDetailTextField(String key, String label) => find.descendant(
+    of: _issueDetail(key),
+    matching: find.byWidgetPredicate(
+      (widget) => widget is TextFormField,
+      description: 'TextFormField("$label") in issue detail $key',
+    ),
+  );
+
+  Finder _issueDetailAction(String key, String label) => find.descendant(
+    of: _issueDetail(key),
+    matching: find.ancestor(
+      of: _text(label),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is ButtonStyleButton,
+        description: 'ButtonStyleButton("$label") in issue detail $key',
+      ),
+    ),
+  );
+
   @override
   Future<void> pumpLocalGitApp({required String repositoryPath}) async {
     await pump(
@@ -172,6 +191,40 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final match = find.descendant(of: _issueDetail(key), matching: _text(text));
     await _waitForVisible(match);
     expect(match, findsWidgets);
+  }
+
+  @override
+  Future<void> expectIssueDescriptionEditorVisible(
+    String key, {
+    required String label,
+  }) async {
+    final editor = _issueDetailTextField(key, label);
+    await _waitForVisible(editor);
+    expect(editor, findsOneWidget);
+  }
+
+  @override
+  Future<void> enterIssueDescription(
+    String key, {
+    required String label,
+    required String text,
+  }) async {
+    final editor = _issueDetailTextField(key, label);
+    await expectIssueDescriptionEditorVisible(key, label: label);
+    await tester.ensureVisible(editor.first);
+    await tester.tap(editor.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(editor.first, text);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> tapIssueDetailAction(String key, String label) async {
+    final action = _issueDetailAction(key, label);
+    await _waitForVisible(action);
+    await tester.ensureVisible(action.first);
+    await tester.tap(action.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
   }
 
   @override
