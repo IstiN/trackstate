@@ -4,13 +4,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../../core/interfaces/local_git_repository_port.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
-import '../../frameworks/flutter/trackstate_test_runtime.dart';
 
 class TrackStateAppScreen implements TrackStateAppComponent {
-  TrackStateAppScreen(this.tester);
+  TrackStateAppScreen(
+    this.tester, {
+    required LocalGitRepositoryPort repositoryService,
+  }) : _repositoryService = repositoryService;
 
   final WidgetTester tester;
+  final LocalGitRepositoryPort _repositoryService;
 
   Finder get localGitAccessButton =>
       find.bySemanticsLabel(RegExp('Local Git')).first;
@@ -53,13 +57,13 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Finder _statusColumn(String label) =>
       find.bySemanticsLabel(RegExp('${RegExp.escape(label)} column'));
 
+  Finder _trackerMessage(String text) =>
+      find.bySemanticsLabel(RegExp(RegExp.escape(text)));
+
   @override
   Future<void> pumpLocalGitApp({required String repositoryPath}) async {
     await pump(
-      await createLocalGitTestRepository(
-        tester: tester,
-        repositoryPath: repositoryPath,
-      ),
+      await _repositoryService.openRepository(repositoryPath: repositoryPath),
     );
     await _waitForVisible(localGitAccessButton);
   }
@@ -168,10 +172,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> expectIssueDetailText(String key, String text) async {
+    final detail = _issueDetail(key);
     await expectIssueDetailVisible(key);
-    final match = find.descendant(of: _issueDetail(key), matching: _text(text));
+    final match = find.descendant(of: detail, matching: _text(text));
     await _waitForVisible(match);
     expect(match, findsWidgets);
+  }
+
+  @override
+  Future<void> expectTrackerMessageContaining(String text) async {
+    final finder = _trackerMessage(text);
+    await _waitForVisible(finder, timeout: const Duration(seconds: 10));
+    expect(finder, findsWidgets);
   }
 
   @override

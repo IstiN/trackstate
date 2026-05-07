@@ -22,5 +22,7 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> expectIssueDetailText(String key, String text);
 
+  Future<void> expectTrackerMessageContaining(String text);
+
   Future<void> expectTextVisible(String text);
 }

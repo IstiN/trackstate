@@ -1,12 +1,13 @@
 # TS-41
 
-Validates the TS-41 dirty-save behavior for `DEMO/DEMO-1/main.md`.
+Validates the TS-41 dirty-write behavior for `DEMO/DEMO-1/main.md`.
 
-The automation covers the ticket in two layers against the same dirty local
-issue:
+The automation covers the same dirty local issue in two layers:
 1. create a temporary local Git runtime fixture
 2. dirty `DEMO/DEMO-1/main.md` outside TrackState
-3. attempt the exact description write through the provider-backed save path
+3. attempt the exact provider-backed description write path
+4. trigger the live TrackState board mutation path and assert the rendered
+   tracker error banner contains the required recovery guidance
 
 ## Install dependencies
 
@@ -28,7 +29,8 @@ flutter pub get
 ## Current expected result
 
 ```text
-Current coverage stays on the real local Git write path for DEMO-1/main.md.
-The test passes only once the provider-backed dirty-write failure becomes
-actionable and tells the user to commit, stash, or clean local changes first.
+Current coverage stays on the real local Git mutation paths for DEMO-1/main.md.
+The tests pass only once both the provider-backed dirty-write failure and the
+live tracker banner tell the user to commit, stash, or clean local changes
+first.
 ```

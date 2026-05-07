@@ -6,3 +6,4 @@ dependencies: []
 notes:
   - Verifies the local Git adapter blocks a save when issue main.md has dirty local edits.
   - Keeps the provider-backed description save assertion as the exact main.md write-path AC3 check.
+  - Uses the live board mutation flow to assert the rendered tracker banner shows the same recovery guidance to the user.
