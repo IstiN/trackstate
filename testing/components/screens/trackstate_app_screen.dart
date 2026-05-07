@@ -5,7 +5,7 @@ import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/trackstate_app_component.dart';
-import '../../frameworks/flutter/trackstate_test_runtime.dart';
+import '../services/local_git_repository_service.dart';
 
 class TrackStateAppScreen implements TrackStateAppComponent {
   TrackStateAppScreen(this.tester);
@@ -66,9 +66,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   Future<void> pumpLocalGitApp({required String repositoryPath}) async {
+    final repositoryService = LocalGitRepositoryService(tester);
     await pump(
-      await createLocalGitTestRepository(
-        tester: tester,
+      await repositoryService.openRepository(
         repositoryPath: repositoryPath,
       ),
     );

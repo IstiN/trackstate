@@ -3,9 +3,9 @@ import 'package:trackstate/domain/models/trackstate_models.dart';
 
 import '../../components/screens/trackstate_app_screen.dart';
 import '../../components/services/issue_aggregate_probe.dart';
+import '../../components/services/local_git_repository_service.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../fixtures/repositories/ts67_issue_artifacts_fixture.dart';
-import '../../frameworks/flutter/trackstate_test_runtime.dart';
 
 void main() {
   testWidgets('TS-67 loads issue comments and links into the issue aggregate model', (
@@ -14,8 +14,7 @@ void main() {
     final fixture = await Ts67IssueArtifactsFixture.create();
     addTearDown(fixture.dispose);
 
-    final repository = await createLocalGitTestRepository(
-      tester: tester,
+    final repository = await LocalGitRepositoryService(tester).openRepository(
       repositoryPath: fixture.path,
     );
     final aggregateProbe = IssueAggregateProbe(repository);
