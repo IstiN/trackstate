@@ -4,7 +4,7 @@ Validates the TS-41 dirty-save behavior for `DEMO/DEMO-1/main.md`.
 
 The TS-41 automation exercises the current local-Git behavior in two ways:
 1. a provider-backed description save attempt against the dirty `main.md`
-2. a real `TrackStateApp` widget attempt that dirties the same file, opens `DEMO-1`, edits the description, clicks `Save`, and expects visible `commit` / `stash` / `clean` recovery guidance
+2. a real `TrackStateApp` widget attempt that dirties the same file, opens `DEMO-1`, edits the description, clicks `Save`, and expects `commit` / `stash` / `clean` recovery guidance on the rendered message banner
 
 The second check now follows the ticketed UI flow directly and fails fast if the live issue-detail surface still does not expose the editor or `Save` control needed for that flow.
 

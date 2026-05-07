@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 
 import '../../components/screens/trackstate_app_screen.dart';
+import '../../core/interfaces/trackstate_app_component.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
 import 'support/ts41_dirty_local_issue_component_factory.dart';
 
@@ -34,7 +35,7 @@ void main() {
     'TS-41 attempts the live description save flow for a dirty local DEMO-1 issue',
     (tester) async {
       final fixture = (await tester.runAsync(LocalTrackStateFixture.create))!;
-      final screen = TrackStateAppScreen(tester);
+      final TrackStateAppComponent screen = TrackStateAppScreen(tester);
       addTearDown(fixture.dispose);
       addTearDown(screen.resetView);
 
@@ -49,9 +50,9 @@ void main() {
         LocalTrackStateFixture.updatedDescription,
       );
       await screen.tapIssueDetailAction('DEMO-1', 'Save');
-      await screen.expectTextVisible('commit');
-      await screen.expectTextVisible('stash');
-      await screen.expectTextVisible('clean');
+      await screen.expectMessageBannerText('commit');
+      await screen.expectMessageBannerText('stash');
+      await screen.expectMessageBannerText('clean');
     },
     timeout: const Timeout(Duration(seconds: 20)),
   );

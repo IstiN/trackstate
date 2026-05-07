@@ -49,6 +49,11 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Finder _statusColumn(String label) =>
       find.bySemanticsLabel(RegExp('${RegExp.escape(label)} column'));
 
+  Finder get _messageBanner => find.byWidgetPredicate(
+    (widget) => widget.runtimeType.toString() == '_MessageBanner',
+    description: 'tracker message banner',
+  );
+
   Finder _issueDetailEditor(String key) => find.descendant(
     of: _issueDetail(key),
     matching: find.byWidgetPredicate(
@@ -87,6 +92,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     );
   }
 
+  @override
   Future<void> replaceIssueDetailDescription(
     String key,
     String description,
@@ -96,6 +102,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await _pumpFrames();
   }
 
+  @override
   Future<void> tapIssueDetailAction(
     String key,
     String label, {
@@ -106,6 +113,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await _waitForVisible(action, timeout: timeout);
     await tester.tap(action.first);
     await _pumpFrames();
+  }
+
+  @override
+  Future<void> pumpLocalGitApp({required String repositoryPath}) async {
+    await pump(
+      await createLocalGitTestRepository(
+        tester: tester,
+        repositoryPath: repositoryPath,
+      ),
+    );
+    await _waitForVisible(localGitAccessButton);
   }
 
   @override
@@ -124,16 +142,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await _pumpFrames();
   }
 
-  Future<void> pumpLocalGitApp({required String repositoryPath}) async {
-    await pump(
-      await createLocalGitTestRepository(
-        tester: tester,
-        repositoryPath: repositoryPath,
-      ),
-    );
-    await _waitForVisible(localGitAccessButton);
-  }
-
+  @override
   void resetView() {
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
@@ -202,6 +211,14 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Future<void> expectIssueDetailText(String key, String text) async {
     await expectIssueDetailVisible(key);
     final match = _text(text);
+    await _waitForVisible(match);
+    expect(match, findsWidgets);
+  }
+
+  @override
+  Future<void> expectMessageBannerText(String text) async {
+    await _waitForVisible(_messageBanner);
+    final match = find.descendant(of: _messageBanner, matching: _text(text));
     await _waitForVisible(match);
     expect(match, findsWidgets);
   }
