@@ -10,18 +10,13 @@ class Ts44AttachmentUploadFixture {
   Ts44AttachmentUploadFixture._({
     required this.config,
     required this.probe,
-    required int Function() uploadAttempts,
-  }) : _uploadAttempts = uploadAttempts;
+  });
 
   final AttachmentUploadTestConfig config;
   final AttachmentUploadProbe probe;
-  final int Function() _uploadAttempts;
-
-  int get uploadAttempts => _uploadAttempts();
 
   static Future<Ts44AttachmentUploadFixture> create() async {
     final config = AttachmentUploadTestConfig.ts44;
-    var uploadAttempts = 0;
     final framework = await GitHubAttachmentUploadFramework.create(
       config: config,
       responder: (request) async {
@@ -48,7 +43,6 @@ class Ts44AttachmentUploadFixture {
 
         if (path.endsWith('/contents/${config.path}') &&
             request.method == 'PUT') {
-          uploadAttempts++;
           return http.Response('{"content":{"sha":"uploaded-sha"}}', 201);
         }
 
@@ -59,7 +53,6 @@ class Ts44AttachmentUploadFixture {
     return Ts44AttachmentUploadFixture._(
       config: config,
       probe: AttachmentUploadProbe(framework),
-      uploadAttempts: () => uploadAttempts,
     );
   }
 

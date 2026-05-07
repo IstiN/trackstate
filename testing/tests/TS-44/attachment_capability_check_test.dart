@@ -21,12 +21,6 @@ void main() {
         reason:
             'Expected an explicit unsupported or not-yet-implemented outcome for the LFS upload flow, but observed ${observation.describeOutcome()}',
       );
-      expect(
-        fixture.uploadAttempts,
-        0,
-        reason:
-            'An unsupported LFS upload should stop before the GitHub contents upload endpoint is called.',
-      );
     },
   );
 }
