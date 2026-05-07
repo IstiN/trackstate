@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../components/screens/trackstate_app_screen.dart';
+import '../../components/factories/testing_dependencies.dart';
 import '../../fixtures/repositories/ts64_moved_issue_fixture.dart';
 
 void main() {
@@ -8,7 +8,9 @@ void main() {
     'TS-64 resolves a moved issue by key after the fixture moves it and rebuilds repository indexes',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      final screen = TrackStateAppScreen(tester);
+      final screen = defaultTestingDependencies.createTrackStateAppScreen(
+        tester,
+      );
       Ts64MovedIssueFixture? fixture;
 
       try {
