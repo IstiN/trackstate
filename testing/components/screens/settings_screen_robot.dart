@@ -20,18 +20,10 @@ class SettingsScreenRobot {
   Finder get workflowCard => find.text('Workflow');
   Finder get fieldsCard => find.text('Fields');
   Finder get languageCard => find.text('Language');
-  Finder get localGitControl => find.ancestor(
-    of: find.text('Local Git'),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
-  Finder get connectGitHubControl => find.ancestor(
-    of: find.text('Connect GitHub'),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
-  Finder get connectedControl => find.ancestor(
-    of: find.text('Connected'),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
+  Finder get localGitControl => find.widgetWithText(FilledButton, 'Local Git');
+  Finder get connectGitHubControl =>
+      find.widgetWithText(FilledButton, 'Connect GitHub');
+  Finder get connectedControl => find.widgetWithText(FilledButton, 'Connected');
   Finder get searchIssuesField => find.byWidgetPredicate(
     (widget) =>
         widget is TextField &&
