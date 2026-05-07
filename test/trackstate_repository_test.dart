@@ -558,6 +558,55 @@ reporter: demo-admin
     },
   );
 
+  test('setup repository honors configPath from project.json', () async {
+    final repository = _mockSetupRepository(
+      files: {
+        'DEMO/project.json': jsonEncode({
+          'key': 'DEMO',
+          'name': 'Demo Project',
+          'configPath': 'tracker-config',
+        }),
+        'DEMO/tracker-config/statuses.json': jsonEncode([
+          {'name': 'To Do'},
+          {'name': 'Done'},
+        ]),
+        'DEMO/tracker-config/issue-types.json': jsonEncode([
+          {'name': 'Epic'},
+          {'name': 'Story'},
+        ]),
+        'DEMO/tracker-config/fields.json': jsonEncode([
+          {'name': 'Summary'},
+          {'name': 'Priority'},
+        ]),
+        'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: Story
+status: In Progress
+priority: High
+summary: Config-aware issue
+assignee: user
+reporter: admin
+parent: null
+epic: null
+updated: 2026-05-05T00:00:00Z
+---
+
+# Description
+
+Loaded from setup data.
+''',
+      },
+    );
+
+    final snapshot = await repository.loadSnapshot();
+
+    expect(snapshot.project.statuses, ['To Do', 'Done']);
+    expect(snapshot.project.issueTypes, ['Epic', 'Story']);
+    expect(snapshot.project.fields, ['Summary', 'Priority']);
+  });
+
   test(
     'github provider evaluates LFS rules against the requested path',
     () async {

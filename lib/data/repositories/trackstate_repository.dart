@@ -116,9 +116,9 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     final dataRoot = projectPath.contains('/')
         ? projectPath.substring(0, projectPath.lastIndexOf('/'))
         : '';
-    final configRoot = _joinPath(dataRoot, 'config');
     final projectJson =
         await _getRepositoryJson(projectPath) as Map<String, Object?>;
+    final configRoot = _resolveConfigRoot(projectJson, dataRoot);
     final defaultLocale = projectJson['defaultLocale']?.toString() ?? 'en';
     final localizedLabels = await _loadLocalizedLabels(
       blobPaths: blobPaths,
@@ -258,6 +258,23 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       issues: indexedIssues,
       repositoryIndex: normalizedIndex,
     );
+  }
+
+  String _resolveConfigRoot(Map<String, Object?> projectJson, String dataRoot) {
+    final configuredPath = projectJson['configPath']?.toString().trim();
+    if (configuredPath == null || configuredPath.isEmpty) {
+      return dataRoot.isEmpty ? 'config' : '$dataRoot/config';
+    }
+    final normalizedPath = configuredPath
+        .replaceFirst(RegExp(r'^/'), '')
+        .replaceFirst(RegExp(r'/$'), '');
+    if (normalizedPath.isEmpty) {
+      return dataRoot.isEmpty ? 'config' : '$dataRoot/config';
+    }
+    if (dataRoot.isNotEmpty && !normalizedPath.startsWith('$dataRoot/')) {
+      return '$dataRoot/$normalizedPath';
+    }
+    return normalizedPath;
   }
 
   Future<String> _getRepositoryText(String path) async =>
