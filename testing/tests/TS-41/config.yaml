@@ -6,5 +6,5 @@ dependencies: []
 notes:
   - Verifies the local Git adapter blocks a save when issue main.md has dirty local edits.
   - Keeps the provider-backed description save assertion as the exact main.md write-path AC3 check.
-  - Uses a shared fixture instead of ticket-local framework wiring so the test stays within the standard testing layers.
-  - The current TrackStateApp issue detail in this checkout is still read-only and does not expose an in-app Edit/Save path for this scenario.
+  - Uses shared fixtures and app-screen abstractions instead of ticket-local framework wiring.
+  - Opens the same issue in the real TrackStateApp and confirms the current checkout still exposes no in-app Edit/Save path for that description field.

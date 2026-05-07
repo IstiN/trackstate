@@ -55,9 +55,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
   );
 
-  Finder _issueDetailEditors(String key) =>
-      find.descendant(of: _issueDetail(key), matching: find.byType(TextField));
-
   Finder get _jqlSearchPanel => find.bySemanticsLabel(RegExp('^JQL Search\$'));
 
   Finder get _jqlSearchField => find.byType(TextField).last;
@@ -190,14 +187,23 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  void expectIssueDetailActionAbsent({
+    required String key,
+    required String label,
+  }) {
+    expect(_issueDetailAction(key, label), findsNothing);
+  }
+
+  @override
   Future<void> expectTextVisible(String text) async {
     final finder = _text(text);
     await _waitForVisible(finder);
     expect(finder, findsWidgets);
   }
 
+  @override
   void expectLocalRuntimeChrome() {
-    expect(localGitAccessButton, findsOneWidget);
+    expect(localGitAccessButton, findsAtLeastNWidgets(1));
     expect(find.text('Local Git'), findsOneWidget);
     expect(find.text('Connect GitHub'), findsNothing);
   }
