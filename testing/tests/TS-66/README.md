@@ -14,9 +14,9 @@
 
 ## Environment / config
 
-No external credentials are required. The test creates a temporary local Git repository with active issues `TRACK-122` and `TRACK-123`, verifies the pre-delete state through the app's repository service, and then attempts to exercise the repository service delete path for `TRACK-123`.
+No external credentials are required. The test creates a temporary local Git repository with active issues `TRACK-122` and `TRACK-123`, verifies the pre-delete state through the app's repository service, and then checks whether the current product repository service exposes the delete path TS-66 requires.
 
-If the product still does not expose a real delete API, the fixture fails explicitly instead of fabricating tombstone artifacts inside the fixture. It first tries the repository service's real `deleteIssue(...)` call shape with the loaded issue model, then retries with the raw issue key before reporting the repository-contract gap.
+If the product still does not expose a real delete API, the fixture fails explicitly instead of probing unsupported runtime methods or fabricating tombstone artifacts inside the fixture.
 
 ## Current blocked output
 
