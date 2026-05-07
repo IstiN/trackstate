@@ -1,10 +1,11 @@
 # TS-41
 
-Validates that TrackState blocks mutations when `DEMO/DEMO-1/main.md` has local dirty changes.
+Validates the real dirty-file save guard around `DEMO/DEMO-1/main.md`.
 
-The TS-41 automation keeps two checks in sync with AC3:
+The TS-41 automation keeps the real dirty-write assertion live:
 1. a provider-backed description save attempt against the dirty `main.md`
-2. a real `TrackStateApp` widget flow that triggers a user-visible failure banner after a board move hits the same dirty file
+
+The real `TrackStateApp` detail view is still read-only in this branch and on `main`, so the ticket's in-app description Save flow remains explicitly skipped rather than replaced with a synthetic Save control or a board-move substitute.
 
 ## Install dependencies
 
@@ -26,5 +27,5 @@ flutter test testing/tests/TS-41/test_save_issue_with_dirty_local_files_test.dar
 ## Expected passing output
 
 ```text
-00:00 +2: All tests passed!
+00:00 +0 -1 ~1: The provider-backed dirty-save assertion still reports the AC3 product gap, and the real-app description flow stays skipped until the UI exists.
 ```

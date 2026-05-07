@@ -33,13 +33,13 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     });
 
     await tester.pumpWidget(TrackStateApp(repository: repository));
-    await tester.pump();
+    await _pumpFrames();
   }
 
   @override
   Future<void> openSection(String label) async {
     await tester.tap(find.bySemanticsLabel(RegExp(RegExp.escape(label))).first);
-    await tester.pumpAndSettle();
+    await _pumpFrames();
   }
 
   @override
@@ -47,6 +47,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final issue = _issue(key, summary);
     await _waitForVisible(issue);
     await tester.tap(issue.first);
+    await _pumpFrames();
     await expectIssueDetailVisible(key);
   }
 
@@ -74,7 +75,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       await tester.pump(const Duration(milliseconds: 120));
     }
     await gesture.up();
-    await tester.pumpAndSettle();
+    await _pumpFrames();
   }
 
   @override
@@ -108,10 +109,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     while (DateTime.now().isBefore(end)) {
       await tester.pump(step);
       if (finder.evaluate().isNotEmpty) {
-        await tester.pumpAndSettle();
+        await _pumpFrames();
         return;
       }
     }
     expect(finder, findsOneWidget);
+  }
+
+  Future<void> _pumpFrames([int count = 12]) async {
+    await tester.pump();
+    for (var i = 0; i < count; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
   }
 }
