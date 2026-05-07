@@ -168,7 +168,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<void> expectIssueDetailText(String key, String text) async {
     await expectIssueDetailVisible(key);
-    final match = _text(text);
+    final match = find.descendant(of: _issueDetail(key), matching: _text(text));
     await _waitForVisible(match);
     expect(match, findsWidgets);
   }
