@@ -50,6 +50,14 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     RegExp('Open ${RegExp.escape(key)} ${RegExp.escape(summary)}'),
   );
 
+  Finder _issueDetailAction(String key, String label) => find.descendant(
+    of: _issueDetail(key),
+    matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
+  );
+
+  Finder _issueDetailEditors(String key) =>
+      find.descendant(of: _issueDetail(key), matching: find.byType(TextField));
+
   Finder get _jqlSearchPanel => find.bySemanticsLabel(RegExp('^JQL Search\$'));
 
   Finder get _jqlSearchField => find.byType(TextField).last;
@@ -113,6 +121,46 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await tester.tap(issue.first);
     await _pumpFrames();
     await expectIssueDetailVisible(key);
+  }
+
+  @override
+  Future<void> tapIssueDetailAction({
+    required String key,
+    required String label,
+  }) async {
+    await expectIssueDetailVisible(key);
+    final action = _issueDetailAction(key, label);
+    if (action.evaluate().isEmpty) {
+      throw StateError(
+        'TS-41 requires a "$label" control in the real $key issue detail, '
+        'but the current TrackStateApp still renders the detail as read-only '
+        'content. Visible issue-detail text: ${_issueDetailVisibleText(key)}',
+      );
+    }
+    await tester.ensureVisible(action.first);
+    await tester.tap(action.first, warnIfMissed: false);
+    await _pumpFrames();
+  }
+
+  @override
+  Future<void> enterIssueDetailDescription({
+    required String key,
+    required String text,
+  }) async {
+    await expectIssueDetailVisible(key);
+    final editors = _issueDetailEditors(key);
+    if (editors.evaluate().isEmpty) {
+      throw StateError(
+        'TS-41 requires an editable description field in the real $key issue '
+        'detail, but the current TrackStateApp still renders the description '
+        'as static text. Visible issue-detail text: ${_issueDetailVisibleText(key)}',
+      );
+    }
+    await tester.ensureVisible(editors.first);
+    await tester.tap(editors.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(editors.first, text);
+    await _pumpFrames();
   }
 
   @override
@@ -254,5 +302,19 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     for (var i = 0; i < count; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
+  }
+
+  String _issueDetailVisibleText(String key) {
+    final detail = _issueDetail(key);
+    final texts = tester
+        .widgetList<Text>(
+          find.descendant(of: detail, matching: find.byType(Text)),
+        )
+        .map((widget) => widget.data?.trim())
+        .whereType<String>()
+        .where((text) => text.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    return texts.isEmpty ? '(none)' : texts.join(' | ');
   }
 }

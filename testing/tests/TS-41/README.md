@@ -2,11 +2,11 @@
 
 Validates the TS-41 dirty-write behavior for `DEMO/DEMO-1/main.md`.
 
-The automation covers both the exact write path and the live app banner path:
+The automation covers the exact write path and a real TrackState issue-detail flow probe:
 1. create a temporary local Git runtime fixture
 2. dirty `DEMO/DEMO-1/main.md` outside TrackState
 3. attempt the exact provider-backed description write path
-4. open the same issue in the real `TrackStateApp`, trigger the live board mutation path, and assert the visible tracker banner
+4. open the same issue in the real `TrackStateApp`, attempt the issue-detail description edit/save flow, and assert the visible recovery guidance if the UI exposes it
 
 ## Install dependencies
 
@@ -28,7 +28,8 @@ flutter pub get
 ## Current expected result
 
 ```text
-The provider-backed description save and the live app banner both pass once the
+The provider-backed description save and the real issue-detail save flow both
+pass once TrackState exposes the edit/save controls in the app and the
 dirty-write failure tells the user to commit, stash, or clean local changes
 first.
 ```

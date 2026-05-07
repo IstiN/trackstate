@@ -7,6 +7,7 @@ import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../core/utils/local_git_test_repository.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
+import 'support/ts41_dirty_local_issue_app_flow_component_factory.dart';
 import 'support/ts41_dirty_local_issue_component_factory.dart';
 import 'support/ts41_live_app_repository.dart';
 
@@ -40,7 +41,7 @@ void main() {
   );
 
   testWidgets(
-    'TS-41 shows actionable visible guidance when a real app mutation hits a dirty main.md',
+    'TS-41 drives the real issue-detail description save flow for the dirty main.md',
     (tester) async {
       final TrackStateAppComponent screen = defaultTestingDependencies
           .createTrackStateAppScreen(tester);
@@ -54,6 +55,7 @@ void main() {
         }
 
         await tester.runAsync(() => fixture!.makeDirtyMainFileChange());
+        final appFlow = createTs41DirtyLocalIssueAppFlowComponent(screen);
 
         await screen.pump(
           createTs41LiveAppRepository(
@@ -64,24 +66,10 @@ void main() {
             ),
           ),
         );
-        await screen.openSection('JQL Search');
-        await screen.openIssue(
-          LocalTrackStateFixture.issueKey,
-          LocalTrackStateFixture.issueSummary,
-        );
-        await screen.expectIssueDetailText(
-          LocalTrackStateFixture.issueKey,
-          LocalTrackStateFixture.originalDescription,
-        );
 
-        await screen.openSection('Board');
-        await screen.dragIssueToStatusColumn(
-          key: LocalTrackStateFixture.issueKey,
-          summary: LocalTrackStateFixture.issueSummary,
-          sourceStatusLabel: 'In Progress',
-          statusLabel: 'Done',
+        await appFlow.attemptDescriptionSave(
+          LocalTrackStateFixture.updatedDescription,
         );
-
         await screen.expectTrackerMessageContaining('commit');
         await screen.expectTrackerMessageContaining('stash');
         await screen.expectTrackerMessageContaining('clean');

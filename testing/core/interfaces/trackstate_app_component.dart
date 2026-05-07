@@ -11,6 +11,16 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openIssue(String key, String summary);
 
+  Future<void> tapIssueDetailAction({
+    required String key,
+    required String label,
+  });
+
+  Future<void> enterIssueDetailDescription({
+    required String key,
+    required String text,
+  });
+
   Future<void> dragIssueToStatusColumn({
     required String key,
     required String summary,
