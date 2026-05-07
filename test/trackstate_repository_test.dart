@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
@@ -235,6 +237,69 @@ README.md -filter
       expect(await provider.isLfsTracked('docs/releases/archive.zip'), isTrue);
       expect(await provider.isLfsTracked('README.md'), isFalse);
       expect(await provider.isLfsTracked('notes/todo.txt'), isFalse);
+    },
+  );
+
+  test(
+    'github provider reports LFS attachment uploads as unsupported',
+    () async {
+      var putAttempted = false;
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path.endsWith('/repos/IstiN/trackstate') &&
+              request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path.endsWith('/user') && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path.endsWith('/contents/.gitattributes') &&
+              request.method == 'GET') {
+            return _contentResponse(
+              '*.png filter=lfs diff=lfs merge=lfs -text\n',
+            );
+          }
+          if (path.endsWith('/contents/attachments/screenshot.png') &&
+              request.method == 'PUT') {
+            putAttempted = true;
+            return http.Response('{"content":{"sha":"uploaded-sha"}}', 201);
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      await expectLater(
+        () => provider.writeAttachment(
+          RepositoryAttachmentWriteRequest(
+            path: 'attachments/screenshot.png',
+            bytes: Uint8List.fromList(const [1, 2, 3]),
+            message: 'Upload screenshot',
+            branch: 'main',
+          ),
+        ),
+        throwsA(
+          isA<TrackStateProviderException>().having(
+            (error) => error.message,
+            'message',
+            contains('not yet implemented'),
+          ),
+        ),
+      );
+      expect(putAttempted, isFalse);
     },
   );
 }

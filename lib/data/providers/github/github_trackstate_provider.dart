@@ -237,6 +237,12 @@ class GitHubTrackStateProvider implements TrackStateProviderAdapter {
     RepositoryAttachmentWriteRequest request,
   ) async {
     final connection = _requireConnection();
+    if (await isLfsTracked(request.path)) {
+      throw TrackStateProviderException(
+        'GitHub LFS attachment uploads are not yet implemented for '
+        '${request.path}.',
+      );
+    }
     final response = await _http.put(
       _githubUri('/repos/${connection.repository}/contents/${request.path}'),
       headers: {
