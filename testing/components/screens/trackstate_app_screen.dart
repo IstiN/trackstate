@@ -29,6 +29,14 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Finder profileInitialsBadge(String initials) =>
       find.descendant(of: profileAvatar, matching: find.text(initials));
 
+  Finder profileSurfaceText(String text) =>
+      find.descendant(of: topBar, matching: _text(text));
+
+  Finder profileSurfaceSemantics(String label) => find.descendant(
+    of: topBar,
+    matching: find.bySemanticsLabel(RegExp(RegExp.escape(label))),
+  );
+
   Finder _text(String text) => find.textContaining(text, findRichText: true);
 
   Finder _issueDetail(String key) =>
@@ -153,6 +161,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   void expectProfileInitials(String initials) {
     expect(profileInitialsBadge(initials), findsOneWidget);
+  }
+
+  void expectProfileIdentityVisible({
+    required String displayName,
+    required String login,
+    required String initials,
+  }) {
+    expectProfileInitials(initials);
+    expect(profileSurfaceText(displayName), findsOneWidget);
+    expect(profileSurfaceText(login), findsOneWidget);
+    expect(profileSurfaceSemantics(displayName), findsOneWidget);
+    expect(profileSurfaceSemantics(login), findsOneWidget);
   }
 
   void expectLocalRuntimeDialog({

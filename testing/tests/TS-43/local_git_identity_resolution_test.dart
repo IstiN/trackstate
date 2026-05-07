@@ -24,7 +24,11 @@ void main() {
           repositoryPath: namedAuthorFixture.directory.path,
         );
         screen.expectLocalRuntimeChrome();
-        screen.expectProfileInitials('QZ');
+        screen.expectProfileIdentityVisible(
+          displayName: 'Quincy Zebra',
+          login: 'quincy.zebra+ts43@example.com',
+          initials: 'QZ',
+        );
 
         await screen.openRepositoryAccess();
         screen.expectLocalRuntimeDialog(
@@ -51,7 +55,11 @@ void main() {
           repositoryPath: emailFallbackFixture.directory.path,
         );
         screen.expectLocalRuntimeChrome();
-        screen.expectProfileInitials('EI');
+        screen.expectProfileIdentityVisible(
+          displayName: 'email.identity+ts43@example.com',
+          login: 'email.identity+ts43@example.com',
+          initials: 'EI',
+        );
 
         await screen.openRepositoryAccess();
         screen.expectLocalRuntimeDialog(
