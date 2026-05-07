@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shlex
 import subprocess
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -17,6 +18,45 @@ class GitHubCliProjectFramework(ProjectCliProbe):
 
     def auth_status(self) -> CliCommandResult:
         return self._run(("gh", "auth", "status"))
+
+    def run_documented_command(self, command: str) -> CliCommandResult:
+        try:
+            parsed_command = tuple(shlex.split(command))
+        except ValueError as error:
+            return CliCommandResult(
+                command=(command,),
+                exit_code=1,
+                stdout="",
+                stderr=f"Could not parse documented CLI command: {error}",
+            )
+        if not parsed_command:
+            return CliCommandResult(
+                command=(command,),
+                exit_code=1,
+                stdout="",
+                stderr="README quick-start command was empty.",
+            )
+        if parsed_command[0] != "gh":
+            return CliCommandResult(
+                command=parsed_command,
+                exit_code=1,
+                stdout="",
+                stderr=(
+                    "README quick-start command must invoke GitHub CLI (`gh`) so "
+                    "the automation can execute it safely."
+                ),
+            )
+        if any(self._contains_shell_metacharacters(token) for token in parsed_command):
+            return CliCommandResult(
+                command=parsed_command,
+                exit_code=1,
+                stdout="",
+                stderr=(
+                    "README quick-start command contains shell metacharacters. "
+                    "Document a direct `gh ...` command instead of a shell pipeline."
+                ),
+            )
+        return self._run(parsed_command)
 
     def viewer_login(self) -> CliCommandResult:
         command = ("gh", "api", "user", "--jq", ".login")
@@ -140,3 +180,7 @@ class GitHubCliProjectFramework(ProjectCliProbe):
             stdout=completed.stdout,
             stderr=completed.stderr,
         )
+
+    def _contains_shell_metacharacters(self, token: str) -> bool:
+        shell_metacharacters = ("|", "&&", ";", "`", "$(", ">", "<")
+        return any(metacharacter in token for metacharacter in shell_metacharacters)

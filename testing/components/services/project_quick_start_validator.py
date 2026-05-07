@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import re
 from pathlib import Path
@@ -9,6 +8,7 @@ from testing.core.config.project_cli_validation_config import (
     ProjectCliValidationConfig,
 )
 from testing.core.interfaces.project_cli_probe import ProjectCliProbe
+from testing.core.models.cli_command_result import CliCommandResult
 from testing.core.models.project_cli_validation_result import (
     ProjectCliValidationResult,
 )
@@ -36,30 +36,21 @@ class ProjectQuickStartValidator:
         )
         readme_text = self._decode_repository_text(readme_fetch)
         quick_start_section = self._read_quick_start_section(readme_text)
-        project_template_fetch = self._probe.get_contents(
-            target_repository,
-            default_branch,
-            config.project_template_path.name,
-        )
-        project_template = self._parse_json_contents(project_template_fetch)
         documented_source_repository = self._documented_source_repository(
             quick_start_section,
         )
         documented_project_file = self._documented_project_file(quick_start_section)
-        documented_config_glob = self._documented_config_glob(quick_start_section)
-        documented_tree_route, documented_contents_route = self._documented_api_routes(
-            readme_text,
+        project_path = documented_project_file or config.project_path
+        documented_command_template = self._documented_validation_command(
+            quick_start_section,
         )
-        project_path = documented_project_file or self._project_path_from_template(
-            project_template,
-            config,
+        documented_command = self._expand_documented_command(
+            documented_command_template,
+            target_repository=target_repository,
+            default_branch=default_branch,
+            project_path=project_path,
         )
-        tree_fetch = self._probe.list_tree(target_repository, default_branch)
-        project_fetch = self._probe.get_project(
-            target_repository,
-            default_branch,
-            project_path,
-        )
+        project_fetch = self._documented_command_result(documented_command)
         expected_project_fetch = self._probe.get_raw_file(
             target_repository,
             default_branch,
@@ -72,19 +63,15 @@ class ProjectQuickStartValidator:
             project_path=project_path,
             readme_text=readme_text,
             quick_start_section=quick_start_section,
-            project_template=project_template,
             expected_project=expected_project,
             documented_source_repository=documented_source_repository,
             documented_project_file=documented_project_file,
-            documented_config_glob=documented_config_glob,
-            documented_tree_route=documented_tree_route,
-            documented_contents_route=documented_contents_route,
+            documented_command_template=documented_command_template,
+            documented_command=documented_command,
             auth_status=auth_status,
             viewer_login=viewer_login,
             repository_info=repository_info,
             readme_fetch=readme_fetch,
-            project_template_fetch=project_template_fetch,
-            tree_fetch=tree_fetch,
             project_fetch=project_fetch,
             expected_project_fetch=expected_project_fetch,
         )
@@ -106,24 +93,8 @@ class ProjectQuickStartValidator:
         ):
             content = contents_result.json_payload.get("content")
             if isinstance(content, str):
-                return self._decode_base64_text(content)
+                return CliCommandResult.decode_base64_text(content.replace("\n", ""))
         return ""
-
-    def _parse_json_contents(self, contents_result: object) -> dict[str, object]:
-        decoded_text = self._decode_repository_text(contents_result)
-        if not decoded_text:
-            return {}
-        try:
-            parsed = json.loads(decoded_text)
-        except json.JSONDecodeError:
-            return {}
-        if isinstance(parsed, dict):
-            return parsed
-        return {}
-
-    def _decode_base64_text(self, content: str) -> str:
-        normalized = content.replace("\n", "")
-        return base64.b64decode(normalized).decode("utf-8")
 
     def _resolve_target_repository(
         self,
@@ -138,7 +109,11 @@ class ProjectQuickStartValidator:
             str,
         ):
             login = viewer_login.json_payload
-        return f"{login}/{config.fork_repository_name}" if login else config.upstream_repository
+        return (
+            f"{login}/{config.fork_repository_name}"
+            if login
+            else config.upstream_repository
+        )
 
     def _repository_default_branch(self, repository_info: object) -> str:
         if hasattr(repository_info, "json_payload") and isinstance(
@@ -162,33 +137,72 @@ class ProjectQuickStartValidator:
             return None
         return match.group(1)
 
-    def _documented_config_glob(self, quick_start_section: str) -> str | None:
-        match = re.search(r"uses\s+`([^`]+)`\s+plus\s+`([^`]+)`", quick_start_section)
-        if match is None:
-            return None
-        return match.group(2)
-
-    def _documented_api_routes(self, readme_text: str) -> tuple[str | None, str | None]:
-        match = re.search(
-            r"GitHub API \(`([^`]+)` for file discovery and `([^`]+)` for "
-            r"markdown/config reads\)",
-            readme_text,
+    def _documented_validation_command(self, quick_start_section: str) -> str | None:
+        code_blocks = re.findall(
+            r"```(?:bash|shell|sh|text)?\n(.*?)```",
+            quick_start_section,
+            re.DOTALL,
         )
-        if match is None:
-            return None, None
-        return match.group(1), match.group(2)
+        for block in code_blocks:
+            for line in block.splitlines():
+                candidate = line.strip()
+                if candidate.startswith("gh "):
+                    return candidate
+        inline_commands = re.findall(r"`(gh [^`]+)`", quick_start_section)
+        for candidate in inline_commands:
+            stripped_candidate = candidate.strip()
+            if stripped_candidate.startswith("gh "):
+                return stripped_candidate
+        return None
 
-    def _project_path_from_template(
+    def _expand_documented_command(
         self,
-        project_template: dict[str, object],
-        config: ProjectCliValidationConfig,
-    ) -> str:
-        trackstate = project_template.get("trackstate")
-        if isinstance(trackstate, dict):
-            project_file = trackstate.get("projectFile")
-            if isinstance(project_file, str) and project_file:
-                return project_file
-        return config.project_path
+        documented_command_template: str | None,
+        *,
+        target_repository: str,
+        default_branch: str,
+        project_path: str,
+    ) -> str | None:
+        if documented_command_template is None:
+            return None
+        owner, repository_name = self._split_repository(target_repository)
+        replacements = (
+            ("<fork>", target_repository),
+            ("<fork-repository>", target_repository),
+            ("<setup-repository>", target_repository),
+            ("<repository>", target_repository),
+            ("<owner>", owner),
+            ("<repo>", repository_name),
+            ("<default-branch>", default_branch),
+            ("<ref>", default_branch),
+            ("<project-path>", project_path),
+        )
+        documented_command = documented_command_template
+        for placeholder, value in replacements:
+            documented_command = documented_command.replace(placeholder, value)
+        return documented_command
+
+    def _split_repository(self, repository: str) -> tuple[str, str]:
+        if "/" not in repository:
+            return "", repository
+        owner, repository_name = repository.split("/", 1)
+        return owner, repository_name
+
+    def _documented_command_result(
+        self,
+        documented_command: str | None,
+    ) -> CliCommandResult:
+        if documented_command is None:
+            return CliCommandResult(
+                command=("README.md",),
+                exit_code=1,
+                stdout="",
+                stderr=(
+                    "The `CLI quick start` section does not document an executable "
+                    "GitHub CLI validation command."
+                ),
+            )
+        return self._probe.run_documented_command(documented_command)
 
     def _parse_expected_project(
         self,
@@ -200,5 +214,7 @@ class ProjectQuickStartValidator:
         ):
             return expected_project_fetch.json_payload
         if hasattr(expected_project_fetch, "stdout"):
-            return json.loads(expected_project_fetch.stdout)
+            parsed = json.loads(expected_project_fetch.stdout)
+            if isinstance(parsed, dict):
+                return parsed
         return {}

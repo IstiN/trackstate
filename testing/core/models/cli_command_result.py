@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 
 
@@ -18,3 +19,7 @@ class CliCommandResult:
     @property
     def command_text(self) -> str:
         return " ".join(self.command)
+
+    @staticmethod
+    def decode_base64_text(content: str) -> str:
+        return base64.b64decode(content).decode("utf-8")

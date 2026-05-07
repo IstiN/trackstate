@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 from dataclasses import dataclass
 
@@ -14,19 +13,15 @@ class ProjectCliValidationResult:
     project_path: str
     readme_text: str
     quick_start_section: str
-    project_template: dict[str, object]
     expected_project: dict[str, object]
     documented_source_repository: str | None
     documented_project_file: str | None
-    documented_config_glob: str | None
-    documented_tree_route: str | None
-    documented_contents_route: str | None
+    documented_command_template: str | None
+    documented_command: str | None
     auth_status: CliCommandResult
     viewer_login: CliCommandResult
     repository_info: CliCommandResult
     readme_fetch: CliCommandResult
-    project_template_fetch: CliCommandResult
-    tree_fetch: CliCommandResult
     project_fetch: CliCommandResult
     expected_project_fetch: CliCommandResult
 
@@ -35,26 +30,6 @@ class ProjectCliValidationResult:
         if isinstance(self.repository_info.json_payload, dict):
             return self.repository_info.json_payload
         return {}
-
-    @property
-    def template_trackstate(self) -> dict[str, object]:
-        trackstate = self.project_template.get("trackstate")
-        if isinstance(trackstate, dict):
-            return trackstate
-        return {}
-
-    @property
-    def documented_config_path(self) -> str | None:
-        if self.documented_config_glob is None:
-            return None
-        return self.documented_config_glob.removesuffix("/*.json")
-
-    @property
-    def documented_default_ref(self) -> str | None:
-        default_ref = self.template_trackstate.get("defaultRef")
-        if isinstance(default_ref, str):
-            return default_ref
-        return None
 
     @property
     def repository_parent(self) -> str | None:
@@ -77,64 +52,30 @@ class ProjectCliValidationResult:
         return self.repository_metadata.get("fork") is True
 
     @property
-    def tree_payload(self) -> dict[str, object]:
-        if isinstance(self.tree_fetch.json_payload, dict):
-            return self.tree_fetch.json_payload
-        return {}
-
-    @property
-    def tree_paths(self) -> list[str]:
-        tree = self.tree_payload.get("tree")
-        if not isinstance(tree, list):
-            return []
-        paths: list[str] = []
-        for entry in tree:
-            if isinstance(entry, dict):
-                path = entry.get("path")
-                if isinstance(path, str):
-                    paths.append(path)
-        return paths
-
-    @property
-    def project_fetch_payload(self) -> dict[str, object]:
-        if isinstance(self.project_fetch.json_payload, dict):
-            return self.project_fetch.json_payload
-        return {}
-
-    @property
-    def project_fetch_path(self) -> str | None:
-        path = self.project_fetch_payload.get("path")
-        if isinstance(path, str):
-            return path
-        return None
-
-    @property
-    def project_fetch_encoding(self) -> str | None:
-        encoding = self.project_fetch_payload.get("encoding")
-        if isinstance(encoding, str):
-            return encoding
-        return None
-
-    @property
-    def project_fetch_content(self) -> str | None:
-        content = self.project_fetch_payload.get("content")
-        if isinstance(content, str):
-            return content.replace("\n", "")
-        return None
-
-    @property
     def actual_project(self) -> dict[str, object] | None:
-        encoded_content = self.project_fetch_content
-        if not encoded_content:
+        stdout = self.project_fetch.stdout.strip()
+        if not stdout:
             return None
         try:
-            decoded_content = base64.b64decode(encoded_content).decode("utf-8")
-            parsed = json.loads(decoded_content)
+            parsed = json.loads(stdout)
         except (ValueError, json.JSONDecodeError):
             return None
-        if isinstance(parsed, dict):
-            return parsed
-        return None
+        if not isinstance(parsed, dict):
+            return None
+        content = parsed.get("content")
+        encoding = parsed.get("encoding")
+        if isinstance(content, str) and encoding == "base64":
+            try:
+                decoded_content = CliCommandResult.decode_base64_text(
+                    content.replace("\n", ""),
+                )
+                decoded_json = json.loads(decoded_content)
+            except (ValueError, json.JSONDecodeError):
+                return None
+            if isinstance(decoded_json, dict):
+                return decoded_json
+            return None
+        return parsed
 
     @property
     def actual_project_text(self) -> str:

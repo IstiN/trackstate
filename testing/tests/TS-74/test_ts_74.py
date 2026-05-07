@@ -59,13 +59,11 @@ class QuickStartCliValidationTest(unittest.TestCase):
             "section to validate.",
         )
         self.assertTrue(
-            result.project_template_fetch.succeeded,
-            "Step 2 failed: the test could not read project-template.json from the "
-            "forked setup repository.\n"
-            f"Command: {result.project_template_fetch.command_text}\n"
-            f"Exit code: {result.project_template_fetch.exit_code}\n"
-            f"stdout:\n{result.project_template_fetch.stdout}\n"
-            f"stderr:\n{result.project_template_fetch.stderr}",
+            result.documented_command_template,
+            "Step 2 failed: the fork README documents repository data paths, but "
+            "it does not include an executable GitHub CLI validation command in "
+            "the `CLI quick start` section.\n"
+            f"Observed section:\n{result.quick_start_section}",
         )
         self.assertEqual(
             result.documented_project_file,
@@ -74,13 +72,6 @@ class QuickStartCliValidationTest(unittest.TestCase):
             "same project file used by this validation.\n"
             f"Documented project file: {result.documented_project_file}\n"
             f"Validated project file: {result.project_path}",
-        )
-        self.assertEqual(
-            result.documented_config_path,
-            "DEMO/config",
-            "Step 2 failed: the README quick-start section no longer documents the "
-            "expected config directory for the quick-start flow.\n"
-            f"Observed config path: {result.documented_config_path}",
         )
         self.assertEqual(
             result.documented_source_repository,
@@ -97,20 +88,6 @@ class QuickStartCliValidationTest(unittest.TestCase):
                 f"{fragment!r}, so the validation path is incomplete.\n"
                 f"Observed section:\n{result.quick_start_section}",
             )
-        self.assertEqual(
-            result.documented_tree_route,
-            "git/trees",
-            "Step 2 failed: the fork README no longer documents the GitHub API "
-            "tree discovery route used by the quick-start flow.\n"
-            f"Observed README:\n{result.readme_text}",
-        )
-        self.assertEqual(
-            result.documented_contents_route,
-            "contents",
-            "Step 2 failed: the fork README no longer documents the GitHub API "
-            "contents route used by the quick-start flow.\n"
-            f"Observed README:\n{result.readme_text}",
-        )
         self.assertTrue(
             result.repository_info.succeeded,
             "Step 3 failed: the test could not inspect the configured setup "
@@ -138,95 +115,40 @@ class QuickStartCliValidationTest(unittest.TestCase):
             "expected upstream template.\n"
             f"Observed repository metadata:\n{result.repository_info.stdout}",
         )
-        self.assertTrue(
-            result.tree_fetch.succeeded,
-            "Step 4 failed: the README-documented repository discovery command "
-            "did not complete successfully.\n"
-            f"Command: {result.tree_fetch.command_text}\n"
-            f"Exit code: {result.tree_fetch.exit_code}\n"
-            f"stdout:\n{result.tree_fetch.stdout}\n"
-            f"stderr:\n{result.tree_fetch.stderr}",
-        )
         self.assertEqual(
-            result.tree_fetch.command,
-            (
-                "gh",
-                "api",
-                f"repos/{result.target_repository}/{result.documented_tree_route}/"
-                f"{result.repository_default_branch}?recursive=1",
-            ),
-            "Step 4 failed: the validation flow did not execute the README-"
-            "documented repository tree discovery command for the fork.",
-        )
-        self.assertIn(
-            result.project_path,
-            result.tree_paths,
-            "Step 4 failed: the README-documented repository tree read did not "
-            "show the configured project file in the fork.\n"
-            f"Observed tree paths:\n{result.tree_fetch.stdout}",
-        )
-        self.assertTrue(
-            any(
-                path == result.documented_config_path
-                or path.startswith(f"{result.documented_config_path}/")
-                for path in result.tree_paths
-                if result.documented_config_path is not None
-            ),
-            "Step 4 failed: the README-documented repository tree read did not "
-            "show the configured tracker config directory in the fork.\n"
-            f"Observed tree paths:\n{result.tree_fetch.stdout}",
-        )
-
-        self.assertEqual(
-            result.project_fetch.command,
-            (
-                "gh",
-                "api",
-                f"repos/{result.target_repository}/{result.documented_contents_route}/"
-                f"{result.project_path}"
-                f"?ref={result.repository_default_branch}",
-            ),
-            "Step 5 failed: the validation flow did not execute the README-"
-            "documented contents read for the forked setup repository.",
+            result.project_fetch.command_text,
+            result.documented_command,
+            "Step 4 failed: the automation did not execute the exact CLI command "
+            "documented in the fork README.\n"
+            f"Documented command: {result.documented_command}\n"
+            f"Executed command: {result.project_fetch.command_text}",
         )
         self.assertTrue(
             result.project_fetch.succeeded,
-            "Step 5 failed: the quick-start validation command did not complete "
-            "successfully.\n"
+            "Step 4 failed: the README-documented quick-start validation command "
+            "did not complete successfully.\n"
+            f"Documented command: {result.documented_command}\n"
             f"Command: {result.project_fetch.command_text}\n"
             f"Exit code: {result.project_fetch.exit_code}\n"
             f"stdout:\n{result.project_fetch.stdout}\n"
             f"stderr:\n{result.project_fetch.stderr}",
         )
-        self.assertEqual(
-            result.project_fetch_path,
-            result.project_path,
-            "Step 5 failed: the CLI response path did not match the quick-start "
-            "project file.\n"
-            f"Observed response:\n{result.project_fetch.stdout}",
-        )
-        self.assertEqual(
-            result.project_fetch_encoding,
-            "base64",
-            "Step 5 failed: the CLI response no longer returned the documented "
-            "GitHub contents payload encoding.\n"
-            f"Observed response:\n{result.project_fetch.stdout}",
-        )
         self.assertTrue(
             result.expected_project_fetch.succeeded,
-            "Step 6 failed: the test could not read the same project file directly "
+            "Step 5 failed: the test could not read the same project file directly "
             "from the forked repository for independent comparison.\n"
             f"Command: {result.expected_project_fetch.command_text}\n"
             f"stderr:\n{result.expected_project_fetch.stderr}",
         )
         self.assertIsNotNone(
             result.actual_project,
-            "Step 6 failed: the CLI contents response did not decode to parseable "
-            "project JSON.",
+            "Step 5 failed: the documented quick-start command did not return "
+            "parseable project JSON.\n"
+            f"Observed output:\n{result.project_fetch.stdout}",
         )
         self.assertTrue(
             result.project_fetch.stdout.lstrip().startswith("{"),
-            "Step 6 failed: the CLI output did not render as a JSON object in the terminal.\n"
+            "Step 5 failed: the CLI output did not render as a JSON object in the terminal.\n"
             f"Observed output:\n{result.project_fetch.stdout}",
         )
         self.assertDictEqual(
