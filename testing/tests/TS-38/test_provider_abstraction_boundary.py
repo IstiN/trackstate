@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from testing.components.services.provider_contract_inspector import create_provider_contract_probe
 from testing.core.interfaces.provider_contract_probe import ProviderContractProbe
+from testing.tests.support.provider_contract_probe_factory import (
+    create_provider_contract_probe,
+)
 
 
 class ProviderAbstractionBoundaryTest(unittest.TestCase):
