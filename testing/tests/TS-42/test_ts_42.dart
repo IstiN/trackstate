@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../components/screens/read_only_issue_detail_screen.dart';
+import 'issue_detail_test_context.dart';
 
 void main() {
   testWidgets(
@@ -10,7 +11,7 @@ void main() {
       ReadOnlyIssueDetailScreen? screen;
 
       try {
-        screen = await ReadOnlyIssueDetailScreen.launch(tester);
+        screen = await launchReadOnlyIssueDetailScreen(tester);
         final issueDetailPage = screen.page;
         const targetIssueKey = 'TRACK-12';
         const targetSummary = 'Implement Git sync service';
