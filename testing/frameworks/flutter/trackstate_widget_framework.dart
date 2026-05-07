@@ -65,8 +65,7 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
     for (final finder in [_semanticsFinder(label), _textFinder(label)]) {
       final matches = finder.evaluate().toList();
       for (var index = 0; index < matches.length; index++) {
-        final semantics = tester.getSemantics(finder.at(index));
-        final flags = semantics.flagsCollection;
+        final flags = tester.getSemantics(finder.at(index)).flagsCollection;
         final hasSelectionState =
             flags.hasCheckedState || flags.hasSelectedState;
         if (!hasSelectionState) {
