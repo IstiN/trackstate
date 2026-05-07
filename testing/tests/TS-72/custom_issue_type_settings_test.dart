@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../../components/screens/settings_screen_robot.dart';
 import '../../core/utils/local_git_repository_fixture.dart';
-import '../../frameworks/flutter/trackstate_test_runtime.dart';
 
 void main() {
   testWidgets(
@@ -22,12 +21,7 @@ void main() {
           await fixture.commitChanges('Add Requirement issue type');
         });
 
-        final repository = await createLocalGitTestRepository(
-          tester: tester,
-          repositoryPath: fixture.directory.path,
-        );
-
-        await robot.pumpApp(repository: repository);
+        await robot.pumpLocalGitApp(repositoryPath: fixture.directory.path);
         await robot.openSettings();
         robot.expectVisibleSettingsContent();
 

@@ -10,6 +10,8 @@ import 'package:trackstate/ui/core/trackstate_icons.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../../frameworks/flutter/trackstate_test_runtime.dart';
+
 class SettingsScreenRobot {
   SettingsScreenRobot(this.tester);
 
@@ -62,6 +64,21 @@ class SettingsScreenRobot {
     final app = TrackStateApp(key: UniqueKey(), repository: repository);
     await tester.pumpWidget(appWrapper == null ? app : appWrapper(app));
     await tester.pumpAndSettle();
+  }
+
+  Future<void> pumpLocalGitApp({
+    required String repositoryPath,
+    Map<String, Object> sharedPreferences = const {},
+    Widget Function(Widget child)? appWrapper,
+  }) async {
+    await pumpApp(
+      repository: await createLocalGitTestRepository(
+        tester: tester,
+        repositoryPath: repositoryPath,
+      ),
+      sharedPreferences: sharedPreferences,
+      appWrapper: appWrapper,
+    );
   }
 
   Future<void> openSettings() async {
