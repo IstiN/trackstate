@@ -171,6 +171,7 @@ Future<void> main() async {
         'Step 2 failed: repository.session was null after the failed connection attempt, so a client could not observe the restricted failure state before retrying.',
       );
     }
+    final failedSessionSnapshot = _serializeSession(failedSession);
     final authenticateAttemptsAfterFailure = provider.authenticateAttempts;
 
     provider.allowSuccessfulAuthentication();
@@ -182,14 +183,15 @@ Future<void> main() async {
         'Step 5 failed: repository.session was null after the successful retry, so a client could not observe the recovered connected state.',
       );
     }
+    final recoveredSessionSnapshot = _serializeSession(recoveredSession);
 
     result['firstConnectError'] = firstConnectError.toString();
     result['firstConnectStackTrace'] = firstConnectStackTrace?.toString();
     result['authenticateAttemptsAfterFailure'] = authenticateAttemptsAfterFailure;
-    result['failedSession'] = _serializeSession(failedSession);
+    result['failedSession'] = failedSessionSnapshot;
     result['authenticateAttemptsAfterRetry'] = provider.authenticateAttempts;
     result['connectedUserLogin'] = connectedUser.login;
-    result['recoveredSession'] = _serializeSession(recoveredSession);
+    result['recoveredSession'] = recoveredSessionSnapshot;
     result['status'] = 'passed';
   } catch (error, stackTrace) {
     result['error'] = error.toString();
