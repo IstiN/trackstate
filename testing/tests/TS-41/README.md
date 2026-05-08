@@ -4,21 +4,21 @@ Attempts the TS-41 dirty-write flow for `DEMO/DEMO-1/main.md` against the
 current product surface in this checkout.
 
 The automation covers the exact provider-backed write path and a live
-`TrackStateApp` issue-detail attempt for the same dirty local issue:
+`TrackStateApp` issue-detail probe for the same dirty local issue:
 1. create a temporary local Git runtime fixture
 2. dirty `DEMO/DEMO-1/main.md` outside TrackState
 3. attempt the exact provider-backed description write path
 4. open the same issue in the real `TrackStateApp`
-5. attempt the issue-detail `Edit` / `Save` flow for that same dirty issue
-6. verify the surfaced app message includes `commit`, `stash`, and `clean`
+5. verify the current issue detail still renders the dirty issue as read-only
+6. verify the live UI exposes no `Edit` / `Save` controls for that issue
 
 The executable failure signal remains the provider-backed save assertion: the
 product still throws a non-actionable dirty-file message instead of telling the
 user to `commit`, `stash`, or `clean` local changes first.
 
-The widget case now establishes the same dirty-file precondition before opening
-the app, so the UI attempt and provider assertion both target the same local
-Git runtime state.
+The widget case establishes the same dirty-file precondition before opening the
+app, so the live UI probe and provider assertion both target the same local Git
+runtime state.
 
 The ticket wiring follows the shared testing layers via reusable fixtures under
 `testing/fixtures/` and the shared `TrackStateAppComponent` abstraction rather
@@ -46,6 +46,6 @@ flutter pub get
 ```text
 The provider-backed dirty-write assertion currently fails because the product
 message still omits `commit` / `stash` / `clean`.
-The widget attempt currently fails fast because the current issue detail does
-not expose the required `Edit` / `Save` controls for the ticketed flow.
+The live UI probe currently passes because the current issue detail still
+renders read-only and exposes no `Edit` / `Save` controls.
 ```

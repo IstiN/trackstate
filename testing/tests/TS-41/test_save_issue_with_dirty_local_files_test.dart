@@ -35,7 +35,7 @@ void main() {
   );
 
   testWidgets(
-    'TS-41 attempts the dirty issue description save flow in TrackState',
+    'TS-41 shows the live dirty issue detail remains read-only in TrackState',
     (tester) async {
       final semantics = tester.ensureSemantics();
       final screen = defaultTestingDependencies.createTrackStateAppScreen(
@@ -61,29 +61,17 @@ void main() {
           LocalTrackStateFixture.issueKey,
           LocalTrackStateFixture.originalDescription,
         );
-        await screen.expectIssueDetailActionVisible(
+        screen.expectIssueDetailDescriptionReadOnly(
+          LocalTrackStateFixture.issueKey,
+        );
+        screen.expectIssueDetailActionAbsent(
           key: LocalTrackStateFixture.issueKey,
           label: 'Edit',
         );
-        await screen.tapIssueDetailAction(
-          key: LocalTrackStateFixture.issueKey,
-          label: 'Edit',
-        );
-        await screen.enterIssueDetailDescription(
-          key: LocalTrackStateFixture.issueKey,
-          description: LocalTrackStateFixture.updatedDescription,
-        );
-        await screen.expectIssueDetailActionVisible(
+        screen.expectIssueDetailActionAbsent(
           key: LocalTrackStateFixture.issueKey,
           label: 'Save',
         );
-        await screen.tapIssueDetailAction(
-          key: LocalTrackStateFixture.issueKey,
-          label: 'Save',
-        );
-        await screen.expectTrackerMessageVisible('commit');
-        await screen.expectTrackerMessageVisible('stash');
-        await screen.expectTrackerMessageVisible('clean');
       } finally {
         await tester.runAsync(() async {
           if (fixture != null) {
