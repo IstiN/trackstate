@@ -791,6 +791,11 @@ Object? _parseScalar(String value) {
   if (trimmed == 'null') return null;
   if (trimmed == 'true') return true;
   if (trimmed == 'false') return false;
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    final structuredValue = _parseInlineStructuredValue(trimmed);
+    if (structuredValue != null) return structuredValue;
+  }
   if ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
       (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
     return trimmed.substring(1, trimmed.length - 1);
@@ -800,6 +805,29 @@ Object? _parseScalar(String value) {
   final doubleValue = double.tryParse(trimmed);
   if (doubleValue != null) return doubleValue;
   return trimmed;
+}
+
+Object? _parseInlineStructuredValue(String value) {
+  try {
+    return _normalizeStructuredValue(jsonDecode(value));
+  } on FormatException {
+    return null;
+  }
+}
+
+Object? _normalizeStructuredValue(Object? value) {
+  if (value is List) {
+    return value
+        .map<Object?>((entry) => _normalizeStructuredValue(entry))
+        .toList(growable: false);
+  }
+  if (value is Map) {
+    return {
+      for (final entry in value.entries)
+        entry.key.toString(): _normalizeStructuredValue(entry.value),
+    };
+  }
+  return value;
 }
 
 List<String> _stringList(Object? value) {
