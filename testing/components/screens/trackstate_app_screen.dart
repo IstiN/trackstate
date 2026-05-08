@@ -226,10 +226,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
-  Future<void> tapIssueDetailAction(
-    String key, {
-    required String label,
-  }) async {
+  Future<void> tapIssueDetailAction(String key, {required String label}) async {
     final action = _issueDetailAction(key, label);
     await _waitForVisible(_issueDetail(key));
     if (action.evaluate().isEmpty) {
@@ -258,6 +255,36 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final finder = _text(text);
     await _waitForVisible(finder, timeout: const Duration(seconds: 10));
     expect(finder, findsWidgets);
+  }
+
+  Future<bool> dismissMessageBanner() async {
+    final dismissCandidates = <Finder>[
+      find.bySemanticsLabel(RegExp(r'^(Dismiss|Close|Hide|OK|Ok)$')),
+      find.text('Dismiss'),
+      find.text('Close'),
+      find.text('Hide'),
+      find.text('OK'),
+      find.text('Ok'),
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is IconButton &&
+            (((widget.tooltip ?? '').toLowerCase().contains('dismiss')) ||
+                ((widget.tooltip ?? '').toLowerCase().contains('close'))),
+        description: 'dismissible message banner action',
+      ),
+    ];
+
+    for (final candidate in dismissCandidates) {
+      if (candidate.evaluate().isEmpty) {
+        continue;
+      }
+      await tester.ensureVisible(candidate.first);
+      await tester.tap(candidate.first, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      return true;
+    }
+
+    return false;
   }
 
   @override
