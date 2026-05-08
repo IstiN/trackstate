@@ -41,7 +41,14 @@ class FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
 
   @override
   Future<RepositoryPermission> getPermission() async =>
-      const RepositoryPermission(canRead: true, canWrite: true, isAdmin: false);
+      const RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        canCheckCollaborators: false,
+      );
 
   @override
   Future<bool> isLfsTracked(String path) async => false;
