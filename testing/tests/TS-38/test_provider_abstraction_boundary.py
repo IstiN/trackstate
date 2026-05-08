@@ -83,6 +83,21 @@ class ProviderAbstractionBoundaryTest(unittest.TestCase):
                 failures.append(
                     f"Step 4 failed: neutral capability flag '{field}' is missing from ProviderSession."
                 )
+        expected_values = {
+            "providerType": "ProviderType.github",
+            "connectionState": "ProviderConnectionState.connected",
+            "resolvedUserIdentity": "mock-user",
+            "canRead": True,
+            "canWrite": True,
+            "canCreateBranch": True,
+            "canManageAttachments": True,
+            "canCheckCollaborators": False,
+        }
+        for field, expected in expected_values.items():
+            if field in session and session[field] != expected:
+                failures.append(
+                    f"Observed {field}={session[field]!r}, expected {expected!r} from the neutral session contract."
+                )
         return failures
 
 
