@@ -373,7 +373,6 @@ class GitHubPagesWorkflowProbe:
             return datetime.fromisoformat(created_at.replace("Z", "+00:00")).timestamp()
         except ValueError:
             return None
-
     def _list_workflow_jobs(self, repository: str, run_id: int) -> list[dict[str, Any]]:
         payload = self._gh_json(
             f"repos/{repository}/actions/runs/{run_id}/jobs?per_page=10"
