@@ -35,7 +35,7 @@ void main() {
   );
 
   testWidgets(
-    'TS-41 shows the live dirty issue detail remains read-only in TrackState',
+    'TS-41 lets a user edit the same dirty issue description and click Save',
     (tester) async {
       final semantics = tester.ensureSemantics();
       final screen = defaultTestingDependencies.createTrackStateAppScreen(
@@ -61,17 +61,26 @@ void main() {
           LocalTrackStateFixture.issueKey,
           LocalTrackStateFixture.originalDescription,
         );
-        screen.expectIssueDetailDescriptionReadOnly(
+        await screen.tapIssueDetailAction(
           LocalTrackStateFixture.issueKey,
-        );
-        screen.expectIssueDetailActionAbsent(
-          key: LocalTrackStateFixture.issueKey,
           label: 'Edit',
         );
-        screen.expectIssueDetailActionAbsent(
-          key: LocalTrackStateFixture.issueKey,
+        await screen.expectIssueDescriptionEditorVisible(
+          LocalTrackStateFixture.issueKey,
+          label: 'Description',
+        );
+        await screen.enterIssueDescription(
+          LocalTrackStateFixture.issueKey,
+          label: 'Description',
+          text: LocalTrackStateFixture.updatedDescription,
+        );
+        await screen.tapIssueDetailAction(
+          LocalTrackStateFixture.issueKey,
           label: 'Save',
         );
+        await screen.expectMessageBannerContains('commit');
+        await screen.expectMessageBannerContains('stash');
+        await screen.expectMessageBannerContains('clean');
       } finally {
         await tester.runAsync(() async {
           if (fixture != null) {
@@ -82,5 +91,6 @@ void main() {
         semantics.dispose();
       }
     },
+    timeout: const Timeout(Duration(seconds: 20)),
   );
 }

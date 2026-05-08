@@ -8,4 +8,4 @@ notes:
   - Keeps the provider-backed description save assertion as the exact main.md write-path AC3 check.
   - Uses shared fixtures and app-screen abstractions instead of ticket-local framework wiring.
   - Establishes the same dirty main.md precondition before opening the live TrackState app.
-  - Probes the live issue-detail surface to confirm the current app still renders the dirty issue as read-only with no Edit/Save controls.
+  - Drives the real TrackState issue-detail flow for DEMO-1 and attempts the ticketed description edit/save action.

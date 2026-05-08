@@ -1,24 +1,14 @@
 # TS-41
 
-Attempts the TS-41 dirty-write flow for `DEMO/DEMO-1/main.md` against the
-current product surface in this checkout.
+Validates the TS-41 dirty-save behavior for `DEMO/DEMO-1/main.md`.
 
-The automation covers the exact provider-backed write path and a live
-`TrackStateApp` issue-detail probe for the same dirty local issue:
+The automation covers the ticket in two layers against the same dirty local
+issue:
 1. create a temporary local Git runtime fixture
 2. dirty `DEMO/DEMO-1/main.md` outside TrackState
-3. attempt the exact provider-backed description write path
-4. open the same issue in the real `TrackStateApp`
-5. verify the current issue detail still renders the dirty issue as read-only
-6. verify the live UI exposes no `Edit` / `Save` controls for that issue
-
-The executable failure signal remains the provider-backed save assertion: the
-product still throws a non-actionable dirty-file message instead of telling the
-user to `commit`, `stash`, or `clean` local changes first.
-
-The widget case establishes the same dirty-file precondition before opening the
-app, so the live UI probe and provider assertion both target the same local Git
-runtime state.
+3. attempt the exact description write through the provider-backed save path
+4. launch the real `TrackStateApp`, open `DEMO-1`, try to edit the description,
+   click `Save`, and verify visible `commit` / `stash` / `clean` guidance
 
 The ticket wiring follows the shared testing layers via reusable fixtures under
 `testing/fixtures/` and the shared `TrackStateAppComponent` abstraction rather
@@ -44,8 +34,7 @@ flutter pub get
 ## Current expected result
 
 ```text
-The provider-backed dirty-write assertion currently fails because the product
-message still omits `commit` / `stash` / `clean`.
-The live UI probe currently passes because the current issue detail still
-renders read-only and exposes no `Edit` / `Save` controls.
+Once TS-41 is fixed, both tests pass:
+- the provider-backed dirty-write failure becomes actionable
+- the real issue-detail save flow surfaces visible commit/stash/clean guidance
 ```

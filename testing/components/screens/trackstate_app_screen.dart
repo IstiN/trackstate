@@ -57,7 +57,10 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   Finder _issueDetailEditor(String key) => find.descendant(
     of: _issueDetail(key),
-    matching: find.byType(EditableText),
+    matching: find.byWidgetPredicate(
+      (widget) => widget is EditableText || widget is TextField,
+      description: 'issue detail editor for $key',
+    ),
   );
 
   Finder get _jqlSearchPanel => find.bySemanticsLabel(RegExp('^JQL Search\$'));
@@ -192,16 +195,59 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
-  void expectIssueDetailActionAbsent({
-    required String key,
+  Future<void> expectIssueDescriptionEditorVisible(
+    String key, {
     required String label,
-  }) {
-    expect(_issueDetailAction(key, label), findsNothing);
+  }) async {
+    final editor = _issueDetailEditor(key);
+    await _waitForVisible(_issueDetail(key));
+    if (editor.evaluate().isEmpty) {
+      fail(
+        'Expected issue detail $key to expose a "$label" editor for the '
+        'TS-41 save flow, but no editable control was rendered.',
+      );
+    }
+    expect(editor, findsWidgets);
   }
 
   @override
-  void expectIssueDetailDescriptionReadOnly(String key) {
-    expect(_issueDetailEditor(key), findsNothing);
+  Future<void> enterIssueDescription(
+    String key, {
+    required String label,
+    required String text,
+  }) async {
+    final editor = _issueDetailEditor(key);
+    await expectIssueDescriptionEditorVisible(key, label: label);
+    await tester.ensureVisible(editor.first);
+    await tester.tap(editor.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(editor.first, text);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> tapIssueDetailAction(
+    String key, {
+    required String label,
+  }) async {
+    final action = _issueDetailAction(key, label);
+    await _waitForVisible(_issueDetail(key));
+    if (action.evaluate().isEmpty) {
+      fail(
+        'Expected issue detail $key to expose a "$label" action for the '
+        'TS-41 save flow, but no matching control was rendered.',
+      );
+    }
+    await tester.ensureVisible(action.first);
+    await tester.tap(action.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> expectMessageBannerContains(String text) async {
+    final finder = _text(text);
+    await _waitForVisible(finder, timeout: const Duration(seconds: 10));
+    expect(finder, findsWidgets);
   }
 
   @override
