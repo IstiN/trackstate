@@ -36,6 +36,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get createIssue => 'Create issue';
 
   @override
+  String get edit => 'Edit';
+
+  @override
+  String get save => 'Save';
+
+  @override
   String get transition => 'Transition';
 
   @override
@@ -197,6 +203,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String githubConnectionFailed(String error) {
     return 'GitHub connection failed: $error';
+  }
+
+  @override
+  String saveFailed(String error) {
+    return 'Save failed: $error';
   }
 
   @override
