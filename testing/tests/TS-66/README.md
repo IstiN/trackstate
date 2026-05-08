@@ -3,20 +3,18 @@
 ## Install dependencies
 
 ```bash
-/tmp/flutter/bin/flutter pub get
+flutter pub get
 ```
 
 ## Run this test
 
 ```bash
-/tmp/flutter/bin/flutter test testing/tests/TS-66/test_ts_66.dart -r expanded
+flutter test testing/tests/TS-66/test_ts_66.dart -r expanded
 ```
 
 ## Environment / config
 
-No external credentials are required. The test creates a temporary local Git repository with one active issue (`TRACK-122`) and one reserved deleted key (`TRACK-123`) represented in `TRACK/.trackstate/index/deleted.json`, then loads that repository through `LocalTrackStateRepository`.
-
-The assertions verify that the deleted-key metadata is exposed through `snapshot.repositoryIndex.deleted`, that `TRACK-123` no longer resolves through the active repository index, and that standard search still returns only the surviving active issue.
+No external credentials are required. The test creates a temporary local Git repository with active issues `TRACK-122` and `TRACK-123`, verifies the pre-delete state through the app's repository service, and then calls the repository service delete path for `TRACK-123`. If the product still does not expose a real delete API, the test fails explicitly instead of fabricating tombstone artifacts inside the fixture.
 
 ## Expected passing output
 
