@@ -238,6 +238,16 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         'TS-41 save flow, but no matching control was rendered.',
       );
     }
+    if (label == 'Save') {
+      await tester.runAsync(() async {
+        await tester.ensureVisible(action.first);
+        await tester.tap(action.first, warnIfMissed: false);
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      });
+      await tester.pumpAndSettle();
+      return;
+    }
     await tester.ensureVisible(action.first);
     await tester.tap(action.first, warnIfMissed: false);
     await tester.pumpAndSettle();
