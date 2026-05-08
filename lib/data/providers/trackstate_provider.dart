@@ -74,6 +74,17 @@ class ProviderSession {
   bool canManageAttachments;
   bool canCheckCollaborators;
 
+  ProviderSession copy() => ProviderSession(
+    providerType: providerType,
+    connectionState: connectionState,
+    resolvedUserIdentity: resolvedUserIdentity,
+    canRead: canRead,
+    canWrite: canWrite,
+    canCreateBranch: canCreateBranch,
+    canManageAttachments: canManageAttachments,
+    canCheckCollaborators: canCheckCollaborators,
+  );
+
   void update({
     required ProviderType providerType,
     required ProviderConnectionState connectionState,

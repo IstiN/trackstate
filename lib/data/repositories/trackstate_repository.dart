@@ -37,7 +37,17 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     required TrackStateProviderAdapter provider,
     this.usesLocalPersistence = false,
     this.supportsGitHubAuth = true,
-  }) : _provider = provider;
+  }) : _provider = provider,
+       _session = ProviderSession(
+         providerType: provider.providerType,
+         connectionState: ProviderConnectionState.disconnected,
+         resolvedUserIdentity: provider.repositoryLabel,
+         canRead: _restrictedPermission.canRead,
+         canWrite: _restrictedPermission.canWrite,
+         canCreateBranch: _restrictedPermission.canCreateBranch,
+         canManageAttachments: _restrictedPermission.canManageAttachments,
+         canCheckCollaborators: _restrictedPermission.canCheckCollaborators,
+       );
 
   final TrackStateProviderAdapter _provider;
   @override
@@ -47,7 +57,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   TrackerSnapshot? _snapshot;
   ProviderSession? _session;
 
-  ProviderSession? get session => _session;
+  ProviderSession? get session => _session?.copy();
 
   @override
   Future<RepositoryUser> connect(RepositoryConnection connection) async {

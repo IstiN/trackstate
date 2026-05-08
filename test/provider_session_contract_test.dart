@@ -150,7 +150,7 @@ void main() {
   );
 
   test(
-    'provider-backed repository keeps captured session references synchronized',
+    'provider-backed repository preserves lifecycle snapshots across later session updates',
     () async {
       final provider = _FakeTrackStateProviderAdapter(
         permission: const RepositoryPermission(
@@ -203,14 +203,92 @@ void main() {
           repository.session ??
           (throw StateError('Expected a provider session after connect.'));
 
-      expect(identical(capturedSession, latestSession), isTrue);
+      expect(identical(capturedSession, latestSession), isFalse);
       expect(
         capturedSession.connectionState,
+        ProviderConnectionState.connecting,
+      );
+      expect(capturedSession.resolvedUserIdentity, 'mock/repository');
+      expect(capturedSession.canCreateBranch, isFalse);
+      expect(capturedSession.canManageAttachments, isFalse);
+      expect(latestSession.connectionState, ProviderConnectionState.connected);
+      expect(latestSession.resolvedUserIdentity, 'mock-user');
+      expect(latestSession.canCreateBranch, isTrue);
+      expect(latestSession.canManageAttachments, isTrue);
+    },
+  );
+
+  test(
+    'provider-backed repository exposes a disconnected session before connect starts',
+    () async {
+      final provider = _FakeTrackStateProviderAdapter(
+        permission: const RepositoryPermission(
+          canRead: false,
+          canWrite: false,
+          isAdmin: false,
+          canCreateBranch: false,
+          canManageAttachments: false,
+          canCheckCollaborators: false,
+        ),
+        delayAuthentication: true,
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final ProviderSession initialSession =
+          repository.session ??
+          (throw StateError(
+            'Expected a disconnected provider session before connect starts.',
+          ));
+
+      expect(initialSession.providerType, ProviderType.github);
+      expect(
+        initialSession.connectionState,
+        ProviderConnectionState.disconnected,
+      );
+      expect(initialSession.resolvedUserIdentity, 'mock/repository');
+      expect(initialSession.canRead, isFalse);
+      expect(initialSession.canWrite, isFalse);
+      expect(initialSession.canCreateBranch, isFalse);
+      expect(initialSession.canManageAttachments, isFalse);
+      expect(initialSession.canCheckCollaborators, isFalse);
+
+      final connectFuture = repository.connect(
+        const RepositoryConnection(
+          repository: 'mock/repository',
+          branch: 'main',
+          token: 'mock-token',
+        ),
+      );
+
+      await Future<void>.delayed(Duration.zero);
+
+      final ProviderSession connectingSession =
+          repository.session ??
+          (throw StateError('Expected a provider session while connecting.'));
+
+      expect(
+        connectingSession.connectionState,
+        ProviderConnectionState.connecting,
+      );
+      expect(
+        initialSession.connectionState,
+        ProviderConnectionState.disconnected,
+      );
+
+      provider.completeAuthentication();
+      await connectFuture;
+
+      expect(
+        connectingSession.connectionState,
+        ProviderConnectionState.connecting,
+      );
+      final ProviderSession connectedSession =
+          repository.session ??
+          (throw StateError('Expected a provider session after connect.'));
+      expect(
+        connectedSession.connectionState,
         ProviderConnectionState.connected,
       );
-      expect(capturedSession.resolvedUserIdentity, 'mock-user');
-      expect(capturedSession.canCreateBranch, isTrue);
-      expect(capturedSession.canManageAttachments, isTrue);
     },
   );
 }
