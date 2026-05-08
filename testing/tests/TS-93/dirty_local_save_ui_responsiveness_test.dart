@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../components/factories/testing_dependencies.dart';
-import '../../components/screens/trackstate_app_screen.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
 import 'support/ts93_local_issue_fixture.dart';
 
@@ -15,9 +14,9 @@ void main() {
     'TS-93 surfaces the dirty-write error promptly and keeps the UI responsive',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      final screen =
-          defaultTestingDependencies.createTrackStateAppScreen(tester)
-              as TrackStateAppScreen;
+      final screen = defaultTestingDependencies.createTrackStateAppScreen(
+        tester,
+      );
       Ts93LocalIssueFixture? fixture;
       var dismissed = false;
 
@@ -63,7 +62,7 @@ void main() {
         await screen.expectMessageBannerContains('stash');
         await screen.expectMessageBannerContains('clean');
 
-        dismissed = await screen.dismissMessageBanner();
+        dismissed = await screen.dismissMessageBannerContaining('Save failed:');
 
         await screen.searchIssues(Ts93LocalIssueFixture.secondIssueKey);
         await screen.expectIssueSearchResultVisible(
