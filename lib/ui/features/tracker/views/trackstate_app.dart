@@ -1617,16 +1617,7 @@ class _SettingsProviderButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     final style = selected
-        ? FilledButton.styleFrom(
-            backgroundColor: colors.primary,
-            foregroundColor: const Color(0xFFFAF8F4),
-            alignment: Alignment.centerLeft,
-            minimumSize: const Size.fromHeight(52),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          )
+        ? _selectedStyle(colors)
         : OutlinedButton.styleFrom(
             foregroundColor: colors.text,
             alignment: Alignment.centerLeft,
@@ -1654,6 +1645,32 @@ class _SettingsProviderButton extends StatelessWidget {
                 child: Text(label),
               ),
       ),
+    );
+  }
+
+  ButtonStyle _selectedStyle(TrackStateColors colors) {
+    const foreground = Color(0xFFFAF8F4);
+    const hoveredBackground = Color(0xFFB85138);
+    const pressedBackground = Color(0xFFB34F35);
+
+    return FilledButton.styleFrom(
+      foregroundColor: foreground,
+      alignment: Alignment.centerLeft,
+      minimumSize: const Size.fromHeight(52),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    ).copyWith(
+      backgroundColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.pressed)) {
+          return pressedBackground;
+        }
+        if (states.contains(WidgetState.hovered) ||
+            states.contains(WidgetState.focused)) {
+          return hoveredBackground;
+        }
+        return colors.primary;
+      }),
+      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
     );
   }
 }

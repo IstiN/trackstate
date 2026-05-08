@@ -435,6 +435,79 @@ Machine ids should survive parsing.
   );
 
   test(
+    'setup repository preserves inline customFields while resolving canonical ids',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+            {'id': 'done', 'name': 'Done'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+            {
+              'id': 'field_101',
+              'name': 'Custom Field 101',
+              'type': 'string',
+              'required': false,
+            },
+            {
+              'id': 'priority',
+              'name': 'Priority',
+              'type': 'option',
+              'required': false,
+            },
+          ]),
+          'DEMO/config/priorities.json': jsonEncode([
+            {'id': 'high', 'name': 'High'},
+          ]),
+          'DEMO/config/versions.json': jsonEncode([]),
+          'DEMO/config/components.json': jsonEncode([]),
+          'DEMO/DEMO-63/main.md': '''
+---
+key: DEMO-63
+project: DEMO
+issueType: story
+status: done
+priority: high
+summary: Inline custom fields issue
+assignee: qa-user
+reporter: qa-admin
+customFields: { "field_101": "value" }
+updated: 2026-05-07T00:00:00Z
+---
+
+# Description
+
+Created from inline frontmatter custom fields.
+''',
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot();
+      final issue = snapshot.issues.single;
+
+      expect(issue.customFields['field_101'], 'value');
+      expect(issue.status, IssueStatus.done);
+      expect(issue.statusId, 'done');
+      expect(issue.priority, IssuePriority.high);
+      expect(issue.priorityId, 'high');
+    },
+  );
+
+  test(
     'setup repository writes the repository canonical status id through the provider adapter',
     () async {
       Map<String, Object?>? savedBody;
@@ -763,7 +836,6 @@ README.md -filter
       expect(putAttempted, isFalse);
     },
   );
-
 }
 
 SetupTrackStateRepository _mockSetupRepository({

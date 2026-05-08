@@ -51,43 +51,37 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
 
   @override
   Future<RepositoryUser> connect(RepositoryConnection connection) async {
-    _session = _buildSession(
+    RepositoryPermission initialPermission = _restrictedPermission;
+    try {
+      initialPermission = await _provider.getPermission();
+    } catch (_) {
+      initialPermission = _restrictedPermission;
+    }
+    _session = _buildProviderSession(
       connectionState: ProviderConnectionState.connecting,
+      resolvedUserIdentity: _provider.repositoryLabel,
+      permission: initialPermission,
     );
 
     RepositoryUser? user;
     try {
       user = await _provider.authenticate(connection);
       final permission = await _provider.getPermission();
-      _session = _buildSession(
+      _session = _buildProviderSession(
         connectionState: ProviderConnectionState.connected,
         resolvedUserIdentity: _resolveUserIdentity(user),
         permission: permission,
       );
       return user;
     } catch (_) {
-      _session = _buildSession(
+      _session = _buildProviderSession(
         connectionState: ProviderConnectionState.disconnected,
         resolvedUserIdentity: _resolveUserIdentity(user),
+        permission: _restrictedPermission,
       );
       rethrow;
     }
   }
-
-  ProviderSession _buildSession({
-    required ProviderConnectionState connectionState,
-    String? resolvedUserIdentity,
-    RepositoryPermission permission = _restrictedPermission,
-  }) => ProviderSession(
-    providerType: _provider.providerType,
-    connectionState: connectionState,
-    resolvedUserIdentity: resolvedUserIdentity ?? _provider.repositoryLabel,
-    canRead: permission.canRead,
-    canWrite: permission.canWrite,
-    canCreateBranch: permission.canCreateBranch,
-    canManageAttachments: permission.canManageAttachments,
-    canCheckCollaborators: permission.canCheckCollaborators,
-  );
 
   String _resolveUserIdentity(RepositoryUser? user) {
     if (user == null) {
@@ -369,6 +363,21 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       repositoryIndex: normalizedIndex,
     );
   }
+
+  ProviderSession _buildProviderSession({
+    required ProviderConnectionState connectionState,
+    required String resolvedUserIdentity,
+    required RepositoryPermission permission,
+  }) => ProviderSession(
+    providerType: _provider.providerType,
+    connectionState: connectionState,
+    resolvedUserIdentity: resolvedUserIdentity,
+    canRead: permission.canRead,
+    canWrite: permission.canWrite,
+    canCreateBranch: permission.canCreateBranch,
+    canManageAttachments: permission.canManageAttachments,
+    canCheckCollaborators: permission.canCheckCollaborators,
+  );
 
   String _resolveConfigRoot(Map<String, Object?> projectJson, String dataRoot) {
     final configuredPath = projectJson['configPath']?.toString().trim();
@@ -892,6 +901,11 @@ Object? _parseScalar(String value) {
   if (trimmed == 'null') return null;
   if (trimmed == 'true') return true;
   if (trimmed == 'false') return false;
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    final structuredValue = _parseInlineStructuredValue(trimmed);
+    if (structuredValue != null) return structuredValue;
+  }
   if ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
       (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
     return trimmed.substring(1, trimmed.length - 1);
@@ -901,6 +915,29 @@ Object? _parseScalar(String value) {
   final doubleValue = double.tryParse(trimmed);
   if (doubleValue != null) return doubleValue;
   return trimmed;
+}
+
+Object? _parseInlineStructuredValue(String value) {
+  try {
+    return _normalizeStructuredValue(jsonDecode(value));
+  } on FormatException {
+    return null;
+  }
+}
+
+Object? _normalizeStructuredValue(Object? value) {
+  if (value is List) {
+    return value
+        .map<Object?>((entry) => _normalizeStructuredValue(entry))
+        .toList(growable: false);
+  }
+  if (value is Map) {
+    return {
+      for (final entry in value.entries)
+        entry.key.toString(): _normalizeStructuredValue(entry.value),
+    };
+  }
+  return value;
 }
 
 List<String> _stringList(Object? value) {

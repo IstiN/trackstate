@@ -82,17 +82,18 @@ void main() {
   );
 
   test(
-    'provider-backed repository exposes a connecting session while connect is in flight',
+    'provider-backed repository session reflects connecting and live permission updates',
     () async {
-      final provider = _DelayedTrackStateProviderAdapter(
+      final provider = _FakeTrackStateProviderAdapter(
         permission: const RepositoryPermission(
           canRead: true,
-          canWrite: true,
+          canWrite: false,
           isAdmin: false,
-          canCreateBranch: true,
-          canManageAttachments: true,
+          canCreateBranch: false,
+          canManageAttachments: false,
           canCheckCollaborators: false,
         ),
+        delayAuthentication: true,
       );
       final repository = ProviderBackedTrackStateRepository(provider: provider);
 
@@ -108,18 +109,26 @@ void main() {
 
       final ProviderSession initialSession =
           repository.session ??
-          (throw StateError(
-            'Expected an in-flight provider session while connect is pending.',
-          ));
+          (throw StateError('Expected a provider session while connecting.'));
 
       expect(initialSession.connectionState, ProviderConnectionState.connecting);
       expect(initialSession.resolvedUserIdentity, 'mock/repository');
-      expect(initialSession.canRead, isFalse);
+      expect(initialSession.canRead, isTrue);
       expect(initialSession.canWrite, isFalse);
       expect(initialSession.canCreateBranch, isFalse);
       expect(initialSession.canManageAttachments, isFalse);
       expect(initialSession.canCheckCollaborators, isFalse);
 
+      provider.updatePermission(
+        const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+      );
       provider.completeAuthentication();
       await connectFuture;
 
@@ -139,9 +148,14 @@ void main() {
 }
 
 class _FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
-  _FakeTrackStateProviderAdapter({required this.permission});
+  _FakeTrackStateProviderAdapter({
+    required RepositoryPermission permission,
+    this.delayAuthentication = false,
+  }) : _permission = permission;
 
-  final RepositoryPermission permission;
+  final bool delayAuthentication;
+  final Completer<void> _authenticationGate = Completer<void>();
+  RepositoryPermission _permission;
 
   @override
   String get dataRef => 'main';
@@ -153,8 +167,12 @@ class _FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
   String get repositoryLabel => 'mock/repository';
 
   @override
-  Future<RepositoryUser> authenticate(RepositoryConnection connection) async =>
-      const RepositoryUser(login: 'mock-user', displayName: 'Mock User');
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    if (delayAuthentication) {
+      await _authenticationGate.future;
+    }
+    return const RepositoryUser(login: 'mock-user', displayName: 'Mock User');
+  }
 
   @override
   Future<RepositoryCommitResult> createCommit(
@@ -170,7 +188,7 @@ class _FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
       RepositoryBranch(name: name, exists: true, isCurrent: name == 'main');
 
   @override
-  Future<RepositoryPermission> getPermission() async => permission;
+  Future<RepositoryPermission> getPermission() async => _permission;
 
   @override
   Future<bool> isLfsTracked(String path) async => false;
@@ -211,6 +229,16 @@ class _FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
     branch: request.branch,
     revision: 'mock-revision',
   );
+
+  void updatePermission(RepositoryPermission permission) {
+    _permission = permission;
+  }
+
+  void completeAuthentication() {
+    if (!_authenticationGate.isCompleted) {
+      _authenticationGate.complete();
+    }
+  }
 }
 
 class _FailingTrackStateProviderAdapter implements TrackStateProviderAdapter {
@@ -246,78 +274,6 @@ class _FailingTrackStateProviderAdapter implements TrackStateProviderAdapter {
     canManageAttachments: false,
     canCheckCollaborators: false,
   );
-
-  @override
-  Future<bool> isLfsTracked(String path) async => false;
-
-  @override
-  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async =>
-      const [];
-
-  @override
-  Future<RepositoryAttachment> readAttachment(
-    String path, {
-    required String ref,
-  }) async => RepositoryAttachment(path: path, bytes: Uint8List(0));
-
-  @override
-  Future<RepositoryTextFile> readTextFile(
-    String path, {
-    required String ref,
-  }) async => RepositoryTextFile(path: path, content: '');
-
-  @override
-  Future<String> resolveWriteBranch() async => 'main';
-
-  @override
-  Future<RepositoryAttachmentWriteResult> writeAttachment(
-    RepositoryAttachmentWriteRequest request,
-  ) async => throw UnimplementedError();
-
-  @override
-  Future<RepositoryWriteResult> writeTextFile(
-    RepositoryWriteRequest request,
-  ) async => throw UnimplementedError();
-}
-
-class _DelayedTrackStateProviderAdapter implements TrackStateProviderAdapter {
-  _DelayedTrackStateProviderAdapter({required this.permission});
-
-  final RepositoryPermission permission;
-  final Completer<void> _authenticationGate = Completer<void>();
-
-  @override
-  String get dataRef => 'main';
-
-  @override
-  ProviderType get providerType => ProviderType.github;
-
-  @override
-  String get repositoryLabel => 'mock/repository';
-
-  void completeAuthentication() {
-    if (!_authenticationGate.isCompleted) {
-      _authenticationGate.complete();
-    }
-  }
-
-  @override
-  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
-    await _authenticationGate.future;
-    return const RepositoryUser(login: 'mock-user', displayName: 'Mock User');
-  }
-
-  @override
-  Future<RepositoryCommitResult> createCommit(
-    RepositoryCommitRequest request,
-  ) async => throw UnimplementedError();
-
-  @override
-  Future<RepositoryBranch> getBranch(String name) async =>
-      RepositoryBranch(name: name, exists: true, isCurrent: name == 'main');
-
-  @override
-  Future<RepositoryPermission> getPermission() async => permission;
 
   @override
   Future<bool> isLfsTracked(String path) async => false;
