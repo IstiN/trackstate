@@ -59,15 +59,18 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
   Future<TrackerSnapshot> loadSnapshot() async => snapshot;
 
   @override
-  Future<List<TrackStateIssue>> searchIssues(String jql) {
-    return repository.searchIssues(jql);
-  }
+  Future<List<TrackStateIssue>> searchIssues(String jql) =>
+      repository.searchIssues(jql);
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) => repository.updateIssueDescription(issue, description);
 
   @override
   Future<TrackStateIssue> updateIssueStatus(
     TrackStateIssue issue,
     IssueStatus status,
-  ) {
-    return repository.updateIssueStatus(issue, status);
-  }
+  ) => repository.updateIssueStatus(issue, status);
 }

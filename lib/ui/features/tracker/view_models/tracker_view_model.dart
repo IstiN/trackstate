@@ -14,6 +14,7 @@ enum TrackerMessageKind {
   tokenEmpty,
   githubConnectedDragCards,
   githubConnectionFailed,
+  issueSaveFailed,
   localGitMoveCommitted,
   githubMoveCommitted,
   movePendingGitHubPersistence,
@@ -78,6 +79,12 @@ class TrackerMessage {
         tone: TrackerMessageTone.error,
         error: '$error',
       );
+
+  factory TrackerMessage.issueSaveFailed(Object error) => TrackerMessage._(
+    TrackerMessageKind.issueSaveFailed,
+    tone: TrackerMessageTone.error,
+    error: '$error',
+  );
 
   factory TrackerMessage.localGitMoveCommitted({
     required String issueKey,
@@ -368,6 +375,47 @@ class TrackerViewModel extends ChangeNotifier {
         orElse: () => issue,
       );
       _message = TrackerMessage.moveFailed(error);
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> saveIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async {
+    final normalizedDescription = description.trim();
+    if (normalizedDescription == issue.description.trim()) {
+      return true;
+    }
+    final snapshot = _snapshot;
+    if (snapshot == null) {
+      return false;
+    }
+    _isSaving = true;
+    _message = null;
+    notifyListeners();
+
+    try {
+      final saved = await _repository.updateIssueDescription(
+        issue,
+        normalizedDescription,
+      );
+      _snapshot = await _repository.loadSnapshot();
+      _selectedIssue = _snapshot!.issues.firstWhere(
+        (current) => current.key == saved.key,
+        orElse: () => saved,
+      );
+      _searchResults = await _repository.searchIssues(_jql);
+      return true;
+    } on Object catch (error) {
+      _message = TrackerMessage.issueSaveFailed(error);
+      _selectedIssue = snapshot.issues.firstWhere(
+        (current) => current.key == issue.key,
+        orElse: () => issue,
+      );
+      return false;
     } finally {
       _isSaving = false;
       notifyListeners();

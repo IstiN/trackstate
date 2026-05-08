@@ -129,7 +129,7 @@ void main() {
         isA<TrackStateProviderException>().having(
           (error) => error.message,
           'message',
-          contains('staged or unstaged local changes'),
+          allOf(contains('commit'), contains('stash'), contains('clean')),
         ),
       ),
     );
