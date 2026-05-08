@@ -76,6 +76,7 @@ class TrackStateIssue {
   TrackStateIssue copyWith({
     IssueStatus? status,
     String? statusId,
+    String? description,
     String? rawMarkdown,
     String? updatedLabel,
   }) {
@@ -89,7 +90,7 @@ class TrackStateIssue {
       priority: priority,
       priorityId: priorityId,
       summary: summary,
-      description: description,
+      description: description ?? this.description,
       assignee: assignee,
       reporter: reporter,
       labels: labels,
