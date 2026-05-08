@@ -16,7 +16,6 @@ abstract interface class TrackStateAppComponent {
   Future<void> expectIssueSearchResultVisible(String key, String summary);
 
   void expectIssueSearchResultAbsent(String key, String summary);
-
   Future<void> dragIssueToStatusColumn({
     required String key,
     required String summary,
@@ -65,4 +64,18 @@ abstract interface class TrackStateAppComponent {
     required String branch,
   });
   Future<void> expectTextVisible(String text);
+
+  Future<bool> isTextVisible(String text);
+
+  Future<bool> isSemanticsLabelVisible(String label);
+
+  Future<bool> tapVisibleControl(String label);
+
+  Future<bool> isTextFieldVisible(String label);
+
+  Future<void> enterLabeledTextField(String label, {required String text});
+
+  List<String> visibleTextsSnapshot();
+
+  List<String> visibleSemanticsLabelsSnapshot();
 }
