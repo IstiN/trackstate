@@ -153,7 +153,7 @@ class TrackStateTheme {
     final scheme = ColorScheme(
       brightness: brightness,
       primary: colors.primary,
-      onPrimary: const Color(0xFF111413),
+      onPrimary: const Color(0xFFFAF8F4),
       secondary: colors.secondary,
       onSecondary: colors.text,
       error: colors.error,
