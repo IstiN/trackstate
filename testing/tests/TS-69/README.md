@@ -25,3 +25,7 @@ test_workflow_builds_pages_artifact_without_committing_web_assets ... ok
 
 On success the test also writes the observed live workflow and Pages details to
 `TS69_RESULT_PATH` when that environment variable is provided.
+
+The live probe follows the newest workflow-dispatch run created after the test's
+dispatch request so shared-environment cancellations do not produce false
+failures.

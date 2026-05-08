@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import datetime
 from typing import Any
 from urllib import parse as urllib_parse
 
@@ -76,14 +77,12 @@ class GitHubPagesWorkflowProbe:
             if isinstance(run.get("id"), int)
         }
 
+        dispatch_started_at = time.time()
         self._dispatch_workflow(requested_repository)
-        run = self._wait_for_new_workflow_run(
+        completed_run = self._wait_for_post_dispatch_workflow_completion(
             requested_repository,
             runs_before_dispatch,
-        )
-        completed_run = self._wait_for_workflow_completion(
-            requested_repository,
-            int(run["id"]),
+            dispatch_started_at,
         )
         jobs = self._list_workflow_jobs(
             requested_repository,
@@ -288,39 +287,92 @@ class GitHubPagesWorkflowProbe:
             if isinstance(run, dict) and run.get("event") == "workflow_dispatch"
         ]
 
-    def _wait_for_new_workflow_run(
+    def _wait_for_post_dispatch_workflow_completion(
         self,
         repository: str,
         runs_before_dispatch: set[int],
+        dispatch_started_at: float,
     ) -> dict[str, Any]:
         deadline = time.time() + self._run_timeout_seconds
+        latest_run: dict[str, Any] | None = None
+        latest_run_detail: dict[str, Any] | None = None
         while time.time() < deadline:
-            runs = self._list_workflow_runs(repository)
-            for run in runs:
-                run_id = run.get("id")
-                if isinstance(run_id, int) and run_id not in runs_before_dispatch:
-                    return run
-            time.sleep(self._poll_interval_seconds)
+            latest_run = self._latest_post_dispatch_run(
+                repository,
+                runs_before_dispatch,
+                dispatch_started_at,
+            )
+            if latest_run is None:
+                time.sleep(self._poll_interval_seconds)
+                continue
+
+            latest_run_id = latest_run.get("id")
+            if not isinstance(latest_run_id, int):
+                time.sleep(self._poll_interval_seconds)
+                continue
+
+            latest_run_detail = self._gh_json(
+                f"repos/{repository}/actions/runs/{latest_run_id}"
+            )
+            if latest_run_detail.get("status") != "completed":
+                time.sleep(self._poll_interval_seconds * 2)
+                continue
+            if latest_run_detail.get("conclusion") == "cancelled":
+                time.sleep(self._poll_interval_seconds)
+                continue
+            return latest_run_detail
+
+        if latest_run_detail is not None:
+            raise GitHubCliError(
+                "The newest workflow_dispatch run created after dispatch for "
+                f"{repository} never reached a non-cancelled completed state within "
+                f"{self._run_timeout_seconds} seconds. Last observed run "
+                f"{latest_run_detail.get('id')} finished with status="
+                f"{latest_run_detail.get('status')} and conclusion="
+                f"{latest_run_detail.get('conclusion')}."
+            )
+
         raise GitHubCliError(
             f"No new workflow_dispatch run for {repository} appeared within "
             f"{self._run_timeout_seconds} seconds."
         )
 
-    def _wait_for_workflow_completion(
+    def _latest_post_dispatch_run(
         self,
         repository: str,
-        run_id: int,
-    ) -> dict[str, Any]:
-        deadline = time.time() + self._run_timeout_seconds
-        while time.time() < deadline:
-            run = self._gh_json(f"repos/{repository}/actions/runs/{run_id}")
-            if run.get("status") == "completed":
-                return run
-            time.sleep(self._poll_interval_seconds * 2)
-        raise GitHubCliError(
-            f"Workflow run {run_id} for {repository} did not complete within "
-            f"{self._run_timeout_seconds} seconds."
+        runs_before_dispatch: set[int],
+        dispatch_started_at: float,
+    ) -> dict[str, Any] | None:
+        matching_runs: list[dict[str, Any]] = []
+        dispatch_started_floor = dispatch_started_at - max(self._poll_interval_seconds, 1)
+        for run in self._list_workflow_runs(repository):
+            run_id = run.get("id")
+            created_at = self._run_created_at_epoch(run)
+            if (
+                isinstance(run_id, int)
+                and run_id not in runs_before_dispatch
+                and created_at is not None
+                and created_at >= dispatch_started_floor
+            ):
+                matching_runs.append(run)
+        if not matching_runs:
+            return None
+        return max(
+            matching_runs,
+            key=lambda run: (
+                self._run_created_at_epoch(run) or 0.0,
+                int(run.get("id", 0)),
+            ),
         )
+
+    def _run_created_at_epoch(self, run: dict[str, Any]) -> float | None:
+        created_at = run.get("created_at")
+        if not isinstance(created_at, str) or not created_at:
+            return None
+        try:
+            return datetime.fromisoformat(created_at.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
 
     def _list_workflow_jobs(self, repository: str, run_id: int) -> list[dict[str, Any]]:
         payload = self._gh_json(
