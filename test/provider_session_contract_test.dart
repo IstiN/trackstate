@@ -111,7 +111,10 @@ void main() {
           repository.session ??
           (throw StateError('Expected a provider session while connecting.'));
 
-      expect(initialSession.connectionState, ProviderConnectionState.connecting);
+      expect(
+        initialSession.connectionState,
+        ProviderConnectionState.connecting,
+      );
       expect(initialSession.resolvedUserIdentity, 'mock/repository');
       expect(initialSession.canRead, isTrue);
       expect(initialSession.canWrite, isFalse);
@@ -143,6 +146,71 @@ void main() {
       expect(finalSession.canCreateBranch, isTrue);
       expect(finalSession.canManageAttachments, isTrue);
       expect(finalSession.canCheckCollaborators, isFalse);
+    },
+  );
+
+  test(
+    'provider-backed repository keeps captured session references synchronized',
+    () async {
+      final provider = _FakeTrackStateProviderAdapter(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: false,
+          isAdmin: false,
+          canCreateBranch: false,
+          canManageAttachments: false,
+          canCheckCollaborators: false,
+        ),
+        delayAuthentication: true,
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final connectFuture = repository.connect(
+        const RepositoryConnection(
+          repository: 'mock/repository',
+          branch: 'main',
+          token: 'mock-token',
+        ),
+      );
+
+      await Future<void>.delayed(Duration.zero);
+
+      final ProviderSession capturedSession =
+          repository.session ??
+          (throw StateError('Expected a provider session while connecting.'));
+
+      expect(
+        capturedSession.connectionState,
+        ProviderConnectionState.connecting,
+      );
+      expect(capturedSession.resolvedUserIdentity, 'mock/repository');
+      expect(capturedSession.canCreateBranch, isFalse);
+
+      provider.updatePermission(
+        const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+      );
+      provider.completeAuthentication();
+      await connectFuture;
+
+      final ProviderSession latestSession =
+          repository.session ??
+          (throw StateError('Expected a provider session after connect.'));
+
+      expect(identical(capturedSession, latestSession), isTrue);
+      expect(
+        capturedSession.connectionState,
+        ProviderConnectionState.connected,
+      );
+      expect(capturedSession.resolvedUserIdentity, 'mock-user');
+      expect(capturedSession.canCreateBranch, isTrue);
+      expect(capturedSession.canManageAttachments, isTrue);
     },
   );
 }
@@ -266,14 +334,15 @@ class _FailingTrackStateProviderAdapter implements TrackStateProviderAdapter {
       RepositoryBranch(name: name, exists: true, isCurrent: name == 'main');
 
   @override
-  Future<RepositoryPermission> getPermission() async => const RepositoryPermission(
-    canRead: false,
-    canWrite: false,
-    isAdmin: false,
-    canCreateBranch: false,
-    canManageAttachments: false,
-    canCheckCollaborators: false,
-  );
+  Future<RepositoryPermission> getPermission() async =>
+      const RepositoryPermission(
+        canRead: false,
+        canWrite: false,
+        isAdmin: false,
+        canCreateBranch: false,
+        canManageAttachments: false,
+        canCheckCollaborators: false,
+      );
 
   @override
   Future<bool> isLfsTracked(String path) async => false;
