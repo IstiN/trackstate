@@ -61,6 +61,16 @@ module.exports = {
             GOAL_INSTRUCTIONS,
             './.dmtools/instructions/architecture/trackstate_scope.md',
             './.dmtools/prompts/rework_focus.md'
+        ],
+        pr_test_automation_review: [
+            GOAL_INSTRUCTIONS,
+            './.dmtools/instructions/architecture/trackstate_scope.md',
+            './.dmtools/prompts/test_review_focus.md'
+        ],
+        pr_test_automation_rework: [
+            GOAL_INSTRUCTIONS,
+            './.dmtools/instructions/architecture/trackstate_scope.md',
+            './.dmtools/prompts/test_rework_focus.md'
         ]
     },
 
