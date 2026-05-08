@@ -12,6 +12,10 @@ abstract interface class TrackStateRepository {
   Future<TrackerSnapshot> loadSnapshot();
   Future<List<TrackStateIssue>> searchIssues(String jql);
   Future<RepositoryUser> connect(RepositoryConnection connection);
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  );
   Future<TrackStateIssue> updateIssueStatus(
     TrackStateIssue issue,
     IssueStatus status,
@@ -75,6 +79,50 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   Future<List<TrackStateIssue>> searchIssues(String jql) async {
     final snapshot = _snapshot ?? await loadSnapshot();
     return _filterIssues(snapshot.issues, jql);
+  }
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async {
+    if (issue.storagePath.isEmpty) {
+      throw const TrackStateRepositoryException(
+        'This issue has no repository file path and cannot be saved.',
+      );
+    }
+    final permission = await _provider.getPermission();
+    if (!permission.canWrite) {
+      throw const TrackStateRepositoryException(
+        'Connect a repository session with write access first.',
+      );
+    }
+
+    final normalizedDescription = description.trim();
+    final writeBranch = await _provider.resolveWriteBranch();
+    final file = await _provider.readTextFile(issue.storagePath, ref: writeBranch);
+    final updatedMarkdown = _replaceSection(
+      file.content,
+      'Description',
+      normalizedDescription,
+    );
+    await _provider.writeTextFile(
+      RepositoryWriteRequest(
+        path: issue.storagePath,
+        content: updatedMarkdown,
+        message: 'Update ${issue.key} description',
+        branch: writeBranch,
+        expectedRevision: file.revision,
+      ),
+    );
+
+    final updatedIssue = issue.copyWith(
+      description: normalizedDescription,
+      rawMarkdown: updatedMarkdown,
+      updatedLabel: 'just now',
+    );
+    _replaceCachedIssue(updatedIssue);
+    return updatedIssue;
   }
 
   @override
@@ -590,6 +638,15 @@ class DemoTrackStateRepository implements TrackStateRepository {
   Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
 
   @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async => issue.copyWith(
+    description: description.trim(),
+    updatedLabel: 'just now',
+  );
+
+  @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
       _filterIssues(_snapshot.issues, jql);
 
@@ -879,6 +936,23 @@ String _replaceFrontmatterValue(String markdown, String key, String value) {
     return markdown.replaceFirst(pattern, '$key: $value');
   }
   return markdown.replaceFirst('---\n', '---\n$key: $value\n');
+}
+
+String _replaceSection(String markdown, String title, String content) {
+  final normalizedContent = content.trim();
+  final pattern = RegExp(
+    '^# $title\\s*\\n([\\s\\S]*?)(?=\\n# |\\z)',
+    multiLine: true,
+  );
+  if (pattern.hasMatch(markdown)) {
+    return markdown.replaceFirst(
+      pattern,
+      '# $title\n\n$normalizedContent',
+    );
+  }
+  final trimmed = markdown.trimRight();
+  final separator = trimmed.isEmpty ? '' : '\n\n';
+  return '$trimmed$separator# $title\n\n$normalizedContent\n';
 }
 
 List<TrackStateConfigEntry> _configEntriesFromJson(
