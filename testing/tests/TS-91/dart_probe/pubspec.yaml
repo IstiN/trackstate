@@ -1,0 +1,9 @@
+name: ts91_provider_default_session_probe
+publish_to: none
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  http:
+    path: packages/http
