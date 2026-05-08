@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -44,12 +45,67 @@ void main() {
       expect(session.canCheckCollaborators, isFalse);
     },
   );
+
+  test(
+    'provider-backed repository session reflects connecting and live permission updates',
+    () async {
+      final provider = _FakeTrackStateProviderAdapter(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: false,
+          isAdmin: false,
+          canCreateBranch: false,
+        ),
+        delayAuthentication: true,
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final connectFuture = repository.connect(
+        const RepositoryConnection(
+          repository: 'mock/repository',
+          branch: 'main',
+          token: 'mock-token',
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final initialSession =
+          repository.session ??
+          (throw StateError('Expected a provider session while connecting.'));
+
+      expect(initialSession.connectionState, ProviderConnectionState.connecting);
+      expect(initialSession.canCreateBranch, isFalse);
+
+      provider.updatePermission(
+        const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+        ),
+      );
+      provider.completeAuthentication();
+      await connectFuture;
+
+      final finalSession =
+          repository.session ??
+          (throw StateError('Expected a provider session after connect.'));
+
+      expect(finalSession.connectionState, ProviderConnectionState.connected);
+      expect(finalSession.canCreateBranch, isTrue);
+    },
+  );
 }
 
 class _FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
-  _FakeTrackStateProviderAdapter({required this.permission});
+  _FakeTrackStateProviderAdapter({
+    required RepositoryPermission permission,
+    this.delayAuthentication = false,
+  }) : _permission = permission;
 
-  final RepositoryPermission permission;
+  final bool delayAuthentication;
+  final Completer<void> _authenticationGate = Completer<void>();
+  RepositoryPermission _permission;
 
   @override
   String get dataRef => 'main';
@@ -61,8 +117,12 @@ class _FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
   String get repositoryLabel => 'mock/repository';
 
   @override
-  Future<RepositoryUser> authenticate(RepositoryConnection connection) async =>
-      const RepositoryUser(login: 'mock-user', displayName: 'Mock User');
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    if (delayAuthentication) {
+      await _authenticationGate.future;
+    }
+    return const RepositoryUser(login: 'mock-user', displayName: 'Mock User');
+  }
 
   @override
   Future<RepositoryCommitResult> createCommit(
@@ -78,7 +138,7 @@ class _FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
       RepositoryBranch(name: name, exists: true, isCurrent: name == 'main');
 
   @override
-  Future<RepositoryPermission> getPermission() async => permission;
+  Future<RepositoryPermission> getPermission() async => _permission;
 
   @override
   Future<bool> isLfsTracked(String path) async => false;
@@ -119,4 +179,14 @@ class _FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
     branch: request.branch,
     revision: 'mock-revision',
   );
+
+  void updatePermission(RepositoryPermission permission) {
+    _permission = permission;
+  }
+
+  void completeAuthentication() {
+    if (!_authenticationGate.isCompleted) {
+      _authenticationGate.complete();
+    }
+  }
 }
