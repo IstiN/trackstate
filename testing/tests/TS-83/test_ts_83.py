@@ -5,21 +5,23 @@ import os
 from pathlib import Path
 import unittest
 
-from testing.components.services.release_source_workflow_validator import (
-    ReleaseSourceWorkflowValidator,
+from testing.core.interfaces.release_source_workflow_probe import (
+    ReleaseSourceWorkflowProbe,
 )
-from testing.core.config.release_source_workflow_config import (
-    load_release_source_workflow_config,
+from testing.tests.support.release_source_workflow_probe_factory import (
+    create_release_source_workflow_probe,
 )
 
 
 class ReleaseSourceWorkflowInclusionTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.config = load_release_source_workflow_config()
-        self.validator = ReleaseSourceWorkflowValidator(self.config)
+        self.repository_root = Path(__file__).resolve().parents[3]
+        self.probe: ReleaseSourceWorkflowProbe = create_release_source_workflow_probe(
+            self.repository_root
+        )
 
     def test_latest_release_or_tag_includes_install_update_workflow(self) -> None:
-        observation = self.validator.validate()
+        observation = self.probe.validate()
         self._write_result_if_requested(observation.to_dict())
 
         self.assertTrue(
@@ -56,6 +58,7 @@ class ReleaseSourceWorkflowInclusionTest(unittest.TestCase):
             "Step 5 failed: the latest stable source snapshot does not include the "
             f"required workflow file.\nRepository: {observation.repository}\n"
             f"Selected {selected_ref.kind}: {selected_ref.name}\n"
+            f"Selected ref observed at: {selected_ref.observed_at}\n"
             f"Selected ref URL: {selected_ref.html_url}\n"
             f"Expected workflow path: {observation.workflow_path}",
         )
