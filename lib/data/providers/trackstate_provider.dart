@@ -54,7 +54,7 @@ enum ProviderType { github, local }
 enum ProviderConnectionState { disconnected, connecting, connected }
 
 class ProviderSession {
-  const ProviderSession({
+  ProviderSession({
     required this.providerType,
     required this.connectionState,
     required this.resolvedUserIdentity,
@@ -65,14 +65,34 @@ class ProviderSession {
     required this.canCheckCollaborators,
   });
 
-  final ProviderType providerType;
-  final ProviderConnectionState connectionState;
-  final String resolvedUserIdentity;
-  final bool canRead;
-  final bool canWrite;
-  final bool canCreateBranch;
-  final bool canManageAttachments;
-  final bool canCheckCollaborators;
+  ProviderType providerType;
+  ProviderConnectionState connectionState;
+  String resolvedUserIdentity;
+  bool canRead;
+  bool canWrite;
+  bool canCreateBranch;
+  bool canManageAttachments;
+  bool canCheckCollaborators;
+
+  void update({
+    required ProviderType providerType,
+    required ProviderConnectionState connectionState,
+    required String resolvedUserIdentity,
+    required bool canRead,
+    required bool canWrite,
+    required bool canCreateBranch,
+    required bool canManageAttachments,
+    required bool canCheckCollaborators,
+  }) {
+    this.providerType = providerType;
+    this.connectionState = connectionState;
+    this.resolvedUserIdentity = resolvedUserIdentity;
+    this.canRead = canRead;
+    this.canWrite = canWrite;
+    this.canCreateBranch = canCreateBranch;
+    this.canManageAttachments = canManageAttachments;
+    this.canCheckCollaborators = canCheckCollaborators;
+  }
 }
 
 class RepositoryTreeEntry {

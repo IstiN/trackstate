@@ -57,7 +57,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     } catch (_) {
       initialPermission = _restrictedPermission;
     }
-    _session = _buildProviderSession(
+    _syncProviderSession(
       connectionState: ProviderConnectionState.connecting,
       resolvedUserIdentity: _provider.repositoryLabel,
       permission: initialPermission,
@@ -67,14 +67,14 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     try {
       user = await _provider.authenticate(connection);
       final permission = await _provider.getPermission();
-      _session = _buildProviderSession(
+      _syncProviderSession(
         connectionState: ProviderConnectionState.connected,
         resolvedUserIdentity: _resolveUserIdentity(user),
         permission: permission,
       );
       return user;
     } catch (_) {
-      _session = _buildProviderSession(
+      _syncProviderSession(
         connectionState: ProviderConnectionState.disconnected,
         resolvedUserIdentity: _resolveUserIdentity(user),
         permission: _restrictedPermission,
@@ -128,7 +128,10 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
 
     final normalizedDescription = description.trim();
     final writeBranch = await _provider.resolveWriteBranch();
-    final file = await _provider.readTextFile(issue.storagePath, ref: writeBranch);
+    final file = await _provider.readTextFile(
+      issue.storagePath,
+      ref: writeBranch,
+    );
     final updatedMarkdown = _replaceSection(
       file.content,
       'Description',
@@ -364,20 +367,36 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     );
   }
 
-  ProviderSession _buildProviderSession({
+  ProviderSession _syncProviderSession({
     required ProviderConnectionState connectionState,
     required String resolvedUserIdentity,
     required RepositoryPermission permission,
-  }) => ProviderSession(
-    providerType: _provider.providerType,
-    connectionState: connectionState,
-    resolvedUserIdentity: resolvedUserIdentity,
-    canRead: permission.canRead,
-    canWrite: permission.canWrite,
-    canCreateBranch: permission.canCreateBranch,
-    canManageAttachments: permission.canManageAttachments,
-    canCheckCollaborators: permission.canCheckCollaborators,
-  );
+  }) {
+    final session =
+        _session ??
+        ProviderSession(
+          providerType: _provider.providerType,
+          connectionState: connectionState,
+          resolvedUserIdentity: resolvedUserIdentity,
+          canRead: permission.canRead,
+          canWrite: permission.canWrite,
+          canCreateBranch: permission.canCreateBranch,
+          canManageAttachments: permission.canManageAttachments,
+          canCheckCollaborators: permission.canCheckCollaborators,
+        );
+    session.update(
+      providerType: _provider.providerType,
+      connectionState: connectionState,
+      resolvedUserIdentity: resolvedUserIdentity,
+      canRead: permission.canRead,
+      canWrite: permission.canWrite,
+      canCreateBranch: permission.canCreateBranch,
+      canManageAttachments: permission.canManageAttachments,
+      canCheckCollaborators: permission.canCheckCollaborators,
+    );
+    _session = session;
+    return session;
+  }
 
   String _resolveConfigRoot(Map<String, Object?> projectJson, String dataRoot) {
     final configuredPath = projectJson['configPath']?.toString().trim();
@@ -669,10 +688,8 @@ class DemoTrackStateRepository implements TrackStateRepository {
   Future<TrackStateIssue> updateIssueDescription(
     TrackStateIssue issue,
     String description,
-  ) async => issue.copyWith(
-    description: description.trim(),
-    updatedLabel: 'just now',
-  );
+  ) async =>
+      issue.copyWith(description: description.trim(), updatedLabel: 'just now');
 
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
@@ -1001,10 +1018,7 @@ String _replaceSection(String markdown, String title, String content) {
     multiLine: true,
   );
   if (pattern.hasMatch(markdown)) {
-    return markdown.replaceFirst(
-      pattern,
-      '# $title\n\n$normalizedContent',
-    );
+    return markdown.replaceFirst(pattern, '# $title\n\n$normalizedContent');
   }
   final trimmed = markdown.trimRight();
   final separator = trimmed.isEmpty ? '' : '\n\n';
