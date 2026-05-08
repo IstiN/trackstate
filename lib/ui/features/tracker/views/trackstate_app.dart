@@ -1142,10 +1142,6 @@ class _IssueDetailState extends State<_IssueDetail> {
         icon: TrackStateIconGlyph.gitBranch,
         onPressed: canUseWriteActions ? () {} : null,
       ),
-      _IssueDetailActionButton(
-        label: l10n.comments,
-        onPressed: canUseWriteActions ? () {} : null,
-      ),
       if (_isEditing)
         _IssueDetailActionButton(
           label: l10n.save,
