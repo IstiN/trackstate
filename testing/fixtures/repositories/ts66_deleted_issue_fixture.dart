@@ -132,22 +132,9 @@ This issue is deleted in the second repository revision.
     await _git(['commit', '-m', 'Seed active issues for TS-66']);
     final beforeDeletionRef = await _gitOutput(['rev-parse', 'HEAD']);
 
-    await File('${directory.path}/$deletedIssuePath').delete();
-    await _writeFile(
-      deletedIndexPath,
-      const JsonEncoder.withIndent('  ').convert([
-        {
-          'key': deletedIssueKey,
-          'project': 'TRACK',
-          'formerPath': deletedIssuePath,
-          'deletedAt': '2026-05-06T12:00:00Z',
-          'summary': 'Deleted story',
-          'issueType': 'story',
-          'parent': null,
-          'epic': null,
-        },
-      ]),
-    );
+    final deletedIssue = await _loadDeletedIssueRecord(deletedIssuePath);
+    await _git(['rm', '--', deletedIssuePath]);
+    await _rebuildDeletedIndexFromStagedDeletes([deletedIssue]);
     await _git(['add', '-A']);
     await _git(['commit', '-m', 'Delete TRACK-123 and reserve its key']);
     final afterDeletionRef = await _gitOutput(['rev-parse', 'HEAD']);
@@ -178,6 +165,49 @@ This issue is deleted in the second repository revision.
       throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
     }
     return result.stdout.toString().trim();
+  }
+
+  Future<void> _rebuildDeletedIndexFromStagedDeletes(
+    List<_DeletedIssueRecord> deletedIssues,
+  ) async {
+    final deletedPaths = (await _gitOutput([
+      'diff',
+      '--cached',
+      '--name-only',
+      '--diff-filter=D',
+    ])).split('\n')..removeWhere((path) => path.trim().isEmpty);
+    final entries = deletedIssues
+        .where((issue) => deletedPaths.contains(issue.formerPath))
+        .map((issue) => issue.toJson())
+        .toList(growable: false);
+    if (entries.isEmpty) {
+      throw StateError(
+        'Expected a staged deleted issue before rebuilding TS-66 deleted.json.',
+      );
+    }
+    await _writeFile(
+      deletedIndexPath,
+      const JsonEncoder.withIndent('  ').convert(entries),
+    );
+  }
+
+  Future<_DeletedIssueRecord> _loadDeletedIssueRecord(
+    String relativePath,
+  ) async {
+    final content = await File(
+      '${directory.path}/$relativePath',
+    ).readAsString();
+    final metadata = _frontmatter(content);
+    return _DeletedIssueRecord(
+      key: metadata['key'] ?? '',
+      project: metadata['project'] ?? '',
+      formerPath: relativePath,
+      deletedAt: metadata['updated'] ?? '',
+      summary: metadata['summary'] ?? '',
+      issueType: metadata['issueType'] ?? '',
+      parent: _nullable(metadata['parent']),
+      epic: _nullable(metadata['epic']),
+    );
   }
 
   Future<bool> _pathExistsAtRef(String ref, String path) async {
@@ -219,6 +249,40 @@ This issue is deleted in the second repository revision.
         )
         .toList(growable: false);
   }
+
+  Map<String, String> _frontmatter(String markdown) {
+    final lines = const LineSplitter().convert(markdown);
+    if (lines.length < 3 || lines.first.trim() != '---') {
+      throw StateError(
+        'Expected YAML frontmatter in TS-66 fixture issue markdown.',
+      );
+    }
+    final metadata = <String, String>{};
+    for (final line in lines.skip(1)) {
+      if (line.trim() == '---') {
+        break;
+      }
+      final separator = line.indexOf(':');
+      if (separator <= 0) {
+        continue;
+      }
+      metadata[line.substring(0, separator).trim()] = line
+          .substring(separator + 1)
+          .trim();
+    }
+    return metadata;
+  }
+
+  String? _nullable(String? value) {
+    if (value == null) {
+      return null;
+    }
+    final normalized = value.trim();
+    if (normalized.isEmpty || normalized.toLowerCase() == 'null') {
+      return null;
+    }
+    return normalized;
+  }
 }
 
 class Ts66DeletedIssueObservation {
@@ -241,4 +305,37 @@ class Ts66DeletedIssueObservation {
   final List<Map<String, Object?>> deletedIndexEntries;
   final List<TrackStateIssue> deletedIssueSearchResults;
   final List<TrackStateIssue> activeIssueSearchResults;
+}
+
+class _DeletedIssueRecord {
+  const _DeletedIssueRecord({
+    required this.key,
+    required this.project,
+    required this.formerPath,
+    required this.deletedAt,
+    required this.summary,
+    required this.issueType,
+    required this.parent,
+    required this.epic,
+  });
+
+  final String key;
+  final String project;
+  final String formerPath;
+  final String deletedAt;
+  final String summary;
+  final String issueType;
+  final String? parent;
+  final String? epic;
+
+  Map<String, Object?> toJson() => {
+    'key': key,
+    'project': project,
+    'formerPath': formerPath,
+    'deletedAt': deletedAt,
+    'summary': summary,
+    'issueType': issueType,
+    'parent': parent,
+    'epic': epic,
+  };
 }
