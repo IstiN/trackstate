@@ -41,21 +41,31 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
 
   @override
   Future<RepositoryUser> connect(RepositoryConnection connection) async {
-    final user = await _provider.authenticate(connection);
-    final permission = await _provider.getPermission();
-    _session = ProviderSession(
-      providerType: _provider.providerType,
-      connectionState: ProviderConnectionState.connected,
-      resolvedUserIdentity: user.login
-          .ifEmpty(user.displayName)
-          .ifEmpty(_provider.repositoryLabel),
-      canRead: permission.canRead,
-      canWrite: permission.canWrite,
-      canCreateBranch: permission.canCreateBranch,
-      canManageAttachments: permission.canManageAttachments,
-      canCheckCollaborators: permission.canCheckCollaborators,
+    final initialPermission = await _provider.getPermission();
+    _session = _buildProviderSession(
+      connectionState: ProviderConnectionState.connecting,
+      resolvedUserIdentity: _provider.repositoryLabel,
+      permission: initialPermission,
     );
-    return user;
+    try {
+      final user = await _provider.authenticate(connection);
+      final permission = await _provider.getPermission();
+      _session = _buildProviderSession(
+        connectionState: ProviderConnectionState.connected,
+        resolvedUserIdentity: user.login
+            .ifEmpty(user.displayName)
+            .ifEmpty(_provider.repositoryLabel),
+        permission: permission,
+      );
+      return user;
+    } catch (_) {
+      _session = _buildProviderSession(
+        connectionState: ProviderConnectionState.disconnected,
+        resolvedUserIdentity: _provider.repositoryLabel,
+        permission: initialPermission,
+      );
+      rethrow;
+    }
   }
 
   @override
@@ -325,6 +335,21 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       repositoryIndex: normalizedIndex,
     );
   }
+
+  ProviderSession _buildProviderSession({
+    required ProviderConnectionState connectionState,
+    required String resolvedUserIdentity,
+    required RepositoryPermission permission,
+  }) => ProviderSession(
+    providerType: _provider.providerType,
+    connectionState: connectionState,
+    resolvedUserIdentity: resolvedUserIdentity,
+    canRead: permission.canRead,
+    canWrite: permission.canWrite,
+    canCreateBranch: permission.canCreateBranch,
+    canManageAttachments: permission.canManageAttachments,
+    canCheckCollaborators: permission.canCheckCollaborators,
+  );
 
   String _resolveConfigRoot(Map<String, Object?> projectJson, String dataRoot) {
     final configuredPath = projectJson['configPath']?.toString().trim();
