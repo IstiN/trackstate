@@ -51,7 +51,7 @@ abstract interface class TrackStateProviderAdapter
 
 enum ProviderType { github, local }
 
-enum ProviderConnectionState { disconnected, connected }
+enum ProviderConnectionState { disconnected, connecting, connected }
 
 class ProviderSession {
   const ProviderSession({

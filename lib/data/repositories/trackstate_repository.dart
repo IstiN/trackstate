@@ -12,6 +12,10 @@ abstract interface class TrackStateRepository {
   Future<TrackerSnapshot> loadSnapshot();
   Future<List<TrackStateIssue>> searchIssues(String jql);
   Future<RepositoryUser> connect(RepositoryConnection connection);
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  );
   Future<TrackStateIssue> updateIssueStatus(
     TrackStateIssue issue,
     IssueStatus status,
@@ -37,21 +41,31 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
 
   @override
   Future<RepositoryUser> connect(RepositoryConnection connection) async {
-    final user = await _provider.authenticate(connection);
-    final permission = await _provider.getPermission();
-    _session = ProviderSession(
-      providerType: _provider.providerType,
-      connectionState: ProviderConnectionState.connected,
-      resolvedUserIdentity: user.login
-          .ifEmpty(user.displayName)
-          .ifEmpty(_provider.repositoryLabel),
-      canRead: permission.canRead,
-      canWrite: permission.canWrite,
-      canCreateBranch: permission.canCreateBranch,
-      canManageAttachments: permission.canManageAttachments,
-      canCheckCollaborators: permission.canCheckCollaborators,
+    final initialPermission = await _provider.getPermission();
+    _session = _buildProviderSession(
+      connectionState: ProviderConnectionState.connecting,
+      resolvedUserIdentity: _provider.repositoryLabel,
+      permission: initialPermission,
     );
-    return user;
+    try {
+      final user = await _provider.authenticate(connection);
+      final permission = await _provider.getPermission();
+      _session = _buildProviderSession(
+        connectionState: ProviderConnectionState.connected,
+        resolvedUserIdentity: user.login
+            .ifEmpty(user.displayName)
+            .ifEmpty(_provider.repositoryLabel),
+        permission: permission,
+      );
+      return user;
+    } catch (_) {
+      _session = _buildProviderSession(
+        connectionState: ProviderConnectionState.disconnected,
+        resolvedUserIdentity: _provider.repositoryLabel,
+        permission: initialPermission,
+      );
+      rethrow;
+    }
   }
 
   @override
@@ -65,6 +79,50 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   Future<List<TrackStateIssue>> searchIssues(String jql) async {
     final snapshot = _snapshot ?? await loadSnapshot();
     return _filterIssues(snapshot.issues, jql);
+  }
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async {
+    if (issue.storagePath.isEmpty) {
+      throw const TrackStateRepositoryException(
+        'This issue has no repository file path and cannot be saved.',
+      );
+    }
+    final permission = await _provider.getPermission();
+    if (!permission.canWrite) {
+      throw const TrackStateRepositoryException(
+        'Connect a repository session with write access first.',
+      );
+    }
+
+    final normalizedDescription = description.trim();
+    final writeBranch = await _provider.resolveWriteBranch();
+    final file = await _provider.readTextFile(issue.storagePath, ref: writeBranch);
+    final updatedMarkdown = _replaceSection(
+      file.content,
+      'Description',
+      normalizedDescription,
+    );
+    await _provider.writeTextFile(
+      RepositoryWriteRequest(
+        path: issue.storagePath,
+        content: updatedMarkdown,
+        message: 'Update ${issue.key} description',
+        branch: writeBranch,
+        expectedRevision: file.revision,
+      ),
+    );
+
+    final updatedIssue = issue.copyWith(
+      description: normalizedDescription,
+      rawMarkdown: updatedMarkdown,
+      updatedLabel: 'just now',
+    );
+    _replaceCachedIssue(updatedIssue);
+    return updatedIssue;
   }
 
   @override
@@ -277,6 +335,21 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       repositoryIndex: normalizedIndex,
     );
   }
+
+  ProviderSession _buildProviderSession({
+    required ProviderConnectionState connectionState,
+    required String resolvedUserIdentity,
+    required RepositoryPermission permission,
+  }) => ProviderSession(
+    providerType: _provider.providerType,
+    connectionState: connectionState,
+    resolvedUserIdentity: resolvedUserIdentity,
+    canRead: permission.canRead,
+    canWrite: permission.canWrite,
+    canCreateBranch: permission.canCreateBranch,
+    canManageAttachments: permission.canManageAttachments,
+    canCheckCollaborators: permission.canCheckCollaborators,
+  );
 
   String _resolveConfigRoot(Map<String, Object?> projectJson, String dataRoot) {
     final configuredPath = projectJson['configPath']?.toString().trim();
@@ -563,6 +636,15 @@ class DemoTrackStateRepository implements TrackStateRepository {
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async => issue.copyWith(
+    description: description.trim(),
+    updatedLabel: 'just now',
+  );
 
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
@@ -854,6 +936,23 @@ String _replaceFrontmatterValue(String markdown, String key, String value) {
     return markdown.replaceFirst(pattern, '$key: $value');
   }
   return markdown.replaceFirst('---\n', '---\n$key: $value\n');
+}
+
+String _replaceSection(String markdown, String title, String content) {
+  final normalizedContent = content.trim();
+  final pattern = RegExp(
+    '^# $title\\s*\\n([\\s\\S]*?)(?=\\n# |\\z)',
+    multiLine: true,
+  );
+  if (pattern.hasMatch(markdown)) {
+    return markdown.replaceFirst(
+      pattern,
+      '# $title\n\n$normalizedContent',
+    );
+  }
+  final trimmed = markdown.trimRight();
+  final separator = trimmed.isEmpty ? '' : '\n\n';
+  return '$trimmed$separator# $title\n\n$normalizedContent\n';
 }
 
 List<TrackStateConfigEntry> _configEntriesFromJson(
