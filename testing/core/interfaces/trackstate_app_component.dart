@@ -39,13 +39,16 @@ abstract interface class TrackStateAppComponent {
     required String text,
   });
 
-  Future<void> tapIssueDetailAction(String key, {required String label});
+  Future<void> tapIssueDetailAction(
+    String key, {
+    required String label,
+  });
 
   Future<void> expectMessageBannerContains(String text);
 
-  Future<bool> dismissMessageBannerContaining(String text);
-
   void expectLocalRuntimeChrome();
+
+  Future<bool> dismissMessageBannerContaining(String text);
 
   Future<void> openRepositoryAccess();
 
@@ -61,6 +64,5 @@ abstract interface class TrackStateAppComponent {
     required String repositoryPath,
     required String branch,
   });
-
   Future<void> expectTextVisible(String text);
 }

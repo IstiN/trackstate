@@ -309,7 +309,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
     return false;
   }
-
   @override
   Future<void> expectTextVisible(String text) async {
     final finder = _text(text);
