@@ -1,64 +1,70 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:trackstate/data/repositories/trackstate_repository.dart';
-import 'package:trackstate/data/repositories/trackstate_repository_factory.dart';
-import 'package:trackstate/data/repositories/trackstate_runtime.dart';
+import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 class Ts66DeletedIssueFixture {
-  Ts66DeletedIssueFixture._(this.directory);
+  Ts66DeletedIssueFixture._({
+    required this.directory,
+    required this.beforeDeletionRef,
+    required this.afterDeletionRef,
+  });
 
   final Directory directory;
+  final String beforeDeletionRef;
+  final String afterDeletionRef;
 
   static const deletedIssueKey = 'TRACK-123';
   static const survivingIssueKey = 'TRACK-122';
   static const deletedIssuePath = 'TRACK/$deletedIssueKey/main.md';
-  static const tombstoneArtifactPath =
-      'TRACK/.trackstate/tombstones/$deletedIssueKey.json';
-  static const tombstoneIndexPath = 'TRACK/.trackstate/index/tombstones.json';
+  static const deletedIndexPath = 'TRACK/.trackstate/index/deleted.json';
 
   static Future<Ts66DeletedIssueFixture> create() async {
     final directory = await Directory.systemTemp.createTemp(
       'trackstate-ts-66-',
     );
-    final fixture = Ts66DeletedIssueFixture._(directory);
-    await fixture._seedRepository();
-    return fixture;
+    final fixture = Ts66DeletedIssueFixture._(
+      directory: directory,
+      beforeDeletionRef: '',
+      afterDeletionRef: '',
+    );
+    return fixture._seedRepository();
   }
 
   Future<void> dispose() => directory.delete(recursive: true);
 
-  Future<Ts66DeletedIssueObservation> observeRepositoryState() async {
-    final (repository: repository, snapshot: snapshot) =
-        await _createConnectedRepositoryService();
-    final deletedIssueFileExists = await File(
-      '${directory.path}/$deletedIssuePath',
-    ).exists();
-    final tombstoneArtifactFile = File(
-      '${directory.path}/$tombstoneArtifactPath',
+  Future<Ts66DeletedIssueObservation> observeBeforeDeletionState() =>
+      _observeRepositoryState(beforeDeletionRef);
+
+  Future<Ts66DeletedIssueObservation> observeAfterDeletionState() =>
+      _observeRepositoryState(afterDeletionRef);
+
+  Future<Ts66DeletedIssueObservation> _observeRepositoryState(
+    String ref,
+  ) async {
+    final repository = LocalTrackStateRepository(
+      repositoryPath: directory.path,
+      dataRef: ref,
     );
-    final tombstoneArtifactExists = await tombstoneArtifactFile.exists();
-    final tombstoneArtifact = tombstoneArtifactExists
-        ? _jsonMap(await tombstoneArtifactFile.readAsString())
-        : const <String, Object?>{};
-    final tombstoneIndexFile = File('${directory.path}/$tombstoneIndexPath');
-    final tombstoneIndexExists = await tombstoneIndexFile.exists();
-    final tombstoneIndexEntries = tombstoneIndexExists
-        ? _jsonList(await tombstoneIndexFile.readAsString())
+    final snapshot = await repository.loadSnapshot();
+    final deletedIssueFileExists = await _pathExistsAtRef(
+      ref,
+      deletedIssuePath,
+    );
+    final deletedIndexExists = await _pathExistsAtRef(ref, deletedIndexPath);
+    final deletedIndexEntries = deletedIndexExists
+        ? _jsonList(await _readTextAtRef(ref, deletedIndexPath))
         : const <Map<String, Object?>>[];
 
     return Ts66DeletedIssueObservation(
       snapshot: snapshot,
       deletedIssuePath: deletedIssuePath,
       deletedIssueFileExists: deletedIssueFileExists,
-      tombstoneArtifactPath: tombstoneArtifactPath,
-      tombstoneArtifactExists: tombstoneArtifactExists,
-      tombstoneArtifact: Map<String, Object?>.unmodifiable(tombstoneArtifact),
-      tombstoneIndexPath: tombstoneIndexPath,
-      tombstoneIndexExists: tombstoneIndexExists,
-      tombstoneIndexEntries: List<Map<String, Object?>>.unmodifiable(
-        tombstoneIndexEntries,
+      deletedIndexPath: deletedIndexPath,
+      deletedIndexExists: deletedIndexExists,
+      deletedIndexEntries: List<Map<String, Object?>>.unmodifiable(
+        deletedIndexEntries,
       ),
       deletedIssueSearchResults: List<TrackStateIssue>.unmodifiable(
         await repository.searchIssues('project = TRACK $deletedIssueKey'),
@@ -69,21 +75,7 @@ class Ts66DeletedIssueFixture {
     );
   }
 
-  Future<void> deleteIssueViaRepositoryService() async {
-    final (repository: repository, snapshot: snapshot) =
-        await _createConnectedRepositoryService();
-    final issue = snapshot.issues.singleWhere(
-      (entry) => entry.key == deletedIssueKey,
-    );
-    throw StateError(
-      'TS-66 requires a real repository-service delete operation, but '
-      '${repository.runtimeType} does not expose deleteIssue for '
-      '${issue.key}. The current repository API only supports '
-      'loadSnapshot, searchIssues, connect, and updateIssueStatus.',
-    );
-  }
-
-  Future<void> _seedRepository() async {
+  Future<Ts66DeletedIssueFixture> _seedRepository() async {
     await _writeFile(
       '.gitattributes',
       '*.png filter=lfs diff=lfs merge=lfs -text\n',
@@ -130,31 +122,41 @@ updated: 2026-05-06T12:00:00Z
 
 # Description
 
-This issue will be deleted through the repository service under test.
+This issue is deleted in the second repository revision.
 ''');
 
     await _git(['init', '-b', 'main']);
     await _git(['config', 'user.name', 'Local Tester']);
     await _git(['config', 'user.email', 'local@example.com']);
     await _git(['add', '.']);
-    await _git(['commit', '-m', 'Seed active issues for deletion fixture']);
-  }
+    await _git(['commit', '-m', 'Seed active issues for TS-66']);
+    final beforeDeletionRef = await _gitOutput(['rev-parse', 'HEAD']);
 
-  Future<({TrackStateRepository repository, TrackerSnapshot snapshot})>
-  _createConnectedRepositoryService() async {
-    final repository = createTrackStateRepository(
-      runtime: TrackStateRuntime.localGit,
-      localRepositoryPath: directory.path,
+    await File('${directory.path}/$deletedIssuePath').delete();
+    await _writeFile(
+      deletedIndexPath,
+      const JsonEncoder.withIndent('  ').convert([
+        {
+          'key': deletedIssueKey,
+          'project': 'TRACK',
+          'formerPath': deletedIssuePath,
+          'deletedAt': '2026-05-06T12:00:00Z',
+          'summary': 'Deleted story',
+          'issueType': 'story',
+          'parent': null,
+          'epic': null,
+        },
+      ]),
     );
-    final snapshot = await repository.loadSnapshot();
-    await repository.connect(
-      RepositoryConnection(
-        repository: snapshot.project.repository,
-        branch: snapshot.project.branch,
-        token: '',
-      ),
+    await _git(['add', '-A']);
+    await _git(['commit', '-m', 'Delete TRACK-123 and reserve its key']);
+    final afterDeletionRef = await _gitOutput(['rev-parse', 'HEAD']);
+
+    return Ts66DeletedIssueFixture._(
+      directory: directory,
+      beforeDeletionRef: beforeDeletionRef,
+      afterDeletionRef: afterDeletionRef,
     );
-    return (repository: repository, snapshot: snapshot);
   }
 
   Future<void> _writeFile(String relativePath, String content) async {
@@ -170,14 +172,36 @@ This issue will be deleted through the repository service under test.
     }
   }
 
-  Map<String, Object?> _jsonMap(String content) {
-    final json = jsonDecode(content);
-    if (json is! Map) {
-      throw StateError('Expected a JSON object.');
+  Future<String> _gitOutput(List<String> args) async {
+    final result = await Process.run('git', ['-C', directory.path, ...args]);
+    if (result.exitCode != 0) {
+      throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
     }
-    return {
-      for (final entry in json.entries) entry.key.toString(): entry.value,
-    };
+    return result.stdout.toString().trim();
+  }
+
+  Future<bool> _pathExistsAtRef(String ref, String path) async {
+    final result = await Process.run('git', [
+      '-C',
+      directory.path,
+      'cat-file',
+      '-e',
+      '$ref:$path',
+    ]);
+    return result.exitCode == 0;
+  }
+
+  Future<String> _readTextAtRef(String ref, String path) async {
+    final result = await Process.run('git', [
+      '-C',
+      directory.path,
+      'show',
+      '$ref:$path',
+    ]);
+    if (result.exitCode != 0) {
+      throw StateError('git show $ref:$path failed: ${result.stderr}');
+    }
+    return result.stdout.toString();
   }
 
   List<Map<String, Object?>> _jsonList(String content) {
@@ -202,12 +226,9 @@ class Ts66DeletedIssueObservation {
     required this.snapshot,
     required this.deletedIssuePath,
     required this.deletedIssueFileExists,
-    required this.tombstoneArtifactPath,
-    required this.tombstoneArtifactExists,
-    required this.tombstoneArtifact,
-    required this.tombstoneIndexPath,
-    required this.tombstoneIndexExists,
-    required this.tombstoneIndexEntries,
+    required this.deletedIndexPath,
+    required this.deletedIndexExists,
+    required this.deletedIndexEntries,
     required this.deletedIssueSearchResults,
     required this.activeIssueSearchResults,
   });
@@ -215,12 +236,9 @@ class Ts66DeletedIssueObservation {
   final TrackerSnapshot snapshot;
   final String deletedIssuePath;
   final bool deletedIssueFileExists;
-  final String tombstoneArtifactPath;
-  final bool tombstoneArtifactExists;
-  final Map<String, Object?> tombstoneArtifact;
-  final String tombstoneIndexPath;
-  final bool tombstoneIndexExists;
-  final List<Map<String, Object?>> tombstoneIndexEntries;
+  final String deletedIndexPath;
+  final bool deletedIndexExists;
+  final List<Map<String, Object?>> deletedIndexEntries;
   final List<TrackStateIssue> deletedIssueSearchResults;
   final List<TrackStateIssue> activeIssueSearchResults;
 }

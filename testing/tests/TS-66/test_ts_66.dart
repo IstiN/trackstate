@@ -4,30 +4,36 @@ import '../../fixtures/repositories/ts66_deleted_issue_fixture.dart';
 
 void main() {
   test(
-    'TS-66 deleting an issue through the repository service reserves its key in the tombstone index and removes it from active search results',
+    'TS-66 loads deleted-key metadata from the shipped deleted index and hides the deleted issue from active search results',
     () async {
       final fixture = await Ts66DeletedIssueFixture.create();
       addTearDown(fixture.dispose);
 
-      final beforeDeletion = await fixture.observeRepositoryState();
+      final beforeDeletion = await fixture.observeBeforeDeletionState();
 
       expect(
         beforeDeletion.deletedIssueFileExists,
         isTrue,
         reason:
-            'The fixture should start with TRACK-123 present as a real repository file before the repository-service delete runs.',
+            'The pre-delete repository revision should still contain TRACK-123 as a real issue file.',
       );
       expect(
-        beforeDeletion.tombstoneArtifactExists,
+        beforeDeletion.deletedIndexExists,
         isFalse,
         reason:
-            'The fixture should start without a tombstone artifact so the test exercises the repository-service delete transition instead of loading a prewritten deleted state.',
+            'The pre-delete revision should not contain ${Ts66DeletedIssueFixture.deletedIndexPath} before the delete commit lands.',
       );
       expect(
-        beforeDeletion.tombstoneIndexExists,
-        isFalse,
+        beforeDeletion.snapshot.repositoryIndex.deleted,
+        isEmpty,
         reason:
-            'The fixture should start without a tombstone index so the delete operation is responsible for reserving the deleted key.',
+            'The loaded repository index should not expose deleted-key metadata before the delete revision.',
+      );
+      expect(
+        beforeDeletion.snapshot.repositoryIndex.pathForKey('TRACK-123'),
+        Ts66DeletedIssueFixture.deletedIssuePath,
+        reason:
+            'The pre-delete repository index should still resolve TRACK-123 to its active repository file.',
       );
       expect(
         beforeDeletion.deletedIssueSearchResults
@@ -35,72 +41,94 @@ void main() {
             .toList(),
         ['TRACK-123'],
         reason:
-            'TRACK-123 should be discoverable through standard repository search before the delete operation runs.',
+            'TRACK-123 should be discoverable through standard repository search in the active revision before deletion.',
       );
 
-      await fixture.deleteIssueViaRepositoryService();
-
-      final afterDeletion = await fixture.observeRepositoryState();
+      final afterDeletion = await fixture.observeAfterDeletionState();
 
       expect(
         afterDeletion.deletedIssueFileExists,
         isFalse,
         reason:
-            'Deleting TRACK-123 should remove ${afterDeletion.deletedIssuePath} from the active repository state rather than only hiding it in derived indexes.',
+            'The deleted revision should remove ${afterDeletion.deletedIssuePath} from the active repository tree.',
       );
       expect(
-        afterDeletion.tombstoneArtifactExists,
+        afterDeletion.deletedIndexExists,
         isTrue,
         reason:
-            'Deleting TRACK-123 should persist a tombstone artifact in ${afterDeletion.tombstoneArtifactPath}.',
+            'The shipped delete flow on main should persist deleted-key metadata in ${afterDeletion.deletedIndexPath}.',
       );
       expect(
-        afterDeletion.tombstoneArtifact['key'],
-        'TRACK-123',
-        reason:
-            'The tombstone artifact should keep the original issue key reserved after deletion.',
-      );
-      expect(
-        afterDeletion.tombstoneArtifact['formerPath'],
-        'TRACK/TRACK-123/main.md',
-        reason:
-            'The tombstone artifact should preserve the original repository path so the deleted issue stays traceable.',
-      );
-      expect(
-        afterDeletion.tombstoneArtifact['deletedAt'],
-        '2026-05-06T12:00:00Z',
-        reason:
-            'The tombstone artifact should include deletion metadata that records when the issue was removed.',
-      );
-      expect(
-        afterDeletion.tombstoneIndexExists,
-        isTrue,
-        reason:
-            'Deleting TRACK-123 should reserve the key in ${afterDeletion.tombstoneIndexPath}.',
-      );
-      expect(
-        afterDeletion.tombstoneIndexEntries,
+        afterDeletion.deletedIndexEntries,
         hasLength(1),
         reason:
-            'The tombstone index should contain exactly one reserved-key record for the deleted issue in this fixture.',
+            'The deleted index should contain exactly one reserved-key record for the deleted issue in this fixture.',
       );
       expect(
-        afterDeletion.tombstoneIndexEntries.single['key'],
+        afterDeletion.deletedIndexEntries.single['key'],
         'TRACK-123',
         reason:
-            'The tombstone index should keep the original issue key reserved after deletion.',
+            'The deleted index should keep the original issue key reserved after deletion.',
       );
       expect(
-        afterDeletion.tombstoneIndexEntries.single['formerPath'],
+        afterDeletion.deletedIndexEntries.single['formerPath'],
         'TRACK/TRACK-123/main.md',
         reason:
-            'The tombstone index should preserve the original repository path so the deleted issue stays traceable.',
+            'The deleted index should preserve the original repository path so the deleted issue stays traceable.',
       );
       expect(
-        afterDeletion.tombstoneIndexEntries.single['deletedAt'],
+        afterDeletion.deletedIndexEntries.single['deletedAt'],
         '2026-05-06T12:00:00Z',
         reason:
-            'The tombstone index should include deletion metadata that records when the issue was removed.',
+            'The deleted index should include deletion metadata that records when the issue was removed.',
+      );
+      expect(
+        afterDeletion.deletedIndexEntries.single['summary'],
+        'Deleted story',
+        reason:
+            'The deleted index should preserve the deleted issue summary for user-facing history and traceability.',
+      );
+      expect(
+        afterDeletion.deletedIndexEntries.single['issueType'],
+        'story',
+        reason:
+            'The deleted index should preserve the deleted issue type identifier from the shipped main-branch schema.',
+      );
+      expect(
+        afterDeletion.snapshot.repositoryIndex.deleted,
+        hasLength(1),
+        reason:
+            'Loading the deleted revision should hydrate one deleted-key tombstone model from ${afterDeletion.deletedIndexPath}.',
+      );
+      expect(
+        afterDeletion.snapshot.repositoryIndex.deleted.single.key,
+        'TRACK-123',
+        reason:
+            'The loaded deleted-key model should keep the original issue key reserved after deletion.',
+      );
+      expect(
+        afterDeletion.snapshot.repositoryIndex.deleted.single.formerPath,
+        'TRACK/TRACK-123/main.md',
+        reason:
+            'The loaded deleted-key model should preserve the original repository path so the deleted issue stays traceable.',
+      );
+      expect(
+        afterDeletion.snapshot.repositoryIndex.deleted.single.deletedAt,
+        '2026-05-06T12:00:00Z',
+        reason:
+            'The loaded deleted-key model should include deletion metadata that records when the issue was removed.',
+      );
+      expect(
+        afterDeletion.snapshot.repositoryIndex.deleted.single.summary,
+        'Deleted story',
+        reason:
+            'The loaded deleted-key model should preserve the deleted issue summary from deleted.json.',
+      );
+      expect(
+        afterDeletion.snapshot.repositoryIndex.deleted.single.issueTypeId,
+        'story',
+        reason:
+            'The loaded deleted-key model should preserve the deleted issue type identifier from deleted.json.',
       );
 
       expect(
@@ -113,13 +141,13 @@ void main() {
         afterDeletion.snapshot.repositoryIndex.pathForKey('TRACK-123'),
         isNull,
         reason:
-            'The active repository index should not resolve TRACK-123 after its repository file is removed.',
+            'The active repository index should not resolve TRACK-123 after the deleted revision removes its repository file.',
       );
       expect(
         afterDeletion.deletedIssueSearchResults,
         isEmpty,
         reason:
-            'A user searching for TRACK-123 through standard JQL should not see the deleted issue in active results.',
+            'A user searching for TRACK-123 through standard JQL should not see the deleted issue in active results once it is represented only in deleted.json.',
       );
       expect(
         afterDeletion.activeIssueSearchResults
