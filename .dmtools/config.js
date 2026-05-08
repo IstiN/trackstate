@@ -61,6 +61,16 @@ module.exports = {
             GOAL_INSTRUCTIONS,
             './.dmtools/instructions/architecture/trackstate_scope.md',
             './.dmtools/prompts/rework_focus.md'
+        ],
+        pr_test_automation_review: [
+            GOAL_INSTRUCTIONS,
+            './.dmtools/instructions/architecture/trackstate_scope.md',
+            './.dmtools/prompts/test_review_focus.md'
+        ],
+        pr_test_automation_rework: [
+            GOAL_INSTRUCTIONS,
+            './.dmtools/instructions/architecture/trackstate_scope.md',
+            './.dmtools/prompts/test_rework_focus.md'
         ]
     },
 
@@ -160,10 +170,22 @@ module.exports = {
                 managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
             }
         },
+        test_case_automation: {
+            customParams: {
+                autoStartReview: true,
+                autoStartReviewConfigFile: 'agents/pr_test_automation_review.json'
+            }
+        },
         pr_review: {
             customParams: {
                 autoStartRework: true,
                 autoStartReworkConfigFile: 'agents/pr_rework.json'
+            }
+        },
+        pr_test_automation_review: {
+            customParams: {
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/pr_test_automation_rework.json'
             }
         },
         pr_rework: {
@@ -171,6 +193,12 @@ module.exports = {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
                 managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
+            }
+        },
+        pr_test_automation_rework: {
+            customParams: {
+                autoStartReview: true,
+                autoStartReviewConfigFile: 'agents/pr_test_automation_review.json'
             }
         }
     },

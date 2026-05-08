@@ -12,14 +12,18 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
   final WidgetTester tester;
 
   @override
-  Future<void> launchApp() async {
-    const repository = DemoTrackStateRepository();
+  Future<void> launchApp({
+    required TrackStateRepository repository,
+    Map<String, Object> sharedPreferences = const {},
+  }) async {
     const size = Size(1440, 960);
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues(sharedPreferences);
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
 
-    await tester.pumpWidget(TrackStateApp(repository: repository));
+    await tester.pumpWidget(
+      TrackStateApp(key: UniqueKey(), repository: repository),
+    );
     await tester.pumpAndSettle();
   }
 
@@ -34,6 +38,16 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
     final finder = _bestTapTarget(label);
     await tester.ensureVisible(finder);
     await tester.tap(finder, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> enterTextIntoField(String label, String text) async {
+    final finder = _textFieldFinder(label);
+    await tester.ensureVisible(finder);
+    await tester.tap(finder, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(finder, text);
     await tester.pumpAndSettle();
   }
 
@@ -55,8 +69,7 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
     for (final finder in [_semanticsFinder(label), _textFinder(label)]) {
       final matches = finder.evaluate().toList();
       for (var index = 0; index < matches.length; index++) {
-        final semantics = tester.getSemantics(finder.at(index));
-        final flags = semantics.flagsCollection;
+        final flags = tester.getSemantics(finder.at(index)).flagsCollection;
         final hasSelectionState =
             flags.hasCheckedState || flags.hasSelectedState;
         if (!hasSelectionState) {
@@ -77,6 +90,74 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
       return null;
     }
     return tester.getRect(finder.first);
+  }
+
+  @override
+  List<String> visibleTexts() {
+    return tester
+        .widgetList<Text>(find.byType(Text))
+        .map((widget) => widget.data?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
+
+  @override
+  String? textFieldValue(String label) {
+    final editableTextFinder = _editableTextFinder(label);
+    if (editableTextFinder.evaluate().isEmpty) {
+      return null;
+    }
+    final editableText = tester.widget<EditableText>(editableTextFinder.first);
+    return editableText.controller.text;
+  }
+
+  @override
+  bool isTextFieldReadOnly(String label) {
+    final editableTextFinder = _editableTextFinder(label);
+    if (editableTextFinder.evaluate().isEmpty) {
+      return false;
+    }
+    final editableText = tester.widget<EditableText>(editableTextFinder.first);
+    return editableText.readOnly;
+  }
+
+  @override
+  List<String> visibleProviderLabels() {
+    final controls = find.descendant(
+      of: _repositoryAccessSection,
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    final rows = <({String label, double top})>[];
+    final matches = controls.evaluate().length;
+    for (var index = 0; index < matches; index++) {
+      final control = controls.at(index);
+      rows.add((
+        label: tester.getSemantics(control).label,
+        top: tester.getRect(control).top,
+      ));
+    }
+    rows.sort((left, right) => left.top.compareTo(right.top));
+    return rows.map((row) => row.label).toList();
+  }
+
+  @override
+  bool isProviderSelected(String label) {
+    final control = _providerControl(label);
+    if (control.evaluate().isEmpty) {
+      return false;
+    }
+    final flags = tester.getSemantics(control.first).flagsCollection;
+    return flags.isSelected || flags.isChecked;
+  }
+
+  @override
+  Rect? rectForProviderLabel(String label) {
+    final control = _providerControl(label);
+    if (control.evaluate().isEmpty) {
+      return null;
+    }
+    return tester.getRect(control.first);
   }
 
   Finder _bestTapTarget(String label) {
@@ -111,4 +192,23 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
       find.bySemanticsLabel(RegExp(RegExp.escape(label)));
 
   Finder _textFinder(String text) => find.text(text);
+
+  Finder get _repositoryAccessSection =>
+      find.bySemanticsLabel(RegExp('Repository access'));
+
+  Finder _providerControl(String label) => find.descendant(
+    of: _repositoryAccessSection,
+    matching: find.ancestor(
+      of: _textFinder(label),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    ),
+  );
+
+  Finder _textFieldFinder(String label) =>
+      find.widgetWithText(TextFormField, label);
+
+  Finder _editableTextFinder(String label) => find.descendant(
+    of: _textFieldFinder(label),
+    matching: find.byType(EditableText),
+  );
 }

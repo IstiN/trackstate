@@ -3,6 +3,10 @@ import 'package:trackstate/data/repositories/trackstate_repository.dart';
 abstract interface class TrackStateAppComponent {
   Future<void> pump(TrackStateRepository repository);
 
+  Future<void> pumpLocalGitApp({required String repositoryPath});
+
+  void resetView();
+
   Future<void> openSection(String label);
 
   Future<void> openIssue(String key, String summary);
@@ -17,6 +21,26 @@ abstract interface class TrackStateAppComponent {
   Future<void> expectIssueDetailVisible(String key);
 
   Future<void> expectIssueDetailText(String key, String text);
+
+  Future<void> expectIssueDescriptionEditorVisible(
+    String key, {
+    required String label,
+  });
+
+  Future<void> enterIssueDescription(
+    String key, {
+    required String label,
+    required String text,
+  });
+
+  Future<void> tapIssueDetailAction(
+    String key, {
+    required String label,
+  });
+
+  Future<void> expectMessageBannerContains(String text);
+
+  void expectLocalRuntimeChrome();
 
   Future<void> expectTextVisible(String text);
 }
