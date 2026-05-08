@@ -33,14 +33,19 @@ abstract interface class TrackStateAppComponent {
     required String text,
   });
 
-  Future<void> tapIssueDetailAction(
-    String key, {
-    required String label,
-  });
+  Future<void> tapIssueDetailAction(String key, {required String label});
 
   Future<void> expectMessageBannerContains(String text);
 
   void expectLocalRuntimeChrome();
 
   Future<void> expectTextVisible(String text);
+
+  Future<bool> isTextVisible(String text);
+
+  Future<bool> isSemanticsLabelVisible(String label);
+
+  List<String> visibleTextsSnapshot();
+
+  List<String> visibleSemanticsLabelsSnapshot();
 }

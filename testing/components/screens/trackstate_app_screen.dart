@@ -226,10 +226,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
-  Future<void> tapIssueDetailAction(
-    String key, {
-    required String label,
-  }) async {
+  Future<void> tapIssueDetailAction(String key, {required String label}) async {
     final action = _issueDetailAction(key, label);
     await _waitForVisible(_issueDetail(key));
     if (action.evaluate().isEmpty) {
@@ -265,6 +262,47 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final finder = _text(text);
     await _waitForVisible(finder);
     expect(finder, findsWidgets);
+  }
+
+  @override
+  Future<bool> isTextVisible(String text) async {
+    await tester.pump();
+    return _text(text).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<bool> isSemanticsLabelVisible(String label) async {
+    await tester.pump();
+    return find
+        .bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  List<String> visibleTextsSnapshot() {
+    final values = <String>[];
+    for (final widget in tester.widgetList<Text>(find.byType(Text))) {
+      final value = widget.data?.trim();
+      if (value == null || value.isEmpty) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
+  }
+
+  @override
+  List<String> visibleSemanticsLabelsSnapshot() {
+    final values = <String>[];
+    for (final widget in tester.widgetList<Semantics>(find.byType(Semantics))) {
+      final value = widget.properties.label?.trim();
+      if (value == null || value.isEmpty) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
   }
 
   @override
