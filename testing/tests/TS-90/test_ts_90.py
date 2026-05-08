@@ -12,6 +12,12 @@ from testing.tests.support.provider_session_retry_probe_factory import (
 
 
 class ProviderSessionRetryRecoveryTest(unittest.TestCase):
+    EXPECTED_UNAUTHORIZED_ERROR = "Unauthorized: simulated connection failure for TS-90."
+    EXPECTED_FAILED_CONNECTION_STATE = "ProviderConnectionState.error"
+    EXPECTED_FAILED_USER_IDENTITY = "mock/retry-repository"
+    EXPECTED_RECOVERED_CONNECTION_STATE = "ProviderConnectionState.connected"
+    EXPECTED_RECOVERED_USER_IDENTITY = "retry-user"
+
     def setUp(self) -> None:
         self.repository_root = Path(__file__).resolve().parents[3]
         self.probe: ProviderSessionSyncProbe = create_provider_session_retry_probe(
@@ -63,6 +69,13 @@ class ProviderSessionRetryRecoveryTest(unittest.TestCase):
                 "expected authentication failure.\n"
                 f"Observed payload: {observation}"
             )
+        elif first_connect_error != self.EXPECTED_UNAUTHORIZED_ERROR:
+            failures.append(
+                "Step 1 failed: the initial connection attempt did not surface the "
+                "required unauthorized authentication failure.\n"
+                f"Expected firstConnectError: {self.EXPECTED_UNAUTHORIZED_ERROR!r}\n"
+                f"Observed firstConnectError: {first_connect_error!r}"
+            )
         authenticate_attempts_after_failure = observation.get(
             "authenticateAttemptsAfterFailure"
         )
@@ -75,15 +88,22 @@ class ProviderSessionRetryRecoveryTest(unittest.TestCase):
             )
 
         failed_connection_state = failed_payload.get("connectionState")
-        if failed_connection_state not in (
-            "ProviderConnectionState.disconnected",
-            "ProviderConnectionState.error",
-        ):
+        if failed_connection_state != self.EXPECTED_FAILED_CONNECTION_STATE:
             failures.append(
-                "Step 2 failed: the session getter did not expose a restricted "
-                "failure-state contract after the unauthorized connection.\n"
+                "Step 2 failed: the session getter did not expose the required "
+                "error-state contract after the unauthorized connection.\n"
+                f"Expected failed connectionState: "
+                f"{self.EXPECTED_FAILED_CONNECTION_STATE!r}\n"
                 f"Observed failed session: {failed_payload}\n"
                 f"Observed firstConnectError: {first_connect_error!r}"
+            )
+
+        if failed_payload.get("resolvedUserIdentity") != self.EXPECTED_FAILED_USER_IDENTITY:
+            failures.append(
+                "Step 2 failed: the failure-state session did not expose the expected "
+                "repository identity before the retry.\n"
+                f"Expected resolvedUserIdentity: {self.EXPECTED_FAILED_USER_IDENTITY!r}\n"
+                f"Observed failed session: {failed_payload}"
             )
 
         for field in (
@@ -118,14 +138,20 @@ class ProviderSessionRetryRecoveryTest(unittest.TestCase):
                 f"Observed connectedUserLogin: {observation.get('connectedUserLogin')!r}"
             )
 
-        if recovered_payload.get("connectionState") != "ProviderConnectionState.connected":
+        if (
+            recovered_payload.get("connectionState")
+            != self.EXPECTED_RECOVERED_CONNECTION_STATE
+        ):
             failures.append(
                 "Step 5 failed: the session getter did not update to the expected "
                 "connected state after the retry.\n"
                 f"Observed recovered session: {recovered_payload}"
             )
 
-        if recovered_payload.get("resolvedUserIdentity") != "retry-user":
+        if (
+            recovered_payload.get("resolvedUserIdentity")
+            != self.EXPECTED_RECOVERED_USER_IDENTITY
+        ):
             failures.append(
                 "Step 5 failed: the recovered session did not expose the successful "
                 "authenticated user identity.\n"
