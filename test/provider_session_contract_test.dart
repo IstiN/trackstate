@@ -150,7 +150,7 @@ void main() {
   );
 
   test(
-    'provider-backed repository preserves lifecycle snapshots across later session updates',
+    'provider-backed repository keeps captured session references synchronized',
     () async {
       final provider = _FakeTrackStateProviderAdapter(
         permission: const RepositoryPermission(
@@ -203,14 +203,14 @@ void main() {
           repository.session ??
           (throw StateError('Expected a provider session after connect.'));
 
-      expect(identical(capturedSession, latestSession), isFalse);
+      expect(identical(capturedSession, latestSession), isTrue);
       expect(
         capturedSession.connectionState,
-        ProviderConnectionState.connecting,
+        ProviderConnectionState.connected,
       );
-      expect(capturedSession.resolvedUserIdentity, 'mock/repository');
-      expect(capturedSession.canCreateBranch, isFalse);
-      expect(capturedSession.canManageAttachments, isFalse);
+      expect(capturedSession.resolvedUserIdentity, 'mock-user');
+      expect(capturedSession.canCreateBranch, isTrue);
+      expect(capturedSession.canManageAttachments, isTrue);
       expect(latestSession.connectionState, ProviderConnectionState.connected);
       expect(latestSession.resolvedUserIdentity, 'mock-user');
       expect(latestSession.canCreateBranch, isTrue);
@@ -270,6 +270,7 @@ void main() {
         connectingSession.connectionState,
         ProviderConnectionState.connecting,
       );
+      expect(identical(initialSession, connectingSession), isFalse);
       expect(
         initialSession.connectionState,
         ProviderConnectionState.disconnected,
@@ -278,16 +279,17 @@ void main() {
       provider.completeAuthentication();
       await connectFuture;
 
-      expect(
-        connectingSession.connectionState,
-        ProviderConnectionState.connecting,
-      );
       final ProviderSession connectedSession =
           repository.session ??
           (throw StateError('Expected a provider session after connect.'));
+      expect(identical(connectingSession, connectedSession), isTrue);
       expect(
         connectedSession.connectionState,
         ProviderConnectionState.connected,
+      );
+      expect(
+        initialSession.connectionState,
+        ProviderConnectionState.disconnected,
       );
     },
   );

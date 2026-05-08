@@ -57,7 +57,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   TrackerSnapshot? _snapshot;
   ProviderSession? _session;
 
-  ProviderSession? get session => _session?.copy();
+  ProviderSession? get session => _session;
 
   @override
   Future<RepositoryUser> connect(RepositoryConnection connection) async {
@@ -67,6 +67,16 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     } catch (_) {
       initialPermission = _restrictedPermission;
     }
+    _session = ProviderSession(
+      providerType: _provider.providerType,
+      connectionState: ProviderConnectionState.connecting,
+      resolvedUserIdentity: _provider.repositoryLabel,
+      canRead: initialPermission.canRead,
+      canWrite: initialPermission.canWrite,
+      canCreateBranch: initialPermission.canCreateBranch,
+      canManageAttachments: initialPermission.canManageAttachments,
+      canCheckCollaborators: initialPermission.canCheckCollaborators,
+    );
     _syncProviderSession(
       connectionState: ProviderConnectionState.connecting,
       resolvedUserIdentity: _provider.repositoryLabel,
