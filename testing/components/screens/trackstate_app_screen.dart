@@ -60,6 +60,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     matching: find.byType(EditableText),
   );
 
+  Finder _trackerMessage(String text) =>
+      find.bySemanticsLabel(RegExp(RegExp.escape(text)));
+
   Finder get _jqlSearchPanel => find.bySemanticsLabel(RegExp('^JQL Search\$'));
 
   Finder get _jqlSearchField => find.byType(TextField).last;
@@ -208,6 +211,30 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<void> tapIssueDetailAction({
+    required String key,
+    required String label,
+  }) async {
+    final action = _issueDetailAction(key, label);
+    await expectIssueDetailActionVisible(key: key, label: label);
+    await tester.tap(action.first);
+    await _pumpFrames();
+  }
+
+  @override
+  Future<void> enterIssueDetailDescription({
+    required String key,
+    required String description,
+  }) async {
+    final editor = _issueDetailEditor(key);
+    await _waitForVisible(editor);
+    await tester.tap(editor.first);
+    await tester.pump();
+    await tester.enterText(editor.first, description);
+    await tester.pump();
+  }
+
+  @override
   void expectIssueDetailActionAbsent({
     required String key,
     required String label,
@@ -223,6 +250,13 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<void> expectTextVisible(String text) async {
     final finder = _text(text);
+    await _waitForVisible(finder);
+    expect(finder, findsWidgets);
+  }
+
+  @override
+  Future<void> expectTrackerMessageVisible(String text) async {
+    final finder = _trackerMessage(text);
     await _waitForVisible(finder);
     expect(finder, findsWidgets);
   }
