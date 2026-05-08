@@ -111,6 +111,9 @@ Read and write tracker files through GitHub Contents API.
   String get dataRef => 'main';
 
   @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
   String get repositoryLabel => 'trackstate/trackstate';
 
   @override

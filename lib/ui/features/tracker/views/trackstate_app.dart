@@ -338,6 +338,48 @@ class _TopBar extends StatelessWidget {
             onPressed: viewModel.toggleTheme,
           ),
           const SizedBox(width: 8),
+          if (viewModel.connectedUser != null) ...[
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: compact ? 160 : 240),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Semantics(
+                    container: true,
+                    label: _profileDisplayName(viewModel),
+                    child: ExcludeSemantics(
+                      child: Text(
+                        _profileDisplayName(viewModel),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: colors.text,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_profileLogin(viewModel) case final login?)
+                    Semantics(
+                      container: true,
+                      label: login,
+                      child: ExcludeSemantics(
+                        child: Text(
+                          login,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodySmall?.copyWith(color: colors.muted),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
           CircleAvatar(
             radius: 18,
             backgroundColor: colors.primarySoft,
@@ -496,6 +538,30 @@ String _profileInitials(AppLocalizations l10n, TrackerViewModel viewModel) {
   return _initialsFromText(l10n.appTitle);
 }
 
+String _profileDisplayName(TrackerViewModel viewModel) {
+  final user = viewModel.connectedUser;
+  if (user == null) {
+    return '';
+  }
+  final displayName = user.displayName.trim();
+  if (displayName.isNotEmpty) {
+    return displayName;
+  }
+  return user.login.trim();
+}
+
+String? _profileLogin(TrackerViewModel viewModel) {
+  final user = viewModel.connectedUser;
+  if (user == null) {
+    return null;
+  }
+  final login = user.login.trim();
+  if (login.isEmpty) {
+    return null;
+  }
+  return login == _profileDisplayName(viewModel) ? null : login;
+}
+
 String _initialsFromText(String value) {
   final parts = value
       .split(RegExp(r'[\s._-]+'))
@@ -522,6 +588,7 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
     TrackerMessageKind.githubConnectionFailed => l10n.githubConnectionFailed(
       message.error!,
     ),
+    TrackerMessageKind.issueSaveFailed => l10n.saveFailed(message.error!),
     TrackerMessageKind.localGitMoveCommitted => l10n.localGitMoveCommitted(
       message.issueKey!,
       message.statusLabel!,
@@ -783,7 +850,10 @@ class _SearchAndDetail extends StatelessWidget {
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 980;
             final list = _IssueList(viewModel: viewModel);
-            final detail = _IssueDetail(issue: viewModel.selectedIssue!);
+            final detail = _IssueDetail(
+              issue: viewModel.selectedIssue!,
+              viewModel: viewModel,
+            );
             return compact
                 ? Column(children: [list, const SizedBox(height: 16), detail])
                 : Row(
@@ -854,11 +924,21 @@ class _Settings extends StatefulWidget {
 
 class _SettingsState extends State<_Settings> {
   late _SettingsProviderSelection _selectedProvider;
+  final TextEditingController _repositoryPathController =
+      TextEditingController();
+  final TextEditingController _writeBranchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _selectedProvider = _initialProvider(widget.viewModel);
+  }
+
+  @override
+  void dispose() {
+    _repositoryPathController.dispose();
+    _writeBranchController.dispose();
+    super.dispose();
   }
 
   @override
@@ -876,6 +956,24 @@ class _SettingsState extends State<_Settings> {
         : _SettingsProviderSelection.hosted;
   }
 
+  void _clearLocalGitDraft() {
+    _repositoryPathController.clear();
+    _writeBranchController.clear();
+  }
+
+  void _selectProvider(_SettingsProviderSelection selection) {
+    if (_selectedProvider == selection) {
+      return;
+    }
+    setState(() {
+      if (_selectedProvider == _SettingsProviderSelection.localGit &&
+          selection != _SettingsProviderSelection.localGit) {
+        _clearLocalGitDraft();
+      }
+      _selectedProvider = selection;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
@@ -886,9 +984,7 @@ class _SettingsState extends State<_Settings> {
         _SettingsProviderButton(
           label: hostedLabel,
           selected: _selectedProvider == _SettingsProviderSelection.hosted,
-          onPressed: () {
-            setState(() => _selectedProvider = _SettingsProviderSelection.hosted);
-          },
+          onPressed: () => _selectProvider(_SettingsProviderSelection.hosted),
         ),
         if (_selectedProvider == _SettingsProviderSelection.hosted) ...[
           const SizedBox(height: 12),
@@ -902,13 +998,14 @@ class _SettingsState extends State<_Settings> {
       _SettingsProviderButton(
         label: l10n.repositoryAccessLocalGit,
         selected: _selectedProvider == _SettingsProviderSelection.localGit,
-        onPressed: () {
-          setState(() => _selectedProvider = _SettingsProviderSelection.localGit);
-        },
+        onPressed: () => _selectProvider(_SettingsProviderSelection.localGit),
       ),
       if (_selectedProvider == _SettingsProviderSelection.localGit) ...[
         const SizedBox(height: 12),
-        _LocalGitConfiguration(project: project),
+        _LocalGitConfiguration(
+          repositoryPathController: _repositoryPathController,
+          writeBranchController: _writeBranchController,
+        ),
       ],
     ];
     return Column(
@@ -963,37 +1060,130 @@ class _SettingsState extends State<_Settings> {
 
 enum _SettingsProviderSelection { hosted, localGit }
 
-class _IssueDetail extends StatelessWidget {
-  const _IssueDetail({required this.issue});
+class _IssueDetail extends StatefulWidget {
+  const _IssueDetail({required this.issue, required this.viewModel});
 
   final TrackStateIssue issue;
+  final TrackerViewModel viewModel;
+
+  @override
+  State<_IssueDetail> createState() => _IssueDetailState();
+}
+
+class _IssueDetailState extends State<_IssueDetail> {
+  late final TextEditingController _descriptionController;
+  bool _isEditing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _descriptionController = TextEditingController(
+      text: widget.issue.description,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _IssueDetail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final issueChanged = oldWidget.issue.key != widget.issue.key;
+    final descriptionChanged =
+        oldWidget.issue.description != widget.issue.description;
+    if (issueChanged) {
+      _isEditing = false;
+    }
+    if (issueChanged || (!_isEditing && descriptionChanged)) {
+      _descriptionController.text = widget.issue.description;
+    }
+  }
+
+  @override
+  void dispose() {
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveDescription() async {
+    final success = await widget.viewModel.saveIssueDescription(
+      widget.issue,
+      _descriptionController.text,
+    );
+    if (!mounted || !success) {
+      return;
+    }
+    setState(() {
+      _isEditing = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final issue = widget.issue;
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
+    final actions = [
+      _PrimaryButton(
+        label: l10n.transition,
+        icon: TrackStateIconGlyph.gitBranch,
+        onPressed: () {},
+      ),
+      if (_isEditing)
+        _IssueDetailActionButton(
+          label: l10n.save,
+          emphasized: true,
+          onPressed: widget.viewModel.isSaving ? null : _saveDescription,
+        )
+      else
+        _IssueDetailActionButton(
+          label: l10n.edit,
+          onPressed: widget.viewModel.isSaving
+              ? null
+              : () {
+                  setState(() {
+                    _isEditing = true;
+                    _descriptionController.text = issue.description;
+                  });
+                },
+        ),
+      if (_isEditing)
+        _IssueDetailActionButton(
+          label: l10n.cancel,
+          onPressed: widget.viewModel.isSaving
+              ? null
+              : () {
+                  setState(() {
+                    _isEditing = false;
+                    _descriptionController.text = issue.description;
+                  });
+                },
+        ),
+    ];
     return _SurfaceCard(
       semanticLabel: '${l10n.issueDetail} ${issue.key}',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _IssueTypeGlyph(issue.issueType),
               const SizedBox(width: 8),
-              Text(
-                issue.key,
-                style: TextStyle(
-                  fontFamily: 'JetBrains Mono',
-                  color: colors.muted,
-                  fontWeight: FontWeight.w600,
+              Expanded(
+                child: Text(
+                  issue.key,
+                  style: TextStyle(
+                    fontFamily: 'JetBrains Mono',
+                    color: colors.muted,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-              const Spacer(),
-              _PrimaryButton(
-                label: l10n.transition,
-                icon: TrackStateIconGlyph.gitBranch,
-                onPressed: () {},
+              Flexible(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.end,
+                  children: actions,
+                ),
               ),
             ],
           ),
@@ -1014,7 +1204,23 @@ class _IssueDetail extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           _SectionTitle(l10n.description),
-          Text(issue.description),
+          if (_isEditing)
+            Semantics(
+              label: l10n.description,
+              textField: true,
+              child: TextField(
+                controller: _descriptionController,
+                minLines: 4,
+                maxLines: null,
+                enabled: !widget.viewModel.isSaving,
+                decoration: InputDecoration(
+                  labelText: l10n.description,
+                  alignLabelWithHint: true,
+                ),
+              ),
+            )
+          else
+            Text(issue.description),
           const SizedBox(height: 18),
           _SectionTitle(l10n.acceptanceCriteria),
           for (final criteria in issue.acceptanceCriteria)
@@ -1046,6 +1252,55 @@ class _IssueDetail extends StatelessWidget {
               _CommentBubble(comment: comment),
         ],
       ),
+    );
+  }
+}
+
+class _IssueDetailActionButton extends StatelessWidget {
+  const _IssueDetailActionButton({
+    required this.label,
+    required this.onPressed,
+    this.emphasized = false,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final child = Text(label);
+    final button = emphasized
+        ? FilledButton(
+            onPressed: onPressed,
+            style: FilledButton.styleFrom(
+              backgroundColor: colors.primary,
+              foregroundColor: const Color(0xFFFAF8F4),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: child,
+          )
+        : OutlinedButton(
+            onPressed: onPressed,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: colors.text,
+              side: BorderSide(color: colors.border),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: child,
+          );
+    return Semantics(
+      button: true,
+      label: label,
+      excludeSemantics: true,
+      child: button,
     );
   }
 }
@@ -1455,16 +1710,7 @@ class _SettingsProviderButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     final style = selected
-        ? FilledButton.styleFrom(
-            backgroundColor: colors.primary,
-            foregroundColor: const Color(0xFFFAF8F4),
-            alignment: Alignment.centerLeft,
-            minimumSize: const Size.fromHeight(52),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          )
+        ? _selectedStyle(colors)
         : OutlinedButton.styleFrom(
             foregroundColor: colors.text,
             alignment: Alignment.centerLeft,
@@ -1492,6 +1738,32 @@ class _SettingsProviderButton extends StatelessWidget {
                 child: Text(label),
               ),
       ),
+    );
+  }
+
+  ButtonStyle _selectedStyle(TrackStateColors colors) {
+    const foreground = Color(0xFFFAF8F4);
+    const hoveredBackground = Color(0xFFB85138);
+    const pressedBackground = Color(0xFFB34F35);
+
+    return FilledButton.styleFrom(
+      foregroundColor: foreground,
+      alignment: Alignment.centerLeft,
+      minimumSize: const Size.fromHeight(52),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    ).copyWith(
+      backgroundColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.pressed)) {
+          return pressedBackground;
+        }
+        if (states.contains(WidgetState.hovered) ||
+            states.contains(WidgetState.focused)) {
+          return hoveredBackground;
+        }
+        return colors.primary;
+      }),
+      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
     );
   }
 }
@@ -1537,37 +1809,43 @@ class _HostedProviderConfiguration extends StatelessWidget {
 }
 
 class _LocalGitConfiguration extends StatelessWidget {
-  const _LocalGitConfiguration({required this.project});
+  const _LocalGitConfiguration({
+    required this.repositoryPathController,
+    required this.writeBranchController,
+  });
 
-  final ProjectConfig project;
+  final TextEditingController repositoryPathController;
+  final TextEditingController writeBranchController;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     return Column(
       children: [
-        _SettingsValueField(
+        _SettingsTextField(
           label: l10n.repositoryPath,
-          value: project.repository,
+          controller: repositoryPathController,
         ),
         const SizedBox(height: 12),
-        _SettingsValueField(label: l10n.writeBranch, value: project.branch),
+        _SettingsTextField(
+          label: l10n.writeBranch,
+          controller: writeBranchController,
+        ),
       ],
     );
   }
 }
 
-class _SettingsValueField extends StatelessWidget {
-  const _SettingsValueField({required this.label, required this.value});
+class _SettingsTextField extends StatelessWidget {
+  const _SettingsTextField({required this.label, required this.controller});
 
   final String label;
-  final String value;
+  final TextEditingController controller;
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
-      initialValue: value,
-      readOnly: true,
+      controller: controller,
       decoration: InputDecoration(labelText: label),
     );
   }

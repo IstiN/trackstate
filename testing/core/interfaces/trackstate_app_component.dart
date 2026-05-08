@@ -11,6 +11,12 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openIssue(String key, String summary);
 
+  Future<void> searchIssues(String query);
+
+  Future<void> expectIssueSearchResultVisible(String key, String summary);
+
+  void expectIssueSearchResultAbsent(String key, String summary);
+
   Future<void> dragIssueToStatusColumn({
     required String key,
     required String summary,
@@ -42,5 +48,21 @@ abstract interface class TrackStateAppComponent {
 
   void expectLocalRuntimeChrome();
 
+  Future<bool> dismissMessageBannerContaining(String text);
+
+  Future<void> openRepositoryAccess();
+
+  Future<void> closeDialog(String actionLabel);
+
+  void expectProfileIdentityVisible({
+    required String displayName,
+    required String login,
+    required String initials,
+  });
+
+  void expectLocalRuntimeDialog({
+    required String repositoryPath,
+    required String branch,
+  });
   Future<void> expectTextVisible(String text);
 }
