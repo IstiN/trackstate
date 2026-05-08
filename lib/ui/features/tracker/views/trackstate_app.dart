@@ -89,9 +89,7 @@ class _TrackerHome extends StatelessWidget {
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
-              child: _MessageBanner(
-                message: viewModel.message,
-              ),
+              child: _MessageBanner(message: viewModel.message),
             ),
           ),
         ),
@@ -572,7 +570,8 @@ String _initialsFromText(String value) {
   }
   final compact = value.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
   if (compact.isEmpty) return '';
-  return compact.substring(0, compact.length < 2 ? compact.length : 2)
+  return compact
+      .substring(0, compact.length < 2 ? compact.length : 2)
       .toUpperCase();
 }
 
@@ -583,8 +582,8 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
     ),
     TrackerMessageKind.localGitTokensNotNeeded => l10n.localGitTokensNotNeeded,
     TrackerMessageKind.tokenEmpty => l10n.tokenEmpty,
-    TrackerMessageKind.githubConnectedDragCards => l10n
-        .githubConnectedDragCards(message.login!, message.repository!),
+    TrackerMessageKind.githubConnectedDragCards =>
+      l10n.githubConnectedDragCards(message.login!, message.repository!),
     TrackerMessageKind.githubConnectionFailed => l10n.githubConnectionFailed(
       message.error!,
     ),
@@ -598,8 +597,8 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
       message.issueKey!,
       message.statusLabel!,
     ),
-    TrackerMessageKind.movePendingGitHubPersistence => l10n
-        .movePendingGitHubPersistence(message.issueKey!),
+    TrackerMessageKind.movePendingGitHubPersistence =>
+      l10n.movePendingGitHubPersistence(message.issueKey!),
     TrackerMessageKind.moveFailed => l10n.moveFailed(message.error!),
     TrackerMessageKind.localGitHubAppUnavailable =>
       l10n.localGitHubAppUnavailable,
@@ -611,8 +610,8 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
       message.login!,
       message.repository!,
     ),
-    TrackerMessageKind.storedGitHubTokenInvalid => l10n
-        .storedGitHubTokenInvalid(message.error!),
+    TrackerMessageKind.storedGitHubTokenInvalid =>
+      l10n.storedGitHubTokenInvalid(message.error!),
   };
 }
 
@@ -984,6 +983,11 @@ class _SettingsState extends State<_Settings> {
         _SettingsProviderButton(
           label: hostedLabel,
           selected: _selectedProvider == _SettingsProviderSelection.hosted,
+          tone:
+              widget.viewModel.repositoryAccessState ==
+                  RepositoryAccessState.connected
+              ? _SettingsProviderButtonTone.connected
+              : _SettingsProviderButtonTone.defaultTone,
           onPressed: () => _selectProvider(_SettingsProviderSelection.hosted),
         ),
         if (_selectedProvider == _SettingsProviderSelection.hosted) ...[
@@ -1700,17 +1704,19 @@ class _SettingsProviderButton extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onPressed,
+    this.tone = _SettingsProviderButtonTone.defaultTone,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onPressed;
+  final _SettingsProviderButtonTone tone;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
     final style = selected
-        ? _selectedStyle(colors)
+        ? _selectedStyle(context, colors)
         : OutlinedButton.styleFrom(
             foregroundColor: colors.text,
             alignment: Alignment.centerLeft,
@@ -1731,7 +1737,11 @@ class _SettingsProviderButton extends StatelessWidget {
       child: SizedBox(
         width: double.infinity,
         child: selected
-            ? FilledButton(onPressed: onPressed, style: style, child: Text(label))
+            ? FilledButton(
+                onPressed: onPressed,
+                style: style,
+                child: Text(label),
+              )
             : OutlinedButton(
                 onPressed: onPressed,
                 style: style,
@@ -1741,7 +1751,10 @@ class _SettingsProviderButton extends StatelessWidget {
     );
   }
 
-  ButtonStyle _selectedStyle(TrackStateColors colors) {
+  ButtonStyle _selectedStyle(BuildContext context, TrackStateColors colors) {
+    if (tone == _SettingsProviderButtonTone.connected) {
+      return _connectedStyle(context, colors);
+    }
     const foreground = Color(0xFFFAF8F4);
     const hoveredBackground = Color(0xFFB85138);
     const pressedBackground = Color(0xFFB34F35);
@@ -1766,7 +1779,36 @@ class _SettingsProviderButton extends StatelessWidget {
       overlayColor: const WidgetStatePropertyAll(Colors.transparent),
     );
   }
+
+  ButtonStyle _connectedStyle(BuildContext context, TrackStateColors colors) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final idleBackground = isDark ? colors.surfaceAlt : colors.text;
+    final hoverBackground = const Color(0xFF3A3835);
+    final pressedBackground = isDark ? colors.surface : colors.text;
+
+    return FilledButton.styleFrom(
+      foregroundColor: colors.success,
+      alignment: Alignment.centerLeft,
+      minimumSize: const Size.fromHeight(52),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    ).copyWith(
+      backgroundColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.pressed)) {
+          return pressedBackground;
+        }
+        if (states.contains(WidgetState.hovered) ||
+            states.contains(WidgetState.focused)) {
+          return hoverBackground;
+        }
+        return idleBackground;
+      }),
+      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+    );
+  }
 }
+
+enum _SettingsProviderButtonTone { defaultTone, connected }
 
 class _HostedProviderConfiguration extends StatelessWidget {
   const _HostedProviderConfiguration({
