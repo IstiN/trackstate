@@ -48,16 +48,19 @@ void main() {
     expect(viewModel.connectedUser?.initials, 'DU');
   });
 
-  test('view model loads the local repository user for avatar details', () async {
-    final viewModel = TrackerViewModel(
-      repository: const _LocalRuntimeRepository(),
-    );
+  test(
+    'view model loads the local repository user for avatar details',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: const _LocalRuntimeRepository(),
+      );
 
-    await viewModel.load();
+      await viewModel.load();
 
-    expect(viewModel.connectedUser?.displayName, 'Local User');
-    expect(viewModel.connectedUser?.initials, 'LU');
-  });
+      expect(viewModel.connectedUser?.displayName, 'Local User');
+      expect(viewModel.connectedUser?.initials, 'LU');
+    },
+  );
 
   test(
     'view model reports local persistence after a successful move',
@@ -69,10 +72,7 @@ void main() {
       await viewModel.load();
       await viewModel.moveIssue(viewModel.selectedIssue!, IssueStatus.done);
 
-      expect(
-        viewModel.message?.kind,
-        TrackerMessageKind.localGitMoveCommitted,
-      );
+      expect(viewModel.message?.kind, TrackerMessageKind.localGitMoveCommitted);
     },
   );
 }
@@ -99,6 +99,12 @@ class _LocalRuntimeRepository implements TrackStateRepository {
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
       _demoRepository.searchIssues(jql);
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Local runtime view-model repository does not support issue deletion.',
+      );
 
   @override
   Future<TrackStateIssue> updateIssueStatus(
