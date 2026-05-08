@@ -19,6 +19,16 @@ abstract interface class TrackStateRepository {
 }
 
 class ProviderBackedTrackStateRepository implements TrackStateRepository {
+  static const RepositoryPermission _restrictedPermission =
+      RepositoryPermission(
+        canRead: false,
+        canWrite: false,
+        isAdmin: false,
+        canCreateBranch: false,
+        canManageAttachments: false,
+        canCheckCollaborators: false,
+      );
+
   ProviderBackedTrackStateRepository({
     required TrackStateProviderAdapter provider,
     this.usesLocalPersistence = false,
@@ -37,21 +47,55 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
 
   @override
   Future<RepositoryUser> connect(RepositoryConnection connection) async {
-    final user = await _provider.authenticate(connection);
-    final permission = await _provider.getPermission();
-    _session = ProviderSession(
-      providerType: _provider.providerType,
-      connectionState: ProviderConnectionState.connected,
-      resolvedUserIdentity: user.login
-          .ifEmpty(user.displayName)
-          .ifEmpty(_provider.repositoryLabel),
-      canRead: permission.canRead,
-      canWrite: permission.canWrite,
-      canCreateBranch: permission.canCreateBranch,
-      canManageAttachments: permission.canManageAttachments,
-      canCheckCollaborators: permission.canCheckCollaborators,
+    _session = _buildSession(
+      connectionState: ProviderConnectionState.connecting,
     );
-    return user;
+
+    RepositoryUser? user;
+    try {
+      user = await _provider.authenticate(connection);
+      final permission = await _provider.getPermission();
+      _session = _buildSession(
+        connectionState: ProviderConnectionState.connected,
+        resolvedUserIdentity: _resolveUserIdentity(user),
+        permission: permission,
+      );
+      return user;
+    } catch (_) {
+      _session = _buildSession(
+        connectionState: ProviderConnectionState.disconnected,
+        resolvedUserIdentity: _resolveUserIdentity(user),
+      );
+      rethrow;
+    }
+  }
+
+  ProviderSession _buildSession({
+    required ProviderConnectionState connectionState,
+    String? resolvedUserIdentity,
+    RepositoryPermission permission = _restrictedPermission,
+  }) => ProviderSession(
+    providerType: _provider.providerType,
+    connectionState: connectionState,
+    resolvedUserIdentity: resolvedUserIdentity ?? _provider.repositoryLabel,
+    canRead: permission.canRead,
+    canWrite: permission.canWrite,
+    canCreateBranch: permission.canCreateBranch,
+    canManageAttachments: permission.canManageAttachments,
+    canCheckCollaborators: permission.canCheckCollaborators,
+  );
+
+  String _resolveUserIdentity(RepositoryUser? user) {
+    if (user == null) {
+      return _provider.repositoryLabel;
+    }
+    if (user.login.isNotEmpty) {
+      return user.login;
+    }
+    if (user.displayName.isNotEmpty) {
+      return user.displayName;
+    }
+    return _provider.repositoryLabel;
   }
 
   @override
