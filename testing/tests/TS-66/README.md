@@ -14,12 +14,12 @@
 
 ## Environment / config
 
-No external credentials are required. The test creates a temporary local Git repository with active issues `TRACK-122` and `TRACK-123`, verifies the pre-delete state through the app's repository service, and then checks whether the current product repository service exposes the delete path TS-66 requires.
+No external credentials are required. The test creates a temporary local Git repository with one active issue (`TRACK-122`) and one reserved deleted key (`TRACK-123`) represented in `TRACK/.trackstate/index/deleted.json`, then loads that repository through `LocalTrackStateRepository`.
 
-If the product still does not expose a real delete API, the fixture fails explicitly instead of probing unsupported runtime methods or fabricating tombstone artifacts inside the fixture.
+The assertions verify that the deleted-key metadata is exposed through `snapshot.repositoryIndex.deleted`, that `TRACK-123` no longer resolves through the active repository index, and that standard search still returns only the surviving active issue.
 
-## Current blocked output
+## Expected passing output
 
 ```text
-Bad state: TS-66 requires a real repository-service delete operation, but LocalTrackStateRepository does not expose deleteIssue for TRACK-123. The current repository API only supports loadSnapshot, searchIssues, connect, and updateIssueStatus.
+00:00 +1: All tests passed!
 ```
