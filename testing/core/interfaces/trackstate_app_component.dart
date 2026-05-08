@@ -11,6 +11,12 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openIssue(String key, String summary);
 
+  Future<void> searchIssues(String query);
+
+  Future<void> expectIssueSearchResultVisible(String key, String summary);
+
+  void expectIssueSearchResultAbsent(String key, String summary);
+
   Future<void> dragIssueToStatusColumn({
     required String key,
     required String summary,
@@ -36,6 +42,8 @@ abstract interface class TrackStateAppComponent {
   Future<void> tapIssueDetailAction(String key, {required String label});
 
   Future<void> expectMessageBannerContains(String text);
+
+  Future<bool> dismissMessageBannerContaining(String text);
 
   void expectLocalRuntimeChrome();
 

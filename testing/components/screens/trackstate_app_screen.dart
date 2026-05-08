@@ -155,6 +155,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await tester.pumpAndSettle();
   }
 
+  @override
   Future<void> searchIssues(String query) async {
     await _waitForVisible(_jqlSearchPanel);
     await _waitForVisible(_jqlSearchField);
@@ -165,6 +166,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await tester.pumpAndSettle();
   }
 
+  @override
   Future<void> expectIssueSearchResultVisible(
     String key,
     String summary,
@@ -174,6 +176,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     expect(issue, findsOneWidget);
   }
 
+  @override
   void expectIssueSearchResultAbsent(String key, String summary) {
     expect(_issue(key, summary), findsNothing);
   }
@@ -255,6 +258,56 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final finder = _text(text);
     await _waitForVisible(finder, timeout: const Duration(seconds: 10));
     expect(finder, findsWidgets);
+  }
+
+  Finder _messageBanner(String text) => find.ancestor(
+    of: _text(text),
+    matching: find.byWidgetPredicate(
+      (widget) => widget is AnimatedContainer,
+      description: 'message banner containing "$text"',
+    ),
+  );
+
+  @override
+  Future<bool> dismissMessageBannerContaining(String text) async {
+    final banner = _messageBanner(text);
+    await _waitForVisible(banner, timeout: const Duration(seconds: 10));
+    final bannerScope = banner.first;
+    final dismissCandidates = <Finder>[
+      find.descendant(
+        of: bannerScope,
+        matching: find.bySemanticsLabel(
+          RegExp(r'^(Dismiss|Close|Hide|OK|Ok)$'),
+        ),
+      ),
+      find.descendant(of: bannerScope, matching: find.text('Dismiss')),
+      find.descendant(of: bannerScope, matching: find.text('Close')),
+      find.descendant(of: bannerScope, matching: find.text('Hide')),
+      find.descendant(of: bannerScope, matching: find.text('OK')),
+      find.descendant(of: bannerScope, matching: find.text('Ok')),
+      find.descendant(
+        of: bannerScope,
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is IconButton &&
+              (((widget.tooltip ?? '').toLowerCase().contains('dismiss')) ||
+                  ((widget.tooltip ?? '').toLowerCase().contains('close'))),
+          description: 'dismiss control inside the message banner',
+        ),
+      ),
+    ];
+
+    for (final candidate in dismissCandidates) {
+      if (candidate.evaluate().isEmpty) {
+        continue;
+      }
+      await tester.ensureVisible(candidate.first);
+      await tester.tap(candidate.first, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      return banner.evaluate().isEmpty;
+    }
+
+    return false;
   }
 
   @override
