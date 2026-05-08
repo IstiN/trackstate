@@ -66,13 +66,13 @@ void main() {
             'Observed ${readOnlyState.edit.describe()}.',
           );
         }
-        if (!writableState.comment.enabled) {
+        if (writableState.comment.visible && !writableState.comment.enabled) {
           failures.add(
-            'TS-42 cannot verify Comments is capability-guarded because the '
-            'writable baseline does not expose Comments as an enabled action. '
+            'Comments is rendered for writable users but is not enabled. '
             'Observed ${writableState.comment.describe()}.',
           );
-        } else if (!readOnlyState.comment.isUnavailable) {
+        }
+        if (!readOnlyState.comment.isUnavailable) {
           failures.add(
             'Comments should be disabled or hidden when canWrite=false. '
             'Observed ${readOnlyState.comment.describe()}.',

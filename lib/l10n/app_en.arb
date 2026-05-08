@@ -15,6 +15,7 @@
   "edit": "Edit",
   "save": "Save",
   "transition": "Transition",
+  "issueDetailReadOnlyMessage": "Write access is required to edit this issue or change its status.",
   "syncStatus": "Synced with Git",
   "searchIssues": "Search issues",
   "quickActions": "Quick actions",
