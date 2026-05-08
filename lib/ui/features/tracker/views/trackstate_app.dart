@@ -854,11 +854,21 @@ class _Settings extends StatefulWidget {
 
 class _SettingsState extends State<_Settings> {
   late _SettingsProviderSelection _selectedProvider;
+  final TextEditingController _repositoryPathController =
+      TextEditingController();
+  final TextEditingController _writeBranchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _selectedProvider = _initialProvider(widget.viewModel);
+  }
+
+  @override
+  void dispose() {
+    _repositoryPathController.dispose();
+    _writeBranchController.dispose();
+    super.dispose();
   }
 
   @override
@@ -876,6 +886,24 @@ class _SettingsState extends State<_Settings> {
         : _SettingsProviderSelection.hosted;
   }
 
+  void _clearLocalGitDraft() {
+    _repositoryPathController.clear();
+    _writeBranchController.clear();
+  }
+
+  void _selectProvider(_SettingsProviderSelection selection) {
+    if (_selectedProvider == selection) {
+      return;
+    }
+    setState(() {
+      if (_selectedProvider == _SettingsProviderSelection.localGit &&
+          selection != _SettingsProviderSelection.localGit) {
+        _clearLocalGitDraft();
+      }
+      _selectedProvider = selection;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
@@ -886,9 +914,7 @@ class _SettingsState extends State<_Settings> {
         _SettingsProviderButton(
           label: hostedLabel,
           selected: _selectedProvider == _SettingsProviderSelection.hosted,
-          onPressed: () {
-            setState(() => _selectedProvider = _SettingsProviderSelection.hosted);
-          },
+          onPressed: () => _selectProvider(_SettingsProviderSelection.hosted),
         ),
         if (_selectedProvider == _SettingsProviderSelection.hosted) ...[
           const SizedBox(height: 12),
@@ -902,13 +928,14 @@ class _SettingsState extends State<_Settings> {
       _SettingsProviderButton(
         label: l10n.repositoryAccessLocalGit,
         selected: _selectedProvider == _SettingsProviderSelection.localGit,
-        onPressed: () {
-          setState(() => _selectedProvider = _SettingsProviderSelection.localGit);
-        },
+        onPressed: () => _selectProvider(_SettingsProviderSelection.localGit),
       ),
       if (_selectedProvider == _SettingsProviderSelection.localGit) ...[
         const SizedBox(height: 12),
-        _LocalGitConfiguration(project: project),
+        _LocalGitConfiguration(
+          repositoryPathController: _repositoryPathController,
+          writeBranchController: _writeBranchController,
+        ),
       ],
     ];
     return Column(
@@ -1537,37 +1564,43 @@ class _HostedProviderConfiguration extends StatelessWidget {
 }
 
 class _LocalGitConfiguration extends StatelessWidget {
-  const _LocalGitConfiguration({required this.project});
+  const _LocalGitConfiguration({
+    required this.repositoryPathController,
+    required this.writeBranchController,
+  });
 
-  final ProjectConfig project;
+  final TextEditingController repositoryPathController;
+  final TextEditingController writeBranchController;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     return Column(
       children: [
-        _SettingsValueField(
+        _SettingsTextField(
           label: l10n.repositoryPath,
-          value: project.repository,
+          controller: repositoryPathController,
         ),
         const SizedBox(height: 12),
-        _SettingsValueField(label: l10n.writeBranch, value: project.branch),
+        _SettingsTextField(
+          label: l10n.writeBranch,
+          controller: writeBranchController,
+        ),
       ],
     );
   }
 }
 
-class _SettingsValueField extends StatelessWidget {
-  const _SettingsValueField({required this.label, required this.value});
+class _SettingsTextField extends StatelessWidget {
+  const _SettingsTextField({required this.label, required this.controller});
 
   final String label;
-  final String value;
+  final TextEditingController controller;
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
-      initialValue: value,
-      readOnly: true,
+      controller: controller,
       decoration: InputDecoration(labelText: label),
     );
   }

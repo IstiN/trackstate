@@ -58,4 +58,124 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'local git configuration fields are editable and reset after provider switch',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      Finder field(String label) => find.widgetWithText(TextFormField, label);
+
+      try {
+        await tester.pumpWidget(
+          const TrackStateApp(repository: DemoTrackStateRepository()),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        final providerSelector = find.bySemanticsLabel(
+          RegExp('Repository access'),
+        );
+        final hostedProvider = find.descendant(
+          of: providerSelector,
+          matching: find.bySemanticsLabel(RegExp('Connect GitHub')),
+        );
+        final localGitProvider = find.descendant(
+          of: providerSelector,
+          matching: find.bySemanticsLabel(RegExp('Local Git')),
+        );
+
+        await tester.tap(localGitProvider);
+        await tester.pumpAndSettle();
+
+        final repositoryPathEditableText = tester.widget<EditableText>(
+          find.descendant(
+            of: field('Repository Path'),
+            matching: find.byType(EditableText),
+          ),
+        );
+        final writeBranchEditableText = tester.widget<EditableText>(
+          find.descendant(
+            of: field('Write Branch'),
+            matching: find.byType(EditableText),
+          ),
+        );
+
+        expect(repositoryPathEditableText.readOnly, isFalse);
+        expect(writeBranchEditableText.readOnly, isFalse);
+        expect(repositoryPathEditableText.controller.text, isEmpty);
+        expect(writeBranchEditableText.controller.text, isEmpty);
+
+        await tester.enterText(
+          field('Repository Path'),
+          '/tmp/trackstate-demo.git',
+        );
+        await tester.enterText(field('Write Branch'), 'feature/ts-54');
+        await tester.pumpAndSettle();
+
+        expect(
+          tester
+              .widget<EditableText>(
+                find.descendant(
+                  of: field('Repository Path'),
+                  matching: find.byType(EditableText),
+                ),
+              )
+              .controller
+              .text,
+          '/tmp/trackstate-demo.git',
+        );
+        expect(
+          tester
+              .widget<EditableText>(
+                find.descendant(
+                  of: field('Write Branch'),
+                  matching: find.byType(EditableText),
+                ),
+              )
+              .controller
+              .text,
+          'feature/ts-54',
+        );
+
+        await tester.tap(hostedProvider);
+        await tester.pumpAndSettle();
+        await tester.tap(localGitProvider);
+        await tester.pumpAndSettle();
+
+        expect(
+          tester
+              .widget<EditableText>(
+                find.descendant(
+                  of: field('Repository Path'),
+                  matching: find.byType(EditableText),
+                ),
+              )
+              .controller
+              .text,
+          isEmpty,
+        );
+        expect(
+          tester
+              .widget<EditableText>(
+                find.descendant(
+                  of: field('Write Branch'),
+                  matching: find.byType(EditableText),
+                ),
+              )
+              .controller
+              .text,
+          isEmpty,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
 }
