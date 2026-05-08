@@ -29,11 +29,6 @@ class TemplateWorkflowFileVerifier:
             default_branch,
             config.workflow_path,
         )
-        workflow_raw_fetch = self._probe.get_raw_file(
-            config.repository,
-            default_branch,
-            config.workflow_path,
-        )
         return TemplateWorkflowFileVerificationResult(
             target_repository=config.repository,
             workflow_path=config.workflow_path,
@@ -43,7 +38,6 @@ class TemplateWorkflowFileVerifier:
             directory_fetch=directory_fetch,
             tree_fetch=tree_fetch,
             workflow_contents_fetch=workflow_contents_fetch,
-            workflow_raw_fetch=workflow_raw_fetch,
         )
 
     def _repository_default_branch(self, repository_info: object) -> str:

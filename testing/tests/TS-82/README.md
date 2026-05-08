@@ -7,7 +7,7 @@ forks inherit the workflow registration fix from TS-77.
 The test performs two layers of verification against the live implementation:
 
 1. GitHub CLI reads the upstream repository metadata, default branch tree,
-   `.github/workflows` directory listing, and the raw workflow file contents.
+   `.github/workflows` directory listing, and the workflow entry metadata.
 2. Playwright opens the public GitHub directory page for that default branch and
    verifies the workflow filename is visibly listed for a human user.
 

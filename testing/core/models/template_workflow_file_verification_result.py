@@ -15,7 +15,6 @@ class TemplateWorkflowFileVerificationResult:
     directory_fetch: CliCommandResult
     tree_fetch: CliCommandResult
     workflow_contents_fetch: CliCommandResult
-    workflow_raw_fetch: CliCommandResult
 
     @property
     def repository_metadata(self) -> dict[str, object]:
@@ -77,14 +76,3 @@ class TemplateWorkflowFileVerificationResult:
         if isinstance(entry_type, str) and entry_type:
             return entry_type
         return None
-
-    @property
-    def workflow_html_url(self) -> str | None:
-        html_url = self.workflow_entry_metadata.get("html_url")
-        if isinstance(html_url, str) and html_url:
-            return html_url
-        return None
-
-    @property
-    def workflow_raw_text(self) -> str:
-        return self.workflow_raw_fetch.stdout

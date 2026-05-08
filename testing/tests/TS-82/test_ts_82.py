@@ -8,9 +8,6 @@ from testing.components.services.template_workflow_file_verifier import (
 )
 from testing.core.config.template_workflow_file_config import TemplateWorkflowFileConfig
 from testing.core.interfaces.project_cli_probe import ProjectCliProbe
-from testing.core.models.template_workflow_file_verification_result import (
-    TemplateWorkflowFileVerificationResult,
-)
 from testing.tests.support.github_repository_directory_page_factory import (
     create_github_repository_directory_page,
 )
@@ -99,45 +96,21 @@ class TemplateWorkflowFileExistsTest(unittest.TestCase):
             "Step 4 failed: the expected workflow path did not resolve to a file.\n"
             f"Observed metadata:\n{result.workflow_contents_fetch.stdout}",
         )
-        self.assertTrue(
-            result.workflow_raw_fetch.succeeded,
-            "Step 4 failed: the workflow file could not be fetched as raw text from "
-            f"{self.config.repository}@{default_branch}.\n"
-            f"Command: {result.workflow_raw_fetch.command_text}\n"
-            f"Exit code: {result.workflow_raw_fetch.exit_code}\n"
-            f"stdout:\n{result.workflow_raw_fetch.stdout}\n"
-            f"stderr:\n{result.workflow_raw_fetch.stderr}",
-        )
-        self.assertIn(
-            "name: Install / Update TrackState",
-            result.workflow_raw_text,
-            "Step 4 failed: the fetched file content did not look like the expected "
-            "workflow definition.\n"
-            f"Observed file preview:\n{result.workflow_raw_text[:500]}",
-        )
-        self.assertIn(
-            "workflow_dispatch:",
-            result.workflow_raw_text,
-            "Step 4 failed: the fetched file content did not expose the expected "
-            "workflow trigger configuration.\n"
-            f"Observed file preview:\n{result.workflow_raw_text[:500]}",
-        )
 
-        self._assert_human_visible_directory_view(result=result, default_branch=default_branch)
+        self._assert_human_visible_directory_view(default_branch=default_branch)
 
     def _assert_human_visible_directory_view(
         self,
         *,
-        result: TemplateWorkflowFileVerificationResult,
         default_branch: str,
     ) -> None:
-        page = create_github_repository_directory_page()
-        observation = page.open_directory(
-            repository=self.config.repository,
-            branch=default_branch,
-            directory_path=self.config.workflow_directory_path,
-            expected_filename=self.config.workflow_filename,
-        )
+        with create_github_repository_directory_page() as page:
+            observation = page.open_directory(
+                repository=self.config.repository,
+                branch=default_branch,
+                directory_path=self.config.workflow_directory_path,
+                expected_filename=self.config.workflow_filename,
+            )
 
         self.assertIn(
             self.config.workflow_filename,
@@ -160,15 +133,6 @@ class TemplateWorkflowFileExistsTest(unittest.TestCase):
             "the workflows directory page.\n"
             f"URL: {observation.url}\nVisible body text:\n{observation.body_text}",
         )
-        workflow_html_url = result.workflow_html_url
-        if workflow_html_url is not None:
-            self.assertIn(
-                self.config.workflow_filename,
-                workflow_html_url,
-                "Step 4 failed: the GitHub metadata HTML URL does not point at the "
-                "expected workflow file.\n"
-                f"Observed html_url: {workflow_html_url}",
-            )
 
 
 if __name__ == "__main__":

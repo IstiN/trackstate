@@ -1,23 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from html.parser import HTMLParser
 
-from testing.core.interfaces.url_text_reader import UrlTextReader, UrlTextReaderError
-
-
-class _VisibleTextParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self._chunks: list[str] = []
-
-    def handle_data(self, data: str) -> None:
-        stripped = data.strip()
-        if stripped:
-            self._chunks.append(stripped)
-
-    def text(self) -> str:
-        return "\n".join(self._chunks)
+from testing.core.interfaces.web_app_session import WebAppSession, WebAppTimeoutError
 
 
 @dataclass(frozen=True)
@@ -27,8 +12,8 @@ class GitHubRepositoryDirectoryObservation:
 
 
 class GitHubRepositoryDirectoryPage:
-    def __init__(self, url_text_reader: UrlTextReader) -> None:
-        self._url_text_reader = url_text_reader
+    def __init__(self, session: WebAppSession) -> None:
+        self._session = session
 
     def open_directory(
         self,
@@ -44,8 +29,11 @@ class GitHubRepositoryDirectoryPage:
             branch=branch,
             directory_path=directory_path,
         )
-        html = self._read_html(url=url, timeout_seconds=timeout_seconds)
-        body_text = self._html_to_visible_text(html)
+        body_text = self._open_in_browser(
+            url=url,
+            expected_filename=expected_filename,
+            timeout_seconds=timeout_seconds,
+        )
         if expected_filename not in body_text:
             raise AssertionError(
                 "Timed out waiting for the workflow filename to appear on the GitHub "
@@ -63,20 +51,26 @@ class GitHubRepositoryDirectoryPage:
         normalized_directory = directory_path.strip("/")
         return f"https://github.com/{repository}/tree/{branch}/{normalized_directory}"
 
-    def _read_html(self, *, url: str, timeout_seconds: int) -> str:
+    def _open_in_browser(
+        self,
+        *,
+        url: str,
+        expected_filename: str,
+        timeout_seconds: int,
+    ) -> str:
         try:
-            return self._url_text_reader.read_text(
-                url=url,
-                headers={"User-Agent": "trackstate-ts82-test"},
-                timeout_seconds=timeout_seconds,
+            self._session.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout_ms=timeout_seconds * 1_000,
             )
-        except UrlTextReaderError as error:
+            return self._session.wait_for_text(
+                expected_filename,
+                timeout_ms=timeout_seconds * 1_000,
+            )
+        except WebAppTimeoutError as error:
             raise AssertionError(
                 "Could not open the GitHub repository directory page for human-style "
-                f"verification.\nURL: {url}\n{error}"
+                f"verification in the browser.\nURL: {url}\nVisible body text:\n"
+                f"{self._session.body_text()}"
             ) from error
-
-    def _html_to_visible_text(self, html: str) -> str:
-        parser = _VisibleTextParser()
-        parser.feed(html)
-        return parser.text()
