@@ -45,6 +45,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get transition => 'Transition';
 
   @override
+  String get issueDetailReadOnlyMessage =>
+      'Write access is required to edit this issue or change its status.';
+
+  @override
   String get syncStatus => 'Synced with Git';
 
   @override

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../data/providers/trackstate_provider.dart';
 import '../../../../data/repositories/trackstate_repository.dart';
 import '../../../../data/services/trackstate_auth_store.dart';
 import '../../../../domain/models/trackstate_models.dart';
@@ -193,6 +194,17 @@ class TrackerViewModel extends ChangeNotifier {
   RepositoryUser? get connectedUser => _connectedUser;
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
   bool get supportsGitHubAuth => _repository.supportsGitHubAuth;
+  ProviderSession? get providerSession => switch (_repository) {
+    ProviderBackedTrackStateRepository repository => repository.session,
+    _ => null,
+  };
+  bool get hasReadOnlySession {
+    final session = providerSession;
+    return session != null &&
+        session.connectionState == ProviderConnectionState.connected &&
+        session.canRead &&
+        !session.canWrite;
+  }
   RepositoryAccessState get repositoryAccessState => usesLocalPersistence
       ? RepositoryAccessState.localGit
       : _isConnected
