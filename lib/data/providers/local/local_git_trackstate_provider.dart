@@ -19,6 +19,9 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
   final String dataRef;
 
   @override
+  ProviderType get providerType => ProviderType.local;
+
+  @override
   String get repositoryLabel => repositoryPath;
 
   @override

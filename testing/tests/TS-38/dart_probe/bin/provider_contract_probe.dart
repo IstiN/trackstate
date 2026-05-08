@@ -12,6 +12,9 @@ class FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
   String get dataRef => 'main';
 
   @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
   String get repositoryLabel => 'mock/repository';
 
   @override
