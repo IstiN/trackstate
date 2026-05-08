@@ -5,5 +5,5 @@ platform: linux
 dependencies: []
 notes:
   - Reproduces dirty-local-files issue creation from the live Local Git app flow.
-  - Verifies the user can reach an issue creation entry point before attempting the create action.
-  - Fails with a user-visible UI snapshot when the create-issue capability is unavailable.
+  - Attempts the full create flow and verifies visible commit/stash/clean guidance after submission.
+  - Fails with a user-visible UI snapshot when the create-issue capability is unavailable or incomplete.
