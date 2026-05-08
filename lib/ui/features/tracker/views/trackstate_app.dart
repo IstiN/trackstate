@@ -522,6 +522,7 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
     TrackerMessageKind.githubConnectionFailed => l10n.githubConnectionFailed(
       message.error!,
     ),
+    TrackerMessageKind.issueSaveFailed => l10n.saveFailed(message.error!),
     TrackerMessageKind.localGitMoveCommitted => l10n.localGitMoveCommitted(
       message.issueKey!,
       message.statusLabel!,
@@ -783,7 +784,10 @@ class _SearchAndDetail extends StatelessWidget {
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 980;
             final list = _IssueList(viewModel: viewModel);
-            final detail = _IssueDetail(issue: viewModel.selectedIssue!);
+            final detail = _IssueDetail(
+              issue: viewModel.selectedIssue!,
+              viewModel: viewModel,
+            );
             return compact
                 ? Column(children: [list, const SizedBox(height: 16), detail])
                 : Row(
@@ -963,37 +967,130 @@ class _SettingsState extends State<_Settings> {
 
 enum _SettingsProviderSelection { hosted, localGit }
 
-class _IssueDetail extends StatelessWidget {
-  const _IssueDetail({required this.issue});
+class _IssueDetail extends StatefulWidget {
+  const _IssueDetail({required this.issue, required this.viewModel});
 
   final TrackStateIssue issue;
+  final TrackerViewModel viewModel;
+
+  @override
+  State<_IssueDetail> createState() => _IssueDetailState();
+}
+
+class _IssueDetailState extends State<_IssueDetail> {
+  late final TextEditingController _descriptionController;
+  bool _isEditing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _descriptionController = TextEditingController(
+      text: widget.issue.description,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _IssueDetail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final issueChanged = oldWidget.issue.key != widget.issue.key;
+    final descriptionChanged =
+        oldWidget.issue.description != widget.issue.description;
+    if (issueChanged) {
+      _isEditing = false;
+    }
+    if (issueChanged || (!_isEditing && descriptionChanged)) {
+      _descriptionController.text = widget.issue.description;
+    }
+  }
+
+  @override
+  void dispose() {
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveDescription() async {
+    final success = await widget.viewModel.saveIssueDescription(
+      widget.issue,
+      _descriptionController.text,
+    );
+    if (!mounted || !success) {
+      return;
+    }
+    setState(() {
+      _isEditing = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final issue = widget.issue;
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
+    final actions = [
+      _PrimaryButton(
+        label: l10n.transition,
+        icon: TrackStateIconGlyph.gitBranch,
+        onPressed: () {},
+      ),
+      if (_isEditing)
+        _IssueDetailActionButton(
+          label: l10n.save,
+          emphasized: true,
+          onPressed: widget.viewModel.isSaving ? null : _saveDescription,
+        )
+      else
+        _IssueDetailActionButton(
+          label: l10n.edit,
+          onPressed: widget.viewModel.isSaving
+              ? null
+              : () {
+                  setState(() {
+                    _isEditing = true;
+                    _descriptionController.text = issue.description;
+                  });
+                },
+        ),
+      if (_isEditing)
+        _IssueDetailActionButton(
+          label: l10n.cancel,
+          onPressed: widget.viewModel.isSaving
+              ? null
+              : () {
+                  setState(() {
+                    _isEditing = false;
+                    _descriptionController.text = issue.description;
+                  });
+                },
+        ),
+    ];
     return _SurfaceCard(
       semanticLabel: '${l10n.issueDetail} ${issue.key}',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _IssueTypeGlyph(issue.issueType),
               const SizedBox(width: 8),
-              Text(
-                issue.key,
-                style: TextStyle(
-                  fontFamily: 'JetBrains Mono',
-                  color: colors.muted,
-                  fontWeight: FontWeight.w600,
+              Expanded(
+                child: Text(
+                  issue.key,
+                  style: TextStyle(
+                    fontFamily: 'JetBrains Mono',
+                    color: colors.muted,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-              const Spacer(),
-              _PrimaryButton(
-                label: l10n.transition,
-                icon: TrackStateIconGlyph.gitBranch,
-                onPressed: () {},
+              Flexible(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.end,
+                  children: actions,
+                ),
               ),
             ],
           ),
@@ -1014,7 +1111,23 @@ class _IssueDetail extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           _SectionTitle(l10n.description),
-          Text(issue.description),
+          if (_isEditing)
+            Semantics(
+              label: l10n.description,
+              textField: true,
+              child: TextField(
+                controller: _descriptionController,
+                minLines: 4,
+                maxLines: null,
+                enabled: !widget.viewModel.isSaving,
+                decoration: InputDecoration(
+                  labelText: l10n.description,
+                  alignLabelWithHint: true,
+                ),
+              ),
+            )
+          else
+            Text(issue.description),
           const SizedBox(height: 18),
           _SectionTitle(l10n.acceptanceCriteria),
           for (final criteria in issue.acceptanceCriteria)
@@ -1046,6 +1159,55 @@ class _IssueDetail extends StatelessWidget {
               _CommentBubble(comment: comment),
         ],
       ),
+    );
+  }
+}
+
+class _IssueDetailActionButton extends StatelessWidget {
+  const _IssueDetailActionButton({
+    required this.label,
+    required this.onPressed,
+    this.emphasized = false,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final child = Text(label);
+    final button = emphasized
+        ? FilledButton(
+            onPressed: onPressed,
+            style: FilledButton.styleFrom(
+              backgroundColor: colors.primary,
+              foregroundColor: const Color(0xFFFAF8F4),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: child,
+          )
+        : OutlinedButton(
+            onPressed: onPressed,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: colors.text,
+              side: BorderSide(color: colors.border),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: child,
+          );
+    return Semantics(
+      button: true,
+      label: label,
+      excludeSemantics: true,
+      child: button,
     );
   }
 }
