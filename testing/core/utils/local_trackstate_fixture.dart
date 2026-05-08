@@ -54,7 +54,6 @@ class LocalTrackStateFixture {
     );
     await _git(['add', issuePath]);
   }
-
   Future<String> buildUpdatedDescriptionMarkdown(
     String updatedDescription,
   ) async {
@@ -68,7 +67,6 @@ class LocalTrackStateFixture {
 
   Future<String> readMainFile() =>
       File('$repositoryPath/$issuePath').readAsString();
-
   Future<void> _seedRepository() async {
     await _writeFile(
       '.gitattributes',

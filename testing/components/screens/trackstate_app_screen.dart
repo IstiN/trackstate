@@ -41,6 +41,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     matching: find.bySemanticsLabel(RegExp(RegExp.escape(label))),
   );
 
+  Finder _exactSemanticsLabel(String label) =>
+      find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
+
   Finder _text(String text) => find.textContaining(text, findRichText: true);
 
   Finder _issueDetail(String key) =>
@@ -62,6 +65,25 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       description: 'issue detail editor for $key',
     ),
   );
+
+  Finder _labeledTextField(String label) {
+    final decorationMatch = find.byWidgetPredicate((widget) {
+      if (widget is TextField) {
+        return widget.decoration?.labelText == label;
+      }
+      return false;
+    }, description: 'text field labeled $label');
+    if (decorationMatch.evaluate().isNotEmpty) {
+      return decorationMatch;
+    }
+    return find.descendant(
+      of: _exactSemanticsLabel(label),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is EditableText || widget is TextField,
+        description: 'editable control labeled $label',
+      ),
+    );
+  }
 
   Finder get _jqlSearchPanel => find.bySemanticsLabel(RegExp('^JQL Search\$'));
 
@@ -100,11 +122,13 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     tester.view.resetDevicePixelRatio();
   }
 
+  @override
   Future<void> openRepositoryAccess() async {
     await tester.tap(localGitAccessButton.first);
     await tester.pumpAndSettle();
   }
 
+  @override
   Future<void> closeDialog(String actionLabel) async {
     await tester.tap(find.text(actionLabel).first);
     await tester.pumpAndSettle();
@@ -309,12 +333,101 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
     return false;
   }
-
   @override
   Future<void> expectTextVisible(String text) async {
     final finder = _text(text);
     await _waitForVisible(finder);
     expect(finder, findsWidgets);
+  }
+
+  @override
+  Future<bool> isTextVisible(String text) async {
+    await tester.pump();
+    return _text(text).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<bool> isSemanticsLabelVisible(String label) async {
+    await tester.pump();
+    return _exactSemanticsLabel(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<bool> tapVisibleControl(String label) async {
+    await tester.pump();
+    final semanticsMatch = _exactSemanticsLabel(label);
+    final textMatch = find.text(label, findRichText: true);
+    final target = semanticsMatch.evaluate().isNotEmpty
+        ? semanticsMatch
+        : textMatch;
+    if (target.evaluate().isEmpty) {
+      return false;
+    }
+    await tester.ensureVisible(target.first);
+    if (label == 'Create' || label == 'Save') {
+      await tester.runAsync(() async {
+        await tester.tap(target.first, warnIfMissed: false);
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      });
+      await tester.pumpAndSettle();
+      return true;
+    }
+    await tester.tap(target.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+    return true;
+  }
+
+  @override
+  Future<bool> isTextFieldVisible(String label) async {
+    await tester.pump();
+    return _labeledTextField(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<void> enterLabeledTextField(
+    String label, {
+    required String text,
+  }) async {
+    final field = _labeledTextField(label);
+    await tester.pump();
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible text field labeled "$label", but no matching '
+        'editable control was rendered.',
+      );
+    }
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(field.first, text);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  List<String> visibleTextsSnapshot() {
+    final values = <String>[];
+    for (final widget in tester.widgetList<Text>(find.byType(Text))) {
+      final value = widget.data?.trim();
+      if (value == null || value.isEmpty) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
+  }
+
+  @override
+  List<String> visibleSemanticsLabelsSnapshot() {
+    final values = <String>[];
+    for (final widget in tester.widgetList<Semantics>(find.byType(Semantics))) {
+      final value = widget.properties.label?.trim();
+      if (value == null || value.isEmpty) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
   }
 
   @override
@@ -328,6 +441,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     expect(profileInitialsBadge(initials), findsOneWidget);
   }
 
+  @override
   void expectProfileIdentityVisible({
     required String displayName,
     required String login,
@@ -340,6 +454,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     expect(profileSurfaceSemantics(login), findsOneWidget);
   }
 
+  @override
   void expectLocalRuntimeDialog({
     required String repositoryPath,
     required String branch,
