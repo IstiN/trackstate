@@ -132,7 +132,8 @@ Future<void> main() async {
     final repository = ProviderBackedTrackStateRepository(provider: provider);
 
     final initialSession = repository.session;
-    result['initialSession'] = _serializeSession(initialSession);
+    final initialSessionSnapshot = _serializeSession(initialSession);
+    result['initialSession'] = initialSessionSnapshot;
 
     final connectFuture = repository.connect(
       const RepositoryConnection(
@@ -145,33 +146,34 @@ Future<void> main() async {
     await Future<void>.delayed(Duration.zero);
 
     final connectingSession = repository.session;
-    result['connectingSession'] = _serializeSession(connectingSession);
+    final connectingSessionSnapshot = _serializeSession(connectingSession);
+    result['connectingSession'] = connectingSessionSnapshot;
 
     provider.completeAuthentication();
     await connectFuture;
 
     final failures = <String>[];
-    if (initialSession == null) {
+    if (initialSessionSnapshot == null) {
       failures.add(
         'Step 2 failed: repository.session was null immediately after initialization, so product logic could not observe ProviderConnectionState.disconnected.',
       );
-    } else if (initialSession.connectionState !=
-        ProviderConnectionState.disconnected) {
+    } else if (initialSessionSnapshot['connectionState'] !=
+        ProviderConnectionState.disconnected.toString()) {
       failures.add(
         'Step 2 failed: repository.session did not expose ProviderConnectionState.disconnected immediately after initialization. '
-        'Observed ${initialSession.connectionState}.',
+        'Observed ${initialSessionSnapshot['connectionState']}.',
       );
     }
 
-    if (connectingSession == null) {
+    if (connectingSessionSnapshot == null) {
       failures.add(
         'Step 4 failed: repository.session was null while authentication was in progress, so product logic could not observe ProviderConnectionState.connecting.',
       );
-    } else if (connectingSession.connectionState !=
-        ProviderConnectionState.connecting) {
+    } else if (connectingSessionSnapshot['connectionState'] !=
+        ProviderConnectionState.connecting.toString()) {
       failures.add(
         'Step 4 failed: repository.session did not expose ProviderConnectionState.connecting after authentication started. '
-        'Observed ${connectingSession.connectionState}.',
+        'Observed ${connectingSessionSnapshot['connectionState']}.',
       );
     }
 
