@@ -20,14 +20,22 @@ class TrackStateApp extends StatefulWidget {
 }
 
 class _TrackStateAppState extends State<TrackStateApp> {
-  late final TrackerViewModel viewModel;
+  late TrackerViewModel viewModel;
 
   @override
   void initState() {
     super.initState();
-    viewModel = TrackerViewModel(
-      repository: widget.repository ?? createTrackStateRepository(),
-    )..load();
+    viewModel = _createViewModel();
+  }
+
+  @override
+  void didUpdateWidget(covariant TrackStateApp oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.repository == widget.repository) {
+      return;
+    }
+    viewModel.dispose();
+    viewModel = _createViewModel();
   }
 
   @override
@@ -35,6 +43,11 @@ class _TrackStateAppState extends State<TrackStateApp> {
     viewModel.dispose();
     super.dispose();
   }
+
+  TrackerViewModel _createViewModel() =>
+      TrackerViewModel(
+        repository: widget.repository ?? createTrackStateRepository(),
+      )..load();
 
   @override
   Widget build(BuildContext context) {
@@ -1054,29 +1067,36 @@ class _IssueDetailState extends State<_IssueDetail> {
     final issue = widget.issue;
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
+    final hasReadOnlySession = widget.viewModel.hasReadOnlySession;
+    final canUseWriteActions =
+        !hasReadOnlySession && !widget.viewModel.isSaving;
     final actions = [
       _PrimaryButton(
         label: l10n.transition,
         icon: TrackStateIconGlyph.gitBranch,
-        onPressed: () {},
+        onPressed: canUseWriteActions ? () {} : null,
+      ),
+      _IssueDetailActionButton(
+        label: l10n.comments,
+        onPressed: canUseWriteActions ? () {} : null,
       ),
       if (_isEditing)
         _IssueDetailActionButton(
           label: l10n.save,
           emphasized: true,
-          onPressed: widget.viewModel.isSaving ? null : _saveDescription,
+          onPressed: canUseWriteActions ? _saveDescription : null,
         )
       else
         _IssueDetailActionButton(
           label: l10n.edit,
-          onPressed: widget.viewModel.isSaving
-              ? null
-              : () {
+          onPressed: canUseWriteActions
+              ? () {
                   setState(() {
                     _isEditing = true;
                     _descriptionController.text = issue.description;
                   });
-                },
+                }
+              : null,
         ),
       if (_isEditing)
         _IssueDetailActionButton(
@@ -1127,6 +1147,15 @@ class _IssueDetailState extends State<_IssueDetail> {
             style: Theme.of(context).textTheme.headlineMedium,
           ),
           const SizedBox(height: 12),
+          if (hasReadOnlySession) ...[
+            Text(
+              l10n.issueDetailReadOnlyMessage,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: colors.muted),
+            ),
+            const SizedBox(height: 12),
+          ],
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -1849,7 +1878,7 @@ class _PrimaryButton extends StatelessWidget {
 
   final String label;
   final TrackStateIconGlyph icon;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {

@@ -166,6 +166,12 @@ abstract class AppLocalizations {
   /// **'Transition'**
   String get transition;
 
+  /// No description provided for @issueDetailReadOnlyMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Write access is required to edit this issue or change its status.'**
+  String get issueDetailReadOnlyMessage;
+
   /// No description provided for @syncStatus.
   ///
   /// In en, this message translates to:
