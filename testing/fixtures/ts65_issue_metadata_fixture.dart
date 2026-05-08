@@ -88,6 +88,9 @@ The UI should resolve the stored status ID to the localized status label.
   String get dataRef => 'main';
 
   @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
   String get repositoryLabel => 'trackstate/trackstate';
 
   @override

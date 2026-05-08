@@ -31,10 +31,28 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   @override
   final bool supportsGitHubAuth;
   TrackerSnapshot? _snapshot;
+  ProviderSession? _session;
+
+  ProviderSession? get session => _session;
 
   @override
-  Future<RepositoryUser> connect(RepositoryConnection connection) =>
-      _provider.authenticate(connection);
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    final user = await _provider.authenticate(connection);
+    final permission = await _provider.getPermission();
+    _session = ProviderSession(
+      providerType: _provider.providerType,
+      connectionState: ProviderConnectionState.connected,
+      resolvedUserIdentity: user.login
+          .ifEmpty(user.displayName)
+          .ifEmpty(_provider.repositoryLabel),
+      canRead: permission.canRead,
+      canWrite: permission.canWrite,
+      canCreateBranch: permission.canCreateBranch,
+      canManageAttachments: permission.canManageAttachments,
+      canCheckCollaborators: permission.canCheckCollaborators,
+    );
+    return user;
+  }
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async {

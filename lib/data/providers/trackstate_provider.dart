@@ -44,8 +44,35 @@ abstract interface class TrackStateProviderAdapter
         RepositoryCommitManager,
         RepositoryPermissionChecker,
         RepositoryAttachmentStore {
+  ProviderType get providerType;
   String get repositoryLabel;
   String get dataRef;
+}
+
+enum ProviderType { github, local }
+
+enum ProviderConnectionState { disconnected, connected }
+
+class ProviderSession {
+  const ProviderSession({
+    required this.providerType,
+    required this.connectionState,
+    required this.resolvedUserIdentity,
+    required this.canRead,
+    required this.canWrite,
+    required this.canCreateBranch,
+    required this.canManageAttachments,
+    required this.canCheckCollaborators,
+  });
+
+  final ProviderType providerType;
+  final ProviderConnectionState connectionState;
+  final String resolvedUserIdentity;
+  final bool canRead;
+  final bool canWrite;
+  final bool canCreateBranch;
+  final bool canManageAttachments;
+  final bool canCheckCollaborators;
 }
 
 class RepositoryTreeEntry {
@@ -140,11 +167,19 @@ class RepositoryPermission {
     required this.canRead,
     required this.canWrite,
     required this.isAdmin,
-  });
+    bool? canCreateBranch,
+    bool? canManageAttachments,
+    bool? canCheckCollaborators,
+  }) : canCreateBranch = canCreateBranch ?? canWrite,
+       canManageAttachments = canManageAttachments ?? canWrite,
+       canCheckCollaborators = canCheckCollaborators ?? isAdmin;
 
   final bool canRead;
   final bool canWrite;
   final bool isAdmin;
+  final bool canCreateBranch;
+  final bool canManageAttachments;
+  final bool canCheckCollaborators;
 }
 
 class RepositoryAttachment {
