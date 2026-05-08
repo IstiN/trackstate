@@ -204,7 +204,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     if (editor.evaluate().isEmpty) {
       fail(
         'Expected issue detail $key to expose a "$label" editor for the '
-        'TS-41 save flow, but no editable control was rendered.',
+        'dirty local save flow, but no editable control was rendered.',
       );
     }
     expect(editor, findsWidgets);
@@ -226,17 +226,24 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
-  Future<void> tapIssueDetailAction(
-    String key, {
-    required String label,
-  }) async {
+  Future<void> tapIssueDetailAction(String key, {required String label}) async {
     final action = _issueDetailAction(key, label);
     await _waitForVisible(_issueDetail(key));
     if (action.evaluate().isEmpty) {
       fail(
         'Expected issue detail $key to expose a "$label" action for the '
-        'TS-41 save flow, but no matching control was rendered.',
+        'dirty local save flow, but no matching control was rendered.',
       );
+    }
+    if (label == 'Save') {
+      await tester.runAsync(() async {
+        await tester.ensureVisible(action.first);
+        await tester.tap(action.first, warnIfMissed: false);
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      });
+      await tester.pumpAndSettle();
+      return;
     }
     await tester.ensureVisible(action.first);
     await tester.tap(action.first, warnIfMissed: false);
