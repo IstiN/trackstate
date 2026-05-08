@@ -33,14 +33,26 @@ abstract interface class TrackStateAppComponent {
     required String text,
   });
 
-  Future<void> tapIssueDetailAction(
-    String key, {
-    required String label,
-  });
+  Future<void> tapIssueDetailAction(String key, {required String label});
 
   Future<void> expectMessageBannerContains(String text);
 
   void expectLocalRuntimeChrome();
+
+  Future<void> openRepositoryAccess();
+
+  Future<void> closeDialog(String actionLabel);
+
+  void expectProfileIdentityVisible({
+    required String displayName,
+    required String login,
+    required String initials,
+  });
+
+  void expectLocalRuntimeDialog({
+    required String repositoryPath,
+    required String branch,
+  });
 
   Future<void> expectTextVisible(String text);
 }
