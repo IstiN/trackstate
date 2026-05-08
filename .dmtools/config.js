@@ -167,6 +167,8 @@ module.exports = {
         },
         bug_development: {
             customParams: {
+                autoStartReview: true,
+                autoStartReviewConfigFile: 'agents/pr_review.json',
                 managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
             }
         },
