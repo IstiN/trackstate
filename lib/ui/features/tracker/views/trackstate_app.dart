@@ -338,6 +338,48 @@ class _TopBar extends StatelessWidget {
             onPressed: viewModel.toggleTheme,
           ),
           const SizedBox(width: 8),
+          if (viewModel.connectedUser != null) ...[
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: compact ? 160 : 240),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Semantics(
+                    container: true,
+                    label: _profileDisplayName(viewModel),
+                    child: ExcludeSemantics(
+                      child: Text(
+                        _profileDisplayName(viewModel),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: colors.text,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_profileLogin(viewModel) case final login?)
+                    Semantics(
+                      container: true,
+                      label: login,
+                      child: ExcludeSemantics(
+                        child: Text(
+                          login,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodySmall?.copyWith(color: colors.muted),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
           CircleAvatar(
             radius: 18,
             backgroundColor: colors.primarySoft,
@@ -494,6 +536,30 @@ String _profileInitials(AppLocalizations l10n, TrackerViewModel viewModel) {
     return repositoryFallback;
   }
   return _initialsFromText(l10n.appTitle);
+}
+
+String _profileDisplayName(TrackerViewModel viewModel) {
+  final user = viewModel.connectedUser;
+  if (user == null) {
+    return '';
+  }
+  final displayName = user.displayName.trim();
+  if (displayName.isNotEmpty) {
+    return displayName;
+  }
+  return user.login.trim();
+}
+
+String? _profileLogin(TrackerViewModel viewModel) {
+  final user = viewModel.connectedUser;
+  if (user == null) {
+    return null;
+  }
+  final login = user.login.trim();
+  if (login.isEmpty) {
+    return null;
+  }
+  return login == _profileDisplayName(viewModel) ? null : login;
 }
 
 String _initialsFromText(String value) {
