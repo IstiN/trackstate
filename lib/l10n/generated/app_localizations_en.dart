@@ -193,6 +193,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String repositoryConfigFallback(String error) {
+    return 'A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. $error';
+  }
+
+  @override
   String get localGitTokensNotNeeded =>
       'This runtime uses local Git commits. GitHub tokens are not needed.';
 

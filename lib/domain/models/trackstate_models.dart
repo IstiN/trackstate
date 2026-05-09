@@ -405,11 +405,13 @@ class TrackerSnapshot {
     required this.project,
     required this.issues,
     this.repositoryIndex = const RepositoryIndex(),
+    this.loadWarnings = const [],
   });
 
   final ProjectConfig project;
   final List<TrackStateIssue> issues;
   final RepositoryIndex repositoryIndex;
+  final List<String> loadWarnings;
 
   List<TrackStateIssue> get epics =>
       issues.where((issue) => issue.issueType == IssueType.epic).toList();

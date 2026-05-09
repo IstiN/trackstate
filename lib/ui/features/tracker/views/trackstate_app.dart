@@ -829,6 +829,8 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
     TrackerMessageKind.dataLoadFailed => l10n.trackerDataLoadFailed(
       message.error!,
     ),
+    TrackerMessageKind.repositoryConfigFallback =>
+      l10n.repositoryConfigFallback(message.error!),
     TrackerMessageKind.localGitTokensNotNeeded => l10n.localGitTokensNotNeeded,
     TrackerMessageKind.tokenEmpty => l10n.tokenEmpty,
     TrackerMessageKind.githubConnectedDragCards =>

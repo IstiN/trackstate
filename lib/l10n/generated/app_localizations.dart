@@ -454,6 +454,12 @@ abstract class AppLocalizations {
   /// **'TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. {error}'**
   String trackerDataLoadFailed(String error);
 
+  /// No description provided for @repositoryConfigFallback.
+  ///
+  /// In en, this message translates to:
+  /// **'A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. {error}'**
+  String repositoryConfigFallback(String error);
+
   /// No description provided for @localGitTokensNotNeeded.
   ///
   /// In en, this message translates to:
