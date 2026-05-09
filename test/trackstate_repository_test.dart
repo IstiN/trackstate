@@ -63,6 +63,47 @@ void main() {
   });
 
   test(
+    'demo repository creates the first issue under the project root path when no issue paths exist yet',
+    () async {
+      const repository = DemoTrackStateRepository(
+        snapshot: TrackerSnapshot(
+          project: ProjectConfig(
+            key: 'DEMO',
+            name: 'Demo Project',
+            repository: 'demo/repository',
+            branch: 'main',
+            defaultLocale: 'en',
+            issueTypeDefinitions: [
+              TrackStateConfigEntry(id: 'story', name: 'Story'),
+            ],
+            statusDefinitions: [TrackStateConfigEntry(id: 'todo', name: 'To Do')],
+            fieldDefinitions: [
+              TrackStateFieldDefinition(
+                id: 'summary',
+                name: 'Summary',
+                type: 'string',
+                required: true,
+              ),
+            ],
+            priorityDefinitions: [
+              TrackStateConfigEntry(id: 'medium', name: 'Medium'),
+            ],
+          ),
+          issues: [],
+        ),
+      );
+
+      final created = await repository.createIssue(
+        summary: 'First demo issue',
+        description: 'Created in an empty project snapshot.',
+      );
+
+      expect(created.key, 'DEMO-1');
+      expect(created.storagePath, 'DEMO/DEMO-1/main.md');
+    },
+  );
+
+  test(
     'setup repository loads indexes, comments, links, attachments, tombstones, and localized labels',
     () async {
       final repository = _mockSetupRepository(
