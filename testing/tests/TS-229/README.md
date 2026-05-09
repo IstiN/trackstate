@@ -17,4 +17,4 @@ python3 -m unittest discover -s testing/tests/TS-229 -p 'test_*.py' -v
 ## Optional environment variables
 
 - `TRACKSTATE_RELEASE_TAG_REPOSITORY` (default: `IstiN/trackstate-setup`)
-- `TRACKSTATE_EXPECTED_STABLE_VERSION` (default from config: `v1.0.0`)
+- `TRACKSTATE_EXPECTED_STABLE_VERSION` (optional, disabled by default)

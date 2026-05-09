@@ -7,4 +7,3 @@ dependencies:
   - network access to the public GitHub web pages for releases and tags
 runtime_inputs:
   repository: IstiN/trackstate-setup
-  expected_stable_version: v1.0.0

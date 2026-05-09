@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
 import re
-from urllib import error as urllib_error
-from urllib import request as urllib_request
 
 from testing.core.config.repository_release_tags_config import (
     RepositoryReleaseTagsConfig,
 )
+from testing.core.interfaces.json_array_http_reader import JsonArrayHttpReader
 from testing.core.interfaces.repository_release_tags_probe import (
     RepositoryReleaseTagsObservation,
 )
@@ -30,19 +28,27 @@ class RepositoryReleaseTagsValidator:
         self,
         config: RepositoryReleaseTagsConfig,
         *,
+        json_array_http_reader: JsonArrayHttpReader,
         url_text_reader: UrlTextReader,
     ) -> None:
         self._config = config
+        self._json_array_http_reader = json_array_http_reader
         self._url_text_reader = url_text_reader
 
     def validate(self) -> RepositoryReleaseTagsObservation:
-        releases_status_code, releases_payload = self._read_json_array(
-            self._config.releases_api_url
+        releases_response = self._json_array_http_reader.read_json_array(
+            url=self._config.releases_api_url,
+            headers=self._API_HEADERS,
+            timeout_seconds=30,
         )
-        tags_status_code, tags_payload = self._read_json_array(self._config.tags_api_url)
+        tags_response = self._json_array_http_reader.read_json_array(
+            url=self._config.tags_api_url,
+            headers=self._API_HEADERS,
+            timeout_seconds=30,
+        )
 
-        release_tag_names = self._extract_release_tag_names(releases_payload)
-        tag_names = self._extract_tag_names(tags_payload)
+        release_tag_names = self._extract_release_tag_names(releases_response.payload)
+        tag_names = self._extract_tag_names(tags_response.payload)
         stable_release_versions = self._stable_versions(release_tag_names)
         stable_tag_versions = self._stable_versions(tag_names)
         common_stable_versions = self._common_stable_versions(
@@ -68,8 +74,8 @@ class RepositoryReleaseTagsValidator:
             repository=self._config.repository,
             releases_api_url=self._config.releases_api_url,
             tags_api_url=self._config.tags_api_url,
-            releases_status_code=releases_status_code,
-            tags_status_code=tags_status_code,
+            releases_status_code=releases_response.status_code,
+            tags_status_code=tags_response.status_code,
             release_tag_names=release_tag_names,
             tag_names=tag_names,
             stable_release_versions=stable_release_versions,
@@ -81,23 +87,6 @@ class RepositoryReleaseTagsValidator:
             releases_page_text=releases_page_text,
             tags_page_text=tags_page_text,
         )
-
-    def _read_json_array(self, url: str) -> tuple[int | None, list[object]]:
-        request = urllib_request.Request(url, headers=self._API_HEADERS)
-        try:
-            with urllib_request.urlopen(request, timeout=30) as response:
-                status_code = response.getcode()
-                body = response.read().decode("utf-8")
-        except urllib_error.HTTPError as error:
-            status_code = error.code
-            body = error.read().decode("utf-8", errors="replace")
-        except urllib_error.URLError as error:
-            raise RuntimeError(f"GET {url} failed: {error.reason}") from error
-
-        payload = json.loads(body or "[]")
-        if not isinstance(payload, list):
-            return status_code, []
-        return status_code, payload
 
     def _extract_release_tag_names(self, payload: list[object]) -> list[str]:
         names: list[str] = []

@@ -11,6 +11,9 @@ from testing.core.config.repository_release_tags_config import (
 from testing.core.interfaces.repository_release_tags_probe import (
     RepositoryReleaseTagsProbe,
 )
+from testing.frameworks.python.urllib_json_array_http_reader import (
+    UrllibJsonArrayHttpReader,
+)
 from testing.frameworks.python.urllib_url_text_reader import UrllibUrlTextReader
 
 
@@ -22,5 +25,6 @@ def create_repository_release_tags_probe(
     )
     return RepositoryReleaseTagsValidator(
         config,
+        json_array_http_reader=UrllibJsonArrayHttpReader(),
         url_text_reader=UrllibUrlTextReader(),
     )
