@@ -28,22 +28,16 @@ Future<TrackStateRepository> createLocalGitTestRepository({
   if (user == null) {
     throw StateError('Local Git user resolution did not complete.');
   }
-  return _PreloadedLocalGitRepository(
-    repository: repository,
-    snapshot: snapshot,
-    user: user,
-  );
+  return _PreloadedLocalGitRepository(repository: repository, user: user);
 }
 
 class _PreloadedLocalGitRepository implements TrackStateRepository {
   const _PreloadedLocalGitRepository({
     required this.repository,
-    required this.snapshot,
     required this.user,
   });
 
   final TrackStateRepository repository;
-  final TrackerSnapshot snapshot;
   final RepositoryUser user;
 
   @override
@@ -56,7 +50,7 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
   Future<RepositoryUser> connect(RepositoryConnection connection) async => user;
 
   @override
-  Future<TrackerSnapshot> loadSnapshot() async => snapshot;
+  Future<TrackerSnapshot> loadSnapshot() => repository.loadSnapshot();
 
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) =>

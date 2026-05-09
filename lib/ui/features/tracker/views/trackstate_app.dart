@@ -4,16 +4,30 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../../../../../data/repositories/trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository_factory.dart';
+import '../../../../../data/repositories/trackstate_runtime.dart';
 import '../../../../../domain/models/trackstate_models.dart';
 import '../../../../../l10n/generated/app_localizations.dart';
 import '../../../core/trackstate_icons.dart';
 import '../../../core/trackstate_theme.dart';
 import '../view_models/tracker_view_model.dart';
 
+typedef LocalRepositoryLoader =
+    Future<TrackStateRepository> Function({
+      required String repositoryPath,
+      required String writeBranch,
+    });
+
+typedef LocalRepositoryConfigurationApplier =
+    Future<void> Function({
+      required String repositoryPath,
+      required String writeBranch,
+    });
+
 class TrackStateApp extends StatefulWidget {
-  const TrackStateApp({super.key, this.repository});
+  const TrackStateApp({super.key, this.repository, this.openLocalRepository});
 
   final TrackStateRepository? repository;
+  final LocalRepositoryLoader? openLocalRepository;
 
   @override
   State<TrackStateApp> createState() => _TrackStateAppState();
@@ -21,6 +35,9 @@ class TrackStateApp extends StatefulWidget {
 
 class _TrackStateAppState extends State<TrackStateApp> {
   late TrackerViewModel viewModel;
+  bool _isCreateIssueVisible = false;
+  String? _activeLocalGitConfigurationKey;
+  String? _pendingLocalGitConfigurationKey;
 
   @override
   void initState() {
@@ -34,8 +51,10 @@ class _TrackStateAppState extends State<TrackStateApp> {
     if (oldWidget.repository == widget.repository) {
       return;
     }
-    viewModel.dispose();
-    viewModel = _createViewModel();
+    final previousViewModel = viewModel;
+    viewModel = _createViewModel(previous: previousViewModel);
+    previousViewModel.dispose();
+    _isCreateIssueVisible = false;
   }
 
   @override
@@ -44,9 +63,92 @@ class _TrackStateAppState extends State<TrackStateApp> {
     super.dispose();
   }
 
-  TrackerViewModel _createViewModel() => TrackerViewModel(
-    repository: widget.repository ?? createTrackStateRepository(),
-  )..load();
+  TrackerViewModel _createViewModel({
+    TrackStateRepository? repository,
+    TrackerViewModel? previous,
+  }) {
+    final nextViewModel = TrackerViewModel(
+      repository:
+          repository ?? widget.repository ?? createTrackStateRepository(),
+    );
+    if (previous != null) {
+      nextViewModel.restorePresentationStateFrom(previous);
+    }
+    nextViewModel.load();
+    return nextViewModel;
+  }
+
+  Future<TrackStateRepository> _openLocalRepository({
+    required String repositoryPath,
+    required String writeBranch,
+  }) async {
+    final loader = widget.openLocalRepository;
+    if (loader != null) {
+      return loader(repositoryPath: repositoryPath, writeBranch: writeBranch);
+    }
+    return createTrackStateRepository(
+      runtime: TrackStateRuntime.localGit,
+      localRepositoryPath: repositoryPath,
+    );
+  }
+
+  Future<void> _switchToLocalRepository({
+    required String repositoryPath,
+    required String writeBranch,
+  }) async {
+    final normalizedRepositoryPath = repositoryPath.trim();
+    final normalizedWriteBranch = writeBranch.trim();
+    if (normalizedRepositoryPath.isEmpty || normalizedWriteBranch.isEmpty) {
+      return;
+    }
+    final configurationKey =
+        '$normalizedRepositoryPath\n$normalizedWriteBranch';
+    if (_activeLocalGitConfigurationKey == configurationKey ||
+        _pendingLocalGitConfigurationKey == configurationKey) {
+      return;
+    }
+
+    _pendingLocalGitConfigurationKey = configurationKey;
+    final previousViewModel = viewModel;
+    try {
+      final nextRepository = await _openLocalRepository(
+        repositoryPath: normalizedRepositoryPath,
+        writeBranch: normalizedWriteBranch,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      final nextViewModel = _createViewModel(
+        repository: nextRepository,
+        previous: previousViewModel,
+      );
+      setState(() {
+        viewModel = nextViewModel;
+        _activeLocalGitConfigurationKey = configurationKey;
+        _isCreateIssueVisible = false;
+      });
+      previousViewModel.dispose();
+    } finally {
+      if (_pendingLocalGitConfigurationKey == configurationKey) {
+        _pendingLocalGitConfigurationKey = null;
+      }
+    }
+  }
+
+  void _openCreateIssue() {
+    if (_isCreateIssueVisible) {
+      return;
+    }
+    setState(() => _isCreateIssueVisible = true);
+  }
+
+  void _closeCreateIssue() {
+    if (!_isCreateIssueVisible) {
+      return;
+    }
+    setState(() => _isCreateIssueVisible = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -68,7 +170,13 @@ class _TrackStateAppState extends State<TrackStateApp> {
             GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
-          home: _TrackerHome(viewModel: viewModel),
+          home: _TrackerHome(
+            viewModel: viewModel,
+            isCreateIssueVisible: _isCreateIssueVisible,
+            onOpenCreateIssue: _openCreateIssue,
+            onCloseCreateIssue: _closeCreateIssue,
+            onApplyLocalGitConfiguration: _switchToLocalRepository,
+          ),
         );
       },
     );
@@ -76,9 +184,19 @@ class _TrackStateAppState extends State<TrackStateApp> {
 }
 
 class _TrackerHome extends StatelessWidget {
-  const _TrackerHome({required this.viewModel});
+  const _TrackerHome({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+    required this.onApplyLocalGitConfiguration,
+  });
 
   final TrackerViewModel viewModel;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
+  final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
 
   @override
   Widget build(BuildContext context) {
@@ -143,8 +261,22 @@ class _TrackerHome extends StatelessWidget {
                 backgroundColor: colors.page,
                 body: SafeArea(
                   child: isCompact
-                      ? _MobileShell(viewModel: viewModel)
-                      : _DesktopShell(viewModel: viewModel),
+                      ? _MobileShell(
+                          viewModel: viewModel,
+                          isCreateIssueVisible: isCreateIssueVisible,
+                          onOpenCreateIssue: onOpenCreateIssue,
+                          onCloseCreateIssue: onCloseCreateIssue,
+                          onApplyLocalGitConfiguration:
+                              onApplyLocalGitConfiguration,
+                        )
+                      : _DesktopShell(
+                          viewModel: viewModel,
+                          isCreateIssueVisible: isCreateIssueVisible,
+                          onOpenCreateIssue: onOpenCreateIssue,
+                          onCloseCreateIssue: onCloseCreateIssue,
+                          onApplyLocalGitConfiguration:
+                              onApplyLocalGitConfiguration,
+                        ),
                 ),
                 bottomNavigationBar: isCompact
                     ? _BottomNavigation(viewModel: viewModel)
@@ -164,9 +296,19 @@ class _SelectSectionIntent extends Intent {
 }
 
 class _DesktopShell extends StatelessWidget {
-  const _DesktopShell({required this.viewModel});
+  const _DesktopShell({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+    required this.onApplyLocalGitConfiguration,
+  });
 
   final TrackerViewModel viewModel;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
+  final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
 
   @override
   Widget build(BuildContext context) {
@@ -174,11 +316,12 @@ class _DesktopShell extends StatelessWidget {
       children: [
         SizedBox(width: 268, child: _Sidebar(viewModel: viewModel)),
         Expanded(
-          child: Column(
-            children: [
-              _TopBar(viewModel: viewModel),
-              Expanded(child: _SectionBody(viewModel: viewModel)),
-            ],
+          child: _TrackerMainPane(
+            viewModel: viewModel,
+            isCreateIssueVisible: isCreateIssueVisible,
+            onOpenCreateIssue: onOpenCreateIssue,
+            onCloseCreateIssue: onCloseCreateIssue,
+            onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
           ),
         ),
       ],
@@ -187,16 +330,80 @@ class _DesktopShell extends StatelessWidget {
 }
 
 class _MobileShell extends StatelessWidget {
-  const _MobileShell({required this.viewModel});
+  const _MobileShell({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+    required this.onApplyLocalGitConfiguration,
+  });
 
   final TrackerViewModel viewModel;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
+  final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return _TrackerMainPane(
+      viewModel: viewModel,
+      compact: true,
+      isCreateIssueVisible: isCreateIssueVisible,
+      onOpenCreateIssue: onOpenCreateIssue,
+      onCloseCreateIssue: onCloseCreateIssue,
+      onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+    );
+  }
+}
+
+class _TrackerMainPane extends StatelessWidget {
+  const _TrackerMainPane({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+    required this.onApplyLocalGitConfiguration,
+    this.compact = false,
+  });
+
+  final TrackerViewModel viewModel;
+  final bool compact;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
+  final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
       children: [
-        _TopBar(viewModel: viewModel, compact: true),
-        Expanded(child: _SectionBody(viewModel: viewModel, compact: true)),
+        Column(
+          children: [
+            _TopBar(
+              viewModel: viewModel,
+              compact: compact,
+              onOpenCreateIssue: onOpenCreateIssue,
+            ),
+            Expanded(
+              child: _SectionBody(
+                viewModel: viewModel,
+                compact: compact,
+                onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+              ),
+            ),
+          ],
+        ),
+        if (isCreateIssueVisible)
+          Positioned.fill(
+            child: _CreateIssueOverlay(
+              compact: compact,
+              child: _CreateIssueDialog(
+                viewModel: viewModel,
+                onDismiss: onCloseCreateIssue,
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -272,9 +479,14 @@ class _Sidebar extends StatelessWidget {
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.viewModel, this.compact = false});
+  const _TopBar({
+    required this.viewModel,
+    required this.onOpenCreateIssue,
+    this.compact = false,
+  });
 
   final TrackerViewModel viewModel;
+  final VoidCallback onOpenCreateIssue;
   final bool compact;
 
   @override
@@ -284,7 +496,7 @@ class _TopBar extends StatelessWidget {
     final repositoryAccessLabel = _repositoryAccessLabel(l10n, viewModel);
     final openCreateIssue = viewModel.hasReadOnlySession || viewModel.isSaving
         ? null
-        : () => _showCreateIssueDialog(context, viewModel);
+        : onOpenCreateIssue;
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 12, 12, 6),
       child: Row(
@@ -423,16 +635,6 @@ class _TopBar extends StatelessWidget {
       ),
     );
   }
-}
-
-Future<void> _showCreateIssueDialog(
-  BuildContext context,
-  TrackerViewModel viewModel,
-) async {
-  await showDialog<void>(
-    context: context,
-    builder: (dialogContext) => _CreateIssueDialog(viewModel: viewModel),
-  );
 }
 
 Future<void> _showRepositoryAccessDialog(
@@ -718,9 +920,14 @@ class _MessageBanner extends StatelessWidget {
 }
 
 class _SectionBody extends StatelessWidget {
-  const _SectionBody({required this.viewModel, this.compact = false});
+  const _SectionBody({
+    required this.viewModel,
+    required this.onApplyLocalGitConfiguration,
+    this.compact = false,
+  });
 
   final TrackerViewModel viewModel;
+  final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final bool compact;
 
   @override
@@ -730,7 +937,10 @@ class _SectionBody extends StatelessWidget {
       TrackerSection.board => _Board(viewModel: viewModel),
       TrackerSection.search => _SearchAndDetail(viewModel: viewModel),
       TrackerSection.hierarchy => _Hierarchy(viewModel: viewModel),
-      TrackerSection.settings => _Settings(viewModel: viewModel),
+      TrackerSection.settings => _Settings(
+        viewModel: viewModel,
+        onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+      ),
     };
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 8, compact ? 12 : 18, 24),
@@ -1037,9 +1247,13 @@ class _Hierarchy extends StatelessWidget {
 }
 
 class _Settings extends StatefulWidget {
-  const _Settings({required this.viewModel});
+  const _Settings({
+    required this.viewModel,
+    required this.onApplyLocalGitConfiguration,
+  });
 
   final TrackerViewModel viewModel;
+  final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
 
   @override
   State<_Settings> createState() => _SettingsState();
@@ -1050,17 +1264,26 @@ class _SettingsState extends State<_Settings> {
   final TextEditingController _repositoryPathController =
       TextEditingController();
   final TextEditingController _writeBranchController = TextEditingController();
+  final FocusNode _repositoryPathFocusNode = FocusNode();
+  final FocusNode _writeBranchFocusNode = FocusNode();
+  String? _lastAppliedLocalGitConfigurationKey;
 
   @override
   void initState() {
     super.initState();
     _selectedProvider = _initialProvider(widget.viewModel);
+    _repositoryPathController.addListener(_maybeApplyLocalGitConfiguration);
+    _writeBranchController.addListener(_maybeApplyLocalGitConfiguration);
+    _repositoryPathFocusNode.addListener(_maybeApplyLocalGitConfiguration);
+    _writeBranchFocusNode.addListener(_maybeApplyLocalGitConfiguration);
   }
 
   @override
   void dispose() {
     _repositoryPathController.dispose();
     _writeBranchController.dispose();
+    _repositoryPathFocusNode.dispose();
+    _writeBranchFocusNode.dispose();
     super.dispose();
   }
 
@@ -1082,6 +1305,38 @@ class _SettingsState extends State<_Settings> {
   void _clearLocalGitDraft() {
     _repositoryPathController.clear();
     _writeBranchController.clear();
+    _lastAppliedLocalGitConfigurationKey = null;
+  }
+
+  Future<void> _maybeApplyLocalGitConfiguration() async {
+    if (_selectedProvider != _SettingsProviderSelection.localGit ||
+        _repositoryPathFocusNode.hasFocus ||
+        _writeBranchFocusNode.hasFocus) {
+      return;
+    }
+    final repositoryPath = _repositoryPathController.text.trim();
+    final writeBranch = _writeBranchController.text.trim();
+    if (repositoryPath.isEmpty || writeBranch.isEmpty) {
+      return;
+    }
+    final configurationKey = '$repositoryPath\n$writeBranch';
+    if (_lastAppliedLocalGitConfigurationKey == configurationKey) {
+      return;
+    }
+    _lastAppliedLocalGitConfigurationKey = configurationKey;
+    var appliedSuccessfully = false;
+    try {
+      await widget.onApplyLocalGitConfiguration(
+        repositoryPath: repositoryPath,
+        writeBranch: writeBranch,
+      );
+      appliedSuccessfully = true;
+    } finally {
+      if (!appliedSuccessfully &&
+          _lastAppliedLocalGitConfigurationKey == configurationKey) {
+        _lastAppliedLocalGitConfigurationKey = null;
+      }
+    }
   }
 
   void _selectProvider(_SettingsProviderSelection selection) {
@@ -1133,6 +1388,8 @@ class _SettingsState extends State<_Settings> {
         _LocalGitConfiguration(
           repositoryPathController: _repositoryPathController,
           writeBranchController: _writeBranchController,
+          repositoryPathFocusNode: _repositoryPathFocusNode,
+          writeBranchFocusNode: _writeBranchFocusNode,
         ),
       ],
     ];
@@ -1977,10 +2234,14 @@ class _LocalGitConfiguration extends StatelessWidget {
   const _LocalGitConfiguration({
     required this.repositoryPathController,
     required this.writeBranchController,
+    required this.repositoryPathFocusNode,
+    required this.writeBranchFocusNode,
   });
 
   final TextEditingController repositoryPathController;
   final TextEditingController writeBranchController;
+  final FocusNode repositoryPathFocusNode;
+  final FocusNode writeBranchFocusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -1990,11 +2251,13 @@ class _LocalGitConfiguration extends StatelessWidget {
         _SettingsTextField(
           label: l10n.repositoryPath,
           controller: repositoryPathController,
+          focusNode: repositoryPathFocusNode,
         ),
         const SizedBox(height: 12),
         _SettingsTextField(
           label: l10n.writeBranch,
           controller: writeBranchController,
+          focusNode: writeBranchFocusNode,
         ),
       ],
     );
@@ -2002,15 +2265,21 @@ class _LocalGitConfiguration extends StatelessWidget {
 }
 
 class _SettingsTextField extends StatelessWidget {
-  const _SettingsTextField({required this.label, required this.controller});
+  const _SettingsTextField({
+    required this.label,
+    required this.controller,
+    required this.focusNode,
+  });
 
   final String label;
   final TextEditingController controller;
+  final FocusNode focusNode;
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       controller: controller,
+      focusNode: focusNode,
       decoration: InputDecoration(labelText: label),
     );
   }
@@ -2151,12 +2420,28 @@ class _IconButtonSurface extends StatelessWidget {
 }
 
 class _CreateIssueDialog extends StatefulWidget {
-  const _CreateIssueDialog({required this.viewModel});
+  const _CreateIssueDialog({required this.viewModel, required this.onDismiss});
 
   final TrackerViewModel viewModel;
+  final VoidCallback onDismiss;
 
   @override
   State<_CreateIssueDialog> createState() => _CreateIssueDialogState();
+}
+
+class _CreateIssueOverlay extends StatelessWidget {
+  const _CreateIssueOverlay({required this.child, this.compact = false});
+
+  final Widget child;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: compact ? Alignment.topCenter : Alignment.center,
+      child: child,
+    );
+  }
 }
 
 class _CreateIssueDialogState extends State<_CreateIssueDialog> {
@@ -2200,7 +2485,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
     if (!mounted || !success) {
       return;
     }
-    Navigator.of(context).pop();
+    widget.onDismiss();
   }
 
   @override
@@ -2284,7 +2569,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                         label: l10n.cancel,
                         onPressed: widget.viewModel.isSaving
                             ? null
-                            : () => Navigator.of(context).pop(),
+                            : widget.onDismiss,
                       ),
                     ],
                   ),

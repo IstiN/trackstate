@@ -106,8 +106,9 @@ void main() {
       if (afterArchival == null) {
         throw StateError('TS-174 post-archive observation did not complete.');
       }
-      final indexedIssuePath = afterArchival.snapshot.repositoryIndex
-          .pathForKey(Ts174ExistingIssueArchiveFixture.issueKey);
+      final indexedIssuePath = afterArchival.snapshot.repositoryIndex.pathForKey(
+        Ts174ExistingIssueArchiveFixture.issueKey,
+      );
 
       expect(
         afterArchival.archivedIssue?.key,

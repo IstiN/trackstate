@@ -304,6 +304,12 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void restorePresentationStateFrom(TrackerViewModel previous) {
+    _section = previous._section;
+    _themePreference = previous._themePreference;
+    _jql = previous._jql;
+  }
+
   void dismissMessage() {
     if (_message == null) {
       return;
