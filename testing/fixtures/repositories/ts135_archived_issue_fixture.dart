@@ -124,8 +124,8 @@ This control issue proves the repository contains more than one issue.
 ''');
 
     await _git(['init', '-b', 'main']);
-    await _git(['config', 'user.name', 'Local Tester']);
-    await _git(['config', 'user.email', 'local@example.com']);
+    await _git(['config', '--local', 'user.name', 'Local Tester']);
+    await _git(['config', '--local', 'user.email', 'local@example.com']);
     await _git(['add', '.']);
     await _git([
       'commit',
