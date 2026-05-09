@@ -471,6 +471,34 @@ void main() {
   );
 
   test(
+    'local repository falls back to built-in fields when fields.json is missing',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      await _git(repo.path, ['rm', 'DEMO/config/fields.json']);
+      await _git(repo.path, ['commit', '-m', 'Remove fields config']);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+
+      expect(snapshot.project.fieldLabel('summary'), 'Summary');
+      expect(snapshot.project.fieldLabel('description'), 'Description');
+      expect(
+        snapshot.project.fieldDefinitions.map((field) => field.id),
+        containsAll(<String>['summary', 'description']),
+      );
+      expect(
+        snapshot.loadWarnings,
+        contains(
+          contains('Falling back to built-in fields because DEMO/config/fields.json is missing'),
+        ),
+      );
+      expect(snapshot.issues, isNotEmpty);
+    },
+  );
+
+  test(
     'local provider rejects stale attachment writes with expected revisions',
     () async {
       final repo = await _createLocalRepository();
