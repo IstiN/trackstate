@@ -15,7 +15,9 @@ class Ts135ArchivedIssueFixture {
   final bool includePreservedMetadata;
 
   static const archivedIssueKey = 'TRACK-555';
-  static const archivedIssuePath = 'TRACK/$archivedIssueKey/main.md';
+  static const activeIssuePath = 'TRACK/$archivedIssueKey/main.md';
+  static const archivedStoragePath =
+      'TRACK/.trackstate/archive/$archivedIssueKey/main.md';
   static const archivedIssueSummary = 'Archive target issue';
   static const siblingIssueKey = 'TRACK-556';
   static const preservedPriority = IssuePriority.high;
@@ -80,7 +82,7 @@ class Ts135ArchivedIssueFixture {
     final currentSessionIssue = currentSessionSnapshot.issues.singleWhere(
       (candidate) => candidate.key == archivedIssueKey,
     );
-    final issueFile = File('${directory.path}/$archivedIssuePath');
+    final issueFile = File('${directory.path}/${currentSessionIssue.storagePath}');
     final restartedObservation = await _observeRepositoryState();
     return Ts135ArchivedIssueRestartObservation(
       archivedIssue: archivedIssue,
@@ -103,7 +105,7 @@ class Ts135ArchivedIssueFixture {
     final issue = snapshot.issues.singleWhere(
       (candidate) => candidate.key == archivedIssueKey,
     );
-    final issueFile = File('${directory.path}/$archivedIssuePath');
+    final issueFile = File('${directory.path}/${issue.storagePath}');
     return Ts135ArchivedIssueObservation(
       snapshot: snapshot,
       issue: issue,
@@ -151,7 +153,7 @@ class Ts135ArchivedIssueFixture {
         '[{"id":"2026.05","name":"2026.05"},{"id":"2026.06","name":"2026.06"}]\n',
       );
     }
-    await _writeFile(archivedIssuePath, '''
+    await _writeFile(initiallyArchived ? archivedStoragePath : activeIssuePath, '''
 ---
 key: $archivedIssueKey
 project: TRACK
