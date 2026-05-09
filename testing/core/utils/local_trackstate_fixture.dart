@@ -55,6 +55,10 @@ class LocalTrackStateFixture {
     await _git(['add', issuePath]);
   }
 
+  Future<void> stashWorktreeChanges({
+    String message = 'Manual recovery before retrying issue creation',
+  }) => _git(['stash', 'push', '--include-untracked', '-m', message]);
+
   Future<String> buildUpdatedDescriptionMarkdown(
     String updatedDescription,
   ) async {
