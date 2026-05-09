@@ -89,7 +89,7 @@ class ThemeTokenPolicyMixedTargetCheckTest(unittest.TestCase):
         self.assertTrue(
             result.theme_token_check.succeeded,
             "Step 3 failed: running `dart run tool/check_theme_tokens.dart "
-            "lib/main.dart lib/ui/` did not complete successfully against the live "
+            "lib/main.dart tool/` did not complete successfully against the live "
             "production targets.\n"
             f"Command: {result.theme_token_check.command_text}\n"
             f"Exit code: {result.theme_token_check.exit_code}\n"

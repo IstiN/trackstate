@@ -2,7 +2,7 @@
 
 Validates the live production theme-token policy check when a single command mixes
 an explicit file target with an explicit directory target:
-`dart run tool/check_theme_tokens.dart lib/main.dart lib/ui/`.
+`dart run tool/check_theme_tokens.dart lib/main.dart tool/`.
 
 The automation only passes when a user can run that command at the repository
 root and observe:
@@ -43,7 +43,7 @@ python3 -m unittest discover -s testing/tests/TS-158 -p 'test_*.py'
 - `TS158_FILE_TARGET_PATH` (optional): file target passed to the policy
   command. Defaults to `lib/main.dart`.
 - `TS158_DIRECTORY_TARGET_PATH` (optional): directory target passed to the
-  policy command. Defaults to `lib/ui/`.
+  policy command. Defaults to `tool/`.
 - `TS158_SUCCESS_MESSAGE` (optional): expected success text. Defaults to
   `No theme token policy violations found.`
 

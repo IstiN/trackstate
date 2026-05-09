@@ -23,7 +23,7 @@ class ThemeTokenPolicyMultiTargetConfig:
         env_prefixes: tuple[str, ...] = ("TS158", "TS132", "TRACKSTATE"),
         default_flutter_version: str = "3.35.3",
         default_file_target_path: str = "lib/main.dart",
-        default_directory_target_path: str = "lib/ui/",
+        default_directory_target_path: str = "tool/",
         default_success_message: str = "No theme token policy violations found.",
     ) -> "ThemeTokenPolicyMultiTargetConfig":
         return cls(
