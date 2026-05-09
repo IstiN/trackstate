@@ -7,6 +7,5 @@ dependencies:
   - trackstate-setup/README.md contains the CLI quick-start validation command
 notes:
   - Extracts the executable gh api validation command from the local main-branch README.
-  - Resolves the authenticated user's trackstate-setup fork when available and falls back to IstiN/trackstate-setup if the fork metadata is unavailable.
+  - Requires a working authenticated GitHub CLI session to resolve the viewer login before invalid credentials are injected.
   - Re-runs the exact documented command with GH_TOKEN and GITHUB_TOKEN overridden to an invalid value and expects a user-visible authentication error.
-

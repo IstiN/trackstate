@@ -36,6 +36,36 @@ class QuickStartInvalidCredentialsTest(unittest.TestCase):
         result = self.validator.validate(config=self.config)
 
         self.assertTrue(
+            result.auth_status.succeeded,
+            "Precondition failed: the CLI prerequisites were not satisfied because "
+            "`gh auth status` did not confirm an authenticated GitHub CLI session "
+            "before the test swapped in invalid credentials.\n"
+            f"Command: {result.auth_status.command_text}\n"
+            f"Exit code: {result.auth_status.exit_code}\n"
+            f"stdout:\n{result.auth_status.stdout}\n"
+            f"stderr:\n{result.auth_status.stderr}",
+        )
+        self.assertTrue(
+            result.viewer_login.succeeded,
+            "Precondition failed: the test could not resolve the authenticated "
+            "GitHub login needed to target the user's setup repository before "
+            "rerunning the README command with invalid credentials.\n"
+            f"Command: {result.viewer_login.command_text}\n"
+            f"Exit code: {result.viewer_login.exit_code}\n"
+            f"stdout:\n{result.viewer_login.stdout}\n"
+            f"stderr:\n{result.viewer_login.stderr}",
+        )
+        self.assertTrue(
+            (result.viewer_login.json_payload or "").strip(),
+            "Precondition failed: `gh api user --jq .login` did not return a "
+            "GitHub login, so the test cannot prove the README flow against a "
+            "resolved user account before invalidating the token.\n"
+            f"Command: {result.viewer_login.command_text}\n"
+            f"stdout:\n{result.viewer_login.stdout}\n"
+            f"stderr:\n{result.viewer_login.stderr}",
+        )
+
+        self.assertTrue(
             result.quick_start_section,
             "Step 1 failed: trackstate-setup/README.md does not contain the "
             "`CLI quick start` section needed for this validation.\n"
