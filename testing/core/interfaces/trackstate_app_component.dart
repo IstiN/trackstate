@@ -9,6 +9,11 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openSection(String label);
 
+  Future<void> switchToLocalGitInSettings({
+    required String repositoryPath,
+    required String writeBranch,
+  });
+
   Future<String> openCreateIssueFlow();
 
   Future<void> expectCreateIssueFormVisible({
@@ -95,6 +100,10 @@ abstract interface class TrackStateAppComponent {
 
   Future<bool> isSemanticsLabelVisible(String label);
 
+  Future<bool> isTopBarTextVisible(String text);
+
+  Future<bool> isTopBarSemanticsLabelVisible(String label);
+
   Future<bool> tapVisibleControl(String label);
 
   Future<bool> tapTopBarControl(String label);
@@ -102,6 +111,8 @@ abstract interface class TrackStateAppComponent {
   Future<bool> isTextFieldVisible(String label);
 
   Future<void> enterLabeledTextField(String label, {required String text});
+
+  Future<String?> readLabeledTextFieldValue(String label);
 
   List<String> visibleTextsSnapshot();
 

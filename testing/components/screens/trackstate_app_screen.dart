@@ -144,6 +144,19 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<void> switchToLocalGitInSettings({
+    required String repositoryPath,
+    required String writeBranch,
+  }) async {
+    await openSection('Settings');
+    await tapVisibleControl('Local Git');
+    await enterLabeledTextField('Repository Path', text: repositoryPath);
+    await enterLabeledTextField('Write Branch', text: writeBranch);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+  }
+
+  @override
   Future<String> openCreateIssueFlow() async {
     const sectionsToInspect = <String>[
       'Dashboard',
@@ -430,9 +443,27 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> isTopBarTextVisible(String text) async {
+    await tester.pump();
+    return find
+        .descendant(of: topBar, matching: _text(text))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
   Future<bool> isSemanticsLabelVisible(String label) async {
     await tester.pump();
     return _exactSemanticsLabel(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<bool> isTopBarSemanticsLabelVisible(String label) async {
+    await tester.pump();
+    return find
+        .descendant(of: topBar, matching: _exactSemanticsLabel(label))
+        .evaluate()
+        .isNotEmpty;
   }
 
   @override
@@ -480,6 +511,29 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await tester.pump();
     await tester.enterText(field.first, text);
     await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<String?> readLabeledTextFieldValue(String label) async {
+    await tester.pump();
+    final field = _labeledTextField(label);
+    if (field.evaluate().isEmpty) {
+      return null;
+    }
+
+    final widget = tester.widget(field.first);
+    if (widget is TextField) {
+      return widget.controller?.text;
+    }
+
+    final editableText = find.descendant(
+      of: field,
+      matching: find.byType(EditableText),
+    );
+    if (editableText.evaluate().isEmpty) {
+      return null;
+    }
+    return tester.widget<EditableText>(editableText.first).controller.text;
   }
 
   @override
