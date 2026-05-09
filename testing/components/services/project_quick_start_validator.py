@@ -29,9 +29,16 @@ class ProjectQuickStartValidator:
         target_repository = self._resolve_target_repository(config, viewer_login)
         repository_info = self._probe.repository_metadata(target_repository)
         default_branch = self._repository_default_branch(repository_info)
+        readme_repository = config.readme_repository_override or target_repository
+        readme_repository_info = (
+            repository_info
+            if readme_repository == target_repository
+            else self._probe.repository_metadata(readme_repository)
+        )
+        readme_default_branch = self._repository_default_branch(readme_repository_info)
         readme_fetch = self._probe.get_contents(
-            target_repository,
-            default_branch,
+            readme_repository,
+            readme_default_branch,
             config.readme_path.name,
         )
         readme_text = self._decode_repository_text(readme_fetch)
@@ -60,6 +67,7 @@ class ProjectQuickStartValidator:
         return ProjectCliValidationResult(
             target_repository=target_repository,
             upstream_repository=config.upstream_repository,
+            readme_repository=readme_repository,
             project_path=project_path,
             readme_text=readme_text,
             quick_start_section=quick_start_section,

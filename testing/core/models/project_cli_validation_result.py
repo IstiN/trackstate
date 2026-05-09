@@ -10,6 +10,7 @@ from testing.core.models.cli_command_result import CliCommandResult
 class ProjectCliValidationResult:
     target_repository: str
     upstream_repository: str
+    readme_repository: str
     project_path: str
     readme_text: str
     quick_start_section: str
