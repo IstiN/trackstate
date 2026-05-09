@@ -494,18 +494,24 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
       includeLegacyDeletedIndex: false,
     );
-    final deletedByKey = {
+    final persistedDeletedByKey = {
       for (final entry in persistedTombstones) entry.key: entry,
       tombstone.key: tombstone,
     };
-    final deletedTombstones = deletedByKey.values.toList()
+    final persistedDeletedTombstones = persistedDeletedByKey.values.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    final snapshotDeletedByKey = {
+      for (final entry in snapshot.repositoryIndex.deleted) entry.key: entry,
+      tombstone.key: tombstone,
+    };
+    final snapshotDeletedTombstones = snapshotDeletedByKey.values.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
     final remainingIssues = snapshot.issues
         .where((candidate) => candidate.key != currentIssue.key)
         .toList(growable: false);
     final repositoryIndex = _deriveRepositoryIndex(
       remainingIssues,
-      deletedTombstones,
+      snapshotDeletedTombstones,
     );
 
     final issuesIndexPath = _joinPath(
@@ -532,14 +538,14 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       RepositoryTextFileChange(
         path: tombstoneIndexPath,
         content:
-            '${jsonEncode(_tombstoneIndexEntriesJson(projectRoot, deletedTombstones))}\n',
+            '${jsonEncode(_tombstoneIndexEntriesJson(projectRoot, persistedDeletedTombstones))}\n',
         expectedRevision: await _existingRevision(
           path: tombstoneIndexPath,
           ref: writeBranch,
           blobPaths: blobPaths,
         ),
       ),
-      for (final entry in deletedTombstones)
+      for (final entry in persistedDeletedTombstones)
         RepositoryTextFileChange(
           path: _tombstoneArtifactPath(projectRoot, entry.key),
           content: '${jsonEncode(_deletedIssueTombstoneJson(entry))}\n',
