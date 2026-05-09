@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 class Ts215ConcurrentLegacyDeletedIndexFixture {
@@ -12,7 +12,11 @@ class Ts215ConcurrentLegacyDeletedIndexFixture {
   static const projectKey = 'TRACK';
   static const survivingIssueKey = 'TRACK-724';
   static const legacyDeletedIssueKey = 'TRACK-700';
-  static const deleteIssueKeys = <String>['TRACK-721', 'TRACK-722', 'TRACK-723'];
+  static const deleteIssueKeys = <String>[
+    'TRACK-721',
+    'TRACK-722',
+    'TRACK-723',
+  ];
   static const legacyDeletedIndexPath =
       '$projectKey/.trackstate/index/deleted.json';
   static const tombstoneIndexPath =
@@ -37,34 +41,73 @@ class Ts215ConcurrentLegacyDeletedIndexFixture {
 
   Future<void> dispose() => directory.delete(recursive: true);
 
-  Future<Ts215ConcurrentDeleteObservation> observeBeforeDeletionState() async {
-    final repository = LocalTrackStateRepository(repositoryPath: directory.path);
+  Future<Ts215ConcurrentDeleteObservation> observeBeforeDeletionState({
+    required TrackStateRepository repository,
+  }) async {
     final snapshot = await repository.loadSnapshot();
-    return _observe(snapshot: snapshot, repository: repository);
+    return _observeRepositoryState(snapshot: snapshot, repository: repository);
   }
 
-  Future<Ts215ConcurrentDeleteObservation>
-  deleteIssuesConcurrentlyViaRepositoryService() async {
-    final repository = LocalTrackStateRepository(repositoryPath: directory.path);
+  Future<List<DeletedIssueTombstone>>
+  deleteIssuesConcurrentlyViaRepositoryService({
+    required TrackStateRepository repository,
+  }) async {
     final snapshot = await repository.loadSnapshot();
     final issues = deleteIssueKeys
         .map(
-          (key) => snapshot.issues.singleWhere((candidate) => candidate.key == key),
+          (key) =>
+              snapshot.issues.singleWhere((candidate) => candidate.key == key),
         )
         .toList(growable: false);
 
-    await Future.wait(issues.map(repository.deleteIssue));
-
-    final refreshedRepository = LocalTrackStateRepository(
-      repositoryPath: directory.path,
+    return List<DeletedIssueTombstone>.unmodifiable(
+      await Future.wait(issues.map(repository.deleteIssue)),
     );
-    final refreshedSnapshot = await refreshedRepository.loadSnapshot();
-    return _observe(snapshot: refreshedSnapshot, repository: refreshedRepository);
   }
 
-  Future<Ts215ConcurrentDeleteObservation> _observe({
+  Future<Ts215ConcurrentDeleteArtifactsObservation>
+  observePostDeletionArtifacts() async {
+    final legacyDeletedIndexFile = File(
+      '${directory.path}/$legacyDeletedIndexPath',
+    );
+    final tombstoneIndexFile = File('${directory.path}/$tombstoneIndexPath');
+    final deleteTargets = await Future.wait(
+      deleteIssueKeys.map(_observeDeleteTargetArtifacts),
+    );
+    final legacyDeletedIndexExists = await legacyDeletedIndexFile.exists();
+    return Ts215ConcurrentDeleteArtifactsObservation(
+      deleteTargets: List<Ts215DeleteTargetArtifactObservation>.unmodifiable(
+        deleteTargets,
+      ),
+      legacyDeletedIndexPath: legacyDeletedIndexPath,
+      legacyDeletedIndexExists: legacyDeletedIndexExists,
+      legacyDeletedIndexContent: legacyDeletedIndexExists
+          ? await legacyDeletedIndexFile.readAsString()
+          : null,
+      tombstoneIndexPath: tombstoneIndexPath,
+      tombstoneIndexExists: await tombstoneIndexFile.exists(),
+      tombstoneIndexJson: await tombstoneIndexFile.exists()
+          ? List<Map<String, Object?>>.unmodifiable(
+              (jsonDecode(await tombstoneIndexFile.readAsString()) as List)
+                  .whereType<Map>()
+                  .map((entry) => Map<String, Object?>.from(entry)),
+            )
+          : const [],
+      headRevision: await _gitOutput(['rev-parse', 'HEAD']),
+      worktreeStatusLines: await _gitOutputLines(['status', '--short']),
+    );
+  }
+
+  Future<Ts215ConcurrentDeleteObservation> observeReloadedRepositoryState({
+    required TrackStateRepository repository,
+  }) async {
+    final snapshot = await repository.loadSnapshot();
+    return _observeRepositoryState(snapshot: snapshot, repository: repository);
+  }
+
+  Future<Ts215ConcurrentDeleteObservation> _observeRepositoryState({
     required TrackerSnapshot snapshot,
-    required LocalTrackStateRepository repository,
+    required TrackStateRepository repository,
   }) async {
     final legacyDeletedIndexFile = File(
       '${directory.path}/$legacyDeletedIndexPath',
@@ -97,7 +140,9 @@ class Ts215ConcurrentLegacyDeletedIndexFixture {
         await repository.searchIssues('project = $projectKey'),
       ),
       survivingIssueSearchResults: List<TrackStateIssue>.unmodifiable(
-        await repository.searchIssues('project = $projectKey $survivingIssueKey'),
+        await repository.searchIssues(
+          'project = $projectKey $survivingIssueKey',
+        ),
       ),
       headRevision: await _gitOutput(['rev-parse', 'HEAD']),
       worktreeStatusLines: await _gitOutputLines(['status', '--short']),
@@ -105,7 +150,7 @@ class Ts215ConcurrentLegacyDeletedIndexFixture {
   }
 
   Future<Ts215DeleteTargetObservation> _observeDeleteTarget(
-    LocalTrackStateRepository repository,
+    TrackStateRepository repository,
     String key,
   ) async {
     final issuePath = issuePathFor(key);
@@ -120,11 +165,33 @@ class Ts215ConcurrentLegacyDeletedIndexFixture {
       tombstonePath: tombstonePath,
       tombstoneFileExists: await tombstoneFile.exists(),
       tombstoneJson: await tombstoneFile.exists()
-          ? jsonDecode(await tombstoneFile.readAsString()) as Map<String, Object?>
+          ? jsonDecode(await tombstoneFile.readAsString())
+                as Map<String, Object?>
           : null,
       searchResults: List<TrackStateIssue>.unmodifiable(
         await repository.searchIssues('project = $projectKey $key'),
       ),
+    );
+  }
+
+  Future<Ts215DeleteTargetArtifactObservation> _observeDeleteTargetArtifacts(
+    String key,
+  ) async {
+    final issuePath = issuePathFor(key);
+    final tombstonePath = tombstonePathFor(key);
+    final issueFile = File('${directory.path}/$issuePath');
+    final tombstoneFile = File('${directory.path}/$tombstonePath');
+    return Ts215DeleteTargetArtifactObservation(
+      key: key,
+      summary: summaryFor(key),
+      issuePath: issuePath,
+      issueFileExists: await issueFile.exists(),
+      tombstonePath: tombstonePath,
+      tombstoneFileExists: await tombstoneFile.exists(),
+      tombstoneJson: await tombstoneFile.exists()
+          ? jsonDecode(await tombstoneFile.readAsString())
+                as Map<String, Object?>
+          : null,
     );
   }
 
@@ -262,6 +329,53 @@ class Ts215ConcurrentDeleteObservation {
 
   Ts215DeleteTargetObservation target(String key) =>
       deleteTargets.singleWhere((target) => target.key == key);
+}
+
+class Ts215ConcurrentDeleteArtifactsObservation {
+  const Ts215ConcurrentDeleteArtifactsObservation({
+    required this.deleteTargets,
+    required this.legacyDeletedIndexPath,
+    required this.legacyDeletedIndexExists,
+    required this.legacyDeletedIndexContent,
+    required this.tombstoneIndexPath,
+    required this.tombstoneIndexExists,
+    required this.tombstoneIndexJson,
+    required this.headRevision,
+    required this.worktreeStatusLines,
+  });
+
+  final List<Ts215DeleteTargetArtifactObservation> deleteTargets;
+  final String legacyDeletedIndexPath;
+  final bool legacyDeletedIndexExists;
+  final String? legacyDeletedIndexContent;
+  final String tombstoneIndexPath;
+  final bool tombstoneIndexExists;
+  final List<Map<String, Object?>> tombstoneIndexJson;
+  final String headRevision;
+  final List<String> worktreeStatusLines;
+
+  Ts215DeleteTargetArtifactObservation target(String key) =>
+      deleteTargets.singleWhere((target) => target.key == key);
+}
+
+class Ts215DeleteTargetArtifactObservation {
+  const Ts215DeleteTargetArtifactObservation({
+    required this.key,
+    required this.summary,
+    required this.issuePath,
+    required this.issueFileExists,
+    required this.tombstonePath,
+    required this.tombstoneFileExists,
+    required this.tombstoneJson,
+  });
+
+  final String key;
+  final String summary;
+  final String issuePath;
+  final bool issueFileExists;
+  final String tombstonePath;
+  final bool tombstoneFileExists;
+  final Map<String, Object?>? tombstoneJson;
 }
 
 class Ts215DeleteTargetObservation {
