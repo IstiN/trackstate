@@ -66,7 +66,12 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
-  }) => repository.createIssue(summary: summary, description: description);
+    Map<String, String> customFields = const {},
+  }) => repository.createIssue(
+    summary: summary,
+    description: description,
+    customFields: customFields,
+  );
 
   @override
   Future<TrackStateIssue> updateIssueDescription(

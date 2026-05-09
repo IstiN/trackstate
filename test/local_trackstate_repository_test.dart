@@ -170,6 +170,49 @@ void main() {
     },
   );
 
+  test('local repository persists create-form custom fields in main.md', () async {
+    final repo = await _createLocalRepository();
+    addTearDown(() => repo.delete(recursive: true));
+
+    await _writeFile(
+      repo,
+      'DEMO/config/fields.json',
+      '[{"id":"summary","name":"Summary","type":"string","required":true},'
+      '{"id":"description","name":"Description","type":"markdown","required":false},'
+      '{"id":"solution","name":"Solution","type":"markdown","required":false},'
+      '{"id":"acceptanceCriteria","name":"Acceptance Criteria","type":"markdown","required":false},'
+      '{"id":"diagrams","name":"Diagrams","type":"markdown","required":false}]\n',
+    );
+    await _git(repo.path, ['add', 'DEMO/config/fields.json']);
+    await _git(repo.path, ['commit', '-m', 'Add custom create fields']);
+
+    final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+    await repository.loadSnapshot();
+    await repository.connect(
+      const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+    );
+
+    const solution = 'Persist solution details in main markdown.';
+    const acceptanceCriteria = '- Persist acceptance criteria in main markdown.';
+    const diagrams = 'graph TD; CreateIssue-->PersistCustomFields;';
+
+    final created = await repository.createIssue(
+      summary: 'Created with custom fields',
+      description: 'Local repository create issue regression coverage.',
+      customFields: const {
+        'solution': solution,
+        'acceptanceCriteria': acceptanceCriteria,
+        'diagrams': diagrams,
+      },
+    );
+
+    final markdown = await File('${repo.path}/${created.storagePath}').readAsString();
+
+    expect(markdown, contains(solution));
+    expect(markdown, contains(acceptanceCriteria));
+    expect(markdown, contains(diagrams));
+  });
+
   test(
     'local provider rejects stale attachment writes with expected revisions',
     () async {

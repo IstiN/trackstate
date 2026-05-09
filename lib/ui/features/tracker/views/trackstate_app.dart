@@ -892,55 +892,15 @@ class _Board extends StatelessWidget {
   }
 }
 
-class _SearchAndDetail extends StatefulWidget {
+class _SearchAndDetail extends StatelessWidget {
   const _SearchAndDetail({required this.viewModel});
 
   final TrackerViewModel viewModel;
 
   @override
-  State<_SearchAndDetail> createState() => _SearchAndDetailState();
-}
-
-class _SearchAndDetailState extends State<_SearchAndDetail> {
-  late final TextEditingController _summaryController;
-  late final TextEditingController _descriptionController;
-  bool _isCreating = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _summaryController = TextEditingController();
-    _descriptionController = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _summaryController.dispose();
-    _descriptionController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submitCreateIssue() async {
-    final success = await widget.viewModel.createIssue(
-      summary: _summaryController.text,
-      description: _descriptionController.text,
-    );
-    if (!mounted || !success) {
-      return;
-    }
-    setState(() {
-      _isCreating = false;
-      _summaryController.clear();
-      _descriptionController.clear();
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final viewModel = widget.viewModel;
-    final summaryLabel = viewModel.project?.fieldLabel('summary') ?? 'Summary';
-    final canSubmit = !viewModel.hasReadOnlySession && !viewModel.isSaving;
+    final viewModel = this.viewModel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -955,67 +915,6 @@ class _SearchAndDetailState extends State<_SearchAndDetail> {
             ),
           ],
         ),
-        if (_isCreating) ...[
-          _SurfaceCard(
-            semanticLabel: l10n.createIssue,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _SectionTitle(l10n.createIssue),
-                const SizedBox(height: 12),
-                Semantics(
-                  label: summaryLabel,
-                  textField: true,
-                  child: TextField(
-                    controller: _summaryController,
-                    enabled: !viewModel.isSaving,
-                    decoration: InputDecoration(labelText: summaryLabel),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Semantics(
-                  label: l10n.description,
-                  textField: true,
-                  child: TextField(
-                    controller: _descriptionController,
-                    minLines: 3,
-                    maxLines: null,
-                    enabled: !viewModel.isSaving,
-                    decoration: InputDecoration(
-                      labelText: l10n.description,
-                      alignLabelWithHint: true,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _IssueDetailActionButton(
-                      label: l10n.save,
-                      emphasized: true,
-                      onPressed: canSubmit ? _submitCreateIssue : null,
-                    ),
-                    _IssueDetailActionButton(
-                      label: l10n.cancel,
-                      onPressed: viewModel.isSaving
-                          ? null
-                          : () {
-                              setState(() {
-                                _isCreating = false;
-                                _summaryController.clear();
-                                _descriptionController.clear();
-                              });
-                            },
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-        ],
         LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 980;
@@ -1040,6 +939,56 @@ class _SearchAndDetailState extends State<_SearchAndDetail> {
     );
   }
 }
+
+const Set<String> _hiddenCreateFieldIds = {
+  'summary',
+  'description',
+  'issueType',
+  'status',
+  'priority',
+  'assignee',
+  'reporter',
+  'labels',
+  'components',
+  'fixVersions',
+  'watchers',
+  'parent',
+  'epic',
+  'archived',
+  'resolution',
+};
+
+List<TrackStateFieldDefinition> _createIssueFieldDefinitions(
+  ProjectConfig? project,
+) {
+  if (project == null) {
+    return const [];
+  }
+  return project.fieldDefinitions
+      .where((field) => !_hiddenCreateFieldIds.contains(field.id))
+      .toList(growable: false);
+}
+
+void _syncCreateFieldControllers(
+  Map<String, TextEditingController> controllers,
+  List<TrackStateFieldDefinition> fields,
+) {
+  final activeFieldIds = fields.map((field) => field.id).toSet();
+  final staleFieldIds = controllers.keys
+      .where((fieldId) => !activeFieldIds.contains(fieldId))
+      .toList(growable: false);
+  for (final fieldId in staleFieldIds) {
+    controllers.remove(fieldId)?.dispose();
+  }
+  for (final field in fields) {
+    controllers.putIfAbsent(field.id, TextEditingController.new);
+  }
+}
+
+String _createIssueFieldLabel(
+  ProjectConfig? project,
+  TrackStateFieldDefinition field,
+) => project?.fieldLabel(field.id) ?? field.name;
 
 class _Hierarchy extends StatelessWidget {
   const _Hierarchy({required this.viewModel});
@@ -2209,6 +2158,7 @@ class _CreateIssueDialog extends StatefulWidget {
 class _CreateIssueDialogState extends State<_CreateIssueDialog> {
   late final TextEditingController _summaryController;
   late final TextEditingController _descriptionController;
+  final Map<String, TextEditingController> _customFieldControllers = {};
 
   @override
   void initState() {
@@ -2221,13 +2171,27 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
   void dispose() {
     _summaryController.dispose();
     _descriptionController.dispose();
+    for (final controller in _customFieldControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
   Future<void> _submitCreateIssue() async {
+    final customFields = <String, String>{};
+    for (final field in _createIssueFieldDefinitions(
+      widget.viewModel.project,
+    )) {
+      final value = _customFieldControllers[field.id]?.text.trim() ?? '';
+      if (value.isEmpty) {
+        continue;
+      }
+      customFields[field.id] = value;
+    }
     final success = await widget.viewModel.createIssue(
       summary: _summaryController.text,
       description: _descriptionController.text,
+      customFields: customFields,
     );
     if (!mounted || !success) {
       return;
@@ -2238,8 +2202,10 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final summaryLabel =
-        widget.viewModel.project?.fieldLabel('summary') ?? 'Summary';
+    final project = widget.viewModel.project;
+    final summaryLabel = project?.fieldLabel('summary') ?? 'Summary';
+    final createFields = _createIssueFieldDefinitions(project);
+    _syncCreateFieldControllers(_customFieldControllers, createFields);
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       child: ConstrainedBox(
@@ -2282,6 +2248,24 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                       ),
                     ),
                   ),
+                  for (final field in createFields) ...[
+                    const SizedBox(height: 12),
+                    Semantics(
+                      label: _createIssueFieldLabel(project, field),
+                      textField: true,
+                      child: TextField(
+                        key: ValueKey('create-field-${field.id}'),
+                        controller: _customFieldControllers[field.id],
+                        minLines: field.type == 'markdown' ? 3 : 1,
+                        maxLines: field.type == 'markdown' ? null : 1,
+                        enabled: !widget.viewModel.isSaving,
+                        decoration: InputDecoration(
+                          labelText: _createIssueFieldLabel(project, field),
+                          alignLabelWithHint: field.type == 'markdown',
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 8,
