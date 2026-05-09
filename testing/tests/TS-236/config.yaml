@@ -1,0 +1,12 @@
+test_id: TS-236
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI installed with network access to api.github.com
+  - trackstate-setup/README.md contains the CLI quick-start validation command
+notes:
+  - Extracts the executable gh api validation command from the local main-branch README.
+  - Resolves the authenticated user's trackstate-setup fork when available and falls back to IstiN/trackstate-setup if the fork metadata is unavailable.
+  - Re-runs the exact documented command with GH_TOKEN and GITHUB_TOKEN overridden to an invalid value and expects a user-visible authentication error.
+
