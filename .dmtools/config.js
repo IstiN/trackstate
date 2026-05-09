@@ -8,6 +8,25 @@ const GOAL_INSTRUCTIONS = './.dmtools/instructions/goal/goal.md';
 const DESIGN_REFERENCE = './.dmtools/instructions/goal/DESIGN.md';
 const SETUP_REPO_INSTRUCTIONS = './.dmtools/instructions/product/trackstate_setup_repo.md';
 const TRACKSTATE_SETUP_SUBMODULES = [{ path: 'trackstate-setup', branch: 'main' }];
+const POST_ACTION_FEEDBACK = {
+    postAction: {
+        enabled: true,
+        maxAttempts: 2
+    }
+};
+const FLUTTER_FEEDBACK = {
+    postAction: {
+        enabled: true,
+        maxAttempts: 2
+    },
+    qualityGates: {
+        enabled: true,
+        gates: [
+            { name: 'flutter-analyze', command: 'flutter analyze', maxAttempts: 2 },
+            { name: 'flutter-test', command: 'flutter test --coverage', maxAttempts: 2 }
+        ]
+    }
+};
 
 module.exports = {
     repository: {
@@ -162,14 +181,16 @@ module.exports = {
             customParams: {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
+                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
+                feedbackLoop: FLUTTER_FEEDBACK
             }
         },
         bug_development: {
             customParams: {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
+                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
+                feedbackLoop: FLUTTER_FEEDBACK
             }
         },
         test_case_automation: {
@@ -194,13 +215,15 @@ module.exports = {
             customParams: {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
+                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
+                feedbackLoop: FLUTTER_FEEDBACK
             }
         },
         pr_test_automation_rework: {
             customParams: {
                 autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_test_automation_review.json'
+                autoStartReviewConfigFile: 'agents/pr_test_automation_review.json',
+                feedbackLoop: POST_ACTION_FEEDBACK
             }
         }
     },

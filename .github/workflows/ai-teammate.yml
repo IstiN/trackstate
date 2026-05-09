@@ -159,7 +159,7 @@ jobs:
           DMTOOLS_INTEGRATIONS: "jira,confluence,figma,ai,cli,file,github"
           ENCODED_CONFIG: ${{ inputs.encoded_config }}
           PROMPT_CHUNK_TOKEN_LIMIT: ${{ vars.PROMPT_CHUNK_TOKEN_LIMIT }}
-          CLI_ALLOWED_COMMANDS: "find,ls,cat,mkdir,bash"
+          CLI_ALLOWED_COMMANDS: "find,ls,cat,mkdir,bash,git,gh,flutter,dart,python3,pytest,run-agent.sh"
 
         run: |
           echo "Using configuration: ${{ inputs.config_file }}"
