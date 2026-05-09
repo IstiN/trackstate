@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 class Ts174ExistingIssueArchiveFixture {
@@ -22,28 +22,28 @@ class Ts174ExistingIssueArchiveFixture {
 
   Future<void> dispose() => directory.delete(recursive: true);
 
-  Future<Ts174ExistingIssueArchiveObservation> observeBeforeArchiveState() =>
-      _observeRepositoryState();
+  Future<Ts174ExistingIssueArchiveObservation> observeRepositoryState({
+    required TrackStateRepository repository,
+    TrackStateIssue? archivedIssue,
+  }) => _observeRepositoryState(
+    repository: repository,
+    archivedIssue: archivedIssue,
+  );
 
-  Future<Ts174ExistingIssueArchiveObservation>
-  archiveIssueViaRepositoryService() async {
-    final repository = LocalTrackStateRepository(
-      repositoryPath: directory.path,
-    );
+  Future<TrackStateIssue> archiveIssueViaRepositoryService({
+    required TrackStateRepository repository,
+  }) async {
     final snapshot = await repository.loadSnapshot();
     final issue = snapshot.issues.singleWhere(
       (candidate) => candidate.key == issueKey,
     );
-    final archivedIssue = await repository.archiveIssue(issue);
-    return _observeRepositoryState(archivedIssue: archivedIssue);
+    return repository.archiveIssue(issue);
   }
 
   Future<Ts174ExistingIssueArchiveObservation> _observeRepositoryState({
+    required TrackStateRepository repository,
     TrackStateIssue? archivedIssue,
   }) async {
-    final repository = LocalTrackStateRepository(
-      repositoryPath: directory.path,
-    );
     final snapshot = await repository.loadSnapshot();
     final issueFile = File('${directory.path}/$issuePath');
     return Ts174ExistingIssueArchiveObservation(
@@ -58,8 +58,8 @@ class Ts174ExistingIssueArchiveFixture {
       visibleIssueSearchResults: List<TrackStateIssue>.unmodifiable(
         await repository.searchIssues('project = TRACK $issueKey'),
       ),
-      mainMarkdown: await issueFile.readAsString(),
-      headIssueMarkdown: await _gitOutput(['show', 'HEAD:$issuePath']),
+      mainMarkdown: await _readFileIfExists(issueFile),
+      headIssueMarkdown: await _tryGitOutput(['show', 'HEAD:$issuePath']),
       headRevision: await _gitOutput(['rev-parse', 'HEAD']),
       latestCommitSubject: await _gitOutput(['log', '-1', '--pretty=%s']),
       worktreeStatusLines: await _gitOutputLines(['status', '--short']),
@@ -142,6 +142,21 @@ real repository artifact.
         .where((line) => line.isNotEmpty)
         .toList(growable: false);
   }
+
+  Future<String?> _readFileIfExists(File file) async {
+    if (!await file.exists()) {
+      return null;
+    }
+    return file.readAsString();
+  }
+
+  Future<String?> _tryGitOutput(List<String> args) async {
+    final result = await Process.run('git', ['-C', directory.path, ...args]);
+    if (result.exitCode != 0) {
+      return null;
+    }
+    return (result.stdout as String).trimRight();
+  }
 }
 
 class Ts174ExistingIssueArchiveObservation {
@@ -167,8 +182,8 @@ class Ts174ExistingIssueArchiveObservation {
   final TrackStateIssue currentIssue;
   final TrackStateIssue? archivedIssue;
   final List<TrackStateIssue> visibleIssueSearchResults;
-  final String mainMarkdown;
-  final String headIssueMarkdown;
+  final String? mainMarkdown;
+  final String? headIssueMarkdown;
   final String headRevision;
   final String latestCommitSubject;
   final List<String> worktreeStatusLines;

@@ -1,15 +1,35 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../components/factories/testing_dependencies.dart';
+import '../../core/interfaces/local_git_repository_port.dart';
 import '../../fixtures/repositories/ts174_existing_issue_archive_fixture.dart';
 
 void main() {
-  test(
-    'TS-174 archives an existing issue and exposes the archived state to repository consumers',
-    () async {
-      final fixture = await Ts174ExistingIssueArchiveFixture.create();
-      addTearDown(fixture.dispose);
+  testWidgets(
+    'TS-174 archives an existing issue and requires the artifact to leave active storage',
+    (tester) async {
+      final fixture = await tester.runAsync(
+        Ts174ExistingIssueArchiveFixture.create,
+      );
+      if (fixture == null) {
+        throw StateError('TS-174 fixture creation did not complete.');
+      }
+      addTearDown(() async {
+        await tester.runAsync(fixture.dispose);
+      });
 
-      final beforeArchival = await fixture.observeBeforeArchiveState();
+      const dependencies = defaultTestingDependencies;
+      final LocalGitRepositoryPort repositoryPort = dependencies
+          .createLocalGitRepositoryPort(tester);
+      final beforeRepository = await repositoryPort.openRepository(
+        repositoryPath: fixture.directory.path,
+      );
+      final beforeArchival = await tester.runAsync(
+        () => fixture.observeRepositoryState(repository: beforeRepository),
+      );
+      if (beforeArchival == null) {
+        throw StateError('TS-174 pre-archive observation did not complete.');
+      }
 
       expect(
         beforeArchival.issueFileExists,
@@ -66,7 +86,26 @@ void main() {
             'The seeded repository must start clean so the archive workflow is the only source of changes.',
       );
 
-      final afterArchival = await fixture.archiveIssueViaRepositoryService();
+      final archivedIssue = await tester.runAsync(
+        () => fixture.archiveIssueViaRepositoryService(
+          repository: beforeRepository,
+        ),
+      );
+      if (archivedIssue == null) {
+        throw StateError('TS-174 archive request did not complete.');
+      }
+      final afterRepository = await repositoryPort.openRepository(
+        repositoryPath: fixture.directory.path,
+      );
+      final afterArchival = await tester.runAsync(
+        () => fixture.observeRepositoryState(
+          repository: afterRepository,
+          archivedIssue: archivedIssue,
+        ),
+      );
+      if (afterArchival == null) {
+        throw StateError('TS-174 post-archive observation did not complete.');
+      }
 
       expect(
         afterArchival.archivedIssue?.key,
@@ -82,17 +121,23 @@ void main() {
       );
       expect(
         afterArchival.issueFileExists,
-        isTrue,
+        isFalse,
         reason:
-            'Step 3 failed: the archived issue artifact should still exist in repository storage after archiving.',
+            'Step 3 failed: TS-174 requires TRACK-122 to leave active storage after archiving, but ${afterArchival.issuePath} still exists in ${afterArchival.repositoryPath}.',
       );
       expect(
         afterArchival.snapshot.repositoryIndex.pathForKey(
           Ts174ExistingIssueArchiveFixture.issueKey,
         ),
-        Ts174ExistingIssueArchiveFixture.issuePath,
+        isNot(Ts174ExistingIssueArchiveFixture.issuePath),
         reason:
-            'Step 3 failed: the repository index should continue to resolve TRACK-122 to its stored artifact after archiving.',
+            'Step 3 failed: the repository index should no longer resolve TRACK-122 to the active storage path after archiving.',
+      );
+      expect(
+        afterArchival.currentIssue.storagePath,
+        isNot(Ts174ExistingIssueArchiveFixture.issuePath),
+        reason:
+            'Step 3 failed: the archived issue returned from repository state should no longer report the active storage path.',
       );
       expect(
         afterArchival.snapshot.repositoryIndex
@@ -110,15 +155,15 @@ void main() {
       );
       expect(
         afterArchival.mainMarkdown,
-        contains('archived: true'),
+        isNull,
         reason:
-            'Expected result mismatch: the persisted issue markdown should contain archived: true after archiveIssue completes.',
+            'Expected result mismatch: the active storage file should no longer be readable from ${afterArchival.issuePath} after archiving.',
       );
       expect(
         afterArchival.headIssueMarkdown,
-        contains('archived: true'),
+        isNull,
         reason:
-            'Expected result mismatch: the committed repository artifact should contain archived: true after archiveIssue completes.',
+            'Expected result mismatch: the archived workflow should remove ${afterArchival.issuePath} from HEAD instead of keeping the active artifact in place.',
       );
       expect(
         afterArchival.headRevision,
@@ -153,5 +198,6 @@ void main() {
             'From a repository consumer perspective, TRACK-122 should appear archived after the workflow completes.',
       );
     },
+    timeout: const Timeout(Duration(seconds: 20)),
   );
 }
