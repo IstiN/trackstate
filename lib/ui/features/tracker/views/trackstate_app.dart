@@ -867,21 +867,143 @@ class _Board extends StatelessWidget {
   }
 }
 
-class _SearchAndDetail extends StatelessWidget {
+class _SearchAndDetail extends StatefulWidget {
   const _SearchAndDetail({required this.viewModel});
 
   final TrackerViewModel viewModel;
 
   @override
+  State<_SearchAndDetail> createState() => _SearchAndDetailState();
+}
+
+class _SearchAndDetailState extends State<_SearchAndDetail> {
+  late final TextEditingController _summaryController;
+  late final TextEditingController _descriptionController;
+  bool _isCreating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _summaryController = TextEditingController();
+    _descriptionController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _summaryController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitCreateIssue() async {
+    final success = await widget.viewModel.createIssue(
+      summary: _summaryController.text,
+      description: _descriptionController.text,
+    );
+    if (!mounted || !success) {
+      return;
+    }
+    setState(() {
+      _isCreating = false;
+      _summaryController.clear();
+      _descriptionController.clear();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final viewModel = widget.viewModel;
+    final summaryLabel = viewModel.project?.fieldLabel('summary') ?? 'Summary';
+    final canSubmit =
+        !viewModel.hasReadOnlySession && !viewModel.isSaving;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _ScreenHeading(
-          title: l10n.jqlSearch,
-          subtitle: l10n.issueCount(viewModel.searchResults.length),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _ScreenHeading(
+                title: l10n.jqlSearch,
+                subtitle: l10n.issueCount(viewModel.searchResults.length),
+              ),
+            ),
+            const SizedBox(width: 12),
+            _PrimaryButton(
+              label: l10n.createIssue,
+              icon: TrackStateIconGlyph.plus,
+              onPressed: viewModel.hasReadOnlySession || viewModel.isSaving
+                  ? null
+                  : () {
+                      setState(() {
+                        _isCreating = !_isCreating;
+                      });
+                    },
+            ),
+          ],
         ),
+        if (_isCreating) ...[
+          _SurfaceCard(
+            semanticLabel: l10n.createIssue,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SectionTitle(l10n.createIssue),
+                const SizedBox(height: 12),
+                Semantics(
+                  label: summaryLabel,
+                  textField: true,
+                  child: TextField(
+                    controller: _summaryController,
+                    enabled: !viewModel.isSaving,
+                    decoration: InputDecoration(labelText: summaryLabel),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Semantics(
+                  label: l10n.description,
+                  textField: true,
+                  child: TextField(
+                    controller: _descriptionController,
+                    minLines: 3,
+                    maxLines: null,
+                    enabled: !viewModel.isSaving,
+                    decoration: InputDecoration(
+                      labelText: l10n.description,
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _IssueDetailActionButton(
+                      label: l10n.save,
+                      emphasized: true,
+                      onPressed: canSubmit ? _submitCreateIssue : null,
+                    ),
+                    _IssueDetailActionButton(
+                      label: l10n.cancel,
+                      onPressed: viewModel.isSaving
+                          ? null
+                          : () {
+                              setState(() {
+                                _isCreating = false;
+                                _summaryController.clear();
+                                _descriptionController.clear();
+                              });
+                            },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
         LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 980;

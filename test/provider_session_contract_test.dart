@@ -339,6 +339,9 @@ class _FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
   Future<RepositoryPermission> getPermission() async => _permission;
 
   @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
   Future<bool> isLfsTracked(String path) async => false;
 
   @override
@@ -423,6 +426,9 @@ class _FailingTrackStateProviderAdapter implements TrackStateProviderAdapter {
         canManageAttachments: false,
         canCheckCollaborators: false,
       );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
 
   @override
   Future<bool> isLfsTracked(String path) async => false;

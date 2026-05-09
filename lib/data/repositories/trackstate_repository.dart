@@ -12,6 +12,10 @@ abstract interface class TrackStateRepository {
   Future<TrackerSnapshot> loadSnapshot();
   Future<List<TrackStateIssue>> searchIssues(String jql);
   Future<RepositoryUser> connect(RepositoryConnection connection);
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+  });
   Future<TrackStateIssue> updateIssueDescription(
     TrackStateIssue issue,
     String description,
@@ -117,6 +121,80 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   Future<List<TrackStateIssue>> searchIssues(String jql) async {
     final snapshot = _snapshot ?? await loadSnapshot();
     return _filterIssues(snapshot.issues, jql);
+  }
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+  }) async {
+    final normalizedSummary = summary.trim();
+    if (normalizedSummary.isEmpty) {
+      throw const TrackStateRepositoryException(
+        'Issue summary is required before creating an issue.',
+      );
+    }
+    final permission = await _provider.getPermission();
+    if (!permission.canWrite) {
+      throw const TrackStateRepositoryException(
+        'Connect a repository session with write access first.',
+      );
+    }
+
+    final snapshot = _snapshot ?? await loadSnapshot();
+    await _provider.ensureCleanWorktree();
+
+    final project = snapshot.project;
+    final key = _nextIssueKey(snapshot);
+    final writeBranch = await _provider.resolveWriteBranch();
+    final issuePath = _nextIssuePath(snapshot, key);
+    final createdAt = DateTime.now().toUtc().toIso8601String();
+    final issueTypeId = _defaultIssueTypeId(project);
+    final statusId = _defaultStatusId(project);
+    final priorityId = _defaultPriorityId(project);
+    final author = _defaultAuthor(_session?.resolvedUserIdentity);
+    final markdown = _buildIssueMarkdown(
+      key: key,
+      projectKey: project.key,
+      summary: normalizedSummary,
+      description: description.trim(),
+      issueTypeId: issueTypeId,
+      statusId: statusId,
+      priorityId: priorityId,
+      assignee: author,
+      reporter: author,
+      createdAt: createdAt,
+    );
+
+    await _provider.writeTextFile(
+      RepositoryWriteRequest(
+        path: issuePath,
+        content: markdown,
+        message: 'Create $key',
+        branch: writeBranch,
+      ),
+    );
+
+    final refreshed = await loadSnapshot();
+    return refreshed.issues.firstWhere(
+      (issue) => issue.key == key,
+      orElse: () => _parseIssue(
+        storagePath: issuePath,
+        markdown: markdown,
+        comments: const [],
+        links: const [],
+        attachments: const [],
+        repositoryIndexEntry: RepositoryIssueIndexEntry(
+          key: key,
+          path: issuePath,
+          childKeys: const [],
+        ),
+        issueTypeDefinitions: project.issueTypeDefinitions,
+        statusDefinitions: project.statusDefinitions,
+        priorityDefinitions: project.priorityDefinitions,
+        resolutionDefinitions: project.resolutionDefinitions,
+      ),
+    );
   }
 
   @override
@@ -679,7 +757,10 @@ class SetupTrackStateRepository extends ProviderBackedTrackStateRepository {
 }
 
 class DemoTrackStateRepository implements TrackStateRepository {
-  const DemoTrackStateRepository();
+  const DemoTrackStateRepository({TrackerSnapshot snapshot = _snapshot})
+    : _snapshotOverride = snapshot;
+
+  final TrackerSnapshot _snapshotOverride;
 
   @override
   bool get usesLocalPersistence => false;
@@ -692,7 +773,50 @@ class DemoTrackStateRepository implements TrackStateRepository {
       const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
 
   @override
-  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+  Future<TrackerSnapshot> loadSnapshot() async => _snapshotOverride;
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+  }) async {
+    final normalizedSummary = summary.trim();
+    if (normalizedSummary.isEmpty) {
+      throw const TrackStateRepositoryException(
+        'Issue summary is required before creating an issue.',
+      );
+    }
+    final key = _nextIssueKey(_snapshotOverride);
+    final issuePath = _nextIssuePath(_snapshotOverride, key);
+    final createdAt = DateTime.now().toUtc().toIso8601String();
+    return _parseIssue(
+      storagePath: issuePath,
+      markdown: _buildIssueMarkdown(
+        key: key,
+        projectKey: _snapshotOverride.project.key,
+        summary: normalizedSummary,
+        description: description.trim(),
+        issueTypeId: _defaultIssueTypeId(_snapshotOverride.project),
+        statusId: _defaultStatusId(_snapshotOverride.project),
+        priorityId: _defaultPriorityId(_snapshotOverride.project),
+        assignee: 'demo-user',
+        reporter: 'demo-user',
+        createdAt: createdAt,
+      ),
+      comments: const [],
+      links: const [],
+      attachments: const [],
+      repositoryIndexEntry: RepositoryIssueIndexEntry(
+        key: key,
+        path: issuePath,
+        childKeys: const [],
+      ),
+      issueTypeDefinitions: _snapshotOverride.project.issueTypeDefinitions,
+      statusDefinitions: _snapshotOverride.project.statusDefinitions,
+      priorityDefinitions: _snapshotOverride.project.priorityDefinitions,
+      resolutionDefinitions: _snapshotOverride.project.resolutionDefinitions,
+    );
+  }
 
   @override
   Future<TrackStateIssue> updateIssueDescription(
@@ -1207,6 +1331,115 @@ String _statusIdForStatus(
     }
   }
   return status.id;
+}
+
+String _nextIssueKey(TrackerSnapshot snapshot) {
+  var highest = 0;
+  final keyPattern = RegExp('^${RegExp.escape(snapshot.project.key)}-(\\d+)\$');
+  for (final issue in snapshot.issues) {
+    final match = keyPattern.firstMatch(issue.key);
+    final value = int.tryParse(match?.group(1) ?? '');
+    if (value != null && value > highest) {
+      highest = value;
+    }
+  }
+  for (final deleted in snapshot.repositoryIndex.deleted) {
+    final match = keyPattern.firstMatch(deleted.key);
+    final value = int.tryParse(match?.group(1) ?? '');
+    if (value != null && value > highest) {
+      highest = value;
+    }
+  }
+  return '${snapshot.project.key}-${highest + 1}';
+}
+
+String _nextIssuePath(TrackerSnapshot snapshot, String key) {
+  final existingPath = snapshot.issues
+      .map((issue) => issue.storagePath)
+      .firstWhere(
+        (path) => path.contains('/'),
+        orElse: () => '${snapshot.project.key}/main.md',
+      );
+  final root = existingPath.split('/').first;
+  return '$root/$key/main.md';
+}
+
+String _defaultIssueTypeId(ProjectConfig project) =>
+    _firstMatchingConfigId(project.issueTypeDefinitions, {'story'}) ??
+    project.issueTypeDefinitions.firstOrNull?.id ??
+    'story';
+
+String _defaultStatusId(ProjectConfig project) =>
+    _firstMatchingConfigId(project.statusDefinitions, {'todo', 'to-do'}) ??
+    project.statusDefinitions.firstOrNull?.id ??
+    'todo';
+
+String _defaultPriorityId(ProjectConfig project) =>
+    _firstMatchingConfigId(project.priorityDefinitions, {'medium'}) ??
+    project.priorityDefinitions.firstOrNull?.id ??
+    'medium';
+
+String? _firstMatchingConfigId(
+  List<TrackStateConfigEntry> definitions,
+  Set<String> preferredTokens,
+) {
+  for (final definition in definitions) {
+    final idToken = _canonicalConfigId(definition.id);
+    final nameToken = _canonicalConfigId(definition.name);
+    if (preferredTokens.contains(idToken) || preferredTokens.contains(nameToken)) {
+      return definition.id;
+    }
+  }
+  return null;
+}
+
+String _defaultAuthor(String? resolvedUserIdentity) {
+  final normalized = (resolvedUserIdentity ?? '').trim();
+  if (normalized.isEmpty || normalized.startsWith('/')) {
+    return 'unassigned';
+  }
+  return normalized;
+}
+
+String _buildIssueMarkdown({
+  required String key,
+  required String projectKey,
+  required String summary,
+  required String description,
+  required String issueTypeId,
+  required String statusId,
+  required String priorityId,
+  required String assignee,
+  required String reporter,
+  required String createdAt,
+}) {
+  final buffer = StringBuffer()
+    ..writeln('---')
+    ..writeln('key: $key')
+    ..writeln('project: $projectKey')
+    ..writeln('issueType: $issueTypeId')
+    ..writeln('status: $statusId')
+    ..writeln('priority: $priorityId')
+    ..writeln('summary: ${_yamlScalar(summary)}')
+    ..writeln('assignee: ${_yamlScalar(assignee)}')
+    ..writeln('reporter: ${_yamlScalar(reporter)}')
+    ..writeln('created: $createdAt')
+    ..writeln('updated: $createdAt')
+    ..writeln('---')
+    ..writeln()
+    ..writeln('# Summary')
+    ..writeln()
+    ..writeln(summary)
+    ..writeln()
+    ..writeln('# Description')
+    ..writeln()
+    ..writeln(description.isEmpty ? 'Describe the issue.' : description);
+  return '${buffer.toString().trimRight()}\n';
+}
+
+String _yamlScalar(String value) {
+  final escaped = value.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+  return '"$escaped"';
 }
 
 String _canonicalConfigId(String? value) {

@@ -144,6 +144,18 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
   }
 
   @override
+  Future<void> ensureCleanWorktree() async {
+    final result = await _runGit(['status', '--porcelain']);
+    if (result.stdout.trim().isEmpty) {
+      return;
+    }
+    throw const TrackStateProviderException(
+      'Cannot create an issue because this repository has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
+    );
+  }
+
+  @override
   Future<RepositoryPermission> getPermission() async {
     final branch = await resolveWriteBranch();
     final exists = await getBranch(branch);
