@@ -110,6 +110,8 @@ abstract interface class TrackStateAppComponent {
 
   Future<bool> isTextFieldVisible(String label);
 
+  Future<int> countLabeledTextFields(String label);
+
   Future<void> enterLabeledTextField(String label, {required String text});
 
   Future<String?> readLabeledTextFieldValue(String label);
