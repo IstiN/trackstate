@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../../components/screens/settings_screen_robot.dart';
 import '../../core/utils/local_git_repository_fixture.dart';
-import '../../frameworks/flutter/flutter_local_git_repository_factory.dart';
+import '../../fixtures/settings/local_git_settings_screen_context.dart';
 import 'support/ts106_oauth_identity_fixture.dart';
 
 void main() {
@@ -10,10 +10,7 @@ void main() {
     'TS-106 hosted OAuth mode shows the remote profile identity instead of local Git metadata',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      final robot = SettingsScreenRobot(
-        tester,
-        localGitRepositoryFactory: FlutterLocalGitRepositoryFactory(tester),
-      );
+      final robot = createLocalGitSettingsScreenRobot(tester);
       final hostedFixture = Ts106OauthIdentityFixture();
 
       try {
