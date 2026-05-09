@@ -6,5 +6,5 @@ dependencies:
   - TS-231
 notes:
   - Reuses the shared Local Git TrackState widget-test flow with a ticket-specific fixture that removes the entire DEMO/config directory from the repository.
-  - Waits for the production-visible fallback warning before asserting that Local Git remains usable and Create issue falls back to the core Summary and Description fields.
+  - Waits for the production-visible startup state before asserting that Local Git remains usable and Create issue falls back to the core Summary and Description fields.
   - Verifies visible user-facing controls instead of internal repository state only.

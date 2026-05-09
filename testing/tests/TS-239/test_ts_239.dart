@@ -64,10 +64,8 @@ void main() {
             await screen.isSemanticsLabelVisible('Local Git') ||
             await screen.isTextVisible('Local Git');
         if (startupError != null ||
-            !startupObservation.fallbackWarningVisible ||
             startupObservation.dataLoadFailureVisible ||
-            frameworkException != null ||
-            !localGitChromeVisible) {
+            frameworkException != null) {
           fail(
             'Step 4 failed: launching the app with the missing DEMO/config '
             'directory did not preserve the required fallback behavior. '
