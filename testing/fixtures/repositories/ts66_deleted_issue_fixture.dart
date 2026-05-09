@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
@@ -11,7 +12,9 @@ class Ts66DeletedIssueFixture {
   static const deletedIssueKey = 'TRACK-123';
   static const survivingIssueKey = 'TRACK-122';
   static const deletedIssuePath = 'TRACK/$deletedIssueKey/main.md';
-  static const deletedIndexPath = 'TRACK/.trackstate/index/deleted.json';
+  static const tombstonePath =
+      'TRACK/.trackstate/tombstones/$deletedIssueKey.json';
+  static const tombstoneIndexPath = 'TRACK/.trackstate/index/tombstones.json';
 
   static Future<Ts66DeletedIssueFixture> create() async {
     final directory = await Directory.systemTemp.createTemp(
@@ -35,10 +38,16 @@ class Ts66DeletedIssueFixture {
       deletedIssueFileExists: await File(
         '${directory.path}/$deletedIssuePath',
       ).exists(),
-      deletedIndexPath: deletedIndexPath,
-      deletedIndexExists: await File(
-        '${directory.path}/$deletedIndexPath',
+      tombstonePath: tombstonePath,
+      tombstoneFileExists: await File(
+        '${directory.path}/$tombstonePath',
       ).exists(),
+      tombstoneJson: null,
+      tombstoneIndexPath: tombstoneIndexPath,
+      tombstoneIndexExists: await File(
+        '${directory.path}/$tombstoneIndexPath',
+      ).exists(),
+      tombstoneIndexJson: const [],
       deletedIssueSearchResults: List<TrackStateIssue>.unmodifiable(
         await repository.searchIssues('project = TRACK $deletedIssueKey'),
       ),
@@ -48,16 +57,52 @@ class Ts66DeletedIssueFixture {
     );
   }
 
-  Future<Never> deleteIssueViaRepositoryService() async {
+  Future<Ts66DeletedIssueObservation> deleteIssueViaRepositoryService() async {
     final repository = LocalTrackStateRepository(
       repositoryPath: directory.path,
     );
-    await repository.loadSnapshot();
-    throw StateError(
-      'TS-66 requires a real repository-service delete operation, but '
-      'LocalTrackStateRepository does not expose deleteIssue for '
-      '$deletedIssueKey. The current repository API only supports '
-      'loadSnapshot, searchIssues, connect, and updateIssueStatus.',
+    final snapshot = await repository.loadSnapshot();
+    final issue = snapshot.issues.singleWhere(
+      (candidate) => candidate.key == deletedIssueKey,
+    );
+    await repository.deleteIssue(issue);
+    final refreshedRepository = LocalTrackStateRepository(
+      repositoryPath: directory.path,
+    );
+    final refreshedSnapshot = await refreshedRepository.loadSnapshot();
+    final tombstoneFile = File('${directory.path}/$tombstonePath');
+    final tombstoneIndexFile = File('${directory.path}/$tombstoneIndexPath');
+    return Ts66DeletedIssueObservation(
+      snapshot: refreshedSnapshot,
+      deletedIssuePath: deletedIssuePath,
+      deletedIssueFileExists: await File(
+        '${directory.path}/$deletedIssuePath',
+      ).exists(),
+      tombstonePath: tombstonePath,
+      tombstoneFileExists: await tombstoneFile.exists(),
+      tombstoneJson: await tombstoneFile.exists()
+          ? jsonDecode(await tombstoneFile.readAsString())
+                as Map<String, Object?>
+          : null,
+      tombstoneIndexPath: tombstoneIndexPath,
+      tombstoneIndexExists: await tombstoneIndexFile.exists(),
+      tombstoneIndexJson: await tombstoneIndexFile.exists()
+          ? List<Map<String, Object?>>.unmodifiable(
+              (jsonDecode(await tombstoneIndexFile.readAsString()) as List)
+                  .whereType<Map>()
+                  .map((entry) => Map<String, Object?>.from(entry)),
+            )
+          : const [],
+      deletedIssueSearchResults: List<TrackStateIssue>.unmodifiable(
+        await refreshedRepository.searchIssues(
+          'project = TRACK $deletedIssueKey',
+        ),
+      ),
+      activeIssueSearchResults: List<TrackStateIssue>.unmodifiable(
+        await refreshedRepository.searchIssues(
+          'project = TRACK $survivingIssueKey',
+        ),
+      ),
     );
   }
 
@@ -137,8 +182,12 @@ class Ts66DeletedIssueObservation {
     required this.snapshot,
     required this.deletedIssuePath,
     required this.deletedIssueFileExists,
-    required this.deletedIndexPath,
-    required this.deletedIndexExists,
+    required this.tombstonePath,
+    required this.tombstoneFileExists,
+    required this.tombstoneJson,
+    required this.tombstoneIndexPath,
+    required this.tombstoneIndexExists,
+    required this.tombstoneIndexJson,
     required this.deletedIssueSearchResults,
     required this.activeIssueSearchResults,
   });
@@ -146,8 +195,12 @@ class Ts66DeletedIssueObservation {
   final TrackerSnapshot snapshot;
   final String deletedIssuePath;
   final bool deletedIssueFileExists;
-  final String deletedIndexPath;
-  final bool deletedIndexExists;
+  final String tombstonePath;
+  final bool tombstoneFileExists;
+  final Map<String, Object?>? tombstoneJson;
+  final String tombstoneIndexPath;
+  final bool tombstoneIndexExists;
+  final List<Map<String, Object?>> tombstoneIndexJson;
   final List<TrackStateIssue> deletedIssueSearchResults;
   final List<TrackStateIssue> activeIssueSearchResults;
 }
