@@ -354,11 +354,21 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
           'Could not resolve the project root for the issue being archived.',
         );
       }
-      if (!blobPaths.contains(currentIssue.storagePath)) {
+      final issueArtifactPaths = _issueArtifactPaths(
+        blobPaths,
+        currentIssue.storagePath,
+      );
+      if (!issueArtifactPaths.contains(currentIssue.storagePath)) {
         throw TrackStateRepositoryException(
           'Could not find repository artifacts for ${currentIssue.key}.',
         );
       }
+      final issueRoot = _issueRoot(currentIssue.storagePath);
+      final archivedStoragePath = _archivedIssueStoragePath(
+        projectRoot,
+        currentIssue.key,
+      );
+      final archivedIssueRoot = _issueRoot(archivedStoragePath);
 
       final issueFile = await _provider.readTextFile(
         currentIssue.storagePath,
@@ -376,6 +386,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
               rawMarkdown: updatedMarkdown,
               updatedLabel: 'just now',
               isArchived: true,
+              storagePath: archivedStoragePath,
             )
           else
             candidate,
@@ -388,28 +399,83 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         projectRoot,
         '.trackstate/index/issues.json',
       );
+      final changes = <RepositoryFileChange>[];
+      for (final artifactPath in issueArtifactPaths) {
+        final targetPath = artifactPath == currentIssue.storagePath
+            ? archivedStoragePath
+            : _joinPath(
+                archivedIssueRoot,
+                artifactPath.substring(issueRoot.length + 1),
+              );
+        if (artifactPath == currentIssue.storagePath) {
+          changes.add(
+            RepositoryTextFileChange(
+              path: targetPath,
+              content: updatedMarkdown,
+              expectedRevision: artifactPath == targetPath
+                  ? issueFile.revision
+                  : await _existingArtifactRevision(
+                      path: targetPath,
+                      ref: writeBranch,
+                      blobPaths: blobPaths,
+                    ),
+            ),
+          );
+          if (artifactPath != targetPath) {
+            changes.add(
+              RepositoryDeleteFileChange(
+                path: artifactPath,
+                expectedRevision: issueFile.revision,
+              ),
+            );
+          }
+          continue;
+        }
+
+        final artifact = await _provider.readAttachment(
+          artifactPath,
+          ref: writeBranch,
+        );
+        changes.add(
+          RepositoryBinaryFileChange(
+            path: targetPath,
+            bytes: artifact.bytes,
+            expectedRevision: artifactPath == targetPath
+                ? artifact.revision
+                : await _existingArtifactRevision(
+                    path: targetPath,
+                    ref: writeBranch,
+                    blobPaths: blobPaths,
+                  ),
+          ),
+        );
+        if (artifactPath != targetPath) {
+          changes.add(
+            RepositoryDeleteFileChange(
+              path: artifactPath,
+              expectedRevision: artifact.revision,
+            ),
+          );
+        }
+      }
+      changes.add(
+        RepositoryTextFileChange(
+          path: issuesIndexPath,
+          content:
+              '${jsonEncode(_repositoryIndexEntriesJson(repositoryIndex.entries))}\n',
+          expectedRevision: await _existingRevision(
+            path: issuesIndexPath,
+            ref: writeBranch,
+            blobPaths: blobPaths,
+          ),
+        ),
+      );
 
       await mutator.applyFileChanges(
         RepositoryFileChangeRequest(
           branch: writeBranch,
           message: 'Archive ${currentIssue.key}',
-          changes: [
-            RepositoryTextFileChange(
-              path: currentIssue.storagePath,
-              content: updatedMarkdown,
-              expectedRevision: issueFile.revision,
-            ),
-            RepositoryTextFileChange(
-              path: issuesIndexPath,
-              content:
-                  '${jsonEncode(_repositoryIndexEntriesJson(repositoryIndex.entries))}\n',
-              expectedRevision: await _existingRevision(
-                path: issuesIndexPath,
-                ref: writeBranch,
-                blobPaths: blobPaths,
-              ),
-            ),
-          ],
+          changes: changes,
         ),
       );
 
@@ -1088,6 +1154,18 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     }
     final file = await _provider.readTextFile(path, ref: ref);
     return file.revision;
+  }
+
+  Future<String?> _existingArtifactRevision({
+    required String path,
+    required String ref,
+    required Set<String> blobPaths,
+  }) async {
+    if (!blobPaths.contains(path)) {
+      return null;
+    }
+    final artifact = await _provider.readAttachment(path, ref: ref);
+    return artifact.revision;
   }
 }
 
@@ -1834,6 +1912,38 @@ String _canonicalConfigId(String? value) {
 String _joinPath(String left, String right) {
   if (left.isEmpty) return right;
   return '$left/$right';
+}
+
+String _issueRoot(String storagePath) =>
+    storagePath.substring(0, storagePath.lastIndexOf('/'));
+
+String _archivedIssueStoragePath(String projectRoot, String key) =>
+    _joinPath(projectRoot, '.trackstate/archive/$key/main.md');
+
+List<String> _issueArtifactPaths(Set<String> blobPaths, String storagePath) {
+  final issueRoot = _issueRoot(storagePath);
+  return blobPaths
+      .where((path) {
+        if (path == storagePath) {
+          return true;
+        }
+        if (!path.startsWith('$issueRoot/')) {
+          return false;
+        }
+        final relativePath = path.substring(issueRoot.length + 1);
+        return !_isNestedIssueArtifactRelativePath(relativePath);
+      })
+      .toList()
+    ..sort();
+}
+
+bool _isNestedIssueArtifactRelativePath(String relativePath) {
+  final separatorIndex = relativePath.indexOf('/');
+  if (separatorIndex <= 0) {
+    return false;
+  }
+  final firstSegment = relativePath.substring(0, separatorIndex);
+  return RegExp(r'^[A-Za-z][A-Za-z0-9]+-\d+$').hasMatch(firstSegment);
 }
 
 RepositoryIssueIndexEntry _repositoryIndexEntry(Map entry) {

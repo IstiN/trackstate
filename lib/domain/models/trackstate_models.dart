@@ -80,6 +80,7 @@ class TrackStateIssue {
     String? rawMarkdown,
     String? updatedLabel,
     bool? isArchived,
+    String? storagePath,
   }) {
     return TrackStateIssue(
       key: key,
@@ -111,7 +112,7 @@ class TrackStateIssue {
       attachments: attachments,
       isArchived: isArchived ?? this.isArchived,
       resolutionId: resolutionId,
-      storagePath: storagePath,
+      storagePath: storagePath ?? this.storagePath,
       rawMarkdown: rawMarkdown ?? this.rawMarkdown,
     );
   }
