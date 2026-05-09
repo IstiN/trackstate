@@ -71,6 +71,13 @@ void main() {
             'user-facing label "Done". $observedState',
       );
       expect(
+        resolution.project.priorityLabel(issue.priorityId),
+        'High',
+        reason:
+            'A client resolving the stored priority id should still present '
+            'the user-facing label "High". $observedState',
+      );
+      expect(
         issue.rawMarkdown,
         contains(
           '${Ts96UnmappedFrontmatterRepositoryFixture.unmappedFieldKey}: '
