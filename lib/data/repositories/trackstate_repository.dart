@@ -338,6 +338,11 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         'Could not resolve the project root for the issue being archived.',
       );
     }
+    if (!blobPaths.contains(currentIssue.storagePath)) {
+      throw TrackStateRepositoryException(
+        'Could not find repository artifacts for ${currentIssue.key}.',
+      );
+    }
 
     final issueFile = await _provider.readTextFile(
       currentIssue.storagePath,
