@@ -5,6 +5,6 @@ platform: linux
 dependencies:
   - TS-141
 notes:
-  - Reuses the shared Local Git TrackState widget-test flow with a ticket-specific fixture that declares Solution, Acceptance Criteria, and Diagrams in DEMO/config/fields.json.
-  - Wraps a preloaded Local Git repository with a deterministic initial load delay so the production loading state is observable before ProjectConfig-backed create fields are available.
+  - Reuses the TS-141 Local Git fixture so the custom-field schema stays sourced from a single shared dependency.
+  - Launches the app through the shared screen abstraction with a deterministic initial load delay so the production loading state is observable before ProjectConfig-backed create fields are available.
   - Verifies the Create issue entry point is unavailable while configuration is still loading, then confirms the loaded form renders the configured custom fields instead of a hardcoded fallback-only form.

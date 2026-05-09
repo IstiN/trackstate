@@ -5,12 +5,11 @@ project configuration is still loading, then exposes the configured custom
 create-form fields once loading completes.
 
 The automation:
-1. creates a clean Local Git repository fixture whose project config declares
-   `Solution`, `Acceptance Criteria`, and `Diagrams`
-2. preloads the real Local Git repository and wraps it with a deterministic
+1. reuses the shared TS-141 Local Git fixture whose project config already
+   declares `Solution`, `Acceptance Criteria`, and `Diagrams`
+2. launches the app through the shared screen abstraction with a deterministic
    initial delay for the first app load
-3. pumps the real `TrackStateApp` and verifies the user only sees the loading
-   state before configuration finishes
+3. verifies the user only sees the loading state before configuration finishes
 4. confirms no visible `Create issue` entry point or `Summary` form field is
    accessible during that loading window
 5. waits for the delayed load to complete and verifies the Local Git runtime UI

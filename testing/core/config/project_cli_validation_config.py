@@ -9,6 +9,7 @@ from pathlib import Path
 class ProjectCliValidationConfig:
     upstream_repository: str
     target_repository_override: str | None
+    readme_repository_override: str | None
     fork_repository_name: str
     project_path: str
     readme_path: Path
@@ -29,6 +30,10 @@ class ProjectCliValidationConfig:
                 "IstiN/trackstate-setup",
             ),
             target_repository_override=target_repository_override,
+            readme_repository_override=os.environ.get(
+                "TS74_README_REPOSITORY",
+                os.environ.get("TRACKSTATE_SETUP_README_REPOSITORY"),
+            ),
             fork_repository_name=os.environ.get(
                 "TS74_FORK_REPOSITORY_NAME",
                 "trackstate-setup",
