@@ -146,6 +146,10 @@ void main() {
           );
         }
 
+        await _verifyHostedRepositoryStatus(screen);
+        await screen.openSection('Dashboard');
+        await _waitForTopBarStatePropagation(screen);
+
         final openedConnectDialog = await screen.tapTopBarControl(
           'Connect GitHub',
         );
@@ -238,6 +242,48 @@ Future<void> _waitForTopBarStatePropagation(
       return;
     }
     await screen.waitWithoutInteraction(tick);
+  }
+}
+
+Future<void> _verifyHostedRepositoryStatus(
+  TrackStateAppComponent screen,
+) async {
+  await screen.openSection('Settings');
+
+  final hostedStatusVisible = await _isAnyLabelVisible(screen, const [
+    'Connect GitHub',
+    'Connected',
+  ]);
+  final fineGrainedTokenVisible = await screen.isTextFieldVisible(
+    'Fine-grained token',
+  );
+  final repositoryPathVisible = await screen.isTextFieldVisible(
+    'Repository Path',
+  );
+  final writeBranchVisible = await screen.isTextFieldVisible('Write Branch');
+
+  if (!hostedStatusVisible || !fineGrainedTokenVisible) {
+    fail(
+      'Step 7 failed: after switching the storage mode back to Remote, '
+      'Settings did not render the expected hosted repository-access status. '
+      'Hosted selector visible=${hostedStatusVisible ? 'yes' : 'no'}, '
+      'Fine-grained token visible=${fineGrainedTokenVisible ? 'yes' : 'no'}. '
+      'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
+      'Visible semantics: '
+      '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+    );
+  }
+
+  if (repositoryPathVisible || writeBranchVisible) {
+    fail(
+      'Step 7 failed: after switching back to Remote, Settings still exposed '
+      'the Local Git repository configuration fields instead of the hosted '
+      'repository-access status. Repository Path visible='
+      '${repositoryPathVisible ? 'yes' : 'no'}, Write Branch visible='
+      '${writeBranchVisible ? 'yes' : 'no'}. Visible texts: '
+      '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
+      '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+    );
   }
 }
 
