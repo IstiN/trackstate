@@ -1,0 +1,10 @@
+test_id: TS-115
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Flutter SDK 3.35.3 available on PATH, at /tmp/flutter/bin/flutter, or bootstrapped automatically
+notes:
+  - Creates a temporary copy of the repository and injects a probe widget under lib/.
+  - Verifies a theme-token color expression analyzes cleanly before swapping in a hardcoded hex color.
+  - Expects flutter analyze to report a lint diagnostic that blocks the hardcoded hex regression.

@@ -60,6 +60,12 @@ abstract interface class TrackStateAppComponent {
     required String initials,
   });
 
+  bool isProfileInitialsVisible(String initials);
+
+  bool isProfileTextVisible(String text);
+
+  bool isProfileSemanticsLabelVisible(String label);
+
   void expectGuestProfileSurface({
     required String repositoryAccessLabel,
     required String initials,
