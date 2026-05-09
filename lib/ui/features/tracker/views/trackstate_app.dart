@@ -878,6 +878,7 @@ class _SearchAndDetail extends StatefulWidget {
 class _SearchAndDetailState extends State<_SearchAndDetail> {
   late final TextEditingController _summaryController;
   late final TextEditingController _descriptionController;
+  final Map<String, TextEditingController> _customFieldControllers = {};
   bool _isCreating = false;
 
   @override
@@ -891,13 +892,25 @@ class _SearchAndDetailState extends State<_SearchAndDetail> {
   void dispose() {
     _summaryController.dispose();
     _descriptionController.dispose();
+    for (final controller in _customFieldControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
   Future<void> _submitCreateIssue() async {
+    final customFields = <String, String>{};
+    for (final field in _createFieldDefinitions(widget.viewModel.project)) {
+      final value = _customFieldControllers[field.id]?.text.trim() ?? '';
+      if (value.isEmpty) {
+        continue;
+      }
+      customFields[field.id] = value;
+    }
     final success = await widget.viewModel.createIssue(
       summary: _summaryController.text,
       description: _descriptionController.text,
+      customFields: customFields,
     );
     if (!mounted || !success) {
       return;
@@ -906,7 +919,32 @@ class _SearchAndDetailState extends State<_SearchAndDetail> {
       _isCreating = false;
       _summaryController.clear();
       _descriptionController.clear();
+      for (final controller in _customFieldControllers.values) {
+        controller.clear();
+      }
     });
+  }
+
+  List<TrackStateFieldDefinition> _createFieldDefinitions(ProjectConfig? project) {
+    if (project == null) {
+      return const [];
+    }
+    return project.fieldDefinitions
+        .where((field) => !_hiddenCreateFieldIds.contains(field.id))
+        .toList(growable: false);
+  }
+
+  void _syncCustomFieldControllers(List<TrackStateFieldDefinition> fields) {
+    final activeFieldIds = fields.map((field) => field.id).toSet();
+    final staleFieldIds = _customFieldControllers.keys
+        .where((fieldId) => !activeFieldIds.contains(fieldId))
+        .toList(growable: false);
+    for (final fieldId in staleFieldIds) {
+      _customFieldControllers.remove(fieldId)?.dispose();
+    }
+    for (final field in fields) {
+      _customFieldControllers.putIfAbsent(field.id, TextEditingController.new);
+    }
   }
 
   @override
@@ -914,6 +952,8 @@ class _SearchAndDetailState extends State<_SearchAndDetail> {
     final l10n = AppLocalizations.of(context)!;
     final viewModel = widget.viewModel;
     final summaryLabel = viewModel.project?.fieldLabel('summary') ?? 'Summary';
+    final createFields = _createFieldDefinitions(viewModel.project);
+    _syncCustomFieldControllers(createFields);
     final canSubmit = !viewModel.hasReadOnlySession && !viewModel.isSaving;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -973,6 +1013,26 @@ class _SearchAndDetailState extends State<_SearchAndDetail> {
                     ),
                   ),
                 ),
+                for (final field in createFields) ...[
+                  const SizedBox(height: 12),
+                  Semantics(
+                    label: viewModel.project?.fieldLabel(field.id) ?? field.name,
+                    textField: true,
+                    child: TextField(
+                      key: ValueKey('create-field-${field.id}'),
+                      controller: _customFieldControllers[field.id],
+                      minLines: field.type == 'markdown' ? 3 : 1,
+                      maxLines: field.type == 'markdown' ? null : 1,
+                      enabled: !viewModel.isSaving,
+                      decoration: InputDecoration(
+                        labelText:
+                            viewModel.project?.fieldLabel(field.id) ??
+                            field.name,
+                        alignLabelWithHint: field.type == 'markdown',
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
@@ -992,6 +1052,10 @@ class _SearchAndDetailState extends State<_SearchAndDetail> {
                                 _isCreating = false;
                                 _summaryController.clear();
                                 _descriptionController.clear();
+                                for (final controller
+                                    in _customFieldControllers.values) {
+                                  controller.clear();
+                                }
                               });
                             },
                     ),
@@ -1026,6 +1090,24 @@ class _SearchAndDetailState extends State<_SearchAndDetail> {
     );
   }
 }
+
+const Set<String> _hiddenCreateFieldIds = {
+  'summary',
+  'description',
+  'issueType',
+  'status',
+  'priority',
+  'assignee',
+  'reporter',
+  'labels',
+  'components',
+  'fixVersions',
+  'watchers',
+  'parent',
+  'epic',
+  'archived',
+  'resolution',
+};
 
 class _Hierarchy extends StatelessWidget {
   const _Hierarchy({required this.viewModel});
