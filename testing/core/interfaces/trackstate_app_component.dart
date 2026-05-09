@@ -3,6 +3,8 @@ import 'package:trackstate/data/repositories/trackstate_repository.dart';
 abstract interface class TrackStateAppComponent {
   Future<void> pump(TrackStateRepository repository);
 
+  Future<void> pumpWithoutPreload(TrackStateRepository repository);
+
   Future<void> pumpLocalGitApp({required String repositoryPath});
 
   void resetView();

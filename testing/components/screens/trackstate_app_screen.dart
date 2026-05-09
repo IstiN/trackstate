@@ -106,6 +106,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> pump(TrackStateRepository repository) async {
+    final resolvedRepository = repository.usesLocalPersistence
+        ? await preloadLocalGitTestRepository(
+            tester: tester,
+            repository: repository,
+          )
+        : repository;
+    await pumpWithoutPreload(resolvedRepository);
+  }
+
+  @override
+  Future<void> pumpWithoutPreload(TrackStateRepository repository) async {
     SharedPreferences.setMockInitialValues({});
     tester.view.physicalSize = const Size(1440, 960);
     tester.view.devicePixelRatio = 1;
@@ -114,23 +125,15 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       tester.view.resetDevicePixelRatio();
     });
 
-    final resolvedRepository = repository.usesLocalPersistence
-        ? await preloadLocalGitTestRepository(
-            tester: tester,
-            repository: repository,
-          )
-        : repository;
-
     await tester.pumpWidget(
       TrackStateApp(
         key: UniqueKey(),
-        repository: resolvedRepository,
-        openLocalRepository: ({
-          required String repositoryPath,
-          required String writeBranch,
-        }) => _repositoryService.openRepository(
-          repositoryPath: repositoryPath,
-        ),
+        repository: repository,
+        openLocalRepository:
+            ({required String repositoryPath, required String writeBranch}) =>
+                _repositoryService.openRepository(
+                  repositoryPath: repositoryPath,
+                ),
       ),
     );
     await _pumpFrames();
