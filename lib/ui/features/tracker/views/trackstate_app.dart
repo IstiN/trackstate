@@ -1451,7 +1451,7 @@ class _IssueDetailActionButton extends StatelessWidget {
             onPressed: onPressed,
             style: FilledButton.styleFrom(
               backgroundColor: colors.primary,
-              foregroundColor: const Color(0xFFFAF8F4),
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -1926,8 +1926,10 @@ class _SettingsProviderButton extends StatelessWidget {
     if (tone == _SettingsProviderButtonTone.connected) {
       return _connectedStyle(context, colors);
     }
-    const foreground = Color(0xFFFAF8F4);
+    final foreground = Theme.of(context).colorScheme.onPrimary;
+    // ignore: avoid_hardcoded_hex_color
     const hoveredBackground = Color(0xFFB85138);
+    // ignore: avoid_hardcoded_hex_color
     const pressedBackground = Color(0xFFB34F35);
 
     return FilledButton.styleFrom(
@@ -1954,6 +1956,7 @@ class _SettingsProviderButton extends StatelessWidget {
   ButtonStyle _connectedStyle(BuildContext context, TrackStateColors colors) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final idleBackground = isDark ? colors.surfaceAlt : colors.text;
+    // ignore: avoid_hardcoded_hex_color
     final hoverBackground = const Color(0xFF3A3835);
     final pressedBackground = isDark ? colors.surface : colors.text;
 
@@ -2219,6 +2222,7 @@ class _NavButton extends StatelessWidget {
               children: [
                 TrackStateIcon(
                   item.glyph,
+                  // ignore: avoid_hardcoded_hex_color
                   color: selected ? const Color(0xFFFAF8F4) : colors.muted,
                   size: 18,
                 ),
@@ -2226,6 +2230,7 @@ class _NavButton extends StatelessWidget {
                 Text(
                   item.label,
                   style: TextStyle(
+                    // ignore: avoid_hardcoded_hex_color
                     color: selected ? const Color(0xFFFAF8F4) : colors.text,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   ),

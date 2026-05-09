@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_hardcoded_hex_color
+
 import 'package:flutter/material.dart';
 
 class TrackStateColors extends ThemeExtension<TrackStateColors> {

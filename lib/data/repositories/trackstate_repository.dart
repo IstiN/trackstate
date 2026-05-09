@@ -152,7 +152,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     final issueTypeId = _defaultIssueTypeId(project);
     final statusId = _defaultStatusId(project);
     final priorityId = _defaultPriorityId(project);
-    final author = _defaultAuthor(_session?.resolvedUserIdentity);
+    final author = _defaultAuthor(_session.resolvedUserIdentity);
     final markdown = _buildIssueMarkdown(
       key: key,
       projectKey: project.key,

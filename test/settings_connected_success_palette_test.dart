@@ -64,6 +64,7 @@ void main() {
         robot.connectedTopBarControl,
       );
 
+      // ignore: avoid_hardcoded_hex_color
       expect(textColor, const Color(0xFF2D2A26));
       expect(contrastRatio(textColor, background), greaterThanOrEqualTo(4.5));
     },
