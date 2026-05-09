@@ -43,7 +43,7 @@ Future<TrackStateRepository> preloadLocalGitTestRepository({
 }
 
 class _PreloadedLocalGitRepository implements TrackStateRepository {
-  const _PreloadedLocalGitRepository({
+  _PreloadedLocalGitRepository({
     required this.repository,
     required this.snapshot,
     required this.user,
@@ -52,6 +52,7 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
   final TrackStateRepository repository;
   final TrackerSnapshot snapshot;
   final RepositoryUser user;
+  bool _servedInitialSnapshot = false;
 
   @override
   bool get supportsGitHubAuth => repository.supportsGitHubAuth;
@@ -63,7 +64,13 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
   Future<RepositoryUser> connect(RepositoryConnection connection) async => user;
 
   @override
-  Future<TrackerSnapshot> loadSnapshot() async => snapshot;
+  Future<TrackerSnapshot> loadSnapshot() async {
+    if (!_servedInitialSnapshot) {
+      _servedInitialSnapshot = true;
+      return snapshot;
+    }
+    return repository.loadSnapshot();
+  }
 
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) =>
@@ -87,14 +94,12 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
   ) => repository.updateIssueDescription(issue, description);
 
   @override
-  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) {
-    return repository.archiveIssue(issue);
-  }
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) =>
+      repository.archiveIssue(issue);
 
   @override
-  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) {
-    return repository.deleteIssue(issue);
-  }
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) =>
+      repository.deleteIssue(issue);
 
   @override
   Future<TrackStateIssue> updateIssueStatus(
