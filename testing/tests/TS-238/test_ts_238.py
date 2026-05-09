@@ -93,16 +93,14 @@ class QuickStartReadmeFormattingTest(unittest.TestCase):
         self.assertRegex(
             quick_start_section,
             re.compile(
-                r"Use this GitHub CLI command to validate that your authenticated\s+"
-                r"`trackstate-setup` fork exposes the same project JSON the app "
-                r"reads:\s+```(?:bash|shell|sh|text)?\n"
+                r"```(?:bash|shell|sh|text)?\n"
                 + re.escape(self.EXPECTED_COMMAND)
                 + r"\n```",
                 re.DOTALL,
             ),
             "Human-style verification failed: the README does not present the "
-            "validation command directly under the quick-start guidance as a "
-            "visible fenced code block a user can copy as-is.\n"
+            "approved validation command as a visible fenced code block a user "
+            "can copy as-is from the `CLI quick start` section.\n"
             f"Observed section:\n{quick_start_section}",
         )
 
