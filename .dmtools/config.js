@@ -11,19 +11,19 @@ const TRACKSTATE_SETUP_SUBMODULES = [{ path: 'trackstate-setup', branch: 'main' 
 const POST_ACTION_FEEDBACK = {
     postAction: {
         enabled: true,
-        maxAttempts: 1
+        maxAttempts: 2
     }
 };
 const FLUTTER_FEEDBACK = {
     postAction: {
         enabled: true,
-        maxAttempts: 1
+        maxAttempts: 2
     },
     qualityGates: {
         enabled: true,
         gates: [
-            { name: 'flutter-analyze', command: 'flutter analyze', maxAttempts: 1 },
-            { name: 'flutter-test', command: 'flutter test --coverage', maxAttempts: 1 }
+            { name: 'flutter-analyze', command: 'flutter analyze', maxAttempts: 2 },
+            { name: 'flutter-test', command: 'flutter test --coverage', maxAttempts: 2 }
         ]
     }
 };
