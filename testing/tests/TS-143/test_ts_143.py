@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
-import os
 import unittest
 
 from testing.components.services.theme_token_policy_directory_validator import (
@@ -22,29 +20,21 @@ from testing.tests.support.flutter_analyze_probe_factory import (
 class ThemeTokenPolicyNormalizedDirectoryCheckTest(unittest.TestCase):
     def setUp(self) -> None:
         self.repository_root = Path(__file__).resolve().parents[3]
-        base_config = ThemeTokenPolicyDirectoryConfig.from_env()
-        self.config = replace(
-            base_config,
-            flutter_version=os.environ.get(
-                "TS143_FLUTTER_VERSION",
-                base_config.flutter_version,
-            ),
-            target_path=os.environ.get("TS143_TARGET_PATH", "lib"),
-            success_message=os.environ.get(
-                "TS143_SUCCESS_MESSAGE",
-                base_config.success_message,
-            ),
+        self.config = ThemeTokenPolicyDirectoryConfig.from_env(
+            env_prefixes=("TS143", "TS132", "TRACKSTATE"),
+            default_target_path="lib",
         )
         self.probe = create_flutter_analyze_probe(
             self.repository_root,
             flutter_version=self.config.flutter_version,
+            env_prefixes=("TS143", "TS132", "TS115", "TRACKSTATE"),
         )
         self.validator = ThemeTokenPolicyDirectoryValidator(
             self.repository_root,
             self.probe,
         )
 
-    def test_theme_token_check_accepts_directory_target_without_trailing_slash(
+    def test_theme_token_check_passes_for_normalized_production_ui_directory(
         self,
     ) -> None:
         result = self.validator.validate(config=self.config)
@@ -77,7 +67,7 @@ class ThemeTokenPolicyNormalizedDirectoryCheckTest(unittest.TestCase):
         self.assertTrue(
             result.theme_token_check.succeeded,
             "Step 2 failed: running `dart run tool/check_theme_tokens.dart lib` "
-            "did not complete successfully against the live repository root.\n"
+            "did not complete successfully against the live production UI directory.\n"
             f"Command: {result.theme_token_check.command_text}\n"
             f"Exit code: {result.theme_token_check.exit_code}\n"
             f"stdout:\n{result.theme_token_check.stdout}\n"
@@ -86,22 +76,22 @@ class ThemeTokenPolicyNormalizedDirectoryCheckTest(unittest.TestCase):
         self.assertIn(
             self.config.success_message,
             output,
-            "Human-style verification failed: the terminal output did not show "
-            "the expected success message after checking the `lib` directory.\n"
-            f"Observed output:\n{output}",
-        )
-        self.assertNotIn(
-            "Theme token policy target does not exist",
-            output,
-            "Human-style verification failed: the terminal output still told the "
-            "user that the normalized `lib` directory target does not exist.\n"
+            "Human-style verification failed: the terminal output did not show the "
+            "expected success message after checking the normalized production "
+            "UI directory.\n"
             f"Observed output:\n{output}",
         )
         self.assertFalse(
             has_diagnostic,
             "Human-style verification failed: the terminal output still displayed "
-            "an analyzer-style diagnostic even though TS-143 expects a clean "
-            "directory scan.\n"
+            "an analyzer-style diagnostic even though TS-143 expects zero warnings.\n"
+            f"Observed output:\n{output}",
+        )
+        self.assertNotIn(
+            "Theme token policy target does not exist",
+            output,
+            "Human-style verification failed: the normalized `lib` directory was "
+            "still rejected as a missing target.\n"
             f"Observed output:\n{output}",
         )
 

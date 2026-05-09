@@ -3,7 +3,7 @@ type: cli
 framework: unittest
 platform: python
 dependencies:
-  - Flutter SDK 3.35.3 available on PATH, at /tmp/flutter/bin/flutter, or via TRACKSTATE_FLUTTER_BIN / TS143_FLUTTER_BIN
+  - Flutter SDK 3.35.3 available on PATH, at /tmp/flutter/bin/flutter, or via TS143_FLUTTER_BIN / TS132_FLUTTER_BIN / TS115_FLUTTER_BIN / TRACKSTATE_FLUTTER_BIN
 notes:
   - Runs the live enforcement command `dart run tool/check_theme_tokens.dart lib` against the repository root.
-  - Passes only when the command exits successfully, shows the success message, and does not report that the normalized `lib` directory target is missing.
+  - Passes only when the normalized production UI path resolves successfully, shows the success message, emits zero analyzer-style warnings, and does not report a missing target for `lib`.
