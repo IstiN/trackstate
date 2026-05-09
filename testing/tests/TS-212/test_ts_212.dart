@@ -111,7 +111,9 @@ void main() {
         throw StateError('TS-212 archive request did not complete.');
       }
 
-      final afterRepository = await repositoryPort.openRepository(
+      final LocalGitRepositoryPort reloadedRepositoryPort = dependencies
+          .createLocalGitRepositoryPort(tester);
+      final afterRepository = await reloadedRepositoryPort.openRepository(
         repositoryPath: fixture.directory.path,
       );
       final afterArchival = await tester.runAsync(
