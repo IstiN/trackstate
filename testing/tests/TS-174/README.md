@@ -1,16 +1,18 @@
 # TS-174
 
-Validates that archiving an existing issue succeeds and exposes the archived
-lifecycle state through the same repository surfaces that integrated clients
-use.
+Validates that archiving an existing issue succeeds, moves the issue artifact
+out of active storage, and exposes the archived lifecycle state through the
+same repository surfaces that integrated clients use.
 
 The automation covers the ticket from the repository-service consumer
 perspective against a temporary local Git-backed TrackState repository:
 1. seed a clean repository with active issue `TRACK-122`
 2. invoke `LocalTrackStateRepository.archiveIssue` for `TRACK-122`
-3. verify the returned issue, repository index, and committed markdown all mark
-   the issue as archived
-4. verify a standard repository search still finds `TRACK-122` and reports it
+3. verify the active-storage artifact `TRACK/TRACK-122/main.md` is removed and
+   the repository no longer resolves `TRACK-122` to the active path
+4. verify the returned issue, repository index, and committed repository state
+   all mark the issue as archived
+5. verify a standard repository search still finds `TRACK-122` and reports it
    as archived
 
 ## Install dependencies
@@ -29,3 +31,9 @@ perspective against a temporary local Git-backed TrackState repository:
 
 This test creates its own temporary local Git-backed repository fixture, so no
 external credentials or environment variables are required.
+
+## Expected output when the test passes
+
+```text
+00:00 +1: All tests passed!
+```
