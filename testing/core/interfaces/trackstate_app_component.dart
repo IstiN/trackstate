@@ -42,6 +42,10 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> expectMessageBannerContains(String text);
 
+  Future<bool> isMessageBannerVisibleContaining(String text);
+
+  Future<void> waitWithoutInteraction(Duration duration);
+
   void expectLocalRuntimeChrome();
 
   Future<bool> dismissMessageBannerContaining(String text);

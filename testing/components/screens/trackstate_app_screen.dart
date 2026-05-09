@@ -287,6 +287,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     expect(finder, findsWidgets);
   }
 
+  @override
+  Future<bool> isMessageBannerVisibleContaining(String text) async {
+    await tester.pump();
+    return _messageBanner(text).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<void> waitWithoutInteraction(Duration duration) async {
+    await tester.pump(duration);
+    await tester.pump();
+  }
+
   Finder _messageBanner(String text) => find.ancestor(
     of: _text(text),
     matching: find.byWidgetPredicate(
