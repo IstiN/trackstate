@@ -4,28 +4,52 @@ import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 class Ts135ArchivedIssueFixture {
-  Ts135ArchivedIssueFixture._({required this.directory});
+  Ts135ArchivedIssueFixture._({
+    required this.directory,
+    required this.initiallyArchived,
+    required this.includePreservedMetadata,
+  });
 
   final Directory directory;
+  final bool initiallyArchived;
+  final bool includePreservedMetadata;
 
   static const archivedIssueKey = 'TRACK-555';
   static const archivedIssuePath = 'TRACK/$archivedIssueKey/main.md';
   static const archivedIssueSummary = 'Archive target issue';
   static const siblingIssueKey = 'TRACK-556';
+  static const preservedPriority = IssuePriority.high;
+  static const preservedPriorityId = 'high';
+  static const preservedComponents = ['tracker-core', 'automation'];
+  static const preservedFixVersionIds = ['2026.05', '2026.06'];
 
-  static Future<Ts135ArchivedIssueFixture> create() async {
+  static Future<Ts135ArchivedIssueFixture> create({
+    bool initiallyArchived = false,
+    bool includePreservedMetadata = false,
+  }) async {
     final directory = await Directory.systemTemp.createTemp(
-      'trackstate-ts-135-',
+      includePreservedMetadata
+          ? 'trackstate-ts-167-'
+          : initiallyArchived
+          ? 'trackstate-ts-152-'
+          : 'trackstate-ts-135-',
     );
-    final fixture = Ts135ArchivedIssueFixture._(directory: directory);
+    final fixture = Ts135ArchivedIssueFixture._(
+      directory: directory,
+      initiallyArchived: initiallyArchived,
+      includePreservedMetadata: includePreservedMetadata,
+    );
     await fixture._seedRepository();
     return fixture;
   }
 
   Future<void> dispose() => directory.delete(recursive: true);
 
-  Future<Ts135ArchivedIssueObservation> observeBeforeArchivalState() =>
+  Future<Ts135ArchivedIssueObservation> observeCurrentState() =>
       _observeRepositoryState();
+
+  Future<Ts135ArchivedIssueObservation> observeBeforeArchivalState() =>
+      observeCurrentState();
 
   Future<Ts135ArchivedIssueObservation>
   archiveIssueViaRepositoryService() async {
@@ -38,6 +62,37 @@ class Ts135ArchivedIssueFixture {
     );
     await repository.archiveIssue(issue);
     return _observeRepositoryState();
+  }
+
+  Future<Ts135ArchivedIssueRestartObservation>
+  archiveIssueAndObserveAfterRestart() async {
+    final dynamic repository = LocalTrackStateRepository(
+      repositoryPath: directory.path,
+    );
+    final snapshot = await repository.loadSnapshot() as TrackerSnapshot;
+    final issue = snapshot.issues.singleWhere(
+      (candidate) => candidate.key == archivedIssueKey,
+    );
+    final archivedIssue =
+        await repository.archiveIssue(issue) as TrackStateIssue;
+    final currentSessionSnapshot =
+        await repository.loadSnapshot() as TrackerSnapshot;
+    final currentSessionIssue = currentSessionSnapshot.issues.singleWhere(
+      (candidate) => candidate.key == archivedIssueKey,
+    );
+    final issueFile = File('${directory.path}/$archivedIssuePath');
+    final restartedObservation = await _observeRepositoryState();
+    return Ts135ArchivedIssueRestartObservation(
+      archivedIssue: archivedIssue,
+      currentSessionIssue: currentSessionIssue,
+      currentSessionIndexEntry: currentSessionSnapshot.repositoryIndex
+          .entryForKey(archivedIssueKey),
+      currentSessionMainMarkdown: await issueFile.readAsString(),
+      currentSessionSearchResults: List<TrackStateIssue>.unmodifiable(
+        await repository.searchIssues('project = TRACK $archivedIssueKey'),
+      ),
+      restartedObservation: restartedObservation,
+    );
   }
 
   Future<Ts135ArchivedIssueObservation> _observeRepositoryState() async {
@@ -82,19 +137,33 @@ class Ts135ArchivedIssueFixture {
       'TRACK/config/fields.json',
       '[{"id":"summary","name":"Summary","type":"string","required":true}]\n',
     );
+    if (includePreservedMetadata) {
+      await _writeFile(
+        'TRACK/config/priorities.json',
+        '[{"id":"high","name":"High"},{"id":"medium","name":"Medium"}]\n',
+      );
+      await _writeFile(
+        'TRACK/config/components.json',
+        '[{"id":"tracker-core","name":"Tracker Core"},{"id":"automation","name":"Automation"}]\n',
+      );
+      await _writeFile(
+        'TRACK/config/versions.json',
+        '[{"id":"2026.05","name":"2026.05"},{"id":"2026.06","name":"2026.06"}]\n',
+      );
+    }
     await _writeFile(archivedIssuePath, '''
 ---
 key: $archivedIssueKey
 project: TRACK
 issueType: story
 status: todo
-summary: $archivedIssueSummary
+${includePreservedMetadata ? 'priority: $preservedPriorityId\ncomponents:\n  - ${preservedComponents[0]}\n  - ${preservedComponents[1]}\nfixVersions:\n  - ${preservedFixVersionIds[0]}\n  - ${preservedFixVersionIds[1]}\n' : ''}summary: $archivedIssueSummary
 updated: 2026-05-09T07:00:00Z
----
+${initiallyArchived ? 'archived: true\n' : ''}---
 
 # Description
 
-This active issue should become archived through the repository service.
+${initiallyArchived ? 'This issue starts archived so redundant archive requests can be verified.' : 'This active issue should become archived through the repository service.'}
 ''');
     await _writeFile('TRACK/$siblingIssueKey/main.md', '''
 ---
@@ -112,10 +181,16 @@ This control issue proves the repository contains more than one issue.
 ''');
 
     await _git(['init', '-b', 'main']);
-    await _git(['config', 'user.name', 'Local Tester']);
-    await _git(['config', 'user.email', 'local@example.com']);
+    await _git(['config', '--local', 'user.name', 'Local Tester']);
+    await _git(['config', '--local', 'user.email', 'local@example.com']);
     await _git(['add', '.']);
-    await _git(['commit', '-m', 'Seed active issues for TS-135']);
+    await _git([
+      'commit',
+      '-m',
+      initiallyArchived
+          ? 'Seed archived issue for TS-152'
+          : 'Seed active issues for TS-135',
+    ]);
   }
 
   Future<void> _writeFile(String relativePath, String content) async {
@@ -148,4 +223,22 @@ class Ts135ArchivedIssueObservation {
   final bool issueFileExists;
   final String mainMarkdown;
   final List<TrackStateIssue> standardSearchResults;
+}
+
+class Ts135ArchivedIssueRestartObservation {
+  const Ts135ArchivedIssueRestartObservation({
+    required this.archivedIssue,
+    required this.currentSessionIssue,
+    required this.currentSessionIndexEntry,
+    required this.currentSessionMainMarkdown,
+    required this.currentSessionSearchResults,
+    required this.restartedObservation,
+  });
+
+  final TrackStateIssue archivedIssue;
+  final TrackStateIssue currentSessionIssue;
+  final RepositoryIssueIndexEntry? currentSessionIndexEntry;
+  final String currentSessionMainMarkdown;
+  final List<TrackStateIssue> currentSessionSearchResults;
+  final Ts135ArchivedIssueObservation restartedObservation;
 }

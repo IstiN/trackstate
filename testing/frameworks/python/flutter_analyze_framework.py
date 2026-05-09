@@ -13,9 +13,16 @@ from testing.core.models.cli_command_result import CliCommandResult
 
 
 class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
-    def __init__(self, repository_root: Path, *, flutter_version: str) -> None:
+    def __init__(
+        self,
+        repository_root: Path,
+        *,
+        flutter_version: str,
+        env_prefixes: tuple[str, ...] = ("TS132", "TS115", "TRACKSTATE"),
+    ) -> None:
         self._repository_root = repository_root
         self._flutter_version = flutter_version
+        self._env_prefixes = env_prefixes
 
     def flutter_version(self) -> CliCommandResult:
         flutter_bin = self._resolve_flutter_bin()
@@ -37,6 +44,13 @@ class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
         project_root: Path,
         target: Path | str,
     ) -> CliCommandResult:
+        return self.theme_token_check_many(project_root, (target,))
+
+    def theme_token_check_many(
+        self,
+        project_root: Path,
+        targets: tuple[Path | str, ...],
+    ) -> CliCommandResult:
         flutter_bin = self._resolve_flutter_bin()
         dart_bin = flutter_bin.parent / "dart"
         return self._run(
@@ -44,22 +58,17 @@ class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
                 str(dart_bin),
                 "run",
                 "tool/check_theme_tokens.dart",
-                self._target_text(target),
+                *self._targets_text(targets),
             ),
             cwd=project_root,
         )
 
     def _resolve_flutter_bin(self) -> Path:
-        for env_key in (
-            "TS132_FLUTTER_BIN",
-            "TS115_FLUTTER_BIN",
-            "TRACKSTATE_FLUTTER_BIN",
-        ):
-            configured = os.environ.get(env_key)
-            if configured:
-                candidate = self._resolve_command(configured)
-                if candidate is not None:
-                    return candidate
+        configured_flutter_bin = self._read_env("FLUTTER_BIN")
+        if configured_flutter_bin:
+            candidate = self._resolve_command(configured_flutter_bin)
+            if candidate is not None:
+                return candidate
 
         bundled_candidate = Path("/tmp/flutter/bin/flutter")
         if bundled_candidate.is_file():
@@ -121,14 +130,9 @@ class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
         )
 
     def _cache_root(self) -> Path:
-        for env_key in (
-            "TS132_TOOL_CACHE",
-            "TS115_TOOL_CACHE",
-            "TRACKSTATE_TOOL_CACHE",
-        ):
-            configured = os.environ.get(env_key)
-            if configured:
-                return Path(configured).expanduser()
+        configured_tool_cache = self._read_env("TOOL_CACHE")
+        if configured_tool_cache:
+            return Path(configured_tool_cache).expanduser()
         return Path.home() / ".cache" / "trackstate-test-tools"
 
     def _cached_flutter_bin_path(self) -> Path:
@@ -143,11 +147,22 @@ class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
         resolved = shutil.which(command)
         return Path(resolved) if resolved else None
 
+    def _read_env(self, suffix: str) -> str | None:
+        for prefix in self._env_prefixes:
+            value = os.environ.get(f"{prefix}_{suffix}")
+            if value:
+                return value
+        return None
+
     @staticmethod
     def _target_text(target: Path | str) -> str:
         if isinstance(target, Path):
             return target.as_posix()
         return target
+
+    @classmethod
+    def _targets_text(cls, targets: tuple[Path | str, ...]) -> tuple[str, ...]:
+        return tuple(cls._target_text(target) for target in targets)
 
     @staticmethod
     def _restore_sdk_permissions(flutter_root: Path) -> None:

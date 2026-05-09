@@ -12,10 +12,12 @@ abstract interface class TrackStateRepository {
   Future<TrackerSnapshot> loadSnapshot();
   Future<List<TrackStateIssue>> searchIssues(String jql);
   Future<RepositoryUser> connect(RepositoryConnection connection);
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue);
   Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue);
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
+    Map<String, String> customFields = const {},
   });
   Future<TrackStateIssue> updateIssueDescription(
     TrackStateIssue issue,
@@ -60,7 +62,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   @override
   final bool supportsGitHubAuth;
   TrackerSnapshot? _snapshot;
-  ProviderSession? _session;
+  final ProviderSession _session;
 
   ProviderSession? get session => _session;
 
@@ -128,6 +130,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
+    Map<String, String> customFields = const {},
   }) async {
     final normalizedSummary = summary.trim();
     if (normalizedSummary.isEmpty) {
@@ -153,12 +156,13 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     final issueTypeId = _defaultIssueTypeId(project);
     final statusId = _defaultStatusId(project);
     final priorityId = _defaultPriorityId(project);
-    final author = _defaultAuthor(_session?.resolvedUserIdentity);
+    final author = _defaultAuthor(_session.resolvedUserIdentity);
     final markdown = _buildIssueMarkdown(
       key: key,
       projectKey: project.key,
       summary: normalizedSummary,
       description: description.trim(),
+      customFields: customFields,
       issueTypeId: issueTypeId,
       statusId: statusId,
       priorityId: priorityId,
@@ -216,9 +220,24 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     }
 
     final normalizedDescription = description.trim();
+    final snapshot = _snapshot ?? await loadSnapshot();
+    final currentIssue = snapshot.issues.firstWhere(
+      (candidate) => candidate.key == issue.key,
+      orElse: () => issue,
+    );
     final writeBranch = await _provider.resolveWriteBranch();
+    final blobPaths =
+        (await _provider.listTree(ref: writeBranch))
+            .where((entry) => entry.type == 'blob')
+            .map((entry) => entry.path)
+            .toSet();
+    if (!blobPaths.contains(currentIssue.storagePath)) {
+      throw TrackStateRepositoryException(
+        'Could not find repository artifacts for ${currentIssue.key}.',
+      );
+    }
     final file = await _provider.readTextFile(
-      issue.storagePath,
+      currentIssue.storagePath,
       ref: writeBranch,
     );
     final updatedMarkdown = _replaceSection(
@@ -228,15 +247,15 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     );
     await _provider.writeTextFile(
       RepositoryWriteRequest(
-        path: issue.storagePath,
+        path: currentIssue.storagePath,
         content: updatedMarkdown,
-        message: 'Update ${issue.key} description',
+        message: 'Update ${currentIssue.key} description',
         branch: writeBranch,
         expectedRevision: file.revision,
       ),
     );
 
-    final updatedIssue = issue.copyWith(
+    final updatedIssue = currentIssue.copyWith(
       description: normalizedDescription,
       rawMarkdown: updatedMarkdown,
       updatedLabel: 'just now',
@@ -295,6 +314,128 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     );
     _replaceCachedIssue(updatedIssue);
     return updatedIssue;
+  }
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async {
+    if (issue.storagePath.isEmpty) {
+      throw const TrackStateRepositoryException(
+        'This issue has no repository file path and cannot be archived.',
+      );
+    }
+    final permission = await _provider.getPermission();
+    if (!permission.canWrite) {
+      throw const TrackStateRepositoryException(
+        'Connect a repository session with write access first.',
+      );
+    }
+    final mutator = switch (_provider) {
+      final RepositoryFileMutator supported => supported,
+      _ => throw const TrackStateRepositoryException(
+        'This repository provider does not support archiving issues yet.',
+      ),
+    };
+    final snapshot = _snapshot ?? await loadSnapshot();
+    final currentIssue = snapshot.issues.firstWhere(
+      (candidate) => candidate.key == issue.key,
+      orElse: () => issue,
+    );
+
+    try {
+      final writeBranch = await _provider.resolveWriteBranch();
+      final tree = await _provider.listTree(ref: writeBranch);
+      final blobPaths = tree
+          .where((entry) => entry.type == 'blob')
+          .map((entry) => entry.path)
+          .toSet();
+      final projectRoot = currentIssue.storagePath.split('/').first;
+      if (projectRoot.isEmpty) {
+        throw const TrackStateRepositoryException(
+          'Could not resolve the project root for the issue being archived.',
+        );
+      }
+      if (!blobPaths.contains(currentIssue.storagePath)) {
+        throw TrackStateRepositoryException(
+          'Could not find repository artifacts for ${currentIssue.key}.',
+        );
+      }
+
+      final issueFile = await _provider.readTextFile(
+        currentIssue.storagePath,
+        ref: writeBranch,
+      );
+      final updatedMarkdown = _replaceFrontmatterValue(
+        issueFile.content,
+        'archived',
+        'true',
+      );
+      final updatedIssues = [
+        for (final candidate in snapshot.issues)
+          if (candidate.key == currentIssue.key)
+            candidate.copyWith(
+              rawMarkdown: updatedMarkdown,
+              updatedLabel: 'just now',
+              isArchived: true,
+            )
+          else
+            candidate,
+      ]..sort((a, b) => a.key.compareTo(b.key));
+      final repositoryIndex = _deriveRepositoryIndex(
+        updatedIssues,
+        snapshot.repositoryIndex.deleted,
+      );
+      final issuesIndexPath = _joinPath(
+        projectRoot,
+        '.trackstate/index/issues.json',
+      );
+
+      await mutator.applyFileChanges(
+        RepositoryFileChangeRequest(
+          branch: writeBranch,
+          message: 'Archive ${currentIssue.key}',
+          changes: [
+            RepositoryTextFileChange(
+              path: currentIssue.storagePath,
+              content: updatedMarkdown,
+              expectedRevision: issueFile.revision,
+            ),
+            RepositoryTextFileChange(
+              path: issuesIndexPath,
+              content:
+                  '${jsonEncode(_repositoryIndexEntriesJson(repositoryIndex.entries))}\n',
+              expectedRevision: await _existingRevision(
+                path: issuesIndexPath,
+                ref: writeBranch,
+                blobPaths: blobPaths,
+              ),
+            ),
+          ],
+        ),
+      );
+
+      final indexedUpdatedIssues = [
+        for (final updatedIssue in updatedIssues)
+          updatedIssue.withRepositoryIndex(
+            repositoryIndex.entryForKey(updatedIssue.key),
+          ),
+      ]..sort((a, b) => a.key.compareTo(b.key));
+      _snapshot = TrackerSnapshot(
+        project: snapshot.project,
+        repositoryIndex: repositoryIndex,
+        issues: indexedUpdatedIssues,
+      );
+      return indexedUpdatedIssues.singleWhere(
+        (candidate) => candidate.key == currentIssue.key,
+      );
+    } on TrackStateProviderException catch (error) {
+      if (error is TrackStateRepositoryException) {
+        rethrow;
+      }
+      throw TrackStateRepositoryException(
+        'Could not archive ${currentIssue.key} because the repository provider '
+        'failed while applying the archive change.',
+      );
+    }
   }
 
   @override
@@ -372,18 +513,30 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       parentKey: currentIssue.parentKey,
       epicKey: currentIssue.epicKey,
     );
-    final deletedByKey = {
+    final persistedTombstones = await _loadDeletedIssueTombstones(
+      blobPaths: blobPaths,
+      dataRoot: projectRoot,
+      issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+      includeLegacyDeletedIndex: false,
+    );
+    final persistedDeletedByKey = {
+      for (final entry in persistedTombstones) entry.key: entry,
+      tombstone.key: tombstone,
+    };
+    final persistedDeletedTombstones = persistedDeletedByKey.values.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    final snapshotDeletedByKey = {
       for (final entry in snapshot.repositoryIndex.deleted) entry.key: entry,
       tombstone.key: tombstone,
     };
-    final deletedTombstones = deletedByKey.values.toList()
+    final snapshotDeletedTombstones = snapshotDeletedByKey.values.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
     final remainingIssues = snapshot.issues
         .where((candidate) => candidate.key != currentIssue.key)
         .toList(growable: false);
     final repositoryIndex = _deriveRepositoryIndex(
       remainingIssues,
-      deletedTombstones,
+      snapshotDeletedTombstones,
     );
 
     final issuesIndexPath = _joinPath(
@@ -394,15 +547,9 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       projectRoot,
       '.trackstate/index/tombstones.json',
     );
-    final legacyDeletedIndexPath = _joinPath(
-      projectRoot,
-      '.trackstate/index/deleted.json',
-    );
     final changes = <RepositoryFileChange>[
       for (final path in issueArtifactPaths)
         RepositoryDeleteFileChange(path: path),
-      if (blobPaths.contains(legacyDeletedIndexPath))
-        RepositoryDeleteFileChange(path: legacyDeletedIndexPath),
       RepositoryTextFileChange(
         path: issuesIndexPath,
         content:
@@ -416,14 +563,14 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       RepositoryTextFileChange(
         path: tombstoneIndexPath,
         content:
-            '${jsonEncode(_tombstoneIndexEntriesJson(projectRoot, deletedTombstones))}\n',
+            '${jsonEncode(_tombstoneIndexEntriesJson(projectRoot, persistedDeletedTombstones))}\n',
         expectedRevision: await _existingRevision(
           path: tombstoneIndexPath,
           ref: writeBranch,
           blobPaths: blobPaths,
         ),
       ),
-      for (final entry in deletedTombstones)
+      for (final entry in persistedDeletedTombstones)
         RepositoryTextFileChange(
           path: _tombstoneArtifactPath(projectRoot, entry.key),
           content: '${jsonEncode(_deletedIssueTombstoneJson(entry))}\n',
@@ -621,19 +768,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     required String resolvedUserIdentity,
     required RepositoryPermission permission,
   }) {
-    final session =
-        _session ??
-        ProviderSession(
-          providerType: _provider.providerType,
-          connectionState: connectionState,
-          resolvedUserIdentity: resolvedUserIdentity,
-          canRead: permission.canRead,
-          canWrite: permission.canWrite,
-          canCreateBranch: permission.canCreateBranch,
-          canManageAttachments: permission.canManageAttachments,
-          canCheckCollaborators: permission.canCheckCollaborators,
-        );
-    session.update(
+    _session.update(
       providerType: _provider.providerType,
       connectionState: connectionState,
       resolvedUserIdentity: resolvedUserIdentity,
@@ -643,8 +778,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       canManageAttachments: permission.canManageAttachments,
       canCheckCollaborators: permission.canCheckCollaborators,
     );
-    _session = session;
-    return session;
+    return _session;
   }
 
   String _resolveConfigRoot(Map<String, Object?> projectJson, String dataRoot) {
@@ -752,11 +886,6 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     required List<TrackStateConfigEntry> issueTypeDefinitions,
   }) async {
     final issuesPath = _joinPath(dataRoot, '.trackstate/index/issues.json');
-    final tombstonesPath = _joinPath(
-      dataRoot,
-      '.trackstate/index/tombstones.json',
-    );
-    final deletedPath = _joinPath(dataRoot, '.trackstate/index/deleted.json');
     final entries = <RepositoryIssueIndexEntry>[];
     if (blobPaths.contains(issuesPath)) {
       final json = await _getRepositoryJson(issuesPath);
@@ -766,6 +895,25 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         );
       }
     }
+    final deleted = await _loadDeletedIssueTombstones(
+      blobPaths: blobPaths,
+      dataRoot: dataRoot,
+      issueTypeDefinitions: issueTypeDefinitions,
+    );
+    return RepositoryIndex(entries: entries, deleted: deleted);
+  }
+
+  Future<List<DeletedIssueTombstone>> _loadDeletedIssueTombstones({
+    required Set<String> blobPaths,
+    required String dataRoot,
+    required List<TrackStateConfigEntry> issueTypeDefinitions,
+    bool includeLegacyDeletedIndex = true,
+  }) async {
+    final tombstonesPath = _joinPath(
+      dataRoot,
+      '.trackstate/index/tombstones.json',
+    );
+    final deletedPath = _joinPath(dataRoot, '.trackstate/index/deleted.json');
     final deleted = <DeletedIssueTombstone>[];
     if (blobPaths.contains(tombstonesPath)) {
       final json = await _getRepositoryJson(tombstonesPath);
@@ -797,7 +945,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         }
       }
     }
-    if (blobPaths.contains(deletedPath)) {
+    if (includeLegacyDeletedIndex && blobPaths.contains(deletedPath)) {
       final json = await _getRepositoryJson(deletedPath);
       if (json is List) {
         deleted.addAll(
@@ -810,10 +958,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         );
       }
     }
-    return RepositoryIndex(
-      entries: entries,
-      deleted: _dedupeDeletedIssueTombstones(deleted),
-    );
+    return _dedupeDeletedIssueTombstones(deleted);
   }
 
   Future<List<IssueComment>> _loadComments({
@@ -989,6 +1134,7 @@ class DemoTrackStateRepository implements TrackStateRepository {
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
+    Map<String, String> customFields = const {},
   }) async {
     final normalizedSummary = summary.trim();
     if (normalizedSummary.isEmpty) {
@@ -1006,6 +1152,7 @@ class DemoTrackStateRepository implements TrackStateRepository {
         projectKey: _snapshotOverride.project.key,
         summary: normalizedSummary,
         description: description.trim(),
+        customFields: customFields,
         issueTypeId: _defaultIssueTypeId(_snapshotOverride.project),
         statusId: _defaultStatusId(_snapshotOverride.project),
         priorityId: _defaultPriorityId(_snapshotOverride.project),
@@ -1038,6 +1185,12 @@ class DemoTrackStateRepository implements TrackStateRepository {
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
       _filterIssues(_snapshot.issues, jql);
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Demo repository is read-only and cannot archive issues.',
+      );
 
   @override
   Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
@@ -1623,6 +1776,7 @@ String _buildIssueMarkdown({
   required String projectKey,
   required String summary,
   required String description,
+  Map<String, String> customFields = const {},
   required String issueTypeId,
   required String statusId,
   required String priorityId,
@@ -1630,6 +1784,10 @@ String _buildIssueMarkdown({
   required String reporter,
   required String createdAt,
 }) {
+  final normalizedCustomFields = Map<String, String>.fromEntries(
+    customFields.entries.toList()
+      ..sort((left, right) => left.key.compareTo(right.key)),
+  );
   final buffer = StringBuffer()
     ..writeln('---')
     ..writeln('key: $key')
@@ -1639,7 +1797,11 @@ String _buildIssueMarkdown({
     ..writeln('priority: $priorityId')
     ..writeln('summary: ${_yamlScalar(summary)}')
     ..writeln('assignee: ${_yamlScalar(assignee)}')
-    ..writeln('reporter: ${_yamlScalar(reporter)}')
+    ..writeln('reporter: ${_yamlScalar(reporter)}');
+  if (normalizedCustomFields.isNotEmpty) {
+    buffer.writeln('customFields: ${jsonEncode(normalizedCustomFields)}');
+  }
+  buffer
     ..writeln('created: $createdAt')
     ..writeln('updated: $createdAt')
     ..writeln('---')
