@@ -97,6 +97,8 @@ abstract interface class TrackStateAppComponent {
 
   Future<bool> tapVisibleControl(String label);
 
+  Future<bool> tapTopBarControl(String label);
+
   Future<bool> isTextFieldVisible(String label);
 
   Future<void> enterLabeledTextField(String label, {required String text});

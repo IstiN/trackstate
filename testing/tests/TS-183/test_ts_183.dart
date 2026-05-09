@@ -52,17 +52,16 @@ void main() {
           screen,
           label: 'Create issue',
           failingStep: 2,
-          context:
-              'after navigating to the Board section in Local Git mode',
+          context: 'after navigating to the Board section in Local Git mode',
         );
 
-        final openedFromBoard = await screen.tapVisibleControl('Create issue');
+        final openedFromBoard = await screen.tapTopBarControl('Create issue');
         expect(
           openedFromBoard,
           isTrue,
           reason:
-              'Step 2 failed: the visible top-bar "Create issue" control in '
-              'Board could not be activated. Top bar texts: '
+              'Step 2 failed: the Board top-bar "Create issue" control could '
+              'not be activated. Top bar texts: '
               '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible texts: '
               '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
               'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',

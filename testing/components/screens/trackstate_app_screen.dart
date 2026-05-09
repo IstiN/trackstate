@@ -168,7 +168,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       'Visible texts: ${_formatSnapshot(visibleTextsSnapshot())}. Visible '
       'semantics: ${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
     );
-    throw StateError('Create issue entry point search did not return.');
   }
 
   @override
@@ -438,28 +437,23 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<bool> tapVisibleControl(String label) async {
-    await tester.pump();
-    final semanticsMatch = _exactSemanticsLabel(label);
-    final textMatch = find.text(label, findRichText: true);
-    final target = semanticsMatch.evaluate().isNotEmpty
-        ? semanticsMatch
-        : textMatch;
-    if (target.evaluate().isEmpty) {
-      return false;
-    }
-    await tester.ensureVisible(target.first);
-    if (label == 'Create' || label == 'Save') {
-      await tester.runAsync(() async {
-        await tester.tap(target.first, warnIfMissed: false);
-        await tester.pump();
-        await Future<void>.delayed(const Duration(milliseconds: 500));
-      });
-      await tester.pumpAndSettle();
-      return true;
-    }
-    await tester.tap(target.first, warnIfMissed: false);
-    await tester.pumpAndSettle();
-    return true;
+    return _tapControl(
+      label: label,
+      semanticsMatch: _exactSemanticsLabel(label),
+      textMatch: find.text(label, findRichText: true),
+    );
+  }
+
+  @override
+  Future<bool> tapTopBarControl(String label) async {
+    return _tapControl(
+      label: label,
+      semanticsMatch: find.descendant(
+        of: topBar,
+        matching: _exactSemanticsLabel(label),
+      ),
+      textMatch: find.descendant(of: topBar, matching: find.text(label)),
+    );
   }
 
   @override
@@ -647,5 +641,32 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     for (var i = 0; i < count; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
+  }
+
+  Future<bool> _tapControl({
+    required String label,
+    required Finder semanticsMatch,
+    required Finder textMatch,
+  }) async {
+    await tester.pump();
+    final target = semanticsMatch.evaluate().isNotEmpty
+        ? semanticsMatch
+        : textMatch;
+    if (target.evaluate().isEmpty) {
+      return false;
+    }
+    await tester.ensureVisible(target.first);
+    if (label == 'Create' || label == 'Save') {
+      await tester.runAsync(() async {
+        await tester.tap(target.first, warnIfMissed: false);
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      });
+      await tester.pumpAndSettle();
+      return true;
+    }
+    await tester.tap(target.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+    return true;
   }
 }
