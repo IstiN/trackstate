@@ -496,6 +496,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<int> countLabeledTextFields(String label) async {
+    await tester.pump();
+    return _labeledTextField(label).evaluate().length;
+  }
+
+  @override
   Future<void> enterLabeledTextField(
     String label, {
     required String text,
