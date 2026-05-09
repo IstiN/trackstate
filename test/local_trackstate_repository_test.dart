@@ -373,46 +373,20 @@ void main() {
   );
 
   test(
-    'local provider falls back when git identity is not configured',
+    'local provider keeps the identity empty when repo-local git identity is not configured',
     () async {
-      final provider = LocalGitTrackStateProvider(
-        repositoryPath: '/tmp/fake-repo',
-        processRunner: _FakeGitProcessRunner(
-          results: {
-            'show-ref --verify --quiet refs/heads/main': GitCommandResult(
-              exitCode: 0,
-              stdout: '',
-              stdoutBytes: Uint8List(0),
-              stderr: '',
-            ),
-            'rev-parse --abbrev-ref HEAD': GitCommandResult(
-              exitCode: 0,
-              stdout: 'main\n',
-              stdoutBytes: Uint8List(0),
-              stderr: '',
-            ),
-            'config user.name': GitCommandResult(
-              exitCode: 1,
-              stdout: '',
-              stdoutBytes: Uint8List(0),
-              stderr: '',
-            ),
-            'config user.email': GitCommandResult(
-              exitCode: 1,
-              stdout: '',
-              stdoutBytes: Uint8List(0),
-              stderr: '',
-            ),
-          },
-        ),
-      );
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+      await _git(repo.path, ['config', '--local', '--unset-all', 'user.name']);
+      await _git(repo.path, ['config', '--local', '--unset-all', 'user.email']);
+      final provider = LocalGitTrackStateProvider(repositoryPath: repo.path);
 
       final user = await provider.authenticate(
         const RepositoryConnection(repository: '.', branch: 'main', token: ''),
       );
 
-      expect(user.login, 'local-user');
-      expect(user.displayName, 'Local User');
+      expect(user.login, isEmpty);
+      expect(user.displayName, isEmpty);
     },
   );
 }
@@ -469,8 +443,13 @@ Loaded from local git.
   await _writeFile(directory, 'attachments/screenshot.png', 'binary-content');
 
   await _git(directory.path, ['init', '-b', 'main']);
-  await _git(directory.path, ['config', 'user.name', 'Local Tester']);
-  await _git(directory.path, ['config', 'user.email', 'local@example.com']);
+  await _git(directory.path, ['config', '--local', 'user.name', 'Local Tester']);
+  await _git(directory.path, [
+    'config',
+    '--local',
+    'user.email',
+    'local@example.com',
+  ]);
   await _git(directory.path, ['add', '.']);
   await _git(directory.path, ['commit', '-m', 'Initial import']);
   return directory;
@@ -490,21 +469,5 @@ Future<void> _git(String repositoryPath, List<String> args) async {
   final result = await Process.run('git', ['-C', repositoryPath, ...args]);
   if (result.exitCode != 0) {
     throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
-  }
-}
-
-class _FakeGitProcessRunner implements GitProcessRunner {
-  const _FakeGitProcessRunner({required this.results});
-
-  final Map<String, GitCommandResult> results;
-
-  @override
-  Future<GitCommandResult> run(
-    String repositoryPath,
-    List<String> args, {
-    bool binaryOutput = false,
-  }) async {
-    return results[args.join(' ')] ??
-        (throw StateError('Unexpected git command: ${args.join(' ')}'));
   }
 }
