@@ -97,11 +97,20 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       find.bySemanticsLabel(RegExp('${RegExp.escape(label)} column'));
 
   @override
-  Future<void> pumpLocalGitApp({required String repositoryPath}) async {
-    await pump(
-      await _repositoryService.openRepository(repositoryPath: repositoryPath),
+  Future<void> pumpLocalGitApp({
+    required String repositoryPath,
+    Duration initialLoadDelay = Duration.zero,
+  }) async {
+    final repository = await _repositoryService.openRepository(
+      repositoryPath: repositoryPath,
+      initialAppLoadDelay: initialLoadDelay,
     );
-    await _waitForVisible(localGitAccessButton);
+    if (initialLoadDelay == Duration.zero) {
+      await pump(repository);
+      await _waitForVisible(localGitAccessButton);
+      return;
+    }
+    await _pumpWidget(repository);
   }
 
   @override
