@@ -7,11 +7,7 @@
 const GOAL_INSTRUCTIONS = './.dmtools/instructions/goal/goal.md';
 const DESIGN_REFERENCE = './.dmtools/instructions/goal/DESIGN.md';
 const SETUP_REPO_INSTRUCTIONS = './.dmtools/instructions/product/trackstate_setup_repo.md';
-const TRACKSTATE_MANAGED_SUBMODULES = [
-    { path: 'agents', branch: 'main', commitMessage: 'TS-121 Update agents automation' },
-    { path: 'trackstate-setup', branch: 'main' }
-];
-const FLUTTER_WRAPPER = 'bash agents/scripts/flutterw.sh';
+const TRACKSTATE_SETUP_SUBMODULES = [{ path: 'trackstate-setup', branch: 'main' }];
 const POST_ACTION_FEEDBACK = {
     postAction: {
         enabled: true,
@@ -26,8 +22,14 @@ const FLUTTER_FEEDBACK = {
     qualityGates: {
         enabled: true,
         gates: [
-            { name: 'flutter-analyze', command: `${FLUTTER_WRAPPER} analyze`, maxAttempts: 2 },
-            { name: 'flutter-test', command: `${FLUTTER_WRAPPER} test --coverage`, maxAttempts: 2 }
+            { name: 'flutter-analyze', command: 'flutter analyze', maxAttempts: 2 },
+            { name: 'flutter-test', command: 'flutter test --coverage', maxAttempts: 2 }
+        ]
+    },
+    policyGates: {
+        enabled: true,
+        gates: [
+            { name: 'theme-token-lint', command: 'dart run tool/check_theme_tokens.dart', maxAttempts: 2 }
         ]
     }
 };
@@ -185,7 +187,7 @@ module.exports = {
             customParams: {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_MANAGED_SUBMODULES,
+                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
                 feedbackLoop: FLUTTER_FEEDBACK
             }
         },
@@ -193,7 +195,7 @@ module.exports = {
             customParams: {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_MANAGED_SUBMODULES,
+                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
                 feedbackLoop: FLUTTER_FEEDBACK
             }
         },
@@ -219,7 +221,7 @@ module.exports = {
             customParams: {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_MANAGED_SUBMODULES,
+                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
                 feedbackLoop: FLUTTER_FEEDBACK
             }
         },
@@ -228,6 +230,18 @@ module.exports = {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_test_automation_review.json',
                 feedbackLoop: POST_ACTION_FEEDBACK
+            }
+        },
+        retry_merge: {
+            customParams: {
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/pr_rework.json'
+            }
+        },
+        retry_merge_test: {
+            customParams: {
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/pr_test_automation_rework.json'
             }
         }
     },

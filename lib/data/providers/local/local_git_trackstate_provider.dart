@@ -305,7 +305,7 @@ class LocalGitTrackStateProvider
   }
 
   Future<String> _gitConfigValue(String key) async =>
-      (await _tryGit(['config', key]))?.stdout.trim() ?? '';
+      (await _tryGit(['config', '--local', key]))?.stdout.trim() ?? '';
 
   Future<void> _ensurePathClean(String path) async {
     final result = await _runGit(['status', '--porcelain', '--', path]);

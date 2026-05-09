@@ -152,6 +152,102 @@ void main() {
     }
   });
 
+  testWidgets(
+    'local runtime exposes a single dialog-based Create issue flow in expanded and compact layouts',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      RegExp exactLabel(String label) => RegExp('^${RegExp.escape(label)}\$');
+
+      Finder byExactSemanticsLabel(String label) => find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            widget.properties.label != null &&
+            exactLabel(label).hasMatch(widget.properties.label!),
+      );
+
+      Future<void> pumpLocalRuntime(Size size) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          TrackStateApp(repository: _LocalRuntimeRepository()),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      Future<void> expectCreateIssueFlowForSection(String sectionLabel) async {
+        await tester.tap(byExactSemanticsLabel(sectionLabel).first);
+        await tester.pumpAndSettle();
+
+        final createIssue = byExactSemanticsLabel('Create issue');
+        expect(
+          createIssue,
+          findsOneWidget,
+          reason:
+              'Expected $sectionLabel to expose exactly one reachable Create issue entry point in Local Git mode.',
+        );
+        expect(find.byType(Dialog), findsNothing);
+        expect(byExactSemanticsLabel('Summary'), findsNothing);
+
+        await tester.tap(createIssue);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Dialog), findsOneWidget);
+        expect(byExactSemanticsLabel('Summary'), findsOneWidget);
+        expect(byExactSemanticsLabel('Description'), findsOneWidget);
+        expect(byExactSemanticsLabel('Save'), findsOneWidget);
+        expect(byExactSemanticsLabel('Cancel'), findsOneWidget);
+
+        await tester.tap(byExactSemanticsLabel('Cancel'));
+        await tester.pumpAndSettle();
+        expect(find.byType(Dialog), findsNothing);
+        expect(byExactSemanticsLabel('Summary'), findsNothing);
+      }
+
+      try {
+        for (final size in const [Size(1440, 960), Size(760, 960)]) {
+          await pumpLocalRuntime(size);
+          for (final section in const [
+            'Dashboard',
+            'Board',
+            'JQL Search',
+            'Hierarchy',
+          ]) {
+            await expectCreateIssueFlowForSection(section);
+          }
+        }
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'create issue form renders configured custom fields in local mode',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final screen = defaultTestingDependencies.createTrackStateAppScreen(
+        tester,
+      );
+      try {
+        await screen.pump(const _CustomCreateFieldsLocalRuntimeRepository());
+
+        final createIssueSection = await screen.openCreateIssueFlow();
+        await screen.expectCreateIssueFormVisible(
+          createIssueSection: createIssueSection,
+        );
+
+        expect(await screen.isTextFieldVisible('Solution'), isTrue);
+        expect(await screen.isTextFieldVisible('Acceptance Criteria'), isTrue);
+        expect(await screen.isTextFieldVisible('Diagrams'), isTrue);
+      } finally {
+        screen.resetView();
+        semantics.dispose();
+      }
+    },
+  );
+
   testWidgets('save failure banner exposes a dismiss action in local mode', (
     tester,
   ) async {
@@ -210,6 +306,12 @@ class _LocalRuntimeRepository implements TrackStateRepository {
       _demoRepository.searchIssues(jql);
 
   @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Local runtime widget repository does not support issue archiving.',
+      );
+
+  @override
   Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
       throw const TrackStateRepositoryException(
         'Local runtime widget repository does not support issue deletion.',
@@ -219,6 +321,7 @@ class _LocalRuntimeRepository implements TrackStateRepository {
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
+    Map<String, String> customFields = const {},
   }) async {
     throw UnimplementedError('Issue creation is not implemented.');
   }
@@ -261,9 +364,18 @@ class _FailingLocalRuntimeRepository implements TrackStateRepository {
       _demoRepository.searchIssues(jql);
 
   @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async {
+    throw const TrackStateRepositoryException(
+      'Cannot archive DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
+    );
+  }
+
+  @override
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
+    Map<String, String> customFields = const {},
   }) async {
     throw const TrackStateRepositoryException(
       'Cannot save DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
@@ -289,6 +401,120 @@ class _FailingLocalRuntimeRepository implements TrackStateRepository {
       'commit, stash, or clean those local changes before trying again.',
     );
   }
+
+  @override
+  Future<TrackStateIssue> updateIssueStatus(
+    TrackStateIssue issue,
+    IssueStatus status,
+  ) async => issue.copyWith(status: status, updatedLabel: 'just now');
+}
+
+class _CustomCreateFieldsLocalRuntimeRepository
+    implements TrackStateRepository {
+  const _CustomCreateFieldsLocalRuntimeRepository();
+
+  @override
+  bool get supportsGitHubAuth => false;
+
+  @override
+  bool get usesLocalPersistence => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async =>
+      const RepositoryUser(login: 'local-user', displayName: 'Local User');
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+    return TrackerSnapshot(
+      project: ProjectConfig(
+        key: snapshot.project.key,
+        name: snapshot.project.name,
+        repository: snapshot.project.repository,
+        branch: snapshot.project.branch,
+        defaultLocale: snapshot.project.defaultLocale,
+        issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+        statusDefinitions: snapshot.project.statusDefinitions,
+        fieldDefinitions: const [
+          TrackStateFieldDefinition(
+            id: 'summary',
+            name: 'Summary',
+            type: 'string',
+            required: true,
+            localizedLabels: {'en': 'Summary'},
+          ),
+          TrackStateFieldDefinition(
+            id: 'description',
+            name: 'Description',
+            type: 'markdown',
+            required: false,
+            localizedLabels: {'en': 'Description'},
+          ),
+          TrackStateFieldDefinition(
+            id: 'solution',
+            name: 'Solution',
+            type: 'markdown',
+            required: false,
+            localizedLabels: {'en': 'Solution'},
+          ),
+          TrackStateFieldDefinition(
+            id: 'acceptanceCriteria',
+            name: 'Acceptance Criteria',
+            type: 'markdown',
+            required: false,
+            localizedLabels: {'en': 'Acceptance Criteria'},
+          ),
+          TrackStateFieldDefinition(
+            id: 'diagrams',
+            name: 'Diagrams',
+            type: 'markdown',
+            required: false,
+            localizedLabels: {'en': 'Diagrams'},
+          ),
+        ],
+        priorityDefinitions: snapshot.project.priorityDefinitions,
+        versionDefinitions: snapshot.project.versionDefinitions,
+        componentDefinitions: snapshot.project.componentDefinitions,
+        resolutionDefinitions: snapshot.project.resolutionDefinitions,
+      ),
+      issues: snapshot.issues,
+      repositoryIndex: snapshot.repositoryIndex,
+    );
+  }
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) async =>
+      (await loadSnapshot()).issues;
+
+  @override
+  Future<TrackStateIssue> archiveIssue(
+    TrackStateIssue issue,
+  ) async => throw const TrackStateRepositoryException(
+    'Custom create-field widget repository does not support issue archiving.',
+  );
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(
+    TrackStateIssue issue,
+  ) async => throw const TrackStateRepositoryException(
+    'Custom create-field widget repository does not support issue deletion.',
+  );
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+    Map<String, String> customFields = const {},
+  }) async {
+    throw UnimplementedError('Issue creation is not implemented.');
+  }
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async =>
+      issue.copyWith(description: description.trim(), updatedLabel: 'just now');
 
   @override
   Future<TrackStateIssue> updateIssueStatus(
