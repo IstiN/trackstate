@@ -35,26 +35,14 @@ void main() {
           'Git-native. Jira-compatible. Team-proven.',
         );
 
-        final createIssueVisible =
-            await screen.isTopBarSemanticsLabelVisible('Create issue') ||
-            await screen.isTopBarTextVisible('Create issue') ||
-            await screen.isSemanticsLabelVisible('Create issue') ||
-            await screen.isTextVisible('Create issue');
-        expect(
-          createIssueVisible,
-          isTrue,
-          reason:
-              'Step 1 failed: Dashboard did not expose a visible top-bar '
-              '"Create issue" control. Top bar texts: '
-              '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. '
-              'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
-              'Visible semantics: '
-              '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+        await _expectTopBarControlVisible(
+          screen,
+          label: 'Create issue',
+          failingStep: 1,
+          context: 'after navigating to Dashboard in Local Git mode',
         );
 
-        final openedCreateFlow =
-            await screen.tapTopBarControl('Create issue') ||
-            await screen.tapVisibleControl('Create issue');
+        final openedCreateFlow = await screen.tapTopBarControl('Create issue');
         expect(
           openedCreateFlow,
           isTrue,
@@ -128,32 +116,22 @@ void main() {
               '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
         );
 
-        final createIssueVisibleAfterCancel =
-            await screen.isTopBarSemanticsLabelVisible('Create issue') ||
-            await screen.isTopBarTextVisible('Create issue') ||
-            await screen.isSemanticsLabelVisible('Create issue') ||
-            await screen.isTextVisible('Create issue');
-        expect(
-          createIssueVisibleAfterCancel,
-          isTrue,
-          reason:
-              'Step 4 failed: after cancelling the overlay, the user could not '
-              'see a visible "Create issue" entry point to reopen the form. '
-              'Top bar texts: ${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. '
-              'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
-              'Visible semantics: '
-              '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+        await _expectTopBarControlVisible(
+          screen,
+          label: 'Create issue',
+          failingStep: 4,
+          context: 'after cancelling the Create issue overlay on Dashboard',
         );
 
-        final reopenedCreateFlow =
-            await screen.tapTopBarControl('Create issue') ||
-            await screen.tapVisibleControl('Create issue');
+        final reopenedCreateFlow = await screen.tapTopBarControl(
+          'Create issue',
+        );
         expect(
           reopenedCreateFlow,
           isTrue,
           reason:
-              'Step 4 failed: the visible "Create issue" control could not be '
-              'activated after cancelling the previous overlay. Top bar texts: '
+              'Step 4 failed: the visible top-bar "Create issue" control could '
+              'not be activated after cancelling the previous overlay. Top bar texts: '
               '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. '
               'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
               'Visible semantics: '
@@ -246,6 +224,25 @@ Future<void> _expectVisibleControl(
     '$context. Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
     'Visible semantics: '
     '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+  );
+}
+
+Future<void> _expectTopBarControlVisible(
+  TrackStateAppComponent screen, {
+  required String label,
+  required int failingStep,
+  required String context,
+}) async {
+  final topBarTexts = screen.topBarVisibleTextsSnapshot();
+  if (topBarTexts.any((value) => value.trim() == label)) {
+    return;
+  }
+
+  fail(
+    'Step $failingStep failed: no visible "$label" control was rendered in the '
+    'top bar $context. Top bar texts: ${_formatSnapshot(topBarTexts)}. Visible '
+    'texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
+    'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
   );
 }
 
