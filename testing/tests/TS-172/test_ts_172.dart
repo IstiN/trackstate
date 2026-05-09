@@ -49,6 +49,41 @@ void main() {
             'Deleting TRACK-777 should create ${afterDeletion.baseObservation.tombstonePath}.',
       );
       expect(
+        afterDeletion.baseObservation.tombstoneJson,
+        isNotNull,
+        reason: 'The tombstone artifact should contain deletion metadata.',
+      );
+      expect(
+        afterDeletion.baseObservation.tombstoneJson?['key'],
+        Ts136LegacyDeletedIndexFixture.deletedIssueKey,
+      );
+      expect(afterDeletion.baseObservation.tombstoneJson?['project'], 'TRACK');
+      expect(
+        afterDeletion.baseObservation.tombstoneJson?['formerPath'],
+        Ts136LegacyDeletedIndexFixture.deletedIssuePath,
+      );
+      expect(
+        afterDeletion.baseObservation.tombstoneJson?['summary'],
+        'Delete target issue',
+      );
+      expect(afterDeletion.baseObservation.tombstoneJson?['issueType'], 'story');
+      expect(afterDeletion.baseObservation.tombstoneJson?['parent'], isNull);
+      expect(afterDeletion.baseObservation.tombstoneJson?['epic'], isNull);
+      expect(
+        afterDeletion.baseObservation.tombstoneJson?['deletedAt'],
+        isA<String>(),
+        reason:
+            'Deleting TRACK-777 should persist the full tombstone payload, not just create the file shell.',
+      );
+      expect(
+        () => DateTime.parse(
+          afterDeletion.baseObservation.tombstoneJson!['deletedAt']! as String,
+        ),
+        returnsNormally,
+        reason:
+            'The tombstone deletedAt value should be an ISO-8601 timestamp.',
+      );
+      expect(
         afterDeletion.baseObservation.tombstoneIndexExists,
         isTrue,
         reason:
