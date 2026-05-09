@@ -1953,28 +1953,16 @@ class _SettingsProviderButton extends StatelessWidget {
 
   ButtonStyle _connectedStyle(BuildContext context, TrackStateColors colors) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final idleBackground = isDark ? colors.surfaceAlt : colors.text;
-    final hoverBackground = const Color(0xFF3A3835);
-    final pressedBackground = isDark ? colors.surface : colors.text;
+    final foreground = isDark ? colors.page : colors.text;
 
     return FilledButton.styleFrom(
-      foregroundColor: colors.success,
+      backgroundColor: colors.success,
+      foregroundColor: foreground,
       alignment: Alignment.centerLeft,
       minimumSize: const Size.fromHeight(52),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    ).copyWith(
-      backgroundColor: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.pressed)) {
-          return pressedBackground;
-        }
-        if (states.contains(WidgetState.hovered) ||
-            states.contains(WidgetState.focused)) {
-          return hoverBackground;
-        }
-        return idleBackground;
-      }),
-      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+      overlayColor: Colors.transparent,
     );
   }
 }
