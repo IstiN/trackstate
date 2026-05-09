@@ -15,7 +15,11 @@ class ThemeTokenCiConfig:
     workflow_job_name: str
     workflow_step_name: str
     gate_command: str
+    probe_relative_path: str
+    pull_request_branch_prefix: str = "ts131-non-tokenized-color"
     recent_run_limit: int = 10
+    run_timeout_seconds: int = 900
+    poll_interval_seconds: int = 5
 
     @classmethod
     def from_file(cls, path: Path) -> "ThemeTokenCiConfig":
@@ -34,6 +38,16 @@ class ThemeTokenCiConfig:
             raise ValueError(
                 "TS-131 config runtime_inputs.recent_run_limit must be a positive integer."
             )
+        run_timeout_seconds = runtime_inputs.get("run_timeout_seconds", 900)
+        if not isinstance(run_timeout_seconds, int) or run_timeout_seconds <= 0:
+            raise ValueError(
+                "TS-131 config runtime_inputs.run_timeout_seconds must be a positive integer."
+            )
+        poll_interval_seconds = runtime_inputs.get("poll_interval_seconds", 5)
+        if not isinstance(poll_interval_seconds, int) or poll_interval_seconds <= 0:
+            raise ValueError(
+                "TS-131 config runtime_inputs.poll_interval_seconds must be a positive integer."
+            )
 
         return cls(
             repository=cls._require_string(runtime_inputs, "repository", path),
@@ -50,7 +64,19 @@ class ThemeTokenCiConfig:
                 path,
             ),
             gate_command=cls._require_string(runtime_inputs, "gate_command", path),
+            probe_relative_path=cls._require_string(
+                runtime_inputs,
+                "probe_relative_path",
+                path,
+            ),
+            pull_request_branch_prefix=cls._require_string(
+                runtime_inputs,
+                "pull_request_branch_prefix",
+                path,
+            ),
             recent_run_limit=recent_run_limit,
+            run_timeout_seconds=run_timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
         )
 
     @staticmethod

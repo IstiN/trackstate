@@ -3,7 +3,7 @@ type: ci
 framework: unittest
 platform: python
 dependencies:
-  - gh CLI authenticated with read access to IstiN/trackstate and GitHub Actions
+  - gh CLI authenticated with push and Pull Request access to IstiN/trackstate
   - network access to GitHub REST APIs
   - Flutter SDK 3.35.3 available on PATH, at /tmp/flutter/bin/flutter, or bootstrapped automatically
 runtime_inputs:
@@ -13,7 +13,12 @@ runtime_inputs:
   workflow_job_name: Flutter checks
   workflow_step_name: Enforce theme tokens
   gate_command: dart run tool/check_theme_tokens.dart
-  recent_run_limit: 10
+  probe_relative_path: lib/ts131_pull_request_probe.dart
+  pull_request_branch_prefix: ts131-non-tokenized-color
+  recent_run_limit: 30
+  run_timeout_seconds: 900
+  poll_interval_seconds: 5
 notes:
-  - Validates that the deployed pull-request workflow still exposes the theme-token gate.
-  - Reuses the TS-115 hardcoded-hex probe to confirm the gate fails on non-tokenized colors.
+  - Creates a disposable Pull Request with a hardcoded Flutter color under lib/.
+  - Waits for the real pull_request workflow run and verifies the theme-token gate fails.
+  - Reuses the TS-115 hardcoded-hex probe to assert the policy command still exits non-zero with a visible diagnostic.
