@@ -1,6 +1,8 @@
-import 'package:flutter/foundation.dart';
+import 'dart:typed_data';
 
 import '../../domain/models/trackstate_models.dart';
+
+typedef ProviderSessionListener = void Function();
 
 abstract interface class RepositoryFileReader {
   Future<RepositoryTextFile> readTextFile(String path, {required String ref});
@@ -53,7 +55,7 @@ enum ProviderType { github, local }
 
 enum ProviderConnectionState { disconnected, connecting, connected, error }
 
-class ProviderSession extends ChangeNotifier {
+class ProviderSession {
   ProviderSession({
     required this.providerType,
     required this.connectionState,
@@ -73,6 +75,24 @@ class ProviderSession extends ChangeNotifier {
   bool canCreateBranch;
   bool canManageAttachments;
   bool canCheckCollaborators;
+  final Set<ProviderSessionListener> _listeners = <ProviderSessionListener>{};
+
+  void addListener(ProviderSessionListener listener) {
+    _listeners.add(listener);
+  }
+
+  void removeListener(ProviderSessionListener listener) {
+    _listeners.remove(listener);
+  }
+
+  void _notifyListeners() {
+    if (_listeners.isEmpty) {
+      return;
+    }
+    for (final listener in List<ProviderSessionListener>.of(_listeners)) {
+      listener();
+    }
+  }
 
   void update({
     required ProviderType providerType,
@@ -104,7 +124,7 @@ class ProviderSession extends ChangeNotifier {
     this.canCreateBranch = canCreateBranch;
     this.canManageAttachments = canManageAttachments;
     this.canCheckCollaborators = canCheckCollaborators;
-    notifyListeners();
+    _notifyListeners();
   }
 }
 
