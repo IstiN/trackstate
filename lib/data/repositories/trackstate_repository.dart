@@ -707,6 +707,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     );
     final fields = await _getFieldDefinitions(
       _joinPath(configRoot, 'fields.json'),
+      blobPaths: blobPaths,
       localizedLabels: localizedLabels['fields'] ?? const {},
       locale: defaultLocale,
       loadWarnings: loadWarnings,
@@ -922,10 +923,20 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
 
   Future<List<TrackStateFieldDefinition>> _getFieldDefinitions(
     String path, {
+    required Set<String> blobPaths,
     required Map<String, String> localizedLabels,
     required String locale,
     required List<String> loadWarnings,
   }) async {
+    if (!blobPaths.contains(path)) {
+      loadWarnings.add(
+        'Falling back to built-in fields because $path is missing.',
+      );
+      return List<TrackStateFieldDefinition>.from(
+        _fieldDefinitions,
+        growable: false,
+      );
+    }
     try {
       final json = await _getRepositoryJson(path);
       if (json is! List) return const [];
