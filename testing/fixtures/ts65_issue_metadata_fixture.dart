@@ -157,6 +157,9 @@ The UI should resolve the stored status ID to the localized status label.
   }
 
   @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
   Future<RepositoryWriteResult> writeTextFile(
     RepositoryWriteRequest request,
   ) async {

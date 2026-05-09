@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 
 import '../../domain/models/trackstate_models.dart';
 
@@ -19,6 +19,13 @@ abstract interface class RepositoryCommitManager {
   Future<RepositoryBranch> getBranch(String name);
   Future<RepositoryWriteResult> writeTextFile(RepositoryWriteRequest request);
   Future<RepositoryCommitResult> createCommit(RepositoryCommitRequest request);
+  Future<void> ensureCleanWorktree();
+}
+
+abstract interface class RepositoryFileMutator {
+  Future<RepositoryCommitResult> applyFileChanges(
+    RepositoryFileChangeRequest request,
+  );
 }
 
 abstract interface class RepositoryPermissionChecker {
@@ -51,10 +58,10 @@ abstract interface class TrackStateProviderAdapter
 
 enum ProviderType { github, local }
 
-enum ProviderConnectionState { disconnected, connecting, connected }
+enum ProviderConnectionState { disconnected, connecting, connected, error }
 
-class ProviderSession {
-  const ProviderSession({
+class ProviderSession extends ChangeNotifier {
+  ProviderSession({
     required this.providerType,
     required this.connectionState,
     required this.resolvedUserIdentity,
@@ -65,14 +72,47 @@ class ProviderSession {
     required this.canCheckCollaborators,
   });
 
-  final ProviderType providerType;
-  final ProviderConnectionState connectionState;
-  final String resolvedUserIdentity;
-  final bool canRead;
-  final bool canWrite;
-  final bool canCreateBranch;
-  final bool canManageAttachments;
-  final bool canCheckCollaborators;
+  ProviderType providerType;
+  ProviderConnectionState connectionState;
+  String resolvedUserIdentity;
+  bool canRead;
+  bool canWrite;
+  bool canCreateBranch;
+  bool canManageAttachments;
+  bool canCheckCollaborators;
+
+  void update({
+    required ProviderType providerType,
+    required ProviderConnectionState connectionState,
+    required String resolvedUserIdentity,
+    required bool canRead,
+    required bool canWrite,
+    required bool canCreateBranch,
+    required bool canManageAttachments,
+    required bool canCheckCollaborators,
+  }) {
+    final changed =
+        this.providerType != providerType ||
+        this.connectionState != connectionState ||
+        this.resolvedUserIdentity != resolvedUserIdentity ||
+        this.canRead != canRead ||
+        this.canWrite != canWrite ||
+        this.canCreateBranch != canCreateBranch ||
+        this.canManageAttachments != canManageAttachments ||
+        this.canCheckCollaborators != canCheckCollaborators;
+    if (!changed) {
+      return;
+    }
+    this.providerType = providerType;
+    this.connectionState = connectionState;
+    this.resolvedUserIdentity = resolvedUserIdentity;
+    this.canRead = canRead;
+    this.canWrite = canWrite;
+    this.canCreateBranch = canCreateBranch;
+    this.canManageAttachments = canManageAttachments;
+    this.canCheckCollaborators = canCheckCollaborators;
+    notifyListeners();
+  }
 }
 
 class RepositoryTreeEntry {
@@ -148,6 +188,42 @@ class RepositoryCommitResult {
   final String branch;
   final String message;
   final String? revision;
+}
+
+class RepositoryFileChangeRequest {
+  const RepositoryFileChangeRequest({
+    required this.branch,
+    required this.message,
+    required this.changes,
+  });
+
+  final String branch;
+  final String message;
+  final List<RepositoryFileChange> changes;
+}
+
+abstract base class RepositoryFileChange {
+  const RepositoryFileChange({required this.path, this.expectedRevision});
+
+  final String path;
+  final String? expectedRevision;
+}
+
+final class RepositoryTextFileChange extends RepositoryFileChange {
+  const RepositoryTextFileChange({
+    required super.path,
+    required this.content,
+    super.expectedRevision,
+  });
+
+  final String content;
+}
+
+final class RepositoryDeleteFileChange extends RepositoryFileChange {
+  const RepositoryDeleteFileChange({
+    required super.path,
+    super.expectedRevision,
+  });
 }
 
 class RepositoryBranch {

@@ -47,6 +47,13 @@ class LocalTrackStateFixture {
     );
   }
 
+  Future<void> makeStagedMainFileChange() async {
+    final file = File('$repositoryPath/$issuePath');
+    await file.writeAsString(
+      '${await file.readAsString()}\nManual filesystem edit was staged.\n',
+    );
+    await _git(['add', issuePath]);
+  }
   Future<String> buildUpdatedDescriptionMarkdown(
     String updatedDescription,
   ) async {
@@ -58,6 +65,8 @@ class LocalTrackStateFixture {
     );
   }
 
+  Future<String> readMainFile() =>
+      File('$repositoryPath/$issuePath').readAsString();
   Future<void> _seedRepository() async {
     await _writeFile(
       '.gitattributes',
