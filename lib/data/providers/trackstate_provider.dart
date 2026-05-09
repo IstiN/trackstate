@@ -19,6 +19,7 @@ abstract interface class RepositoryCommitManager {
   Future<RepositoryBranch> getBranch(String name);
   Future<RepositoryWriteResult> writeTextFile(RepositoryWriteRequest request);
   Future<RepositoryCommitResult> createCommit(RepositoryCommitRequest request);
+  Future<void> ensureCleanWorktree();
 }
 
 abstract interface class RepositoryPermissionChecker {
