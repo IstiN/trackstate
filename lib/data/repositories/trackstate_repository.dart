@@ -220,9 +220,24 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     }
 
     final normalizedDescription = description.trim();
+    final snapshot = _snapshot ?? await loadSnapshot();
+    final currentIssue = snapshot.issues.firstWhere(
+      (candidate) => candidate.key == issue.key,
+      orElse: () => issue,
+    );
     final writeBranch = await _provider.resolveWriteBranch();
+    final blobPaths =
+        (await _provider.listTree(ref: writeBranch))
+            .where((entry) => entry.type == 'blob')
+            .map((entry) => entry.path)
+            .toSet();
+    if (!blobPaths.contains(currentIssue.storagePath)) {
+      throw TrackStateRepositoryException(
+        'Could not find repository artifacts for ${currentIssue.key}.',
+      );
+    }
     final file = await _provider.readTextFile(
-      issue.storagePath,
+      currentIssue.storagePath,
       ref: writeBranch,
     );
     final updatedMarkdown = _replaceSection(
@@ -232,15 +247,15 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     );
     await _provider.writeTextFile(
       RepositoryWriteRequest(
-        path: issue.storagePath,
+        path: currentIssue.storagePath,
         content: updatedMarkdown,
-        message: 'Update ${issue.key} description',
+        message: 'Update ${currentIssue.key} description',
         branch: writeBranch,
         expectedRevision: file.revision,
       ),
     );
 
-    final updatedIssue = issue.copyWith(
+    final updatedIssue = currentIssue.copyWith(
       description: normalizedDescription,
       rawMarkdown: updatedMarkdown,
       updatedLabel: 'just now',

@@ -174,6 +174,92 @@ void main() {
   );
 
   test(
+    'local repository reports a missing description update target as a repository not-found error',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final beforeHead = await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ]);
+
+      const missingIssue = TrackStateIssue(
+        key: 'MISSING-999',
+        project: 'DEMO',
+        issueType: IssueType.story,
+        issueTypeId: 'story',
+        status: IssueStatus.todo,
+        statusId: 'todo',
+        priority: IssuePriority.medium,
+        priorityId: 'medium',
+        summary: 'Missing update target',
+        description:
+            'Synthetic missing issue used for update regression coverage.',
+        assignee: '',
+        reporter: '',
+        labels: [],
+        components: [],
+        fixVersionIds: [],
+        watchers: [],
+        customFields: {},
+        parentKey: null,
+        epicKey: null,
+        parentPath: null,
+        epicPath: null,
+        progress: 0,
+        updatedLabel: 'just now',
+        acceptanceCriteria: [],
+        comments: [],
+        links: [],
+        attachments: [],
+        isArchived: false,
+        storagePath: 'DEMO/MISSING-999/main.md',
+      );
+
+      await expectLater(
+        () => repository.updateIssueDescription(
+          missingIssue,
+          'Updated description that should never be written.',
+        ),
+        throwsA(
+          isA<TrackStateRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            'Could not find repository artifacts for MISSING-999.',
+          ),
+        ),
+      );
+
+      final afterHead = await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ]);
+      final status = await Process.run('git', [
+        '-C',
+        repo.path,
+        'status',
+        '--short',
+      ]);
+
+      expect(
+        afterHead.stdout.toString().trim(),
+        beforeHead.stdout.toString().trim(),
+      );
+      expect(status.stdout.toString().trim(), isEmpty);
+    },
+  );
+
+  test(
     'local repository reports a missing archive target as a repository not-found error',
     () async {
       final repo = await _createLocalRepository();
