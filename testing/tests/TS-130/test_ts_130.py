@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import unittest
 
 from testing.components.services.hardcoded_hex_lint_validator import (
@@ -77,23 +78,14 @@ class ThemeTokenCheckDiagnosticTest(unittest.TestCase):
         hardcoded_output = HardcodedHexLintValidationResult.combine_output(
             result.hardcoded_analyze,
         )
-        output_lower = hardcoded_output.lower()
-        has_terminal_diagnostic = any(
-            marker in output_lower
-            for marker in (
-                "error •",
-                "warning •",
-                "info •",
-                " error - ",
-                " warning - ",
-                " info - ",
-            )
+        has_warning_diagnostic = _contains_warning_diagnostic(
+            hardcoded_output,
         )
         mentions_probe_file = self.config.probe_relative_path.as_posix() in hardcoded_output
         mentions_literal = self.config.hardcoded_color_expression in hardcoded_output
-        mentions_position = (
-            f"{self.config.probe_relative_path.as_posix()}:"
-            in hardcoded_output
+        mentions_numeric_position = _mentions_numeric_position(
+            self.config.probe_relative_path.as_posix(),
+            hardcoded_output,
         )
 
         self.assertNotEqual(
@@ -107,19 +99,27 @@ class ThemeTokenCheckDiagnosticTest(unittest.TestCase):
             f"Observed output:\n{hardcoded_output}",
         )
         self.assertTrue(
-            has_terminal_diagnostic,
+            has_warning_diagnostic,
             "Step 4 failed: the command did not emit an analyzer-style "
-            "diagnostic for the hardcoded hex violation.\n"
+            "warning for the hardcoded hex violation.\n"
             f"Probe file: {result.probe_path}\n"
             f"Observed output:\n{hardcoded_output}",
         )
         self.assertTrue(
-            mentions_probe_file and mentions_literal and mentions_position,
+            mentions_probe_file and mentions_literal and mentions_numeric_position,
             "Human-style verification failed for Step 4: the diagnostic did not "
             "clearly identify the offending literal and its file/line location.\n"
             f"Probe file: {result.probe_path}\n"
             f"Observed output:\n{hardcoded_output}",
         )
+
+
+def _contains_warning_diagnostic(output: str) -> bool:
+    return re.search(r"(^|\n)\s*warning\s*(?:•|-)\s", output.lower()) is not None
+
+
+def _mentions_numeric_position(path: str, output: str) -> bool:
+    return re.search(rf"{re.escape(path)}:\d+:\d+\b", output) is not None
 
 
 if __name__ == "__main__":

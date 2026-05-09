@@ -6,8 +6,8 @@ at `lib/ts115_lint_probe.dart`, and runs
 `dart run tool/check_theme_tokens.dart lib/ts115_lint_probe.dart` twice:
 
 1. with `Theme.of(context).colorScheme.primary`, which must pass cleanly; and
-2. with `Color(0xFFFAF8F4)`, which must fail with analyzer-style diagnostics that
-   identify the probe file and offending literal.
+2. with `Color(0xFFFAF8F4)`, which must fail with an analyzer-style warning that
+   identifies the probe file, offending literal, and numeric line/column.
 
 ## Install dependencies
 

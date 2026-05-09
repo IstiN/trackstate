@@ -7,4 +7,4 @@ dependencies:
 notes:
   - Creates a temporary copy of the repository and injects lib/ts115_lint_probe.dart.
   - Verifies dart run tool/check_theme_tokens.dart accepts a tokenized color before rejecting Color(0xFFFAF8F4).
-  - Confirms the terminal diagnostic includes the hardcoded literal and probe file path a user would rely on.
+  - Confirms the terminal diagnostic is a warning that includes the hardcoded literal, probe file path, and numeric line/column a user would rely on.
