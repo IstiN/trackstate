@@ -372,8 +372,14 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       parentKey: currentIssue.parentKey,
       epicKey: currentIssue.epicKey,
     );
+    final persistedTombstones = await _loadDeletedIssueTombstones(
+      blobPaths: blobPaths,
+      dataRoot: projectRoot,
+      issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+      includeLegacyDeletedIndex: false,
+    );
     final deletedByKey = {
-      for (final entry in snapshot.repositoryIndex.deleted) entry.key: entry,
+      for (final entry in persistedTombstones) entry.key: entry,
       tombstone.key: tombstone,
     };
     final deletedTombstones = deletedByKey.values.toList()
@@ -394,15 +400,9 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       projectRoot,
       '.trackstate/index/tombstones.json',
     );
-    final legacyDeletedIndexPath = _joinPath(
-      projectRoot,
-      '.trackstate/index/deleted.json',
-    );
     final changes = <RepositoryFileChange>[
       for (final path in issueArtifactPaths)
         RepositoryDeleteFileChange(path: path),
-      if (blobPaths.contains(legacyDeletedIndexPath))
-        RepositoryDeleteFileChange(path: legacyDeletedIndexPath),
       RepositoryTextFileChange(
         path: issuesIndexPath,
         content:
@@ -752,11 +752,6 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     required List<TrackStateConfigEntry> issueTypeDefinitions,
   }) async {
     final issuesPath = _joinPath(dataRoot, '.trackstate/index/issues.json');
-    final tombstonesPath = _joinPath(
-      dataRoot,
-      '.trackstate/index/tombstones.json',
-    );
-    final deletedPath = _joinPath(dataRoot, '.trackstate/index/deleted.json');
     final entries = <RepositoryIssueIndexEntry>[];
     if (blobPaths.contains(issuesPath)) {
       final json = await _getRepositoryJson(issuesPath);
@@ -766,6 +761,25 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         );
       }
     }
+    final deleted = await _loadDeletedIssueTombstones(
+      blobPaths: blobPaths,
+      dataRoot: dataRoot,
+      issueTypeDefinitions: issueTypeDefinitions,
+    );
+    return RepositoryIndex(entries: entries, deleted: deleted);
+  }
+
+  Future<List<DeletedIssueTombstone>> _loadDeletedIssueTombstones({
+    required Set<String> blobPaths,
+    required String dataRoot,
+    required List<TrackStateConfigEntry> issueTypeDefinitions,
+    bool includeLegacyDeletedIndex = true,
+  }) async {
+    final tombstonesPath = _joinPath(
+      dataRoot,
+      '.trackstate/index/tombstones.json',
+    );
+    final deletedPath = _joinPath(dataRoot, '.trackstate/index/deleted.json');
     final deleted = <DeletedIssueTombstone>[];
     if (blobPaths.contains(tombstonesPath)) {
       final json = await _getRepositoryJson(tombstonesPath);
@@ -797,7 +811,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         }
       }
     }
-    if (blobPaths.contains(deletedPath)) {
+    if (includeLegacyDeletedIndex && blobPaths.contains(deletedPath)) {
       final json = await _getRepositoryJson(deletedPath);
       if (json is List) {
         deleted.addAll(
@@ -810,10 +824,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         );
       }
     }
-    return RepositoryIndex(
-      entries: entries,
-      deleted: _dedupeDeletedIssueTombstones(deleted),
-    );
+    return _dedupeDeletedIssueTombstones(deleted);
   }
 
   Future<List<IssueComment>> _loadComments({
