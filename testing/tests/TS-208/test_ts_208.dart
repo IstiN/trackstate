@@ -69,29 +69,27 @@ void main() {
             localRepositoryPath: fixture.repositoryPath,
           ),
         );
-        await screen.waitWithoutInteraction(const Duration(seconds: 3));
+        await screen.waitWithoutInteraction(const Duration(seconds: 2));
 
-        expect(
-          tester.takeException(),
-          isNull,
-          reason:
-              'Step 2 failed: launching the app with malformed '
-              'DEMO/config/fields.json surfaced a framework exception instead '
-              'of keeping the Local Git UI usable.',
-        );
+        final parseErrorLogged = await _waitForLoggedParseError(screen, tester);
+        final frameworkException = tester.takeException();
         final localGitChromeVisible =
             await screen.isSemanticsLabelVisible('Local Git') ||
             await screen.isTextVisible('Local Git');
-        expect(
-          localGitChromeVisible,
-          isTrue,
-          reason:
-              'Step 2 failed: launching the app with malformed '
-              'DEMO/config/fields.json did not keep the user in a visible '
-              'Local Git runtime state. Visible texts: '
-              '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
-              'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-        );
+        if (!parseErrorLogged ||
+            frameworkException != null ||
+            !localGitChromeVisible) {
+          fail(
+            'Step 2 failed: launching the app with malformed '
+            'DEMO/config/fields.json did not preserve the required fallback '
+            'behavior. Parse error reported=${parseErrorLogged ? 'yes' : 'no'}, '
+            'framework exception=${frameworkException ?? '<none>'}, '
+            'Local Git visible=${localGitChromeVisible ? 'yes' : 'no'}. '
+            'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
+            'Visible semantics: '
+            '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+          );
+        }
 
         final createIssueSection = await screen.openCreateIssueFlow();
         await screen.expectCreateIssueFormVisible(
@@ -212,4 +210,32 @@ String _formatSnapshot(List<String> values, {int limit = 20}) {
     return '<none>';
   }
   return snapshot.join(' | ');
+}
+
+Future<bool> _waitForLoggedParseError(
+  TrackStateAppComponent screen,
+  WidgetTester tester,
+) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 8));
+  while (DateTime.now().isBefore(deadline)) {
+    if (await screen.isMessageBannerVisibleContaining('FormatException') ||
+        await screen.isMessageBannerVisibleContaining('Unexpected character') ||
+        _snapshotContainsParseError(screen.visibleTextsSnapshot()) ||
+        _snapshotContainsParseError(screen.visibleSemanticsLabelsSnapshot())) {
+      return true;
+    }
+    await tester.pump(const Duration(milliseconds: 200));
+  }
+  return await screen.isMessageBannerVisibleContaining('FormatException') ||
+      await screen.isMessageBannerVisibleContaining('Unexpected character') ||
+      _snapshotContainsParseError(screen.visibleTextsSnapshot()) ||
+      _snapshotContainsParseError(screen.visibleSemanticsLabelsSnapshot());
+}
+
+bool _snapshotContainsParseError(List<String> values) {
+  return values.any(
+    (value) =>
+        value.contains('FormatException') ||
+        value.contains('Unexpected character'),
+  );
 }
