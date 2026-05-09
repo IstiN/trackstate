@@ -90,18 +90,12 @@ Future<void> _verifyCreateIssueAccessibility(
   final semanticsPresent = await screen.isTopBarSemanticsLabelVisible(
     'Create issue',
   );
-  if (semanticsPresent) {
-    return;
-  }
-
-  final globalSemanticsPresent = await screen.isSemanticsLabelVisible(
-    'Create issue',
-  );
-  if (!globalSemanticsPresent) {
+  if (!semanticsPresent) {
     failures.add(
-      'Step failed in $section: "Create issue" was visible in the top bar, but '
-      'no matching semantics label was discoverable for accessibility tools. Top '
-      'bar texts: ${_formatSnapshot(topBarTexts)}. Visible semantics: '
+      'Step failed in $section: "Create issue" was visible in the shared top '
+      'bar, but that same top-bar control did not expose a matching semantics '
+      'label for accessibility tools. Top bar texts: '
+      '${_formatSnapshot(topBarTexts)}. Visible semantics: '
       '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
     );
   }
