@@ -7,7 +7,10 @@
 const GOAL_INSTRUCTIONS = './.dmtools/instructions/goal/goal.md';
 const DESIGN_REFERENCE = './.dmtools/instructions/goal/DESIGN.md';
 const SETUP_REPO_INSTRUCTIONS = './.dmtools/instructions/product/trackstate_setup_repo.md';
-const TRACKSTATE_SETUP_SUBMODULES = [{ path: 'trackstate-setup', branch: 'main' }];
+const TRACKSTATE_MANAGED_SUBMODULES = [
+    { path: 'agents', branch: 'main', commitMessage: 'TS-121 Update agents automation' },
+    { path: 'trackstate-setup', branch: 'main' }
+];
 const FLUTTER_WRAPPER = 'bash agents/scripts/flutterw.sh';
 const POST_ACTION_FEEDBACK = {
     postAction: {
@@ -182,7 +185,7 @@ module.exports = {
             customParams: {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
+                managedSubmodules: TRACKSTATE_MANAGED_SUBMODULES,
                 feedbackLoop: FLUTTER_FEEDBACK
             }
         },
@@ -190,7 +193,7 @@ module.exports = {
             customParams: {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
+                managedSubmodules: TRACKSTATE_MANAGED_SUBMODULES,
                 feedbackLoop: FLUTTER_FEEDBACK
             }
         },
@@ -216,7 +219,7 @@ module.exports = {
             customParams: {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
+                managedSubmodules: TRACKSTATE_MANAGED_SUBMODULES,
                 feedbackLoop: FLUTTER_FEEDBACK
             }
         },
