@@ -38,10 +38,7 @@ abstract interface class TrackStateAppComponent {
     required String text,
   });
 
-  Future<void> tapIssueDetailAction(
-    String key, {
-    required String label,
-  });
+  Future<void> tapIssueDetailAction(String key, {required String label});
 
   Future<void> expectMessageBannerContains(String text);
 
@@ -56,6 +53,11 @@ abstract interface class TrackStateAppComponent {
   void expectProfileIdentityVisible({
     required String displayName,
     required String login,
+    required String initials,
+  });
+
+  void expectGuestProfileSurface({
+    required String repositoryAccessLabel,
     required String initials,
   });
 
@@ -76,6 +78,8 @@ abstract interface class TrackStateAppComponent {
   Future<void> enterLabeledTextField(String label, {required String text});
 
   List<String> visibleTextsSnapshot();
+
+  List<String> topBarVisibleTextsSnapshot();
 
   List<String> visibleSemanticsLabelsSnapshot();
 }
