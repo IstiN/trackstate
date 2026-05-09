@@ -286,6 +286,9 @@ This comment demonstrates markdown-backed collaboration history.
       final doneIssue = snapshot.issues.firstWhere(
         (entry) => entry.key == 'DEMO-4',
       );
+      final epicIssue = snapshot.issues.firstWhere(
+        (entry) => entry.key == 'DEMO-1',
+      );
 
       expect(snapshot.project.fieldLabel('storyPoints'), 'Story Points');
       expect(snapshot.project.resolutionLabel('done'), 'Done');
@@ -301,6 +304,7 @@ This comment demonstrates markdown-backed collaboration history.
       expect(boardIssue.watchers, ['demo-admin', 'demo-user']);
       expect(boardIssue.customFields['storyPoints'], 5);
       expect(boardIssue.customFields['releaseTrain'], ['web', 'mobile']);
+      expect(epicIssue.customFields['created'], '2026-05-05T00:00:00Z');
       expect(boardIssue.links.single.targetKey, 'DEMO-4');
       expect(boardIssue.attachments.single.name, 'board-preview.svg');
       expect(doneIssue.statusId, 'done');

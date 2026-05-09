@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 
 import '../../domain/models/trackstate_models.dart';
@@ -53,7 +51,7 @@ abstract interface class TrackStateProviderAdapter
 
 enum ProviderType { github, local }
 
-enum ProviderConnectionState { disconnected, connecting, connected }
+enum ProviderConnectionState { disconnected, connecting, connected, error }
 
 class ProviderSession extends ChangeNotifier {
   ProviderSession({
