@@ -17,6 +17,8 @@ class ReleaseOnMergeObservation:
     release_tag_name: str
     release_html_url: str
     release_published_at: str | None
+    release_is_draft: bool
+    release_is_prerelease: bool
     tag_name: str
     tag_commit_sha: str | None
     releases_page_url: str

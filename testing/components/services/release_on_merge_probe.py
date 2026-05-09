@@ -70,6 +70,7 @@ class ReleaseOnMergeProbeService:
         ) = self._wait_for_release_and_tag(
             release_ids_before=release_ids_before,
             tag_names_before=tag_names_before,
+            expected_merge_commit_sha=pull_request_merge_commit_sha,
         )
 
         release_tag_name = self._require_string(release_entry, "tag_name")
@@ -101,6 +102,8 @@ class ReleaseOnMergeProbeService:
             release_tag_name=release_tag_name,
             release_html_url=str(release_entry.get("html_url", "")),
             release_published_at=self._optional_string(release_entry.get("published_at")),
+            release_is_draft=self._is_true(release_entry.get("draft")),
+            release_is_prerelease=self._is_true(release_entry.get("prerelease")),
             tag_name=tag_name,
             tag_commit_sha=self._optional_string((tag_entry.get("commit") or {}).get("sha")),
             releases_page_url=self._config.releases_page_url,
@@ -261,6 +264,7 @@ class ReleaseOnMergeProbeService:
         *,
         release_ids_before: set[int],
         tag_names_before: set[str],
+        expected_merge_commit_sha: str,
     ) -> tuple[dict[str, Any], dict[str, Any], int]:
         deadline = time.time() + self._config.release_timeout_seconds
         attempts = 0
@@ -276,27 +280,40 @@ class ReleaseOnMergeProbeService:
                 for tag in latest_tags
                 if self._is_new_semantic_tag(tag, tag_names_before)
             ]
-            release_by_tag = {
-                self._optional_string(release.get("tag_name")): release
-                for release in latest_releases
-                if self._release_id(release) not in release_ids_before
-                and self._optional_string(release.get("tag_name"))
+            semantic_tag_by_name = {
+                tag_name: tag
+                for tag in new_semantic_tags
+                if (tag_name := self._optional_string(tag.get("name"))) is not None
             }
-            for tag in new_semantic_tags:
-                tag_name = self._optional_string(tag.get("name"))
-                if tag_name is None:
+            for release in latest_releases:
+                if self._release_id(release) in release_ids_before:
                     continue
-                matching_release = release_by_tag.get(tag_name)
-                if matching_release is not None:
-                    return matching_release, tag, attempts
+                if self._is_true(release.get("draft")) or self._is_true(
+                    release.get("prerelease")
+                ):
+                    continue
+                release_tag_name = self._optional_string(release.get("tag_name"))
+                if release_tag_name is None:
+                    continue
+                matching_tag = semantic_tag_by_name.get(release_tag_name)
+                if matching_tag is None:
+                    continue
+                tag_commit_sha = self._optional_string(
+                    (matching_tag.get("commit") or {}).get("sha")
+                )
+                if tag_commit_sha != expected_merge_commit_sha:
+                    continue
+                return release, matching_tag, attempts
             time.sleep(self._config.poll_interval_seconds)
 
         raise ReleaseOnMergeProbeError(
             "TS-230 did not observe both a new GitHub release and a corresponding "
-            "new semantic version tag after merging to the default branch within the "
+            "new semantic version tag tied to the merged pull request commit, with "
+            "the release published as stable (not draft, not prerelease), within the "
             "configured timeout.\n"
             f"Repository: {self._config.repository}\n"
             f"Timeout: {self._config.release_timeout_seconds}s\n"
+            f"Expected merge commit sha: {expected_merge_commit_sha}\n"
             f"Baseline release ids: {sorted(release_ids_before)}\n"
             f"Baseline tag names sample: {sorted(tag_names_before)[:20]}\n"
             f"Last observed releases: {latest_releases}\n"
@@ -443,6 +460,10 @@ class ReleaseOnMergeProbeService:
         if isinstance(value, str) and value.strip():
             return value.strip()
         return None
+
+    @staticmethod
+    def _is_true(value: object) -> bool:
+        return value is True
 
     @staticmethod
     def _require_string(payload: dict[str, Any], key: str) -> str:

@@ -70,6 +70,26 @@ class PullRequestMergeGeneratesReleaseAndTagTest(unittest.TestCase):
             f"Release URL: {observation.release_html_url}",
         )
         self.assertTrue(
+            observation.release_published_at,
+            "Step 4 failed: the observed release does not include published_at, so it "
+            "is not verified as a published stable release.\n"
+            f"Release URL: {observation.release_html_url}",
+        )
+        self.assertFalse(
+            observation.release_is_draft,
+            "Step 4 failed: the observed release is still marked as draft, not a stable "
+            "release.\n"
+            f"Release URL: {observation.release_html_url}\n"
+            f"Release tag: {observation.release_tag_name}",
+        )
+        self.assertFalse(
+            observation.release_is_prerelease,
+            "Step 4 failed: the observed release is marked as prerelease, not a stable "
+            "release.\n"
+            f"Release URL: {observation.release_html_url}\n"
+            f"Release tag: {observation.release_tag_name}",
+        )
+        self.assertTrue(
             observation.tag_name,
             "Step 4 failed: TS-230 did not observe a matching newly created tag.\n"
             f"Observed release tag: {observation.release_tag_name}",
@@ -87,6 +107,21 @@ class PullRequestMergeGeneratesReleaseAndTagTest(unittest.TestCase):
             "version format.\n"
             f"Pattern: {self.config.semver_tag_pattern}\n"
             f"Observed tag: {observation.tag_name}",
+        )
+        self.assertTrue(
+            observation.tag_commit_sha,
+            "Step 4 failed: the observed semantic version tag does not expose a commit "
+            "sha, so it cannot be linked to the merged pull request commit.\n"
+            f"Tag name: {observation.tag_name}",
+        )
+        self.assertEqual(
+            observation.pull_request_merge_commit_sha,
+            observation.tag_commit_sha,
+            "Step 4 failed: the observed release/tag is not tied to the merged pull "
+            "request commit.\n"
+            f"Merged PR commit: {observation.pull_request_merge_commit_sha}\n"
+            f"Tag commit: {observation.tag_commit_sha}\n"
+            f"Tag name: {observation.tag_name}",
         )
         self.assertTrue(
             observation.releases_page_contains_tag,
