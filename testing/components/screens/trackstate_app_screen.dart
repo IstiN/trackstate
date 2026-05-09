@@ -114,7 +114,16 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     });
 
     await tester.pumpWidget(
-      TrackStateApp(key: UniqueKey(), repository: repository),
+      TrackStateApp(
+        key: UniqueKey(),
+        repository: repository,
+        openLocalRepository: ({
+          required String repositoryPath,
+          required String writeBranch,
+        }) => _repositoryService.openRepository(
+          repositoryPath: repositoryPath,
+        ),
+      ),
     );
     await _pumpFrames();
   }
@@ -150,12 +159,22 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     required String repositoryPath,
     required String writeBranch,
   }) async {
+    await _repositoryService.openRepository(repositoryPath: repositoryPath);
     await openSection('Settings');
     await tapVisibleControl('Local Git');
     await enterLabeledTextField('Repository Path', text: repositoryPath);
     await enterLabeledTextField('Write Branch', text: writeBranch);
     FocusManager.instance.primaryFocus?.unfocus();
-    await tester.pumpAndSettle();
+    await _pumpFrames(20);
+    final end = DateTime.now().add(const Duration(seconds: 5));
+    while (DateTime.now().isBefore(end)) {
+      if (await isTopBarSemanticsLabelVisible('Local Git') ||
+          await isTopBarTextVisible('Local Git')) {
+        break;
+      }
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await _pumpFrames();
   }
 
   @override
