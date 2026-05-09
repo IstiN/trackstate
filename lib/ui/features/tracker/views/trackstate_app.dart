@@ -66,6 +66,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
   TrackerViewModel _createViewModel({
     TrackStateRepository? repository,
     TrackerViewModel? previous,
+    bool autoLoad = true,
   }) {
     final nextViewModel = TrackerViewModel(
       repository:
@@ -74,7 +75,9 @@ class _TrackStateAppState extends State<TrackStateApp> {
     if (previous != null) {
       nextViewModel.restorePresentationStateFrom(previous);
     }
-    nextViewModel.load();
+    if (autoLoad) {
+      nextViewModel.load();
+    }
     return nextViewModel;
   }
 
@@ -122,6 +125,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
       final nextViewModel = _createViewModel(
         repository: nextRepository,
         previous: previousViewModel,
+        autoLoad: false,
       );
       setState(() {
         viewModel = nextViewModel;
@@ -129,6 +133,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
         _isCreateIssueVisible = false;
       });
       previousViewModel.dispose();
+      await nextViewModel.load();
     } finally {
       if (_pendingLocalGitConfigurationKey == configurationKey) {
         _pendingLocalGitConfigurationKey = null;
@@ -829,6 +834,8 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
     TrackerMessageKind.dataLoadFailed => l10n.trackerDataLoadFailed(
       message.error!,
     ),
+    TrackerMessageKind.repositoryConfigFallback =>
+      l10n.repositoryConfigFallback(message.error!),
     TrackerMessageKind.localGitTokensNotNeeded => l10n.localGitTokensNotNeeded,
     TrackerMessageKind.tokenEmpty => l10n.tokenEmpty,
     TrackerMessageKind.githubConnectedDragCards =>

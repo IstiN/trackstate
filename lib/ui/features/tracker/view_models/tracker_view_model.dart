@@ -14,6 +14,7 @@ enum TrackerMessageTone { info, error }
 
 enum TrackerMessageKind {
   dataLoadFailed,
+  repositoryConfigFallback,
   localGitTokensNotNeeded,
   tokenEmpty,
   githubConnectedDragCards,
@@ -56,6 +57,13 @@ class TrackerMessage {
     tone: TrackerMessageTone.error,
     error: '$error',
   );
+
+  factory TrackerMessage.repositoryConfigFallback(Object error) =>
+      TrackerMessage._(
+        TrackerMessageKind.repositoryConfigFallback,
+        tone: TrackerMessageTone.error,
+        error: '$error',
+      );
 
   factory TrackerMessage.localGitTokensNotNeeded() => const TrackerMessage._(
     TrackerMessageKind.localGitTokensNotNeeded,
@@ -265,6 +273,11 @@ class TrackerViewModel extends ChangeNotifier {
         await _loadLocalRepositoryUser();
       } else if (supportsGitHubAuth) {
         await _restoreGitHubConnection();
+      }
+      if (_message == null && _snapshot!.loadWarnings.isNotEmpty) {
+        _message = TrackerMessage.repositoryConfigFallback(
+          _snapshot!.loadWarnings.first,
+        );
       }
     } on Object catch (error) {
       _message = TrackerMessage.dataLoadFailed(error);
