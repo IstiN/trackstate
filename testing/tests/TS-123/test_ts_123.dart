@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../components/factories/testing_dependencies.dart';
-import '../../core/interfaces/trackstate_app_component.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
 
 void main() {
@@ -52,32 +51,16 @@ void main() {
           LocalTrackStateFixture.issueSummary,
         );
 
-        final createIssueSection = await _openCreateIssueFlow(screen);
-        await _expectCreateIssueFormVisible(
-          screen,
+        final createIssueSection = await screen.openCreateIssueFlow();
+        await screen.expectCreateIssueFormVisible(
           createIssueSection: createIssueSection,
         );
 
-        await screen.enterLabeledTextField('Summary', text: createdSummary);
-        if (await screen.isTextFieldVisible('Description')) {
-          await screen.enterLabeledTextField(
-            'Description',
-            text: createdDescription,
-          );
-        }
-
-        final submittedCreate =
-            await screen.tapVisibleControl('Create') ||
-            await screen.tapVisibleControl('Save');
-        if (!submittedCreate) {
-          fail(
-            'TS-123 reached the "Create issue" form from $createIssueSection '
-            'and populated the required fields, but no visible "Create" or '
-            '"Save" action was available for submission. Visible texts: '
-            '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
-            'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-          );
-        }
+        await screen.populateCreateIssueForm(
+          summary: createdSummary,
+          description: createdDescription,
+        );
+        await screen.submitCreateIssue(createIssueSection: createIssueSection);
 
         await screen.waitWithoutInteraction(const Duration(milliseconds: 800));
 
@@ -173,48 +156,6 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
-}
-
-Future<String> _openCreateIssueFlow(TrackStateAppComponent screen) async {
-  const sectionsToInspect = <String>[
-    'Dashboard',
-    'Board',
-    'JQL Search',
-    'Hierarchy',
-    'Settings',
-  ];
-  final visitedSections = <String>[];
-
-  for (final section in sectionsToInspect) {
-    await screen.openSection(section);
-    visitedSections.add(section);
-    if (await screen.tapVisibleControl('Create issue')) {
-      return section;
-    }
-  }
-
-  fail(
-    'TS-123 could not find a production-visible "Create issue" entry point in '
-    'the clean Local Git runtime. Visited sections: '
-    '${visitedSections.join(', ')}. Visible texts: '
-    '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
-    '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-  );
-  throw StateError('TS-123 create issue entry point search did not return.');
-}
-
-Future<void> _expectCreateIssueFormVisible(
-  TrackStateAppComponent screen, {
-  required String createIssueSection,
-}) async {
-  if (!await screen.isTextFieldVisible('Summary')) {
-    fail(
-      'TS-123 opened the "Create issue" entry point from $createIssueSection, '
-      'but no visible "Summary" field was rendered. Visible texts: '
-      '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
-      '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-    );
-  }
 }
 
 String _formatSnapshot(List<String> values, {int limit = 20}) {

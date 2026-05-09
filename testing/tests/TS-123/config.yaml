@@ -2,8 +2,9 @@ test_id: TS-123
 type: ui
 framework: flutter_test
 platform: linux
-dependencies: [TS-102]
+dependencies: [TS-122]
 notes:
   - Reuses the shared LocalTrackStateFixture and TrackStateAppComponent Local Git widget-test flow.
+  - Depends on TS-122 for the production-visible Create issue entry point coverage in Local Git mode.
   - Verifies clean Local Git issue creation succeeds through the production-visible Create issue surface.
   - Confirms the create form closes, the new issue is visible in the UI, and Local Git records a dedicated create commit.

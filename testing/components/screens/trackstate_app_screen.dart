@@ -144,6 +144,74 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<String> openCreateIssueFlow() async {
+    const sectionsToInspect = <String>[
+      'Dashboard',
+      'Board',
+      'JQL Search',
+      'Hierarchy',
+      'Settings',
+    ];
+    final visitedSections = <String>[];
+
+    for (final section in sectionsToInspect) {
+      await openSection(section);
+      visitedSections.add(section);
+      if (await tapVisibleControl('Create issue')) {
+        return section;
+      }
+    }
+
+    fail(
+      'Could not find a production-visible "Create issue" entry point in the '
+      'Local Git runtime. Visited sections: ${visitedSections.join(', ')}. '
+      'Visible texts: ${_formatSnapshot(visibleTextsSnapshot())}. Visible '
+      'semantics: ${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
+    );
+    throw StateError('Create issue entry point search did not return.');
+  }
+
+  @override
+  Future<void> expectCreateIssueFormVisible({
+    required String createIssueSection,
+  }) async {
+    if (!await isTextFieldVisible('Summary')) {
+      fail(
+        'Opened the "Create issue" entry point from $createIssueSection, but '
+        'no visible "Summary" field was rendered. Visible texts: '
+        '${_formatSnapshot(visibleTextsSnapshot())}. Visible semantics: '
+        '${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
+      );
+    }
+  }
+
+  @override
+  Future<void> populateCreateIssueForm({
+    required String summary,
+    String? description,
+  }) async {
+    await enterLabeledTextField('Summary', text: summary);
+    if (description != null && await isTextFieldVisible('Description')) {
+      await enterLabeledTextField('Description', text: description);
+    }
+  }
+
+  @override
+  Future<void> submitCreateIssue({required String createIssueSection}) async {
+    final submittedCreate =
+        await tapVisibleControl('Create') || await tapVisibleControl('Save');
+    if (!submittedCreate) {
+      fail(
+        'Reached the "Create issue" form from $createIssueSection and '
+        'populated the visible fields, but no visible "Create" or "Save" '
+        'action was available for submission. Visible texts: '
+        '${_formatSnapshot(visibleTextsSnapshot())}. Visible semantics: '
+        '${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
+      );
+    }
+  }
+
+  @override
   Future<void> openIssue(String key, String summary) async {
     final issue = _issue(key, summary);
     await _waitForVisible(issue);
@@ -442,6 +510,24 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       values.add(value);
     }
     return values;
+  }
+
+  String _formatSnapshot(List<String> values, {int limit = 20}) {
+    final snapshot = <String>[];
+    for (final value in values) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty || snapshot.contains(trimmed)) {
+        continue;
+      }
+      snapshot.add(trimmed);
+      if (snapshot.length == limit) {
+        break;
+      }
+    }
+    if (snapshot.isEmpty) {
+      return '<none>';
+    }
+    return snapshot.join(' | ');
   }
 
   @override
