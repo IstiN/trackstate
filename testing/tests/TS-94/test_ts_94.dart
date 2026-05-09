@@ -35,41 +35,7 @@ void main() {
           LocalTrackStateFixture.issueSummary,
         );
 
-        const sectionsToInspect = <String>[
-          'Dashboard',
-          'Board',
-          'JQL Search',
-          'Hierarchy',
-          'Settings',
-        ];
-        final visitedSections = <String>[];
-        String? createIssueSection;
-
-        for (final section in sectionsToInspect) {
-          await screen.openSection(section);
-          visitedSections.add(section);
-
-          final openedCreateIssueEntryPoint = await screen.tapVisibleControl(
-            'Create issue',
-          );
-          if (openedCreateIssueEntryPoint) {
-            createIssueSection = section;
-            break;
-          }
-        }
-
-        if (createIssueSection == null) {
-          fail(
-            'TS-94 could not navigate to an issue creation screen after '
-            'dirtying ${LocalTrackStateFixture.issuePath}. No visible '
-            '"Create issue" entry point was rendered in sections '
-            '${visitedSections.join(', ')}. Visible texts: '
-            '${_formatSnapshot(screen.visibleTextsSnapshot())}. '
-            'Visible semantics: '
-            '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-          );
-        }
-
+        final createIssueSection = await screen.openCreateIssueFlow();
         await _attemptDirtyIssueCreation(
           screen,
           createIssueSection: createIssueSection,
@@ -92,58 +58,16 @@ Future<void> _attemptDirtyIssueCreation(
   TrackStateAppComponent screen, {
   required String createIssueSection,
 }) async {
-  if (!await screen.isTextFieldVisible('Summary')) {
-    fail(
-      'TS-94 reached the "Create issue" entry point from $createIssueSection, '
-      'but the creation flow did not expose a visible "Summary" field. '
-      'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
-      'Visible semantics: '
-      '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-    );
-  }
-
-  await screen.enterLabeledTextField(
-    'Summary',
-    text: 'TS-94 dirty create candidate',
+  await screen.expectCreateIssueFormVisible(
+    createIssueSection: createIssueSection,
   );
-  if (await screen.isTextFieldVisible('Description')) {
-    await screen.enterLabeledTextField(
-      'Description',
-      text: 'Dirty local creation should surface recovery guidance.',
-    );
-  }
-
-  final submittedCreate =
-      await screen.tapVisibleControl('Create') ||
-      await screen.tapVisibleControl('Save');
-  if (!submittedCreate) {
-    fail(
-      'TS-94 reached the "Create issue" entry point from $createIssueSection '
-      'and populated the visible fields, but no visible "Create" or "Save" '
-      'action was rendered for submission. Visible texts: '
-      '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
-      '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-    );
-  }
+  await screen.populateCreateIssueForm(
+    summary: 'TS-94 dirty create candidate',
+    description: 'Dirty local creation should surface recovery guidance.',
+  );
+  await screen.submitCreateIssue(createIssueSection: createIssueSection);
 
   await screen.expectMessageBannerContains('commit');
   await screen.expectMessageBannerContains('stash');
   await screen.expectMessageBannerContains('clean');
-}
-
-String _formatSnapshot(List<String> values, {int limit = 20}) {
-  final snapshot = <String>[];
-  for (final value in values) {
-    if (value.isEmpty || snapshot.contains(value)) {
-      continue;
-    }
-    snapshot.add(value);
-    if (snapshot.length == limit) {
-      break;
-    }
-  }
-  if (snapshot.isEmpty) {
-    return '<none>';
-  }
-  return snapshot.join(' | ');
 }
