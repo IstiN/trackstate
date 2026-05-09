@@ -7,7 +7,10 @@ void main(List<String> arguments) {
   final config = _PolicyConfig.load(File(parsed.configPath));
   final targets = parsed.targets.isEmpty
       ? _collectIncludedFiles(root, config)
-      : parsed.targets;
+      : _resolveExplicitTargets(root, parsed.targets, config);
+  if (targets == null) {
+    return;
+  }
 
   final violations = <_Violation>[];
   for (final target in targets) {
@@ -36,6 +39,44 @@ void main(List<String> arguments) {
     );
   }
   exitCode = 1;
+}
+
+List<String>? _resolveExplicitTargets(
+  Directory root,
+  List<String> targets,
+  _PolicyConfig config,
+) {
+  final resolvedTargets = <String>{};
+
+  for (final target in targets) {
+    final entityType = FileSystemEntity.typeSync(target, followLinks: false);
+    if (entityType == FileSystemEntityType.file) {
+      resolvedTargets.add(target);
+      continue;
+    }
+    if (entityType == FileSystemEntityType.directory) {
+      final directory = Directory(target);
+      for (final entity in directory.listSync(
+        recursive: true,
+        followLinks: false,
+      )) {
+        if (entity is! File) {
+          continue;
+        }
+        final relativePath = _relativePath(root, entity);
+        if (config.shouldCheck(relativePath)) {
+          resolvedTargets.add(relativePath);
+        }
+      }
+      continue;
+    }
+    stderr.writeln('Theme token policy target does not exist: $target');
+    exitCode = 2;
+    return null;
+  }
+
+  final sortedTargets = resolvedTargets.toList()..sort();
+  return sortedTargets;
 }
 
 List<String> _collectIncludedFiles(Directory root, _PolicyConfig config) {
