@@ -12,6 +12,7 @@ abstract interface class TrackStateRepository {
   Future<TrackerSnapshot> loadSnapshot();
   Future<List<TrackStateIssue>> searchIssues(String jql);
   Future<RepositoryUser> connect(RepositoryConnection connection);
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue);
   Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue);
   Future<TrackStateIssue> createIssue({
     required String summary,
@@ -298,6 +299,113 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     );
     _replaceCachedIssue(updatedIssue);
     return updatedIssue;
+  }
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async {
+    if (issue.storagePath.isEmpty) {
+      throw const TrackStateRepositoryException(
+        'This issue has no repository file path and cannot be archived.',
+      );
+    }
+    final permission = await _provider.getPermission();
+    if (!permission.canWrite) {
+      throw const TrackStateRepositoryException(
+        'Connect a repository session with write access first.',
+      );
+    }
+    final mutator = switch (_provider) {
+      final RepositoryFileMutator supported => supported,
+      _ => throw const TrackStateRepositoryException(
+        'This repository provider does not support archiving issues yet.',
+      ),
+    };
+    final snapshot = _snapshot ?? await loadSnapshot();
+    final currentIssue = snapshot.issues.firstWhere(
+      (candidate) => candidate.key == issue.key,
+      orElse: () => issue,
+    );
+
+    final writeBranch = await _provider.resolveWriteBranch();
+    final tree = await _provider.listTree(ref: writeBranch);
+    final blobPaths = tree
+        .where((entry) => entry.type == 'blob')
+        .map((entry) => entry.path)
+        .toSet();
+    final projectRoot = currentIssue.storagePath.split('/').first;
+    if (projectRoot.isEmpty) {
+      throw const TrackStateRepositoryException(
+        'Could not resolve the project root for the issue being archived.',
+      );
+    }
+
+    final issueFile = await _provider.readTextFile(
+      currentIssue.storagePath,
+      ref: writeBranch,
+    );
+    final updatedMarkdown = _replaceFrontmatterValue(
+      issueFile.content,
+      'archived',
+      'true',
+    );
+    final updatedIssues = [
+      for (final candidate in snapshot.issues)
+        if (candidate.key == currentIssue.key)
+          candidate.copyWith(
+            rawMarkdown: updatedMarkdown,
+            updatedLabel: 'just now',
+            isArchived: true,
+          )
+        else
+          candidate,
+    ]..sort((a, b) => a.key.compareTo(b.key));
+    final repositoryIndex = _deriveRepositoryIndex(
+      updatedIssues,
+      snapshot.repositoryIndex.deleted,
+    );
+    final issuesIndexPath = _joinPath(
+      projectRoot,
+      '.trackstate/index/issues.json',
+    );
+
+    await mutator.applyFileChanges(
+      RepositoryFileChangeRequest(
+        branch: writeBranch,
+        message: 'Archive ${currentIssue.key}',
+        changes: [
+          RepositoryTextFileChange(
+            path: currentIssue.storagePath,
+            content: updatedMarkdown,
+            expectedRevision: issueFile.revision,
+          ),
+          RepositoryTextFileChange(
+            path: issuesIndexPath,
+            content:
+                '${jsonEncode(_repositoryIndexEntriesJson(repositoryIndex.entries))}\n',
+            expectedRevision: await _existingRevision(
+              path: issuesIndexPath,
+              ref: writeBranch,
+              blobPaths: blobPaths,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    final indexedUpdatedIssues = [
+      for (final updatedIssue in updatedIssues)
+        updatedIssue.withRepositoryIndex(
+          repositoryIndex.entryForKey(updatedIssue.key),
+        ),
+    ]..sort((a, b) => a.key.compareTo(b.key));
+    _snapshot = TrackerSnapshot(
+      project: snapshot.project,
+      repositoryIndex: repositoryIndex,
+      issues: indexedUpdatedIssues,
+    );
+    return indexedUpdatedIssues.singleWhere(
+      (candidate) => candidate.key == currentIssue.key,
+    );
   }
 
   @override
@@ -1043,6 +1151,12 @@ class DemoTrackStateRepository implements TrackStateRepository {
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
       _filterIssues(_snapshot.issues, jql);
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Demo repository is read-only and cannot archive issues.',
+      );
 
   @override
   Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>

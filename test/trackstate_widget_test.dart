@@ -152,27 +152,30 @@ void main() {
     }
   });
 
-  testWidgets('create issue form renders configured custom fields in local mode', (
-    tester,
-  ) async {
-    final semantics = tester.ensureSemantics();
-    final screen = defaultTestingDependencies.createTrackStateAppScreen(tester);
-    try {
-      await screen.pump(const _CustomCreateFieldsLocalRuntimeRepository());
-
-      final createIssueSection = await screen.openCreateIssueFlow();
-      await screen.expectCreateIssueFormVisible(
-        createIssueSection: createIssueSection,
+  testWidgets(
+    'create issue form renders configured custom fields in local mode',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final screen = defaultTestingDependencies.createTrackStateAppScreen(
+        tester,
       );
+      try {
+        await screen.pump(const _CustomCreateFieldsLocalRuntimeRepository());
 
-      expect(await screen.isTextFieldVisible('Solution'), isTrue);
-      expect(await screen.isTextFieldVisible('Acceptance Criteria'), isTrue);
-      expect(await screen.isTextFieldVisible('Diagrams'), isTrue);
-    } finally {
-      screen.resetView();
-      semantics.dispose();
-    }
-  });
+        final createIssueSection = await screen.openCreateIssueFlow();
+        await screen.expectCreateIssueFormVisible(
+          createIssueSection: createIssueSection,
+        );
+
+        expect(await screen.isTextFieldVisible('Solution'), isTrue);
+        expect(await screen.isTextFieldVisible('Acceptance Criteria'), isTrue);
+        expect(await screen.isTextFieldVisible('Diagrams'), isTrue);
+      } finally {
+        screen.resetView();
+        semantics.dispose();
+      }
+    },
+  );
 
   testWidgets('save failure banner exposes a dismiss action in local mode', (
     tester,
@@ -232,6 +235,12 @@ class _LocalRuntimeRepository implements TrackStateRepository {
       _demoRepository.searchIssues(jql);
 
   @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Local runtime widget repository does not support issue archiving.',
+      );
+
+  @override
   Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
       throw const TrackStateRepositoryException(
         'Local runtime widget repository does not support issue deletion.',
@@ -284,6 +293,14 @@ class _FailingLocalRuntimeRepository implements TrackStateRepository {
       _demoRepository.searchIssues(jql);
 
   @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async {
+    throw const TrackStateRepositoryException(
+      'Cannot archive DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
+    );
+  }
+
+  @override
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
@@ -321,7 +338,8 @@ class _FailingLocalRuntimeRepository implements TrackStateRepository {
   ) async => issue.copyWith(status: status, updatedLabel: 'just now');
 }
 
-class _CustomCreateFieldsLocalRuntimeRepository implements TrackStateRepository {
+class _CustomCreateFieldsLocalRuntimeRepository
+    implements TrackStateRepository {
   const _CustomCreateFieldsLocalRuntimeRepository();
 
   @override
@@ -398,10 +416,18 @@ class _CustomCreateFieldsLocalRuntimeRepository implements TrackStateRepository 
       (await loadSnapshot()).issues;
 
   @override
-  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
-      throw const TrackStateRepositoryException(
-        'Custom create-field widget repository does not support issue deletion.',
-      );
+  Future<TrackStateIssue> archiveIssue(
+    TrackStateIssue issue,
+  ) async => throw const TrackStateRepositoryException(
+    'Custom create-field widget repository does not support issue archiving.',
+  );
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(
+    TrackStateIssue issue,
+  ) async => throw const TrackStateRepositoryException(
+    'Custom create-field widget repository does not support issue deletion.',
+  );
 
   @override
   Future<TrackStateIssue> createIssue({
