@@ -148,11 +148,29 @@ abstract class AppLocalizations {
   /// **'Create issue'**
   String get createIssue;
 
+  /// No description provided for @edit.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get edit;
+
+  /// No description provided for @save.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get save;
+
   /// No description provided for @transition.
   ///
   /// In en, this message translates to:
   /// **'Transition'**
   String get transition;
+
+  /// No description provided for @issueDetailReadOnlyMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Write access is required to edit this issue or change its status.'**
+  String get issueDetailReadOnlyMessage;
 
   /// No description provided for @syncStatus.
   ///
@@ -459,6 +477,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'GitHub connection failed: {error}'**
   String githubConnectionFailed(String error);
+
+  /// No description provided for @saveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Save failed: {error}'**
+  String saveFailed(String error);
 
   /// No description provided for @localGitMoveCommitted.
   ///

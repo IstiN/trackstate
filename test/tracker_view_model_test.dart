@@ -1,8 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.dart';
+
+import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
 
 void main() {
   setUp(() {
@@ -75,6 +77,37 @@ void main() {
       expect(viewModel.message?.kind, TrackerMessageKind.localGitMoveCommitted);
     },
   );
+
+  test(
+    'view model reacts to live provider session capability downgrades',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final repository = ReactiveIssueDetailTrackStateRepository();
+      final viewModel = TrackerViewModel(repository: repository);
+      var notificationCount = 0;
+      viewModel.addListener(() {
+        notificationCount += 1;
+      });
+
+      await viewModel.load();
+
+      expect(viewModel.hasReadOnlySession, isFalse);
+
+      notificationCount = 0;
+      repository.synchronizeSessionToReadOnly();
+
+      expect(viewModel.hasReadOnlySession, isTrue);
+      expect(
+        notificationCount,
+        greaterThan(0),
+        reason:
+            'Expected the view model to notify listeners when the active provider session becomes read-only.',
+      );
+      viewModel.dispose();
+    },
+  );
 }
 
 class _LocalRuntimeRepository implements TrackStateRepository {
@@ -105,6 +138,21 @@ class _LocalRuntimeRepository implements TrackStateRepository {
       throw const TrackStateRepositoryException(
         'Local runtime view-model repository does not support issue deletion.',
       );
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+  }) async {
+    throw UnimplementedError('Issue creation is not implemented.');
+  }
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async =>
+      issue.copyWith(description: description.trim(), updatedLabel: 'just now');
 
   @override
   Future<TrackStateIssue> updateIssueStatus(

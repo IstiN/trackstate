@@ -36,7 +36,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get createIssue => 'Create issue';
 
   @override
+  String get edit => 'Edit';
+
+  @override
+  String get save => 'Save';
+
+  @override
   String get transition => 'Transition';
+
+  @override
+  String get issueDetailReadOnlyMessage =>
+      'Write access is required to edit this issue or change its status.';
 
   @override
   String get syncStatus => 'Synced with Git';
@@ -197,6 +207,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String githubConnectionFailed(String error) {
     return 'GitHub connection failed: $error';
+  }
+
+  @override
+  String saveFailed(String error) {
+    return 'Save failed: $error';
   }
 
   @override

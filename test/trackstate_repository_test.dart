@@ -63,6 +63,47 @@ void main() {
   });
 
   test(
+    'demo repository creates the first issue under the project root path when no issue paths exist yet',
+    () async {
+      const repository = DemoTrackStateRepository(
+        snapshot: TrackerSnapshot(
+          project: ProjectConfig(
+            key: 'DEMO',
+            name: 'Demo Project',
+            repository: 'demo/repository',
+            branch: 'main',
+            defaultLocale: 'en',
+            issueTypeDefinitions: [
+              TrackStateConfigEntry(id: 'story', name: 'Story'),
+            ],
+            statusDefinitions: [TrackStateConfigEntry(id: 'todo', name: 'To Do')],
+            fieldDefinitions: [
+              TrackStateFieldDefinition(
+                id: 'summary',
+                name: 'Summary',
+                type: 'string',
+                required: true,
+              ),
+            ],
+            priorityDefinitions: [
+              TrackStateConfigEntry(id: 'medium', name: 'Medium'),
+            ],
+          ),
+          issues: [],
+        ),
+      );
+
+      final created = await repository.createIssue(
+        summary: 'First demo issue',
+        description: 'Created in an empty project snapshot.',
+      );
+
+      expect(created.key, 'DEMO-1');
+      expect(created.storagePath, 'DEMO/DEMO-1/main.md');
+    },
+  );
+
+  test(
     'setup repository loads indexes, comments, links, attachments, tombstones, and localized labels',
     () async {
       final repository = _mockSetupRepository(
@@ -291,6 +332,9 @@ This comment demonstrates markdown-backed collaboration history.
       final doneIssue = snapshot.issues.firstWhere(
         (entry) => entry.key == 'DEMO-4',
       );
+      final epicIssue = snapshot.issues.firstWhere(
+        (entry) => entry.key == 'DEMO-1',
+      );
 
       expect(snapshot.project.fieldLabel('storyPoints'), 'Story Points');
       expect(snapshot.project.resolutionLabel('done'), 'Done');
@@ -306,6 +350,7 @@ This comment demonstrates markdown-backed collaboration history.
       expect(boardIssue.watchers, ['demo-admin', 'demo-user']);
       expect(boardIssue.customFields['storyPoints'], 5);
       expect(boardIssue.customFields['releaseTrain'], ['web', 'mobile']);
+      expect(epicIssue.customFields['created'], '2026-05-05T00:00:00Z');
       expect(boardIssue.links.single.targetKey, 'DEMO-4');
       expect(boardIssue.attachments.single.name, 'board-preview.svg');
       expect(doneIssue.statusId, 'done');
@@ -436,6 +481,79 @@ Machine ids should survive parsing.
       expect(issue.statusId, 'building');
       expect(issue.priority, IssuePriority.high);
       expect(issue.priorityId, 'p1');
+    },
+  );
+
+  test(
+    'setup repository preserves inline customFields while resolving canonical ids',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+            {'id': 'done', 'name': 'Done'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+            {
+              'id': 'field_101',
+              'name': 'Custom Field 101',
+              'type': 'string',
+              'required': false,
+            },
+            {
+              'id': 'priority',
+              'name': 'Priority',
+              'type': 'option',
+              'required': false,
+            },
+          ]),
+          'DEMO/config/priorities.json': jsonEncode([
+            {'id': 'high', 'name': 'High'},
+          ]),
+          'DEMO/config/versions.json': jsonEncode([]),
+          'DEMO/config/components.json': jsonEncode([]),
+          'DEMO/DEMO-63/main.md': '''
+---
+key: DEMO-63
+project: DEMO
+issueType: story
+status: done
+priority: high
+summary: Inline custom fields issue
+assignee: qa-user
+reporter: qa-admin
+customFields: { "field_101": "value" }
+updated: 2026-05-07T00:00:00Z
+---
+
+# Description
+
+Created from inline frontmatter custom fields.
+''',
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot();
+      final issue = snapshot.issues.single;
+
+      expect(issue.customFields['field_101'], 'value');
+      expect(issue.status, IssueStatus.done);
+      expect(issue.statusId, 'done');
+      expect(issue.priority, IssuePriority.high);
+      expect(issue.priorityId, 'high');
     },
   );
 

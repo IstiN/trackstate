@@ -31,6 +31,21 @@ class LocalRuntimeRepository implements TrackStateRepository {
       );
 
   @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+  }) async {
+    throw UnimplementedError('Issue creation is not implemented.');
+  }
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async =>
+      issue.copyWith(description: description.trim(), updatedLabel: 'just now');
+
+  @override
   Future<TrackStateIssue> updateIssueStatus(
     TrackStateIssue issue,
     IssueStatus status,

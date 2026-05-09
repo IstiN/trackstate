@@ -59,9 +59,20 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
   Future<TrackerSnapshot> loadSnapshot() async => snapshot;
 
   @override
-  Future<List<TrackStateIssue>> searchIssues(String jql) {
-    return repository.searchIssues(jql);
-  }
+  Future<List<TrackStateIssue>> searchIssues(String jql) =>
+      repository.searchIssues(jql);
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+  }) => repository.createIssue(summary: summary, description: description);
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) => repository.updateIssueDescription(issue, description);
 
   @override
   Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) {
@@ -72,7 +83,5 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
   Future<TrackStateIssue> updateIssueStatus(
     TrackStateIssue issue,
     IssueStatus status,
-  ) {
-    return repository.updateIssueStatus(issue, status);
-  }
+  ) => repository.updateIssueStatus(issue, status);
 }
