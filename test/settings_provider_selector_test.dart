@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -171,6 +173,73 @@ void main() {
               .text,
           isEmpty,
         );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'failed Local Git auto-apply can retry the same configuration without edits',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      Finder field(String label) => find.widgetWithText(TextFormField, label);
+
+      var openAttempts = 0;
+      Object? capturedError;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: const DemoTrackStateRepository(),
+            openLocalRepository:
+                ({
+                  required String repositoryPath,
+                  required String writeBranch,
+                }) async {
+                  openAttempts += 1;
+                  if (openAttempts == 1) {
+                    throw StateError(
+                      'Simulated Local Git open failure for $repositoryPath',
+                    );
+                  }
+                  return const DemoTrackStateRepository();
+                },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+        await tester.tap(find.bySemanticsLabel(RegExp('Local Git')).first);
+        await tester.pumpAndSettle();
+
+        await tester.enterText(field('Repository Path'), '/tmp/retryable-repo');
+        await tester.enterText(field('Write Branch'), 'main');
+        await runZonedGuarded(
+          () async {
+            FocusManager.instance.primaryFocus?.unfocus();
+            await tester.pump();
+          },
+          (error, _) {
+            capturedError = error;
+          },
+        );
+        expect(capturedError, isA<StateError>());
+        expect(openAttempts, 1);
+
+        await tester.tap(field('Repository Path'));
+        await tester.pump();
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pumpAndSettle();
+
+        expect(openAttempts, 2);
+        expect(find.bySemanticsLabel(RegExp('Local Git')), findsWidgets);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
