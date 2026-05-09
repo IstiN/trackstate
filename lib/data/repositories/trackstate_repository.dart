@@ -326,91 +326,101 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       orElse: () => issue,
     );
 
-    final writeBranch = await _provider.resolveWriteBranch();
-    final tree = await _provider.listTree(ref: writeBranch);
-    final blobPaths = tree
-        .where((entry) => entry.type == 'blob')
-        .map((entry) => entry.path)
-        .toSet();
-    final projectRoot = currentIssue.storagePath.split('/').first;
-    if (projectRoot.isEmpty) {
-      throw const TrackStateRepositoryException(
-        'Could not resolve the project root for the issue being archived.',
-      );
-    }
-    if (!blobPaths.contains(currentIssue.storagePath)) {
-      throw TrackStateRepositoryException(
-        'Could not find repository artifacts for ${currentIssue.key}.',
-      );
-    }
+    try {
+      final writeBranch = await _provider.resolveWriteBranch();
+      final tree = await _provider.listTree(ref: writeBranch);
+      final blobPaths = tree
+          .where((entry) => entry.type == 'blob')
+          .map((entry) => entry.path)
+          .toSet();
+      final projectRoot = currentIssue.storagePath.split('/').first;
+      if (projectRoot.isEmpty) {
+        throw const TrackStateRepositoryException(
+          'Could not resolve the project root for the issue being archived.',
+        );
+      }
+      if (!blobPaths.contains(currentIssue.storagePath)) {
+        throw TrackStateRepositoryException(
+          'Could not find repository artifacts for ${currentIssue.key}.',
+        );
+      }
 
-    final issueFile = await _provider.readTextFile(
-      currentIssue.storagePath,
-      ref: writeBranch,
-    );
-    final updatedMarkdown = _replaceFrontmatterValue(
-      issueFile.content,
-      'archived',
-      'true',
-    );
-    final updatedIssues = [
-      for (final candidate in snapshot.issues)
-        if (candidate.key == currentIssue.key)
-          candidate.copyWith(
-            rawMarkdown: updatedMarkdown,
-            updatedLabel: 'just now',
-            isArchived: true,
-          )
-        else
-          candidate,
-    ]..sort((a, b) => a.key.compareTo(b.key));
-    final repositoryIndex = _deriveRepositoryIndex(
-      updatedIssues,
-      snapshot.repositoryIndex.deleted,
-    );
-    final issuesIndexPath = _joinPath(
-      projectRoot,
-      '.trackstate/index/issues.json',
-    );
+      final issueFile = await _provider.readTextFile(
+        currentIssue.storagePath,
+        ref: writeBranch,
+      );
+      final updatedMarkdown = _replaceFrontmatterValue(
+        issueFile.content,
+        'archived',
+        'true',
+      );
+      final updatedIssues = [
+        for (final candidate in snapshot.issues)
+          if (candidate.key == currentIssue.key)
+            candidate.copyWith(
+              rawMarkdown: updatedMarkdown,
+              updatedLabel: 'just now',
+              isArchived: true,
+            )
+          else
+            candidate,
+      ]..sort((a, b) => a.key.compareTo(b.key));
+      final repositoryIndex = _deriveRepositoryIndex(
+        updatedIssues,
+        snapshot.repositoryIndex.deleted,
+      );
+      final issuesIndexPath = _joinPath(
+        projectRoot,
+        '.trackstate/index/issues.json',
+      );
 
-    await mutator.applyFileChanges(
-      RepositoryFileChangeRequest(
-        branch: writeBranch,
-        message: 'Archive ${currentIssue.key}',
-        changes: [
-          RepositoryTextFileChange(
-            path: currentIssue.storagePath,
-            content: updatedMarkdown,
-            expectedRevision: issueFile.revision,
-          ),
-          RepositoryTextFileChange(
-            path: issuesIndexPath,
-            content:
-                '${jsonEncode(_repositoryIndexEntriesJson(repositoryIndex.entries))}\n',
-            expectedRevision: await _existingRevision(
-              path: issuesIndexPath,
-              ref: writeBranch,
-              blobPaths: blobPaths,
+      await mutator.applyFileChanges(
+        RepositoryFileChangeRequest(
+          branch: writeBranch,
+          message: 'Archive ${currentIssue.key}',
+          changes: [
+            RepositoryTextFileChange(
+              path: currentIssue.storagePath,
+              content: updatedMarkdown,
+              expectedRevision: issueFile.revision,
             ),
-          ),
-        ],
-      ),
-    );
-
-    final indexedUpdatedIssues = [
-      for (final updatedIssue in updatedIssues)
-        updatedIssue.withRepositoryIndex(
-          repositoryIndex.entryForKey(updatedIssue.key),
+            RepositoryTextFileChange(
+              path: issuesIndexPath,
+              content:
+                  '${jsonEncode(_repositoryIndexEntriesJson(repositoryIndex.entries))}\n',
+              expectedRevision: await _existingRevision(
+                path: issuesIndexPath,
+                ref: writeBranch,
+                blobPaths: blobPaths,
+              ),
+            ),
+          ],
         ),
-    ]..sort((a, b) => a.key.compareTo(b.key));
-    _snapshot = TrackerSnapshot(
-      project: snapshot.project,
-      repositoryIndex: repositoryIndex,
-      issues: indexedUpdatedIssues,
-    );
-    return indexedUpdatedIssues.singleWhere(
-      (candidate) => candidate.key == currentIssue.key,
-    );
+      );
+
+      final indexedUpdatedIssues = [
+        for (final updatedIssue in updatedIssues)
+          updatedIssue.withRepositoryIndex(
+            repositoryIndex.entryForKey(updatedIssue.key),
+          ),
+      ]..sort((a, b) => a.key.compareTo(b.key));
+      _snapshot = TrackerSnapshot(
+        project: snapshot.project,
+        repositoryIndex: repositoryIndex,
+        issues: indexedUpdatedIssues,
+      );
+      return indexedUpdatedIssues.singleWhere(
+        (candidate) => candidate.key == currentIssue.key,
+      );
+    } on TrackStateProviderException catch (error) {
+      if (error is TrackStateRepositoryException) {
+        rethrow;
+      }
+      throw TrackStateRepositoryException(
+        'Could not archive ${currentIssue.key} because the repository provider '
+        'failed while applying the archive change.',
+      );
+    }
   }
 
   @override
