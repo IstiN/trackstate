@@ -8,6 +8,8 @@ import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
+import '../testing/fixtures/repositories/ts163_archive_provider_failure_fixture.dart';
+
 void main() {
   test(
     'local repository loads issues and commits status updates with git',
@@ -336,6 +338,23 @@ void main() {
     },
   );
 
+  test(
+    'local repository maps archive provider failures to a sanitized repository exception',
+    () async {
+      final fixture = await Ts163ArchiveProviderFailureFixture.create();
+      addTearDown(fixture.dispose);
+
+      final observation = await fixture.archiveIssueViaRepositoryService();
+
+      expect(observation.errorType, 'TrackStateRepositoryException');
+      expect(observation.errorMessage, isNot(contains('Git command failed')));
+      expect(observation.errorMessage, isNot(contains('fatal:')));
+      expect(observation.errorMessage, isNot(contains('.git/index.lock')));
+      expect(observation.visibleIssueSearchResults.single.isArchived, isFalse);
+      expect(observation.forcedArchiveCommitAttempts, 1);
+    },
+  );
+
   test('local repository persists create-form custom fields in main.md', () async {
     final repo = await _createLocalRepository();
     addTearDown(() => repo.delete(recursive: true));
@@ -529,7 +548,12 @@ Loaded from local git.
   await _writeFile(directory, 'attachments/screenshot.png', 'binary-content');
 
   await _git(directory.path, ['init', '-b', 'main']);
-  await _git(directory.path, ['config', '--local', 'user.name', 'Local Tester']);
+  await _git(directory.path, [
+    'config',
+    '--local',
+    'user.name',
+    'Local Tester',
+  ]);
   await _git(directory.path, [
     'config',
     '--local',
