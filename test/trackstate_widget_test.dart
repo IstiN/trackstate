@@ -152,6 +152,60 @@ void main() {
     }
   });
 
+  testWidgets(
+    'local runtime exposes Create issue in dashboard, board, search, and hierarchy',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      Future<void> expectCreateIssueFlowForSection(String sectionLabel) async {
+        await tester.tap(find.bySemanticsLabel(RegExp(sectionLabel)).first);
+        await tester.pumpAndSettle();
+
+        final createIssue = find.bySemanticsLabel(RegExp('Create issue'));
+        expect(
+          createIssue,
+          findsWidgets,
+          reason:
+              'Expected $sectionLabel to expose a reachable Create issue entry point in Local Git mode.',
+        );
+
+        await tester.tap(createIssue.first);
+        await tester.pumpAndSettle();
+
+        expect(find.bySemanticsLabel(RegExp('Summary')), findsWidgets);
+        expect(find.bySemanticsLabel(RegExp('Description')), findsWidgets);
+        expect(find.bySemanticsLabel(RegExp('Save')), findsWidgets);
+        expect(find.bySemanticsLabel(RegExp('Cancel')), findsWidgets);
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Cancel')).first);
+        await tester.pumpAndSettle();
+        expect(find.bySemanticsLabel(RegExp('Summary')), findsNothing);
+      }
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(repository: _LocalRuntimeRepository()),
+        );
+        await tester.pumpAndSettle();
+
+        for (final section in const [
+          'Dashboard',
+          'Board',
+          'JQL Search',
+          'Hierarchy',
+        ]) {
+          await expectCreateIssueFlowForSection(section);
+        }
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
   testWidgets('save failure banner exposes a dismiss action in local mode', (
     tester,
   ) async {

@@ -282,6 +282,9 @@ class _TopBar extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
     final repositoryAccessLabel = _repositoryAccessLabel(l10n, viewModel);
+    final openCreateIssue = viewModel.hasReadOnlySession || viewModel.isSaving
+        ? null
+        : () => _showCreateIssueDialog(context, viewModel);
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 12, 12, 6),
       child: Row(
@@ -328,10 +331,23 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: 12),
           if (compact)
             _IconButtonSurface(
+              label: l10n.createIssue,
+              glyph: TrackStateIconGlyph.plus,
+              onPressed: openCreateIssue,
+            )
+          else
+            _PrimaryButton(
+              label: l10n.createIssue,
+              icon: TrackStateIconGlyph.plus,
+              onPressed: openCreateIssue,
+            ),
+          const SizedBox(width: 8),
+          if (compact)
+            _IconButtonSurface(
               label: repositoryAccessLabel,
               glyph: TrackStateIconGlyph.gitBranch,
               onPressed: viewModel.isSaving
-                  ? () {}
+                  ? null
                   : () => _showRepositoryAccessDialog(context, viewModel),
             )
           else
@@ -339,7 +355,7 @@ class _TopBar extends StatelessWidget {
               label: repositoryAccessLabel,
               icon: TrackStateIconGlyph.gitBranch,
               onPressed: viewModel.isSaving
-                  ? () {}
+                  ? null
                   : () => _showRepositoryAccessDialog(context, viewModel),
             ),
           const SizedBox(width: 8),
@@ -407,6 +423,16 @@ class _TopBar extends StatelessWidget {
       ),
     );
   }
+}
+
+Future<void> _showCreateIssueDialog(
+  BuildContext context,
+  TrackerViewModel viewModel,
+) async {
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => _CreateIssueDialog(viewModel: viewModel),
+  );
 }
 
 Future<void> _showRepositoryAccessDialog(
@@ -926,18 +952,6 @@ class _SearchAndDetailState extends State<_SearchAndDetail> {
                 title: l10n.jqlSearch,
                 subtitle: l10n.issueCount(viewModel.searchResults.length),
               ),
-            ),
-            const SizedBox(width: 12),
-            _PrimaryButton(
-              label: l10n.createIssue,
-              icon: TrackStateIconGlyph.plus,
-              onPressed: viewModel.hasReadOnlySession || viewModel.isSaving
-                  ? null
-                  : () {
-                      setState(() {
-                        _isCreating = !_isCreating;
-                      });
-                    },
             ),
           ],
         ),
@@ -2146,13 +2160,15 @@ class _IconButtonSurface extends StatelessWidget {
 
   final String label;
   final TrackStateIconGlyph glyph;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final enabled = onPressed != null;
     return Semantics(
       button: true,
+      enabled: enabled,
       label: label,
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
@@ -2164,7 +2180,130 @@ class _IconButtonSurface extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: colors.border),
           ),
-          child: TrackStateIcon(glyph, color: colors.text, size: 18),
+          foregroundDecoration: enabled
+              ? null
+              : BoxDecoration(
+                  color: colors.page.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+          child: TrackStateIcon(
+            glyph,
+            color: enabled ? colors.text : colors.muted,
+            size: 18,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CreateIssueDialog extends StatefulWidget {
+  const _CreateIssueDialog({required this.viewModel});
+
+  final TrackerViewModel viewModel;
+
+  @override
+  State<_CreateIssueDialog> createState() => _CreateIssueDialogState();
+}
+
+class _CreateIssueDialogState extends State<_CreateIssueDialog> {
+  late final TextEditingController _summaryController;
+  late final TextEditingController _descriptionController;
+
+  @override
+  void initState() {
+    super.initState();
+    _summaryController = TextEditingController();
+    _descriptionController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _summaryController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitCreateIssue() async {
+    final success = await widget.viewModel.createIssue(
+      summary: _summaryController.text,
+      description: _descriptionController.text,
+    );
+    if (!mounted || !success) {
+      return;
+    }
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final summaryLabel =
+        widget.viewModel.project?.fieldLabel('summary') ?? 'Summary';
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: ListenableBuilder(
+          listenable: widget.viewModel,
+          builder: (context, _) {
+            final canSubmit =
+                !widget.viewModel.hasReadOnlySession &&
+                !widget.viewModel.isSaving;
+            return _SurfaceCard(
+              semanticLabel: l10n.createIssue,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _SectionTitle(l10n.createIssue),
+                  const SizedBox(height: 12),
+                  Semantics(
+                    label: summaryLabel,
+                    textField: true,
+                    child: TextField(
+                      controller: _summaryController,
+                      enabled: !widget.viewModel.isSaving,
+                      decoration: InputDecoration(labelText: summaryLabel),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Semantics(
+                    label: l10n.description,
+                    textField: true,
+                    child: TextField(
+                      controller: _descriptionController,
+                      minLines: 3,
+                      maxLines: null,
+                      enabled: !widget.viewModel.isSaving,
+                      decoration: InputDecoration(
+                        labelText: l10n.description,
+                        alignLabelWithHint: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _IssueDetailActionButton(
+                        label: l10n.save,
+                        emphasized: true,
+                        onPressed: canSubmit ? _submitCreateIssue : null,
+                      ),
+                      _IssueDetailActionButton(
+                        label: l10n.cancel,
+                        onPressed: widget.viewModel.isSaving
+                            ? null
+                            : () => Navigator.of(context).pop(),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
