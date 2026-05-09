@@ -5,9 +5,13 @@ import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 class Ts136LegacyDeletedIndexFixture {
-  Ts136LegacyDeletedIndexFixture._({required this.directory});
+  Ts136LegacyDeletedIndexFixture._({
+    required this.directory,
+    required this.seedLegacyDeletedIndex,
+  });
 
   final Directory directory;
+  final bool seedLegacyDeletedIndex;
 
   static const deletedIssueKey = 'TRACK-777';
   static const survivingIssueKey = 'TRACK-776';
@@ -24,11 +28,17 @@ class Ts136LegacyDeletedIndexFixture {
 
   String get repositoryPath => directory.path;
 
-  static Future<Ts136LegacyDeletedIndexFixture> create() async {
+  static Future<Ts136LegacyDeletedIndexFixture> create({
+    bool seedLegacyDeletedIndex = true,
+    String tempDirectoryPrefix = 'trackstate-ts-136-',
+  }) async {
     final directory = await Directory.systemTemp.createTemp(
-      'trackstate-ts-136-',
+      tempDirectoryPrefix,
     );
-    final fixture = Ts136LegacyDeletedIndexFixture._(directory: directory);
+    final fixture = Ts136LegacyDeletedIndexFixture._(
+      directory: directory,
+      seedLegacyDeletedIndex: seedLegacyDeletedIndex,
+    );
     await fixture._seedRepository();
     return fixture;
   }
@@ -41,6 +51,10 @@ class Ts136LegacyDeletedIndexFixture {
       repositoryPath: directory.path,
     );
     final snapshot = await repository.loadSnapshot();
+    final legacyDeletedIndexFile = File(
+      '${directory.path}/$legacyDeletedIndexPath',
+    );
+    final legacyDeletedIndexExists = await legacyDeletedIndexFile.exists();
     return Ts136LegacyDeletedIndexObservation(
       snapshot: snapshot,
       deletedIssuePath: deletedIssuePath,
@@ -58,12 +72,10 @@ class Ts136LegacyDeletedIndexFixture {
       ).exists(),
       tombstoneIndexJson: const [],
       legacyDeletedIndexPath: legacyDeletedIndexPath,
-      legacyDeletedIndexExists: await File(
-        '${directory.path}/$legacyDeletedIndexPath',
-      ).exists(),
-      legacyDeletedIndexContent: await File(
-        '${directory.path}/$legacyDeletedIndexPath',
-      ).readAsString(),
+      legacyDeletedIndexExists: legacyDeletedIndexExists,
+      legacyDeletedIndexContent: legacyDeletedIndexExists
+          ? await legacyDeletedIndexFile.readAsString()
+          : null,
       deletedIssueSearchResults: List<TrackStateIssue>.unmodifiable(
         await repository.searchIssues('project = TRACK $deletedIssueKey'),
       ),
@@ -153,7 +165,9 @@ class Ts136LegacyDeletedIndexFixture {
       'TRACK/config/fields.json',
       '[{"id":"summary","name":"Summary","type":"string","required":true}]\n',
     );
-    await _writeFile(legacyDeletedIndexPath, legacyDeletedIndexContent);
+    if (seedLegacyDeletedIndex) {
+      await _writeFile(legacyDeletedIndexPath, legacyDeletedIndexContent);
+    }
     await _writeFile('TRACK/$survivingIssueKey/main.md', '''
 ---
 key: $survivingIssueKey
