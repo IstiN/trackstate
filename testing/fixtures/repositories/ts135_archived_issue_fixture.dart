@@ -7,25 +7,37 @@ class Ts135ArchivedIssueFixture {
   Ts135ArchivedIssueFixture._({
     required this.directory,
     required this.initiallyArchived,
+    required this.includePreservedMetadata,
   });
 
   final Directory directory;
   final bool initiallyArchived;
+  final bool includePreservedMetadata;
 
   static const archivedIssueKey = 'TRACK-555';
   static const archivedIssuePath = 'TRACK/$archivedIssueKey/main.md';
   static const archivedIssueSummary = 'Archive target issue';
   static const siblingIssueKey = 'TRACK-556';
+  static const preservedPriority = IssuePriority.high;
+  static const preservedPriorityId = 'high';
+  static const preservedComponents = ['tracker-core', 'automation'];
+  static const preservedFixVersionIds = ['2026.05', '2026.06'];
 
   static Future<Ts135ArchivedIssueFixture> create({
     bool initiallyArchived = false,
+    bool includePreservedMetadata = false,
   }) async {
     final directory = await Directory.systemTemp.createTemp(
-      initiallyArchived ? 'trackstate-ts-152-' : 'trackstate-ts-135-',
+      includePreservedMetadata
+          ? 'trackstate-ts-167-'
+          : initiallyArchived
+          ? 'trackstate-ts-152-'
+          : 'trackstate-ts-135-',
     );
     final fixture = Ts135ArchivedIssueFixture._(
       directory: directory,
       initiallyArchived: initiallyArchived,
+      includePreservedMetadata: includePreservedMetadata,
     );
     await fixture._seedRepository();
     return fixture;
@@ -125,13 +137,27 @@ class Ts135ArchivedIssueFixture {
       'TRACK/config/fields.json',
       '[{"id":"summary","name":"Summary","type":"string","required":true}]\n',
     );
+    if (includePreservedMetadata) {
+      await _writeFile(
+        'TRACK/config/priorities.json',
+        '[{"id":"high","name":"High"},{"id":"medium","name":"Medium"}]\n',
+      );
+      await _writeFile(
+        'TRACK/config/components.json',
+        '[{"id":"tracker-core","name":"Tracker Core"},{"id":"automation","name":"Automation"}]\n',
+      );
+      await _writeFile(
+        'TRACK/config/versions.json',
+        '[{"id":"2026.05","name":"2026.05"},{"id":"2026.06","name":"2026.06"}]\n',
+      );
+    }
     await _writeFile(archivedIssuePath, '''
 ---
 key: $archivedIssueKey
 project: TRACK
 issueType: story
 status: todo
-summary: $archivedIssueSummary
+${includePreservedMetadata ? 'priority: $preservedPriorityId\ncomponents:\n  - ${preservedComponents[0]}\n  - ${preservedComponents[1]}\nfixVersions:\n  - ${preservedFixVersionIds[0]}\n  - ${preservedFixVersionIds[1]}\n' : ''}summary: $archivedIssueSummary
 updated: 2026-05-09T07:00:00Z
 ${initiallyArchived ? 'archived: true\n' : ''}---
 
