@@ -106,6 +106,9 @@ class LocalTrackStateFixture {
   Future<String> readRepositoryFile(String relativePath) =>
       File('$repositoryPath/$relativePath').readAsString();
 
+  Future<bool> repositoryPathExists(String relativePath) =>
+      File('$repositoryPath/$relativePath').exists();
+
   Future<void> _seedRepository() async {
     await _writeFile(
       '.gitattributes',
