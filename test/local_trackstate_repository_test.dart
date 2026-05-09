@@ -136,6 +136,41 @@ void main() {
   });
 
   test(
+    'local repository rejects issue creation when the worktree is dirty',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+
+      final dirtyFile = File('${repo.path}/DEMO/DEMO-1/main.md');
+      await _writeFile(
+        repo,
+        'DEMO/DEMO-1/main.md',
+        '${await dirtyFile.readAsString()}\nDirty worktree change.\n',
+      );
+
+      await expectLater(
+        () => repository.createIssue(
+          summary: 'Dirty create candidate',
+          description: 'Should be blocked with recovery guidance.',
+        ),
+        throwsA(
+          isA<Object>().having(
+            (error) => '$error',
+            'message',
+            allOf(contains('commit'), contains('stash'), contains('clean')),
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
     'local provider rejects stale attachment writes with expected revisions',
     () async {
       final repo = await _createLocalRepository();

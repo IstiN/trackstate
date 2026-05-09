@@ -1,4 +1,4 @@
-import 'dart:ui' show CheckedState, Tristate;
+import 'dart:ui' show CheckedState;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -212,12 +212,12 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
       final flags = tester.getSemantics(finder.at(index)).flagsCollection;
       final hasSelectionState =
           flags.isChecked != CheckedState.none ||
-          flags.isSelected != Tristate.none;
+          flags.isSelected.value != null;
       if (!hasSelectionState) {
         continue;
       }
       if (flags.isChecked == CheckedState.isTrue ||
-          flags.isSelected == Tristate.isTrue) {
+          flags.isSelected.value == true) {
         return true;
       }
     }

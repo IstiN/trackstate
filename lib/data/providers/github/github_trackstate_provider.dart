@@ -196,6 +196,9 @@ class GitHubTrackStateProvider implements TrackStateProviderAdapter {
   }
 
   @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
   Future<RepositoryPermission> getPermission() async {
     final connection = _connection;
     if (connection == null) {

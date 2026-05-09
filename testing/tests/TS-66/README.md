@@ -18,13 +18,13 @@ No external credentials are required. The test creates a temporary local Git
 repository where both `TRACK-122` and `TRACK-123` start as active issues.
 
 TS-66 verifies that pre-delete state is real, then attempts to drive the delete
-through the application repository service. The current product repository
-contract still exposes only `loadSnapshot`, `searchIssues`, `connect`, and
-`updateIssueStatus`, so the test fails explicitly until a real delete API is
-available from `testing/` alone.
+through the application repository service, verifies the tombstone artifact at
+`.trackstate/tombstones/TRACK-123.json`, checks the reserved-key index at
+`.trackstate/index/tombstones.json`, and confirms that normal search results no
+longer include the deleted issue.
 
 ## Expected current output
 
 ```text
-Bad state: TS-66 requires a real repository-service delete operation, but LocalTrackStateRepository does not expose deleteIssue for TRACK-123. The current repository API only supports loadSnapshot, searchIssues, connect, and updateIssueStatus.
+00:00 +1: All tests passed!
 ```

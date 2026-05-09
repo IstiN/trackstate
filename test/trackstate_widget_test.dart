@@ -5,6 +5,8 @@ import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../testing/components/factories/testing_dependencies.dart';
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -149,6 +151,39 @@ void main() {
       tester.view.resetDevicePixelRatio();
     }
   });
+
+  testWidgets('save failure banner exposes a dismiss action in local mode', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final screen = defaultTestingDependencies.createTrackStateAppScreen(tester);
+    try {
+      await screen.pump(const _FailingLocalRuntimeRepository());
+
+      await screen.openSection('Search');
+      await screen.openIssue('TRACK-12', 'Implement Git sync service');
+      await screen.tapIssueDetailAction('TRACK-12', label: 'Edit');
+      await screen.enterIssueDescription(
+        'TRACK-12',
+        label: 'Description',
+        text: 'Updated description for dismiss regression coverage.',
+      );
+      await screen.tapIssueDetailAction('TRACK-12', label: 'Save');
+
+      await screen.expectMessageBannerContains('Save failed:');
+      await screen.expectMessageBannerContains('commit');
+      await screen.expectMessageBannerContains('stash');
+      await screen.expectMessageBannerContains('clean');
+
+      expect(
+        await screen.dismissMessageBannerContaining('Save failed:'),
+        isTrue,
+      );
+    } finally {
+      screen.resetView();
+      semantics.dispose();
+    }
+  });
 }
 
 class _LocalRuntimeRepository implements TrackStateRepository {
@@ -175,13 +210,85 @@ class _LocalRuntimeRepository implements TrackStateRepository {
       _demoRepository.searchIssues(jql);
 
   @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Local runtime widget repository does not support issue deletion.',
+      );
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+  }) async {
+    throw UnimplementedError('Issue creation is not implemented.');
+  }
+
+  @override
   Future<TrackStateIssue> updateIssueDescription(
     TrackStateIssue issue,
     String description,
-  ) async => issue.copyWith(
-    description: description.trim(),
-    updatedLabel: 'just now',
-  );
+  ) async =>
+      issue.copyWith(description: description.trim(), updatedLabel: 'just now');
+
+  @override
+  Future<TrackStateIssue> updateIssueStatus(
+    TrackStateIssue issue,
+    IssueStatus status,
+  ) async => issue.copyWith(status: status, updatedLabel: 'just now');
+}
+
+class _FailingLocalRuntimeRepository implements TrackStateRepository {
+  const _FailingLocalRuntimeRepository();
+
+  static const _demoRepository = DemoTrackStateRepository();
+
+  @override
+  bool get supportsGitHubAuth => false;
+
+  @override
+  bool get usesLocalPersistence => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async =>
+      const RepositoryUser(login: 'local-user', displayName: 'Local User');
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async =>
+      _demoRepository.loadSnapshot();
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) async =>
+      _demoRepository.searchIssues(jql);
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+  }) async {
+    throw const TrackStateRepositoryException(
+      'Cannot save DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
+    );
+  }
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async {
+    throw const TrackStateRepositoryException(
+      'Cannot save DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
+    );
+  }
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async {
+    throw const TrackStateRepositoryException(
+      'Cannot delete DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
+    );
+  }
 
   @override
   Future<TrackStateIssue> updateIssueStatus(

@@ -16,10 +16,13 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   final WidgetTester tester;
   final LocalGitRepositoryPort _repositoryService;
 
+  Finder get repositoryAccessButton =>
+      find.bySemanticsLabel(RegExp(r'^(Local Git|Connect GitHub|Connected)$'));
+
   Finder get localGitAccessButton => find.bySemanticsLabel(RegExp('Local Git'));
 
   Finder get topBar => find
-      .ancestor(of: localGitAccessButton.first, matching: find.byType(Row))
+      .ancestor(of: repositoryAccessButton.first, matching: find.byType(Row))
       .first;
 
   Finder get profileAvatar =>
@@ -40,6 +43,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     of: topBar,
     matching: find.bySemanticsLabel(RegExp(RegExp.escape(label))),
   );
+
+  Finder _exactSemanticsLabel(String label) =>
+      find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
 
   Finder _text(String text) => find.textContaining(text, findRichText: true);
 
@@ -62,6 +68,25 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       description: 'issue detail editor for $key',
     ),
   );
+
+  Finder _labeledTextField(String label) {
+    final decorationMatch = find.byWidgetPredicate((widget) {
+      if (widget is TextField) {
+        return widget.decoration?.labelText == label;
+      }
+      return false;
+    }, description: 'text field labeled $label');
+    if (decorationMatch.evaluate().isNotEmpty) {
+      return decorationMatch;
+    }
+    return find.descendant(
+      of: _exactSemanticsLabel(label),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is EditableText || widget is TextField,
+        description: 'editable control labeled $label',
+      ),
+    );
+  }
 
   Finder get _jqlSearchPanel => find.bySemanticsLabel(RegExp('^JQL Search\$'));
 
@@ -100,11 +125,13 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     tester.view.resetDevicePixelRatio();
   }
 
+  @override
   Future<void> openRepositoryAccess() async {
-    await tester.tap(localGitAccessButton.first);
+    await tester.tap(repositoryAccessButton.first);
     await tester.pumpAndSettle();
   }
 
+  @override
   Future<void> closeDialog(String actionLabel) async {
     await tester.tap(find.text(actionLabel).first);
     await tester.pumpAndSettle();
@@ -114,6 +141,74 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Future<void> openSection(String label) async {
     await tester.tap(find.bySemanticsLabel(RegExp(RegExp.escape(label))).first);
     await _pumpFrames();
+  }
+
+  @override
+  Future<String> openCreateIssueFlow() async {
+    const sectionsToInspect = <String>[
+      'Dashboard',
+      'Board',
+      'JQL Search',
+      'Hierarchy',
+      'Settings',
+    ];
+    final visitedSections = <String>[];
+
+    for (final section in sectionsToInspect) {
+      await openSection(section);
+      visitedSections.add(section);
+      if (await tapVisibleControl('Create issue')) {
+        return section;
+      }
+    }
+
+    fail(
+      'Could not find a production-visible "Create issue" entry point in the '
+      'Local Git runtime. Visited sections: ${visitedSections.join(', ')}. '
+      'Visible texts: ${_formatSnapshot(visibleTextsSnapshot())}. Visible '
+      'semantics: ${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
+    );
+    throw StateError('Create issue entry point search did not return.');
+  }
+
+  @override
+  Future<void> expectCreateIssueFormVisible({
+    required String createIssueSection,
+  }) async {
+    if (!await isTextFieldVisible('Summary')) {
+      fail(
+        'Opened the "Create issue" entry point from $createIssueSection, but '
+        'no visible "Summary" field was rendered. Visible texts: '
+        '${_formatSnapshot(visibleTextsSnapshot())}. Visible semantics: '
+        '${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
+      );
+    }
+  }
+
+  @override
+  Future<void> populateCreateIssueForm({
+    required String summary,
+    String? description,
+  }) async {
+    await enterLabeledTextField('Summary', text: summary);
+    if (description != null && await isTextFieldVisible('Description')) {
+      await enterLabeledTextField('Description', text: description);
+    }
+  }
+
+  @override
+  Future<void> submitCreateIssue({required String createIssueSection}) async {
+    final submittedCreate =
+        await tapVisibleControl('Create') || await tapVisibleControl('Save');
+    if (!submittedCreate) {
+      fail(
+        'Reached the "Create issue" form from $createIssueSection and '
+        'populated the visible fields, but no visible "Create" or "Save" '
+        'action was available for submission. Visible texts: '
+        '${_formatSnapshot(visibleTextsSnapshot())}. Visible semantics: '
+        '${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
+      );
+    }
   }
 
   @override
@@ -311,10 +406,141 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> isMessageBannerVisibleContaining(String text) async {
+    await tester.pump();
+    return _messageBanner(text).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<void> waitWithoutInteraction(Duration duration) async {
+    await tester.pump(duration);
+    await tester.pump();
+  }
+
+  @override
   Future<void> expectTextVisible(String text) async {
     final finder = _text(text);
     await _waitForVisible(finder);
     expect(finder, findsWidgets);
+  }
+
+  @override
+  Future<bool> isTextVisible(String text) async {
+    await tester.pump();
+    return _text(text).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<bool> isSemanticsLabelVisible(String label) async {
+    await tester.pump();
+    return _exactSemanticsLabel(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<bool> tapVisibleControl(String label) async {
+    await tester.pump();
+    final semanticsMatch = _exactSemanticsLabel(label);
+    final textMatch = find.text(label, findRichText: true);
+    final target = semanticsMatch.evaluate().isNotEmpty
+        ? semanticsMatch
+        : textMatch;
+    if (target.evaluate().isEmpty) {
+      return false;
+    }
+    await tester.ensureVisible(target.first);
+    if (label == 'Create' || label == 'Save') {
+      await tester.runAsync(() async {
+        await tester.tap(target.first, warnIfMissed: false);
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      });
+      await tester.pumpAndSettle();
+      return true;
+    }
+    await tester.tap(target.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+    return true;
+  }
+
+  @override
+  Future<bool> isTextFieldVisible(String label) async {
+    await tester.pump();
+    return _labeledTextField(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<void> enterLabeledTextField(
+    String label, {
+    required String text,
+  }) async {
+    final field = _labeledTextField(label);
+    await tester.pump();
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible text field labeled "$label", but no matching '
+        'editable control was rendered.',
+      );
+    }
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(field.first, text);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  List<String> visibleTextsSnapshot() {
+    return _textSnapshotWithin(find.byType(Scaffold));
+  }
+
+  @override
+  List<String> topBarVisibleTextsSnapshot() {
+    return _textSnapshotWithin(topBar);
+  }
+
+  List<String> _textSnapshotWithin(Finder scope) {
+    final values = <String>[];
+    for (final widget in tester.widgetList<Text>(
+      find.descendant(of: scope, matching: find.byType(Text)),
+    )) {
+      final value = widget.data?.trim();
+      if (value == null || value.isEmpty) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
+  }
+
+  String _formatSnapshot(List<String> values, {int limit = 20}) {
+    final snapshot = <String>[];
+    for (final value in values) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty || snapshot.contains(trimmed)) {
+        continue;
+      }
+      snapshot.add(trimmed);
+      if (snapshot.length == limit) {
+        break;
+      }
+    }
+    if (snapshot.isEmpty) {
+      return '<none>';
+    }
+    return snapshot.join(' | ');
+  }
+
+  @override
+  List<String> visibleSemanticsLabelsSnapshot() {
+    final values = <String>[];
+    for (final widget in tester.widgetList<Semantics>(find.byType(Semantics))) {
+      final value = widget.properties.label?.trim();
+      if (value == null || value.isEmpty) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
   }
 
   @override
@@ -328,6 +554,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     expect(profileInitialsBadge(initials), findsOneWidget);
   }
 
+  @override
   void expectProfileIdentityVisible({
     required String displayName,
     required String login,
@@ -340,6 +567,52 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     expect(profileSurfaceSemantics(login), findsOneWidget);
   }
 
+  @override
+  bool isProfileInitialsVisible(String initials) =>
+      profileInitialsBadge(initials).evaluate().isNotEmpty;
+
+  @override
+  bool isProfileTextVisible(String text) =>
+      profileSurfaceText(text).evaluate().isNotEmpty;
+
+  @override
+  bool isProfileSemanticsLabelVisible(String label) =>
+      profileSurfaceSemantics(label).evaluate().isNotEmpty;
+
+  @override
+  void expectGuestProfileSurface({
+    required String repositoryAccessLabel,
+    required String initials,
+  }) {
+    final topBarTexts = topBarVisibleTextsSnapshot();
+    expectProfileInitials(initials);
+    expect(
+      topBarTexts,
+      contains(repositoryAccessLabel),
+      reason:
+          'The guest top bar should keep the visible "$repositoryAccessLabel" '
+          'entry point when no authenticated identity is resolved.',
+    );
+    final unexpectedIdentityTexts = topBarTexts
+        .where(
+          (text) =>
+              text != repositoryAccessLabel &&
+              text != initials &&
+              text != 'Synced with Git' &&
+              !text.startsWith('project = '),
+        )
+        .toList();
+    expect(
+      unexpectedIdentityTexts,
+      isEmpty,
+      reason:
+          'Guest mode should not render a resolved profile name or login in '
+          'the top-bar profile surface. Observed top-bar texts: '
+          '${topBarTexts.join(' | ')}',
+    );
+  }
+
+  @override
   void expectLocalRuntimeDialog({
     required String repositoryPath,
     required String branch,
