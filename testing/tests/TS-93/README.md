@@ -29,7 +29,7 @@ flutter test testing/tests/TS-93/dirty_local_save_ui_responsiveness_test.dart --
 
 ## Required environment and config
 
-- Flutter 3.35.3 available on `PATH`
+- Flutter SDK available on `PATH`
 - No extra environment variables are required
 
 ## Current expected result

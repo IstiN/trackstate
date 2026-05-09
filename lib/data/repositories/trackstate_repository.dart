@@ -37,7 +37,17 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     required TrackStateProviderAdapter provider,
     this.usesLocalPersistence = false,
     this.supportsGitHubAuth = true,
-  }) : _provider = provider;
+  }) : _provider = provider,
+       _session = ProviderSession(
+         providerType: provider.providerType,
+         connectionState: ProviderConnectionState.disconnected,
+         resolvedUserIdentity: provider.repositoryLabel,
+         canRead: _restrictedPermission.canRead,
+         canWrite: _restrictedPermission.canWrite,
+         canCreateBranch: _restrictedPermission.canCreateBranch,
+         canManageAttachments: _restrictedPermission.canManageAttachments,
+         canCheckCollaborators: _restrictedPermission.canCheckCollaborators,
+       );
 
   final TrackStateProviderAdapter _provider;
   @override
@@ -75,7 +85,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       return user;
     } catch (_) {
       _syncProviderSession(
-        connectionState: ProviderConnectionState.disconnected,
+        connectionState: ProviderConnectionState.error,
         resolvedUserIdentity: _resolveUserIdentity(user),
         permission: _restrictedPermission,
       );
@@ -776,7 +786,7 @@ TrackStateIssue _parseIssue({
     components: _stringList(frontmatter['components']),
     fixVersionIds: _stringList(frontmatter['fixVersions']),
     watchers: _stringList(frontmatter['watchers']),
-    customFields: _stringObjectMap(frontmatter['customFields']),
+    customFields: _customFieldsFromFrontmatter(frontmatter),
     parentKey: _nullable(frontmatter['parent']?.toString()),
     epicKey: _nullable(frontmatter['epic']?.toString()),
     parentPath: repositoryIndexEntry?.parentPath,
@@ -973,6 +983,38 @@ List<String> _stringList(Object? value) {
 Map<String, Object?> _stringObjectMap(Object? value) {
   if (value is! Map) return const {};
   return {for (final entry in value.entries) entry.key.toString(): entry.value};
+}
+
+const Set<String> _issueFrontmatterCoreKeys = {
+  'key',
+  'project',
+  'issueType',
+  'status',
+  'priority',
+  'summary',
+  'assignee',
+  'reporter',
+  'labels',
+  'components',
+  'fixVersions',
+  'watchers',
+  'customFields',
+  'parent',
+  'epic',
+  'updated',
+  'archived',
+  'resolution',
+};
+
+Map<String, Object?> _customFieldsFromFrontmatter(
+  Map<String, Object?> frontmatter,
+) {
+  final customFields = {..._stringObjectMap(frontmatter['customFields'])};
+  for (final entry in frontmatter.entries) {
+    if (_issueFrontmatterCoreKeys.contains(entry.key)) continue;
+    customFields.putIfAbsent(entry.key, () => entry.value);
+  }
+  return customFields;
 }
 
 bool? _boolValue(Object? value) {

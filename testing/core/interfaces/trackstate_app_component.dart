@@ -45,6 +45,10 @@ abstract interface class TrackStateAppComponent {
 
   Future<bool> dismissMessageBannerContaining(String text);
 
+  Future<bool> isMessageBannerVisibleContaining(String text);
+
+  Future<void> waitWithoutInteraction(Duration duration);
+
   void expectLocalRuntimeChrome();
 
   Future<void> openRepositoryAccess();
@@ -57,10 +61,36 @@ abstract interface class TrackStateAppComponent {
     required String initials,
   });
 
+  bool isProfileInitialsVisible(String initials);
+
+  bool isProfileTextVisible(String text);
+
+  bool isProfileSemanticsLabelVisible(String label);
+
+  void expectGuestProfileSurface({
+    required String repositoryAccessLabel,
+    required String initials,
+  });
+
   void expectLocalRuntimeDialog({
     required String repositoryPath,
     required String branch,
   });
-
   Future<void> expectTextVisible(String text);
+
+  Future<bool> isTextVisible(String text);
+
+  Future<bool> isSemanticsLabelVisible(String label);
+
+  Future<bool> tapVisibleControl(String label);
+
+  Future<bool> isTextFieldVisible(String label);
+
+  Future<void> enterLabeledTextField(String label, {required String text});
+
+  List<String> visibleTextsSnapshot();
+
+  List<String> topBarVisibleTextsSnapshot();
+
+  List<String> visibleSemanticsLabelsSnapshot();
 }
