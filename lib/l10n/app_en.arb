@@ -12,7 +12,10 @@
   "settings": "Settings",
   "issueDetail": "Issue detail",
   "createIssue": "Create issue",
+  "edit": "Edit",
+  "save": "Save",
   "transition": "Transition",
+  "issueDetailReadOnlyMessage": "Write access is required to edit this issue or change its status.",
   "syncStatus": "Synced with Git",
   "searchIssues": "Search issues",
   "quickActions": "Quick actions",
@@ -82,6 +85,14 @@
   },
   "githubConnectionFailed": "GitHub connection failed: {error}",
   "@githubConnectionFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "saveFailed": "Save failed: {error}",
+  "@saveFailed": {
     "placeholders": {
       "error": {
         "type": "String"

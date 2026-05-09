@@ -1,4 +1,4 @@
-import 'dart:ui' show Tristate;
+import 'dart:ui' show PointerDeviceKind, Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -10,10 +10,16 @@ import 'package:trackstate/ui/core/trackstate_icons.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../../core/interfaces/local_git_repository_factory.dart';
+
 class SettingsScreenRobot {
-  SettingsScreenRobot(this.tester);
+  SettingsScreenRobot(
+    this.tester, {
+    LocalGitRepositoryFactory? localGitRepositoryFactory,
+  }) : _localGitRepositoryFactory = localGitRepositoryFactory;
 
   final WidgetTester tester;
+  final LocalGitRepositoryFactory? _localGitRepositoryFactory;
   static const jqlPlaceholderText =
       'project = TRACK AND status != Done ORDER BY priority DESC';
 
@@ -23,6 +29,8 @@ class SettingsScreenRobot {
   Finder get workflowCard => find.text('Workflow');
   Finder get fieldsCard => find.text('Fields');
   Finder get languageCard => find.text('Language');
+  Finder get repositoryAccessSection =>
+      find.bySemanticsLabel(RegExp('Repository access'));
   Finder get localGitTopBarControl => topBarProviderControl('Local Git');
   Finder get localGitSettingsControl => settingsProviderControl('Local Git');
   Finder get connectGitHubTopBarControl =>
@@ -31,11 +39,15 @@ class SettingsScreenRobot {
       settingsProviderControl('Connect GitHub');
   Finder get connectedTopBarControl => topBarProviderControl('Connected');
   Finder get connectedSettingsControl => settingsProviderControl('Connected');
-  Finder get localGitControl => _settingsProviderButton('Local Git');
-  Finder get connectGitHubControl => _settingsProviderButton('Connect GitHub');
-  Finder get connectedControl => _settingsProviderButton('Connected');
+  Finder get localGitControl => providerControl('Local Git');
+  Finder get connectGitHubControl => providerControl('Connect GitHub');
+  Finder get connectedControl => providerControl('Connected');
   Finder get selectedConnectedControl =>
       _filledSettingsProviderButton('Connected');
+  Finder get settingsConnectedControl => find.descendant(
+    of: repositoryAccessSection,
+    matching: find.widgetWithText(FilledButton, 'Connected'),
+  );
   Finder get searchIssuesField => find.byWidgetPredicate(
     (widget) =>
         widget is TextField &&
@@ -58,10 +70,43 @@ class SettingsScreenRobot {
     await tester.pumpAndSettle();
   }
 
+  Future<void> pumpLocalGitApp({
+    required String repositoryPath,
+    Map<String, Object> sharedPreferences = const {},
+    Widget Function(Widget child)? appWrapper,
+  }) async {
+    final localGitRepositoryFactory = _localGitRepositoryFactory;
+    if (localGitRepositoryFactory == null) {
+      throw StateError('Local Git repository factory is not configured.');
+    }
+    await pumpApp(
+      repository: await localGitRepositoryFactory.create(
+        repositoryPath: repositoryPath,
+      ),
+      sharedPreferences: sharedPreferences,
+      appWrapper: appWrapper,
+    );
+  }
+
   Future<void> openSettings() async {
     await tester.tap(settingsNavigation);
     await tester.pumpAndSettle();
   }
+
+  Finder providerControl(String label) => find.descendant(
+    of: repositoryAccessSection,
+    matching: find.ancestor(
+      of: find.text(label),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    ),
+  );
+
+  Finder configCard(String title) => _smallestByArea(
+    find.ancestor(of: find.text(title), matching: find.byType(Column)),
+  );
+
+  Finder configCardItem(String title, String item) =>
+      find.descendant(of: configCard(title), matching: find.text(item));
 
   Future<void> clearFocus() async {
     FocusManager.instance.primaryFocus?.unfocus();
@@ -79,6 +124,22 @@ class SettingsScreenRobot {
   TrackStateColors colors() {
     final context = tester.element(find.byType(Scaffold).first);
     return context.ts;
+  }
+
+  Offset centerOf(Finder finder) => tester.getCenter(finder);
+
+  Future<TestGesture> hover(Finder finder) async {
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: const Offset(-1, -1));
+    await gesture.moveTo(centerOf(finder));
+    await tester.pump();
+    return gesture;
+  }
+
+  Future<TestGesture> pressAndHold(Finder finder) async {
+    final gesture = await tester.startGesture(centerOf(finder));
+    await tester.pump();
+    return gesture;
   }
 
   Future<List<String>> collectFocusOrder({
@@ -172,6 +233,26 @@ class SettingsScreenRobot {
     throw StateError('No rendered text "$text" found within $scope');
   }
 
+  Color resolvedButtonForeground(
+    Finder scope,
+    Set<WidgetState> states, {
+    String? text,
+  }) {
+    final style = _effectiveButtonStyle(scope);
+    return style.foregroundColor?.resolve(states) ??
+        (text == null
+            ? renderedTextColor(scope)
+            : renderedTextColorWithin(scope, text));
+  }
+
+  Color resolvedButtonBackground(Finder scope, Set<WidgetState> states) {
+    final style = _effectiveButtonStyle(scope);
+    final background =
+        style.backgroundColor?.resolve(states) ?? Colors.transparent;
+    final overlay = style.overlayColor?.resolve(states) ?? Colors.transparent;
+    return Color.alphaBlend(overlay, background);
+  }
+
   Color renderedButtonBackground(Finder scope) {
     for (final element in scope.evaluate()) {
       final widget = element.widget;
@@ -224,6 +305,19 @@ class SettingsScreenRobot {
     return tester.getSemantics(finder.first).label;
   }
 
+  List<String> visibleProviderLabels(Iterable<String> candidateLabels) {
+    final rows = <({String label, double top})>[];
+    for (final label in candidateLabels) {
+      final control = providerControl(label);
+      if (control.evaluate().isEmpty) {
+        continue;
+      }
+      rows.add((label: label, top: tester.getRect(control.first).top));
+    }
+    rows.sort((left, right) => left.top.compareTo(right.top));
+    return rows.map((row) => row.label).toList();
+  }
+
   Finder topBarProviderControl(String label) =>
       _buttonControlWithText(label, requiresTrackStateIcon: true);
 
@@ -235,15 +329,6 @@ class SettingsScreenRobot {
     return find.semantics.byPredicate(
       (node) => node.id == semanticsId,
       describeMatch: (_) => 'semantics node for $finder',
-    );
-  }
-
-  Finder _settingsProviderButton(String label) {
-    return _lowestButton(
-      find.ancestor(
-        of: find.text(label),
-        matching: find.bySubtype<ButtonStyleButton>(),
-      ),
     );
   }
 
@@ -269,6 +354,25 @@ class SettingsScreenRobot {
     return buttons.at(bestIndex);
   }
 
+  Finder _smallestByArea(Finder candidates) {
+    final matches = candidates.evaluate().length;
+    if (matches == 0) {
+      return candidates;
+    }
+
+    var bestIndex = 0;
+    var bestArea = double.infinity;
+    for (var index = 0; index < matches; index++) {
+      final rect = tester.getRect(candidates.at(index));
+      final area = rect.width * rect.height;
+      if (area <= bestArea) {
+        bestArea = area;
+        bestIndex = index;
+      }
+    }
+    return candidates.at(bestIndex);
+  }
+
   List<String> visibleTexts() {
     return tester
         .widgetList<Text>(find.byType(Text))
@@ -276,6 +380,63 @@ class SettingsScreenRobot {
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .toList();
+  }
+
+  List<String> visibleConfigItems(String title) {
+    final texts = find.descendant(
+      of: configCard(title),
+      matching: find.byType(Text),
+    );
+    final values = <String>[];
+    for (final element in texts.evaluate()) {
+      final widget = element.widget as Text;
+      final value = widget.data?.trim();
+      if (value == null || value.isEmpty || value == title) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
+  }
+
+  ButtonStyle _effectiveButtonStyle(Finder scope) {
+    final element = scope.evaluate().first;
+    final widget = element.widget;
+    return switch (widget) {
+      FilledButton button => _mergedButtonStyle(
+        style: button.style,
+        theme: button.themeStyleOf(element),
+        defaults: button.defaultStyleOf(element),
+      ),
+      OutlinedButton button => _mergedButtonStyle(
+        style: button.style,
+        theme: button.themeStyleOf(element),
+        defaults: button.defaultStyleOf(element),
+      ),
+      TextButton button => _mergedButtonStyle(
+        style: button.style,
+        theme: button.themeStyleOf(element),
+        defaults: button.defaultStyleOf(element),
+      ),
+      ElevatedButton button => _mergedButtonStyle(
+        style: button.style,
+        theme: button.themeStyleOf(element),
+        defaults: button.defaultStyleOf(element),
+      ),
+      _ => throw StateError(
+        'No button style available for ${widget.runtimeType}',
+      ),
+    };
+  }
+
+  ButtonStyle _mergedButtonStyle({
+    required ButtonStyle? style,
+    required ButtonStyle? theme,
+    required ButtonStyle? defaults,
+  }) {
+    return (style?.merge(theme) ?? theme ?? const ButtonStyle()).merge(
+      defaults,
+    );
   }
 
   Finder _buttonControlWithText(

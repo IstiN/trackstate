@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../data/providers/trackstate_provider.dart';
 import '../../../../data/repositories/trackstate_repository.dart';
 import '../../../../data/services/trackstate_auth_store.dart';
 import '../../../../domain/models/trackstate_models.dart';
@@ -14,6 +15,7 @@ enum TrackerMessageKind {
   tokenEmpty,
   githubConnectedDragCards,
   githubConnectionFailed,
+  issueSaveFailed,
   localGitMoveCommitted,
   githubMoveCommitted,
   movePendingGitHubPersistence,
@@ -78,6 +80,12 @@ class TrackerMessage {
         tone: TrackerMessageTone.error,
         error: '$error',
       );
+
+  factory TrackerMessage.issueSaveFailed(Object error) => TrackerMessage._(
+    TrackerMessageKind.issueSaveFailed,
+    tone: TrackerMessageTone.error,
+    error: '$error',
+  );
 
   factory TrackerMessage.localGitMoveCommitted({
     required String issueKey,
@@ -186,6 +194,17 @@ class TrackerViewModel extends ChangeNotifier {
   RepositoryUser? get connectedUser => _connectedUser;
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
   bool get supportsGitHubAuth => _repository.supportsGitHubAuth;
+  ProviderSession? get providerSession => switch (_repository) {
+    ProviderBackedTrackStateRepository repository => repository.session,
+    _ => null,
+  };
+  bool get hasReadOnlySession {
+    final session = providerSession;
+    return session != null &&
+        session.connectionState == ProviderConnectionState.connected &&
+        session.canRead &&
+        !session.canWrite;
+  }
   RepositoryAccessState get repositoryAccessState => usesLocalPersistence
       ? RepositoryAccessState.localGit
       : _isConnected
@@ -269,6 +288,14 @@ class TrackerViewModel extends ChangeNotifier {
     _themePreference = _themePreference == ThemePreference.light
         ? ThemePreference.dark
         : ThemePreference.light;
+    notifyListeners();
+  }
+
+  void dismissMessage() {
+    if (_message == null) {
+      return;
+    }
+    _message = null;
     notifyListeners();
   }
 
@@ -368,6 +395,47 @@ class TrackerViewModel extends ChangeNotifier {
         orElse: () => issue,
       );
       _message = TrackerMessage.moveFailed(error);
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> saveIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async {
+    final normalizedDescription = description.trim();
+    if (normalizedDescription == issue.description.trim()) {
+      return true;
+    }
+    final snapshot = _snapshot;
+    if (snapshot == null) {
+      return false;
+    }
+    _isSaving = true;
+    _message = null;
+    notifyListeners();
+
+    try {
+      final saved = await _repository.updateIssueDescription(
+        issue,
+        normalizedDescription,
+      );
+      _snapshot = await _repository.loadSnapshot();
+      _selectedIssue = _snapshot!.issues.firstWhere(
+        (current) => current.key == saved.key,
+        orElse: () => saved,
+      );
+      _searchResults = await _repository.searchIssues(_jql);
+      return true;
+    } on Object catch (error) {
+      _message = TrackerMessage.issueSaveFailed(error);
+      _selectedIssue = snapshot.issues.firstWhere(
+        (current) => current.key == issue.key,
+        orElse: () => issue,
+      );
+      return false;
     } finally {
       _isSaving = false;
       notifyListeners();

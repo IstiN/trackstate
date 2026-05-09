@@ -4,19 +4,23 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../../core/interfaces/local_git_repository_port.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
-import '../../frameworks/flutter/trackstate_test_runtime.dart';
 
 class TrackStateAppScreen implements TrackStateAppComponent {
-  TrackStateAppScreen(this.tester);
+  TrackStateAppScreen(
+    this.tester, {
+    required LocalGitRepositoryPort repositoryService,
+  }) : _repositoryService = repositoryService;
 
   final WidgetTester tester;
+  final LocalGitRepositoryPort _repositoryService;
 
-  Finder get localGitAccessButton =>
-      find.bySemanticsLabel(RegExp('Local Git')).first;
+  Finder get localGitAccessButton => find.bySemanticsLabel(RegExp('Local Git'));
 
-  Finder get topBar =>
-      find.ancestor(of: localGitAccessButton, matching: find.byType(Row)).first;
+  Finder get topBar => find
+      .ancestor(of: localGitAccessButton.first, matching: find.byType(Row))
+      .first;
 
   Finder get profileAvatar =>
       find.descendant(of: topBar, matching: find.byType(CircleAvatar));
@@ -37,6 +41,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     matching: find.bySemanticsLabel(RegExp(RegExp.escape(label))),
   );
 
+  Finder _exactSemanticsLabel(String label) =>
+      find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
+
   Finder _text(String text) => find.textContaining(text, findRichText: true);
 
   Finder _issueDetail(String key) =>
@@ -46,8 +53,52 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     RegExp('Open ${RegExp.escape(key)} ${RegExp.escape(summary)}'),
   );
 
+  Finder _issueDetailAction(String key, String label) => find.descendant(
+    of: _issueDetail(key),
+    matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
+  );
+
+  Finder _issueDetailEditor(String key) => find.descendant(
+    of: _issueDetail(key),
+    matching: find.byWidgetPredicate(
+      (widget) => widget is EditableText || widget is TextField,
+      description: 'issue detail editor for $key',
+    ),
+  );
+
+  Finder _labeledTextField(String label) {
+    final decorationMatch = find.byWidgetPredicate((widget) {
+      if (widget is TextField) {
+        return widget.decoration?.labelText == label;
+      }
+      return false;
+    }, description: 'text field labeled $label');
+    if (decorationMatch.evaluate().isNotEmpty) {
+      return decorationMatch;
+    }
+    return find.descendant(
+      of: _exactSemanticsLabel(label),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is EditableText || widget is TextField,
+        description: 'editable control labeled $label',
+      ),
+    );
+  }
+
+  Finder get _jqlSearchPanel => find.bySemanticsLabel(RegExp('^JQL Search\$'));
+
+  Finder get _jqlSearchField => find.byType(TextField).last;
+
   Finder _statusColumn(String label) =>
       find.bySemanticsLabel(RegExp('${RegExp.escape(label)} column'));
+
+  @override
+  Future<void> pumpLocalGitApp({required String repositoryPath}) async {
+    await pump(
+      await _repositoryService.openRepository(repositoryPath: repositoryPath),
+    );
+    await _waitForVisible(localGitAccessButton);
+  }
 
   @override
   Future<void> pump(TrackStateRepository repository) async {
@@ -62,29 +113,22 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await tester.pumpWidget(
       TrackStateApp(key: UniqueKey(), repository: repository),
     );
-    await tester.pump();
+    await _pumpFrames();
   }
 
-  Future<void> pumpLocalGitApp({required String repositoryPath}) async {
-    await pump(
-      await createLocalGitTestRepository(
-        tester: tester,
-        repositoryPath: repositoryPath,
-      ),
-    );
-    await _waitForVisible(localGitAccessButton);
-  }
-
+  @override
   void resetView() {
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
   }
 
+  @override
   Future<void> openRepositoryAccess() async {
-    await tester.tap(localGitAccessButton);
+    await tester.tap(localGitAccessButton.first);
     await tester.pumpAndSettle();
   }
 
+  @override
   Future<void> closeDialog(String actionLabel) async {
     await tester.tap(find.text(actionLabel).first);
     await tester.pumpAndSettle();
@@ -93,7 +137,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<void> openSection(String label) async {
     await tester.tap(find.bySemanticsLabel(RegExp(RegExp.escape(label))).first);
-    await tester.pumpAndSettle();
+    await _pumpFrames();
   }
 
   @override
@@ -101,6 +145,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final issue = _issue(key, summary);
     await _waitForVisible(issue);
     await tester.tap(issue.first);
+    await _pumpFrames();
     await expectIssueDetailVisible(key);
   }
 
@@ -128,7 +173,36 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       await tester.pump(const Duration(milliseconds: 120));
     }
     await gesture.up();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 500)),
+    );
     await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> searchIssues(String query) async {
+    await _waitForVisible(_jqlSearchPanel);
+    await _waitForVisible(_jqlSearchField);
+    await tester.tap(_jqlSearchField.first);
+    await tester.pump();
+    await tester.enterText(_jqlSearchField.first, query);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> expectIssueSearchResultVisible(
+    String key,
+    String summary,
+  ) async {
+    final issue = _issue(key, summary);
+    await _waitForVisible(issue);
+    expect(issue, findsOneWidget);
+  }
+
+  @override
+  void expectIssueSearchResultAbsent(String key, String summary) {
+    expect(_issue(key, summary), findsNothing);
   }
 
   @override
@@ -140,12 +214,125 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> expectIssueDetailText(String key, String text) async {
+    final detail = _issueDetail(key);
     await expectIssueDetailVisible(key);
-    final match = _text(text);
+    final match = find.descendant(of: detail, matching: _text(text));
     await _waitForVisible(match);
     expect(match, findsWidgets);
   }
 
+  @override
+  Future<void> expectIssueDescriptionEditorVisible(
+    String key, {
+    required String label,
+  }) async {
+    final editor = _issueDetailEditor(key);
+    await _waitForVisible(_issueDetail(key));
+    if (editor.evaluate().isEmpty) {
+      fail(
+        'Expected issue detail $key to expose a "$label" editor for the '
+        'dirty local save flow, but no editable control was rendered.',
+      );
+    }
+    expect(editor, findsWidgets);
+  }
+
+  @override
+  Future<void> enterIssueDescription(
+    String key, {
+    required String label,
+    required String text,
+  }) async {
+    final editor = _issueDetailEditor(key);
+    await expectIssueDescriptionEditorVisible(key, label: label);
+    await tester.ensureVisible(editor.first);
+    await tester.tap(editor.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(editor.first, text);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> tapIssueDetailAction(String key, {required String label}) async {
+    final action = _issueDetailAction(key, label);
+    await _waitForVisible(_issueDetail(key));
+    if (action.evaluate().isEmpty) {
+      fail(
+        'Expected issue detail $key to expose a "$label" action for the '
+        'dirty local save flow, but no matching control was rendered.',
+      );
+    }
+    if (label == 'Save') {
+      await tester.runAsync(() async {
+        await tester.ensureVisible(action.first);
+        await tester.tap(action.first, warnIfMissed: false);
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      });
+      await tester.pumpAndSettle();
+      return;
+    }
+    await tester.ensureVisible(action.first);
+    await tester.tap(action.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> expectMessageBannerContains(String text) async {
+    final finder = _text(text);
+    await _waitForVisible(finder, timeout: const Duration(seconds: 10));
+    expect(finder, findsWidgets);
+  }
+
+  Finder _messageBanner(String text) => find.ancestor(
+    of: _text(text),
+    matching: find.byWidgetPredicate(
+      (widget) => widget is AnimatedContainer,
+      description: 'message banner containing "$text"',
+    ),
+  );
+
+  @override
+  Future<bool> dismissMessageBannerContaining(String text) async {
+    final banner = _messageBanner(text);
+    await _waitForVisible(banner, timeout: const Duration(seconds: 10));
+    final bannerScope = banner.first;
+    final dismissCandidates = <Finder>[
+      find.descendant(
+        of: bannerScope,
+        matching: find.bySemanticsLabel(
+          RegExp(r'^(Dismiss|Close|Hide|OK|Ok)$'),
+        ),
+      ),
+      find.descendant(of: bannerScope, matching: find.text('Dismiss')),
+      find.descendant(of: bannerScope, matching: find.text('Close')),
+      find.descendant(of: bannerScope, matching: find.text('Hide')),
+      find.descendant(of: bannerScope, matching: find.text('OK')),
+      find.descendant(of: bannerScope, matching: find.text('Ok')),
+      find.descendant(
+        of: bannerScope,
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is IconButton &&
+              (((widget.tooltip ?? '').toLowerCase().contains('dismiss')) ||
+                  ((widget.tooltip ?? '').toLowerCase().contains('close'))),
+          description: 'dismiss control inside the message banner',
+        ),
+      ),
+    ];
+
+    for (final candidate in dismissCandidates) {
+      if (candidate.evaluate().isEmpty) {
+        continue;
+      }
+      await tester.ensureVisible(candidate.first);
+      await tester.tap(candidate.first, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      return banner.evaluate().isEmpty;
+    }
+
+    return false;
+  }
   @override
   Future<void> expectTextVisible(String text) async {
     final finder = _text(text);
@@ -153,8 +340,99 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     expect(finder, findsWidgets);
   }
 
+  @override
+  Future<bool> isTextVisible(String text) async {
+    await tester.pump();
+    return _text(text).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<bool> isSemanticsLabelVisible(String label) async {
+    await tester.pump();
+    return _exactSemanticsLabel(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<bool> tapVisibleControl(String label) async {
+    await tester.pump();
+    final semanticsMatch = _exactSemanticsLabel(label);
+    final textMatch = find.text(label, findRichText: true);
+    final target = semanticsMatch.evaluate().isNotEmpty
+        ? semanticsMatch
+        : textMatch;
+    if (target.evaluate().isEmpty) {
+      return false;
+    }
+    await tester.ensureVisible(target.first);
+    if (label == 'Create' || label == 'Save') {
+      await tester.runAsync(() async {
+        await tester.tap(target.first, warnIfMissed: false);
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      });
+      await tester.pumpAndSettle();
+      return true;
+    }
+    await tester.tap(target.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+    return true;
+  }
+
+  @override
+  Future<bool> isTextFieldVisible(String label) async {
+    await tester.pump();
+    return _labeledTextField(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<void> enterLabeledTextField(
+    String label, {
+    required String text,
+  }) async {
+    final field = _labeledTextField(label);
+    await tester.pump();
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible text field labeled "$label", but no matching '
+        'editable control was rendered.',
+      );
+    }
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(field.first, text);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  List<String> visibleTextsSnapshot() {
+    final values = <String>[];
+    for (final widget in tester.widgetList<Text>(find.byType(Text))) {
+      final value = widget.data?.trim();
+      if (value == null || value.isEmpty) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
+  }
+
+  @override
+  List<String> visibleSemanticsLabelsSnapshot() {
+    final values = <String>[];
+    for (final widget in tester.widgetList<Semantics>(find.byType(Semantics))) {
+      final value = widget.properties.label?.trim();
+      if (value == null || value.isEmpty) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
+  }
+
+  @override
   void expectLocalRuntimeChrome() {
-    expect(localGitAccessButton, findsOneWidget);
+    expect(localGitAccessButton, findsAtLeastNWidgets(1));
     expect(find.text('Local Git'), findsOneWidget);
     expect(find.text('Connect GitHub'), findsNothing);
   }
@@ -163,6 +441,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     expect(profileInitialsBadge(initials), findsOneWidget);
   }
 
+  @override
   void expectProfileIdentityVisible({
     required String displayName,
     required String login,
@@ -175,6 +454,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     expect(profileSurfaceSemantics(login), findsOneWidget);
   }
 
+  @override
   void expectLocalRuntimeDialog({
     required String repositoryPath,
     required String branch,
@@ -197,10 +477,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     while (DateTime.now().isBefore(end)) {
       await tester.pump(step);
       if (finder.evaluate().isNotEmpty) {
-        await tester.pumpAndSettle();
+        await _pumpFrames();
         return;
       }
     }
     expect(finder, findsOneWidget);
+  }
+
+  Future<void> _pumpFrames([int count = 12]) async {
+    await tester.pump();
+    for (var i = 0; i < count; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
   }
 }

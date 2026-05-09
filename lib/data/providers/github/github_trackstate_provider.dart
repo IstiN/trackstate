@@ -36,6 +36,9 @@ class GitHubTrackStateProvider implements TrackStateProviderAdapter {
   http.Client get _http => _client ?? http.Client();
 
   @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
   String get repositoryLabel => repositoryName;
 
   @override
@@ -237,6 +240,12 @@ class GitHubTrackStateProvider implements TrackStateProviderAdapter {
     RepositoryAttachmentWriteRequest request,
   ) async {
     final connection = _requireConnection();
+    if (await _isLfsTracked(request.path, ref: request.branch)) {
+      throw TrackStateProviderException(
+        'GitHub LFS attachment uploads are not yet implemented for '
+        '${request.path}.',
+      );
+    }
     final response = await _http.put(
       _githubUri('/repos/${connection.repository}/contents/${request.path}'),
       headers: {
@@ -268,9 +277,11 @@ class GitHubTrackStateProvider implements TrackStateProviderAdapter {
   }
 
   @override
-  Future<bool> isLfsTracked(String path) async {
+  Future<bool> isLfsTracked(String path) => _isLfsTracked(path, ref: dataRef);
+
+  Future<bool> _isLfsTracked(String path, {required String ref}) async {
     try {
-      final attributes = await readTextFile('.gitattributes', ref: dataRef);
+      final attributes = await readTextFile('.gitattributes', ref: ref);
       return _isLfsTrackedByAttributes(attributes.content, path);
     } on TrackStateProviderException {
       return false;

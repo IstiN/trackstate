@@ -19,6 +19,9 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
   final String dataRef;
 
   @override
+  ProviderType get providerType => ProviderType.local;
+
+  @override
   String get repositoryLabel => repositoryPath;
 
   @override
@@ -232,7 +235,8 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
       return;
     }
     throw TrackStateProviderException(
-      'Cannot save $path because it has staged or unstaged local changes.',
+      'Cannot save $path because it has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
     );
   }
 

@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -109,6 +107,9 @@ Read and write tracker files through GitHub Contents API.
 
   @override
   String get dataRef => 'main';
+
+  @override
+  ProviderType get providerType => ProviderType.github;
 
   @override
   String get repositoryLabel => 'trackstate/trackstate';
