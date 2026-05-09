@@ -191,7 +191,6 @@ Future<void> _expectTopBarControlVisible(
     'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
   );
 }
-
 String _formatSnapshot(List<String> values, {int limit = 20}) {
   final snapshot = <String>[];
   for (final value in values) {

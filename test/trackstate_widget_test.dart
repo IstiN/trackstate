@@ -224,6 +224,68 @@ void main() {
   );
 
   testWidgets(
+    'create issue overlay stays open and preserves draft while switching tracker sections',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      const preservedSummary = 'Refactor Persistence Verification';
+
+      RegExp exactLabel(String label) => RegExp('^${RegExp.escape(label)}\$');
+
+      Finder byExactSemanticsLabel(String label) => find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            widget.properties.label != null &&
+            exactLabel(label).hasMatch(widget.properties.label!),
+      );
+
+      Finder summaryField() => find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField && widget.decoration?.labelText == 'Summary',
+      );
+
+      try {
+        tester.view.physicalSize = const Size(1440, 960);
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          TrackStateApp(repository: _LocalRuntimeRepository()),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(byExactSemanticsLabel('Create issue').first);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Dialog), findsOneWidget);
+        expect(summaryField(), findsOneWidget);
+
+        await tester.enterText(summaryField(), preservedSummary);
+        await tester.pump();
+        expect(
+          tester.widget<TextField>(summaryField()).controller?.text,
+          preservedSummary,
+        );
+
+        await tester.tap(byExactSemanticsLabel('Board').first);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Drag-ready workflow columns backed by Git files'),
+          findsOneWidget,
+        );
+        expect(find.byType(Dialog), findsOneWidget);
+        expect(summaryField(), findsOneWidget);
+        expect(
+          tester.widget<TextField>(summaryField()).controller?.text,
+          preservedSummary,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'create issue form renders configured custom fields in local mode',
     (tester) async {
       final semantics = tester.ensureSemantics();
