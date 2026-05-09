@@ -101,6 +101,8 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> enterLabeledTextField(String label, {required String text});
 
+  Future<String> readLabeledTextFieldValue(String label);
+
   List<String> visibleTextsSnapshot();
 
   List<String> topBarVisibleTextsSnapshot();
