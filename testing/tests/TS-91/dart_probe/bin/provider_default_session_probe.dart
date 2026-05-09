@@ -61,6 +61,8 @@ class PassiveTrackStateProviderAdapter implements TrackStateProviderAdapter {
     'TS-91 must not attempt to create commits before connect().',
   );
 
+  Future<void> ensureCleanWorktree() async {}
+
   @override
   Future<String> resolveWriteBranch() async => dataRef;
 
