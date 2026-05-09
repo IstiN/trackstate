@@ -16,6 +16,7 @@ abstract interface class TrackStateRepository {
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
+    Map<String, String> customFields = const {},
   });
   Future<TrackStateIssue> updateIssueDescription(
     TrackStateIssue issue,
@@ -128,6 +129,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
+    Map<String, String> customFields = const {},
   }) async {
     final normalizedSummary = summary.trim();
     if (normalizedSummary.isEmpty) {
@@ -159,6 +161,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       projectKey: project.key,
       summary: normalizedSummary,
       description: description.trim(),
+      customFields: customFields,
       issueTypeId: issueTypeId,
       statusId: statusId,
       priorityId: priorityId,
@@ -989,6 +992,7 @@ class DemoTrackStateRepository implements TrackStateRepository {
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
+    Map<String, String> customFields = const {},
   }) async {
     final normalizedSummary = summary.trim();
     if (normalizedSummary.isEmpty) {
@@ -1006,6 +1010,7 @@ class DemoTrackStateRepository implements TrackStateRepository {
         projectKey: _snapshotOverride.project.key,
         summary: normalizedSummary,
         description: description.trim(),
+        customFields: customFields,
         issueTypeId: _defaultIssueTypeId(_snapshotOverride.project),
         statusId: _defaultStatusId(_snapshotOverride.project),
         priorityId: _defaultPriorityId(_snapshotOverride.project),
@@ -1623,6 +1628,7 @@ String _buildIssueMarkdown({
   required String projectKey,
   required String summary,
   required String description,
+  Map<String, String> customFields = const {},
   required String issueTypeId,
   required String statusId,
   required String priorityId,
@@ -1630,6 +1636,10 @@ String _buildIssueMarkdown({
   required String reporter,
   required String createdAt,
 }) {
+  final normalizedCustomFields = Map<String, String>.fromEntries(
+    customFields.entries.toList()
+      ..sort((left, right) => left.key.compareTo(right.key)),
+  );
   final buffer = StringBuffer()
     ..writeln('---')
     ..writeln('key: $key')
@@ -1639,7 +1649,11 @@ String _buildIssueMarkdown({
     ..writeln('priority: $priorityId')
     ..writeln('summary: ${_yamlScalar(summary)}')
     ..writeln('assignee: ${_yamlScalar(assignee)}')
-    ..writeln('reporter: ${_yamlScalar(reporter)}')
+    ..writeln('reporter: ${_yamlScalar(reporter)}');
+  if (normalizedCustomFields.isNotEmpty) {
+    buffer.writeln('customFields: ${jsonEncode(normalizedCustomFields)}');
+  }
+  buffer
     ..writeln('created: $createdAt')
     ..writeln('updated: $createdAt')
     ..writeln('---')
