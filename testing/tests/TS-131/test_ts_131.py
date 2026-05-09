@@ -92,47 +92,75 @@ class ThemeTokenPullRequestGateTest(unittest.TestCase):
             f"Observed workflow text:\n{workflow_observation.workflow_text}",
         )
         self.assertEqual(
-            workflow_observation.latest_pull_request_run_event,
+            workflow_observation.workflow_run_event,
             "pull_request",
-            "Step 3 failed: the selected live workflow run was not triggered by a "
+            "Step 3 failed: the disposable workflow run was not triggered by a "
             "Pull Request event.\n"
-            f"Run URL: {workflow_observation.latest_pull_request_run_url}\n"
-            f"Observed event: {workflow_observation.latest_pull_request_run_event}",
+            f"Run URL: {workflow_observation.workflow_run_url}\n"
+            f"Observed event: {workflow_observation.workflow_run_event}",
         )
         self.assertEqual(
-            workflow_observation.latest_pull_request_run_conclusion,
-            "success",
-            "Step 3 failed: the live Pull Request workflow run did not complete "
-            "successfully.\n"
-            f"Run URL: {workflow_observation.latest_pull_request_run_url}\n"
-            f"Status: {workflow_observation.latest_pull_request_run_status}\n"
-            f"Conclusion: {workflow_observation.latest_pull_request_run_conclusion}",
+            workflow_observation.workflow_run_conclusion,
+            "failure",
+            "Step 3 failed: the disposable Pull Request workflow run did not fail "
+            "as required for a hardcoded-color PR.\n"
+            f"Run URL: {workflow_observation.workflow_run_url}\n"
+            f"Status: {workflow_observation.workflow_run_status}\n"
+            f"Conclusion: {workflow_observation.workflow_run_conclusion}",
         )
         self.assertIn(
             self.ci_config.workflow_job_name,
             workflow_observation.observed_job_names,
-            "Step 3 failed: the selected Pull Request workflow run did not expose "
+            "Step 3 failed: the disposable Pull Request workflow run did not expose "
             "the expected job name.\n"
-            f"Run URL: {workflow_observation.latest_pull_request_run_url}\n"
+            f"Run URL: {workflow_observation.workflow_run_url}\n"
             f"Observed job names: {workflow_observation.observed_job_names}",
         )
         self.assertIn(
             self.ci_config.workflow_step_name,
             workflow_observation.observed_step_names,
-            "Step 3 failed: the selected Pull Request workflow run did not expose "
+            "Step 3 failed: the disposable Pull Request workflow run did not expose "
             "the theme-token gate step in the job details.\n"
-            f"Run URL: {workflow_observation.latest_pull_request_run_url}\n"
+            f"Run URL: {workflow_observation.workflow_run_url}\n"
             f"Observed step names: {workflow_observation.observed_step_names}",
         )
         self.assertEqual(
             workflow_observation.theme_token_step_conclusion,
-            "success",
-            "Human-style verification failed for Step 3: the live Pull Request run "
-            "did not show the theme-token gate step succeeding in GitHub Actions.\n"
-            f"Run URL: {workflow_observation.latest_pull_request_run_url}\n"
+            "failure",
+            "Human-style verification failed for Step 3: the disposable Pull "
+            "Request run did not show the theme-token gate step failing in "
+            "GitHub Actions.\n"
+            f"Run URL: {workflow_observation.workflow_run_url}\n"
             f"Matched job: {workflow_observation.theme_token_job_name}\n"
             f"Step status: {workflow_observation.theme_token_step_status}\n"
             f"Step conclusion: {workflow_observation.theme_token_step_conclusion}",
+        )
+        self.assertEqual(
+            workflow_observation.probe_pull_request_mergeable_state,
+            "blocked",
+            "Step 3 failed: the disposable Pull Request did not reach the REST "
+            "mergeable_state expected for a failed required check.\n"
+            f"PR URL: {workflow_observation.probe_pull_request_url}\n"
+            f"Observed mergeable_state: "
+            f"{workflow_observation.probe_pull_request_mergeable_state}",
+        )
+        self.assertEqual(
+            workflow_observation.probe_pull_request_merge_state_status,
+            "BLOCKED",
+            "Step 3 failed: GitHub GraphQL did not report the disposable Pull "
+            "Request as blocked after the failed theme-token check.\n"
+            f"PR URL: {workflow_observation.probe_pull_request_url}\n"
+            f"Observed mergeStateStatus: "
+            f"{workflow_observation.probe_pull_request_merge_state_status}",
+        )
+        self.assertEqual(
+            workflow_observation.probe_pull_request_status_check_rollup_state,
+            "FAILURE",
+            "Step 3 failed: the disposable Pull Request head commit did not show "
+            "failed status checks after the theme-token gate ran.\n"
+            f"PR URL: {workflow_observation.probe_pull_request_url}\n"
+            f"Observed statusCheckRollup state: "
+            f"{workflow_observation.probe_pull_request_status_check_rollup_state}",
         )
 
         self.assertTrue(
@@ -190,13 +218,20 @@ class ThemeTokenPullRequestGateTest(unittest.TestCase):
                 " info - ",
             )
         )
-        self.assertTrue(
-            lint_result.hardcoded_analyze.exit_code != 0 or has_terminal_diagnostic,
-            "Step 3 failed: the live theme-token policy gate accepted a hardcoded "
-            "Flutter color instead of surfacing a blocking diagnostic.\n"
+        self.assertNotEqual(
+            lint_result.hardcoded_analyze.exit_code,
+            0,
+            "Step 3 failed: the local theme-token policy command returned exit "
+            "code 0 for a hardcoded Flutter color, so it would not block CI.\n"
             f"Probe file: {lint_result.probe_path}\n"
             f"Command: {lint_result.hardcoded_analyze.command_text}\n"
-            f"Exit code: {lint_result.hardcoded_analyze.exit_code}\n"
+            f"Observed output:\n{hardcoded_output}",
+        )
+        self.assertTrue(
+            has_terminal_diagnostic,
+            "Human-style verification failed for Step 3: the blocking local "
+            "theme-token policy run did not emit an analyzer-style diagnostic.\n"
+            f"Probe file: {lint_result.probe_path}\n"
             f"Observed output:\n{hardcoded_output}",
         )
         self.assertNotIn(

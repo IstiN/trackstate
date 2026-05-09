@@ -13,14 +13,20 @@ class ThemeTokenCiObservation:
     workflow_html_url: str
     default_branch: str
     workflow_text: str
-    latest_pull_request_run_id: int
-    latest_pull_request_run_url: str
-    latest_pull_request_run_event: str
-    latest_pull_request_run_status: str | None
-    latest_pull_request_run_conclusion: str | None
-    latest_pull_request_head_branch: str | None
-    latest_pull_request_display_title: str | None
-    latest_pull_request_created_at: str | None
+    probe_branch_name: str
+    probe_commit_sha: str
+    probe_file_path: str
+    probe_pull_request_number: int
+    probe_pull_request_url: str
+    probe_pull_request_mergeable_state: str | None
+    probe_pull_request_merge_state_status: str | None
+    probe_pull_request_status_check_rollup_state: str | None
+    probe_pull_request_head_sha: str | None
+    workflow_run_id: int
+    workflow_run_url: str
+    workflow_run_event: str
+    workflow_run_status: str | None
+    workflow_run_conclusion: str | None
     observed_job_names: list[str]
     observed_step_names: list[str]
     theme_token_job_name: str | None

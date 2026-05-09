@@ -3,8 +3,8 @@ type: ci
 framework: unittest
 platform: python
 dependencies:
-  - gh CLI authenticated with read access to IstiN/trackstate and GitHub Actions
-  - network access to GitHub REST APIs
+  - gh CLI authenticated with read/write access to IstiN/trackstate pull requests, branches, and GitHub Actions
+  - network access to GitHub REST/GraphQL APIs
   - Flutter SDK 3.35.3 available on PATH, at /tmp/flutter/bin/flutter, or bootstrapped automatically
 runtime_inputs:
   repository: IstiN/trackstate
@@ -13,7 +13,14 @@ runtime_inputs:
   workflow_job_name: Flutter checks
   workflow_step_name: Enforce theme tokens
   gate_command: dart run tool/check_theme_tokens.dart
+  probe_branch_prefix: ts131-non-tokenized-color
+  probe_file_path: lib/ts131_pull_request_probe.dart
+  hardcoded_color_expression: Color(0xFFFAF8F4)
+  pull_request_title_prefix: "TS-131 probe: non-tokenized color"
   recent_run_limit: 10
+  poll_interval_seconds: 5
+  workflow_run_timeout_seconds: 600
+  pull_request_state_timeout_seconds: 90
 notes:
-  - Validates that the deployed pull-request workflow still exposes the theme-token gate.
-  - Reuses the TS-115 hardcoded-hex probe to confirm the gate fails on non-tokenized colors.
+  - Creates a disposable branch and PR in IstiN/trackstate, waits for the PR workflow run, and verifies the theme-token gate fails.
+  - Reuses the TS-115 hardcoded-hex probe to confirm the command itself exits non-zero with contributor-visible diagnostics.
