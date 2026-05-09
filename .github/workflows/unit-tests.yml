@@ -37,6 +37,8 @@ jobs:
               - 'pubspec.lock'
               - 'analysis_options.yaml'
               - 'l10n.yaml'
+              - 'tool/**'
+              - '.dmtools/policies/**'
               - '.github/workflows/unit-tests.yml'
 
       - name: Skip full Flutter validation
@@ -58,6 +60,10 @@ jobs:
       - name: Analyze
         if: steps.changes.outputs.flutter == 'true'
         run: flutter analyze
+
+      - name: Enforce theme tokens
+        if: steps.changes.outputs.flutter == 'true'
+        run: dart run tool/check_theme_tokens.dart
 
       - name: Run unit and golden tests
         if: steps.changes.outputs.flutter == 'true'
