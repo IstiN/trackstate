@@ -139,7 +139,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> openSection(String label) async {
-    await tester.tap(find.bySemanticsLabel(RegExp(RegExp.escape(label))).first);
+    final section = find.bySemanticsLabel(RegExp(RegExp.escape(label))).first;
+    await tester.ensureVisible(section);
+    await tester.tap(section, warnIfMissed: false);
     await _pumpFrames();
   }
 
@@ -522,18 +524,25 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     }
 
     final widget = tester.widget(field.first);
+    if (widget is EditableText) {
+      return widget.controller.text;
+    }
     if (widget is TextField) {
       return widget.controller?.text;
     }
 
     final editableText = find.descendant(
-      of: field,
+      of: field.first,
       matching: find.byType(EditableText),
     );
-    if (editableText.evaluate().isEmpty) {
-      return null;
+    if (editableText.evaluate().isNotEmpty) {
+      return tester.widget<EditableText>(editableText.first).controller.text;
     }
-    return tester.widget<EditableText>(editableText.first).controller.text;
+
+    fail(
+      'Expected the visible text field labeled "$label" to expose a readable '
+      'value, but no controller-backed editable widget was found.',
+    );
   }
 
   @override
