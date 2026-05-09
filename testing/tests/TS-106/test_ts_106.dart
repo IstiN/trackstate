@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../../components/screens/settings_screen_robot.dart';
 import '../../core/utils/local_git_repository_fixture.dart';
+import '../../frameworks/flutter/flutter_local_git_repository_factory.dart';
 import 'support/ts106_oauth_identity_fixture.dart';
 
 void main() {
@@ -9,7 +10,10 @@ void main() {
     'TS-106 hosted OAuth mode shows the remote profile identity instead of local Git metadata',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      final robot = SettingsScreenRobot(tester);
+      final robot = SettingsScreenRobot(
+        tester,
+        localGitRepositoryFactory: FlutterLocalGitRepositoryFactory(tester),
+      );
       final hostedFixture = Ts106OauthIdentityFixture();
 
       try {
@@ -20,6 +24,51 @@ void main() {
           ),
         ))!;
         addTearDown(localAuthorFixture.dispose);
+
+        await robot.pumpLocalGitApp(
+          repositoryPath: localAuthorFixture.directory.path,
+        );
+
+        expect(
+          robot.localGitTopBarControl,
+          findsOneWidget,
+          reason:
+              'The scenario must first launch the real Local Git runtime so the competing local author identity is exercised through the production boundary.',
+        );
+        expect(
+          find.text('DEMO-1 · Local identity issue'),
+          findsOneWidget,
+          reason:
+              'Launching the Local Git runtime should load tracker data from the fixture repository, proving the configured local author participates in the app-under-test state.',
+        );
+        robot.expectTopBarProfileIdentityVisible(
+          displayName: localAuthorFixture.userName,
+          login: localAuthorFixture.userEmail,
+          initials: 'LU',
+        );
+        robot.expectTopBarProfileIdentityAbsent(
+          Ts106OauthIdentityFixture.remoteDisplayName,
+        );
+        robot.expectTopBarProfileIdentityAbsent(
+          Ts106OauthIdentityFixture.remoteLogin,
+        );
+        await tester.tap(robot.localGitTopBarControl);
+        await tester.pumpAndSettle();
+        expect(find.text('Local Git runtime'), findsOneWidget);
+        expect(
+          find.text('Repository: ${localAuthorFixture.directory.path}'),
+          findsOneWidget,
+        );
+        expect(
+          find.text('Branch: ${localAuthorFixture.branch}'),
+          findsOneWidget,
+        );
+        expect(
+          find.textContaining('GitHub tokens are not used in this runtime'),
+          findsOneWidget,
+        );
+        await tester.tap(find.text('Close').first);
+        await tester.pumpAndSettle();
 
         await robot.pumpApp(
           repository: hostedFixture.createRepository(),
