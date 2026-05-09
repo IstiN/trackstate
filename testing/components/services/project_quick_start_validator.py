@@ -29,9 +29,16 @@ class ProjectQuickStartValidator:
         target_repository = self._resolve_target_repository(config, viewer_login)
         repository_info = self._probe.repository_metadata(target_repository)
         default_branch = self._repository_default_branch(repository_info)
+        documentation_repository = config.documentation_repository
+        documentation_repository_info = self._probe.repository_metadata(
+            documentation_repository,
+        )
+        documentation_default_branch = self._repository_default_branch(
+            documentation_repository_info,
+        )
         readme_fetch = self._probe.get_contents(
-            target_repository,
-            default_branch,
+            documentation_repository,
+            documentation_default_branch,
             config.readme_path.name,
         )
         readme_text = self._decode_repository_text(readme_fetch)

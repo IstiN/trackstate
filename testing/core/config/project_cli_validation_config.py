@@ -8,6 +8,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class ProjectCliValidationConfig:
     upstream_repository: str
+    documentation_repository: str
     target_repository_override: str | None
     fork_repository_name: str
     project_path: str
@@ -27,6 +28,13 @@ class ProjectCliValidationConfig:
             upstream_repository=os.environ.get(
                 "TS74_UPSTREAM_SETUP_REPOSITORY",
                 "IstiN/trackstate-setup",
+            ),
+            documentation_repository=os.environ.get(
+                "TS74_DOCUMENTATION_REPOSITORY",
+                os.environ.get(
+                    "TS74_UPSTREAM_SETUP_REPOSITORY",
+                    "IstiN/trackstate-setup",
+                ),
             ),
             target_repository_override=target_repository_override,
             fork_repository_name=os.environ.get(
