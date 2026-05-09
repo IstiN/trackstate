@@ -66,6 +66,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
   TrackerViewModel _createViewModel({
     TrackStateRepository? repository,
     TrackerViewModel? previous,
+    bool autoLoad = true,
   }) {
     final nextViewModel = TrackerViewModel(
       repository:
@@ -74,7 +75,9 @@ class _TrackStateAppState extends State<TrackStateApp> {
     if (previous != null) {
       nextViewModel.restorePresentationStateFrom(previous);
     }
-    nextViewModel.load();
+    if (autoLoad) {
+      nextViewModel.load();
+    }
     return nextViewModel;
   }
 
@@ -122,6 +125,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
       final nextViewModel = _createViewModel(
         repository: nextRepository,
         previous: previousViewModel,
+        autoLoad: false,
       );
       setState(() {
         viewModel = nextViewModel;
