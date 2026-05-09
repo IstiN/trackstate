@@ -158,13 +158,12 @@ void main() {
       final semantics = tester.ensureSemantics();
       RegExp exactLabel(String label) => RegExp('^${RegExp.escape(label)}\$');
 
-      Finder byExactSemanticsLabel(String label) =>
-          find.byWidgetPredicate(
-            (widget) =>
-                widget is Semantics &&
-                widget.properties.label != null &&
-                exactLabel(label).hasMatch(widget.properties.label!),
-          );
+      Finder byExactSemanticsLabel(String label) => find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            widget.properties.label != null &&
+            exactLabel(label).hasMatch(widget.properties.label!),
+      );
 
       Future<void> pumpLocalRuntime(Size size) async {
         tester.view.physicalSize = size;
@@ -307,6 +306,12 @@ class _LocalRuntimeRepository implements TrackStateRepository {
       _demoRepository.searchIssues(jql);
 
   @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Local runtime widget repository does not support issue archiving.',
+      );
+
+  @override
   Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
       throw const TrackStateRepositoryException(
         'Local runtime widget repository does not support issue deletion.',
@@ -357,6 +362,14 @@ class _FailingLocalRuntimeRepository implements TrackStateRepository {
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
       _demoRepository.searchIssues(jql);
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async {
+    throw const TrackStateRepositoryException(
+      'Cannot archive DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
+    );
+  }
 
   @override
   Future<TrackStateIssue> createIssue({
@@ -472,6 +485,13 @@ class _CustomCreateFieldsLocalRuntimeRepository
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
       (await loadSnapshot()).issues;
+
+  @override
+  Future<TrackStateIssue> archiveIssue(
+    TrackStateIssue issue,
+  ) async => throw const TrackStateRepositoryException(
+    'Custom create-field widget repository does not support issue archiving.',
+  );
 
   @override
   Future<DeletedIssueTombstone> deleteIssue(

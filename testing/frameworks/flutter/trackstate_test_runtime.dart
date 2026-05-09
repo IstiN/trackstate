@@ -80,6 +80,11 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
   ) => repository.updateIssueDescription(issue, description);
 
   @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) {
+    return repository.archiveIssue(issue);
+  }
+
+  @override
   Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) {
     return repository.deleteIssue(issue);
   }
