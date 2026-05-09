@@ -282,6 +282,9 @@ class _TopBar extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
     final repositoryAccessLabel = _repositoryAccessLabel(l10n, viewModel);
+    final openCreateIssue = viewModel.hasReadOnlySession || viewModel.isSaving
+        ? null
+        : () => _showCreateIssueDialog(context, viewModel);
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 12, 12, 6),
       child: Row(
@@ -328,10 +331,23 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: 12),
           if (compact)
             _IconButtonSurface(
+              label: l10n.createIssue,
+              glyph: TrackStateIconGlyph.plus,
+              onPressed: openCreateIssue,
+            )
+          else
+            _PrimaryButton(
+              label: l10n.createIssue,
+              icon: TrackStateIconGlyph.plus,
+              onPressed: openCreateIssue,
+            ),
+          const SizedBox(width: 8),
+          if (compact)
+            _IconButtonSurface(
               label: repositoryAccessLabel,
               glyph: TrackStateIconGlyph.gitBranch,
               onPressed: viewModel.isSaving
-                  ? () {}
+                  ? null
                   : () => _showRepositoryAccessDialog(context, viewModel),
             )
           else
@@ -339,7 +355,7 @@ class _TopBar extends StatelessWidget {
               label: repositoryAccessLabel,
               icon: TrackStateIconGlyph.gitBranch,
               onPressed: viewModel.isSaving
-                  ? () {}
+                  ? null
                   : () => _showRepositoryAccessDialog(context, viewModel),
             ),
           const SizedBox(width: 8),
@@ -407,6 +423,16 @@ class _TopBar extends StatelessWidget {
       ),
     );
   }
+}
+
+Future<void> _showCreateIssueDialog(
+  BuildContext context,
+  TrackerViewModel viewModel,
+) async {
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => _CreateIssueDialog(viewModel: viewModel),
+  );
 }
 
 Future<void> _showRepositoryAccessDialog(
@@ -866,95 +892,15 @@ class _Board extends StatelessWidget {
   }
 }
 
-class _SearchAndDetail extends StatefulWidget {
+class _SearchAndDetail extends StatelessWidget {
   const _SearchAndDetail({required this.viewModel});
 
   final TrackerViewModel viewModel;
 
   @override
-  State<_SearchAndDetail> createState() => _SearchAndDetailState();
-}
-
-class _SearchAndDetailState extends State<_SearchAndDetail> {
-  late final TextEditingController _summaryController;
-  late final TextEditingController _descriptionController;
-  final Map<String, TextEditingController> _customFieldControllers = {};
-  bool _isCreating = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _summaryController = TextEditingController();
-    _descriptionController = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _summaryController.dispose();
-    _descriptionController.dispose();
-    for (final controller in _customFieldControllers.values) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
-  Future<void> _submitCreateIssue() async {
-    final customFields = <String, String>{};
-    for (final field in _createFieldDefinitions(widget.viewModel.project)) {
-      final value = _customFieldControllers[field.id]?.text.trim() ?? '';
-      if (value.isEmpty) {
-        continue;
-      }
-      customFields[field.id] = value;
-    }
-    final success = await widget.viewModel.createIssue(
-      summary: _summaryController.text,
-      description: _descriptionController.text,
-      customFields: customFields,
-    );
-    if (!mounted || !success) {
-      return;
-    }
-    setState(() {
-      _isCreating = false;
-      _summaryController.clear();
-      _descriptionController.clear();
-      for (final controller in _customFieldControllers.values) {
-        controller.clear();
-      }
-    });
-  }
-
-  List<TrackStateFieldDefinition> _createFieldDefinitions(ProjectConfig? project) {
-    if (project == null) {
-      return const [];
-    }
-    return project.fieldDefinitions
-        .where((field) => !_hiddenCreateFieldIds.contains(field.id))
-        .toList(growable: false);
-  }
-
-  void _syncCustomFieldControllers(List<TrackStateFieldDefinition> fields) {
-    final activeFieldIds = fields.map((field) => field.id).toSet();
-    final staleFieldIds = _customFieldControllers.keys
-        .where((fieldId) => !activeFieldIds.contains(fieldId))
-        .toList(growable: false);
-    for (final fieldId in staleFieldIds) {
-      _customFieldControllers.remove(fieldId)?.dispose();
-    }
-    for (final field in fields) {
-      _customFieldControllers.putIfAbsent(field.id, TextEditingController.new);
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final viewModel = widget.viewModel;
-    final summaryLabel = viewModel.project?.fieldLabel('summary') ?? 'Summary';
-    final createFields = _createFieldDefinitions(viewModel.project);
-    _syncCustomFieldControllers(createFields);
-    final canSubmit = !viewModel.hasReadOnlySession && !viewModel.isSaving;
+    final viewModel = this.viewModel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -967,105 +913,8 @@ class _SearchAndDetailState extends State<_SearchAndDetail> {
                 subtitle: l10n.issueCount(viewModel.searchResults.length),
               ),
             ),
-            const SizedBox(width: 12),
-            _PrimaryButton(
-              label: l10n.createIssue,
-              icon: TrackStateIconGlyph.plus,
-              onPressed: viewModel.hasReadOnlySession || viewModel.isSaving
-                  ? null
-                  : () {
-                      setState(() {
-                        _isCreating = !_isCreating;
-                      });
-                    },
-            ),
           ],
         ),
-        if (_isCreating) ...[
-          _SurfaceCard(
-            semanticLabel: l10n.createIssue,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _SectionTitle(l10n.createIssue),
-                const SizedBox(height: 12),
-                Semantics(
-                  label: summaryLabel,
-                  textField: true,
-                  child: TextField(
-                    controller: _summaryController,
-                    enabled: !viewModel.isSaving,
-                    decoration: InputDecoration(labelText: summaryLabel),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Semantics(
-                  label: l10n.description,
-                  textField: true,
-                  child: TextField(
-                    controller: _descriptionController,
-                    minLines: 3,
-                    maxLines: null,
-                    enabled: !viewModel.isSaving,
-                    decoration: InputDecoration(
-                      labelText: l10n.description,
-                      alignLabelWithHint: true,
-                    ),
-                  ),
-                ),
-                for (final field in createFields) ...[
-                  const SizedBox(height: 12),
-                  Semantics(
-                    label: viewModel.project?.fieldLabel(field.id) ?? field.name,
-                    textField: true,
-                    child: TextField(
-                      key: ValueKey('create-field-${field.id}'),
-                      controller: _customFieldControllers[field.id],
-                      minLines: field.type == 'markdown' ? 3 : 1,
-                      maxLines: field.type == 'markdown' ? null : 1,
-                      enabled: !viewModel.isSaving,
-                      decoration: InputDecoration(
-                        labelText:
-                            viewModel.project?.fieldLabel(field.id) ??
-                            field.name,
-                        alignLabelWithHint: field.type == 'markdown',
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _IssueDetailActionButton(
-                      label: l10n.save,
-                      emphasized: true,
-                      onPressed: canSubmit ? _submitCreateIssue : null,
-                    ),
-                    _IssueDetailActionButton(
-                      label: l10n.cancel,
-                      onPressed: viewModel.isSaving
-                          ? null
-                          : () {
-                              setState(() {
-                                _isCreating = false;
-                                _summaryController.clear();
-                                _descriptionController.clear();
-                                for (final controller
-                                    in _customFieldControllers.values) {
-                                  controller.clear();
-                                }
-                              });
-                            },
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-        ],
         LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 980;
@@ -1108,6 +957,38 @@ const Set<String> _hiddenCreateFieldIds = {
   'archived',
   'resolution',
 };
+
+List<TrackStateFieldDefinition> _createIssueFieldDefinitions(
+  ProjectConfig? project,
+) {
+  if (project == null) {
+    return const [];
+  }
+  return project.fieldDefinitions
+      .where((field) => !_hiddenCreateFieldIds.contains(field.id))
+      .toList(growable: false);
+}
+
+void _syncCreateFieldControllers(
+  Map<String, TextEditingController> controllers,
+  List<TrackStateFieldDefinition> fields,
+) {
+  final activeFieldIds = fields.map((field) => field.id).toSet();
+  final staleFieldIds = controllers.keys
+      .where((fieldId) => !activeFieldIds.contains(fieldId))
+      .toList(growable: false);
+  for (final fieldId in staleFieldIds) {
+    controllers.remove(fieldId)?.dispose();
+  }
+  for (final field in fields) {
+    controllers.putIfAbsent(field.id, TextEditingController.new);
+  }
+}
+
+String _createIssueFieldLabel(
+  ProjectConfig? project,
+  TrackStateFieldDefinition field,
+) => project?.fieldLabel(field.id) ?? field.name;
 
 class _Hierarchy extends StatelessWidget {
   const _Hierarchy({required this.viewModel});
@@ -2228,13 +2109,15 @@ class _IconButtonSurface extends StatelessWidget {
 
   final String label;
   final TrackStateIconGlyph glyph;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final enabled = onPressed != null;
     return Semantics(
       button: true,
+      enabled: enabled,
       label: label,
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
@@ -2246,7 +2129,165 @@ class _IconButtonSurface extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: colors.border),
           ),
-          child: TrackStateIcon(glyph, color: colors.text, size: 18),
+          foregroundDecoration: enabled
+              ? null
+              : BoxDecoration(
+                  color: colors.page.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+          child: TrackStateIcon(
+            glyph,
+            color: enabled ? colors.text : colors.muted,
+            size: 18,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CreateIssueDialog extends StatefulWidget {
+  const _CreateIssueDialog({required this.viewModel});
+
+  final TrackerViewModel viewModel;
+
+  @override
+  State<_CreateIssueDialog> createState() => _CreateIssueDialogState();
+}
+
+class _CreateIssueDialogState extends State<_CreateIssueDialog> {
+  late final TextEditingController _summaryController;
+  late final TextEditingController _descriptionController;
+  final Map<String, TextEditingController> _customFieldControllers = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _summaryController = TextEditingController();
+    _descriptionController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _summaryController.dispose();
+    _descriptionController.dispose();
+    for (final controller in _customFieldControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _submitCreateIssue() async {
+    final customFields = <String, String>{};
+    for (final field in _createIssueFieldDefinitions(
+      widget.viewModel.project,
+    )) {
+      final value = _customFieldControllers[field.id]?.text.trim() ?? '';
+      if (value.isEmpty) {
+        continue;
+      }
+      customFields[field.id] = value;
+    }
+    final success = await widget.viewModel.createIssue(
+      summary: _summaryController.text,
+      description: _descriptionController.text,
+      customFields: customFields,
+    );
+    if (!mounted || !success) {
+      return;
+    }
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final project = widget.viewModel.project;
+    final summaryLabel = project?.fieldLabel('summary') ?? 'Summary';
+    final createFields = _createIssueFieldDefinitions(project);
+    _syncCreateFieldControllers(_customFieldControllers, createFields);
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: ListenableBuilder(
+          listenable: widget.viewModel,
+          builder: (context, _) {
+            final canSubmit =
+                !widget.viewModel.hasReadOnlySession &&
+                !widget.viewModel.isSaving;
+            return _SurfaceCard(
+              semanticLabel: l10n.createIssue,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _SectionTitle(l10n.createIssue),
+                  const SizedBox(height: 12),
+                  Semantics(
+                    label: summaryLabel,
+                    textField: true,
+                    child: TextField(
+                      controller: _summaryController,
+                      enabled: !widget.viewModel.isSaving,
+                      decoration: InputDecoration(labelText: summaryLabel),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Semantics(
+                    label: l10n.description,
+                    textField: true,
+                    child: TextField(
+                      controller: _descriptionController,
+                      minLines: 3,
+                      maxLines: null,
+                      enabled: !widget.viewModel.isSaving,
+                      decoration: InputDecoration(
+                        labelText: l10n.description,
+                        alignLabelWithHint: true,
+                      ),
+                    ),
+                  ),
+                  for (final field in createFields) ...[
+                    const SizedBox(height: 12),
+                    Semantics(
+                      label: _createIssueFieldLabel(project, field),
+                      textField: true,
+                      child: TextField(
+                        key: ValueKey('create-field-${field.id}'),
+                        controller: _customFieldControllers[field.id],
+                        minLines: field.type == 'markdown' ? 3 : 1,
+                        maxLines: field.type == 'markdown' ? null : 1,
+                        enabled: !widget.viewModel.isSaving,
+                        decoration: InputDecoration(
+                          labelText: _createIssueFieldLabel(project, field),
+                          alignLabelWithHint: field.type == 'markdown',
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _IssueDetailActionButton(
+                        label: l10n.save,
+                        emphasized: true,
+                        onPressed: canSubmit ? _submitCreateIssue : null,
+                      ),
+                      _IssueDetailActionButton(
+                        label: l10n.cancel,
+                        onPressed: widget.viewModel.isSaving
+                            ? null
+                            : () => Navigator.of(context).pop(),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
