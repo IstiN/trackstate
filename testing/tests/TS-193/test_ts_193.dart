@@ -108,12 +108,6 @@ void main() {
       }
 
       expect(
-        afterArchival.errorType,
-        'TrackStateRepositoryException',
-        reason:
-            'Step 2 failed: archiveIssue should throw TrackStateRepositoryException when archive relocation cannot write to the destination directory, but got ${afterArchival.errorType}. Actual message: ${afterArchival.errorMessage}.',
-      );
-      expect(
         afterArchival.issuePath,
         Ts193ArchivePermissionFailureFixture.issuePath,
         reason:
@@ -193,6 +187,12 @@ void main() {
         Ts193ArchivePermissionFailureFixture.issuePath,
         reason:
             'Human-style verification failed: from an integrated-client perspective, TRACK-122 should still be surfaced at its active storage path after archive relocation fails.',
+      );
+      expect(
+        afterArchival.errorType,
+        'TrackStateRepositoryException',
+        reason:
+            'Step 2 failed: archiveIssue should throw TrackStateRepositoryException when archive relocation cannot write to the destination directory, but got ${afterArchival.errorType}. Actual message: ${afterArchival.errorMessage}.',
       );
     },
     timeout: const Timeout(Duration(seconds: 20)),
