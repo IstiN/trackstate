@@ -61,25 +61,7 @@ void main() {
           text: verificationNotesValue,
         );
         await screen.submitCreateIssue(createIssueSection: createIssueSection);
-
-        await screen.waitWithoutInteraction(const Duration(milliseconds: 800));
-
-        expect(
-          await screen.isMessageBannerVisibleContaining('Save failed:'),
-          isFalse,
-          reason:
-              'A clean repository should not show a save failure after Local '
-              'Git issue creation. Visible texts: '
-              '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
-              'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-        );
-        expect(
-          await screen.isTextFieldVisible('Summary'),
-          isFalse,
-          reason:
-              'The create form should close after successful issue creation, '
-              'but the Summary field is still visible.',
-        );
+        await _waitForCreateIssueFormToClose(screen);
 
         await screen.openSection('JQL Search');
         await screen.searchIssues(Ts150LocalGitFixture.createdIssueKey);
@@ -208,4 +190,34 @@ String _formatSnapshot(List<String> values, {int limit = 20}) {
     return '<none>';
   }
   return snapshot.join(' | ');
+}
+
+Future<void> _waitForCreateIssueFormToClose(
+  TrackStateAppComponent screen, {
+  Duration timeout = const Duration(seconds: 5),
+  Duration pollInterval = const Duration(milliseconds: 100),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(deadline)) {
+    if (await screen.isMessageBannerVisibleContaining('Save failed:')) {
+      fail(
+        'A clean repository should not show a save failure after Local Git '
+        'issue creation. Visible texts: '
+        '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
+        'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+      );
+    }
+    if (!await screen.isTextFieldVisible('Summary')) {
+      return;
+    }
+    await screen.waitWithoutInteraction(pollInterval);
+  }
+
+  fail(
+    'The create form should close after successful issue creation, but the '
+    'Summary field remained visible after waiting ${timeout.inSeconds} '
+    'seconds. Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
+    'Visible semantics: '
+    '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+  );
 }
