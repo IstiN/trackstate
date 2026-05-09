@@ -418,6 +418,7 @@ class TrackerViewModel extends ChangeNotifier {
   Future<bool> createIssue({
     required String summary,
     String description = '',
+    Map<String, String> customFields = const {},
   }) async {
     final normalizedSummary = summary.trim();
     if (normalizedSummary.isEmpty) {
@@ -437,6 +438,7 @@ class TrackerViewModel extends ChangeNotifier {
       final created = await _repository.createIssue(
         summary: normalizedSummary,
         description: description,
+        customFields: customFields,
       );
       _snapshot = await _repository.loadSnapshot();
       _selectedIssue = _snapshot!.issues.firstWhere(
