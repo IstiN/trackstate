@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/local/local_git_trackstate_provider.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 void main() {
@@ -170,6 +171,85 @@ void main() {
     },
   );
 
+  test(
+    'local repository reports a missing archive target as a repository not-found error',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final beforeHead = await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ]);
+
+      const missingIssue = TrackStateIssue(
+        key: 'MISSING-999',
+        project: 'DEMO',
+        issueType: IssueType.story,
+        issueTypeId: 'story',
+        status: IssueStatus.todo,
+        statusId: 'todo',
+        priority: IssuePriority.medium,
+        priorityId: 'medium',
+        summary: 'Missing archive target',
+        description:
+            'Synthetic missing issue used for archive regression coverage.',
+        assignee: '',
+        reporter: '',
+        labels: [],
+        components: [],
+        fixVersionIds: [],
+        watchers: [],
+        customFields: {},
+        parentKey: null,
+        epicKey: null,
+        parentPath: null,
+        epicPath: null,
+        progress: 0,
+        updatedLabel: 'just now',
+        acceptanceCriteria: [],
+        comments: [],
+        links: [],
+        attachments: [],
+        isArchived: false,
+        storagePath: 'DEMO/MISSING-999/main.md',
+      );
+
+      await expectLater(
+        () => repository.archiveIssue(missingIssue),
+        throwsA(
+          isA<TrackStateRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            'Could not find repository artifacts for MISSING-999.',
+          ),
+        ),
+      );
+
+      final afterHead = await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ]);
+      final status = await Process.run('git', [
+        '-C',
+        repo.path,
+        'status',
+        '--short',
+      ]);
+
+      expect(
+        afterHead.stdout.toString().trim(),
+        beforeHead.stdout.toString().trim(),
+      );
+      expect(status.stdout.toString().trim(), isEmpty);
+    },
+  );
+
   test('local repository persists create-form custom fields in main.md', () async {
     final repo = await _createLocalRepository();
     addTearDown(() => repo.delete(recursive: true));
@@ -178,10 +258,10 @@ void main() {
       repo,
       'DEMO/config/fields.json',
       '[{"id":"summary","name":"Summary","type":"string","required":true},'
-      '{"id":"description","name":"Description","type":"markdown","required":false},'
-      '{"id":"solution","name":"Solution","type":"markdown","required":false},'
-      '{"id":"acceptanceCriteria","name":"Acceptance Criteria","type":"markdown","required":false},'
-      '{"id":"diagrams","name":"Diagrams","type":"markdown","required":false}]\n',
+          '{"id":"description","name":"Description","type":"markdown","required":false},'
+          '{"id":"solution","name":"Solution","type":"markdown","required":false},'
+          '{"id":"acceptanceCriteria","name":"Acceptance Criteria","type":"markdown","required":false},'
+          '{"id":"diagrams","name":"Diagrams","type":"markdown","required":false}]\n',
     );
     await _git(repo.path, ['add', 'DEMO/config/fields.json']);
     await _git(repo.path, ['commit', '-m', 'Add custom create fields']);
@@ -193,7 +273,8 @@ void main() {
     );
 
     const solution = 'Persist solution details in main markdown.';
-    const acceptanceCriteria = '- Persist acceptance criteria in main markdown.';
+    const acceptanceCriteria =
+        '- Persist acceptance criteria in main markdown.';
     const diagrams = 'graph TD; CreateIssue-->PersistCustomFields;';
 
     final created = await repository.createIssue(
@@ -206,7 +287,9 @@ void main() {
       },
     );
 
-    final markdown = await File('${repo.path}/${created.storagePath}').readAsString();
+    final markdown = await File(
+      '${repo.path}/${created.storagePath}',
+    ).readAsString();
 
     expect(markdown, contains(solution));
     expect(markdown, contains(acceptanceCriteria));
