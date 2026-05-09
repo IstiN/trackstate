@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
-import 'support/ts208_local_git_fixture.dart';
+import 'support/ts224_local_git_fixture.dart';
 
 void main() {
   setUp(() {
@@ -11,31 +11,32 @@ void main() {
   });
 
   testWidgets(
-    'TS-208 falls back to system create fields when fields.json is malformed',
+    'TS-224 saves a fallback-mode Local Git issue with malformed fields.json',
     (tester) async {
       final semantics = tester.ensureSemantics();
       final TrackStateAppComponent screen = defaultTestingDependencies
           .createTrackStateAppScreen(tester);
-      Ts208LocalGitFixture? fixture;
+      Ts224LocalGitFixture? fixture;
 
-      const summaryValue = 'TS-208 fallback summary';
+      const summaryValue = 'TS-224 fallback summary';
       const descriptionValue =
-          'TS-208 verifies the malformed fields fallback keeps the create form usable.';
+          'TS-224 verifies the malformed fields fallback still persists Description to Local Git.';
 
       try {
-        fixture = await tester.runAsync(Ts208LocalGitFixture.create);
+        fixture = await tester.runAsync(Ts224LocalGitFixture.create);
         if (fixture == null) {
-          throw StateError('TS-208 fixture creation did not complete.');
+          throw StateError('TS-224 fixture creation did not complete.');
         }
 
+        final initialHead = await tester.runAsync(fixture.headRevision) ?? '';
         final initialStatus =
             await tester.runAsync(fixture.worktreeStatusLines) ?? <String>[];
         expect(
           initialStatus,
           isEmpty,
           reason:
-              'TS-208 requires a clean Local Git repository before launching '
-              'the malformed fields.json scenario, but `git status --short` '
+              'TS-224 requires a clean Local Git repository before launching '
+              'the malformed fields.json save scenario, but `git status --short` '
               'returned ${initialStatus.join(' | ')}.',
         );
 
@@ -50,15 +51,14 @@ void main() {
             '{"id":"summary","name":"Summary","type":"string","required":true}',
           ),
           reason:
-              'TS-208 must exercise a malformed DEMO/config/fields.json fixture.',
+              'TS-224 must exercise a malformed DEMO/config/fields.json fixture.',
         );
         expect(
           malformedFieldsContents,
           isNot(contains(',\n  {"id":"description"')),
           reason:
-              'TS-208 must keep DEMO/config/fields.json syntactically invalid '
-              'by omitting the comma between the Summary and Description '
-              'entries.',
+              'TS-224 must keep DEMO/config/fields.json syntactically invalid '
+              'by omitting the comma between the Summary and Description entries.',
         );
 
         await screen.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
@@ -92,19 +92,19 @@ void main() {
           screen,
           label: 'Description',
           createIssueSection: createIssueSection,
-          failingStep: 4,
+          failingStep: 3,
         );
         await _expectVisibleText(
           screen,
           label: 'Save',
           createIssueSection: createIssueSection,
-          failingStep: 4,
+          failingStep: 3,
         );
         await _expectVisibleText(
           screen,
           label: 'Cancel',
           createIssueSection: createIssueSection,
-          failingStep: 4,
+          failingStep: 3,
         );
 
         await screen.populateCreateIssueForm(
@@ -137,6 +137,107 @@ void main() {
               'Step 4 failed: interacting with the fallback Create issue form '
               'surfaced a framework exception instead of keeping the UI stable.',
         );
+
+        await screen.submitCreateIssue(createIssueSection: createIssueSection);
+        await screen.waitWithoutInteraction(const Duration(milliseconds: 800));
+
+        expect(
+          await screen.isMessageBannerVisibleContaining('Save failed:'),
+          isFalse,
+          reason:
+              'Step 5 failed: saving the fallback-mode Local Git issue '
+              'surfaced a save error instead of completing successfully. '
+              'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
+              'Visible semantics: '
+              '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+        );
+        expect(
+          await screen.isTextFieldVisible('Summary'),
+          isFalse,
+          reason:
+              'Step 5 failed: the Create issue dialog stayed open after save, '
+              'so the success path was not completed.',
+        );
+
+        await screen.searchIssues(Ts224LocalGitFixture.createdIssueKey);
+        await screen.expectIssueSearchResultVisible(
+          Ts224LocalGitFixture.createdIssueKey,
+          summaryValue,
+        );
+        await screen.openIssue(
+          Ts224LocalGitFixture.createdIssueKey,
+          summaryValue,
+        );
+        await screen.expectIssueDetailText(
+          Ts224LocalGitFixture.createdIssueKey,
+          summaryValue,
+        );
+
+        final latestHead = await tester.runAsync(fixture.headRevision) ?? '';
+        final latestParent = await tester.runAsync(fixture.parentOfHead) ?? '';
+        final latestSubject =
+            await tester.runAsync(fixture.latestCommitSubject) ?? '';
+        final latestFiles =
+            await tester.runAsync(fixture.latestCommitFiles) ?? <String>[];
+        final finalStatus =
+            await tester.runAsync(fixture.worktreeStatusLines) ?? <String>[];
+        final createdMarkdown =
+            await tester.runAsync(
+              () => fixture!.readRepositoryFile(
+                Ts224LocalGitFixture.createdIssuePath,
+              ),
+            ) ??
+            '';
+
+        expect(
+          latestHead,
+          isNot(initialHead),
+          reason:
+              'Step 6 failed: a successful fallback-mode Local Git create flow '
+              'should append a new commit, but HEAD did not change.',
+        );
+        expect(
+          latestParent,
+          initialHead,
+          reason:
+              'Step 6 failed: the create commit should be written directly on '
+              'top of the clean fixture HEAD.',
+        );
+        expect(
+          latestSubject,
+          'Create ${Ts224LocalGitFixture.createdIssueKey}',
+          reason:
+              'Step 6 failed: the latest Local Git commit should be dedicated '
+              'to the fallback-mode create action.',
+        );
+        expect(
+          latestFiles,
+          equals([Ts224LocalGitFixture.createdIssuePath]),
+          reason:
+              'Step 6 failed: issue creation should commit only the new issue '
+              'file. Observed files: ${latestFiles.join(' | ')}',
+        );
+        expect(
+          finalStatus,
+          isEmpty,
+          reason:
+              'Step 6 failed: successful Local Git issue creation should leave '
+              'the worktree clean, but `git status --short` returned '
+              '${finalStatus.join(' | ')}.',
+        );
+        expect(
+          createdMarkdown,
+          allOf(
+            contains('key: ${Ts224LocalGitFixture.createdIssueKey}'),
+            contains('summary: "$summaryValue"'),
+            contains('# Description'),
+            contains(descriptionValue),
+          ),
+          reason:
+              'Step 6 failed: ${Ts224LocalGitFixture.createdIssuePath} was '
+              'created, but it did not contain the saved fallback field values.\n'
+              'Observed main.md:\n$createdMarkdown',
+        );
       } finally {
         await tester.runAsync(() async {
           if (fixture != null) {
@@ -147,7 +248,7 @@ void main() {
         semantics.dispose();
       }
     },
-    timeout: const Timeout(Duration(seconds: 20)),
+    timeout: const Timeout(Duration(seconds: 30)),
   );
 }
 
