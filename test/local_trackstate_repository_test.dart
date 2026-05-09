@@ -443,6 +443,34 @@ void main() {
   });
 
   test(
+    'local repository falls back to built-in fields when fields.json is malformed',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      await _writeFile(
+        repo,
+        'DEMO/config/fields.json',
+        '[{"id":"summary","name":"Summary","type":"string","required":true}\n'
+            '{"id":"description","name":"Description","type":"markdown","required":false}]\n',
+      );
+      await _git(repo.path, ['add', 'DEMO/config/fields.json']);
+      await _git(repo.path, ['commit', '-m', 'Break fields config']);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+
+      expect(snapshot.project.fieldLabel('summary'), 'Summary');
+      expect(snapshot.project.fieldLabel('description'), 'Description');
+      expect(
+        snapshot.project.fieldDefinitions.map((field) => field.id),
+        containsAll(<String>['summary', 'description']),
+      );
+      expect(snapshot.issues, isNotEmpty);
+    },
+  );
+
+  test(
     'local provider rejects stale attachment writes with expected revisions',
     () async {
       final repo = await _createLocalRepository();

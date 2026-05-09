@@ -671,6 +671,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   }
 
   Future<TrackerSnapshot> _loadSetupSnapshot() async {
+    final loadWarnings = <String>[];
     final tree = await _provider.listTree(ref: _provider.dataRef);
     final blobPaths = tree
         .where((entry) => entry.type == 'blob')
@@ -708,6 +709,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       _joinPath(configRoot, 'fields.json'),
       localizedLabels: localizedLabels['fields'] ?? const {},
       locale: defaultLocale,
+      loadWarnings: loadWarnings,
     );
     final priorities = await _loadOptionalConfigEntries(
       blobPaths: blobPaths,
@@ -826,6 +828,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       project: project,
       issues: indexedIssues,
       repositoryIndex: normalizedIndex,
+      loadWarnings: loadWarnings,
     );
   }
 
@@ -921,29 +924,40 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     String path, {
     required Map<String, String> localizedLabels,
     required String locale,
+    required List<String> loadWarnings,
   }) async {
-    final json = await _getRepositoryJson(path);
-    if (json is! List) return const [];
-    return json
-        .whereType<Map>()
-        .map((entry) {
-          final rawId = entry['id']?.toString();
-          final id = rawId == null || rawId.isEmpty
-              ? _canonicalConfigId(entry['name']?.toString())
-              : rawId;
-          final fallbackName = entry['name']?.toString() ?? id;
-          final localizedLabel = localizedLabels[id];
-          return TrackStateFieldDefinition(
-            id: id,
-            name: fallbackName,
-            type: entry['type']?.toString() ?? 'string',
-            required: entry['required'] == true,
-            localizedLabels: localizedLabel == null
-                ? const {}
-                : {locale: localizedLabel},
-          );
-        })
-        .toList(growable: false);
+    try {
+      final json = await _getRepositoryJson(path);
+      if (json is! List) return const [];
+      return json
+          .whereType<Map>()
+          .map((entry) {
+            final rawId = entry['id']?.toString();
+            final id = rawId == null || rawId.isEmpty
+                ? _canonicalConfigId(entry['name']?.toString())
+                : rawId;
+            final fallbackName = entry['name']?.toString() ?? id;
+            final localizedLabel = localizedLabels[id];
+            return TrackStateFieldDefinition(
+              id: id,
+              name: fallbackName,
+              type: entry['type']?.toString() ?? 'string',
+              required: entry['required'] == true,
+              localizedLabels: localizedLabel == null
+                  ? const {}
+                  : {locale: localizedLabel},
+            );
+          })
+          .toList(growable: false);
+    } on FormatException catch (error) {
+      loadWarnings.add(
+        'Falling back to built-in fields after failing to parse $path: $error',
+      );
+      return List<TrackStateFieldDefinition>.from(
+        _fieldDefinitions,
+        growable: false,
+      );
+    }
   }
 
   Future<RepositoryIndex> _loadRepositoryIndex({

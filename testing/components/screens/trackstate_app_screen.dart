@@ -6,6 +6,7 @@ import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/local_git_repository_port.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
+import '../../frameworks/flutter/trackstate_test_runtime.dart';
 
 class TrackStateAppScreen implements TrackStateAppComponent {
   TrackStateAppScreen(
@@ -113,8 +114,24 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       tester.view.resetDevicePixelRatio();
     });
 
+    final resolvedRepository = repository.usesLocalPersistence
+        ? await preloadLocalGitTestRepository(
+            tester: tester,
+            repository: repository,
+          )
+        : repository;
+
     await tester.pumpWidget(
-      TrackStateApp(key: UniqueKey(), repository: repository),
+      TrackStateApp(
+        key: UniqueKey(),
+        repository: resolvedRepository,
+        openLocalRepository: ({
+          required String repositoryPath,
+          required String writeBranch,
+        }) => _repositoryService.openRepository(
+          repositoryPath: repositoryPath,
+        ),
+      ),
     );
     await _pumpFrames();
   }
@@ -139,7 +156,34 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> openSection(String label) async {
-    final section = find.bySemanticsLabel(RegExp(RegExp.escape(label))).first;
+    final end = DateTime.now().add(const Duration(seconds: 5));
+    Finder? section;
+    while (DateTime.now().isBefore(end)) {
+      final semanticsMatch = find.bySemanticsLabel(
+        RegExp(RegExp.escape(label)),
+      );
+      if (semanticsMatch.evaluate().isNotEmpty) {
+        section = semanticsMatch.first;
+        break;
+      }
+
+      final textMatch = find.text(label, findRichText: true);
+      if (textMatch.evaluate().isNotEmpty) {
+        section = textMatch.first;
+        break;
+      }
+
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    if (section == null) {
+      fail(
+        'Could not find section "$label". Visible texts: '
+        '${_formatSnapshot(visibleTextsSnapshot())}. Visible semantics: '
+        '${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
+      );
+    }
+
     await tester.ensureVisible(section);
     await tester.tap(section, warnIfMissed: false);
     await _pumpFrames();
@@ -150,12 +194,22 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     required String repositoryPath,
     required String writeBranch,
   }) async {
+    await _repositoryService.openRepository(repositoryPath: repositoryPath);
     await openSection('Settings');
     await tapVisibleControl('Local Git');
     await enterLabeledTextField('Repository Path', text: repositoryPath);
     await enterLabeledTextField('Write Branch', text: writeBranch);
     FocusManager.instance.primaryFocus?.unfocus();
-    await tester.pumpAndSettle();
+    await _pumpFrames(20);
+    final end = DateTime.now().add(const Duration(seconds: 5));
+    while (DateTime.now().isBefore(end)) {
+      if (await isTopBarSemanticsLabelVisible('Local Git') ||
+          await isTopBarTextVisible('Local Git')) {
+        break;
+      }
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await _pumpFrames();
   }
 
   @override
@@ -447,6 +501,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<bool> isTopBarTextVisible(String text) async {
     await tester.pump();
+    if (repositoryAccessButton.evaluate().isEmpty) {
+      return false;
+    }
     return find
         .descendant(of: topBar, matching: _text(text))
         .evaluate()
@@ -462,6 +519,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<bool> isTopBarSemanticsLabelVisible(String label) async {
     await tester.pump();
+    if (repositoryAccessButton.evaluate().isEmpty) {
+      return false;
+    }
     return find
         .descendant(of: topBar, matching: _exactSemanticsLabel(label))
         .evaluate()
@@ -479,6 +539,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<bool> tapTopBarControl(String label) async {
+    if (repositoryAccessButton.evaluate().isEmpty) {
+      return false;
+    }
     return _tapControl(
       label: label,
       semanticsMatch: find.descendant(
@@ -493,6 +556,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Future<bool> isTextFieldVisible(String label) async {
     await tester.pump();
     return _labeledTextField(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<int> countLabeledTextFields(String label) async {
+    await tester.pump();
+    return _labeledTextField(label).evaluate().length;
   }
 
   @override
