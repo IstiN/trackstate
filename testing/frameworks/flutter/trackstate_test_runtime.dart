@@ -28,17 +28,24 @@ Future<TrackStateRepository> createLocalGitTestRepository({
   if (user == null) {
     throw StateError('Local Git user resolution did not complete.');
   }
-  return _PreloadedLocalGitRepository(repository: repository, user: user);
+  return _PreloadedLocalGitRepository(
+    repository: repository,
+    snapshot: snapshot,
+    user: user,
+  );
 }
 
 class _PreloadedLocalGitRepository implements TrackStateRepository {
-  const _PreloadedLocalGitRepository({
+  _PreloadedLocalGitRepository({
     required this.repository,
+    required this.snapshot,
     required this.user,
   });
 
   final TrackStateRepository repository;
+  final TrackerSnapshot snapshot;
   final RepositoryUser user;
+  bool _servedInitialSnapshot = false;
 
   @override
   bool get supportsGitHubAuth => repository.supportsGitHubAuth;
@@ -50,7 +57,13 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
   Future<RepositoryUser> connect(RepositoryConnection connection) async => user;
 
   @override
-  Future<TrackerSnapshot> loadSnapshot() => repository.loadSnapshot();
+  Future<TrackerSnapshot> loadSnapshot() async {
+    if (!_servedInitialSnapshot) {
+      _servedInitialSnapshot = true;
+      return snapshot;
+    }
+    return repository.loadSnapshot();
+  }
 
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) =>
@@ -74,14 +87,12 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
   ) => repository.updateIssueDescription(issue, description);
 
   @override
-  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) {
-    return repository.archiveIssue(issue);
-  }
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) =>
+      repository.archiveIssue(issue);
 
   @override
-  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) {
-    return repository.deleteIssue(issue);
-  }
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) =>
+      repository.deleteIssue(issue);
 
   @override
   Future<TrackStateIssue> updateIssueStatus(
