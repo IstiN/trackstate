@@ -15,7 +15,14 @@ class ThemeTokenCiConfig:
     workflow_job_name: str
     workflow_step_name: str
     gate_command: str
-    recent_run_limit: int = 10
+    base_branch: str
+    probe_path: str
+    branch_prefix: str
+    pr_title: str
+    pr_body: str
+    poll_interval_seconds: int = 5
+    run_timeout_seconds: int = 600
+    pull_request_timeout_seconds: int = 90
 
     @classmethod
     def from_file(cls, path: Path) -> "ThemeTokenCiConfig":
@@ -27,12 +34,6 @@ class ThemeTokenCiConfig:
         if not isinstance(runtime_inputs, dict):
             raise ValueError(
                 f"TS-131 config runtime_inputs must deserialize to a mapping: {path}"
-            )
-
-        recent_run_limit = runtime_inputs.get("recent_run_limit", 10)
-        if not isinstance(recent_run_limit, int) or recent_run_limit <= 0:
-            raise ValueError(
-                "TS-131 config runtime_inputs.recent_run_limit must be a positive integer."
             )
 
         return cls(
@@ -50,7 +51,29 @@ class ThemeTokenCiConfig:
                 path,
             ),
             gate_command=cls._require_string(runtime_inputs, "gate_command", path),
-            recent_run_limit=recent_run_limit,
+            base_branch=cls._require_string(runtime_inputs, "base_branch", path),
+            probe_path=cls._require_string(runtime_inputs, "probe_path", path),
+            branch_prefix=cls._require_string(runtime_inputs, "branch_prefix", path),
+            pr_title=cls._require_string(runtime_inputs, "pr_title", path),
+            pr_body=cls._require_string(runtime_inputs, "pr_body", path),
+            poll_interval_seconds=cls._require_positive_int(
+                runtime_inputs,
+                "poll_interval_seconds",
+                path,
+                default=5,
+            ),
+            run_timeout_seconds=cls._require_positive_int(
+                runtime_inputs,
+                "run_timeout_seconds",
+                path,
+                default=600,
+            ),
+            pull_request_timeout_seconds=cls._require_positive_int(
+                runtime_inputs,
+                "pull_request_timeout_seconds",
+                path,
+                default=90,
+            ),
         )
 
     @staticmethod
@@ -63,3 +86,18 @@ class ThemeTokenCiConfig:
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"TS-131 config is missing runtime_inputs.{key} in {path}.")
         return value.strip()
+
+    @staticmethod
+    def _require_positive_int(
+        payload: dict[str, Any],
+        key: str,
+        path: Path,
+        *,
+        default: int,
+    ) -> int:
+        value = payload.get(key, default)
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError(
+                f"TS-131 config runtime_inputs.{key} must be a positive integer in {path}."
+            )
+        return value

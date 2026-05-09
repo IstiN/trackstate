@@ -1,14 +1,19 @@
 # TS-131
 
-Validates the deployed pull-request CI gate for non-tokenized Flutter colors
-without creating or pushing a branch.
+Validates the deployed pull-request CI gate for non-tokenized Flutter colors by
+creating a disposable branch and Pull Request in `IstiN/trackstate`, waiting for
+the exact PR workflow run, and confirming that `Enforce theme tokens` fails in a
+merge-blocking way.
 
-The automation passes only when both of these are true:
-1. the live GitHub Actions pull-request workflow for `IstiN/trackstate` visibly
-   includes and executes the `Enforce theme tokens` step, and
-2. the repository's real `dart run tool/check_theme_tokens.dart` gate rejects a
-   hardcoded Flutter color in the same way a contributor would observe from the
-   terminal.
+The automation also reuses the repository's real
+`dart run tool/check_theme_tokens.dart` gate locally and requires the hardcoded
+color probe to fail with a non-zero exit status while still showing a
+contributor-visible diagnostic.
+
+## Install dependencies
+
+No extra Python packages are required beyond the repository dependencies already
+used by the existing `testing/` suite.
 
 ## Run this test
 
@@ -19,8 +24,8 @@ python3 -m unittest discover -s testing/tests/TS-131 -p 'test_*.py' -v
 
 ## Required environment
 
-- `gh` must be installed and authenticated with access to read workflow metadata
-  for `IstiN/trackstate`.
+- `gh` must be installed and authenticated with permission to push branches and
+  create Pull Requests in `IstiN/trackstate`.
 - Network access to GitHub REST APIs is required.
 - A Flutter SDK is required for the reused hardcoded-hex probe. The runtime uses
   the same resolution order documented in `testing/tests/TS-115/README.md`.

@@ -70,7 +70,7 @@ class ThemeTokenPullRequestGateTest(unittest.TestCase):
         )
         self.assertTrue(
             workflow_observation.workflow_declares_pull_request_trigger,
-            "Step 3 failed: the live workflow source no longer declares a "
+            "Step 2 failed: the live workflow source no longer declares a "
             "`pull_request` trigger, so a Pull Request would not be blocked by "
             "this gate.\n"
             f"Workflow URL: {workflow_observation.workflow_html_url}\n"
@@ -78,32 +78,50 @@ class ThemeTokenPullRequestGateTest(unittest.TestCase):
         )
         self.assertTrue(
             workflow_observation.workflow_declares_gate_step,
-            "Step 3 failed: the live workflow source no longer visibly declares "
+            "Step 2 failed: the live workflow source no longer visibly declares "
             f"the `{self.ci_config.workflow_step_name}` step.\n"
             f"Workflow URL: {workflow_observation.workflow_html_url}\n"
             f"Observed workflow text:\n{workflow_observation.workflow_text}",
         )
         self.assertTrue(
             workflow_observation.workflow_declares_gate_command,
-            "Step 3 failed: the live workflow source no longer runs the theme-token "
+            "Step 2 failed: the live workflow source no longer runs the theme-token "
             "policy command, so the Pull Request gate would not execute.\n"
             f"Expected command: {self.ci_config.gate_command}\n"
             f"Workflow URL: {workflow_observation.workflow_html_url}\n"
             f"Observed workflow text:\n{workflow_observation.workflow_text}",
         )
+
+        self.assertTrue(
+            workflow_observation.pull_request_head_branch.startswith(
+                self.ci_config.branch_prefix
+            ),
+            "Step 3 failed: the disposable pull request did not use the configured "
+            "TS-131 branch prefix.\n"
+            f"Observed branch: {workflow_observation.pull_request_head_branch}",
+        )
+        self.assertEqual(
+            workflow_observation.pull_request_probe_path,
+            self.ci_config.probe_path,
+            "Step 3 failed: the disposable pull request did not commit the expected "
+            "probe file path.\n"
+            f"Expected probe path: {self.ci_config.probe_path}\n"
+            f"Observed probe path: {workflow_observation.pull_request_probe_path}",
+        )
         self.assertEqual(
             workflow_observation.latest_pull_request_run_event,
             "pull_request",
-            "Step 3 failed: the selected live workflow run was not triggered by a "
-            "Pull Request event.\n"
+            "Step 3 failed: the observed workflow run was not triggered by the "
+            "disposable Pull Request.\n"
             f"Run URL: {workflow_observation.latest_pull_request_run_url}\n"
             f"Observed event: {workflow_observation.latest_pull_request_run_event}",
         )
         self.assertEqual(
             workflow_observation.latest_pull_request_run_conclusion,
-            "success",
-            "Step 3 failed: the live Pull Request workflow run did not complete "
-            "successfully.\n"
+            "failure",
+            "Step 3 failed: the disposable Pull Request workflow run did not fail "
+            "as required for a merge-blocking theme-token gate.\n"
+            f"Pull Request URL: {workflow_observation.pull_request_url}\n"
             f"Run URL: {workflow_observation.latest_pull_request_run_url}\n"
             f"Status: {workflow_observation.latest_pull_request_run_status}\n"
             f"Conclusion: {workflow_observation.latest_pull_request_run_conclusion}",
@@ -111,7 +129,7 @@ class ThemeTokenPullRequestGateTest(unittest.TestCase):
         self.assertIn(
             self.ci_config.workflow_job_name,
             workflow_observation.observed_job_names,
-            "Step 3 failed: the selected Pull Request workflow run did not expose "
+            "Step 3 failed: the disposable Pull Request workflow run did not expose "
             "the expected job name.\n"
             f"Run URL: {workflow_observation.latest_pull_request_run_url}\n"
             f"Observed job names: {workflow_observation.observed_job_names}",
@@ -119,20 +137,40 @@ class ThemeTokenPullRequestGateTest(unittest.TestCase):
         self.assertIn(
             self.ci_config.workflow_step_name,
             workflow_observation.observed_step_names,
-            "Step 3 failed: the selected Pull Request workflow run did not expose "
+            "Step 3 failed: the disposable Pull Request workflow run did not expose "
             "the theme-token gate step in the job details.\n"
             f"Run URL: {workflow_observation.latest_pull_request_run_url}\n"
             f"Observed step names: {workflow_observation.observed_step_names}",
         )
         self.assertEqual(
             workflow_observation.theme_token_step_conclusion,
-            "success",
-            "Human-style verification failed for Step 3: the live Pull Request run "
-            "did not show the theme-token gate step succeeding in GitHub Actions.\n"
+            "failure",
+            "Human-style verification failed for Step 3: GitHub Actions did not "
+            "show the `Enforce theme tokens` step failing on the disposable "
+            "Pull Request.\n"
+            f"Pull Request URL: {workflow_observation.pull_request_url}\n"
             f"Run URL: {workflow_observation.latest_pull_request_run_url}\n"
             f"Matched job: {workflow_observation.theme_token_job_name}\n"
             f"Step status: {workflow_observation.theme_token_step_status}\n"
             f"Step conclusion: {workflow_observation.theme_token_step_conclusion}",
+        )
+        self.assertEqual(
+            workflow_observation.pull_request_mergeable_state,
+            "blocked",
+            "Step 3 failed: GitHub did not report the disposable Pull Request as "
+            "blocked after the failing theme-token gate.\n"
+            f"Pull Request URL: {workflow_observation.pull_request_url}\n"
+            f"Observed mergeable state: "
+            f"{workflow_observation.pull_request_mergeable_state}\n"
+            f"Observed status state: {workflow_observation.pull_request_status_state}",
+        )
+        self.assertEqual(
+            workflow_observation.pull_request_status_state,
+            "failure",
+            "Step 3 failed: GitHub did not report failing status checks for the "
+            "disposable Pull Request head commit.\n"
+            f"Pull Request URL: {workflow_observation.pull_request_url}\n"
+            f"Observed status state: {workflow_observation.pull_request_status_state}",
         )
 
         self.assertTrue(
@@ -159,7 +197,7 @@ class ThemeTokenPullRequestGateTest(unittest.TestCase):
         )
         self.assertTrue(
             lint_result.tokenized_analyze.succeeded,
-            "Step 1 failed: the tokenized Flutter probe did not pass the same "
+            "Step 4 failed: the tokenized Flutter probe did not pass the same "
             "theme-token policy gate that CI executes.\n"
             f"Probe file: {lint_result.probe_path}\n"
             f"Command: {lint_result.tokenized_analyze.command_text}\n"
@@ -169,7 +207,7 @@ class ThemeTokenPullRequestGateTest(unittest.TestCase):
         self.assertIn(
             "No theme token policy violations found.",
             tokenized_output,
-            "Human-style verification failed for Step 1: the terminal output for "
+            "Human-style verification failed for Step 4: the terminal output for "
             "the tokenized probe did not clearly show a clean policy-gate result.\n"
             f"Probe file: {lint_result.probe_path}\n"
             f"Observed output:\n{tokenized_output}",
@@ -190,19 +228,27 @@ class ThemeTokenPullRequestGateTest(unittest.TestCase):
                 " info - ",
             )
         )
-        self.assertTrue(
-            lint_result.hardcoded_analyze.exit_code != 0 or has_terminal_diagnostic,
-            "Step 3 failed: the live theme-token policy gate accepted a hardcoded "
-            "Flutter color instead of surfacing a blocking diagnostic.\n"
+        self.assertNotEqual(
+            lint_result.hardcoded_analyze.exit_code,
+            0,
+            "Step 5 failed: the local theme-token policy command exited successfully "
+            "after the probe widget was changed to a hardcoded Flutter color.\n"
             f"Probe file: {lint_result.probe_path}\n"
             f"Command: {lint_result.hardcoded_analyze.command_text}\n"
             f"Exit code: {lint_result.hardcoded_analyze.exit_code}\n"
             f"Observed output:\n{hardcoded_output}",
         )
+        self.assertTrue(
+            has_terminal_diagnostic,
+            "Human-style verification failed for Step 5: the local theme-token "
+            "policy output did not include a contributor-visible diagnostic.\n"
+            f"Probe file: {lint_result.probe_path}\n"
+            f"Observed output:\n{hardcoded_output}",
+        )
         self.assertNotIn(
             "No theme token policy violations found.",
             hardcoded_output,
-            "Step 3 failed: the terminal still reported a clean theme-token result "
+            "Step 5 failed: the terminal still reported a clean theme-token result "
             "after the probe widget was changed to a hardcoded hex color.\n"
             f"Probe file: {lint_result.probe_path}\n"
             f"Observed output:\n{hardcoded_output}",
@@ -210,7 +256,7 @@ class ThemeTokenPullRequestGateTest(unittest.TestCase):
         self.assertIn(
             self.lint_config.probe_relative_path.name,
             hardcoded_output,
-            "Human-style verification failed for Step 3: the terminal diagnostic "
+            "Human-style verification failed for Step 5: the terminal diagnostic "
             "did not point the user to the offending probe file.\n"
             f"Probe file: {lint_result.probe_path}\n"
             f"Observed output:\n{hardcoded_output}",
@@ -218,7 +264,7 @@ class ThemeTokenPullRequestGateTest(unittest.TestCase):
         self.assertIn(
             self.lint_config.hardcoded_color_expression,
             hardcoded_output,
-            "Human-style verification failed for Step 3: the terminal diagnostic "
+            "Human-style verification failed for Step 5: the terminal diagnostic "
             "did not visibly include the hardcoded color expression.\n"
             f"Probe file: {lint_result.probe_path}\n"
             f"Observed output:\n{hardcoded_output}",
