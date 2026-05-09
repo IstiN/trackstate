@@ -35,10 +35,7 @@ class LocalGitTrackStateProvider
     }
     final name = await _gitConfigValue('user.name');
     final email = await _gitConfigValue('user.email');
-    return RepositoryUser(
-      login: email.ifEmpty('local-user'),
-      displayName: name.ifEmpty(email.ifEmpty('Local User')),
-    );
+    return RepositoryUser(login: email, displayName: name.ifEmpty(email));
   }
 
   @override
@@ -308,7 +305,7 @@ class LocalGitTrackStateProvider
   }
 
   Future<String> _gitConfigValue(String key) async =>
-      (await _tryGit(['config', key]))?.stdout.trim() ?? '';
+      (await _tryGit(['config', '--local', key]))?.stdout.trim() ?? '';
 
   Future<void> _ensurePathClean(String path) async {
     final result = await _runGit(['status', '--porcelain', '--', path]);
