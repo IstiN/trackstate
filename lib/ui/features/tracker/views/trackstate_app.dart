@@ -102,7 +102,12 @@ class _TrackerHome extends StatelessWidget {
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
-              child: _MessageBanner(message: viewModel.message),
+              child: _MessageBanner(
+                message: viewModel.message,
+                onDismiss: viewModel.message == null
+                    ? null
+                    : viewModel.dismissMessage,
+              ),
             ),
           ),
         ),
@@ -629,9 +634,10 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
 }
 
 class _MessageBanner extends StatelessWidget {
-  const _MessageBanner({required this.message});
+  const _MessageBanner({required this.message, this.onDismiss});
 
   final TrackerMessage? message;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -652,6 +658,7 @@ class _MessageBanner extends StatelessWidget {
         border: Border.all(color: isError ? colors.accent : colors.primary),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           TrackStateIcon(
             isError ? TrackStateIconGlyph.issue : TrackStateIconGlyph.gitBranch,
@@ -661,6 +668,20 @@ class _MessageBanner extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(child: Text(resolvedMessage)),
+          if (onDismiss != null) ...[
+            const SizedBox(width: 8),
+            Semantics(
+              button: true,
+              label: l10n.close,
+              child: TextButton(
+                onPressed: onDismiss,
+                style: TextButton.styleFrom(
+                  foregroundColor: isError ? colors.accent : colors.primary,
+                ),
+                child: Text(l10n.close),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -691,7 +712,10 @@ class _SectionBody extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (viewModel.message != null) ...[
-                _MessageBanner(message: viewModel.message!),
+                _MessageBanner(
+                  message: viewModel.message!,
+                  onDismiss: viewModel.dismissMessage,
+                ),
                 const SizedBox(height: 12),
               ],
               AnimatedSwitcher(

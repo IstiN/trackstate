@@ -291,6 +291,14 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void dismissMessage() {
+    if (_message == null) {
+      return;
+    }
+    _message = null;
+    notifyListeners();
+  }
+
   Future<void> connectGitHub(String token, {bool remember = false}) async {
     if (!supportsGitHubAuth) {
       _message = TrackerMessage.localGitTokensNotNeeded();
