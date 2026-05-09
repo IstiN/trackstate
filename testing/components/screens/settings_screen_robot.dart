@@ -1,4 +1,4 @@
-import 'dart:ui' show PointerDeviceKind, Tristate;
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -161,7 +161,7 @@ class SettingsScreenRobot {
   String? focusedLabel(Map<String, Finder> candidates) {
     final focusedSemantics = find.semantics.byPredicate(
       (node) =>
-          node.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue,
+          node.getSemanticsData().flagsCollection.isFocused.value == true,
       describeMatch: (_) => 'focused semantics node',
     );
     if (focusedSemantics.evaluate().isEmpty) {
