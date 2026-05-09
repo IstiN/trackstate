@@ -62,7 +62,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   @override
   final bool supportsGitHubAuth;
   TrackerSnapshot? _snapshot;
-  ProviderSession? _session;
+  final ProviderSession _session;
 
   ProviderSession? get session => _session;
 
@@ -156,7 +156,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     final issueTypeId = _defaultIssueTypeId(project);
     final statusId = _defaultStatusId(project);
     final priorityId = _defaultPriorityId(project);
-    final author = _defaultAuthor(_session?.resolvedUserIdentity);
+    final author = _defaultAuthor(_session.resolvedUserIdentity);
     final markdown = _buildIssueMarkdown(
       key: key,
       projectKey: project.key,
@@ -743,19 +743,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     required String resolvedUserIdentity,
     required RepositoryPermission permission,
   }) {
-    final session =
-        _session ??
-        ProviderSession(
-          providerType: _provider.providerType,
-          connectionState: connectionState,
-          resolvedUserIdentity: resolvedUserIdentity,
-          canRead: permission.canRead,
-          canWrite: permission.canWrite,
-          canCreateBranch: permission.canCreateBranch,
-          canManageAttachments: permission.canManageAttachments,
-          canCheckCollaborators: permission.canCheckCollaborators,
-        );
-    session.update(
+    _session.update(
       providerType: _provider.providerType,
       connectionState: connectionState,
       resolvedUserIdentity: resolvedUserIdentity,
@@ -765,8 +753,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       canManageAttachments: permission.canManageAttachments,
       canCheckCollaborators: permission.canCheckCollaborators,
     );
-    _session = session;
-    return session;
+    return _session;
   }
 
   String _resolveConfigRoot(Map<String, Object?> projectJson, String dataRoot) {
