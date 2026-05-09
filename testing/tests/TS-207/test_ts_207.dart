@@ -202,15 +202,31 @@ Future<void> _openCreateIssueFromJqlSearch(
   TrackStateAppComponent screen,
 ) async {
   await screen.openSection('JQL Search');
-  final opened = await screen.tapVisibleControl('Create issue');
+  final visibleFromToolbar =
+      await screen.isTopBarSemanticsLabelVisible('Create issue') ||
+      await screen.isTopBarTextVisible('Create issue');
+  expect(
+    visibleFromToolbar,
+    isTrue,
+    reason:
+        'Step 1 failed: JQL Search did not expose a visible top-bar '
+        '"Create issue" entry point. Top bar texts: '
+        '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible '
+        'texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
+        'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+  );
+
+  final opened = await screen.tapTopBarControl('Create issue');
   if (opened) {
     return;
   }
 
   fail(
-    'Step 1 failed: JQL Search did not expose a visible "Create issue" entry '
-    'point. Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
-    'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+    'Step 1 failed: the visible JQL Search top-bar "Create issue" control '
+    'could not be activated. Top bar texts: '
+    '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible texts: '
+    '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
+    '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
   );
 }
 
