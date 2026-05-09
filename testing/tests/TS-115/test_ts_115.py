@@ -28,7 +28,9 @@ class HardcodedHexLintRuleTest(unittest.TestCase):
             self.probe,
         )
 
-    def test_flutter_analyze_blocks_hardcoded_hex_colors_in_ui_widgets(self) -> None:
+    def test_theme_token_policy_gate_blocks_hardcoded_hex_colors_in_ui_widgets(
+        self,
+    ) -> None:
         result = self.validator.validate(config=self.config)
 
         self.assertTrue(
@@ -56,17 +58,18 @@ class HardcodedHexLintRuleTest(unittest.TestCase):
         self.assertTrue(
             result.tokenized_analyze.succeeded,
             "Step 1 failed: the theme-tokenized probe widget did not analyze "
-            "cleanly before the hardcoded-hex mutation.\n"
+            "cleanly through the theme-token policy gate before the "
+            "hardcoded-hex mutation.\n"
             f"Probe file: {result.probe_path}\n"
             f"Command: {result.tokenized_analyze.command_text}\n"
             f"Exit code: {result.tokenized_analyze.exit_code}\n"
             f"Analyzer output:\n{tokenized_output}",
         )
         self.assertIn(
-            "No issues found!",
+            "No theme token policy violations found.",
             tokenized_output,
             "Human-style verification failed for Step 1: the terminal output for "
-            "the theme-tokenized probe did not show a clean analyzer result.\n"
+            "the theme-tokenized probe did not show a clean policy result.\n"
             f"Probe file: {result.probe_path}\n"
             f"Observed output:\n{tokenized_output}",
         )
@@ -95,8 +98,8 @@ class HardcodedHexLintRuleTest(unittest.TestCase):
 
         self.assertTrue(
             result.hardcoded_analyze.exit_code != 0 or has_terminal_diagnostic,
-            "Step 3 failed: `flutter analyze` treated the hardcoded hex probe as "
-            "acceptable instead of surfacing a linter violation.\n"
+            "Step 3 failed: the theme-token policy gate treated the hardcoded "
+            "hex probe as acceptable instead of surfacing a lint violation.\n"
             f"Probe file: {result.probe_path}\n"
             f"Command: {result.hardcoded_analyze.command_text}\n"
             f"Exit code: {result.hardcoded_analyze.exit_code}\n"
