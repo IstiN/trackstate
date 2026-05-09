@@ -44,6 +44,13 @@ class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
         project_root: Path,
         target: Path | str,
     ) -> CliCommandResult:
+        return self.theme_token_check_many(project_root, (target,))
+
+    def theme_token_check_many(
+        self,
+        project_root: Path,
+        targets: tuple[Path | str, ...],
+    ) -> CliCommandResult:
         flutter_bin = self._resolve_flutter_bin()
         dart_bin = flutter_bin.parent / "dart"
         return self._run(
@@ -51,7 +58,7 @@ class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
                 str(dart_bin),
                 "run",
                 "tool/check_theme_tokens.dart",
-                self._target_text(target),
+                *self._targets_text(targets),
             ),
             cwd=project_root,
         )
@@ -152,6 +159,10 @@ class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
         if isinstance(target, Path):
             return target.as_posix()
         return target
+
+    @classmethod
+    def _targets_text(cls, targets: tuple[Path | str, ...]) -> tuple[str, ...]:
+        return tuple(cls._target_text(target) for target in targets)
 
     @staticmethod
     def _restore_sdk_permissions(flutter_root: Path) -> None:
