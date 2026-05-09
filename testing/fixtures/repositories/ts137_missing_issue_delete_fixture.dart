@@ -199,8 +199,8 @@ This issue must remain active after the missing delete attempt.
 ''');
 
     await _git(['init', '-b', 'main']);
-    await _git(['config', 'user.name', 'Local Tester']);
-    await _git(['config', 'user.email', 'local@example.com']);
+    await _git(['config', '--local', 'user.name', 'Local Tester']);
+    await _git(['config', '--local', 'user.email', 'local@example.com']);
     await _git(['add', '.']);
     await _git(['commit', '-m', 'Seed active issues for TS-137']);
   }

@@ -316,13 +316,22 @@ This comment demonstrates markdown-backed collaboration history.
         files.keys,
         containsAll([
           'DEMO/.trackstate/index/issues.json',
-          'DEMO/.trackstate/index/tombstones.json',
-          'DEMO/.trackstate/tombstones/DEMO-99.json',
           'DEMO/config/resolutions.json',
           'DEMO/DEMO-1/DEMO-2/links.json',
           'DEMO/DEMO-1/DEMO-2/attachments/board-preview.svg',
         ]),
       );
+      expect(
+        files.containsKey('DEMO/.trackstate/index/tombstones.json') ||
+            files.containsKey('DEMO/.trackstate/index/deleted.json'),
+        isTrue,
+        reason:
+            'The checked-in setup template must include either the current '
+            'tombstone index or the legacy deleted index.',
+      );
+      if (files.containsKey('DEMO/.trackstate/index/tombstones.json')) {
+        expect(files.keys, contains('DEMO/.trackstate/tombstones/DEMO-99.json'));
+      }
 
       final repository = _mockSetupRepository(files: files);
       final snapshot = await repository.loadSnapshot();

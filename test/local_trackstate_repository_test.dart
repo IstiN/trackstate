@@ -5,7 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/local/local_git_trackstate_provider.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
+
+import '../testing/fixtures/repositories/ts163_archive_provider_failure_fixture.dart';
 
 void main() {
   test(
@@ -170,6 +173,188 @@ void main() {
     },
   );
 
+  test(
+    'local repository reports a missing description update target as a repository not-found error',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final beforeHead = await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ]);
+
+      const missingIssue = TrackStateIssue(
+        key: 'MISSING-999',
+        project: 'DEMO',
+        issueType: IssueType.story,
+        issueTypeId: 'story',
+        status: IssueStatus.todo,
+        statusId: 'todo',
+        priority: IssuePriority.medium,
+        priorityId: 'medium',
+        summary: 'Missing update target',
+        description:
+            'Synthetic missing issue used for update regression coverage.',
+        assignee: '',
+        reporter: '',
+        labels: [],
+        components: [],
+        fixVersionIds: [],
+        watchers: [],
+        customFields: {},
+        parentKey: null,
+        epicKey: null,
+        parentPath: null,
+        epicPath: null,
+        progress: 0,
+        updatedLabel: 'just now',
+        acceptanceCriteria: [],
+        comments: [],
+        links: [],
+        attachments: [],
+        isArchived: false,
+        storagePath: 'DEMO/MISSING-999/main.md',
+      );
+
+      await expectLater(
+        () => repository.updateIssueDescription(
+          missingIssue,
+          'Updated description that should never be written.',
+        ),
+        throwsA(
+          isA<TrackStateRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            'Could not find repository artifacts for MISSING-999.',
+          ),
+        ),
+      );
+
+      final afterHead = await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ]);
+      final status = await Process.run('git', [
+        '-C',
+        repo.path,
+        'status',
+        '--short',
+      ]);
+
+      expect(
+        afterHead.stdout.toString().trim(),
+        beforeHead.stdout.toString().trim(),
+      );
+      expect(status.stdout.toString().trim(), isEmpty);
+    },
+  );
+
+  test(
+    'local repository reports a missing archive target as a repository not-found error',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final beforeHead = await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ]);
+
+      const missingIssue = TrackStateIssue(
+        key: 'MISSING-999',
+        project: 'DEMO',
+        issueType: IssueType.story,
+        issueTypeId: 'story',
+        status: IssueStatus.todo,
+        statusId: 'todo',
+        priority: IssuePriority.medium,
+        priorityId: 'medium',
+        summary: 'Missing archive target',
+        description:
+            'Synthetic missing issue used for archive regression coverage.',
+        assignee: '',
+        reporter: '',
+        labels: [],
+        components: [],
+        fixVersionIds: [],
+        watchers: [],
+        customFields: {},
+        parentKey: null,
+        epicKey: null,
+        parentPath: null,
+        epicPath: null,
+        progress: 0,
+        updatedLabel: 'just now',
+        acceptanceCriteria: [],
+        comments: [],
+        links: [],
+        attachments: [],
+        isArchived: false,
+        storagePath: 'DEMO/MISSING-999/main.md',
+      );
+
+      await expectLater(
+        () => repository.archiveIssue(missingIssue),
+        throwsA(
+          isA<TrackStateRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            'Could not find repository artifacts for MISSING-999.',
+          ),
+        ),
+      );
+
+      final afterHead = await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ]);
+      final status = await Process.run('git', [
+        '-C',
+        repo.path,
+        'status',
+        '--short',
+      ]);
+
+      expect(
+        afterHead.stdout.toString().trim(),
+        beforeHead.stdout.toString().trim(),
+      );
+      expect(status.stdout.toString().trim(), isEmpty);
+    },
+  );
+
+  test(
+    'local repository maps archive provider failures to a sanitized repository exception',
+    () async {
+      final fixture = await Ts163ArchiveProviderFailureFixture.create();
+      addTearDown(fixture.dispose);
+
+      final observation = await fixture.archiveIssueViaRepositoryService();
+
+      expect(observation.errorType, 'TrackStateRepositoryException');
+      expect(observation.errorMessage, isNot(contains('Git command failed')));
+      expect(observation.errorMessage, isNot(contains('fatal:')));
+      expect(observation.errorMessage, isNot(contains('.git/index.lock')));
+      expect(observation.visibleIssueSearchResults.single.isArchived, isFalse);
+      expect(observation.forcedArchiveCommitAttempts, 1);
+    },
+  );
+
   test('local repository persists create-form custom fields in main.md', () async {
     final repo = await _createLocalRepository();
     addTearDown(() => repo.delete(recursive: true));
@@ -178,10 +363,10 @@ void main() {
       repo,
       'DEMO/config/fields.json',
       '[{"id":"summary","name":"Summary","type":"string","required":true},'
-      '{"id":"description","name":"Description","type":"markdown","required":false},'
-      '{"id":"solution","name":"Solution","type":"markdown","required":false},'
-      '{"id":"acceptanceCriteria","name":"Acceptance Criteria","type":"markdown","required":false},'
-      '{"id":"diagrams","name":"Diagrams","type":"markdown","required":false}]\n',
+          '{"id":"description","name":"Description","type":"markdown","required":false},'
+          '{"id":"solution","name":"Solution","type":"markdown","required":false},'
+          '{"id":"acceptanceCriteria","name":"Acceptance Criteria","type":"markdown","required":false},'
+          '{"id":"diagrams","name":"Diagrams","type":"markdown","required":false}]\n',
     );
     await _git(repo.path, ['add', 'DEMO/config/fields.json']);
     await _git(repo.path, ['commit', '-m', 'Add custom create fields']);
@@ -193,7 +378,8 @@ void main() {
     );
 
     const solution = 'Persist solution details in main markdown.';
-    const acceptanceCriteria = '- Persist acceptance criteria in main markdown.';
+    const acceptanceCriteria =
+        '- Persist acceptance criteria in main markdown.';
     const diagrams = 'graph TD; CreateIssue-->PersistCustomFields;';
 
     final created = await repository.createIssue(
@@ -206,7 +392,9 @@ void main() {
       },
     );
 
-    final markdown = await File('${repo.path}/${created.storagePath}').readAsString();
+    final markdown = await File(
+      '${repo.path}/${created.storagePath}',
+    ).readAsString();
 
     expect(markdown, contains(solution));
     expect(markdown, contains(acceptanceCriteria));
@@ -290,46 +478,20 @@ void main() {
   );
 
   test(
-    'local provider falls back when git identity is not configured',
+    'local provider keeps the identity empty when repo-local git identity is not configured',
     () async {
-      final provider = LocalGitTrackStateProvider(
-        repositoryPath: '/tmp/fake-repo',
-        processRunner: _FakeGitProcessRunner(
-          results: {
-            'show-ref --verify --quiet refs/heads/main': GitCommandResult(
-              exitCode: 0,
-              stdout: '',
-              stdoutBytes: Uint8List(0),
-              stderr: '',
-            ),
-            'rev-parse --abbrev-ref HEAD': GitCommandResult(
-              exitCode: 0,
-              stdout: 'main\n',
-              stdoutBytes: Uint8List(0),
-              stderr: '',
-            ),
-            'config user.name': GitCommandResult(
-              exitCode: 1,
-              stdout: '',
-              stdoutBytes: Uint8List(0),
-              stderr: '',
-            ),
-            'config user.email': GitCommandResult(
-              exitCode: 1,
-              stdout: '',
-              stdoutBytes: Uint8List(0),
-              stderr: '',
-            ),
-          },
-        ),
-      );
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+      await _git(repo.path, ['config', '--local', '--unset-all', 'user.name']);
+      await _git(repo.path, ['config', '--local', '--unset-all', 'user.email']);
+      final provider = LocalGitTrackStateProvider(repositoryPath: repo.path);
 
       final user = await provider.authenticate(
         const RepositoryConnection(repository: '.', branch: 'main', token: ''),
       );
 
-      expect(user.login, 'local-user');
-      expect(user.displayName, 'Local User');
+      expect(user.login, isEmpty);
+      expect(user.displayName, isEmpty);
     },
   );
 }
@@ -386,8 +548,18 @@ Loaded from local git.
   await _writeFile(directory, 'attachments/screenshot.png', 'binary-content');
 
   await _git(directory.path, ['init', '-b', 'main']);
-  await _git(directory.path, ['config', 'user.name', 'Local Tester']);
-  await _git(directory.path, ['config', 'user.email', 'local@example.com']);
+  await _git(directory.path, [
+    'config',
+    '--local',
+    'user.name',
+    'Local Tester',
+  ]);
+  await _git(directory.path, [
+    'config',
+    '--local',
+    'user.email',
+    'local@example.com',
+  ]);
   await _git(directory.path, ['add', '.']);
   await _git(directory.path, ['commit', '-m', 'Initial import']);
   return directory;
@@ -407,21 +579,5 @@ Future<void> _git(String repositoryPath, List<String> args) async {
   final result = await Process.run('git', ['-C', repositoryPath, ...args]);
   if (result.exitCode != 0) {
     throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
-  }
-}
-
-class _FakeGitProcessRunner implements GitProcessRunner {
-  const _FakeGitProcessRunner({required this.results});
-
-  final Map<String, GitCommandResult> results;
-
-  @override
-  Future<GitCommandResult> run(
-    String repositoryPath,
-    List<String> args, {
-    bool binaryOutput = false,
-  }) async {
-    return results[args.join(' ')] ??
-        (throw StateError('Unexpected git command: ${args.join(' ')}'));
   }
 }
