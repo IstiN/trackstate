@@ -59,9 +59,6 @@ class Ts185ArchiveGitLockFixture {
       repositoryPath: directory.path,
     );
     final refreshedSnapshot = await refreshedRepository.loadSnapshot();
-    final resolvedIssuePath = refreshedSnapshot.issues
-        .singleWhere((candidate) => candidate.key == issueKey)
-        .storagePath;
 
     return Ts163ArchiveProviderFailureObservation(
       repositoryPath: directory.path,
@@ -69,16 +66,14 @@ class Ts185ArchiveGitLockFixture {
       errorType: error.runtimeType.toString(),
       errorMessage: error.toString(),
       errorStackTrace: stackTrace?.toString(),
-      issuePath: resolvedIssuePath,
-      issueFileExists: await File(
-        '${directory.path}/$resolvedIssuePath',
-      ).exists(),
+      issuePath: issuePath,
+      issueFileExists: await File('${directory.path}/$issuePath').exists(),
       visibleIssueSearchResults: List.unmodifiable(
         await refreshedRepository.searchIssues('project = TRACK $issueKey'),
       ),
       headIssueMarkdown: await _gitOutput(['show', 'HEAD:$issuePath']),
       worktreeIssueMarkdown:
-          await _readFileIfExists('${directory.path}/$resolvedIssuePath') ?? '',
+          await _readFileIfExists('${directory.path}/$issuePath') ?? '',
       headRevision: await _gitOutput(['rev-parse', 'HEAD']),
       worktreeStatusLines: await _gitOutputLines(['status', '--short']),
     );

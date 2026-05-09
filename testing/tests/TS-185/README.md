@@ -12,8 +12,9 @@ perspective against a temporary local Git-backed TrackState repository:
 3. invoke `LocalTrackStateRepository.archiveIssue` for `TRACK-122`
 4. verify the caller receives a `TrackStateRepositoryException` without raw Git
    stderr or filesystem details
-5. verify standard repository search still shows `TRACK-122` as active from
-   `HEAD`
+5. verify standard repository search still shows `TRACK-122` as active
+6. verify the original worktree issue markdown stays unchanged and the failed
+   archive does not leave a Git status entry for the original issue artifact
 
 ## Install dependencies
 

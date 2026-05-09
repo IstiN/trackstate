@@ -105,6 +105,32 @@ void main() {
             'From a repository consumer perspective, TRACK-122 should still appear active after the failed archive attempt.',
       );
       expect(
+        afterArchival.issuePath,
+        Ts185ArchiveGitLockFixture.issuePath,
+        reason:
+            'The post-failure observation must inspect the original active issue artifact instead of a path resolved from repository reload state.',
+      );
+      expect(
+        afterArchival.issueFileExists,
+        isTrue,
+        reason:
+            'The failed archive must leave ${Ts185ArchiveGitLockFixture.issuePath} in place in the worktree.',
+      );
+      expect(
+        afterArchival.worktreeIssueMarkdown,
+        beforeArchival.worktreeIssueMarkdown,
+        reason:
+            'The failed archive must not partially rewrite the worktree copy of ${Ts185ArchiveGitLockFixture.issuePath}.',
+      );
+      expect(
+        afterArchival.worktreeStatusLines.any(
+          (line) => line.contains(Ts185ArchiveGitLockFixture.issuePath),
+        ),
+        isFalse,
+        reason:
+            'The failed archive must not leave a Git status entry for ${Ts185ArchiveGitLockFixture.issuePath}. Actual git status: ${afterArchival.worktreeStatusLines.join(' | ')}.',
+      );
+      expect(
         afterArchival.headIssueMarkdown,
         beforeArchival.headIssueMarkdown,
         reason:
