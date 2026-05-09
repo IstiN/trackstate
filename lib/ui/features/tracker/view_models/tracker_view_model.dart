@@ -415,6 +415,46 @@ class TrackerViewModel extends ChangeNotifier {
     }
   }
 
+  Future<bool> createIssue({
+    required String summary,
+    String description = '',
+  }) async {
+    final normalizedSummary = summary.trim();
+    if (normalizedSummary.isEmpty) {
+      _message = TrackerMessage.issueSaveFailed(
+        const TrackStateRepositoryException(
+          'Issue summary is required before creating an issue.',
+        ),
+      );
+      notifyListeners();
+      return false;
+    }
+    _isSaving = true;
+    _message = null;
+    notifyListeners();
+
+    try {
+      final created = await _repository.createIssue(
+        summary: normalizedSummary,
+        description: description,
+      );
+      _snapshot = await _repository.loadSnapshot();
+      _selectedIssue = _snapshot!.issues.firstWhere(
+        (issue) => issue.key == created.key,
+        orElse: () => created,
+      );
+      _searchResults = await _repository.searchIssues(_jql);
+      _section = TrackerSection.search;
+      return true;
+    } on Object catch (error) {
+      _message = TrackerMessage.issueSaveFailed(error);
+      return false;
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+
   Future<bool> saveIssueDescription(
     TrackStateIssue issue,
     String description,

@@ -9,6 +9,19 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openSection(String label);
 
+  Future<String> openCreateIssueFlow();
+
+  Future<void> expectCreateIssueFormVisible({
+    required String createIssueSection,
+  });
+
+  Future<void> populateCreateIssueForm({
+    required String summary,
+    String? description,
+  });
+
+  Future<void> submitCreateIssue({required String createIssueSection});
+
   Future<void> openIssue(String key, String summary);
 
   Future<void> searchIssues(String query);
@@ -16,6 +29,7 @@ abstract interface class TrackStateAppComponent {
   Future<void> expectIssueSearchResultVisible(String key, String summary);
 
   void expectIssueSearchResultAbsent(String key, String summary);
+
   Future<void> dragIssueToStatusColumn({
     required String key,
     required String summary,
@@ -42,13 +56,13 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> expectMessageBannerContains(String text);
 
+  Future<bool> dismissMessageBannerContaining(String text);
+
   Future<bool> isMessageBannerVisibleContaining(String text);
 
   Future<void> waitWithoutInteraction(Duration duration);
 
   void expectLocalRuntimeChrome();
-
-  Future<bool> dismissMessageBannerContaining(String text);
 
   Future<void> openRepositoryAccess();
 

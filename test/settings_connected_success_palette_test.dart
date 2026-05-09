@@ -12,7 +12,7 @@ void main() {
   });
 
   testWidgets(
-    'settings connected control uses the centralized success palette accessibly',
+    'settings connected control uses the centralized success background accessibly',
     (tester) async {
       final robot = SettingsScreenRobot(tester);
 
@@ -26,15 +26,15 @@ void main() {
 
       expect(robot.settingsConnectedControl, findsOneWidget);
 
+      final background = robot.renderedButtonBackground(
+        robot.settingsConnectedControl,
+      );
       final textColor = robot.renderedTextColorWithin(
         robot.settingsConnectedControl,
         'Connected',
       );
-      final background = robot.renderedButtonBackground(
-        robot.settingsConnectedControl,
-      );
 
-      expect(textColor, robot.colors().success);
+      expect(background, robot.colors().success);
       expect(contrastRatio(textColor, background), greaterThanOrEqualTo(4.5));
     },
   );

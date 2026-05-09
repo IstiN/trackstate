@@ -4,7 +4,9 @@ framework: unittest
 platform: python
 dependencies:
   - Flutter SDK 3.35.3 available on PATH, at /tmp/flutter/bin/flutter, or bootstrapped automatically
+  - TS-119 theme-token policy gate fix deployed on main
 notes:
   - Creates a temporary copy of the repository and injects a probe widget under lib/.
-  - Verifies a theme-token color expression passes the repository policy gate before swapping in a hardcoded hex color.
-  - Expects dart run tool/check_theme_tokens.dart to report a diagnostic that blocks the hardcoded hex regression.
+  - Reuses the shared HardcodedHexLintValidator to exercise the supported dart run tool/check_theme_tokens.dart enforcement path.
+  - Verifies a theme-token color expression passes the policy gate before swapping in a hardcoded hex color.
+  - Expects the policy gate to exit non-zero and emit an analyzer-style diagnostic for the hardcoded hex regression.

@@ -44,10 +44,9 @@ class _TrackStateAppState extends State<TrackStateApp> {
     super.dispose();
   }
 
-  TrackerViewModel _createViewModel() =>
-      TrackerViewModel(
-        repository: widget.repository ?? createTrackStateRepository(),
-      )..load();
+  TrackerViewModel _createViewModel() => TrackerViewModel(
+    repository: widget.repository ?? createTrackStateRepository(),
+  )..load();
 
   @override
   Widget build(BuildContext context) {
@@ -867,21 +866,142 @@ class _Board extends StatelessWidget {
   }
 }
 
-class _SearchAndDetail extends StatelessWidget {
+class _SearchAndDetail extends StatefulWidget {
   const _SearchAndDetail({required this.viewModel});
 
   final TrackerViewModel viewModel;
 
   @override
+  State<_SearchAndDetail> createState() => _SearchAndDetailState();
+}
+
+class _SearchAndDetailState extends State<_SearchAndDetail> {
+  late final TextEditingController _summaryController;
+  late final TextEditingController _descriptionController;
+  bool _isCreating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _summaryController = TextEditingController();
+    _descriptionController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _summaryController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitCreateIssue() async {
+    final success = await widget.viewModel.createIssue(
+      summary: _summaryController.text,
+      description: _descriptionController.text,
+    );
+    if (!mounted || !success) {
+      return;
+    }
+    setState(() {
+      _isCreating = false;
+      _summaryController.clear();
+      _descriptionController.clear();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final viewModel = widget.viewModel;
+    final summaryLabel = viewModel.project?.fieldLabel('summary') ?? 'Summary';
+    final canSubmit = !viewModel.hasReadOnlySession && !viewModel.isSaving;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _ScreenHeading(
-          title: l10n.jqlSearch,
-          subtitle: l10n.issueCount(viewModel.searchResults.length),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _ScreenHeading(
+                title: l10n.jqlSearch,
+                subtitle: l10n.issueCount(viewModel.searchResults.length),
+              ),
+            ),
+            const SizedBox(width: 12),
+            _PrimaryButton(
+              label: l10n.createIssue,
+              icon: TrackStateIconGlyph.plus,
+              onPressed: viewModel.hasReadOnlySession || viewModel.isSaving
+                  ? null
+                  : () {
+                      setState(() {
+                        _isCreating = !_isCreating;
+                      });
+                    },
+            ),
+          ],
         ),
+        if (_isCreating) ...[
+          _SurfaceCard(
+            semanticLabel: l10n.createIssue,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SectionTitle(l10n.createIssue),
+                const SizedBox(height: 12),
+                Semantics(
+                  label: summaryLabel,
+                  textField: true,
+                  child: TextField(
+                    controller: _summaryController,
+                    enabled: !viewModel.isSaving,
+                    decoration: InputDecoration(labelText: summaryLabel),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Semantics(
+                  label: l10n.description,
+                  textField: true,
+                  child: TextField(
+                    controller: _descriptionController,
+                    minLines: 3,
+                    maxLines: null,
+                    enabled: !viewModel.isSaving,
+                    decoration: InputDecoration(
+                      labelText: l10n.description,
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _IssueDetailActionButton(
+                      label: l10n.save,
+                      emphasized: true,
+                      onPressed: canSubmit ? _submitCreateIssue : null,
+                    ),
+                    _IssueDetailActionButton(
+                      label: l10n.cancel,
+                      onPressed: viewModel.isSaving
+                          ? null
+                          : () {
+                              setState(() {
+                                _isCreating = false;
+                                _summaryController.clear();
+                                _descriptionController.clear();
+                              });
+                            },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
         LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 980;
@@ -1329,7 +1449,7 @@ class _IssueDetailActionButton extends StatelessWidget {
             onPressed: onPressed,
             style: FilledButton.styleFrom(
               backgroundColor: colors.primary,
-              foregroundColor: const Color(0xFFFAF8F4),
+              foregroundColor: colors.page,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -1804,12 +1924,11 @@ class _SettingsProviderButton extends StatelessWidget {
     if (tone == _SettingsProviderButtonTone.connected) {
       return _connectedStyle(context, colors);
     }
-    const foreground = Color(0xFFFAF8F4);
-    const hoveredBackground = Color(0xFFB85138);
-    const pressedBackground = Color(0xFFB34F35);
+    final hoveredBackground = Color.lerp(colors.primary, colors.text, 0.04)!;
+    final pressedBackground = Color.lerp(colors.primary, colors.text, 0.08)!;
 
     return FilledButton.styleFrom(
-      foregroundColor: foreground,
+      foregroundColor: colors.page,
       alignment: Alignment.centerLeft,
       minimumSize: const Size.fromHeight(52),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1831,28 +1950,16 @@ class _SettingsProviderButton extends StatelessWidget {
 
   ButtonStyle _connectedStyle(BuildContext context, TrackStateColors colors) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final idleBackground = isDark ? colors.surfaceAlt : colors.text;
-    final hoverBackground = const Color(0xFF3A3835);
-    final pressedBackground = isDark ? colors.surface : colors.text;
+    final foreground = isDark ? colors.page : colors.text;
 
     return FilledButton.styleFrom(
-      foregroundColor: colors.success,
+      backgroundColor: colors.success,
+      foregroundColor: foreground,
       alignment: Alignment.centerLeft,
       minimumSize: const Size.fromHeight(52),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    ).copyWith(
-      backgroundColor: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.pressed)) {
-          return pressedBackground;
-        }
-        if (states.contains(WidgetState.hovered) ||
-            states.contains(WidgetState.focused)) {
-          return hoverBackground;
-        }
-        return idleBackground;
-      }),
-      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+      overlayColor: Colors.transparent,
     );
   }
 }
@@ -2097,14 +2204,14 @@ class _NavButton extends StatelessWidget {
               children: [
                 TrackStateIcon(
                   item.glyph,
-                  color: selected ? const Color(0xFFFAF8F4) : colors.muted,
+                  color: selected ? colors.page : colors.muted,
                   size: 18,
                 ),
                 const SizedBox(width: 10),
                 Text(
                   item.label,
                   style: TextStyle(
-                    color: selected ? const Color(0xFFFAF8F4) : colors.text,
+                    color: selected ? colors.page : colors.text,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),

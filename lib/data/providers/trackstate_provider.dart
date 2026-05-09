@@ -1,6 +1,5 @@
-import 'package:flutter/foundation.dart';
-
 import '../../domain/models/trackstate_models.dart';
+import 'foundation_compat.dart';
 
 abstract interface class RepositoryFileReader {
   Future<RepositoryTextFile> readTextFile(String path, {required String ref});
@@ -19,6 +18,13 @@ abstract interface class RepositoryCommitManager {
   Future<RepositoryBranch> getBranch(String name);
   Future<RepositoryWriteResult> writeTextFile(RepositoryWriteRequest request);
   Future<RepositoryCommitResult> createCommit(RepositoryCommitRequest request);
+  Future<void> ensureCleanWorktree();
+}
+
+abstract interface class RepositoryFileMutator {
+  Future<RepositoryCommitResult> applyFileChanges(
+    RepositoryFileChangeRequest request,
+  );
 }
 
 abstract interface class RepositoryPermissionChecker {
@@ -181,6 +187,42 @@ class RepositoryCommitResult {
   final String branch;
   final String message;
   final String? revision;
+}
+
+class RepositoryFileChangeRequest {
+  const RepositoryFileChangeRequest({
+    required this.branch,
+    required this.message,
+    required this.changes,
+  });
+
+  final String branch;
+  final String message;
+  final List<RepositoryFileChange> changes;
+}
+
+abstract base class RepositoryFileChange {
+  const RepositoryFileChange({required this.path, this.expectedRevision});
+
+  final String path;
+  final String? expectedRevision;
+}
+
+final class RepositoryTextFileChange extends RepositoryFileChange {
+  const RepositoryTextFileChange({
+    required super.path,
+    required this.content,
+    super.expectedRevision,
+  });
+
+  final String content;
+}
+
+final class RepositoryDeleteFileChange extends RepositoryFileChange {
+  const RepositoryDeleteFileChange({
+    required super.path,
+    super.expectedRevision,
+  });
 }
 
 class RepositoryBranch {

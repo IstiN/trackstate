@@ -45,7 +45,7 @@ class HardcodedHexLintRuleTest(unittest.TestCase):
             result.pub_get.succeeded,
             "Precondition failed: `flutter pub get` did not complete in the "
             "temporary reproduction project, so TS-115 could not run the real "
-            "analysis flow.\n"
+            "policy-gate flow.\n"
             f"Command: {result.pub_get.command_text}\n"
             f"Exit code: {result.pub_get.exit_code}\n"
             f"stdout:\n{result.pub_get.stdout}\n"
@@ -57,7 +57,7 @@ class HardcodedHexLintRuleTest(unittest.TestCase):
         )
         self.assertTrue(
             result.tokenized_analyze.succeeded,
-            "Step 1 failed: the theme-tokenized probe widget did not analyze "
+            "Step 1 failed: the theme-tokenized probe widget did not pass "
             "cleanly through the theme-token policy gate before the "
             "hardcoded-hex mutation.\n"
             f"Probe file: {result.probe_path}\n"
@@ -108,14 +108,14 @@ class HardcodedHexLintRuleTest(unittest.TestCase):
         self.assertNotIn(
             "No issues found!",
             hardcoded_output,
-            "Step 3 failed: the terminal still reported `No issues found!` after "
-            "the probe widget was changed to use a hardcoded hex color.\n"
+            "Step 3 failed: the terminal still reported `No issues found!` "
+            "after the probe widget was changed to use a hardcoded hex color.\n"
             f"Probe file: {result.probe_path}\n"
             f"Observed output:\n{hardcoded_output}",
         )
         self.assertTrue(
             mentions_probe_file and (mentions_rule_intent or mentions_literal),
-            "Human-style verification failed for Step 3: the analyzer output did "
+            "Human-style verification failed for Step 3: the policy output did "
             "not clearly point a user to the hardcoded-hex violation in the probe "
             "widget.\n"
             f"Probe file: {result.probe_path}\n"
