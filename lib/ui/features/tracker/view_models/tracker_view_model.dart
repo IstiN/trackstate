@@ -7,11 +7,8 @@ import '../../../../data/services/trackstate_auth_store.dart';
 import '../../../../domain/models/trackstate_models.dart';
 
 enum TrackerSection { dashboard, board, search, hierarchy, settings }
-
 enum RepositoryAccessState { localGit, connected, connectGitHub }
-
 enum TrackerMessageTone { info, error }
-
 enum TrackerMessageKind {
   dataLoadFailed,
   localGitTokensNotNeeded,
@@ -167,16 +164,10 @@ class TrackerViewModel extends ChangeNotifier {
     TrackStateAuthStore authStore =
         const SharedPreferencesTrackStateAuthStore(),
   }) : _repository = repository,
-       _authStore = authStore,
-       _repositoryListenable = repository is Listenable
-           ? repository as Listenable
-           : null {
-    _repositoryListenable?.addListener(_handleRepositoryChange);
-  }
+       _authStore = authStore;
 
   final TrackStateRepository _repository;
   final TrackStateAuthStore _authStore;
-  final Listenable? _repositoryListenable;
 
   TrackerSnapshot? _snapshot;
   TrackerSection _section = TrackerSection.dashboard;
@@ -214,7 +205,6 @@ class TrackerViewModel extends ChangeNotifier {
         session.canRead &&
         !session.canWrite;
   }
-
   RepositoryAccessState get repositoryAccessState => usesLocalPersistence
       ? RepositoryAccessState.localGit
       : _isConnected
@@ -223,10 +213,6 @@ class TrackerViewModel extends ChangeNotifier {
   bool get isGitHubAppAuthAvailable =>
       supportsGitHubAuth &&
       (_githubAppClientId.isNotEmpty || _githubAuthProxyUrl.isNotEmpty);
-
-  void _handleRepositoryChange() {
-    notifyListeners();
-  }
 
   List<TrackStateIssue> get issues => _snapshot?.issues ?? const [];
   List<TrackStateIssue> get epics => _snapshot?.epics ?? const [];
@@ -534,12 +520,6 @@ class TrackerViewModel extends ChangeNotifier {
         token: '',
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _repositoryListenable?.removeListener(_handleRepositoryChange);
-    super.dispose();
   }
 
   String? _callbackToken() {

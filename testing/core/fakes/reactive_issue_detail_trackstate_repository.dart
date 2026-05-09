@@ -34,10 +34,15 @@ class ReactiveIssueDetailTrackStateRepository
     );
 
     _provider.updatePermission(readOnlyPermission);
-    updateProviderSession(
+    currentSession.update(
+      providerType: currentSession.providerType,
       connectionState: ProviderConnectionState.connected,
       resolvedUserIdentity: currentSession.resolvedUserIdentity,
-      permission: readOnlyPermission,
+      canRead: readOnlyPermission.canRead,
+      canWrite: readOnlyPermission.canWrite,
+      canCreateBranch: readOnlyPermission.canCreateBranch,
+      canManageAttachments: readOnlyPermission.canManageAttachments,
+      canCheckCollaborators: readOnlyPermission.canCheckCollaborators,
     );
   }
 }

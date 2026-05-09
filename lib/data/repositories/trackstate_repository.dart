@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../../domain/models/trackstate_models.dart';
@@ -23,8 +22,7 @@ abstract interface class TrackStateRepository {
   );
 }
 
-class ProviderBackedTrackStateRepository extends ChangeNotifier
-    implements TrackStateRepository {
+class ProviderBackedTrackStateRepository implements TrackStateRepository {
   static const RepositoryPermission _restrictedPermission =
       RepositoryPermission(
         canRead: false,
@@ -60,19 +58,6 @@ class ProviderBackedTrackStateRepository extends ChangeNotifier
   ProviderSession? _session;
 
   ProviderSession? get session => _session;
-
-  @protected
-  ProviderSession updateProviderSession({
-    required ProviderConnectionState connectionState,
-    required String resolvedUserIdentity,
-    required RepositoryPermission permission,
-  }) {
-    return _syncProviderSession(
-      connectionState: connectionState,
-      resolvedUserIdentity: resolvedUserIdentity,
-      permission: permission,
-    );
-  }
 
   @override
   Future<RepositoryUser> connect(RepositoryConnection connection) async {
@@ -430,7 +415,6 @@ class ProviderBackedTrackStateRepository extends ChangeNotifier
       canCheckCollaborators: permission.canCheckCollaborators,
     );
     _session = session;
-    notifyListeners();
     return session;
   }
 
