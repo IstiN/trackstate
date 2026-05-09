@@ -6,6 +6,7 @@ import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/local_git_repository_port.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
+import '../../frameworks/flutter/trackstate_test_runtime.dart';
 
 class TrackStateAppScreen implements TrackStateAppComponent {
   TrackStateAppScreen(
@@ -113,10 +114,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       tester.view.resetDevicePixelRatio();
     });
 
+    final resolvedRepository = repository.usesLocalPersistence
+        ? await preloadLocalGitTestRepository(
+            tester: tester,
+            repository: repository,
+          )
+        : repository;
+
     await tester.pumpWidget(
       TrackStateApp(
         key: UniqueKey(),
-        repository: repository,
+        repository: resolvedRepository,
         openLocalRepository: ({
           required String repositoryPath,
           required String writeBranch,

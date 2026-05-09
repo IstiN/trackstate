@@ -12,6 +12,13 @@ Future<TrackStateRepository> createLocalGitTestRepository({
     runtime: TrackStateRuntime.localGit,
     localRepositoryPath: repositoryPath,
   );
+  return preloadLocalGitTestRepository(tester: tester, repository: repository);
+}
+
+Future<TrackStateRepository> preloadLocalGitTestRepository({
+  required WidgetTester tester,
+  required TrackStateRepository repository,
+}) async {
   final snapshot = await tester.runAsync(repository.loadSnapshot);
   if (snapshot == null) {
     throw StateError('Local Git snapshot loading did not complete.');

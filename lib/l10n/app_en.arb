@@ -70,6 +70,14 @@
       }
     }
   },
+  "repositoryConfigFallback": "A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. {error}",
+  "@repositoryConfigFallback": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "localGitTokensNotNeeded": "This runtime uses local Git commits. GitHub tokens are not needed.",
   "tokenEmpty": "Token is empty.",
   "githubConnectedDragCards": "Connected as {login} to {repository}. Drag cards to commit status changes.",
