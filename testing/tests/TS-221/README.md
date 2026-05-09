@@ -10,7 +10,9 @@ The automation:
 3. switches storage in `Settings` to `Local Git` using a temporary repository
    fixture and a `main` write branch
 4. confirms the saved `Repository Path` and `Write Branch` values remain visible
-   in `Settings`
+   in `Settings`, then proves the apply boundary in-place: it taps a visible
+   `Save` action when one exists, otherwise it asserts the top bar already shows
+   `Local Git` while the user is still on `Settings`
 5. returns to `Dashboard` immediately without refreshing the app
 6. verifies the hosted `Connect GitHub` control is no longer visible in the top
    bar and that `Local Git` is shown instead
@@ -42,9 +44,10 @@ fixture, so no external credentials or environment variables are required.
 ## Expected result
 
 ```text
-Pass: switching Settings from hosted mode to Local Git updates the Dashboard top
-bar immediately, replacing Connect GitHub with Local Git and exposing the saved
-repository path and branch through the Local Git runtime dialog.
+Pass: switching Settings from hosted mode to Local Git applies from the real
+user-visible boundary in Settings, updates the Dashboard top bar immediately,
+replaces Connect GitHub with Local Git, and exposes the saved repository path
+and branch through the Local Git runtime dialog.
 
 Fail: Dashboard still shows hosted-mode controls after the settings switch, does
 not expose Local Git immediately, or the Local Git runtime dialog does not show

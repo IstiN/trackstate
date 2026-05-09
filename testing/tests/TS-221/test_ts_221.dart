@@ -62,6 +62,8 @@ void main() {
           );
         }
 
+        await _completeSaveOrAssertAutoApply(screen);
+
         await screen.openSection('Dashboard');
         await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
 
@@ -172,4 +174,54 @@ String _formatSnapshot(List<String> values, {int limit = 20}) {
     return '<none>';
   }
   return snapshot.join(' | ');
+}
+
+Future<void> _completeSaveOrAssertAutoApply(
+  TrackStateAppComponent screen,
+) async {
+  final saveVisible = await _isAnyLabelVisible(screen, const ['Save']);
+  if (saveVisible) {
+    final saved = await screen.tapVisibleControl('Save');
+    if (!saved) {
+      fail(
+        'Step 4 failed: Settings exposed a visible "Save" action after the '
+        'Local Git configuration was entered, but the automation could not '
+        'activate it. Visible texts: '
+        '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
+        '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+      );
+    }
+    await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
+    await _expectTopBarLabelState(
+      screen,
+      step: 4,
+      context:
+          'after tapping the visible Save action in Settings with a valid Local Git configuration',
+      expectedVisible: const ['Local Git'],
+      expectedAbsent: const ['Connect GitHub', 'Connected'],
+    );
+    return;
+  }
+
+  await _expectTopBarLabelState(
+    screen,
+    step: 4,
+    context:
+        'while still on Settings after entering a valid Local Git configuration with no visible Save action',
+    expectedVisible: const ['Local Git'],
+    expectedAbsent: const ['Connect GitHub', 'Connected'],
+  );
+}
+
+Future<bool> _isAnyLabelVisible(
+  TrackStateAppComponent screen,
+  List<String> labels,
+) async {
+  for (final label in labels) {
+    if (await screen.isSemanticsLabelVisible(label) ||
+        await screen.isTextVisible(label)) {
+      return true;
+    }
+  }
+  return false;
 }
