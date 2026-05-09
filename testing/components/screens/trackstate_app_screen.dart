@@ -112,11 +112,10 @@ class TrackStateAppScreen implements TrackStateAppComponent {
             repository: repository,
           )
         : repository;
-    await pumpWithoutPreload(resolvedRepository);
+    await _pumpWidget(resolvedRepository);
   }
 
-  @override
-  Future<void> pumpWithoutPreload(TrackStateRepository repository) async {
+  Future<void> _pumpWidget(TrackStateRepository repository) async {
     SharedPreferences.setMockInitialValues({});
     tester.view.physicalSize = const Size(1440, 960);
     tester.view.devicePixelRatio = 1;

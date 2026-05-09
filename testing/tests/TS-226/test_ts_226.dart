@@ -1,7 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trackstate/data/repositories/trackstate_repository_factory.dart';
-import 'package:trackstate/data/repositories/trackstate_runtime.dart';
 
 import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
@@ -51,11 +49,9 @@ void main() {
               'absent from the Local Git repository.',
         );
 
-        await screen.pumpWithoutPreload(
-          createTrackStateRepository(
-            runtime: TrackStateRuntime.localGit,
-            localRepositoryPath: fixture.repositoryPath,
-          ),
+        final startupError = await _launchSupportedLocalGitApp(
+          screen,
+          repositoryPath: fixture.repositoryPath,
         );
         await screen.waitWithoutInteraction(const Duration(seconds: 2));
 
@@ -67,14 +63,16 @@ void main() {
         final localGitChromeVisible =
             await screen.isSemanticsLabelVisible('Local Git') ||
             await screen.isTextVisible('Local Git');
-        if (!startupObservation.fallbackWarningVisible ||
+        if (startupError != null ||
+            !startupObservation.fallbackWarningVisible ||
             startupObservation.dataLoadFailureVisible ||
             frameworkException != null ||
             !localGitChromeVisible) {
           fail(
             'Step 2 failed: launching the app with missing '
             'DEMO/config/fields.json did not preserve the required fallback '
-            'behavior. Fallback warning visible='
+            'behavior. startup error=${startupError ?? '<none>'}, '
+            'Fallback warning visible='
             '${startupObservation.fallbackWarningVisible ? 'yes' : 'no'}, '
             'data load failure visible='
             '${startupObservation.dataLoadFailureVisible ? 'yes' : 'no'}, '
@@ -151,6 +149,18 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 20)),
   );
+}
+
+Future<Object?> _launchSupportedLocalGitApp(
+  TrackStateAppComponent screen, {
+  required String repositoryPath,
+}) async {
+  try {
+    await screen.pumpLocalGitApp(repositoryPath: repositoryPath);
+    return null;
+  } catch (error) {
+    return error;
+  }
 }
 
 Future<void> _expectCreateFieldVisible(
