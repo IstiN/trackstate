@@ -333,6 +333,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
     return false;
   }
+
   @override
   Future<void> expectTextVisible(String text) async {
     final finder = _text(text);
@@ -453,6 +454,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     expect(profileSurfaceSemantics(displayName), findsOneWidget);
     expect(profileSurfaceSemantics(login), findsOneWidget);
   }
+
+  @override
+  bool isProfileInitialsVisible(String initials) =>
+      profileInitialsBadge(initials).evaluate().isNotEmpty;
+
+  @override
+  bool isProfileTextVisible(String text) =>
+      profileSurfaceText(text).evaluate().isNotEmpty;
+
+  @override
+  bool isProfileSemanticsLabelVisible(String label) =>
+      profileSurfaceSemantics(label).evaluate().isNotEmpty;
 
   @override
   void expectLocalRuntimeDialog({

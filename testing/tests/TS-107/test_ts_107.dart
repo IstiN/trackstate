@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../components/factories/testing_dependencies.dart';
-import '../../components/screens/trackstate_app_screen.dart';
+import '../../core/interfaces/trackstate_app_component.dart';
 import '../../core/utils/local_git_repository_fixture.dart';
 
 void main() {
@@ -9,9 +9,8 @@ void main() {
     'TS-107 local git mode without configured identity stays in a guest/login-only state',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      final screen =
-          defaultTestingDependencies.createTrackStateAppScreen(tester)
-              as TrackStateAppScreen;
+      final TrackStateAppComponent screen = defaultTestingDependencies
+          .createTrackStateAppScreen(tester);
       LocalGitRepositoryFixture? fixture;
 
       try {
@@ -93,15 +92,18 @@ void main() {
   );
 }
 
-bool _profileFallbackIdentityVisible(TrackStateAppScreen screen, String text) {
-  return screen.profileSurfaceText(text).evaluate().isNotEmpty ||
-      screen.profileSurfaceSemantics(text).evaluate().isNotEmpty;
+bool _profileFallbackIdentityVisible(
+  TrackStateAppComponent screen,
+  String text,
+) {
+  return screen.isProfileTextVisible(text) ||
+      screen.isProfileSemanticsLabelVisible(text);
 }
 
-bool _hasGuestOrLoginOnlyIndicator(TrackStateAppScreen screen) {
+bool _hasGuestOrLoginOnlyIndicator(TrackStateAppComponent screen) {
   const guestInitials = ['LG', 'GU', 'G'];
   for (final initials in guestInitials) {
-    if (screen.profileInitialsBadge(initials).evaluate().isNotEmpty) {
+    if (screen.isProfileInitialsVisible(initials)) {
       return true;
     }
   }
@@ -116,8 +118,8 @@ bool _hasGuestOrLoginOnlyIndicator(TrackStateAppScreen screen) {
     'not signed in',
   ];
   for (final label in loginOnlyLabels) {
-    if (screen.profileSurfaceText(label).evaluate().isNotEmpty ||
-        screen.profileSurfaceSemantics(label).evaluate().isNotEmpty) {
+    if (screen.isProfileTextVisible(label) ||
+        screen.isProfileSemanticsLabelVisible(label)) {
       return true;
     }
   }

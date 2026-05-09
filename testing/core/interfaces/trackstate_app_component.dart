@@ -38,10 +38,7 @@ abstract interface class TrackStateAppComponent {
     required String text,
   });
 
-  Future<void> tapIssueDetailAction(
-    String key, {
-    required String label,
-  });
+  Future<void> tapIssueDetailAction(String key, {required String label});
 
   Future<void> expectMessageBannerContains(String text);
 
@@ -58,6 +55,12 @@ abstract interface class TrackStateAppComponent {
     required String login,
     required String initials,
   });
+
+  bool isProfileInitialsVisible(String initials);
+
+  bool isProfileTextVisible(String text);
+
+  bool isProfileSemanticsLabelVisible(String label);
 
   void expectLocalRuntimeDialog({
     required String repositoryPath,
