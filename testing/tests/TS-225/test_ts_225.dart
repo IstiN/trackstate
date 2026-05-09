@@ -78,17 +78,18 @@ void main() {
         final connectGitHubVisible =
             await screen.isSemanticsLabelVisible('Connect GitHub') ||
             await screen.isTextVisible('Connect GitHub');
-        final aiOnlyFallback = _looksLikeAiOnlyFallback(
-          screen.visibleTextsSnapshot(),
-          screen.visibleSemanticsLabelsSnapshot(),
-        );
+        final unexpectedTrackStateAiVisible =
+            _hasUnexpectedTrackStateAiReference(
+              screen.visibleTextsSnapshot(),
+              screen.visibleSemanticsLabelsSnapshot(),
+            );
 
         if (!parseErrorLogged ||
             frameworkException != null ||
             !localGitVisible ||
             !localGitTopBarVisible ||
             connectGitHubVisible ||
-            aiOnlyFallback) {
+            unexpectedTrackStateAiVisible) {
           fail(
             'Step 2 failed: launching the app with malformed '
             'DEMO/config/fields.json did not preserve the required Local Git '
@@ -97,7 +98,8 @@ void main() {
             'Local Git visible=${localGitVisible ? 'yes' : 'no'}, '
             'top-bar Local Git visible=${localGitTopBarVisible ? 'yes' : 'no'}, '
             'Connect GitHub visible=${connectGitHubVisible ? 'yes' : 'no'}, '
-            'AI-only fallback detected=${aiOnlyFallback ? 'yes' : 'no'}. '
+            'unexpected TrackState.AI visible='
+            '${unexpectedTrackStateAiVisible ? 'yes' : 'no'}. '
             'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
             'Visible semantics: '
             '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
@@ -162,16 +164,12 @@ bool _snapshotContainsParseError(List<String> values) {
   );
 }
 
-bool _looksLikeAiOnlyFallback(
+bool _hasUnexpectedTrackStateAiReference(
   List<String> visibleTexts,
   List<String> visibleSemantics,
 ) {
   final combined = [...visibleTexts, ...visibleSemantics];
-  final hasTrackStateAi = combined.any(
-    (value) => value.contains('TrackState.AI'),
-  );
-  final hasLocalGit = combined.any((value) => value.contains('Local Git'));
-  return hasTrackStateAi && !hasLocalGit;
+  return combined.any((value) => value.contains('TrackState.AI'));
 }
 
 String _formatSnapshot(List<String> values, {int limit = 20}) {
