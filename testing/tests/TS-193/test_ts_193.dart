@@ -1,15 +1,35 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../components/factories/testing_dependencies.dart';
+import '../../core/interfaces/local_git_repository_port.dart';
 import '../../fixtures/repositories/ts193_archive_permission_failure_fixture.dart';
 
 void main() {
-  test(
+  testWidgets(
     'TS-193 keeps issue metadata active when archive storage relocation fails',
-    () async {
-      final fixture = await Ts193ArchivePermissionFailureFixture.create();
-      addTearDown(fixture.dispose);
+    (tester) async {
+      final fixture = await tester.runAsync(
+        Ts193ArchivePermissionFailureFixture.create,
+      );
+      if (fixture == null) {
+        throw StateError('TS-193 fixture creation did not complete.');
+      }
+      addTearDown(() async {
+        await tester.runAsync(fixture.dispose);
+      });
 
-      final beforeArchival = await fixture.observeBeforeArchiveState();
+      const dependencies = defaultTestingDependencies;
+      final LocalGitRepositoryPort repositoryPort = dependencies
+          .createLocalGitRepositoryPort(tester);
+      final beforeRepository = await repositoryPort.openRepository(
+        repositoryPath: fixture.directory.path,
+      );
+      final beforeArchival = await tester.runAsync(
+        () => fixture.observeRepositoryState(repository: beforeRepository),
+      );
+      if (beforeArchival == null) {
+        throw StateError('TS-193 pre-archive observation did not complete.');
+      }
 
       expect(
         beforeArchival.issueFileExists,
@@ -66,7 +86,26 @@ void main() {
             'The seeded repository must start clean so the archive permission failure is the only source of changes.',
       );
 
-      final afterArchival = await fixture.archiveIssueViaRepositoryService();
+      final archiveFailure = await tester.runAsync(
+        () => fixture.archiveIssueViaRepositoryService(
+          repository: beforeRepository,
+        ),
+      );
+      if (archiveFailure == null) {
+        throw StateError('TS-193 archive request did not complete.');
+      }
+      final afterRepository = await repositoryPort.openRepository(
+        repositoryPath: fixture.directory.path,
+      );
+      final afterArchival = await tester.runAsync(
+        () => fixture.observeRepositoryState(
+          repository: afterRepository,
+          archiveFailure: archiveFailure,
+        ),
+      );
+      if (afterArchival == null) {
+        throw StateError('TS-193 post-archive observation did not complete.');
+      }
 
       expect(
         afterArchival.errorType,

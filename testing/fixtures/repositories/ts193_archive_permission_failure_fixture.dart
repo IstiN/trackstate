@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
 
 import 'ts163_archive_provider_failure_fixture.dart';
 
@@ -32,14 +32,39 @@ class Ts193ArchivePermissionFailureFixture {
     await _seed.dispose();
   }
 
-  Future<Ts163ArchiveProviderFailureObservation> observeBeforeArchiveState() =>
-      _seed.observeBeforeArchiveState();
+  Future<Ts163ArchiveProviderFailureObservation> observeRepositoryState({
+    required TrackStateRepository repository,
+    Ts193ArchivePermissionFailureResult? archiveFailure,
+  }) async {
+    final snapshot = await repository.loadSnapshot();
+    final resolvedIssuePath = snapshot.issues
+        .singleWhere((candidate) => candidate.key == issueKey)
+        .storagePath;
 
-  Future<Ts163ArchiveProviderFailureObservation>
-  archiveIssueViaRepositoryService() async {
-    final repository = LocalTrackStateRepository(
+    return Ts163ArchiveProviderFailureObservation(
       repositoryPath: directory.path,
+      snapshot: snapshot,
+      errorType: archiveFailure?.errorType,
+      errorMessage: archiveFailure?.errorMessage,
+      errorStackTrace: archiveFailure?.errorStackTrace,
+      issuePath: resolvedIssuePath,
+      issueFileExists: await File(
+        '${directory.path}/$resolvedIssuePath',
+      ).exists(),
+      visibleIssueSearchResults: List.unmodifiable(
+        await repository.searchIssues('project = TRACK $issueKey'),
+      ),
+      headIssueMarkdown: await _gitOutput(['show', 'HEAD:$issuePath']),
+      worktreeIssueMarkdown:
+          await _readFileIfExists('${directory.path}/$resolvedIssuePath') ?? '',
+      headRevision: await _gitOutput(['rev-parse', 'HEAD']),
+      worktreeStatusLines: await _gitOutputLines(['status', '--short']),
     );
+  }
+
+  Future<Ts193ArchivePermissionFailureResult> archiveIssueViaRepositoryService({
+    required TrackStateRepository repository,
+  }) async {
     final snapshot = await repository.loadSnapshot();
     final issue = snapshot.issues.singleWhere(
       (candidate) => candidate.key == issueKey,
@@ -60,32 +85,10 @@ class Ts193ArchivePermissionFailureFixture {
       );
     }
 
-    final refreshedRepository = LocalTrackStateRepository(
-      repositoryPath: directory.path,
-    );
-    final refreshedSnapshot = await refreshedRepository.loadSnapshot();
-    final resolvedIssuePath = refreshedSnapshot.issues
-        .singleWhere((candidate) => candidate.key == issueKey)
-        .storagePath;
-
-    return Ts163ArchiveProviderFailureObservation(
-      repositoryPath: directory.path,
-      snapshot: refreshedSnapshot,
+    return Ts193ArchivePermissionFailureResult(
       errorType: error.runtimeType.toString(),
       errorMessage: error.toString(),
       errorStackTrace: stackTrace?.toString(),
-      issuePath: resolvedIssuePath,
-      issueFileExists: await File(
-        '${directory.path}/$resolvedIssuePath',
-      ).exists(),
-      visibleIssueSearchResults: List.unmodifiable(
-        await refreshedRepository.searchIssues('project = TRACK $issueKey'),
-      ),
-      headIssueMarkdown: await _gitOutput(['show', 'HEAD:$issuePath']),
-      worktreeIssueMarkdown:
-          await _readFileIfExists('${directory.path}/$resolvedIssuePath') ?? '',
-      headRevision: await _gitOutput(['rev-parse', 'HEAD']),
-      worktreeStatusLines: await _gitOutputLines(['status', '--short']),
     );
   }
 
@@ -139,4 +142,16 @@ class Ts193ArchivePermissionFailureFixture {
     }
     return file.readAsString();
   }
+}
+
+class Ts193ArchivePermissionFailureResult {
+  const Ts193ArchivePermissionFailureResult({
+    required this.errorType,
+    required this.errorMessage,
+    required this.errorStackTrace,
+  });
+
+  final String errorType;
+  final String errorMessage;
+  final String? errorStackTrace;
 }
