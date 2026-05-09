@@ -18,3 +18,9 @@ class FlutterAnalyzeProbe(Protocol):
         project_root: Path,
         target: Path | str,
     ) -> CliCommandResult: ...
+
+    def theme_token_check_many(
+        self,
+        project_root: Path,
+        targets: tuple[Path | str, ...],
+    ) -> CliCommandResult: ...

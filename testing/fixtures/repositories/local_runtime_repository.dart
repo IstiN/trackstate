@@ -25,6 +25,12 @@ class LocalRuntimeRepository implements TrackStateRepository {
       _demoRepository.searchIssues(jql);
 
   @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Local runtime fixture is read-only for issue archiving.',
+      );
+
+  @override
   Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
       throw const TrackStateRepositoryException(
         'Local runtime fixture is read-only for issue deletion.',
@@ -34,6 +40,7 @@ class LocalRuntimeRepository implements TrackStateRepository {
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
+    Map<String, String> customFields = const {},
   }) async {
     throw UnimplementedError('Issue creation is not implemented.');
   }

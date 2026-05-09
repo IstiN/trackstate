@@ -231,6 +231,18 @@ module.exports = {
                 autoStartReviewConfigFile: 'agents/pr_test_automation_review.json',
                 feedbackLoop: POST_ACTION_FEEDBACK
             }
+        },
+        retry_merge: {
+            customParams: {
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/pr_rework.json'
+            }
+        },
+        retry_merge_test: {
+            customParams: {
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/pr_test_automation_rework.json'
+            }
         }
     },
 

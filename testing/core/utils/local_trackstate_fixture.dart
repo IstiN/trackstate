@@ -55,6 +55,10 @@ class LocalTrackStateFixture {
     await _git(['add', issuePath]);
   }
 
+  Future<void> stashWorktreeChanges({
+    String message = 'Manual recovery before retrying issue creation',
+  }) => _git(['stash', 'push', '--include-untracked', '-m', message]);
+
   Future<String> buildUpdatedDescriptionMarkdown(
     String updatedDescription,
   ) async {
@@ -101,6 +105,9 @@ class LocalTrackStateFixture {
 
   Future<String> readRepositoryFile(String relativePath) =>
       File('$repositoryPath/$relativePath').readAsString();
+
+  Future<bool> repositoryPathExists(String relativePath) =>
+      File('$repositoryPath/$relativePath').exists();
 
   Future<void> _seedRepository() async {
     await _writeFile(
