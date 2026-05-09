@@ -1,0 +1,9 @@
+test_id: TS-226
+type: ui
+framework: flutter_test
+platform: linux
+dependencies: [TS-208]
+notes:
+  - Reuses the shared Local Git TrackState widget-test flow with a ticket-specific fixture that removes DEMO/config/fields.json from the repository.
+  - Waits for a visible fallback warning that references the missing fields configuration before asserting the production-visible Create issue flow.
+  - Verifies Local Git stays usable and the fallback Create issue form keeps the core Summary, Description, Save, and Cancel controls available.

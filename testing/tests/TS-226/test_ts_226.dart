@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
-import 'support/ts208_local_git_fixture.dart';
+import 'support/ts226_local_git_fixture.dart';
 
 void main() {
   setUp(() {
@@ -11,21 +11,21 @@ void main() {
   });
 
   testWidgets(
-    'TS-208 falls back to system create fields when fields.json is malformed',
+    'TS-226 falls back to system create fields when fields.json is missing',
     (tester) async {
       final semantics = tester.ensureSemantics();
       final TrackStateAppComponent screen = defaultTestingDependencies
           .createTrackStateAppScreen(tester);
-      Ts208LocalGitFixture? fixture;
+      Ts226LocalGitFixture? fixture;
 
-      const summaryValue = 'TS-208 fallback summary';
+      const summaryValue = 'TS-226 fallback summary';
       const descriptionValue =
-          'TS-208 verifies the malformed fields fallback keeps the create form usable.';
+          'TS-226 verifies the missing fields fallback keeps the create form usable.';
 
       try {
-        fixture = await tester.runAsync(Ts208LocalGitFixture.create);
+        fixture = await tester.runAsync(Ts226LocalGitFixture.create);
         if (fixture == null) {
-          throw StateError('TS-208 fixture creation did not complete.');
+          throw StateError('TS-226 fixture creation did not complete.');
         }
 
         final initialStatus =
@@ -34,48 +34,48 @@ void main() {
           initialStatus,
           isEmpty,
           reason:
-              'TS-208 requires a clean Local Git repository before launching '
-              'the malformed fields.json scenario, but `git status --short` '
+              'TS-226 requires a clean Local Git repository before launching '
+              'the missing fields.json scenario, but `git status --short` '
               'returned ${initialStatus.join(' | ')}.',
         );
 
-        final malformedFieldsContents =
-            await tester.runAsync(
-              () => fixture!.readRepositoryFile('DEMO/config/fields.json'),
-            ) ??
-            '';
+        final fieldsConfigExists =
+            await tester.runAsync(fixture.fieldsConfigExists) ?? true;
         expect(
-          malformedFieldsContents,
-          contains(
-            '{"id":"summary","name":"Summary","type":"string","required":true}',
-          ),
+          fieldsConfigExists,
+          isFalse,
           reason:
-              'TS-208 must exercise a malformed DEMO/config/fields.json fixture.',
-        );
-        expect(
-          malformedFieldsContents,
-          isNot(contains(',\n  {"id":"description"')),
-          reason:
-              'TS-208 must keep DEMO/config/fields.json syntactically invalid '
-              'by omitting the comma between the Summary and Description '
-              'entries.',
+              'TS-226 must exercise a fixture where DEMO/config/fields.json is '
+              'absent from the Local Git repository.',
         );
 
-        await screen.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
+        final startupError = await _launchSupportedLocalGitApp(
+          screen,
+          repositoryPath: fixture.repositoryPath,
+        );
         await screen.waitWithoutInteraction(const Duration(seconds: 2));
 
-        final parseErrorLogged = await _waitForLoggedParseError(screen, tester);
+        final startupObservation = await _observeMissingFieldsStartup(
+          screen,
+          tester,
+        );
         final frameworkException = tester.takeException();
         final localGitChromeVisible =
             await screen.isSemanticsLabelVisible('Local Git') ||
             await screen.isTextVisible('Local Git');
-        if (!parseErrorLogged ||
+        if (startupError != null ||
+            !startupObservation.fallbackWarningVisible ||
+            startupObservation.dataLoadFailureVisible ||
             frameworkException != null ||
             !localGitChromeVisible) {
           fail(
-            'Step 2 failed: launching the app with malformed '
+            'Step 2 failed: launching the app with missing '
             'DEMO/config/fields.json did not preserve the required fallback '
-            'behavior. Parse error reported=${parseErrorLogged ? 'yes' : 'no'}, '
+            'behavior. startup error=${startupError ?? '<none>'}, '
+            'Fallback warning visible='
+            '${startupObservation.fallbackWarningVisible ? 'yes' : 'no'}, '
+            'data load failure visible='
+            '${startupObservation.dataLoadFailureVisible ? 'yes' : 'no'}, '
             'framework exception=${frameworkException ?? '<none>'}, '
             'Local Git visible=${localGitChromeVisible ? 'yes' : 'no'}. '
             'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
@@ -151,6 +151,18 @@ void main() {
   );
 }
 
+Future<Object?> _launchSupportedLocalGitApp(
+  TrackStateAppComponent screen, {
+  required String repositoryPath,
+}) async {
+  try {
+    await screen.pumpLocalGitApp(repositoryPath: repositoryPath);
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
 Future<void> _expectCreateFieldVisible(
   TrackStateAppComponent screen, {
   required String label,
@@ -163,7 +175,7 @@ Future<void> _expectCreateFieldVisible(
   fail(
     'Step $failingStep failed: the Local Git Create issue form opened from '
     '$createIssueSection did not render a visible "$label" field after '
-    'loading malformed DEMO/config/fields.json. Visible texts: '
+    'loading with missing DEMO/config/fields.json. Visible texts: '
     '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
     '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
   );
@@ -181,7 +193,7 @@ Future<void> _expectVisibleText(
   fail(
     'Step $failingStep failed: the Local Git Create issue form opened from '
     '$createIssueSection did not show the visible "$label" action after '
-    'loading malformed DEMO/config/fields.json. Visible texts: '
+    'loading with missing DEMO/config/fields.json. Visible texts: '
     '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible semantics: '
     '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
   );
@@ -205,30 +217,86 @@ String _formatSnapshot(List<String> values, {int limit = 20}) {
   return snapshot.join(' | ');
 }
 
-Future<bool> _waitForLoggedParseError(
+Future<_MissingFieldsStartupObservation> _observeMissingFieldsStartup(
   TrackStateAppComponent screen,
   WidgetTester tester,
 ) async {
   final deadline = DateTime.now().add(const Duration(seconds: 8));
   while (DateTime.now().isBefore(deadline)) {
-    if (await screen.isMessageBannerVisibleContaining('FormatException') ||
-        await screen.isMessageBannerVisibleContaining('Unexpected character') ||
-        _snapshotContainsParseError(screen.visibleTextsSnapshot()) ||
-        _snapshotContainsParseError(screen.visibleSemanticsLabelsSnapshot())) {
-      return true;
+    final observation = await _readMissingFieldsStartupObservation(screen);
+    if (observation.fallbackWarningVisible ||
+        observation.dataLoadFailureVisible) {
+      return observation;
     }
     await tester.pump(const Duration(milliseconds: 200));
   }
-  return await screen.isMessageBannerVisibleContaining('FormatException') ||
-      await screen.isMessageBannerVisibleContaining('Unexpected character') ||
-      _snapshotContainsParseError(screen.visibleTextsSnapshot()) ||
-      _snapshotContainsParseError(screen.visibleSemanticsLabelsSnapshot());
+  return _readMissingFieldsStartupObservation(screen);
 }
 
-bool _snapshotContainsParseError(List<String> values) {
-  return values.any(
-    (value) =>
-        value.contains('FormatException') ||
-        value.contains('Unexpected character'),
+Future<_MissingFieldsStartupObservation> _readMissingFieldsStartupObservation(
+  TrackStateAppComponent screen,
+) async {
+  final fallbackBannerVisible =
+      await screen.isMessageBannerVisibleContaining('built-in defaults') ||
+      await screen.isMessageBannerVisibleContaining('built-in fields') ||
+      await screen.isMessageBannerVisibleContaining('fell back') ||
+      await screen.isMessageBannerVisibleContaining('falling back');
+  final dataLoadFailureVisible =
+      await screen.isMessageBannerVisibleContaining(
+        'TrackState data was not found',
+      ) ||
+      await screen.isMessageBannerVisibleContaining('Git command failed:');
+
+  final visibleTexts = screen.visibleTextsSnapshot();
+  final visibleSemantics = screen.visibleSemanticsLabelsSnapshot();
+
+  return _MissingFieldsStartupObservation(
+    fallbackWarningVisible:
+        (fallbackBannerVisible &&
+            (_snapshotContainsFieldsPath(visibleTexts) ||
+                _snapshotContainsFieldsPath(visibleSemantics))) ||
+        _snapshotContainsMissingFieldsFallback(visibleTexts) ||
+        _snapshotContainsMissingFieldsFallback(visibleSemantics),
+    dataLoadFailureVisible:
+        dataLoadFailureVisible ||
+        _snapshotContainsDataLoadFailure(visibleTexts) ||
+        _snapshotContainsDataLoadFailure(visibleSemantics),
   );
+}
+
+bool _snapshotContainsMissingFieldsFallback(List<String> values) {
+  return values.any((value) {
+    final normalized = value.toLowerCase();
+    final mentionsFallback =
+        normalized.contains('built-in defaults') ||
+        normalized.contains('built-in fields') ||
+        normalized.contains('fell back') ||
+        normalized.contains('falling back') ||
+        normalized.contains('system fields');
+    return mentionsFallback && normalized.contains('fields.json');
+  });
+}
+
+bool _snapshotContainsFieldsPath(List<String> values) {
+  return values.any((value) => value.toLowerCase().contains('fields.json'));
+}
+
+bool _snapshotContainsDataLoadFailure(List<String> values) {
+  return values.any((value) {
+    final normalized = value.toLowerCase();
+    return normalized.contains('trackstate data was not found') ||
+        normalized.contains('git command failed:') ||
+        (normalized.contains('fields.json') &&
+            normalized.contains("does not exist in 'head'"));
+  });
+}
+
+class _MissingFieldsStartupObservation {
+  const _MissingFieldsStartupObservation({
+    required this.fallbackWarningVisible,
+    required this.dataLoadFailureVisible,
+  });
+
+  final bool fallbackWarningVisible;
+  final bool dataLoadFailureVisible;
 }
