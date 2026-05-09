@@ -16,10 +16,13 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   final WidgetTester tester;
   final LocalGitRepositoryPort _repositoryService;
 
+  Finder get repositoryAccessButton =>
+      find.bySemanticsLabel(RegExp(r'^(Local Git|Connect GitHub|Connected)$'));
+
   Finder get localGitAccessButton => find.bySemanticsLabel(RegExp('Local Git'));
 
   Finder get topBar => find
-      .ancestor(of: localGitAccessButton.first, matching: find.byType(Row))
+      .ancestor(of: repositoryAccessButton.first, matching: find.byType(Row))
       .first;
 
   Finder get profileAvatar =>
@@ -124,7 +127,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> openRepositoryAccess() async {
-    await tester.tap(localGitAccessButton.first);
+    await tester.tap(repositoryAccessButton.first);
     await tester.pumpAndSettle();
   }
 
@@ -284,6 +287,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     expect(finder, findsWidgets);
   }
 
+  @override
+  Future<bool> isMessageBannerVisibleContaining(String text) async {
+    await tester.pump();
+    return _messageBanner(text).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<void> waitWithoutInteraction(Duration duration) async {
+    await tester.pump(duration);
+    await tester.pump();
+  }
+
   Finder _messageBanner(String text) => find.ancestor(
     of: _text(text),
     matching: find.byWidgetPredicate(
@@ -407,8 +422,19 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   List<String> visibleTextsSnapshot() {
+    return _textSnapshotWithin(find.byType(Scaffold));
+  }
+
+  @override
+  List<String> topBarVisibleTextsSnapshot() {
+    return _textSnapshotWithin(topBar);
+  }
+
+  List<String> _textSnapshotWithin(Finder scope) {
     final values = <String>[];
-    for (final widget in tester.widgetList<Text>(find.byType(Text))) {
+    for (final widget in tester.widgetList<Text>(
+      find.descendant(of: scope, matching: find.byType(Text)),
+    )) {
       final value = widget.data?.trim();
       if (value == null || value.isEmpty) {
         continue;
@@ -466,6 +492,39 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   bool isProfileSemanticsLabelVisible(String label) =>
       profileSurfaceSemantics(label).evaluate().isNotEmpty;
+
+  @override
+  void expectGuestProfileSurface({
+    required String repositoryAccessLabel,
+    required String initials,
+  }) {
+    final topBarTexts = topBarVisibleTextsSnapshot();
+    expectProfileInitials(initials);
+    expect(
+      topBarTexts,
+      contains(repositoryAccessLabel),
+      reason:
+          'The guest top bar should keep the visible "$repositoryAccessLabel" '
+          'entry point when no authenticated identity is resolved.',
+    );
+    final unexpectedIdentityTexts = topBarTexts
+        .where(
+          (text) =>
+              text != repositoryAccessLabel &&
+              text != initials &&
+              text != 'Synced with Git' &&
+              !text.startsWith('project = '),
+        )
+        .toList();
+    expect(
+      unexpectedIdentityTexts,
+      isEmpty,
+      reason:
+          'Guest mode should not render a resolved profile name or login in '
+          'the top-bar profile surface. Observed top-bar texts: '
+          '${topBarTexts.join(' | ')}',
+    );
+  }
 
   @override
   void expectLocalRuntimeDialog({

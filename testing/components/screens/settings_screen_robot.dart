@@ -331,15 +331,6 @@ class SettingsScreenRobot {
     );
   }
 
-  Finder _settingsProviderButton(String label) {
-    return _lowestButton(
-      find.ancestor(
-        of: find.text(label),
-        matching: find.bySubtype<ButtonStyleButton>(),
-      ),
-    );
-  }
-
   Finder _filledSettingsProviderButton(String label) {
     return _lowestButton(find.widgetWithText(FilledButton, label));
   }
