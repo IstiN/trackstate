@@ -21,6 +21,7 @@ class TrackStateApp extends StatefulWidget {
 
 class _TrackStateAppState extends State<TrackStateApp> {
   late TrackerViewModel viewModel;
+  bool _isCreateIssueVisible = false;
 
   @override
   void initState() {
@@ -36,6 +37,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
     }
     viewModel.dispose();
     viewModel = _createViewModel();
+    _isCreateIssueVisible = false;
   }
 
   @override
@@ -44,10 +46,23 @@ class _TrackStateAppState extends State<TrackStateApp> {
     super.dispose();
   }
 
-  TrackerViewModel _createViewModel() =>
-      TrackerViewModel(
-        repository: widget.repository ?? createTrackStateRepository(),
-      )..load();
+  TrackerViewModel _createViewModel() => TrackerViewModel(
+    repository: widget.repository ?? createTrackStateRepository(),
+  )..load();
+
+  void _openCreateIssue() {
+    if (_isCreateIssueVisible) {
+      return;
+    }
+    setState(() => _isCreateIssueVisible = true);
+  }
+
+  void _closeCreateIssue() {
+    if (!_isCreateIssueVisible) {
+      return;
+    }
+    setState(() => _isCreateIssueVisible = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -69,7 +84,12 @@ class _TrackStateAppState extends State<TrackStateApp> {
             GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
-          home: _TrackerHome(viewModel: viewModel),
+          home: _TrackerHome(
+            viewModel: viewModel,
+            isCreateIssueVisible: _isCreateIssueVisible,
+            onOpenCreateIssue: _openCreateIssue,
+            onCloseCreateIssue: _closeCreateIssue,
+          ),
         );
       },
     );
@@ -77,9 +97,17 @@ class _TrackStateAppState extends State<TrackStateApp> {
 }
 
 class _TrackerHome extends StatelessWidget {
-  const _TrackerHome({required this.viewModel});
+  const _TrackerHome({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+  });
 
   final TrackerViewModel viewModel;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
 
   @override
   Widget build(BuildContext context) {
@@ -144,8 +172,18 @@ class _TrackerHome extends StatelessWidget {
                 backgroundColor: colors.page,
                 body: SafeArea(
                   child: isCompact
-                      ? _MobileShell(viewModel: viewModel)
-                      : _DesktopShell(viewModel: viewModel),
+                      ? _MobileShell(
+                          viewModel: viewModel,
+                          isCreateIssueVisible: isCreateIssueVisible,
+                          onOpenCreateIssue: onOpenCreateIssue,
+                          onCloseCreateIssue: onCloseCreateIssue,
+                        )
+                      : _DesktopShell(
+                          viewModel: viewModel,
+                          isCreateIssueVisible: isCreateIssueVisible,
+                          onOpenCreateIssue: onOpenCreateIssue,
+                          onCloseCreateIssue: onCloseCreateIssue,
+                        ),
                 ),
                 bottomNavigationBar: isCompact
                     ? _BottomNavigation(viewModel: viewModel)
@@ -165,9 +203,17 @@ class _SelectSectionIntent extends Intent {
 }
 
 class _DesktopShell extends StatelessWidget {
-  const _DesktopShell({required this.viewModel});
+  const _DesktopShell({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+  });
 
   final TrackerViewModel viewModel;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
 
   @override
   Widget build(BuildContext context) {
@@ -175,11 +221,11 @@ class _DesktopShell extends StatelessWidget {
       children: [
         SizedBox(width: 268, child: _Sidebar(viewModel: viewModel)),
         Expanded(
-          child: Column(
-            children: [
-              _TopBar(viewModel: viewModel),
-              Expanded(child: _SectionBody(viewModel: viewModel)),
-            ],
+          child: _TrackerMainPane(
+            viewModel: viewModel,
+            isCreateIssueVisible: isCreateIssueVisible,
+            onOpenCreateIssue: onOpenCreateIssue,
+            onCloseCreateIssue: onCloseCreateIssue,
           ),
         ),
       ],
@@ -188,16 +234,71 @@ class _DesktopShell extends StatelessWidget {
 }
 
 class _MobileShell extends StatelessWidget {
-  const _MobileShell({required this.viewModel});
+  const _MobileShell({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+  });
 
   final TrackerViewModel viewModel;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return _TrackerMainPane(
+      viewModel: viewModel,
+      compact: true,
+      isCreateIssueVisible: isCreateIssueVisible,
+      onOpenCreateIssue: onOpenCreateIssue,
+      onCloseCreateIssue: onCloseCreateIssue,
+    );
+  }
+}
+
+class _TrackerMainPane extends StatelessWidget {
+  const _TrackerMainPane({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+    this.compact = false,
+  });
+
+  final TrackerViewModel viewModel;
+  final bool compact;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
       children: [
-        _TopBar(viewModel: viewModel, compact: true),
-        Expanded(child: _SectionBody(viewModel: viewModel, compact: true)),
+        Column(
+          children: [
+            _TopBar(
+              viewModel: viewModel,
+              compact: compact,
+              onOpenCreateIssue: onOpenCreateIssue,
+            ),
+            Expanded(
+              child: _SectionBody(viewModel: viewModel, compact: compact),
+            ),
+          ],
+        ),
+        if (isCreateIssueVisible)
+          Positioned.fill(
+            child: _CreateIssueOverlay(
+              compact: compact,
+              child: _CreateIssueDialog(
+                viewModel: viewModel,
+                onDismiss: onCloseCreateIssue,
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -273,9 +374,14 @@ class _Sidebar extends StatelessWidget {
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.viewModel, this.compact = false});
+  const _TopBar({
+    required this.viewModel,
+    required this.onOpenCreateIssue,
+    this.compact = false,
+  });
 
   final TrackerViewModel viewModel;
+  final VoidCallback onOpenCreateIssue;
   final bool compact;
 
   @override
@@ -283,6 +389,9 @@ class _TopBar extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
     final repositoryAccessLabel = _repositoryAccessLabel(l10n, viewModel);
+    final openCreateIssue = viewModel.hasReadOnlySession || viewModel.isSaving
+        ? null
+        : onOpenCreateIssue;
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 12, 12, 6),
       child: Row(
@@ -329,10 +438,23 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: 12),
           if (compact)
             _IconButtonSurface(
+              label: l10n.createIssue,
+              glyph: TrackStateIconGlyph.plus,
+              onPressed: openCreateIssue,
+            )
+          else
+            _PrimaryButton(
+              label: l10n.createIssue,
+              icon: TrackStateIconGlyph.plus,
+              onPressed: openCreateIssue,
+            ),
+          const SizedBox(width: 8),
+          if (compact)
+            _IconButtonSurface(
               label: repositoryAccessLabel,
               glyph: TrackStateIconGlyph.gitBranch,
               onPressed: viewModel.isSaving
-                  ? () {}
+                  ? null
                   : () => _showRepositoryAccessDialog(context, viewModel),
             )
           else
@@ -340,7 +462,7 @@ class _TopBar extends StatelessWidget {
               label: repositoryAccessLabel,
               icon: TrackStateIconGlyph.gitBranch,
               onPressed: viewModel.isSaving
-                  ? () {}
+                  ? null
                   : () => _showRepositoryAccessDialog(context, viewModel),
             ),
           const SizedBox(width: 8),
@@ -354,7 +476,7 @@ class _TopBar extends StatelessWidget {
             onPressed: viewModel.toggleTheme,
           ),
           const SizedBox(width: 8),
-          if (viewModel.connectedUser != null) ...[
+          if (_hasVisibleProfileIdentity(viewModel)) ...[
             ConstrainedBox(
               constraints: BoxConstraints(maxWidth: compact ? 160 : 240),
               child: Column(
@@ -577,6 +699,10 @@ String? _profileLogin(TrackerViewModel viewModel) {
   }
   return login == _profileDisplayName(viewModel) ? null : login;
 }
+
+bool _hasVisibleProfileIdentity(TrackerViewModel viewModel) =>
+    _profileDisplayName(viewModel).isNotEmpty ||
+    (_profileLogin(viewModel)?.isNotEmpty ?? false);
 
 String _initialsFromText(String value) {
   final parts = value
@@ -875,12 +1001,20 @@ class _SearchAndDetail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final viewModel = this.viewModel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _ScreenHeading(
-          title: l10n.jqlSearch,
-          subtitle: l10n.issueCount(viewModel.searchResults.length),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _ScreenHeading(
+                title: l10n.jqlSearch,
+                subtitle: l10n.issueCount(viewModel.searchResults.length),
+              ),
+            ),
+          ],
         ),
         LayoutBuilder(
           builder: (context, constraints) {
@@ -906,6 +1040,56 @@ class _SearchAndDetail extends StatelessWidget {
     );
   }
 }
+
+const Set<String> _hiddenCreateFieldIds = {
+  'summary',
+  'description',
+  'issueType',
+  'status',
+  'priority',
+  'assignee',
+  'reporter',
+  'labels',
+  'components',
+  'fixVersions',
+  'watchers',
+  'parent',
+  'epic',
+  'archived',
+  'resolution',
+};
+
+List<TrackStateFieldDefinition> _createIssueFieldDefinitions(
+  ProjectConfig? project,
+) {
+  if (project == null) {
+    return const [];
+  }
+  return project.fieldDefinitions
+      .where((field) => !_hiddenCreateFieldIds.contains(field.id))
+      .toList(growable: false);
+}
+
+void _syncCreateFieldControllers(
+  Map<String, TextEditingController> controllers,
+  List<TrackStateFieldDefinition> fields,
+) {
+  final activeFieldIds = fields.map((field) => field.id).toSet();
+  final staleFieldIds = controllers.keys
+      .where((fieldId) => !activeFieldIds.contains(fieldId))
+      .toList(growable: false);
+  for (final fieldId in staleFieldIds) {
+    controllers.remove(fieldId)?.dispose();
+  }
+  for (final field in fields) {
+    controllers.putIfAbsent(field.id, TextEditingController.new);
+  }
+}
+
+String _createIssueFieldLabel(
+  ProjectConfig? project,
+  TrackStateFieldDefinition field,
+) => project?.fieldLabel(field.id) ?? field.name;
 
 class _Hierarchy extends StatelessWidget {
   const _Hierarchy({required this.viewModel});
@@ -1329,7 +1513,7 @@ class _IssueDetailActionButton extends StatelessWidget {
             onPressed: onPressed,
             style: FilledButton.styleFrom(
               backgroundColor: colors.primary,
-              foregroundColor: const Color(0xFFFAF8F4),
+              foregroundColor: colors.page,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -1804,12 +1988,11 @@ class _SettingsProviderButton extends StatelessWidget {
     if (tone == _SettingsProviderButtonTone.connected) {
       return _connectedStyle(context, colors);
     }
-    const foreground = Color(0xFFFAF8F4);
-    const hoveredBackground = Color(0xFFB85138);
-    const pressedBackground = Color(0xFFB34F35);
+    final hoveredBackground = Color.lerp(colors.primary, colors.text, 0.04)!;
+    final pressedBackground = Color.lerp(colors.primary, colors.text, 0.08)!;
 
     return FilledButton.styleFrom(
-      foregroundColor: foreground,
+      foregroundColor: colors.page,
       alignment: Alignment.centerLeft,
       minimumSize: const Size.fromHeight(52),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1831,28 +2014,16 @@ class _SettingsProviderButton extends StatelessWidget {
 
   ButtonStyle _connectedStyle(BuildContext context, TrackStateColors colors) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final idleBackground = isDark ? colors.surfaceAlt : colors.text;
-    final hoverBackground = const Color(0xFF3A3835);
-    final pressedBackground = isDark ? colors.surface : colors.text;
+    final foreground = isDark ? colors.page : colors.text;
 
     return FilledButton.styleFrom(
-      foregroundColor: colors.success,
+      backgroundColor: colors.success,
+      foregroundColor: foreground,
       alignment: Alignment.centerLeft,
       minimumSize: const Size.fromHeight(52),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    ).copyWith(
-      backgroundColor: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.pressed)) {
-          return pressedBackground;
-        }
-        if (states.contains(WidgetState.hovered) ||
-            states.contains(WidgetState.focused)) {
-          return hoverBackground;
-        }
-        return idleBackground;
-      }),
-      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+      overlayColor: Colors.transparent,
     );
   }
 }
@@ -2039,13 +2210,15 @@ class _IconButtonSurface extends StatelessWidget {
 
   final String label;
   final TrackStateIconGlyph glyph;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final enabled = onPressed != null;
     return Semantics(
       button: true,
+      enabled: enabled,
       label: label,
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
@@ -2057,7 +2230,181 @@ class _IconButtonSurface extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: colors.border),
           ),
-          child: TrackStateIcon(glyph, color: colors.text, size: 18),
+          foregroundDecoration: enabled
+              ? null
+              : BoxDecoration(
+                  color: colors.page.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+          child: TrackStateIcon(
+            glyph,
+            color: enabled ? colors.text : colors.muted,
+            size: 18,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CreateIssueDialog extends StatefulWidget {
+  const _CreateIssueDialog({required this.viewModel, required this.onDismiss});
+
+  final TrackerViewModel viewModel;
+  final VoidCallback onDismiss;
+
+  @override
+  State<_CreateIssueDialog> createState() => _CreateIssueDialogState();
+}
+
+class _CreateIssueOverlay extends StatelessWidget {
+  const _CreateIssueOverlay({required this.child, this.compact = false});
+
+  final Widget child;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: compact ? Alignment.topCenter : Alignment.center,
+      child: child,
+    );
+  }
+}
+
+class _CreateIssueDialogState extends State<_CreateIssueDialog> {
+  late final TextEditingController _summaryController;
+  late final TextEditingController _descriptionController;
+  final Map<String, TextEditingController> _customFieldControllers = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _summaryController = TextEditingController();
+    _descriptionController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _summaryController.dispose();
+    _descriptionController.dispose();
+    for (final controller in _customFieldControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _submitCreateIssue() async {
+    final customFields = <String, String>{};
+    for (final field in _createIssueFieldDefinitions(
+      widget.viewModel.project,
+    )) {
+      final value = _customFieldControllers[field.id]?.text.trim() ?? '';
+      if (value.isEmpty) {
+        continue;
+      }
+      customFields[field.id] = value;
+    }
+    final success = await widget.viewModel.createIssue(
+      summary: _summaryController.text,
+      description: _descriptionController.text,
+      customFields: customFields,
+    );
+    if (!mounted || !success) {
+      return;
+    }
+    widget.onDismiss();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final project = widget.viewModel.project;
+    final summaryLabel = project?.fieldLabel('summary') ?? 'Summary';
+    final createFields = _createIssueFieldDefinitions(project);
+    _syncCreateFieldControllers(_customFieldControllers, createFields);
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: ListenableBuilder(
+          listenable: widget.viewModel,
+          builder: (context, _) {
+            final canSubmit =
+                !widget.viewModel.hasReadOnlySession &&
+                !widget.viewModel.isSaving;
+            return _SurfaceCard(
+              semanticLabel: l10n.createIssue,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _SectionTitle(l10n.createIssue),
+                  const SizedBox(height: 12),
+                  Semantics(
+                    label: summaryLabel,
+                    textField: true,
+                    child: TextField(
+                      controller: _summaryController,
+                      enabled: !widget.viewModel.isSaving,
+                      decoration: InputDecoration(labelText: summaryLabel),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Semantics(
+                    label: l10n.description,
+                    textField: true,
+                    child: TextField(
+                      controller: _descriptionController,
+                      minLines: 3,
+                      maxLines: null,
+                      enabled: !widget.viewModel.isSaving,
+                      decoration: InputDecoration(
+                        labelText: l10n.description,
+                        alignLabelWithHint: true,
+                      ),
+                    ),
+                  ),
+                  for (final field in createFields) ...[
+                    const SizedBox(height: 12),
+                    Semantics(
+                      label: _createIssueFieldLabel(project, field),
+                      textField: true,
+                      child: TextField(
+                        key: ValueKey('create-field-${field.id}'),
+                        controller: _customFieldControllers[field.id],
+                        minLines: field.type == 'markdown' ? 3 : 1,
+                        maxLines: field.type == 'markdown' ? null : 1,
+                        enabled: !widget.viewModel.isSaving,
+                        decoration: InputDecoration(
+                          labelText: _createIssueFieldLabel(project, field),
+                          alignLabelWithHint: field.type == 'markdown',
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _IssueDetailActionButton(
+                        label: l10n.save,
+                        emphasized: true,
+                        onPressed: canSubmit ? _submitCreateIssue : null,
+                      ),
+                      _IssueDetailActionButton(
+                        label: l10n.cancel,
+                        onPressed: widget.viewModel.isSaving
+                            ? null
+                            : widget.onDismiss,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
@@ -2097,14 +2444,14 @@ class _NavButton extends StatelessWidget {
               children: [
                 TrackStateIcon(
                   item.glyph,
-                  color: selected ? const Color(0xFFFAF8F4) : colors.muted,
+                  color: selected ? colors.page : colors.muted,
                   size: 18,
                 ),
                 const SizedBox(width: 10),
                 Text(
                   item.label,
                   style: TextStyle(
-                    color: selected ? const Color(0xFFFAF8F4) : colors.text,
+                    color: selected ? colors.page : colors.text,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),

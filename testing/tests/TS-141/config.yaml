@@ -1,0 +1,9 @@
+test_id: TS-141
+type: ui
+framework: flutter_test
+platform: linux
+dependencies: [TS-122, TS-123]
+notes:
+  - Reuses the shared Local Git TrackState widget-test flow and adds a ticket-specific clean repository fixture.
+  - Declares Solution, Acceptance Criteria, and Diagrams in the Local Git project field config before opening the production-visible Create issue flow.
+  - Fails with a user-visible create-form snapshot when any required custom field is missing, then verifies persisted filesystem content when creation succeeds.

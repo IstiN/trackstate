@@ -80,6 +80,9 @@ class MutableTrackStateProviderAdapter implements TrackStateProviderAdapter {
   );
 
   @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
   Future<String> resolveWriteBranch() async => _connection?.branch ?? 'main';
 
   @override
@@ -152,7 +155,8 @@ Future<void> main() async {
         'Step 2 failed: repository.session was null while the provider was still connecting, so a client could not hold a live session reference.',
       );
     }
-    if (sessionReference.connectionState != ProviderConnectionState.connecting) {
+    if (sessionReference.connectionState !=
+        ProviderConnectionState.connecting) {
       throw StateError(
         'Step 2 failed: the captured session reference did not expose ProviderConnectionState.connecting before authentication completed. '
         'Observed ${sessionReference.connectionState}.',
@@ -179,10 +183,6 @@ Future<void> main() async {
     final latestSession = repository.session;
     result['updatedSessionReference'] = _serializeSession(sessionReference);
     result['latestRepositorySession'] = _serializeSession(latestSession);
-    result['sameInstanceAsLatestGetter'] = identical(
-      sessionReference,
-      latestSession,
-    );
 
     if (latestSession == null) {
       throw StateError(

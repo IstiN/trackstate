@@ -63,10 +63,31 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
       repository.searchIssues(jql);
 
   @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+    Map<String, String> customFields = const {},
+  }) => repository.createIssue(
+    summary: summary,
+    description: description,
+    customFields: customFields,
+  );
+
+  @override
   Future<TrackStateIssue> updateIssueDescription(
     TrackStateIssue issue,
     String description,
   ) => repository.updateIssueDescription(issue, description);
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) {
+    return repository.archiveIssue(issue);
+  }
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) {
+    return repository.deleteIssue(issue);
+  }
 
   @override
   Future<TrackStateIssue> updateIssueStatus(

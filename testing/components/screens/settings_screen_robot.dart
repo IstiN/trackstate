@@ -1,4 +1,4 @@
-import 'dart:ui' show PointerDeviceKind, SemanticsFlag;
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -31,6 +31,9 @@ class SettingsScreenRobot {
   Finder get languageCard => find.text('Language');
   Finder get repositoryAccessSection =>
       find.bySemanticsLabel(RegExp('Repository access'));
+  Finder get topBar => find
+      .ancestor(of: _currentTopBarControl(), matching: find.byType(Row))
+      .first;
   Finder get localGitTopBarControl => topBarProviderControl('Local Git');
   Finder get localGitSettingsControl => settingsProviderControl('Local Git');
   Finder get connectGitHubTopBarControl =>
@@ -39,6 +42,8 @@ class SettingsScreenRobot {
       settingsProviderControl('Connect GitHub');
   Finder get connectedTopBarControl => topBarProviderControl('Connected');
   Finder get connectedSettingsControl => settingsProviderControl('Connected');
+  Finder get profileAvatar =>
+      find.descendant(of: topBar, matching: find.byType(CircleAvatar));
   Finder get localGitControl => providerControl('Local Git');
   Finder get connectGitHubControl => providerControl('Connect GitHub');
   Finder get connectedControl => providerControl('Connected');
@@ -160,7 +165,7 @@ class SettingsScreenRobot {
 
   String? focusedLabel(Map<String, Finder> candidates) {
     final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
+      (node) => node.getSemanticsData().flagsCollection.isFocused,
       describeMatch: (_) => 'focused semantics node',
     );
     if (focusedSemantics.evaluate().isEmpty) {
@@ -302,6 +307,39 @@ class SettingsScreenRobot {
 
   String semanticsLabelOf(Finder finder) {
     return tester.getSemantics(finder.first).label;
+  }
+
+  Finder profileInitialsBadge(String initials) =>
+      find.descendant(of: profileAvatar, matching: find.text(initials));
+
+  Finder profileSurfaceText(String text) => find.descendant(
+    of: topBar,
+    matching: find.textContaining(text, findRichText: true),
+  );
+
+  Finder profileSurfaceSemantics(String label) => find.descendant(
+    of: topBar,
+    matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
+  );
+
+  void expectTopBarProfileIdentityVisible({
+    required String displayName,
+    String? login,
+    required String initials,
+  }) {
+    expect(profileInitialsBadge(initials), findsOneWidget);
+    expect(profileSurfaceText(displayName), findsOneWidget);
+    expect(profileSurfaceSemantics(displayName), findsOneWidget);
+    if (login == null || login.isEmpty || login == displayName) {
+      return;
+    }
+    expect(profileSurfaceText(login), findsOneWidget);
+    expect(profileSurfaceSemantics(login), findsOneWidget);
+  }
+
+  void expectTopBarProfileIdentityAbsent(String value) {
+    expect(profileSurfaceText(value), findsNothing);
+    expect(profileSurfaceSemantics(value), findsNothing);
   }
 
   List<String> visibleProviderLabels(Iterable<String> candidateLabels) {
@@ -458,6 +496,16 @@ class SettingsScreenRobot {
           '${requiresTrackStateIcon ? 'top-bar' : 'settings'} '
           'button control "$label"',
     );
+  }
+
+  Finder _currentTopBarControl() {
+    for (final label in const ['Connected', 'Connect GitHub', 'Local Git']) {
+      final control = topBarProviderControl(label);
+      if (control.evaluate().isNotEmpty) {
+        return control;
+      }
+    }
+    return connectGitHubTopBarControl;
   }
 
   bool _subtreeContainsWidget(Element root, bool Function(Widget) matches) {

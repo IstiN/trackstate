@@ -63,6 +63,47 @@ void main() {
   });
 
   test(
+    'demo repository creates the first issue under the project root path when no issue paths exist yet',
+    () async {
+      const repository = DemoTrackStateRepository(
+        snapshot: TrackerSnapshot(
+          project: ProjectConfig(
+            key: 'DEMO',
+            name: 'Demo Project',
+            repository: 'demo/repository',
+            branch: 'main',
+            defaultLocale: 'en',
+            issueTypeDefinitions: [
+              TrackStateConfigEntry(id: 'story', name: 'Story'),
+            ],
+            statusDefinitions: [TrackStateConfigEntry(id: 'todo', name: 'To Do')],
+            fieldDefinitions: [
+              TrackStateFieldDefinition(
+                id: 'summary',
+                name: 'Summary',
+                type: 'string',
+                required: true,
+              ),
+            ],
+            priorityDefinitions: [
+              TrackStateConfigEntry(id: 'medium', name: 'Medium'),
+            ],
+          ),
+          issues: [],
+        ),
+      );
+
+      final created = await repository.createIssue(
+        summary: 'First demo issue',
+        description: 'Created in an empty project snapshot.',
+      );
+
+      expect(created.key, 'DEMO-1');
+      expect(created.storagePath, 'DEMO/DEMO-1/main.md');
+    },
+  );
+
+  test(
     'setup repository loads indexes, comments, links, attachments, tombstones, and localized labels',
     () async {
       final repository = _mockSetupRepository(
@@ -138,18 +179,22 @@ void main() {
               'archived': false,
             },
           ]),
-          'DEMO/.trackstate/index/deleted.json': jsonEncode([
+          'DEMO/.trackstate/index/tombstones.json': jsonEncode([
             {
               'key': 'DEMO-99',
-              'project': 'DEMO',
-              'formerPath': 'DEMO/DEMO-99/main.md',
-              'deletedAt': '2026-05-05T00:30:00Z',
-              'summary': 'Retired issue',
-              'issueType': 'story',
-              'parent': null,
-              'epic': 'DEMO-1',
+              'path': 'DEMO/.trackstate/tombstones/DEMO-99.json',
             },
           ]),
+          'DEMO/.trackstate/tombstones/DEMO-99.json': jsonEncode({
+            'key': 'DEMO-99',
+            'project': 'DEMO',
+            'formerPath': 'DEMO/DEMO-99/main.md',
+            'deletedAt': '2026-05-05T00:30:00Z',
+            'summary': 'Retired issue',
+            'issueType': 'story',
+            'parent': null,
+            'epic': 'DEMO-1',
+          }),
           'DEMO/DEMO-1/main.md': '''
 ---
 key: DEMO-1
@@ -271,12 +316,22 @@ This comment demonstrates markdown-backed collaboration history.
         files.keys,
         containsAll([
           'DEMO/.trackstate/index/issues.json',
-          'DEMO/.trackstate/index/deleted.json',
           'DEMO/config/resolutions.json',
           'DEMO/DEMO-1/DEMO-2/links.json',
           'DEMO/DEMO-1/DEMO-2/attachments/board-preview.svg',
         ]),
       );
+      expect(
+        files.containsKey('DEMO/.trackstate/index/tombstones.json') ||
+            files.containsKey('DEMO/.trackstate/index/deleted.json'),
+        isTrue,
+        reason:
+            'The checked-in setup template must include either the current '
+            'tombstone index or the legacy deleted index.',
+      );
+      if (files.containsKey('DEMO/.trackstate/index/tombstones.json')) {
+        expect(files.keys, contains('DEMO/.trackstate/tombstones/DEMO-99.json'));
+      }
 
       final repository = _mockSetupRepository(files: files);
       final snapshot = await repository.loadSnapshot();
