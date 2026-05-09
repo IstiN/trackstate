@@ -7,8 +7,11 @@ import '../../../../data/services/trackstate_auth_store.dart';
 import '../../../../domain/models/trackstate_models.dart';
 
 enum TrackerSection { dashboard, board, search, hierarchy, settings }
+
 enum RepositoryAccessState { localGit, connected, connectGitHub }
+
 enum TrackerMessageTone { info, error }
+
 enum TrackerMessageKind {
   dataLoadFailed,
   localGitTokensNotNeeded,
@@ -164,10 +167,13 @@ class TrackerViewModel extends ChangeNotifier {
     TrackStateAuthStore authStore =
         const SharedPreferencesTrackStateAuthStore(),
   }) : _repository = repository,
-       _authStore = authStore;
+       _authStore = authStore {
+    _bindProviderSession();
+  }
 
   final TrackStateRepository _repository;
   final TrackStateAuthStore _authStore;
+  ProviderSession? _boundProviderSession;
 
   TrackerSnapshot? _snapshot;
   TrackerSection _section = TrackerSection.dashboard;
@@ -205,6 +211,7 @@ class TrackerViewModel extends ChangeNotifier {
         session.canRead &&
         !session.canWrite;
   }
+
   RepositoryAccessState get repositoryAccessState => usesLocalPersistence
       ? RepositoryAccessState.localGit
       : _isConnected
@@ -265,6 +272,12 @@ class TrackerViewModel extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  @override
+  void dispose() {
+    _boundProviderSession?.removeListener(_handleProviderSessionChanged);
+    super.dispose();
   }
 
   Future<void> updateQuery(String query) async {
@@ -337,6 +350,7 @@ class TrackerViewModel extends ChangeNotifier {
       _message = TrackerMessage.githubConnectionFailed(error);
       _isConnected = false;
     } finally {
+      _bindProviderSession();
       _isSaving = false;
       notifyListeners();
     }
@@ -507,6 +521,8 @@ class TrackerViewModel extends ChangeNotifier {
     } on Object catch (error) {
       _message = TrackerMessage.storedGitHubTokenInvalid(error);
       await _authStore.clearToken(project.repository);
+    } finally {
+      _bindProviderSession();
     }
   }
 
@@ -520,6 +536,21 @@ class TrackerViewModel extends ChangeNotifier {
         token: '',
       ),
     );
+    _bindProviderSession();
+  }
+
+  void _bindProviderSession() {
+    final session = providerSession;
+    if (identical(_boundProviderSession, session)) {
+      return;
+    }
+    _boundProviderSession?.removeListener(_handleProviderSessionChanged);
+    _boundProviderSession = session;
+    _boundProviderSession?.addListener(_handleProviderSessionChanged);
+  }
+
+  void _handleProviderSessionChanged() {
+    notifyListeners();
   }
 
   String? _callbackToken() {
