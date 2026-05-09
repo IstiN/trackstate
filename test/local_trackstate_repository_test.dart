@@ -355,6 +355,47 @@ void main() {
     },
   );
 
+  test(
+    'local repository moves archived issue artifacts out of active storage',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      const activeIssuePath = 'DEMO/DEMO-1/main.md';
+      const activeAcceptancePath = 'DEMO/DEMO-1/acceptance_criteria.md';
+      const archivedIssuePath = 'DEMO/.trackstate/archive/DEMO-1/main.md';
+      const archivedAcceptancePath =
+          'DEMO/.trackstate/archive/DEMO-1/acceptance_criteria.md';
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final beforeArchive = await repository.loadSnapshot();
+
+      final archivedIssue = await repository.archiveIssue(
+        beforeArchive.issues.single,
+      );
+      final afterArchive = await repository.loadSnapshot();
+
+      expect(archivedIssue.isArchived, isTrue);
+      expect(archivedIssue.storagePath, archivedIssuePath);
+      expect(File('${repo.path}/$activeIssuePath').existsSync(), isFalse);
+      expect(
+        File('${repo.path}/$archivedIssuePath').readAsStringSync(),
+        contains('archived: true'),
+      );
+      expect(File('${repo.path}/$activeAcceptancePath').existsSync(), isFalse);
+      expect(
+        File('${repo.path}/$archivedAcceptancePath').readAsStringSync(),
+        contains('Can be loaded from local Git'),
+      );
+      expect(
+        afterArchive.repositoryIndex.pathForKey('DEMO-1'),
+        archivedIssuePath,
+      );
+      expect(afterArchive.issues.single.storagePath, archivedIssuePath);
+      expect(afterArchive.issues.single.isArchived, isTrue);
+    },
+  );
+
   test('local repository persists create-form custom fields in main.md', () async {
     final repo = await _createLocalRepository();
     addTearDown(() => repo.delete(recursive: true));
