@@ -15,7 +15,7 @@ The automation:
 ## Install dependencies
 
 ```bash
-/tmp/flutter/bin/flutter pub get
+flutter pub get
 ```
 
 ## Run this test
@@ -26,11 +26,12 @@ overrides the ticket precondition:
 ```bash
 tmp_home="$(mktemp -d)"
 HOME="$tmp_home" XDG_CONFIG_HOME="$tmp_home/.config" \
-  /tmp/flutter/bin/flutter test testing/tests/TS-107/test_ts_107.dart --reporter expanded
+  flutter test testing/tests/TS-107/test_ts_107.dart --reporter expanded
 rm -rf "$tmp_home"
 ```
 
-If Flutter is already on `PATH`, replace `/tmp/flutter/bin/flutter` with `flutter`.
+If Flutter is not already on `PATH`, replace `flutter` with your local Flutter
+binary.
 
 ## Expected result
 
