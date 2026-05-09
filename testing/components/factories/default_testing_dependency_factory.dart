@@ -15,8 +15,9 @@ class DefaultTestingDependencyFactory {
     TrackStateRepository repository,
   ) => IssueAggregateProbe(repository);
 
-  LocalGitRepositoryPort createLocalGitRepositoryPort(WidgetTester tester) =>
-      LocalGitRepositoryService(tester);
+  LocalGitRepositoryPort createLocalGitRepositoryPort(WidgetTester tester) {
+    return LocalGitRepositoryService(tester);
+  }
 
   TrackStateAppComponent createTrackStateAppScreen(WidgetTester tester) =>
       TrackStateAppScreen(
