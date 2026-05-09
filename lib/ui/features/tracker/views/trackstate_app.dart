@@ -21,6 +21,7 @@ class TrackStateApp extends StatefulWidget {
 
 class _TrackStateAppState extends State<TrackStateApp> {
   late TrackerViewModel viewModel;
+  bool _isCreateIssueVisible = false;
 
   @override
   void initState() {
@@ -36,6 +37,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
     }
     viewModel.dispose();
     viewModel = _createViewModel();
+    _isCreateIssueVisible = false;
   }
 
   @override
@@ -47,6 +49,20 @@ class _TrackStateAppState extends State<TrackStateApp> {
   TrackerViewModel _createViewModel() => TrackerViewModel(
     repository: widget.repository ?? createTrackStateRepository(),
   )..load();
+
+  void _openCreateIssue() {
+    if (_isCreateIssueVisible) {
+      return;
+    }
+    setState(() => _isCreateIssueVisible = true);
+  }
+
+  void _closeCreateIssue() {
+    if (!_isCreateIssueVisible) {
+      return;
+    }
+    setState(() => _isCreateIssueVisible = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -68,7 +84,12 @@ class _TrackStateAppState extends State<TrackStateApp> {
             GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
-          home: _TrackerHome(viewModel: viewModel),
+          home: _TrackerHome(
+            viewModel: viewModel,
+            isCreateIssueVisible: _isCreateIssueVisible,
+            onOpenCreateIssue: _openCreateIssue,
+            onCloseCreateIssue: _closeCreateIssue,
+          ),
         );
       },
     );
@@ -76,9 +97,17 @@ class _TrackStateAppState extends State<TrackStateApp> {
 }
 
 class _TrackerHome extends StatelessWidget {
-  const _TrackerHome({required this.viewModel});
+  const _TrackerHome({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+  });
 
   final TrackerViewModel viewModel;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
 
   @override
   Widget build(BuildContext context) {
@@ -143,8 +172,18 @@ class _TrackerHome extends StatelessWidget {
                 backgroundColor: colors.page,
                 body: SafeArea(
                   child: isCompact
-                      ? _MobileShell(viewModel: viewModel)
-                      : _DesktopShell(viewModel: viewModel),
+                      ? _MobileShell(
+                          viewModel: viewModel,
+                          isCreateIssueVisible: isCreateIssueVisible,
+                          onOpenCreateIssue: onOpenCreateIssue,
+                          onCloseCreateIssue: onCloseCreateIssue,
+                        )
+                      : _DesktopShell(
+                          viewModel: viewModel,
+                          isCreateIssueVisible: isCreateIssueVisible,
+                          onOpenCreateIssue: onOpenCreateIssue,
+                          onCloseCreateIssue: onCloseCreateIssue,
+                        ),
                 ),
                 bottomNavigationBar: isCompact
                     ? _BottomNavigation(viewModel: viewModel)
@@ -164,9 +203,17 @@ class _SelectSectionIntent extends Intent {
 }
 
 class _DesktopShell extends StatelessWidget {
-  const _DesktopShell({required this.viewModel});
+  const _DesktopShell({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+  });
 
   final TrackerViewModel viewModel;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
 
   @override
   Widget build(BuildContext context) {
@@ -174,11 +221,11 @@ class _DesktopShell extends StatelessWidget {
       children: [
         SizedBox(width: 268, child: _Sidebar(viewModel: viewModel)),
         Expanded(
-          child: Column(
-            children: [
-              _TopBar(viewModel: viewModel),
-              Expanded(child: _SectionBody(viewModel: viewModel)),
-            ],
+          child: _TrackerMainPane(
+            viewModel: viewModel,
+            isCreateIssueVisible: isCreateIssueVisible,
+            onOpenCreateIssue: onOpenCreateIssue,
+            onCloseCreateIssue: onCloseCreateIssue,
           ),
         ),
       ],
@@ -187,16 +234,71 @@ class _DesktopShell extends StatelessWidget {
 }
 
 class _MobileShell extends StatelessWidget {
-  const _MobileShell({required this.viewModel});
+  const _MobileShell({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+  });
 
   final TrackerViewModel viewModel;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return _TrackerMainPane(
+      viewModel: viewModel,
+      compact: true,
+      isCreateIssueVisible: isCreateIssueVisible,
+      onOpenCreateIssue: onOpenCreateIssue,
+      onCloseCreateIssue: onCloseCreateIssue,
+    );
+  }
+}
+
+class _TrackerMainPane extends StatelessWidget {
+  const _TrackerMainPane({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+    this.compact = false,
+  });
+
+  final TrackerViewModel viewModel;
+  final bool compact;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
       children: [
-        _TopBar(viewModel: viewModel, compact: true),
-        Expanded(child: _SectionBody(viewModel: viewModel, compact: true)),
+        Column(
+          children: [
+            _TopBar(
+              viewModel: viewModel,
+              compact: compact,
+              onOpenCreateIssue: onOpenCreateIssue,
+            ),
+            Expanded(
+              child: _SectionBody(viewModel: viewModel, compact: compact),
+            ),
+          ],
+        ),
+        if (isCreateIssueVisible)
+          Positioned.fill(
+            child: _CreateIssueOverlay(
+              compact: compact,
+              child: _CreateIssueDialog(
+                viewModel: viewModel,
+                onDismiss: onCloseCreateIssue,
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -272,9 +374,14 @@ class _Sidebar extends StatelessWidget {
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.viewModel, this.compact = false});
+  const _TopBar({
+    required this.viewModel,
+    required this.onOpenCreateIssue,
+    this.compact = false,
+  });
 
   final TrackerViewModel viewModel;
+  final VoidCallback onOpenCreateIssue;
   final bool compact;
 
   @override
@@ -284,7 +391,7 @@ class _TopBar extends StatelessWidget {
     final repositoryAccessLabel = _repositoryAccessLabel(l10n, viewModel);
     final openCreateIssue = viewModel.hasReadOnlySession || viewModel.isSaving
         ? null
-        : () => _showCreateIssueDialog(context, viewModel);
+        : onOpenCreateIssue;
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 12, 12, 6),
       child: Row(
@@ -423,16 +530,6 @@ class _TopBar extends StatelessWidget {
       ),
     );
   }
-}
-
-Future<void> _showCreateIssueDialog(
-  BuildContext context,
-  TrackerViewModel viewModel,
-) async {
-  await showDialog<void>(
-    context: context,
-    builder: (dialogContext) => _CreateIssueDialog(viewModel: viewModel),
-  );
 }
 
 Future<void> _showRepositoryAccessDialog(
@@ -2151,12 +2248,28 @@ class _IconButtonSurface extends StatelessWidget {
 }
 
 class _CreateIssueDialog extends StatefulWidget {
-  const _CreateIssueDialog({required this.viewModel});
+  const _CreateIssueDialog({required this.viewModel, required this.onDismiss});
 
   final TrackerViewModel viewModel;
+  final VoidCallback onDismiss;
 
   @override
   State<_CreateIssueDialog> createState() => _CreateIssueDialogState();
+}
+
+class _CreateIssueOverlay extends StatelessWidget {
+  const _CreateIssueOverlay({required this.child, this.compact = false});
+
+  final Widget child;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: compact ? Alignment.topCenter : Alignment.center,
+      child: child,
+    );
+  }
 }
 
 class _CreateIssueDialogState extends State<_CreateIssueDialog> {
@@ -2200,7 +2313,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
     if (!mounted || !success) {
       return;
     }
-    Navigator.of(context).pop();
+    widget.onDismiss();
   }
 
   @override
@@ -2284,7 +2397,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                         label: l10n.cancel,
                         onPressed: widget.viewModel.isSaving
                             ? null
-                            : () => Navigator.of(context).pop(),
+                            : widget.onDismiss,
                       ),
                     ],
                   ),
