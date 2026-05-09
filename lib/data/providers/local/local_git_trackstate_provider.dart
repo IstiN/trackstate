@@ -100,9 +100,7 @@ class LocalGitTrackStateProvider
       expectedRevision: request.expectedRevision,
       currentRevision: await _currentHeadRevision(request.path),
     );
-    final file = File(_absolutePath(request.path));
-    await file.parent.create(recursive: true);
-    await file.writeAsString(request.content);
+    await _writeTextToWorktree(path: request.path, content: request.content);
     await _runGit(['add', '--', request.path]);
     if (!await _hasStagedChanges(request.path)) {
       final revision = await _tryGit(['rev-parse', 'HEAD:${request.path}']);
@@ -158,9 +156,10 @@ class LocalGitTrackStateProvider
             expectedRevision: change.expectedRevision,
             currentRevision: await _currentHeadRevision(change.path),
           );
-          final file = File(_absolutePath(change.path));
-          await file.parent.create(recursive: true);
-          await file.writeAsString(change.content);
+          await _writeTextToWorktree(
+            path: change.path,
+            content: change.content,
+          );
           await _runGit(['add', '--', change.path]);
         case RepositoryBinaryFileChange():
           _ensureExpectedRevisionMatches(
@@ -168,9 +167,7 @@ class LocalGitTrackStateProvider
             expectedRevision: change.expectedRevision,
             currentRevision: await _currentHeadRevision(change.path),
           );
-          final file = File(_absolutePath(change.path));
-          await file.parent.create(recursive: true);
-          await file.writeAsBytes(change.bytes);
+          await _writeBytesToWorktree(path: change.path, bytes: change.bytes);
           await _runGit(['add', '--', change.path]);
         case RepositoryDeleteFileChange():
           if (change.expectedRevision != null) {
@@ -182,10 +179,7 @@ class LocalGitTrackStateProvider
           }
           final currentRevision = await _currentHeadRevision(change.path);
           if (currentRevision == null) {
-            final file = File(_absolutePath(change.path));
-            if (await file.exists()) {
-              await file.delete();
-            }
+            await _deleteWorktreeFileIfExists(change.path);
             continue;
           }
           await _runGit(['rm', '-f', '--', change.path]);
@@ -256,9 +250,7 @@ class LocalGitTrackStateProvider
       expectedRevision: request.expectedRevision,
       currentRevision: await _currentHeadRevision(request.path),
     );
-    final file = File(_absolutePath(request.path));
-    await file.parent.create(recursive: true);
-    await file.writeAsBytes(request.bytes);
+    await _writeBytesToWorktree(path: request.path, bytes: request.bytes);
     await _runGit(['add', '--', request.path]);
     if (!await _hasStagedChanges(request.path)) {
       final revision = await _tryGit(['rev-parse', 'HEAD:${request.path}']);
@@ -346,6 +338,63 @@ class LocalGitTrackStateProvider
       'Expected revision ${expectedRevision ?? 'for a new file'}, '
       'found ${currentRevision ?? 'no file at HEAD'}.',
     );
+  }
+
+  Future<void> _writeTextToWorktree({
+    required String path,
+    required String content,
+  }) async {
+    final file = File(_absolutePath(path));
+    await _withFileSystemErrorMapping(
+      path: path,
+      operation: 'write text file',
+      action: () async {
+        await file.parent.create(recursive: true);
+        await file.writeAsString(content);
+      },
+    );
+  }
+
+  Future<void> _writeBytesToWorktree({
+    required String path,
+    required List<int> bytes,
+  }) async {
+    final file = File(_absolutePath(path));
+    await _withFileSystemErrorMapping(
+      path: path,
+      operation: 'write binary file',
+      action: () async {
+        await file.parent.create(recursive: true);
+        await file.writeAsBytes(bytes);
+      },
+    );
+  }
+
+  Future<void> _deleteWorktreeFileIfExists(String path) async {
+    final file = File(_absolutePath(path));
+    await _withFileSystemErrorMapping(
+      path: path,
+      operation: 'delete file',
+      action: () async {
+        if (await file.exists()) {
+          await file.delete();
+        }
+      },
+    );
+  }
+
+  Future<void> _withFileSystemErrorMapping({
+    required String path,
+    required String operation,
+    required Future<void> Function() action,
+  }) async {
+    try {
+      await action();
+    } on FileSystemException {
+      throw TrackStateProviderException(
+        'Local repository could not $operation at $path because the filesystem rejected the change.',
+      );
+    }
   }
 
   Future<GitCommandResult> _runGit(
