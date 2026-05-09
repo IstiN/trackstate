@@ -52,6 +52,37 @@ class Ts135ArchivedIssueFixture {
     return _observeRepositoryState();
   }
 
+  Future<Ts135ArchivedIssueRestartObservation>
+  archiveIssueAndObserveAfterRestart() async {
+    final dynamic repository = LocalTrackStateRepository(
+      repositoryPath: directory.path,
+    );
+    final snapshot = await repository.loadSnapshot() as TrackerSnapshot;
+    final issue = snapshot.issues.singleWhere(
+      (candidate) => candidate.key == archivedIssueKey,
+    );
+    final archivedIssue =
+        await repository.archiveIssue(issue) as TrackStateIssue;
+    final currentSessionSnapshot =
+        await repository.loadSnapshot() as TrackerSnapshot;
+    final currentSessionIssue = currentSessionSnapshot.issues.singleWhere(
+      (candidate) => candidate.key == archivedIssueKey,
+    );
+    final issueFile = File('${directory.path}/$archivedIssuePath');
+    final restartedObservation = await _observeRepositoryState();
+    return Ts135ArchivedIssueRestartObservation(
+      archivedIssue: archivedIssue,
+      currentSessionIssue: currentSessionIssue,
+      currentSessionIndexEntry: currentSessionSnapshot.repositoryIndex
+          .entryForKey(archivedIssueKey),
+      currentSessionMainMarkdown: await issueFile.readAsString(),
+      currentSessionSearchResults: List<TrackStateIssue>.unmodifiable(
+        await repository.searchIssues('project = TRACK $archivedIssueKey'),
+      ),
+      restartedObservation: restartedObservation,
+    );
+  }
+
   Future<Ts135ArchivedIssueObservation> _observeRepositoryState() async {
     final repository = LocalTrackStateRepository(
       repositoryPath: directory.path,
@@ -166,4 +197,22 @@ class Ts135ArchivedIssueObservation {
   final bool issueFileExists;
   final String mainMarkdown;
   final List<TrackStateIssue> standardSearchResults;
+}
+
+class Ts135ArchivedIssueRestartObservation {
+  const Ts135ArchivedIssueRestartObservation({
+    required this.archivedIssue,
+    required this.currentSessionIssue,
+    required this.currentSessionIndexEntry,
+    required this.currentSessionMainMarkdown,
+    required this.currentSessionSearchResults,
+    required this.restartedObservation,
+  });
+
+  final TrackStateIssue archivedIssue;
+  final TrackStateIssue currentSessionIssue;
+  final RepositoryIssueIndexEntry? currentSessionIndexEntry;
+  final String currentSessionMainMarkdown;
+  final List<TrackStateIssue> currentSessionSearchResults;
+  final Ts135ArchivedIssueObservation restartedObservation;
 }
