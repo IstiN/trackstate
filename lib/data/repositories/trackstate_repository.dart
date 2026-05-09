@@ -62,6 +62,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   @override
   final bool supportsGitHubAuth;
   TrackerSnapshot? _snapshot;
+  final Set<String> _knownTombstoneKeys = <String>{};
   final ProviderSession _session;
 
   ProviderSession? get session => _session;
@@ -226,11 +227,10 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       orElse: () => issue,
     );
     final writeBranch = await _provider.resolveWriteBranch();
-    final blobPaths =
-        (await _provider.listTree(ref: writeBranch))
-            .where((entry) => entry.type == 'blob')
-            .map((entry) => entry.path)
-            .toSet();
+    final blobPaths = (await _provider.listTree(ref: writeBranch))
+        .where((entry) => entry.type == 'blob')
+        .map((entry) => entry.path)
+        .toSet();
     if (!blobPaths.contains(currentIssue.storagePath)) {
       throw TrackStateRepositoryException(
         'Could not find repository artifacts for ${currentIssue.key}.',
@@ -579,73 +579,86 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       parentKey: currentIssue.parentKey,
       epicKey: currentIssue.epicKey,
     );
-    final persistedTombstones = await _loadDeletedIssueTombstones(
-      blobPaths: blobPaths,
-      dataRoot: projectRoot,
-      issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
-      includeLegacyDeletedIndex: false,
-    );
-    final persistedDeletedByKey = {
-      for (final entry in persistedTombstones) entry.key: entry,
-      tombstone.key: tombstone,
-    };
-    final persistedDeletedTombstones = persistedDeletedByKey.values.toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
+    _knownTombstoneKeys.add(tombstone.key);
+    final latestSnapshot = _snapshot ?? snapshot;
     final snapshotDeletedByKey = {
-      for (final entry in snapshot.repositoryIndex.deleted) entry.key: entry,
+      for (final entry in latestSnapshot.repositoryIndex.deleted)
+        entry.key: entry,
       tombstone.key: tombstone,
     };
     final snapshotDeletedTombstones = snapshotDeletedByKey.values.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
-    final remainingIssues = snapshot.issues
+    final remainingIssues = latestSnapshot.issues
         .where((candidate) => candidate.key != currentIssue.key)
         .toList(growable: false);
     final repositoryIndex = _deriveRepositoryIndex(
       remainingIssues,
       snapshotDeletedTombstones,
     );
-
-    final issuesIndexPath = _joinPath(
-      projectRoot,
-      '.trackstate/index/issues.json',
+    final indexedRemainingIssues = [
+      for (final remainingIssue in remainingIssues)
+        remainingIssue.withRepositoryIndex(
+          repositoryIndex.entryForKey(remainingIssue.key),
+        ),
+    ]..sort((a, b) => a.key.compareTo(b.key));
+    _snapshot = TrackerSnapshot(
+      project: latestSnapshot.project,
+      repositoryIndex: repositoryIndex,
+      issues: indexedRemainingIssues,
     );
+
+    final tombstoneArtifactPrefix = _joinPath(
+      projectRoot,
+      '.trackstate/tombstones/',
+    );
+    final tombstoneKeysInArtifacts = blobPaths
+        .where(
+          (path) =>
+              path.startsWith(tombstoneArtifactPrefix) &&
+              path.endsWith('.json'),
+        )
+        .map((path) => path.split('/').last.replaceAll('.json', ''))
+        .toSet();
+    final tombstoneKeysForIndex = <String>{
+      ..._knownTombstoneKeys,
+      ...tombstoneKeysInArtifacts,
+    };
+    final tombstoneIndexTombstones =
+        snapshotDeletedTombstones
+            .where((entry) => tombstoneKeysForIndex.contains(entry.key))
+            .toList(growable: false)
+          ..sort((a, b) => a.key.compareTo(b.key));
+
     final tombstoneIndexPath = _joinPath(
       projectRoot,
       '.trackstate/index/tombstones.json',
+    );
+    final tombstoneArtifactPath = _tombstoneArtifactPath(
+      projectRoot,
+      tombstone.key,
     );
     final changes = <RepositoryFileChange>[
       for (final path in issueArtifactPaths)
         RepositoryDeleteFileChange(path: path),
       RepositoryTextFileChange(
-        path: issuesIndexPath,
-        content:
-            '${jsonEncode(_repositoryIndexEntriesJson(repositoryIndex.entries))}\n',
-        expectedRevision: await _existingRevision(
-          path: issuesIndexPath,
-          ref: writeBranch,
-          blobPaths: blobPaths,
-        ),
-      ),
-      RepositoryTextFileChange(
         path: tombstoneIndexPath,
         content:
-            '${jsonEncode(_tombstoneIndexEntriesJson(projectRoot, persistedDeletedTombstones))}\n',
+            '${jsonEncode(_tombstoneIndexEntriesJson(projectRoot, tombstoneIndexTombstones))}\n',
         expectedRevision: await _existingRevision(
           path: tombstoneIndexPath,
           ref: writeBranch,
           blobPaths: blobPaths,
         ),
       ),
-      for (final entry in persistedDeletedTombstones)
-        RepositoryTextFileChange(
-          path: _tombstoneArtifactPath(projectRoot, entry.key),
-          content: '${jsonEncode(_deletedIssueTombstoneJson(entry))}\n',
-          expectedRevision: await _existingRevision(
-            path: _tombstoneArtifactPath(projectRoot, entry.key),
-            ref: writeBranch,
-            blobPaths: blobPaths,
-          ),
+      RepositoryTextFileChange(
+        path: tombstoneArtifactPath,
+        content: '${jsonEncode(_deletedIssueTombstoneJson(tombstone))}\n',
+        expectedRevision: await _existingRevision(
+          path: tombstoneArtifactPath,
+          ref: writeBranch,
+          blobPaths: blobPaths,
         ),
+      ),
     ];
 
     await mutator.applyFileChanges(
@@ -654,18 +667,6 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         message: 'Delete ${currentIssue.key} and reserve tombstone',
         changes: changes,
       ),
-    );
-
-    final indexedRemainingIssues = [
-      for (final remainingIssue in remainingIssues)
-        remainingIssue.withRepositoryIndex(
-          repositoryIndex.entryForKey(remainingIssue.key),
-        ),
-    ]..sort((a, b) => a.key.compareTo(b.key));
-    _snapshot = TrackerSnapshot(
-      project: snapshot.project,
-      repositoryIndex: repositoryIndex,
-      issues: indexedRemainingIssues,
     );
     return tombstone;
   }
@@ -982,7 +983,10 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       final json = await _getRepositoryJson(issuesPath);
       if (json is List) {
         entries.addAll(
-          json.whereType<Map>().map((entry) => _repositoryIndexEntry(entry)),
+          json
+              .whereType<Map>()
+              .map((entry) => _repositoryIndexEntry(entry))
+              .where((entry) => blobPaths.contains(entry.path)),
         );
       }
     }
@@ -1947,19 +1951,16 @@ String _archivedIssueStoragePath(String projectRoot, String key) =>
 
 List<String> _issueArtifactPaths(Set<String> blobPaths, String storagePath) {
   final issueRoot = _issueRoot(storagePath);
-  return blobPaths
-      .where((path) {
-        if (path == storagePath) {
-          return true;
-        }
-        if (!path.startsWith('$issueRoot/')) {
-          return false;
-        }
-        final relativePath = path.substring(issueRoot.length + 1);
-        return !_isNestedIssueArtifactRelativePath(relativePath);
-      })
-      .toList()
-    ..sort();
+  return blobPaths.where((path) {
+    if (path == storagePath) {
+      return true;
+    }
+    if (!path.startsWith('$issueRoot/')) {
+      return false;
+    }
+    final relativePath = path.substring(issueRoot.length + 1);
+    return !_isNestedIssueArtifactRelativePath(relativePath);
+  }).toList()..sort();
 }
 
 bool _isNestedIssueArtifactRelativePath(String relativePath) {
