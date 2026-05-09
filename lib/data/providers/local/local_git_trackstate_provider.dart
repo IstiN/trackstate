@@ -162,6 +162,16 @@ class LocalGitTrackStateProvider
           await file.parent.create(recursive: true);
           await file.writeAsString(change.content);
           await _runGit(['add', '--', change.path]);
+        case RepositoryBinaryFileChange():
+          _ensureExpectedRevisionMatches(
+            path: change.path,
+            expectedRevision: change.expectedRevision,
+            currentRevision: await _currentHeadRevision(change.path),
+          );
+          final file = File(_absolutePath(change.path));
+          await file.parent.create(recursive: true);
+          await file.writeAsBytes(change.bytes);
+          await _runGit(['add', '--', change.path]);
         case RepositoryDeleteFileChange():
           if (change.expectedRevision != null) {
             _ensureExpectedRevisionMatches(

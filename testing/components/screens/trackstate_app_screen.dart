@@ -146,6 +146,19 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<void> switchToLocalGitInSettings({
+    required String repositoryPath,
+    required String writeBranch,
+  }) async {
+    await openSection('Settings');
+    await tapVisibleControl('Local Git');
+    await enterLabeledTextField('Repository Path', text: repositoryPath);
+    await enterLabeledTextField('Write Branch', text: writeBranch);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+  }
+
+  @override
   Future<String> openCreateIssueFlow() async {
     const sectionsToInspect = <String>[
       'Dashboard',
@@ -170,7 +183,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       'Visible texts: ${_formatSnapshot(visibleTextsSnapshot())}. Visible '
       'semantics: ${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
     );
-    throw StateError('Create issue entry point search did not return.');
   }
 
   @override
@@ -433,35 +445,48 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> isTopBarTextVisible(String text) async {
+    await tester.pump();
+    return find
+        .descendant(of: topBar, matching: _text(text))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
   Future<bool> isSemanticsLabelVisible(String label) async {
     await tester.pump();
     return _exactSemanticsLabel(label).evaluate().isNotEmpty;
   }
 
   @override
-  Future<bool> tapVisibleControl(String label) async {
+  Future<bool> isTopBarSemanticsLabelVisible(String label) async {
     await tester.pump();
-    final semanticsMatch = _exactSemanticsLabel(label);
-    final textMatch = find.text(label, findRichText: true);
-    final target = semanticsMatch.evaluate().isNotEmpty
-        ? semanticsMatch
-        : textMatch;
-    if (target.evaluate().isEmpty) {
-      return false;
-    }
-    await tester.ensureVisible(target.first);
-    if (label == 'Create' || label == 'Save') {
-      await tester.runAsync(() async {
-        await tester.tap(target.first, warnIfMissed: false);
-        await tester.pump();
-        await Future<void>.delayed(const Duration(milliseconds: 500));
-      });
-      await tester.pumpAndSettle();
-      return true;
-    }
-    await tester.tap(target.first, warnIfMissed: false);
-    await tester.pumpAndSettle();
-    return true;
+    return find
+        .descendant(of: topBar, matching: _exactSemanticsLabel(label))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  Future<bool> tapVisibleControl(String label) async {
+    return _tapControl(
+      label: label,
+      semanticsMatch: _exactSemanticsLabel(label),
+      textMatch: find.text(label, findRichText: true),
+    );
+  }
+
+  @override
+  Future<bool> tapTopBarControl(String label) async {
+    return _tapControl(
+      label: label,
+      semanticsMatch: find.descendant(
+        of: topBar,
+        matching: _exactSemanticsLabel(label),
+      ),
+      textMatch: find.descendant(of: topBar, matching: find.text(label)),
+    );
   }
 
   @override
@@ -491,14 +516,11 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
-  Future<String> readLabeledTextFieldValue(String label) async {
-    final field = _labeledTextField(label);
+  Future<String?> readLabeledTextFieldValue(String label) async {
     await tester.pump();
+    final field = _labeledTextField(label);
     if (field.evaluate().isEmpty) {
-      fail(
-        'Expected a visible text field labeled "$label", but no matching '
-        'editable control was rendered.',
-      );
+      return null;
     }
 
     final widget = tester.widget(field.first);
@@ -506,18 +528,15 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       return widget.controller.text;
     }
     if (widget is TextField) {
-      final controller = widget.controller;
-      if (controller != null) {
-        return controller.text;
-      }
+      return widget.controller?.text;
     }
 
-    final editable = find.descendant(
+    final editableText = find.descendant(
       of: field.first,
       matching: find.byType(EditableText),
     );
-    if (editable.evaluate().isNotEmpty) {
-      return tester.widget<EditableText>(editable.first).controller.text;
+    if (editableText.evaluate().isNotEmpty) {
+      return tester.widget<EditableText>(editableText.first).controller.text;
     }
 
     fail(
@@ -685,5 +704,32 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     for (var i = 0; i < count; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
+  }
+
+  Future<bool> _tapControl({
+    required String label,
+    required Finder semanticsMatch,
+    required Finder textMatch,
+  }) async {
+    await tester.pump();
+    final target = semanticsMatch.evaluate().isNotEmpty
+        ? semanticsMatch
+        : textMatch;
+    if (target.evaluate().isEmpty) {
+      return false;
+    }
+    await tester.ensureVisible(target.first);
+    if (label == 'Create' || label == 'Save') {
+      await tester.runAsync(() async {
+        await tester.tap(target.first, warnIfMissed: false);
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      });
+      await tester.pumpAndSettle();
+      return true;
+    }
+    await tester.tap(target.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+    return true;
   }
 }
