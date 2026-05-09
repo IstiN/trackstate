@@ -11,10 +11,7 @@ class Ts242ConcurrentActiveIndexFixture {
 
   static const projectKey = 'TRACK';
   static const survivingIssueKey = 'TRACK-3';
-  static const deleteIssueKeys = <String>[
-    'TRACK-4',
-    'TRACK-5',
-  ];
+  static const deleteIssueKeys = <String>['TRACK-4', 'TRACK-5'];
   static const activeIndexPath = '$projectKey/.trackstate/index/issues.json';
 
   String get repositoryPath => directory.path;
@@ -23,9 +20,7 @@ class Ts242ConcurrentActiveIndexFixture {
     final directory = await Directory.systemTemp.createTemp(
       'trackstate-ts-242-',
     );
-    final fixture = Ts242ConcurrentActiveIndexFixture._(
-      directory: directory,
-    );
+    final fixture = Ts242ConcurrentActiveIndexFixture._(directory: directory);
     await fixture._seedRepository();
     return fixture;
   }
@@ -113,6 +108,22 @@ class Ts242ConcurrentActiveIndexFixture {
 
   static String summaryFor(String key) => 'Concurrent delete target $key';
 
+  List<Map<String, Object?>> _seededActiveIndexEntries() {
+    final activeIssueKeys = <String>[...deleteIssueKeys, survivingIssueKey];
+    return List<Map<String, Object?>>.unmodifiable(
+      activeIssueKeys.map(
+        (key) => <String, Object?>{
+          'key': key,
+          'path': issuePathFor(key),
+          'parent': null,
+          'epic': null,
+          'children': const <String>[],
+          'archived': false,
+        },
+      ),
+    );
+  }
+
   Future<void> _seedRepository() async {
     await _writeFile(
       '.gitattributes',
@@ -166,6 +177,10 @@ updated: 2026-05-09T12:05:00Z
 
 This issue must remain visible after the concurrent delete workflow completes.
 ''');
+    await _writeFile(
+      activeIndexPath,
+      '${jsonEncode(_seededActiveIndexEntries())}\n',
+    );
 
     await _git(['init', '-b', 'main']);
     await _git(['config', '--local', 'user.name', 'Local Tester']);

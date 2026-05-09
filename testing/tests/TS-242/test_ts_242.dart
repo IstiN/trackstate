@@ -46,6 +46,27 @@ void main() {
       );
 
       expect(
+        beforeDeletion.activeIndexExists,
+        isTrue,
+        reason:
+            'Precondition: ${beforeDeletion.activeIndexPath} must exist before concurrent deletion starts.',
+      );
+
+      final beforeIssueKeys = beforeDeletion.activeIndexJson
+          .map((entry) => entry['key'])
+          .whereType<String>()
+          .toSet();
+      expect(
+        beforeIssueKeys,
+        unorderedEquals(<String>{
+          ...Ts242ConcurrentActiveIndexFixture.deleteIssueKeys,
+          Ts242ConcurrentActiveIndexFixture.survivingIssueKey,
+        }),
+        reason:
+            'Precondition: ${beforeDeletion.activeIndexPath} must include TRACK-4 and TRACK-5 delete targets before Step 1.',
+      );
+
+      expect(
         beforeDeletion.worktreeStatusLines,
         isEmpty,
         reason:
@@ -65,9 +86,7 @@ void main() {
       // Step 1: Verify that delete operations returned tombstones for all issues
       expect(
         deletedTombstones.map((tombstone) => tombstone.key).toList(),
-        unorderedEquals(
-          Ts242ConcurrentActiveIndexFixture.deleteIssueKeys,
-        ),
+        unorderedEquals(Ts242ConcurrentActiveIndexFixture.deleteIssueKeys),
         reason:
             'Step 1: concurrent delete should return one tombstone result per deleted issue.',
       );
@@ -77,7 +96,9 @@ void main() {
         fixture.observePostDeletionArtifacts,
       );
       if (afterDeletionArtifacts == null) {
-        throw StateError('TS-242 post-delete artifact observation did not complete.');
+        throw StateError(
+          'TS-242 post-delete artifact observation did not complete.',
+        );
       }
 
       // Step 2: Verify that issues.json no longer contains TRACK-4 or TRACK-5
