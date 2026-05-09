@@ -1,0 +1,9 @@
+test_id: TS-158
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Flutter SDK 3.35.3 available on PATH, at /tmp/flutter/bin/flutter, or via TS158_FLUTTER_BIN / TS132_FLUTTER_BIN / TS115_FLUTTER_BIN / TRACKSTATE_FLUTTER_BIN
+notes:
+  - Runs the live enforcement command `dart run tool/check_theme_tokens.dart lib/main.dart lib/ui/` against the repository root.
+  - Passes only when the command exits successfully, shows the success message, emits zero analyzer-style warnings, and does not reject either the file or directory target as missing.
