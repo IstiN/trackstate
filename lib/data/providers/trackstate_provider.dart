@@ -1,6 +1,5 @@
-import 'package:flutter/foundation.dart';
-
 import '../../domain/models/trackstate_models.dart';
+import 'foundation_compat.dart';
 
 abstract interface class RepositoryFileReader {
   Future<RepositoryTextFile> readTextFile(String path, {required String ref});
