@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 
 import '../../domain/models/trackstate_models.dart';
 
@@ -54,7 +54,7 @@ enum ProviderType { github, local }
 
 enum ProviderConnectionState { disconnected, connecting, connected, error }
 
-class ProviderSession {
+class ProviderSession extends ChangeNotifier {
   ProviderSession({
     required this.providerType,
     required this.connectionState,
@@ -85,6 +85,18 @@ class ProviderSession {
     required bool canManageAttachments,
     required bool canCheckCollaborators,
   }) {
+    final changed =
+        this.providerType != providerType ||
+        this.connectionState != connectionState ||
+        this.resolvedUserIdentity != resolvedUserIdentity ||
+        this.canRead != canRead ||
+        this.canWrite != canWrite ||
+        this.canCreateBranch != canCreateBranch ||
+        this.canManageAttachments != canManageAttachments ||
+        this.canCheckCollaborators != canCheckCollaborators;
+    if (!changed) {
+      return;
+    }
     this.providerType = providerType;
     this.connectionState = connectionState;
     this.resolvedUserIdentity = resolvedUserIdentity;
@@ -93,6 +105,7 @@ class ProviderSession {
     this.canCreateBranch = canCreateBranch;
     this.canManageAttachments = canManageAttachments;
     this.canCheckCollaborators = canCheckCollaborators;
+    notifyListeners();
   }
 }
 

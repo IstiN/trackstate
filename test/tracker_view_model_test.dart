@@ -1,8 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.dart';
+
+import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
 
 void main() {
   setUp(() {
@@ -48,16 +50,19 @@ void main() {
     expect(viewModel.connectedUser?.initials, 'DU');
   });
 
-  test('view model loads the local repository user for avatar details', () async {
-    final viewModel = TrackerViewModel(
-      repository: const _LocalRuntimeRepository(),
-    );
+  test(
+    'view model loads the local repository user for avatar details',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: const _LocalRuntimeRepository(),
+      );
 
-    await viewModel.load();
+      await viewModel.load();
 
-    expect(viewModel.connectedUser?.displayName, 'Local User');
-    expect(viewModel.connectedUser?.initials, 'LU');
-  });
+      expect(viewModel.connectedUser?.displayName, 'Local User');
+      expect(viewModel.connectedUser?.initials, 'LU');
+    },
+  );
 
   test(
     'view model reports local persistence after a successful move',
@@ -69,10 +74,38 @@ void main() {
       await viewModel.load();
       await viewModel.moveIssue(viewModel.selectedIssue!, IssueStatus.done);
 
+      expect(viewModel.message?.kind, TrackerMessageKind.localGitMoveCommitted);
+    },
+  );
+
+  test(
+    'view model reacts to live provider session capability downgrades',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final repository = ReactiveIssueDetailTrackStateRepository();
+      final viewModel = TrackerViewModel(repository: repository);
+      var notificationCount = 0;
+      viewModel.addListener(() {
+        notificationCount += 1;
+      });
+
+      await viewModel.load();
+
+      expect(viewModel.hasReadOnlySession, isFalse);
+
+      notificationCount = 0;
+      repository.synchronizeSessionToReadOnly();
+
+      expect(viewModel.hasReadOnlySession, isTrue);
       expect(
-        viewModel.message?.kind,
-        TrackerMessageKind.localGitMoveCommitted,
+        notificationCount,
+        greaterThan(0),
+        reason:
+            'Expected the view model to notify listeners when the active provider session becomes read-only.',
       );
+      viewModel.dispose();
     },
   );
 }
@@ -112,10 +145,8 @@ class _LocalRuntimeRepository implements TrackStateRepository {
   Future<TrackStateIssue> updateIssueDescription(
     TrackStateIssue issue,
     String description,
-  ) async => issue.copyWith(
-    description: description.trim(),
-    updatedLabel: 'just now',
-  );
+  ) async =>
+      issue.copyWith(description: description.trim(), updatedLabel: 'just now');
 
   @override
   Future<TrackStateIssue> updateIssueStatus(

@@ -1,4 +1,4 @@
-import 'dart:ui' show PointerDeviceKind, SemanticsFlag;
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -160,7 +160,7 @@ class SettingsScreenRobot {
 
   String? focusedLabel(Map<String, Finder> candidates) {
     final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
+      (node) => node.getSemanticsData().flagsCollection.isFocused,
       describeMatch: (_) => 'focused semantics node',
     );
     if (focusedSemantics.evaluate().isEmpty) {
