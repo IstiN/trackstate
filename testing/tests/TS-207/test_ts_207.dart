@@ -27,6 +27,18 @@ void main() {
           throw StateError('TS-207 fixture creation did not complete.');
         }
 
+        final initialHead = await tester.runAsync(fixture.headRevision) ?? '';
+        final initialStatus =
+            await tester.runAsync(fixture.worktreeStatusLines) ?? <String>[];
+        expect(
+          initialStatus,
+          isEmpty,
+          reason:
+              'TS-207 requires a clean Local Git repository before opening '
+              'Create issue, but `git status --short` returned '
+              '${initialStatus.join(' | ')}.',
+        );
+
         await screen.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
         screen.expectLocalRuntimeChrome();
 
@@ -93,10 +105,56 @@ void main() {
           createdSummary,
         );
 
-        final createdMarkdown = await tester.runAsync(
-          () => fixture!.readRepositoryFile(
-            Ts207LocalGitFixture.createdIssuePath,
-          ),
+        final latestHead = await tester.runAsync(fixture.headRevision) ?? '';
+        final latestParent = await tester.runAsync(fixture.parentOfHead) ?? '';
+        final latestSubject =
+            await tester.runAsync(fixture.latestCommitSubject) ?? '';
+        final latestFiles =
+            await tester.runAsync(fixture.latestCommitFiles) ?? <String>[];
+        final finalStatus =
+            await tester.runAsync(fixture.worktreeStatusLines) ?? <String>[];
+        final createdMarkdown =
+            await tester.runAsync(
+              () => fixture!.readRepositoryFile(
+                Ts207LocalGitFixture.createdIssuePath,
+              ),
+            ) ??
+            '';
+        expect(
+          latestHead,
+          isNot(initialHead),
+          reason:
+              'Step 3 failed: a successful Local Git create flow should append '
+              'a new commit, but HEAD did not change.',
+        );
+        expect(
+          latestParent,
+          initialHead,
+          reason:
+              'Step 3 failed: the create commit should be written directly on '
+              'top of the clean fixture HEAD.',
+        );
+        expect(
+          latestSubject,
+          'Create ${Ts207LocalGitFixture.createdIssueKey}',
+          reason:
+              'Step 3 failed: the latest Local Git commit should be dedicated '
+              'to the create action.',
+        );
+        expect(
+          latestFiles,
+          equals([Ts207LocalGitFixture.createdIssuePath]),
+          reason:
+              'Step 3 failed: issue creation should commit only the new issue '
+              'file. Observed files: ${latestFiles.join(' | ')}',
+        );
+        expect(
+          finalStatus,
+          isEmpty,
+          reason:
+              'Step 3 failed: successful Local Git issue creation should leave '
+              'the worktree clean, but `git status --short` returned '
+              '${finalStatus.join(' | ')}.',
         );
         expect(
           createdMarkdown,

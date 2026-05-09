@@ -27,6 +27,36 @@ class Ts207LocalGitFixture {
 
   Future<void> dispose() => _repositoryFixture.dispose();
 
+  Future<String> headRevision() => _gitOutput(['rev-parse', 'HEAD']);
+
+  Future<String> parentOfHead() => _gitOutput(['rev-parse', 'HEAD^']);
+
+  Future<String> latestCommitSubject() =>
+      _gitOutput(['log', '-1', '--pretty=%s']);
+
+  Future<List<String>> latestCommitFiles() async {
+    final output = await _gitOutput([
+      'show',
+      '--name-only',
+      '--format=',
+      'HEAD',
+    ]);
+    return output
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  Future<List<String>> worktreeStatusLines() async {
+    final output = await _gitOutput(['status', '--short']);
+    return output
+        .split('\n')
+        .map((line) => line.trimRight())
+        .where((line) => line.isNotEmpty)
+        .toList(growable: false);
+  }
+
   Future<String> readRepositoryFile(String relativePath) =>
       File('$repositoryPath/$relativePath').readAsString();
 
@@ -76,5 +106,13 @@ Loaded from a Local Git fixture that declares resettable create-form fields.
     );
     await _repositoryFixture.stageAll();
     await _repositoryFixture.commit('Seed TS-207 Local Git fixture');
+  }
+
+  Future<String> _gitOutput(List<String> args) async {
+    final result = await Process.run('git', ['-C', repositoryPath, ...args]);
+    if (result.exitCode != 0) {
+      throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
+    }
+    return result.stdout.toString().trim();
   }
 }
