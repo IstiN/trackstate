@@ -1,10 +1,13 @@
+import 'dart:convert';
 import 'dart:io';
 
-import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
+import '../../core/utils/local_git_repository_fixture.dart';
+
 class Ts214LegacyDeletedIndexCreateFixture {
-  Ts214LegacyDeletedIndexCreateFixture._(this.directory);
+  Ts214LegacyDeletedIndexCreateFixture._(this._repositoryFixture);
 
   static const activeIssueKey = 'TRACK-699';
   static const legacyDeletedIssueKey = 'TRACK-700';
@@ -15,45 +18,39 @@ class Ts214LegacyDeletedIndexCreateFixture {
 [{"key":"$legacyDeletedIssueKey","project":"TRACK","formerPath":"TRACK/$legacyDeletedIssueKey/main.md","deletedAt":"2026-05-01T08:30:00Z","summary":"Legacy deleted issue","issueType":"story","parent":null,"epic":null}]
 ''';
 
-  final Directory directory;
+  final LocalGitRepositoryFixture _repositoryFixture;
 
-  String get repositoryPath => directory.path;
+  Directory get directory => _repositoryFixture.directory;
+
+  String get repositoryPath => _repositoryFixture.directory.path;
 
   static Future<Ts214LegacyDeletedIndexCreateFixture> create() async {
-    final directory = await Directory.systemTemp.createTemp(
-      'trackstate-ts-214-',
+    final repositoryFixture = await LocalGitRepositoryFixture.create(
+      userName: 'TS-214 Tester',
+      userEmail: 'ts214@example.com',
     );
-    final fixture = Ts214LegacyDeletedIndexCreateFixture._(directory);
-    await fixture._seedRepository();
+    final fixture = Ts214LegacyDeletedIndexCreateFixture._(repositoryFixture);
+    await fixture._seedProjectConfiguration();
     return fixture;
   }
 
-  Future<void> dispose() => directory.delete(recursive: true);
+  Future<void> dispose() => _repositoryFixture.dispose();
 
-  Future<Ts214LegacyDeletedIndexCreateObservation> observeBeforeCreateState() =>
-      _observeState();
+  Future<Ts214LegacyDeletedIndexCreateObservation> observeRepositoryState({
+    required TrackStateRepository repository,
+    TrackStateIssue? createdIssue,
+  }) => _observeState(repository: repository, createdIssue: createdIssue);
 
-  Future<Ts214LegacyDeletedIndexCreateObservation>
   createIssueViaRepositoryService({
+    required TrackStateRepository repository,
     required String summary,
     required String description,
-  }) async {
-    final repository = LocalTrackStateRepository(
-      repositoryPath: repositoryPath,
-    );
-    final createdIssue = await repository.createIssue(
-      summary: summary,
-      description: description,
-    );
-    return _observeState(createdIssue: createdIssue);
-  }
+  }) => repository.createIssue(summary: summary, description: description);
 
   Future<Ts214LegacyDeletedIndexCreateObservation> _observeState({
+    required TrackStateRepository repository,
     TrackStateIssue? createdIssue,
   }) async {
-    final repository = LocalTrackStateRepository(
-      repositoryPath: repositoryPath,
-    );
     final snapshot = await repository.loadSnapshot();
     final legacyDeletedIndexFile = File(
       '$repositoryPath/$legacyDeletedIndexPath',
@@ -112,29 +109,39 @@ class Ts214LegacyDeletedIndexCreateFixture {
     );
   }
 
-  Future<void> _seedRepository() async {
-    await _writeFile(
-      '.gitattributes',
-      '*.png filter=lfs diff=lfs merge=lfs -text\n',
-    );
-    await _writeFile(
+  Future<void> _seedProjectConfiguration() async {
+    final defaultProjectDirectory = Directory('$repositoryPath/DEMO');
+    if (await defaultProjectDirectory.exists()) {
+      await defaultProjectDirectory.delete(recursive: true);
+    }
+    await _repositoryFixture.writeFile(
       'TRACK/project.json',
-      '{"key":"TRACK","name":"Track Demo"}\n',
+      '${jsonEncode({'key': 'TRACK', 'name': 'Track Demo'})}\n',
     );
-    await _writeFile(
+    await _repositoryFixture.writeFile(
       'TRACK/config/statuses.json',
-      '[{"id":"todo","name":"To Do"},{"id":"done","name":"Done"}]\n',
+      '${jsonEncode([
+        {'id': 'todo', 'name': 'To Do'},
+        {'id': 'done', 'name': 'Done'},
+      ])}\n',
     );
-    await _writeFile(
+    await _repositoryFixture.writeFile(
       'TRACK/config/issue-types.json',
-      '[{"id":"story","name":"Story"}]\n',
+      '${jsonEncode([
+        {'id': 'story', 'name': 'Story'},
+      ])}\n',
     );
-    await _writeFile(
+    await _repositoryFixture.writeFile(
       'TRACK/config/fields.json',
-      '[{"id":"summary","name":"Summary","type":"string","required":true}]\n',
+      '${jsonEncode([
+        {'id': 'summary', 'name': 'Summary', 'type': 'string', 'required': true},
+      ])}\n',
     );
-    await _writeFile(legacyDeletedIndexPath, legacyDeletedIndexContent);
-    await _writeFile(activeIssuePath, '''
+    await _repositoryFixture.writeFile(
+      legacyDeletedIndexPath,
+      legacyDeletedIndexContent,
+    );
+    await _repositoryFixture.writeFile(activeIssuePath, '''
 ---
 key: $activeIssueKey
 project: TRACK
@@ -148,25 +155,8 @@ updated: 2026-05-06T10:00:00Z
 
 This issue remains active while TS-214 creates a new issue.
 ''');
-
-    await _git(['init', '-b', 'main']);
-    await _git(['config', '--local', 'user.name', 'Local Tester']);
-    await _git(['config', '--local', 'user.email', 'local@example.com']);
-    await _git(['add', '.']);
-    await _git(['commit', '-m', 'Seed active issues for TS-214']);
-  }
-
-  Future<void> _writeFile(String relativePath, String content) async {
-    final file = File('$repositoryPath/$relativePath');
-    await file.parent.create(recursive: true);
-    await file.writeAsString(content);
-  }
-
-  Future<void> _git(List<String> args) async {
-    final result = await Process.run('git', ['-C', repositoryPath, ...args]);
-    if (result.exitCode != 0) {
-      throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
-    }
+    await _repositoryFixture.stageAll();
+    await _repositoryFixture.commit('Seed active issues for TS-214');
   }
 
   Future<String> _gitOutput(List<String> args) async {
@@ -193,6 +183,9 @@ This issue remains active while TS-214 creates a new issue.
 
   Future<List<String>> _worktreeStatusLines() async {
     final output = await _gitOutput(['status', '--short']);
+    if (output.isEmpty) {
+      return const <String>[];
+    }
     return output
         .split('\n')
         .map((line) => line.trimRight())
