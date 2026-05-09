@@ -34,6 +34,7 @@ class LocalRuntimeRepository implements TrackStateRepository {
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
+    Map<String, String> customFields = const {},
   }) async {
     throw UnimplementedError('Issue creation is not implemented.');
   }
