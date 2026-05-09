@@ -32,6 +32,19 @@ class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
             cwd=project_root,
         )
 
+    def theme_token_check(self, project_root: Path, target: Path) -> CliCommandResult:
+        flutter_bin = self._resolve_flutter_bin()
+        dart_bin = flutter_bin.parent / "dart"
+        return self._run(
+            (
+                str(dart_bin),
+                "run",
+                "tool/check_theme_tokens.dart",
+                target.as_posix(),
+            ),
+            cwd=project_root,
+        )
+
     def _resolve_flutter_bin(self) -> Path:
         for env_key in ("TS115_FLUTTER_BIN", "TRACKSTATE_FLUTTER_BIN"):
             configured = os.environ.get(env_key)

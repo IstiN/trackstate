@@ -5,11 +5,11 @@ temporary copy of the repository, adding a simple Flutter widget that first uses
 a theme token (`Theme.of(context).colorScheme.primary`) and then replacing that
 token with a hardcoded hex color (`Color(0xFFFAF8F4)`).
 
-The automation only passes when the real analyzer path behaves like a user would
-expect from the terminal:
-1. the tokenized widget analyzes cleanly, and
-2. the hardcoded hex variant produces an analyzer diagnostic that clearly points
-   at the probe file instead of printing `No issues found!`
+The automation only passes when the repository theme-token policy gate behaves
+like a user would expect from the terminal:
+1. the tokenized widget passes cleanly, and
+2. the hardcoded hex variant produces an analyzer-style diagnostic that clearly
+   points at the probe file instead of printing `No issues found!`
 
 ## Install dependencies
 

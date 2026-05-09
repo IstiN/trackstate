@@ -44,10 +44,9 @@ class _TrackStateAppState extends State<TrackStateApp> {
     super.dispose();
   }
 
-  TrackerViewModel _createViewModel() =>
-      TrackerViewModel(
-        repository: widget.repository ?? createTrackStateRepository(),
-      )..load();
+  TrackerViewModel _createViewModel() => TrackerViewModel(
+    repository: widget.repository ?? createTrackStateRepository(),
+  )..load();
 
   @override
   Widget build(BuildContext context) {
@@ -915,8 +914,7 @@ class _SearchAndDetailState extends State<_SearchAndDetail> {
     final l10n = AppLocalizations.of(context)!;
     final viewModel = widget.viewModel;
     final summaryLabel = viewModel.project?.fieldLabel('summary') ?? 'Summary';
-    final canSubmit =
-        !viewModel.hasReadOnlySession && !viewModel.isSaving;
+    final canSubmit = !viewModel.hasReadOnlySession && !viewModel.isSaving;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1451,7 +1449,7 @@ class _IssueDetailActionButton extends StatelessWidget {
             onPressed: onPressed,
             style: FilledButton.styleFrom(
               backgroundColor: colors.primary,
-              foregroundColor: const Color(0xFFFAF8F4),
+              foregroundColor: colors.page,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -1926,12 +1924,11 @@ class _SettingsProviderButton extends StatelessWidget {
     if (tone == _SettingsProviderButtonTone.connected) {
       return _connectedStyle(context, colors);
     }
-    const foreground = Color(0xFFFAF8F4);
-    const hoveredBackground = Color(0xFFB85138);
-    const pressedBackground = Color(0xFFB34F35);
+    final hoveredBackground = Color.lerp(colors.primary, colors.text, 0.04)!;
+    final pressedBackground = Color.lerp(colors.primary, colors.text, 0.08)!;
 
     return FilledButton.styleFrom(
-      foregroundColor: foreground,
+      foregroundColor: colors.page,
       alignment: Alignment.centerLeft,
       minimumSize: const Size.fromHeight(52),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -2207,14 +2204,14 @@ class _NavButton extends StatelessWidget {
               children: [
                 TrackStateIcon(
                   item.glyph,
-                  color: selected ? const Color(0xFFFAF8F4) : colors.muted,
+                  color: selected ? colors.page : colors.muted,
                   size: 18,
                 ),
                 const SizedBox(width: 10),
                 Text(
                   item.label,
                   style: TextStyle(
-                    color: selected ? const Color(0xFFFAF8F4) : colors.text,
+                    color: selected ? colors.page : colors.text,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),
