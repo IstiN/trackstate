@@ -4,28 +4,40 @@ import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 class Ts135ArchivedIssueFixture {
-  Ts135ArchivedIssueFixture._({required this.directory});
+  Ts135ArchivedIssueFixture._({
+    required this.directory,
+    required this.initiallyArchived,
+  });
 
   final Directory directory;
+  final bool initiallyArchived;
 
   static const archivedIssueKey = 'TRACK-555';
   static const archivedIssuePath = 'TRACK/$archivedIssueKey/main.md';
   static const archivedIssueSummary = 'Archive target issue';
   static const siblingIssueKey = 'TRACK-556';
 
-  static Future<Ts135ArchivedIssueFixture> create() async {
+  static Future<Ts135ArchivedIssueFixture> create({
+    bool initiallyArchived = false,
+  }) async {
     final directory = await Directory.systemTemp.createTemp(
-      'trackstate-ts-135-',
+      initiallyArchived ? 'trackstate-ts-152-' : 'trackstate-ts-135-',
     );
-    final fixture = Ts135ArchivedIssueFixture._(directory: directory);
+    final fixture = Ts135ArchivedIssueFixture._(
+      directory: directory,
+      initiallyArchived: initiallyArchived,
+    );
     await fixture._seedRepository();
     return fixture;
   }
 
   Future<void> dispose() => directory.delete(recursive: true);
 
-  Future<Ts135ArchivedIssueObservation> observeBeforeArchivalState() =>
+  Future<Ts135ArchivedIssueObservation> observeCurrentState() =>
       _observeRepositoryState();
+
+  Future<Ts135ArchivedIssueObservation> observeBeforeArchivalState() =>
+      observeCurrentState();
 
   Future<Ts135ArchivedIssueObservation>
   archiveIssueViaRepositoryService() async {
@@ -90,11 +102,11 @@ issueType: story
 status: todo
 summary: $archivedIssueSummary
 updated: 2026-05-09T07:00:00Z
----
+${initiallyArchived ? 'archived: true\n' : ''}---
 
 # Description
 
-This active issue should become archived through the repository service.
+${initiallyArchived ? 'This issue starts archived so redundant archive requests can be verified.' : 'This active issue should become archived through the repository service.'}
 ''');
     await _writeFile('TRACK/$siblingIssueKey/main.md', '''
 ---
@@ -115,7 +127,13 @@ This control issue proves the repository contains more than one issue.
     await _git(['config', 'user.name', 'Local Tester']);
     await _git(['config', 'user.email', 'local@example.com']);
     await _git(['add', '.']);
-    await _git(['commit', '-m', 'Seed active issues for TS-135']);
+    await _git([
+      'commit',
+      '-m',
+      initiallyArchived
+          ? 'Seed archived issue for TS-152'
+          : 'Seed active issues for TS-135',
+    ]);
   }
 
   Future<void> _writeFile(String relativePath, String content) async {
