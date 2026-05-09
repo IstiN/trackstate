@@ -482,6 +482,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  bool isProfileInitialsVisible(String initials) =>
+      profileInitialsBadge(initials).evaluate().isNotEmpty;
+
+  @override
+  bool isProfileTextVisible(String text) =>
+      profileSurfaceText(text).evaluate().isNotEmpty;
+
+  @override
+  bool isProfileSemanticsLabelVisible(String label) =>
+      profileSurfaceSemantics(label).evaluate().isNotEmpty;
+
+  @override
   void expectGuestProfileSurface({
     required String repositoryAccessLabel,
     required String initials,
