@@ -757,7 +757,10 @@ class SetupTrackStateRepository extends ProviderBackedTrackStateRepository {
 }
 
 class DemoTrackStateRepository implements TrackStateRepository {
-  const DemoTrackStateRepository();
+  const DemoTrackStateRepository({TrackerSnapshot snapshot = _snapshot})
+    : _snapshotOverride = snapshot;
+
+  final TrackerSnapshot _snapshotOverride;
 
   @override
   bool get usesLocalPersistence => false;
@@ -770,7 +773,7 @@ class DemoTrackStateRepository implements TrackStateRepository {
       const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
 
   @override
-  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+  Future<TrackerSnapshot> loadSnapshot() async => _snapshotOverride;
 
   @override
   Future<TrackStateIssue> createIssue({
@@ -783,19 +786,19 @@ class DemoTrackStateRepository implements TrackStateRepository {
         'Issue summary is required before creating an issue.',
       );
     }
-    final key = _nextIssueKey(_snapshot);
-    final issuePath = _nextIssuePath(_snapshot, key);
+    final key = _nextIssueKey(_snapshotOverride);
+    final issuePath = _nextIssuePath(_snapshotOverride, key);
     final createdAt = DateTime.now().toUtc().toIso8601String();
     return _parseIssue(
       storagePath: issuePath,
       markdown: _buildIssueMarkdown(
         key: key,
-        projectKey: _snapshot.project.key,
+        projectKey: _snapshotOverride.project.key,
         summary: normalizedSummary,
         description: description.trim(),
-        issueTypeId: _defaultIssueTypeId(_snapshot.project),
-        statusId: _defaultStatusId(_snapshot.project),
-        priorityId: _defaultPriorityId(_snapshot.project),
+        issueTypeId: _defaultIssueTypeId(_snapshotOverride.project),
+        statusId: _defaultStatusId(_snapshotOverride.project),
+        priorityId: _defaultPriorityId(_snapshotOverride.project),
         assignee: 'demo-user',
         reporter: 'demo-user',
         createdAt: createdAt,
@@ -808,10 +811,10 @@ class DemoTrackStateRepository implements TrackStateRepository {
         path: issuePath,
         childKeys: const [],
       ),
-      issueTypeDefinitions: _snapshot.project.issueTypeDefinitions,
-      statusDefinitions: _snapshot.project.statusDefinitions,
-      priorityDefinitions: _snapshot.project.priorityDefinitions,
-      resolutionDefinitions: _snapshot.project.resolutionDefinitions,
+      issueTypeDefinitions: _snapshotOverride.project.issueTypeDefinitions,
+      statusDefinitions: _snapshotOverride.project.statusDefinitions,
+      priorityDefinitions: _snapshotOverride.project.priorityDefinitions,
+      resolutionDefinitions: _snapshotOverride.project.resolutionDefinitions,
     );
   }
 
@@ -1355,7 +1358,7 @@ String _nextIssuePath(TrackerSnapshot snapshot, String key) {
       .map((issue) => issue.storagePath)
       .firstWhere(
         (path) => path.contains('/'),
-        orElse: () => '$key/main.md',
+        orElse: () => '${snapshot.project.key}/main.md',
       );
   final root = existingPath.split('/').first;
   return '$root/$key/main.md';

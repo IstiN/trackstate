@@ -66,6 +66,9 @@ class FailingTrackStateProviderAdapter implements TrackStateProviderAdapter {
   );
 
   @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
   Future<String> resolveWriteBranch() async => dataRef;
 
   @override
