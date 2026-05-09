@@ -299,7 +299,7 @@ class _TrackStateIconPainter extends CustomPainter {
           Offset(s * .62, s * .38),
           s * .32,
           Paint()
-            ..color = Colors.transparent
+            ..color = const Color(0x00000000)
             ..blendMode = BlendMode.clear,
         );
       case TrackStateIconGlyph.sun:

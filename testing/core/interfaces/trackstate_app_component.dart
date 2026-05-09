@@ -9,6 +9,19 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openSection(String label);
 
+  Future<String> openCreateIssueFlow();
+
+  Future<void> expectCreateIssueFormVisible({
+    required String createIssueSection,
+  });
+
+  Future<void> populateCreateIssueForm({
+    required String summary,
+    String? description,
+  });
+
+  Future<void> submitCreateIssue({required String createIssueSection});
+
   Future<void> openIssue(String key, String summary);
 
   Future<void> searchIssues(String query);

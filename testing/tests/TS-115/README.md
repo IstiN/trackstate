@@ -2,14 +2,16 @@
 
 Validates the prevention mechanism for hardcoded UI hex colors by creating a
 temporary copy of the repository, adding a simple Flutter widget that first uses
-a theme token (`Theme.of(context).colorScheme.primary`) and then replacing that
-token with a hardcoded hex color (`Color(0xFFFAF8F4)`).
+a theme token (`Theme.of(context).colorScheme.primary`), then replacing that
+token with a hardcoded hex color (`Color(0xFFFAF8F4)`), and running the
+supported theme-token policy command against the probe file.
 
-The automation only passes when the real analyzer path behaves like a user would
-expect from the terminal:
-1. the tokenized widget analyzes cleanly, and
-2. the hardcoded hex variant produces an analyzer diagnostic that clearly points
-   at the probe file instead of printing `No issues found!`
+The automation only passes when the repository theme-token policy gate behaves
+like a user would expect from the terminal:
+1. `dart run tool/check_theme_tokens.dart <file>` passes cleanly for the
+   tokenized widget, and
+2. the hardcoded hex variant produces an analyzer-style diagnostic that clearly
+   points at the probe file instead of printing a clean result
 
 ## Install dependencies
 
@@ -49,3 +51,12 @@ Ran 1 test in <time>
 
 OK
 ```
+
+## Expected behavior
+
+Running `dart run tool/check_theme_tokens.dart <file>` against a Flutter UI
+probe that uses `Theme.of(context).colorScheme.primary` should exit with code 0
+and print `No theme token policy violations found.` without any warning or
+error diagnostics. Replacing that color with `Color(0xFFFAF8F4)` should then
+fail with a diagnostic that identifies the probe file and the hardcoded color
+violation.

@@ -1,4 +1,4 @@
-import 'dart:ui' as ui show PointerDeviceKind;
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -134,7 +134,7 @@ class SettingsScreenRobot {
   Offset centerOf(Finder finder) => tester.getCenter(finder);
 
   Future<TestGesture> hover(Finder finder) async {
-    final gesture = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: const Offset(-1, -1));
     await gesture.moveTo(centerOf(finder));
     await tester.pump();
@@ -165,7 +165,7 @@ class SettingsScreenRobot {
 
   String? focusedLabel(Map<String, Finder> candidates) {
     final focusedSemantics = find.semantics.byPredicate(
-      (node) => _isFocusedFlag(node.getSemanticsData().flagsCollection.isFocused),
+      (node) => node.getSemanticsData().flagsCollection.isFocused,
       describeMatch: (_) => 'focused semantics node',
     );
     if (focusedSemantics.evaluate().isEmpty) {
@@ -189,10 +189,6 @@ class SettingsScreenRobot {
       }
     }
     return null;
-  }
-
-  bool _isFocusedFlag(Object focusedState) {
-    return focusedState == true || focusedState.toString() == 'Tristate.isTrue';
   }
 
   Color renderedTextColor(Finder finder) {

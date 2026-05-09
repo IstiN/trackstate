@@ -1,6 +1,5 @@
-import 'dart:typed_data';
-
 import '../../domain/models/trackstate_models.dart';
+import 'foundation_compat.dart';
 
 typedef ProviderSessionListener = void Function();
 
