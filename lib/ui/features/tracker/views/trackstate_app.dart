@@ -354,7 +354,7 @@ class _TopBar extends StatelessWidget {
             onPressed: viewModel.toggleTheme,
           ),
           const SizedBox(width: 8),
-          if (viewModel.connectedUser != null) ...[
+          if (_hasVisibleProfileIdentity(viewModel)) ...[
             ConstrainedBox(
               constraints: BoxConstraints(maxWidth: compact ? 160 : 240),
               child: Column(
@@ -577,6 +577,10 @@ String? _profileLogin(TrackerViewModel viewModel) {
   }
   return login == _profileDisplayName(viewModel) ? null : login;
 }
+
+bool _hasVisibleProfileIdentity(TrackerViewModel viewModel) =>
+    _profileDisplayName(viewModel).isNotEmpty ||
+    (_profileLogin(viewModel)?.isNotEmpty ?? false);
 
 String _initialsFromText(String value) {
   final parts = value

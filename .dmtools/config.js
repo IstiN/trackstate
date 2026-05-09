@@ -8,6 +8,7 @@ const GOAL_INSTRUCTIONS = './.dmtools/instructions/goal/goal.md';
 const DESIGN_REFERENCE = './.dmtools/instructions/goal/DESIGN.md';
 const SETUP_REPO_INSTRUCTIONS = './.dmtools/instructions/product/trackstate_setup_repo.md';
 const TRACKSTATE_SETUP_SUBMODULES = [{ path: 'trackstate-setup', branch: 'main' }];
+const FLUTTER_WRAPPER = 'bash agents/scripts/flutterw.sh';
 const POST_ACTION_FEEDBACK = {
     postAction: {
         enabled: true,
@@ -22,8 +23,8 @@ const FLUTTER_FEEDBACK = {
     qualityGates: {
         enabled: true,
         gates: [
-            { name: 'flutter-analyze', command: 'flutter analyze', maxAttempts: 2 },
-            { name: 'flutter-test', command: 'flutter test --coverage', maxAttempts: 2 }
+            { name: 'flutter-analyze', command: `${FLUTTER_WRAPPER} analyze`, maxAttempts: 2 },
+            { name: 'flutter-test', command: `${FLUTTER_WRAPPER} test --coverage`, maxAttempts: 2 }
         ]
     }
 };

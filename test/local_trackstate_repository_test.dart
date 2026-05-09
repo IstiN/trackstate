@@ -247,7 +247,7 @@ void main() {
   );
 
   test(
-    'local provider falls back when git identity is not configured',
+    'local provider keeps the identity empty when git identity is not configured',
     () async {
       final provider = LocalGitTrackStateProvider(
         repositoryPath: '/tmp/fake-repo',
@@ -285,8 +285,8 @@ void main() {
         const RepositoryConnection(repository: '.', branch: 'main', token: ''),
       );
 
-      expect(user.login, 'local-user');
-      expect(user.displayName, 'Local User');
+      expect(user.login, isEmpty);
+      expect(user.displayName, isEmpty);
     },
   );
 }
