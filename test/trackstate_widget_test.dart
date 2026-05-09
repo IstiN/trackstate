@@ -153,6 +153,77 @@ void main() {
   });
 
   testWidgets(
+    'local runtime exposes a single dialog-based Create issue flow in expanded and compact layouts',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      RegExp exactLabel(String label) => RegExp('^${RegExp.escape(label)}\$');
+
+      Finder byExactSemanticsLabel(String label) => find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            widget.properties.label != null &&
+            exactLabel(label).hasMatch(widget.properties.label!),
+      );
+
+      Future<void> pumpLocalRuntime(Size size) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          TrackStateApp(repository: _LocalRuntimeRepository()),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      Future<void> expectCreateIssueFlowForSection(String sectionLabel) async {
+        await tester.tap(byExactSemanticsLabel(sectionLabel).first);
+        await tester.pumpAndSettle();
+
+        final createIssue = byExactSemanticsLabel('Create issue');
+        expect(
+          createIssue,
+          findsOneWidget,
+          reason:
+              'Expected $sectionLabel to expose exactly one reachable Create issue entry point in Local Git mode.',
+        );
+        expect(find.byType(Dialog), findsNothing);
+        expect(byExactSemanticsLabel('Summary'), findsNothing);
+
+        await tester.tap(createIssue);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Dialog), findsOneWidget);
+        expect(byExactSemanticsLabel('Summary'), findsOneWidget);
+        expect(byExactSemanticsLabel('Description'), findsOneWidget);
+        expect(byExactSemanticsLabel('Save'), findsOneWidget);
+        expect(byExactSemanticsLabel('Cancel'), findsOneWidget);
+
+        await tester.tap(byExactSemanticsLabel('Cancel'));
+        await tester.pumpAndSettle();
+        expect(find.byType(Dialog), findsNothing);
+        expect(byExactSemanticsLabel('Summary'), findsNothing);
+      }
+
+      try {
+        for (final size in const [Size(1440, 960), Size(760, 960)]) {
+          await pumpLocalRuntime(size);
+          for (final section in const [
+            'Dashboard',
+            'Board',
+            'JQL Search',
+            'Hierarchy',
+          ]) {
+            await expectCreateIssueFlowForSection(section);
+          }
+        }
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'create issue form renders configured custom fields in local mode',
     (tester) async {
       final semantics = tester.ensureSemantics();
