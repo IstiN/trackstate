@@ -25,14 +25,18 @@ class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
         flutter_bin = self._resolve_flutter_bin()
         return self._run((str(flutter_bin), "pub", "get"), cwd=project_root)
 
-    def analyze(self, project_root: Path, target: Path) -> CliCommandResult:
+    def analyze(self, project_root: Path, target: Path | str) -> CliCommandResult:
         flutter_bin = self._resolve_flutter_bin()
         return self._run(
-            (str(flutter_bin), "analyze", target.as_posix()),
+            (str(flutter_bin), "analyze", self._target_text(target)),
             cwd=project_root,
         )
 
-    def theme_token_check(self, project_root: Path, target: Path) -> CliCommandResult:
+    def theme_token_check(
+        self,
+        project_root: Path,
+        target: Path | str,
+    ) -> CliCommandResult:
         flutter_bin = self._resolve_flutter_bin()
         dart_bin = flutter_bin.parent / "dart"
         return self._run(
@@ -40,13 +44,17 @@ class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
                 str(dart_bin),
                 "run",
                 "tool/check_theme_tokens.dart",
-                target.as_posix(),
+                self._target_text(target),
             ),
             cwd=project_root,
         )
 
     def _resolve_flutter_bin(self) -> Path:
-        for env_key in ("TS115_FLUTTER_BIN", "TRACKSTATE_FLUTTER_BIN"):
+        for env_key in (
+            "TS132_FLUTTER_BIN",
+            "TS115_FLUTTER_BIN",
+            "TRACKSTATE_FLUTTER_BIN",
+        ):
             configured = os.environ.get(env_key)
             if configured:
                 candidate = self._resolve_command(configured)
@@ -113,7 +121,11 @@ class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
         )
 
     def _cache_root(self) -> Path:
-        for env_key in ("TS115_TOOL_CACHE", "TRACKSTATE_TOOL_CACHE"):
+        for env_key in (
+            "TS132_TOOL_CACHE",
+            "TS115_TOOL_CACHE",
+            "TRACKSTATE_TOOL_CACHE",
+        ):
             configured = os.environ.get(env_key)
             if configured:
                 return Path(configured).expanduser()
@@ -130,6 +142,12 @@ class PythonFlutterAnalyzeFramework(FlutterAnalyzeProbe):
 
         resolved = shutil.which(command)
         return Path(resolved) if resolved else None
+
+    @staticmethod
+    def _target_text(target: Path | str) -> str:
+        if isinstance(target, Path):
+            return target.as_posix()
+        return target
 
     @staticmethod
     def _restore_sdk_permissions(flutter_root: Path) -> None:
