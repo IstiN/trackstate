@@ -24,11 +24,7 @@ typedef LocalRepositoryConfigurationApplier =
     });
 
 class TrackStateApp extends StatefulWidget {
-  const TrackStateApp({
-    super.key,
-    this.repository,
-    this.openLocalRepository,
-  });
+  const TrackStateApp({super.key, this.repository, this.openLocalRepository});
 
   final TrackStateRepository? repository;
   final LocalRepositoryLoader? openLocalRepository;
@@ -72,7 +68,8 @@ class _TrackStateAppState extends State<TrackStateApp> {
     TrackerViewModel? previous,
   }) {
     final nextViewModel = TrackerViewModel(
-      repository: repository ?? widget.repository ?? createTrackStateRepository(),
+      repository:
+          repository ?? widget.repository ?? createTrackStateRepository(),
     );
     if (previous != null) {
       nextViewModel.restorePresentationStateFrom(previous);
@@ -87,10 +84,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
   }) async {
     final loader = widget.openLocalRepository;
     if (loader != null) {
-      return loader(
-        repositoryPath: repositoryPath,
-        writeBranch: writeBranch,
-      );
+      return loader(repositoryPath: repositoryPath, writeBranch: writeBranch);
     }
     return createTrackStateRepository(
       runtime: TrackStateRuntime.localGit,
@@ -1330,10 +1324,19 @@ class _SettingsState extends State<_Settings> {
       return;
     }
     _lastAppliedLocalGitConfigurationKey = configurationKey;
-    await widget.onApplyLocalGitConfiguration(
-      repositoryPath: repositoryPath,
-      writeBranch: writeBranch,
-    );
+    var appliedSuccessfully = false;
+    try {
+      await widget.onApplyLocalGitConfiguration(
+        repositoryPath: repositoryPath,
+        writeBranch: writeBranch,
+      );
+      appliedSuccessfully = true;
+    } finally {
+      if (!appliedSuccessfully &&
+          _lastAppliedLocalGitConfigurationKey == configurationKey) {
+        _lastAppliedLocalGitConfigurationKey = null;
+      }
+    }
   }
 
   void _selectProvider(_SettingsProviderSelection selection) {
