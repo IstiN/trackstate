@@ -179,18 +179,22 @@ void main() {
               'archived': false,
             },
           ]),
-          'DEMO/.trackstate/index/deleted.json': jsonEncode([
+          'DEMO/.trackstate/index/tombstones.json': jsonEncode([
             {
               'key': 'DEMO-99',
-              'project': 'DEMO',
-              'formerPath': 'DEMO/DEMO-99/main.md',
-              'deletedAt': '2026-05-05T00:30:00Z',
-              'summary': 'Retired issue',
-              'issueType': 'story',
-              'parent': null,
-              'epic': 'DEMO-1',
+              'path': 'DEMO/.trackstate/tombstones/DEMO-99.json',
             },
           ]),
+          'DEMO/.trackstate/tombstones/DEMO-99.json': jsonEncode({
+            'key': 'DEMO-99',
+            'project': 'DEMO',
+            'formerPath': 'DEMO/DEMO-99/main.md',
+            'deletedAt': '2026-05-05T00:30:00Z',
+            'summary': 'Retired issue',
+            'issueType': 'story',
+            'parent': null,
+            'epic': 'DEMO-1',
+          }),
           'DEMO/DEMO-1/main.md': '''
 ---
 key: DEMO-1
@@ -312,7 +316,8 @@ This comment demonstrates markdown-backed collaboration history.
         files.keys,
         containsAll([
           'DEMO/.trackstate/index/issues.json',
-          'DEMO/.trackstate/index/deleted.json',
+          'DEMO/.trackstate/index/tombstones.json',
+          'DEMO/.trackstate/tombstones/DEMO-99.json',
           'DEMO/config/resolutions.json',
           'DEMO/DEMO-1/DEMO-2/links.json',
           'DEMO/DEMO-1/DEMO-2/attachments/board-preview.svg',

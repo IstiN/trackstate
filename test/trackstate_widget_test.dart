@@ -210,6 +210,12 @@ class _LocalRuntimeRepository implements TrackStateRepository {
       _demoRepository.searchIssues(jql);
 
   @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Local runtime widget repository does not support issue deletion.',
+      );
+
+  @override
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
@@ -221,10 +227,8 @@ class _LocalRuntimeRepository implements TrackStateRepository {
   Future<TrackStateIssue> updateIssueDescription(
     TrackStateIssue issue,
     String description,
-  ) async => issue.copyWith(
-    description: description.trim(),
-    updatedLabel: 'just now',
-  );
+  ) async =>
+      issue.copyWith(description: description.trim(), updatedLabel: 'just now');
 
   @override
   Future<TrackStateIssue> updateIssueStatus(
@@ -274,6 +278,14 @@ class _FailingLocalRuntimeRepository implements TrackStateRepository {
   ) async {
     throw const TrackStateRepositoryException(
       'Cannot save DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
+    );
+  }
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async {
+    throw const TrackStateRepositoryException(
+      'Cannot delete DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
       'commit, stash, or clean those local changes before trying again.',
     );
   }
