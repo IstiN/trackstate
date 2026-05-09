@@ -134,6 +134,12 @@ class _LocalRuntimeRepository implements TrackStateRepository {
       _demoRepository.searchIssues(jql);
 
   @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Local runtime view-model repository does not support issue archiving.',
+      );
+
+  @override
   Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
       throw const TrackStateRepositoryException(
         'Local runtime view-model repository does not support issue deletion.',
