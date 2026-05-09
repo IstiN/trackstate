@@ -148,7 +148,34 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> openSection(String label) async {
-    final section = find.bySemanticsLabel(RegExp(RegExp.escape(label))).first;
+    final end = DateTime.now().add(const Duration(seconds: 5));
+    Finder? section;
+    while (DateTime.now().isBefore(end)) {
+      final semanticsMatch = find.bySemanticsLabel(
+        RegExp(RegExp.escape(label)),
+      );
+      if (semanticsMatch.evaluate().isNotEmpty) {
+        section = semanticsMatch.first;
+        break;
+      }
+
+      final textMatch = find.text(label, findRichText: true);
+      if (textMatch.evaluate().isNotEmpty) {
+        section = textMatch.first;
+        break;
+      }
+
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    if (section == null) {
+      fail(
+        'Could not find section "$label". Visible texts: '
+        '${_formatSnapshot(visibleTextsSnapshot())}. Visible semantics: '
+        '${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
+      );
+    }
+
     await tester.ensureVisible(section);
     await tester.tap(section, warnIfMissed: false);
     await _pumpFrames();
@@ -466,6 +493,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<bool> isTopBarTextVisible(String text) async {
     await tester.pump();
+    if (repositoryAccessButton.evaluate().isEmpty) {
+      return false;
+    }
     return find
         .descendant(of: topBar, matching: _text(text))
         .evaluate()
@@ -481,6 +511,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<bool> isTopBarSemanticsLabelVisible(String label) async {
     await tester.pump();
+    if (repositoryAccessButton.evaluate().isEmpty) {
+      return false;
+    }
     return find
         .descendant(of: topBar, matching: _exactSemanticsLabel(label))
         .evaluate()
@@ -498,6 +531,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<bool> tapTopBarControl(String label) async {
+    if (repositoryAccessButton.evaluate().isEmpty) {
+      return false;
+    }
     return _tapControl(
       label: label,
       semanticsMatch: find.descendant(

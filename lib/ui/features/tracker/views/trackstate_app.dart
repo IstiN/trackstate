@@ -129,6 +129,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
         _isCreateIssueVisible = false;
       });
       previousViewModel.dispose();
+      await nextViewModel.load();
     } finally {
       if (_pendingLocalGitConfigurationKey == configurationKey) {
         _pendingLocalGitConfigurationKey = null;
