@@ -35,22 +35,14 @@ void main() {
           'Git-native. Jira-compatible. Team-proven.',
         );
 
-        final createIssueVisible =
-            await screen.isSemanticsLabelVisible('Create issue') ||
-            await screen.isTextVisible('Create issue');
-        expect(
-          createIssueVisible,
-          isTrue,
-          reason:
-              'Step 2 failed: Dashboard did not expose a visible top-bar '
-              '"Create issue" control. Top bar texts: '
-              '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. '
-              'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
-              'Visible semantics: '
-              '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+        await _expectTopBarControlVisible(
+          screen,
+          label: 'Create issue',
+          failingStep: 2,
+          context: 'after navigating to Dashboard in Local Git mode',
         );
 
-        final openedCreateFlow = await screen.tapVisibleControl('Create issue');
+        final openedCreateFlow = await screen.tapTopBarControl('Create issue');
         expect(
           openedCreateFlow,
           isTrue,
@@ -79,7 +71,7 @@ void main() {
         );
 
         await screen.openSection('Board');
-        await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
+        await screen.waitWithoutInteraction(const Duration(milliseconds: 800));
         final boardBackgroundVisible = await screen.isTextVisible(
           'Drag-ready workflow columns backed by Git files',
         );
@@ -181,6 +173,24 @@ void main() {
   );
 }
 
+Future<void> _expectTopBarControlVisible(
+  TrackStateAppComponent screen, {
+  required String label,
+  required int failingStep,
+  required String context,
+}) async {
+  final topBarTexts = screen.topBarVisibleTextsSnapshot();
+  if (topBarTexts.any((value) => value.trim() == label)) {
+    return;
+  }
+
+  fail(
+    'Step $failingStep failed: no visible "$label" control was rendered in the '
+    'top bar $context. Top bar texts: ${_formatSnapshot(topBarTexts)}. Visible '
+    'texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
+    'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
+  );
+}
 String _formatSnapshot(List<String> values, {int limit = 20}) {
   final snapshot = <String>[];
   for (final value in values) {
