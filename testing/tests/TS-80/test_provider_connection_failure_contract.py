@@ -64,13 +64,10 @@ class ProviderConnectionFailureContractTest(unittest.TestCase):
             return failures
 
         connection_state = session.get("connectionState")
-        if connection_state not in (
-            "ProviderConnectionState.disconnected",
-            "ProviderConnectionState.error",
-        ):
+        if connection_state != "ProviderConnectionState.error":
             failures.append(
                 "Step 3 failed: the session contract did not reflect a failed connection.\n"
-                "Expected connectionState to be disconnected/error after the provider "
+                "Expected connectionState to be error after the provider "
                 "rejected authentication.\n"
                 f"Observed connectionState: {connection_state!r}\n"
                 f"Observed connect error: {connect_error!r}"
