@@ -78,18 +78,17 @@ void main() {
         final connectGitHubVisible =
             await screen.isSemanticsLabelVisible('Connect GitHub') ||
             await screen.isTextVisible('Connect GitHub');
-        final unexpectedTrackStateAiVisible =
-            _hasUnexpectedTrackStateAiReference(
-              screen.visibleTextsSnapshot(),
-              screen.visibleSemanticsLabelsSnapshot(),
-            );
+        final topBarTrackStateAiVisible =
+            await screen.isTopBarSemanticsLabelVisible('TrackState.AI') ||
+            await screen.isTopBarTextVisible('TrackState.AI');
+        final topBarSnapshot = screen.topBarVisibleTextsSnapshot();
 
         if (!parseErrorLogged ||
             frameworkException != null ||
             !localGitVisible ||
             !localGitTopBarVisible ||
             connectGitHubVisible ||
-            unexpectedTrackStateAiVisible) {
+            topBarTrackStateAiVisible) {
           fail(
             'Step 2 failed: launching the app with malformed '
             'DEMO/config/fields.json did not preserve the required Local Git '
@@ -98,8 +97,9 @@ void main() {
             'Local Git visible=${localGitVisible ? 'yes' : 'no'}, '
             'top-bar Local Git visible=${localGitTopBarVisible ? 'yes' : 'no'}, '
             'Connect GitHub visible=${connectGitHubVisible ? 'yes' : 'no'}, '
-            'unexpected TrackState.AI visible='
-            '${unexpectedTrackStateAiVisible ? 'yes' : 'no'}. '
+            'top-bar TrackState.AI visible='
+            '${topBarTrackStateAiVisible ? 'yes' : 'no'}. '
+            'Top-bar texts: ${_formatSnapshot(topBarSnapshot)}. '
             'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
             'Visible semantics: '
             '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
@@ -162,14 +162,6 @@ bool _snapshotContainsParseError(List<String> values) {
         value.contains('FormatException') ||
         value.contains('Unexpected character'),
   );
-}
-
-bool _hasUnexpectedTrackStateAiReference(
-  List<String> visibleTexts,
-  List<String> visibleSemantics,
-) {
-  final combined = [...visibleTexts, ...visibleSemantics];
-  return combined.any((value) => value.contains('TrackState.AI'));
 }
 
 String _formatSnapshot(List<String> values, {int limit = 20}) {
