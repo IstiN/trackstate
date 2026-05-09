@@ -48,11 +48,12 @@ void main() {
         await screen.openSection('Board');
         await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
 
-        await _expectVisibleControl(
+        await _expectTopBarControlVisible(
           screen,
           label: 'Create issue',
           failingStep: 2,
-          context: 'after navigating to the Board section in Local Git mode',
+          context:
+              'after navigating to the Board section in Local Git mode',
         );
 
         final openedFromBoard = await screen.tapVisibleControl('Create issue');
@@ -60,8 +61,9 @@ void main() {
           openedFromBoard,
           isTrue,
           reason:
-              'Step 2 failed: the visible "Create issue" control in Board '
-              'could not be activated. Visible texts: '
+              'Step 2 failed: the visible top-bar "Create issue" control in '
+              'Board could not be activated. Top bar texts: '
+              '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible texts: '
               '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
               'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
         );
@@ -197,6 +199,25 @@ void main() {
       }
     },
     timeout: const Timeout(Duration(seconds: 30)),
+  );
+}
+
+Future<void> _expectTopBarControlVisible(
+  TrackStateAppComponent screen, {
+  required String label,
+  required int failingStep,
+  required String context,
+}) async {
+  final topBarTexts = screen.topBarVisibleTextsSnapshot();
+  if (topBarTexts.any((value) => value.trim() == label)) {
+    return;
+  }
+  fail(
+    'Step $failingStep failed: no visible "$label" control was rendered in '
+    'the top bar $context. Top bar texts: ${_formatSnapshot(topBarTexts)}. '
+    'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
+    'Visible semantics: '
+    '${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
   );
 }
 
