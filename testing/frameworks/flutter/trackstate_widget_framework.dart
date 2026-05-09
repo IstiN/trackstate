@@ -1,5 +1,3 @@
-import 'dart:ui' show CheckedState;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -210,14 +208,7 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
     final matches = finder.evaluate().toList();
     for (var index = 0; index < matches.length; index++) {
       final flags = tester.getSemantics(finder.at(index)).flagsCollection;
-      final hasSelectionState =
-          flags.isChecked != CheckedState.none ||
-          flags.isSelected.value != null;
-      if (!hasSelectionState) {
-        continue;
-      }
-      if (flags.isChecked == CheckedState.isTrue ||
-          flags.isSelected.value == true) {
+      if (flags.isChecked || flags.isSelected) {
         return true;
       }
     }

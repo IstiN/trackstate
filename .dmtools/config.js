@@ -25,6 +25,12 @@ const FLUTTER_FEEDBACK = {
             { name: 'flutter-analyze', command: 'flutter analyze', maxAttempts: 2 },
             { name: 'flutter-test', command: 'flutter test --coverage', maxAttempts: 2 }
         ]
+    },
+    policyGates: {
+        enabled: true,
+        gates: [
+            { name: 'theme-token-lint', command: 'dart run tool/check_theme_tokens.dart', maxAttempts: 2 }
+        ]
     }
 };
 
@@ -224,6 +230,18 @@ module.exports = {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_test_automation_review.json',
                 feedbackLoop: POST_ACTION_FEEDBACK
+            }
+        },
+        retry_merge: {
+            customParams: {
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/pr_rework.json'
+            }
+        },
+        retry_merge_test: {
+            customParams: {
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/pr_test_automation_rework.json'
             }
         }
     },

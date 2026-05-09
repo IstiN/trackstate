@@ -59,9 +59,9 @@ class QuickStartReadmeContractTest(unittest.TestCase):
 
         self.assertEqual(
             documented_command,
-            'gh api repos/<repository>/contents/<project-path>?ref=<default-branch> --header "Accept: application/vnd.github.raw+json"',
-            "Expected the CLI quick start to document the exact raw `gh api` command "
-            "that prints the fork project JSON without using shell pipes.",
+            'gh api repos/<fork>/contents/<project-path>?ref=<default-branch> -H "Accept: application/vnd.github.raw+json"',
+            "Expected the CLI quick start to document the executable raw `gh api` "
+            "command that prints the fork project JSON without using shell pipes.",
         )
 
         expanded_command = self.validator._expand_documented_command(
@@ -73,7 +73,7 @@ class QuickStartReadmeContractTest(unittest.TestCase):
 
         self.assertEqual(
             expanded_command,
-            'gh api repos/octocat/trackstate-setup/contents/DEMO/project.json?ref=main --header "Accept: application/vnd.github.raw+json"',
+            'gh api repos/octocat/trackstate-setup/contents/DEMO/project.json?ref=main -H "Accept: application/vnd.github.raw+json"',
         )
 
 

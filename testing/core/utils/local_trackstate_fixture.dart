@@ -54,6 +54,11 @@ class LocalTrackStateFixture {
     );
     await _git(['add', issuePath]);
   }
+
+  Future<void> stashWorktreeChanges({
+    String message = 'Manual recovery before retrying issue creation',
+  }) => _git(['stash', 'push', '--include-untracked', '-m', message]);
+
   Future<String> buildUpdatedDescriptionMarkdown(
     String updatedDescription,
   ) async {
@@ -67,6 +72,43 @@ class LocalTrackStateFixture {
 
   Future<String> readMainFile() =>
       File('$repositoryPath/$issuePath').readAsString();
+
+  Future<String> headRevision() => _gitOutput(['rev-parse', 'HEAD']);
+
+  Future<String> parentOfHead() => _gitOutput(['rev-parse', 'HEAD^']);
+
+  Future<String> latestCommitSubject() =>
+      _gitOutput(['log', '-1', '--pretty=%s']);
+
+  Future<List<String>> latestCommitFiles() async {
+    final output = await _gitOutput([
+      'show',
+      '--name-only',
+      '--format=',
+      'HEAD',
+    ]);
+    return output
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  Future<List<String>> worktreeStatusLines() async {
+    final output = await _gitOutput(['status', '--short']);
+    return output
+        .split('\n')
+        .map((line) => line.trimRight())
+        .where((line) => line.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  Future<String> readRepositoryFile(String relativePath) =>
+      File('$repositoryPath/$relativePath').readAsString();
+
+  Future<bool> repositoryPathExists(String relativePath) =>
+      File('$repositoryPath/$relativePath').exists();
+
   Future<void> _seedRepository() async {
     await _writeFile(
       '.gitattributes',
@@ -84,6 +126,10 @@ class LocalTrackStateFixture {
     await _writeFile(
       'DEMO/config/fields.json',
       '[{"name":"Summary"},{"name":"Priority"}]\n',
+    );
+    await _writeFile(
+      'DEMO/config/priorities.json',
+      '[{"name":"Medium"},{"name":"High"}]\n',
     );
     await _writeFile(issuePath, '''
 ---
@@ -126,5 +172,13 @@ Loaded from local git.
     if (result.exitCode != 0) {
       throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
     }
+  }
+
+  Future<String> _gitOutput(List<String> args) async {
+    final result = await Process.run('git', ['-C', repositoryPath, ...args]);
+    if (result.exitCode != 0) {
+      throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
+    }
+    return result.stdout.toString().trim();
   }
 }
