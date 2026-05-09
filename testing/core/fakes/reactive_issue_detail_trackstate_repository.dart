@@ -224,6 +224,7 @@ Read and write tracker files through GitHub Contents API.
   }
 
   @override
+  Future<void> ensureCleanWorktree() async {}
   Future<RepositoryWriteResult> writeTextFile(
     RepositoryWriteRequest request,
   ) async {

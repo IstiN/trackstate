@@ -1,0 +1,9 @@
+test_id: TS-163
+type: api
+framework: flutter_test
+platform: linux
+dependencies:
+  - TS-159 archiveIssue missing-entity mapping deployed on main
+notes:
+  - Exercises LocalTrackStateRepository.archiveIssue against a real local Git-backed fixture with an existing TRACK-122 issue.
+  - Forces a generic git commit failure during the archive write so the test can verify provider-level details are mapped to TrackStateRepositoryException and do not leak to callers.

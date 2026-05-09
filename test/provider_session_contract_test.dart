@@ -47,7 +47,7 @@ void main() {
   );
 
   test(
-    'provider-backed repository exposes a restricted session after connect fails',
+    'provider-backed repository exposes an error session after connect fails',
     () async {
       final repository = ProviderBackedTrackStateRepository(
         provider: _FailingTrackStateProviderAdapter(),
@@ -71,7 +71,7 @@ void main() {
           ));
 
       expect(session.providerType, ProviderType.github);
-      expect(session.connectionState, ProviderConnectionState.disconnected);
+      expect(session.connectionState, ProviderConnectionState.error);
       expect(session.resolvedUserIdentity, 'mock/repository');
       expect(session.canRead, isFalse);
       expect(session.canWrite, isFalse);
@@ -219,7 +219,7 @@ void main() {
   );
 
   test(
-    'provider-backed repository exposes a disconnected session before connect starts',
+    'provider-backed repository keeps the same session reference across connect start',
     () async {
       final provider = _FakeTrackStateProviderAdapter(
         permission: const RepositoryPermission(
@@ -270,10 +270,10 @@ void main() {
         connectingSession.connectionState,
         ProviderConnectionState.connecting,
       );
-      expect(identical(initialSession, connectingSession), isFalse);
+      expect(identical(initialSession, connectingSession), isTrue);
       expect(
         initialSession.connectionState,
-        ProviderConnectionState.disconnected,
+        ProviderConnectionState.connecting,
       );
 
       provider.completeAuthentication();
@@ -289,7 +289,7 @@ void main() {
       );
       expect(
         initialSession.connectionState,
-        ProviderConnectionState.disconnected,
+        ProviderConnectionState.connected,
       );
     },
   );
@@ -337,6 +337,9 @@ class _FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
 
   @override
   Future<RepositoryPermission> getPermission() async => _permission;
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
 
   @override
   Future<bool> isLfsTracked(String path) async => false;
@@ -423,6 +426,9 @@ class _FailingTrackStateProviderAdapter implements TrackStateProviderAdapter {
         canManageAttachments: false,
         canCheckCollaborators: false,
       );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
 
   @override
   Future<bool> isLfsTracked(String path) async => false;

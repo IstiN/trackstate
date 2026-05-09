@@ -79,6 +79,8 @@ class TrackStateIssue {
     String? description,
     String? rawMarkdown,
     String? updatedLabel,
+    bool? isArchived,
+    String? storagePath,
   }) {
     return TrackStateIssue(
       key: key,
@@ -108,9 +110,9 @@ class TrackStateIssue {
       comments: comments,
       links: links,
       attachments: attachments,
-      isArchived: isArchived,
+      isArchived: isArchived ?? this.isArchived,
       resolutionId: resolutionId,
-      storagePath: storagePath,
+      storagePath: storagePath ?? this.storagePath,
       rawMarkdown: rawMarkdown ?? this.rawMarkdown,
     );
   }
@@ -454,7 +456,8 @@ class RepositoryUser {
     }
     final compact = source.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
     if (compact.isEmpty) return '';
-    return compact.substring(0, compact.length < 2 ? compact.length : 2)
+    return compact
+        .substring(0, compact.length < 2 ? compact.length : 2)
         .toUpperCase();
   }
 }

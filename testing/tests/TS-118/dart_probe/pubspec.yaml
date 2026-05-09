@@ -1,0 +1,11 @@
+name: ts118_provider_unexpected_operation_exception_probe
+publish_to: none
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    path: packages/flutter
+  http:
+    path: packages/http

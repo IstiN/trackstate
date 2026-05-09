@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -177,6 +175,9 @@ Read and write tracker files through GitHub Contents API.
       'TS-42 should not attempt to create commits in a read-only session.',
     );
   }
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
 
   @override
   Future<RepositoryWriteResult> writeTextFile(

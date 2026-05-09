@@ -9,6 +9,24 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openSection(String label);
 
+  Future<void> switchToLocalGitInSettings({
+    required String repositoryPath,
+    required String writeBranch,
+  });
+
+  Future<String> openCreateIssueFlow();
+
+  Future<void> expectCreateIssueFormVisible({
+    required String createIssueSection,
+  });
+
+  Future<void> populateCreateIssueForm({
+    required String summary,
+    String? description,
+  });
+
+  Future<void> submitCreateIssue({required String createIssueSection});
+
   Future<void> openIssue(String key, String summary);
 
   Future<void> searchIssues(String query);
@@ -16,6 +34,7 @@ abstract interface class TrackStateAppComponent {
   Future<void> expectIssueSearchResultVisible(String key, String summary);
 
   void expectIssueSearchResultAbsent(String key, String summary);
+
   Future<void> dragIssueToStatusColumn({
     required String key,
     required String summary,
@@ -38,16 +57,17 @@ abstract interface class TrackStateAppComponent {
     required String text,
   });
 
-  Future<void> tapIssueDetailAction(
-    String key, {
-    required String label,
-  });
+  Future<void> tapIssueDetailAction(String key, {required String label});
 
   Future<void> expectMessageBannerContains(String text);
 
-  void expectLocalRuntimeChrome();
-
   Future<bool> dismissMessageBannerContaining(String text);
+
+  Future<bool> isMessageBannerVisibleContaining(String text);
+
+  Future<void> waitWithoutInteraction(Duration duration);
+
+  void expectLocalRuntimeChrome();
 
   Future<void> openRepositoryAccess();
 
@@ -56,6 +76,17 @@ abstract interface class TrackStateAppComponent {
   void expectProfileIdentityVisible({
     required String displayName,
     required String login,
+    required String initials,
+  });
+
+  bool isProfileInitialsVisible(String initials);
+
+  bool isProfileTextVisible(String text);
+
+  bool isProfileSemanticsLabelVisible(String label);
+
+  void expectGuestProfileSurface({
+    required String repositoryAccessLabel,
     required String initials,
   });
 
@@ -69,13 +100,25 @@ abstract interface class TrackStateAppComponent {
 
   Future<bool> isSemanticsLabelVisible(String label);
 
+  Future<bool> isTopBarTextVisible(String text);
+
+  Future<bool> isTopBarSemanticsLabelVisible(String label);
+
   Future<bool> tapVisibleControl(String label);
+
+  Future<bool> tapTopBarControl(String label);
 
   Future<bool> isTextFieldVisible(String label);
 
+  Future<int> countLabeledTextFields(String label);
+
   Future<void> enterLabeledTextField(String label, {required String text});
 
+  Future<String?> readLabeledTextFieldValue(String label);
+
   List<String> visibleTextsSnapshot();
+
+  List<String> topBarVisibleTextsSnapshot();
 
   List<String> visibleSemanticsLabelsSnapshot();
 }

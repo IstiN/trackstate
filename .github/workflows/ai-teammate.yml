@@ -58,6 +58,13 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.3'
+          channel: stable
+          cache: true
+
       - name: Configure npm global prefix
         if: vars.AI_AGENT_PROVIDER == 'copilot'
         run: |
@@ -120,8 +127,6 @@ jobs:
 
       - name: Run AI Teammate
         env:
-          PATH: "/home/runner/.local/bin:/home/runner/.dmtools/bin:/bin:/usr/bin:$PATH"
-
           JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           JIRA_BASE_PATH: ${{ vars.JIRA_BASE_PATH }}
@@ -159,7 +164,7 @@ jobs:
           DMTOOLS_INTEGRATIONS: "jira,confluence,figma,ai,cli,file,github"
           ENCODED_CONFIG: ${{ inputs.encoded_config }}
           PROMPT_CHUNK_TOKEN_LIMIT: ${{ vars.PROMPT_CHUNK_TOKEN_LIMIT }}
-          CLI_ALLOWED_COMMANDS: "find,ls,cat,mkdir,bash"
+          CLI_ALLOWED_COMMANDS: "find,ls,cat,mkdir,bash,git,gh,flutter,dart,python3,pytest,run-agent.sh"
 
         run: |
           echo "Using configuration: ${{ inputs.config_file }}"
