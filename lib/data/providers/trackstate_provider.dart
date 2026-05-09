@@ -238,6 +238,16 @@ final class RepositoryTextFileChange extends RepositoryFileChange {
   final String content;
 }
 
+final class RepositoryBinaryFileChange extends RepositoryFileChange {
+  const RepositoryBinaryFileChange({
+    required super.path,
+    required this.bytes,
+    super.expectedRevision,
+  });
+
+  final Uint8List bytes;
+}
+
 final class RepositoryDeleteFileChange extends RepositoryFileChange {
   const RepositoryDeleteFileChange({
     required super.path,

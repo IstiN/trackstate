@@ -34,18 +34,18 @@ class Ts163ArchiveProviderFailureFixture {
       repositoryPath: directory.path,
     );
     final snapshot = await repository.loadSnapshot();
+    final resolvedIssuePath = _resolvedIssuePath(snapshot);
     return Ts163ArchiveProviderFailureObservation(
       repositoryPath: directory.path,
       snapshot: snapshot,
-      issuePath: issuePath,
-      issueFileExists: await File('${directory.path}/$issuePath').exists(),
+      issuePath: resolvedIssuePath,
+      issueFileExists: await File('${directory.path}/$resolvedIssuePath').exists(),
       visibleIssueSearchResults: List<TrackStateIssue>.unmodifiable(
         await repository.searchIssues('project = TRACK $issueKey'),
       ),
       headIssueMarkdown: await _gitOutput(['show', 'HEAD:$issuePath']),
-      worktreeIssueMarkdown: await File(
-        '${directory.path}/$issuePath',
-      ).readAsString(),
+      worktreeIssueMarkdown:
+          await _readFileIfExists('${directory.path}/$resolvedIssuePath') ?? '',
       headRevision: await _gitOutput(['rev-parse', 'HEAD']),
       worktreeStatusLines: await _gitOutputLines(['status', '--short']),
     );
@@ -82,21 +82,21 @@ class Ts163ArchiveProviderFailureFixture {
       repositoryPath: directory.path,
     );
     final refreshedSnapshot = await refreshedRepository.loadSnapshot();
+    final resolvedIssuePath = _resolvedIssuePath(refreshedSnapshot);
     return Ts163ArchiveProviderFailureObservation(
       repositoryPath: directory.path,
       snapshot: refreshedSnapshot,
       errorType: error.runtimeType.toString(),
       errorMessage: error.toString(),
       errorStackTrace: stackTrace?.toString(),
-      issuePath: issuePath,
-      issueFileExists: await File('${directory.path}/$issuePath').exists(),
+      issuePath: resolvedIssuePath,
+      issueFileExists: await File('${directory.path}/$resolvedIssuePath').exists(),
       visibleIssueSearchResults: List<TrackStateIssue>.unmodifiable(
         await refreshedRepository.searchIssues('project = TRACK $issueKey'),
       ),
       headIssueMarkdown: await _gitOutput(['show', 'HEAD:$issuePath']),
-      worktreeIssueMarkdown: await File(
-        '${directory.path}/$issuePath',
-      ).readAsString(),
+      worktreeIssueMarkdown:
+          await _readFileIfExists('${directory.path}/$resolvedIssuePath') ?? '',
       headRevision: await _gitOutput(['rev-parse', 'HEAD']),
       worktreeStatusLines: await _gitOutputLines(['status', '--short']),
       forcedArchiveCommitAttempts: processRunner.forcedArchiveCommitAttempts,
@@ -178,6 +178,17 @@ while archiveIssue is processing a real repository artifact.
         .map((line) => line.trim())
         .where((line) => line.isNotEmpty)
         .toList(growable: false);
+  }
+
+  String _resolvedIssuePath(TrackerSnapshot snapshot) =>
+      snapshot.issues.singleWhere((candidate) => candidate.key == issueKey).storagePath;
+
+  Future<String?> _readFileIfExists(String path) async {
+    final file = File(path);
+    if (!await file.exists()) {
+      return null;
+    }
+    return file.readAsString();
   }
 }
 
