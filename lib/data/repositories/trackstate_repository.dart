@@ -63,6 +63,8 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   final bool supportsGitHubAuth;
   TrackerSnapshot? _snapshot;
   final Set<String> _knownTombstoneKeys = <String>{};
+  final Map<String, DeletedIssueTombstone> _knownTombstonesByKey =
+      <String, DeletedIssueTombstone>{};
   final ProviderSession _session;
 
   ProviderSession? get session => _session;
@@ -580,10 +582,12 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       epicKey: currentIssue.epicKey,
     );
     _knownTombstoneKeys.add(tombstone.key);
+    _knownTombstonesByKey[tombstone.key] = tombstone;
     final latestSnapshot = _snapshot ?? snapshot;
     final snapshotDeletedByKey = {
       for (final entry in latestSnapshot.repositoryIndex.deleted)
         entry.key: entry,
+      ..._knownTombstonesByKey,
       tombstone.key: tombstone,
     };
     final snapshotDeletedTombstones = snapshotDeletedByKey.values.toList()
@@ -601,7 +605,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
           repositoryIndex.entryForKey(remainingIssue.key),
         ),
     ]..sort((a, b) => a.key.compareTo(b.key));
-    _snapshot = TrackerSnapshot(
+    final updatedSnapshot = TrackerSnapshot(
       project: latestSnapshot.project,
       repositoryIndex: repositoryIndex,
       issues: indexedRemainingIssues,
@@ -661,14 +665,21 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       ),
     ];
 
-    await mutator.applyFileChanges(
-      RepositoryFileChangeRequest(
-        branch: writeBranch,
-        message: 'Delete ${currentIssue.key} and reserve tombstone',
-        changes: changes,
-      ),
-    );
-    return tombstone;
+    try {
+      await mutator.applyFileChanges(
+        RepositoryFileChangeRequest(
+          branch: writeBranch,
+          message: 'Delete ${currentIssue.key} and reserve tombstone',
+          changes: changes,
+        ),
+      );
+      _snapshot = updatedSnapshot;
+      return tombstone;
+    } catch (_) {
+      _knownTombstoneKeys.remove(tombstone.key);
+      _knownTombstonesByKey.remove(tombstone.key);
+      rethrow;
+    }
   }
 
   Future<TrackerSnapshot> _loadSetupSnapshot() async {
