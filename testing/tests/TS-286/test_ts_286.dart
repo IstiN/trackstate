@@ -1,4 +1,3 @@
-import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -45,13 +44,6 @@ void main() {
         final semanticsMessage = visibleSemantics.any(
           (value) => value.trim() == expectedMessage,
         );
-        final liveRegionAlert = find.semantics.byPredicate(
-          (node) =>
-              node.getSemanticsData().label == expectedMessage &&
-              node.getSemanticsData().hasFlag(SemanticsFlag.isLiveRegion),
-          describeMatch: (_) =>
-              'live-region semantics node for the move validation failure banner',
-        );
 
         expect(
           visibleMessage,
@@ -71,16 +63,7 @@ void main() {
               'semantics: ${_formatSnapshot(visibleSemantics)}. Visible texts: '
               '${_formatSnapshot(visibleTexts)}.',
         );
-        expect(
-          liveRegionAlert.evaluate(),
-          isNotEmpty,
-          reason:
-              'Step 3 failed: the move validation failure text was visible, but '
-              'no matching live-region alert semantics node announced it to '
-              'screen readers. Visible semantics: '
-              '${_formatSnapshot(visibleSemantics)}. Visible texts: '
-              '${_formatSnapshot(visibleTexts)}.',
-        );
+        await screen.expectMessageBannerAnnouncedAsLiveRegion(expectedMessage);
       } finally {
         screen.resetView();
         semantics.dispose();
