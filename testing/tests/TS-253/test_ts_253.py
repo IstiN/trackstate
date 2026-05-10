@@ -63,11 +63,25 @@ class QuickStartCliManualWalkthroughTest(unittest.TestCase):
             "Step 1 failed: the deployed README does not contain a `CLI quick start` "
             "section.",
         )
-        self.assertEqual(
-            len(result.code_block_commands),
-            2,
-            "Step 1 failed: TS-253 expected exactly two copy-pasteable CLI code-block "
-            "commands in `CLI quick start` (positive and negative paths).\n"
+        self.assertIn(
+            result.positive_command.template,
+            result.code_block_commands,
+            "Step 1 failed: the automation could not match the positive walkthrough "
+            "command back to a README code block.\n"
+            f"Observed commands: {result.code_block_commands}",
+        )
+        self.assertIn(
+            result.negative_command.template,
+            result.code_block_commands,
+            "Step 1 failed: the automation could not match the negative walkthrough "
+            "command back to a README code block.\n"
+            f"Observed commands: {result.code_block_commands}",
+        )
+        self.assertNotEqual(
+            result.positive_command.template,
+            result.negative_command.template,
+            "Step 1 failed: the README quick start did not expose distinct positive "
+            "and negative walkthrough commands.\n"
             f"Observed commands: {result.code_block_commands}",
         )
         self.assertTrue(
@@ -133,6 +147,35 @@ class QuickStartCliManualWalkthroughTest(unittest.TestCase):
             "the raw content URL.\n"
             f"Path: {result.project_path}\n"
             f"stderr:\n{result.expected_project_fetch.stderr}",
+        )
+        self.assertIsNone(
+            result.expected_project_parse_error,
+            "Step 2 failed: the direct raw-file read did not return valid project "
+            "JSON for comparison.\n"
+            f"Path: {result.project_path}\n"
+            f"Parse error: {result.expected_project_parse_error}\n"
+            f"Observed output:\n{result.expected_project_fetch.stdout}",
+        )
+        self.assertIsNotNone(
+            result.expected_project,
+            "Step 2 failed: the direct raw-file read did not return a JSON object "
+            "for comparison.\n"
+            f"Observed output:\n{result.expected_project_fetch.stdout}",
+        )
+        self.assertIsNone(
+            result.actual_project_parse_error,
+            "Step 2 failed: the positive README command did not print valid JSON in "
+            "the terminal.\n"
+            f"Command: {result.positive_command.command}\n"
+            f"Parse error: {result.actual_project_parse_error}\n"
+            f"Observed output:\n{result.positive_command.result.stdout}",
+        )
+        self.assertIsNotNone(
+            result.actual_project,
+            "Step 2 failed: the positive README command did not print a JSON object "
+            "to the terminal.\n"
+            f"Command: {result.positive_command.command}\n"
+            f"Observed output:\n{result.positive_command.result.stdout}",
         )
         self.assertEqual(
             result.actual_project,

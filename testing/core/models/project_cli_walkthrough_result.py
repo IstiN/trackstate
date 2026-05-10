@@ -76,11 +76,23 @@ class ProjectCliWalkthroughResult:
 
     @property
     def expected_project(self) -> dict[str, object] | None:
-        return self._parse_project_payload(self.expected_project_fetch.stdout)
+        parsed, _ = self._parse_project_payload(self.expected_project_fetch.stdout)
+        return parsed
+
+    @property
+    def expected_project_parse_error(self) -> str | None:
+        _, error = self._parse_project_payload(self.expected_project_fetch.stdout)
+        return error
 
     @property
     def actual_project(self) -> dict[str, object] | None:
-        return self._parse_project_payload(self.positive_command.result.stdout)
+        parsed, _ = self._parse_project_payload(self.positive_command.result.stdout)
+        return parsed
+
+    @property
+    def actual_project_parse_error(self) -> str | None:
+        _, error = self._parse_project_payload(self.positive_command.result.stdout)
+        return error
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -106,17 +118,25 @@ class ProjectCliWalkthroughResult:
                 self.negative_project_fetch,
             ),
             "actual_project": self.actual_project,
+            "actual_project_parse_error": self.actual_project_parse_error,
             "expected_project": self.expected_project,
+            "expected_project_parse_error": self.expected_project_parse_error,
         }
 
-    def _parse_project_payload(self, text: str) -> dict[str, object] | None:
+    def _parse_project_payload(
+        self,
+        text: str,
+    ) -> tuple[dict[str, object] | None, str | None]:
         stripped = text.strip()
         if not stripped:
-            return None
-        parsed = json.loads(stripped)
+            return None, None
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError as error:
+            return None, str(error)
         if isinstance(parsed, dict):
-            return parsed
-        return None
+            return parsed, None
+        return None, f"Expected a JSON object but observed {type(parsed).__name__}."
 
     def _serialize_command_result(
         self,
