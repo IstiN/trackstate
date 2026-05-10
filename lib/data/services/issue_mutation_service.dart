@@ -56,21 +56,6 @@ class IssueMutationService {
       final projectRoot = snapshot.project.key;
       final writeBranch = await provider.resolveWriteBranch();
       final blobPaths = await _blobPaths(provider, writeBranch);
-      final hierarchy = _resolveHierarchyForCreate(
-        snapshot: snapshot,
-        parentKey: parentKey,
-        epicKey: epicKey,
-      );
-      if (hierarchy.failure != null) {
-        return _failure(
-          operation: operation,
-          issueKey: key,
-          category: hierarchy.failure!.category,
-          message: hierarchy.failure!.message,
-          details: hierarchy.failure!.details,
-        );
-      }
-
       final issueTypeDefinition =
           _resolveConfigEntry(
             issueTypeId ?? fields['issueType']?.toString(),
@@ -96,6 +81,22 @@ class IssueMutationService {
           issueKey: key,
           category: IssueMutationErrorCategory.validation,
           message: 'Project configuration is missing required issue defaults.',
+        );
+      }
+
+      final hierarchy = _resolveHierarchyForCreate(
+        snapshot: snapshot,
+        parentKey: parentKey,
+        epicKey: epicKey,
+        isEpicIssue: issueTypeDefinition.id == 'epic',
+      );
+      if (hierarchy.failure != null) {
+        return _failure(
+          operation: operation,
+          issueKey: key,
+          category: hierarchy.failure!.category,
+          message: hierarchy.failure!.message,
+          details: hierarchy.failure!.details,
         );
       }
 
@@ -601,6 +602,7 @@ class IssueMutationService {
         issue: issue,
         parentKey: parentKey,
         epicKey: epicKey,
+        isEpicIssue: issue.isEpic,
       );
       if (hierarchy.failure != null) {
         return _failure(
@@ -1199,9 +1201,19 @@ _HierarchyResolution _resolveHierarchyForCreate({
   required TrackerSnapshot snapshot,
   String? parentKey,
   String? epicKey,
+  bool isEpicIssue = false,
 }) {
   final normalizedParentKey = _normalizeNullableString(parentKey);
   final normalizedEpicKey = _normalizeNullableString(epicKey);
+  if (isEpicIssue &&
+      (normalizedParentKey != null || normalizedEpicKey != null)) {
+    return const _HierarchyResolution(
+      failure: IssueMutationFailure(
+        category: IssueMutationErrorCategory.validation,
+        message: 'Epic issues cannot belong to a parent issue or another epic.',
+      ),
+    );
+  }
   if (normalizedParentKey != null) {
     final parent = snapshot.issues.where(
       (candidate) => candidate.key == normalizedParentKey,
@@ -1232,11 +1244,29 @@ _HierarchyResolution _resolveHierarchyForCreate({
         ),
       );
     }
-    final epicIssue = inheritedEpic == null
-        ? null
-        : snapshot.issues.firstWhere(
-            (candidate) => candidate.key == inheritedEpic,
-          );
+    TrackStateIssue? epicIssue;
+    if (inheritedEpic != null) {
+      final inheritedEpicMatches = snapshot.issues.where(
+        (candidate) => candidate.key == inheritedEpic,
+      );
+      if (inheritedEpicMatches.isEmpty) {
+        return const _HierarchyResolution(
+          failure: IssueMutationFailure(
+            category: IssueMutationErrorCategory.notFound,
+            message: 'Could not find epic issue.',
+          ),
+        );
+      }
+      epicIssue = inheritedEpicMatches.single;
+      if (!epicIssue.isEpic) {
+        return const _HierarchyResolution(
+          failure: IssueMutationFailure(
+            category: IssueMutationErrorCategory.validation,
+            message: 'Explicit epic target must reference an epic issue.',
+          ),
+        );
+      }
+    }
     return _HierarchyResolution(
       parentKey: parentIssue.key,
       epicKey: inheritedEpic,
@@ -1258,10 +1288,16 @@ _HierarchyResolution _resolveHierarchyForCreate({
       ),
     );
   }
-  return _HierarchyResolution(
-    epicKey: normalizedEpicKey,
-    epicIssue: epic.single,
-  );
+  final epicIssue = epic.single;
+  if (!epicIssue.isEpic) {
+    return const _HierarchyResolution(
+      failure: IssueMutationFailure(
+        category: IssueMutationErrorCategory.validation,
+        message: 'Explicit epic target must reference an epic issue.',
+      ),
+    );
+  }
+  return _HierarchyResolution(epicKey: normalizedEpicKey, epicIssue: epicIssue);
 }
 
 _HierarchyResolution _resolveHierarchyForMove({
@@ -1269,6 +1305,7 @@ _HierarchyResolution _resolveHierarchyForMove({
   required TrackStateIssue issue,
   String? parentKey,
   String? epicKey,
+  required bool isEpicIssue,
 }) {
   final normalizedParentKey = _normalizeNullableString(parentKey);
   final normalizedEpicKey = _normalizeNullableString(epicKey);
@@ -1285,6 +1322,7 @@ _HierarchyResolution _resolveHierarchyForMove({
       snapshot: snapshot,
       parentKey: null,
       epicKey: normalizedEpicKey,
+      isEpicIssue: isEpicIssue,
     );
   }
   final parent = snapshot.issues.where(
@@ -1312,6 +1350,7 @@ _HierarchyResolution _resolveHierarchyForMove({
     snapshot: snapshot,
     parentKey: normalizedParentKey,
     epicKey: normalizedEpicKey,
+    isEpicIssue: isEpicIssue,
   );
 }
 
