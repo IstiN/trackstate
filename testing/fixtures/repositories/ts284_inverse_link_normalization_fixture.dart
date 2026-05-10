@@ -1,11 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
-import 'package:trackstate/data/services/issue_mutation_service.dart';
-import 'package:trackstate/domain/models/issue_mutation_models.dart';
-import 'package:trackstate/domain/models/trackstate_models.dart';
-
 class Ts284InverseLinkNormalizationFixture {
   Ts284InverseLinkNormalizationFixture._(this.directory);
 
@@ -31,23 +26,7 @@ class Ts284InverseLinkNormalizationFixture {
 
   Future<void> dispose() => directory.delete(recursive: true);
 
-  Future<Ts284InverseLinkNormalizationObservation>
-  observeInverseLinkNormalization() async {
-    final repository = LocalTrackStateRepository(
-      repositoryPath: repositoryPath,
-    );
-    await repository.loadSnapshot();
-    await repository.connect(
-      const RepositoryConnection(repository: '.', branch: 'main', token: ''),
-    );
-    final service = IssueMutationService(repository: repository);
-
-    final result = await service.createLink(
-      issueKey: sourceIssueKey,
-      targetKey: targetIssueKey,
-      type: inverseLabel,
-    );
-
+  Future<Ts284PersistedLinkObservation> observePersistedLinkState() async {
     final sourceLinksFile = File('$repositoryPath/$sourceLinksPath');
     final sourceLinksExists = await sourceLinksFile.exists();
     final rawLinksFileContent = sourceLinksExists
@@ -57,22 +36,12 @@ class Ts284InverseLinkNormalizationFixture {
         ? const <Map<String, Object?>>[]
         : _decodeLinks(rawLinksFileContent);
 
-    final refreshedRepository = LocalTrackStateRepository(
-      repositoryPath: repositoryPath,
-    );
-    final refreshedSnapshot = await refreshedRepository.loadSnapshot();
-    final refreshedIssue = refreshedSnapshot.issues.singleWhere(
-      (issue) => issue.key == sourceIssueKey,
-    );
-
-    return Ts284InverseLinkNormalizationObservation(
-      result: result,
+    return Ts284PersistedLinkObservation(
       sourceLinksPath: sourceLinksPath,
       sourceLinksExists: sourceLinksExists,
       rawLinksFileContent: rawLinksFileContent,
       persistedLinks: List<Map<String, Object?>>.unmodifiable(persistedLinks),
       linksJsonFiles: List<String>.unmodifiable(await _collectLinksJsonFiles()),
-      refreshedIssue: refreshedIssue,
     );
   }
 
@@ -214,24 +183,20 @@ Issue used as the normalized outward-link target for TS-284.
   }
 }
 
-class Ts284InverseLinkNormalizationObservation {
-  const Ts284InverseLinkNormalizationObservation({
-    required this.result,
+class Ts284PersistedLinkObservation {
+  const Ts284PersistedLinkObservation({
     required this.sourceLinksPath,
     required this.sourceLinksExists,
     required this.rawLinksFileContent,
     required this.persistedLinks,
     required this.linksJsonFiles,
-    required this.refreshedIssue,
   });
 
-  final IssueMutationResult<TrackStateIssue> result;
   final String sourceLinksPath;
   final bool sourceLinksExists;
   final String? rawLinksFileContent;
   final List<Map<String, Object?>> persistedLinks;
   final List<String> linksJsonFiles;
-  final TrackStateIssue refreshedIssue;
 }
 
 List<Map<String, Object?>> _decodeLinks(String content) {
