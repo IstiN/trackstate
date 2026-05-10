@@ -29,6 +29,13 @@ class ProjectQuickStartNegativePathResult:
     negative_command_checks: tuple[ProjectCliNegativeCommandCheck, ...]
 
     @property
+    def tree_truncated(self) -> bool:
+        payload = self.tree_fetch.json_payload
+        if not isinstance(payload, dict):
+            return False
+        return payload.get("truncated") is True
+
+    @property
     def tree_paths(self) -> tuple[str, ...]:
         payload = self.tree_fetch.json_payload
         if not isinstance(payload, dict):
@@ -47,6 +54,23 @@ class ProjectQuickStartNegativePathResult:
         return tuple(paths)
 
     @property
+    def duplicate_inline_negative_paths(self) -> tuple[str, ...]:
+        return self._duplicate_values(self.inline_negative_paths)
+
+    @property
+    def duplicate_command_negative_paths(self) -> tuple[str, ...]:
+        return self._duplicate_values(self.command_negative_paths)
+
+    @property
     def existing_negative_paths(self) -> tuple[str, ...]:
         tree_paths = set(self.tree_paths)
         return tuple(path for path in self.negative_paths if path in tree_paths)
+
+    def _duplicate_values(self, values: tuple[str, ...]) -> tuple[str, ...]:
+        duplicates: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            if value in seen and value not in duplicates:
+                duplicates.append(value)
+            seen.add(value)
+        return tuple(duplicates)

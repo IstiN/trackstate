@@ -96,7 +96,7 @@ class ProjectQuickStartNegativePathValidator:
                 if "/" not in candidate or candidate.startswith("<"):
                     continue
                 candidate_paths.append(candidate)
-        return self._dedupe(candidate_paths)
+        return tuple(candidate_paths)
 
     def _negative_command_checks(
         self,

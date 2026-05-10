@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 import re
@@ -96,6 +97,13 @@ class QuickStartNegativePathUniquenessTest(unittest.TestCase):
             f"stdout:\n{result.tree_fetch.stdout}\n"
             f"stderr:\n{result.tree_fetch.stderr}",
         )
+        self.assertFalse(
+            result.tree_truncated,
+            "Step 2 failed: the live repository tree response was truncated, so the "
+            "test cannot prove the documented negative path is absent.\n"
+            f"Command: {result.tree_fetch.command_text}\n"
+            f"Tree payload:\n{result.tree_fetch.stdout}",
+        )
         self.assertTrue(
             result.tree_paths,
             "Step 2 failed: the live repository tree response did not expose any "
@@ -110,11 +118,20 @@ class QuickStartNegativePathUniquenessTest(unittest.TestCase):
             f"Observed quick-start section:\n{result.quick_start_section}",
         )
         self.assertEqual(
-            len(result.negative_paths),
-            len(set(result.negative_paths)),
-            "Step 4 failed: the live README documents duplicate negative validation "
-            "paths instead of unique identifiers.\n"
-            f"Observed negative paths: {result.negative_paths}",
+            result.duplicate_inline_negative_paths,
+            (),
+            "Step 4 failed: the live README repeats inline negative validation "
+            "paths instead of documenting unique examples.\n"
+            f"Inline negative paths: {result.inline_negative_paths}\n"
+            f"Duplicate inline paths: {result.duplicate_inline_negative_paths}",
+        )
+        self.assertEqual(
+            result.duplicate_command_negative_paths,
+            (),
+            "Step 4 failed: the live README repeats executable negative "
+            "validation paths instead of documenting unique commands.\n"
+            f"Command negative paths: {result.command_negative_paths}\n"
+            f"Duplicate command paths: {result.duplicate_command_negative_paths}",
         )
         self.assertNotIn(
             result.positive_project_path,
@@ -140,10 +157,10 @@ class QuickStartNegativePathUniquenessTest(unittest.TestCase):
             f"Observed quick-start section:\n{result.quick_start_section}",
         )
         self.assertEqual(
-            set(result.inline_negative_paths),
-            set(result.command_negative_paths),
+            Counter(result.inline_negative_paths),
+            Counter(result.command_negative_paths),
             "Step 4 failed: the inline negative path example and the executable "
-            "negative command no longer point to the same file path.\n"
+            "negative command no longer point to the same path occurrences.\n"
             f"Inline negative paths: {result.inline_negative_paths}\n"
             f"Command negative paths: {result.command_negative_paths}",
         )
