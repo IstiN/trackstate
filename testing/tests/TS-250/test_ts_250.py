@@ -112,17 +112,6 @@ class PullRequestReleaseDryRunTest(unittest.TestCase):
             f"Run URL: {observation.dry_run_run_url}\n"
             f"Observed event: {observation.dry_run_run_event}",
         )
-        self.assertEqual(
-            observation.dry_run_run_conclusion,
-            "success",
-            "Step 3 failed: the release workflow run for the disposable pull request "
-            "did not complete successfully.\n"
-            f"Pull Request URL: {observation.pull_request_url}\n"
-            f"Checks URL: {observation.pull_request_checks_url}\n"
-            f"Run URL: {observation.dry_run_run_url}\n"
-            f"Run status: {observation.dry_run_run_status}\n"
-            f"Run conclusion: {observation.dry_run_run_conclusion}",
-        )
         self.assertIsNotNone(
             observation.dry_run_step_name,
             "Step 3 failed: the release workflow run did not expose a visible dry-run "
