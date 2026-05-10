@@ -12,6 +12,9 @@ from testing.core.interfaces.non_default_branch_release_probe import (
     NonDefaultBranchReleaseProbe,
 )
 from testing.frameworks.python.gh_cli_api_client import GhCliApiClient
+from testing.frameworks.python.gh_cli_non_default_branch_release_repository import (
+    GhCliNonDefaultBranchReleaseRepository,
+)
 from testing.frameworks.python.urllib_url_text_reader import UrllibUrlTextReader
 
 
@@ -21,8 +24,13 @@ def create_non_default_branch_release_probe(
     config = NonDefaultBranchReleaseConfig.from_file(
         repository_root / "testing/tests/TS-252/config.yaml"
     )
+    github_api_client = GhCliApiClient(repository_root)
     return NonDefaultBranchReleaseProbeService(
         config,
-        github_api_client=GhCliApiClient(repository_root),
+        github_api_client=github_api_client,
+        repository_manager=GhCliNonDefaultBranchReleaseRepository(
+            repository_root,
+            github_api_client=github_api_client,
+        ),
         url_text_reader=UrllibUrlTextReader(),
     )
