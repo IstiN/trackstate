@@ -109,10 +109,10 @@ void main() {
             'Step 2 failed: ${Ts281ReopenIssueResolutionFixture.issuePath} still persisted resolution=fixed after reopening.\nObserved markdown:\n${afterTransition.issueMarkdown}',
       );
       expect(
-        afterTransition.latestCommitSubject,
-        'Move ${Ts281ReopenIssueResolutionFixture.issueKey} to ${Ts281ReopenIssueResolutionFixture.reopenedStatusLabel}',
+        afterTransition.issueFileRevision,
+        result.revision,
         reason:
-            'Step 2 failed: reopening should create the expected persistence commit subject.',
+            'Step 2 failed: the persisted issue file revision should match the revision returned by transitionIssue after reopening ${Ts281ReopenIssueResolutionFixture.issueKey}.',
       );
       expect(
         afterTransition.worktreeStatusLines,

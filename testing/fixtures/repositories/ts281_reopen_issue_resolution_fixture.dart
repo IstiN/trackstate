@@ -50,6 +50,7 @@ class Ts281ReopenIssueResolutionFixture {
       issue: issue,
       searchResults: searchResults,
       issueMarkdown: await File('$repositoryPath/$issuePath').readAsString(),
+      issueFileRevision: await _gitOutput(['rev-parse', 'HEAD:$issuePath']),
       headRevision: await _gitOutput(['rev-parse', 'HEAD']),
       latestCommitSubject: await _gitOutput(['log', '-1', '--pretty=%s']),
       worktreeStatusLines: await _gitOutputLines(['status', '--short']),
@@ -193,6 +194,7 @@ class Ts281IssueStateObservation {
     required this.issue,
     required this.searchResults,
     required this.issueMarkdown,
+    required this.issueFileRevision,
     required this.headRevision,
     required this.latestCommitSubject,
     required this.worktreeStatusLines,
@@ -202,6 +204,7 @@ class Ts281IssueStateObservation {
   final TrackStateIssue issue;
   final List<TrackStateIssue> searchResults;
   final String issueMarkdown;
+  final String issueFileRevision;
   final String headRevision;
   final String latestCommitSubject;
   final List<String> worktreeStatusLines;
