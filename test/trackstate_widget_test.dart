@@ -164,7 +164,6 @@ void main() {
             widget.properties.label != null &&
             exactLabel(label).hasMatch(widget.properties.label!),
       );
-
       Future<void> pumpLocalRuntime(Size size) async {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1;
@@ -194,10 +193,13 @@ void main() {
         expect(find.byType(Dialog), findsOneWidget);
         expect(byExactSemanticsLabel('Summary'), findsOneWidget);
         expect(byExactSemanticsLabel('Description'), findsOneWidget);
+        expect(byExactSemanticsLabel('Assignee'), findsOneWidget);
+        expect(byExactSemanticsLabel('Labels'), findsOneWidget);
         expect(byExactSemanticsLabel('Save'), findsOneWidget);
         expect(byExactSemanticsLabel('Cancel'), findsOneWidget);
 
-        await tester.tap(byExactSemanticsLabel('Cancel'));
+        await tester.ensureVisible(byExactSemanticsLabel('Cancel'));
+        await tester.tap(byExactSemanticsLabel('Cancel'), warnIfMissed: false);
         await tester.pumpAndSettle();
         expect(find.byType(Dialog), findsNothing);
         expect(byExactSemanticsLabel('Summary'), findsNothing);
@@ -215,6 +217,59 @@ void main() {
             await expectCreateIssueFlowForSection(section);
           }
         }
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'contextual child-create entry points prefill hierarchy-aware fields',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      RegExp exactLabel(String label) => RegExp('^${RegExp.escape(label)}\$');
+
+      Finder byExactSemanticsLabel(String label) => find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            widget.properties.label != null &&
+            exactLabel(label).hasMatch(widget.properties.label!),
+      );
+      try {
+        tester.view.physicalSize = const Size(1440, 960);
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          TrackStateApp(repository: _LocalRuntimeRepository()),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(byExactSemanticsLabel('JQL Search').first);
+        await tester.pumpAndSettle();
+
+        await tester.tap(byExactSemanticsLabel('Create child issue').first);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Dialog), findsOneWidget);
+        expect(find.text('Sub-task'), findsWidgets);
+
+        await tester.ensureVisible(byExactSemanticsLabel('Cancel').first);
+        await tester.tap(
+          byExactSemanticsLabel('Cancel').first,
+          warnIfMissed: false,
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(byExactSemanticsLabel('Hierarchy').first);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.bySemanticsLabel(RegExp('^Create child issue for TRACK-')).first,
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Dialog), findsOneWidget);
+        expect(find.text('Story'), findsWidgets);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();

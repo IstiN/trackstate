@@ -16,6 +16,7 @@ typedef LocalRepositoryLoader =
       required String repositoryPath,
       required String writeBranch,
     });
+typedef _CreateIssueLauncher = void Function([_CreateIssuePrefill? prefill]);
 
 typedef LocalRepositoryConfigurationApplier =
     Future<void> Function({
@@ -36,6 +37,7 @@ class TrackStateApp extends StatefulWidget {
 class _TrackStateAppState extends State<TrackStateApp> {
   late TrackerViewModel viewModel;
   bool _isCreateIssueVisible = false;
+  _CreateIssuePrefill? _createIssuePrefill;
   String? _activeLocalGitConfigurationKey;
   String? _pendingLocalGitConfigurationKey;
 
@@ -55,6 +57,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
     viewModel = _createViewModel(previous: previousViewModel);
     previousViewModel.dispose();
     _isCreateIssueVisible = false;
+    _createIssuePrefill = null;
   }
 
   @override
@@ -131,6 +134,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
         viewModel = nextViewModel;
         _activeLocalGitConfigurationKey = configurationKey;
         _isCreateIssueVisible = false;
+        _createIssuePrefill = null;
       });
       previousViewModel.dispose();
       await nextViewModel.load();
@@ -141,18 +145,25 @@ class _TrackStateAppState extends State<TrackStateApp> {
     }
   }
 
-  void _openCreateIssue() {
+  void _openCreateIssue([_CreateIssuePrefill? prefill]) {
     if (_isCreateIssueVisible) {
       return;
     }
-    setState(() => _isCreateIssueVisible = true);
+    setState(() {
+      _isCreateIssueVisible = true;
+      _createIssuePrefill =
+          prefill ?? _CreateIssuePrefill(originSection: viewModel.section);
+    });
   }
 
   void _closeCreateIssue() {
     if (!_isCreateIssueVisible) {
       return;
     }
-    setState(() => _isCreateIssueVisible = false);
+    setState(() {
+      _isCreateIssueVisible = false;
+      _createIssuePrefill = null;
+    });
   }
 
   @override
@@ -180,6 +191,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
             isCreateIssueVisible: _isCreateIssueVisible,
             onOpenCreateIssue: _openCreateIssue,
             onCloseCreateIssue: _closeCreateIssue,
+            createIssuePrefill: _createIssuePrefill,
             onApplyLocalGitConfiguration: _switchToLocalRepository,
           ),
         );
@@ -194,13 +206,15 @@ class _TrackerHome extends StatelessWidget {
     required this.isCreateIssueVisible,
     required this.onOpenCreateIssue,
     required this.onCloseCreateIssue,
+    required this.createIssuePrefill,
     required this.onApplyLocalGitConfiguration,
   });
 
   final TrackerViewModel viewModel;
   final bool isCreateIssueVisible;
-  final VoidCallback onOpenCreateIssue;
+  final _CreateIssueLauncher onOpenCreateIssue;
   final VoidCallback onCloseCreateIssue;
+  final _CreateIssuePrefill? createIssuePrefill;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
 
   @override
@@ -271,6 +285,7 @@ class _TrackerHome extends StatelessWidget {
                           isCreateIssueVisible: isCreateIssueVisible,
                           onOpenCreateIssue: onOpenCreateIssue,
                           onCloseCreateIssue: onCloseCreateIssue,
+                          createIssuePrefill: createIssuePrefill,
                           onApplyLocalGitConfiguration:
                               onApplyLocalGitConfiguration,
                         )
@@ -279,6 +294,7 @@ class _TrackerHome extends StatelessWidget {
                           isCreateIssueVisible: isCreateIssueVisible,
                           onOpenCreateIssue: onOpenCreateIssue,
                           onCloseCreateIssue: onCloseCreateIssue,
+                          createIssuePrefill: createIssuePrefill,
                           onApplyLocalGitConfiguration:
                               onApplyLocalGitConfiguration,
                         ),
@@ -306,13 +322,15 @@ class _DesktopShell extends StatelessWidget {
     required this.isCreateIssueVisible,
     required this.onOpenCreateIssue,
     required this.onCloseCreateIssue,
+    required this.createIssuePrefill,
     required this.onApplyLocalGitConfiguration,
   });
 
   final TrackerViewModel viewModel;
   final bool isCreateIssueVisible;
-  final VoidCallback onOpenCreateIssue;
+  final _CreateIssueLauncher onOpenCreateIssue;
   final VoidCallback onCloseCreateIssue;
+  final _CreateIssuePrefill? createIssuePrefill;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
 
   @override
@@ -326,6 +344,7 @@ class _DesktopShell extends StatelessWidget {
             isCreateIssueVisible: isCreateIssueVisible,
             onOpenCreateIssue: onOpenCreateIssue,
             onCloseCreateIssue: onCloseCreateIssue,
+            createIssuePrefill: createIssuePrefill,
             onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
           ),
         ),
@@ -340,13 +359,15 @@ class _MobileShell extends StatelessWidget {
     required this.isCreateIssueVisible,
     required this.onOpenCreateIssue,
     required this.onCloseCreateIssue,
+    required this.createIssuePrefill,
     required this.onApplyLocalGitConfiguration,
   });
 
   final TrackerViewModel viewModel;
   final bool isCreateIssueVisible;
-  final VoidCallback onOpenCreateIssue;
+  final _CreateIssueLauncher onOpenCreateIssue;
   final VoidCallback onCloseCreateIssue;
+  final _CreateIssuePrefill? createIssuePrefill;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
 
   @override
@@ -357,6 +378,7 @@ class _MobileShell extends StatelessWidget {
       isCreateIssueVisible: isCreateIssueVisible,
       onOpenCreateIssue: onOpenCreateIssue,
       onCloseCreateIssue: onCloseCreateIssue,
+      createIssuePrefill: createIssuePrefill,
       onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
     );
   }
@@ -368,6 +390,7 @@ class _TrackerMainPane extends StatelessWidget {
     required this.isCreateIssueVisible,
     required this.onOpenCreateIssue,
     required this.onCloseCreateIssue,
+    required this.createIssuePrefill,
     required this.onApplyLocalGitConfiguration,
     this.compact = false,
   });
@@ -375,8 +398,9 @@ class _TrackerMainPane extends StatelessWidget {
   final TrackerViewModel viewModel;
   final bool compact;
   final bool isCreateIssueVisible;
-  final VoidCallback onOpenCreateIssue;
+  final _CreateIssueLauncher onOpenCreateIssue;
   final VoidCallback onCloseCreateIssue;
+  final _CreateIssuePrefill? createIssuePrefill;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
 
   @override
@@ -394,6 +418,7 @@ class _TrackerMainPane extends StatelessWidget {
               child: _SectionBody(
                 viewModel: viewModel,
                 compact: compact,
+                onOpenCreateIssue: onOpenCreateIssue,
                 onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
               ),
             ),
@@ -406,6 +431,9 @@ class _TrackerMainPane extends StatelessWidget {
               child: _CreateIssueDialog(
                 viewModel: viewModel,
                 onDismiss: onCloseCreateIssue,
+                prefill:
+                    createIssuePrefill ??
+                    _CreateIssuePrefill(originSection: viewModel.section),
               ),
             ),
           ),
@@ -491,7 +519,7 @@ class _TopBar extends StatelessWidget {
   });
 
   final TrackerViewModel viewModel;
-  final VoidCallback onOpenCreateIssue;
+  final _CreateIssueLauncher onOpenCreateIssue;
   final bool compact;
 
   @override
@@ -501,7 +529,9 @@ class _TopBar extends StatelessWidget {
     final repositoryAccessLabel = _repositoryAccessLabel(l10n, viewModel);
     final openCreateIssue = viewModel.hasReadOnlySession || viewModel.isSaving
         ? null
-        : onOpenCreateIssue;
+        : () => onOpenCreateIssue(
+            _CreateIssuePrefill(originSection: viewModel.section),
+          );
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 12, 12, 6),
       child: Row(
@@ -929,11 +959,13 @@ class _MessageBanner extends StatelessWidget {
 class _SectionBody extends StatelessWidget {
   const _SectionBody({
     required this.viewModel,
+    required this.onOpenCreateIssue,
     required this.onApplyLocalGitConfiguration,
     this.compact = false,
   });
 
   final TrackerViewModel viewModel;
+  final _CreateIssueLauncher onOpenCreateIssue;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final bool compact;
 
@@ -942,8 +974,14 @@ class _SectionBody extends StatelessWidget {
     final body = switch (viewModel.section) {
       TrackerSection.dashboard => _Dashboard(viewModel: viewModel),
       TrackerSection.board => _Board(viewModel: viewModel),
-      TrackerSection.search => _SearchAndDetail(viewModel: viewModel),
-      TrackerSection.hierarchy => _Hierarchy(viewModel: viewModel),
+      TrackerSection.search => _SearchAndDetail(
+        viewModel: viewModel,
+        onOpenCreateIssue: onOpenCreateIssue,
+      ),
+      TrackerSection.hierarchy => _Hierarchy(
+        viewModel: viewModel,
+        onOpenCreateIssue: onOpenCreateIssue,
+      ),
       TrackerSection.settings => _Settings(
         viewModel: viewModel,
         onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
@@ -1080,7 +1118,10 @@ class _Board extends StatelessWidget {
                 title: _statusLabel(l10n, status),
                 targetStatus: status,
                 issues: grouped[status]!,
-                onSelect: viewModel.selectIssue,
+                onSelect: (issue) => viewModel.selectIssue(
+                  issue,
+                  returnSection: TrackerSection.board,
+                ),
                 onMove: viewModel.moveIssue,
               );
             }).toList();
@@ -1114,9 +1155,13 @@ class _Board extends StatelessWidget {
 }
 
 class _SearchAndDetail extends StatelessWidget {
-  const _SearchAndDetail({required this.viewModel});
+  const _SearchAndDetail({
+    required this.viewModel,
+    required this.onOpenCreateIssue,
+  });
 
   final TrackerViewModel viewModel;
+  final _CreateIssueLauncher onOpenCreateIssue;
 
   @override
   Widget build(BuildContext context) {
@@ -1143,6 +1188,14 @@ class _SearchAndDetail extends StatelessWidget {
             final detail = _IssueDetail(
               issue: viewModel.selectedIssue!,
               viewModel: viewModel,
+              onCreateChildIssue: () => onOpenCreateIssue(
+                _CreateIssuePrefill.forChild(
+                  originSection:
+                      viewModel.issueDetailReturnSection ??
+                      TrackerSection.search,
+                  issue: viewModel.selectedIssue!,
+                ),
+              ),
             );
             return compact
                 ? Column(children: [list, const SizedBox(height: 16), detail])
@@ -1211,10 +1264,125 @@ String _createIssueFieldLabel(
   TrackStateFieldDefinition field,
 ) => project?.fieldLabel(field.id) ?? field.name;
 
+String _projectFieldLabel(
+  ProjectConfig? project,
+  String fieldId, {
+  required String fallback,
+}) {
+  final resolved = project?.fieldLabel(fieldId);
+  if (resolved == null || resolved == fieldId) {
+    return fallback;
+  }
+  return resolved;
+}
+
+class _CreateIssuePrefill {
+  const _CreateIssuePrefill({
+    required this.originSection,
+    this.issueTypeId,
+    this.parentKey,
+    this.epicKey,
+  });
+
+  factory _CreateIssuePrefill.forChild({
+    required TrackerSection originSection,
+    required TrackStateIssue issue,
+  }) {
+    if (issue.isEpic) {
+      return _CreateIssuePrefill(
+        originSection: originSection,
+        issueTypeId: IssueType.story.id,
+        epicKey: issue.key,
+      );
+    }
+    return _CreateIssuePrefill(
+      originSection: originSection,
+      issueTypeId: IssueType.subtask.id,
+      parentKey: issue.key,
+      epicKey: issue.epicKey,
+    );
+  }
+
+  final TrackerSection originSection;
+  final String? issueTypeId;
+  final String? parentKey;
+  final String? epicKey;
+}
+
+TrackStateConfigEntry? _resolveConfigEntry(
+  String? value,
+  List<TrackStateConfigEntry> entries,
+) {
+  final canonicalValue = _canonicalConfigId(value);
+  if (canonicalValue.isEmpty) {
+    return null;
+  }
+  for (final entry in entries) {
+    final entryId = _canonicalConfigId(entry.id);
+    final entryName = _canonicalConfigId(entry.name);
+    if (entryId == canonicalValue || entryName == canonicalValue) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+String _canonicalConfigId(String? value) {
+  final normalized = (value ?? '').trim().toLowerCase();
+  if (normalized.isEmpty) {
+    return '';
+  }
+  return normalized
+      .replaceAll('&', 'and')
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'-+'), '-')
+      .replaceAll(RegExp(r'^-|-$'), '');
+}
+
+TrackStateConfigEntry? _defaultCreateIssueType(ProjectConfig project) =>
+    _resolveConfigEntry(IssueType.story.id, project.issueTypeDefinitions) ??
+    project.issueTypeDefinitions.firstOrNull;
+
+TrackStateConfigEntry? _defaultCreatePriority(ProjectConfig project) =>
+    _resolveConfigEntry(IssuePriority.medium.id, project.priorityDefinitions) ??
+    project.priorityDefinitions.firstOrNull;
+
+TrackStateConfigEntry? _defaultCreateStatus(ProjectConfig project) =>
+    _resolveConfigEntry(IssueStatus.todo.id, project.statusDefinitions) ??
+    project.statusDefinitions.firstOrNull;
+
+List<TrackStateConfigEntry> _supportedCreateIssueTypes(ProjectConfig project) =>
+    project.issueTypeDefinitions
+        .where(
+          (definition) => switch (_canonicalConfigId(definition.id)) {
+            'epic' || 'story' || 'task' || 'subtask' || 'bug' => true,
+            _ => false,
+          },
+        )
+        .toList(growable: false);
+
+List<TrackStateIssue> _epicOptions(TrackerViewModel viewModel) =>
+    [...viewModel.epics]..sort((left, right) => left.key.compareTo(right.key));
+
+List<TrackStateIssue> _parentOptions(TrackerViewModel viewModel) => [
+  for (final issue in viewModel.issues)
+    if (!issue.isEpic && !issue.isArchived) issue,
+]..sort((left, right) => left.key.compareTo(right.key));
+
+String _trackerSectionLabel(AppLocalizations l10n, TrackerSection section) =>
+    switch (section) {
+      TrackerSection.dashboard => l10n.dashboard,
+      TrackerSection.board => l10n.board,
+      TrackerSection.search => l10n.jqlSearch,
+      TrackerSection.hierarchy => l10n.hierarchy,
+      TrackerSection.settings => l10n.settings,
+    };
+
 class _Hierarchy extends StatelessWidget {
-  const _Hierarchy({required this.viewModel});
+  const _Hierarchy({required this.viewModel, required this.onOpenCreateIssue});
 
   final TrackerViewModel viewModel;
+  final _CreateIssueLauncher onOpenCreateIssue;
 
   @override
   Widget build(BuildContext context) {
@@ -1234,7 +1402,16 @@ class _Hierarchy extends StatelessWidget {
                 _TreeIssueRow(
                   issue: epic,
                   depth: 0,
-                  onSelect: viewModel.selectIssue,
+                  onSelect: (issue) => viewModel.selectIssue(
+                    issue,
+                    returnSection: TrackerSection.hierarchy,
+                  ),
+                  onCreateChild: () => onOpenCreateIssue(
+                    _CreateIssuePrefill.forChild(
+                      originSection: TrackerSection.hierarchy,
+                      issue: epic,
+                    ),
+                  ),
                 ),
                 for (final child in viewModel.issues.where(
                   (i) => i.epicKey == epic.key,
@@ -1242,7 +1419,16 @@ class _Hierarchy extends StatelessWidget {
                   _TreeIssueRow(
                     issue: child,
                     depth: child.parentKey == null ? 1 : 2,
-                    onSelect: viewModel.selectIssue,
+                    onSelect: (issue) => viewModel.selectIssue(
+                      issue,
+                      returnSection: TrackerSection.hierarchy,
+                    ),
+                    onCreateChild: () => onOpenCreateIssue(
+                      _CreateIssuePrefill.forChild(
+                        originSection: TrackerSection.hierarchy,
+                        issue: child,
+                      ),
+                    ),
                   ),
               ],
             ],
@@ -1453,10 +1639,15 @@ class _SettingsState extends State<_Settings> {
 enum _SettingsProviderSelection { hosted, localGit }
 
 class _IssueDetail extends StatefulWidget {
-  const _IssueDetail({required this.issue, required this.viewModel});
+  const _IssueDetail({
+    required this.issue,
+    required this.viewModel,
+    required this.onCreateChildIssue,
+  });
 
   final TrackStateIssue issue;
   final TrackerViewModel viewModel;
+  final VoidCallback onCreateChildIssue;
 
   @override
   State<_IssueDetail> createState() => _IssueDetailState();
@@ -1516,10 +1707,19 @@ class _IssueDetailState extends State<_IssueDetail> {
     final canUseWriteActions =
         !hasReadOnlySession && !widget.viewModel.isSaving;
     final actions = [
+      if (widget.viewModel.issueDetailReturnSection case final returnSection?)
+        _IssueDetailActionButton(
+          label: '${l10n.back} ${_trackerSectionLabel(l10n, returnSection)}',
+          onPressed: widget.viewModel.returnFromIssueDetail,
+        ),
       _PrimaryButton(
         label: l10n.transition,
         icon: TrackStateIconGlyph.gitBranch,
         onPressed: canUseWriteActions ? () {} : null,
+      ),
+      _IssueDetailActionButton(
+        label: l10n.createChildIssue,
+        onPressed: canUseWriteActions ? widget.onCreateChildIssue : null,
       ),
       if (_isEditing)
         _IssueDetailActionButton(
@@ -1968,10 +2168,15 @@ class _IssueCard extends StatelessWidget {
 }
 
 class _IssueListRow extends StatelessWidget {
-  const _IssueListRow({required this.issue, required this.onSelect});
+  const _IssueListRow({
+    required this.issue,
+    required this.onSelect,
+    this.trailingAction,
+  });
 
   final TrackStateIssue issue;
   final ValueChanged<TrackStateIssue> onSelect;
+  final Widget? trailingAction;
 
   @override
   Widget build(BuildContext context) {
@@ -2004,6 +2209,10 @@ class _IssueListRow extends StatelessWidget {
               _StatusBadge(status: issue.status),
               const SizedBox(width: 8),
               _Avatar(name: issue.assignee),
+              if (trailingAction != null) ...[
+                const SizedBox(width: 8),
+                trailingAction!,
+              ],
             ],
           ),
         ),
@@ -2017,17 +2226,27 @@ class _TreeIssueRow extends StatelessWidget {
     required this.issue,
     required this.depth,
     required this.onSelect,
+    required this.onCreateChild,
   });
 
   final TrackStateIssue issue;
   final int depth;
   final ValueChanged<TrackStateIssue> onSelect;
+  final VoidCallback onCreateChild;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(left: depth * 28.0, bottom: 8),
-      child: _IssueListRow(issue: issue, onSelect: onSelect),
+      child: _IssueListRow(
+        issue: issue,
+        onSelect: onSelect,
+        trailingAction: _CompactActionIconButton(
+          label: 'Create child issue for ${issue.key}',
+          glyph: TrackStateIconGlyph.plus,
+          onPressed: onCreateChild,
+        ),
+      ),
     );
   }
 }
@@ -2426,11 +2645,171 @@ class _IconButtonSurface extends StatelessWidget {
   }
 }
 
+class _CompactActionIconButton extends StatelessWidget {
+  const _CompactActionIconButton({
+    required this.label,
+    required this.glyph,
+    required this.onPressed,
+  });
+
+  final String label;
+  final TrackStateIconGlyph glyph;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return Semantics(
+      button: true,
+      label: label,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: TrackStateIcon(
+            glyph,
+            size: 16,
+            color: onPressed == null ? colors.muted : colors.primary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DropdownCreateField extends StatelessWidget {
+  const _DropdownCreateField({
+    required this.label,
+    required this.items,
+    required this.onChanged,
+    this.value,
+    this.enabled = true,
+    this.hintText,
+    this.errorText,
+  });
+
+  final String label;
+  final String? value;
+  final bool enabled;
+  final String? hintText;
+  final String? errorText;
+  final List<DropdownMenuItem<String>> items;
+  final ValueChanged<String?>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: label,
+      child: DropdownButtonFormField<String>(
+        key: ValueKey('$label-${value ?? 'empty'}'),
+        initialValue: items.any((item) => item.value == value) ? value : null,
+        isExpanded: true,
+        items: items,
+        onChanged: enabled ? onChanged : null,
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hintText,
+          errorText: errorText,
+        ),
+      ),
+    );
+  }
+}
+
+class _ReadOnlyCreateField extends StatelessWidget {
+  const _ReadOnlyCreateField({
+    required this.label,
+    required this.value,
+    this.helperText,
+  });
+
+  final String label;
+  final String value;
+  final String? helperText;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: label,
+      readOnly: true,
+      child: InputDecorator(
+        decoration: InputDecoration(labelText: label, helperText: helperText),
+        child: Text(value),
+      ),
+    );
+  }
+}
+
+class _LabelTokenField extends StatelessWidget {
+  const _LabelTokenField({
+    required this.label,
+    required this.controller,
+    required this.labels,
+    required this.enabled,
+    required this.helperText,
+    required this.onChanged,
+    required this.onSubmitted,
+    required this.onRemove,
+  });
+
+  final String label;
+  final TextEditingController controller;
+  final List<String> labels;
+  final bool enabled;
+  final String helperText;
+  final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSubmitted;
+  final ValueChanged<String> onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Semantics(
+          label: label,
+          textField: true,
+          child: TextField(
+            controller: controller,
+            enabled: enabled,
+            onChanged: onChanged,
+            onSubmitted: onSubmitted,
+            decoration: InputDecoration(
+              labelText: label,
+              helperText: helperText,
+            ),
+          ),
+        ),
+        if (labels.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final labelValue in labels)
+                InputChip(
+                  label: Text(labelValue),
+                  onDeleted: enabled ? () => onRemove(labelValue) : null,
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _CreateIssueDialog extends StatefulWidget {
-  const _CreateIssueDialog({required this.viewModel, required this.onDismiss});
+  const _CreateIssueDialog({
+    required this.viewModel,
+    required this.onDismiss,
+    required this.prefill,
+  });
 
   final TrackerViewModel viewModel;
   final VoidCallback onDismiss;
+  final _CreateIssuePrefill prefill;
 
   @override
   State<_CreateIssueDialog> createState() => _CreateIssueDialogState();
@@ -2454,26 +2833,152 @@ class _CreateIssueOverlay extends StatelessWidget {
 class _CreateIssueDialogState extends State<_CreateIssueDialog> {
   late final TextEditingController _summaryController;
   late final TextEditingController _descriptionController;
+  late final TextEditingController _assigneeController;
+  late final TextEditingController _labelEntryController;
   final Map<String, TextEditingController> _customFieldControllers = {};
+  final List<String> _labels = <String>[];
+  late String _selectedIssueTypeId;
+  late String _selectedPriorityId;
+  String? _selectedEpicKey;
+  String? _selectedParentKey;
+  bool _didAttemptSubmit = false;
 
   @override
   void initState() {
     super.initState();
     _summaryController = TextEditingController();
     _descriptionController = TextEditingController();
+    _assigneeController = TextEditingController(text: _defaultAssignee());
+    _labelEntryController = TextEditingController();
+    final project = widget.viewModel.project;
+    final defaultIssueType = project == null
+        ? IssueType.story.id
+        : (_resolveConfigEntry(
+                    widget.prefill.issueTypeId,
+                    _supportedCreateIssueTypes(project),
+                  ) ??
+                  _defaultCreateIssueType(project) ??
+                  const TrackStateConfigEntry(id: 'story', name: 'Story'))
+              .id;
+    final defaultPriority = project == null
+        ? IssuePriority.medium.id
+        : (_defaultCreatePriority(project) ??
+                  project.priorityDefinitions.firstOrNull ??
+                  const TrackStateConfigEntry(id: 'medium', name: 'Medium'))
+              .id;
+    _selectedIssueTypeId = defaultIssueType;
+    _selectedPriorityId = defaultPriority;
+    _selectedEpicKey = widget.prefill.epicKey;
+    _selectedParentKey = widget.prefill.parentKey;
+    _syncHierarchyToIssueType();
   }
 
   @override
   void dispose() {
     _summaryController.dispose();
     _descriptionController.dispose();
+    _assigneeController.dispose();
+    _labelEntryController.dispose();
     for (final controller in _customFieldControllers.values) {
       controller.dispose();
     }
     super.dispose();
   }
 
+  bool get _isEpicType => _canonicalConfigId(_selectedIssueTypeId) == 'epic';
+
+  bool get _isSubtaskType =>
+      _canonicalConfigId(_selectedIssueTypeId) == 'subtask';
+
+  String _defaultAssignee() {
+    final connectedUser = widget.viewModel.connectedUser;
+    if (connectedUser?.login case final login? when login.isNotEmpty) {
+      return login;
+    }
+    final identity = widget.viewModel.providerSession?.resolvedUserIdentity
+        .trim();
+    if (identity != null && identity.isNotEmpty) {
+      return identity;
+    }
+    return '';
+  }
+
+  TrackStateIssue? _issueByKey(String? key) =>
+      widget.viewModel.issues.where((issue) => issue.key == key).firstOrNull;
+
+  void _syncHierarchyToIssueType() {
+    if (_isEpicType) {
+      _selectedEpicKey = null;
+      _selectedParentKey = null;
+      return;
+    }
+    if (_isSubtaskType) {
+      _selectedEpicKey = null;
+      final parent = _issueByKey(_selectedParentKey);
+      if (parent?.isEpic ?? false) {
+        _selectedParentKey = null;
+      }
+      return;
+    }
+    _selectedParentKey = null;
+  }
+
+  String? _derivedEpicKey() {
+    if (!_isSubtaskType) {
+      return null;
+    }
+    final parentIssue = _issueByKey(_selectedParentKey);
+    return parentIssue?.epicKey;
+  }
+
+  void _applyIssueType(String? issueTypeId) {
+    if (issueTypeId == null || issueTypeId == _selectedIssueTypeId) {
+      return;
+    }
+    setState(() {
+      _selectedIssueTypeId = issueTypeId;
+      _syncHierarchyToIssueType();
+      if (!_isEpicType && !_isSubtaskType && _selectedEpicKey == null) {
+        _selectedEpicKey = widget.prefill.epicKey;
+      }
+    });
+  }
+
+  void _commitLabels({bool commitRemainder = false}) {
+    final currentValue = _labelEntryController.text;
+    if (currentValue.trim().isEmpty) {
+      return;
+    }
+    final fragments = currentValue.split(',');
+    final remainder = commitRemainder ? '' : fragments.removeLast().trim();
+    final newLabels = [
+      for (final fragment in fragments)
+        if (fragment.trim().isNotEmpty) fragment.trim(),
+      if (commitRemainder && remainder.isNotEmpty) remainder,
+    ];
+    if (newLabels.isEmpty && remainder == _labelEntryController.text) {
+      return;
+    }
+    setState(() {
+      for (final label in newLabels) {
+        if (!_labels.contains(label)) {
+          _labels.add(label);
+        }
+      }
+      _labelEntryController.value = TextEditingValue(
+        text: commitRemainder ? '' : remainder,
+        selection: TextSelection.collapsed(
+          offset: commitRemainder ? 0 : remainder.length,
+        ),
+      );
+    });
+  }
+
   Future<void> _submitCreateIssue() async {
+    setState(() {
+      _didAttemptSubmit = true;
+    });
+    _commitLabels(commitRemainder: true);
     final customFields = <String, String>{};
     for (final field in _createIssueFieldDefinitions(
       widget.viewModel.project,
@@ -2488,6 +2993,15 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
       summary: _summaryController.text,
       description: _descriptionController.text,
       customFields: customFields,
+      issueTypeId: _selectedIssueTypeId,
+      priorityId: _selectedPriorityId,
+      assignee: _assigneeController.text.trim(),
+      parentKey: _isSubtaskType ? _selectedParentKey : null,
+      epicKey: _isEpicType
+          ? null
+          : (_isSubtaskType ? _derivedEpicKey() : _selectedEpicKey),
+      labels: _labels,
+      returnSection: widget.prefill.originSection,
     );
     if (!mounted || !success) {
       return;
@@ -2499,13 +3013,57 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final project = widget.viewModel.project;
-    final summaryLabel = project?.fieldLabel('summary') ?? 'Summary';
+    final summaryLabel = _projectFieldLabel(
+      project,
+      'summary',
+      fallback: 'Summary',
+    );
+    final issueTypeLabel = _projectFieldLabel(
+      project,
+      'issueType',
+      fallback: l10n.issueType,
+    );
+    final priorityLabel = _projectFieldLabel(
+      project,
+      'priority',
+      fallback: l10n.priority,
+    );
+    final assigneeLabel = _projectFieldLabel(
+      project,
+      'assignee',
+      fallback: l10n.assignee,
+    );
+    final labelsLabel = _projectFieldLabel(
+      project,
+      'labels',
+      fallback: l10n.labels,
+    );
+    final parentLabel = _projectFieldLabel(
+      project,
+      'parent',
+      fallback: l10n.parent,
+    );
+    final epicLabel = _projectFieldLabel(project, 'epic', fallback: l10n.epic);
     final createFields = _createIssueFieldDefinitions(project);
     _syncCreateFieldControllers(_customFieldControllers, createFields);
+    final issueTypeOptions = project == null
+        ? const <TrackStateConfigEntry>[]
+        : _supportedCreateIssueTypes(project);
+    final priorityOptions =
+        project?.priorityDefinitions ?? const <TrackStateConfigEntry>[];
+    final epicOptions = _epicOptions(widget.viewModel);
+    final parentOptions = _parentOptions(widget.viewModel);
+    final defaultStatus = project == null
+        ? null
+        : _defaultCreateStatus(project);
+    final derivedEpic = _issueByKey(_derivedEpicKey());
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 560),
+        constraints: BoxConstraints(
+          maxWidth: 620,
+          maxHeight: MediaQuery.sizeOf(context).height - 48,
+        ),
         child: ListenableBuilder(
           listenable: widget.viewModel,
           builder: (context, _) {
@@ -2514,73 +3072,212 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                 !widget.viewModel.isSaving;
             return _SurfaceCard(
               semanticLabel: l10n.createIssue,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _SectionTitle(l10n.createIssue),
-                  const SizedBox(height: 12),
-                  Semantics(
-                    label: summaryLabel,
-                    textField: true,
-                    child: TextField(
-                      controller: _summaryController,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _SectionTitle(l10n.createIssue),
+                    const SizedBox(height: 12),
+                    _DropdownCreateField(
+                      label: issueTypeLabel,
+                      value: _selectedIssueTypeId,
                       enabled: !widget.viewModel.isSaving,
-                      decoration: InputDecoration(labelText: summaryLabel),
+                      items: [
+                        for (final option in issueTypeOptions)
+                          DropdownMenuItem<String>(
+                            value: option.id,
+                            child: Text(
+                              option.label(project?.defaultLocale),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: _applyIssueType,
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Semantics(
-                    label: l10n.description,
-                    textField: true,
-                    child: TextField(
-                      controller: _descriptionController,
-                      minLines: 3,
-                      maxLines: null,
-                      enabled: !widget.viewModel.isSaving,
-                      decoration: InputDecoration(
-                        labelText: l10n.description,
-                        alignLabelWithHint: true,
-                      ),
-                    ),
-                  ),
-                  for (final field in createFields) ...[
                     const SizedBox(height: 12),
                     Semantics(
-                      label: _createIssueFieldLabel(project, field),
+                      label: summaryLabel,
                       textField: true,
                       child: TextField(
-                        key: ValueKey('create-field-${field.id}'),
-                        controller: _customFieldControllers[field.id],
-                        minLines: field.type == 'markdown' ? 3 : 1,
-                        maxLines: field.type == 'markdown' ? null : 1,
+                        controller: _summaryController,
+                        enabled: !widget.viewModel.isSaving,
+                        decoration: InputDecoration(labelText: summaryLabel),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Semantics(
+                      label: l10n.description,
+                      textField: true,
+                      child: TextField(
+                        controller: _descriptionController,
+                        minLines: 3,
+                        maxLines: null,
                         enabled: !widget.viewModel.isSaving,
                         decoration: InputDecoration(
-                          labelText: _createIssueFieldLabel(project, field),
-                          alignLabelWithHint: field.type == 'markdown',
+                          labelText: l10n.description,
+                          alignLabelWithHint: true,
                         ),
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _IssueDetailActionButton(
-                        label: l10n.save,
-                        emphasized: true,
-                        onPressed: canSubmit ? _submitCreateIssue : null,
-                      ),
-                      _IssueDetailActionButton(
-                        label: l10n.cancel,
-                        onPressed: widget.viewModel.isSaving
-                            ? null
-                            : widget.onDismiss,
+                    const SizedBox(height: 12),
+                    _DropdownCreateField(
+                      label: priorityLabel,
+                      value: _selectedPriorityId,
+                      enabled: !widget.viewModel.isSaving,
+                      items: [
+                        for (final option in priorityOptions)
+                          DropdownMenuItem<String>(
+                            value: option.id,
+                            child: Text(
+                              option.label(project?.defaultLocale),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) {
+                          return;
+                        }
+                        setState(() {
+                          _selectedPriorityId = value;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    _ReadOnlyCreateField(
+                      label: l10n.initialStatus,
+                      value:
+                          defaultStatus?.label(project?.defaultLocale) ??
+                          l10n.toDo,
+                    ),
+                    if (!_isEpicType && !_isSubtaskType) ...[
+                      const SizedBox(height: 12),
+                      _DropdownCreateField(
+                        label: epicLabel,
+                        value: _selectedEpicKey,
+                        enabled: !widget.viewModel.isSaving,
+                        hintText: l10n.optional,
+                        items: [
+                          for (final option in epicOptions)
+                            DropdownMenuItem<String>(
+                              value: option.key,
+                              child: Text(
+                                '${option.key} · ${option.summary}',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedEpicKey = value;
+                          });
+                        },
                       ),
                     ],
-                  ),
-                ],
+                    if (_isSubtaskType) ...[
+                      const SizedBox(height: 12),
+                      _DropdownCreateField(
+                        label: parentLabel,
+                        value: _selectedParentKey,
+                        enabled: !widget.viewModel.isSaving,
+                        hintText: parentOptions.isEmpty
+                            ? l10n.noEligibleParents
+                            : null,
+                        errorText:
+                            _didAttemptSubmit && _selectedParentKey == null
+                            ? l10n.subTaskParentRequired
+                            : null,
+                        items: [
+                          for (final option in parentOptions)
+                            DropdownMenuItem<String>(
+                              value: option.key,
+                              child: Text(
+                                '${option.key} · ${option.summary}',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: parentOptions.isEmpty
+                            ? null
+                            : (value) {
+                                setState(() {
+                                  _selectedParentKey = value;
+                                });
+                              },
+                      ),
+                      const SizedBox(height: 12),
+                      _ReadOnlyCreateField(
+                        label: epicLabel,
+                        value: derivedEpic == null
+                            ? l10n.derivedFromParent
+                            : '${derivedEpic.key} · ${derivedEpic.summary}',
+                        helperText: l10n.epicDerivedFromParent,
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Semantics(
+                      label: assigneeLabel,
+                      textField: true,
+                      child: TextField(
+                        controller: _assigneeController,
+                        enabled: !widget.viewModel.isSaving,
+                        decoration: InputDecoration(labelText: assigneeLabel),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _LabelTokenField(
+                      label: labelsLabel,
+                      controller: _labelEntryController,
+                      labels: _labels,
+                      enabled: !widget.viewModel.isSaving,
+                      helperText: l10n.labelsTokenHelper,
+                      onChanged: (_) => _commitLabels(),
+                      onSubmitted: (_) => _commitLabels(commitRemainder: true),
+                      onRemove: (label) {
+                        setState(() {
+                          _labels.remove(label);
+                        });
+                      },
+                    ),
+                    for (final field in createFields) ...[
+                      const SizedBox(height: 12),
+                      Semantics(
+                        label: _createIssueFieldLabel(project, field),
+                        textField: true,
+                        child: TextField(
+                          key: ValueKey('create-field-${field.id}'),
+                          controller: _customFieldControllers[field.id],
+                          minLines: field.type == 'markdown' ? 3 : 1,
+                          maxLines: field.type == 'markdown' ? null : 1,
+                          enabled: !widget.viewModel.isSaving,
+                          decoration: InputDecoration(
+                            labelText: _createIssueFieldLabel(project, field),
+                            alignLabelWithHint: field.type == 'markdown',
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _IssueDetailActionButton(
+                          label: l10n.save,
+                          emphasized: true,
+                          onPressed: canSubmit ? _submitCreateIssue : null,
+                        ),
+                        _IssueDetailActionButton(
+                          label: l10n.cancel,
+                          onPressed: widget.viewModel.isSaving
+                              ? null
+                              : widget.onDismiss,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             );
           },
