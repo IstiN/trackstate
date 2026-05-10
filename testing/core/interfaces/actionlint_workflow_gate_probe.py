@@ -32,6 +32,7 @@ class ActionlintWorkflowGateObservation:
     actionlint_job_name: str | None
     actionlint_step_name: str | None
     actionlint_step_conclusion: str | None
+    actionlint_log_excerpt: str | None
     mutated_line_preview: str
     cleanup_deleted_branch: bool
 
