@@ -8,11 +8,58 @@ Future<TrackStateRepository> createLocalGitTestRepository({
   required WidgetTester tester,
   required String repositoryPath,
 }) async {
+  final repository = await createLocalGitMutationRepository(
+    tester: tester,
+    repositoryPath: repositoryPath,
+  );
+  final snapshot = await tester.runAsync(repository.loadSnapshot);
+  if (snapshot == null) {
+    throw StateError('Local Git snapshot loading did not complete.');
+  }
+  final user = await tester.runAsync(
+    () => repository.connect(
+      RepositoryConnection(
+        repository: snapshot.project.repository,
+        branch: snapshot.project.branch,
+        token: '',
+      ),
+    ),
+  );
+  if (user == null) {
+    throw StateError('Local Git user resolution did not complete.');
+  }
+  return _PreloadedLocalGitRepository(
+    repository: repository,
+    snapshot: snapshot,
+    user: user,
+  );
+}
+
+Future<ProviderBackedTrackStateRepository> createLocalGitMutationRepository({
+  required WidgetTester tester,
+  required String repositoryPath,
+}) async {
   final repository = createTrackStateRepository(
     runtime: TrackStateRuntime.localGit,
     localRepositoryPath: repositoryPath,
   );
-  return preloadLocalGitTestRepository(tester: tester, repository: repository);
+  if (repository case final ProviderBackedTrackStateRepository providerBacked) {
+    await preloadProviderBackedLocalGitRepository(
+      tester: tester,
+      repository: providerBacked,
+    );
+    return providerBacked;
+  }
+  throw StateError(
+    'Local Git test runtime requires a provider-backed repository.',
+  );
+}
+
+Future<void> preloadProviderBackedLocalGitRepository({
+  required WidgetTester tester,
+  required ProviderBackedTrackStateRepository repository,
+}) async {
+  await preloadLocalGitTestRepository(tester: tester, repository: repository);
 }
 
 Future<TrackStateRepository> preloadLocalGitTestRepository({
