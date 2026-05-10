@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 import unittest
 
 from testing.components.services.project_quick_start_validator import (
@@ -46,8 +47,8 @@ class QuickStartCliValidationTest(unittest.TestCase):
         )
         self.assertTrue(
             result.readme_fetch.succeeded,
-            "Step 2 failed: the test could not read README.md from the forked "
-            "setup repository, so it could not validate the documented quick-start flow.\n"
+            "Step 2 failed: the test could not read README.md from the setup "
+            "template repository, so it could not validate the documented quick-start flow.\n"
             f"Command: {result.readme_fetch.command_text}\n"
             f"Exit code: {result.readme_fetch.exit_code}\n"
             f"stdout:\n{result.readme_fetch.stdout}\n"
@@ -55,12 +56,12 @@ class QuickStartCliValidationTest(unittest.TestCase):
         )
         self.assertTrue(
             result.quick_start_section,
-            "Step 2 failed: the fork README does not contain a `CLI quick start` "
+            "Step 2 failed: the setup README does not contain a `CLI quick start` "
             "section to validate.",
         )
         self.assertTrue(
             result.documented_command_template,
-            "Step 2 failed: the fork README documents repository data paths, but "
+            "Step 2 failed: the setup README documents repository data paths, but "
             "it does not include an executable GitHub CLI validation command in "
             "the `CLI quick start` section.\n"
             f"Observed section:\n{result.quick_start_section}",
@@ -68,7 +69,7 @@ class QuickStartCliValidationTest(unittest.TestCase):
         self.assertEqual(
             result.documented_project_file,
             result.project_path,
-            "Step 2 failed: the README quick-start section no longer points at the "
+            "Step 2 failed: the README quick-start section no longer points to the "
             "same project file used by this validation.\n"
             f"Documented project file: {result.documented_project_file}\n"
             f"Validated project file: {result.project_path}",
@@ -116,10 +117,10 @@ class QuickStartCliValidationTest(unittest.TestCase):
             f"Observed repository metadata:\n{result.repository_info.stdout}",
         )
         self.assertEqual(
-            result.project_fetch.command_text,
-            result.documented_command,
-            "Step 4 failed: the automation did not execute the exact CLI command "
-            "documented in the fork README.\n"
+            result.project_fetch.command,
+            tuple(shlex.split(result.documented_command or "")),
+            "Step 4 failed: the automation did not execute the same GitHub CLI "
+            "command documented in the setup README.\n"
             f"Documented command: {result.documented_command}\n"
             f"Executed command: {result.project_fetch.command_text}",
         )

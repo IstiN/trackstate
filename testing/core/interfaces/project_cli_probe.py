@@ -14,8 +14,6 @@ class ProjectCliProbe(Protocol):
 
     def repository_metadata(self, repository: str) -> CliCommandResult: ...
 
-    def run_documented_command(self, command: str) -> CliCommandResult: ...
-
     def get_contents(
         self,
         repository: str,
