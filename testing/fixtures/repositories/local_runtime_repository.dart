@@ -21,6 +21,19 @@ class LocalRuntimeRepository implements TrackStateRepository {
       _demoRepository.loadSnapshot();
 
   @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => _demoRepository.searchIssuePage(
+    jql,
+    startAt: startAt,
+    maxResults: maxResults,
+    continuationToken: continuationToken,
+  );
+
+  @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
       _demoRepository.searchIssues(jql);
 

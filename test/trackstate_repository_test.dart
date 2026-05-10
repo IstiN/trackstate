@@ -62,6 +62,21 @@ void main() {
     expect(results.every((issue) => issue.epicKey == 'TRACK-34'), isTrue);
   });
 
+  test('JQL search exposes deterministic page metadata', () async {
+    const repository = DemoTrackStateRepository();
+
+    final page = await repository.searchIssuePage(
+      'project = TRACK AND status != Done ORDER BY priority DESC',
+      maxResults: 2,
+    );
+
+    expect(page.issues, hasLength(2));
+    expect(page.startAt, 0);
+    expect(page.total, greaterThan(page.issues.length));
+    expect(page.nextStartAt, 2);
+    expect(page.nextPageToken, 'offset:2');
+  });
+
   test(
     'demo repository creates the first issue under the project root path when no issue paths exist yet',
     () async {
@@ -76,7 +91,9 @@ void main() {
             issueTypeDefinitions: [
               TrackStateConfigEntry(id: 'story', name: 'Story'),
             ],
-            statusDefinitions: [TrackStateConfigEntry(id: 'todo', name: 'To Do')],
+            statusDefinitions: [
+              TrackStateConfigEntry(id: 'todo', name: 'To Do'),
+            ],
             fieldDefinitions: [
               TrackStateFieldDefinition(
                 id: 'summary',
@@ -330,7 +347,10 @@ This comment demonstrates markdown-backed collaboration history.
             'tombstone index or the legacy deleted index.',
       );
       if (files.containsKey('DEMO/.trackstate/index/tombstones.json')) {
-        expect(files.keys, contains('DEMO/.trackstate/tombstones/DEMO-99.json'));
+        expect(
+          files.keys,
+          contains('DEMO/.trackstate/tombstones/DEMO-99.json'),
+        );
       }
 
       final repository = _mockSetupRepository(files: files);

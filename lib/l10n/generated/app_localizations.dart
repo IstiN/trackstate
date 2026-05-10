@@ -196,6 +196,24 @@ abstract class AppLocalizations {
   /// **'Search issues'**
   String get searchIssues;
 
+  /// No description provided for @loadMore.
+  ///
+  /// In en, this message translates to:
+  /// **'Load more'**
+  String get loadMore;
+
+  /// No description provided for @loadMoreIssues.
+  ///
+  /// In en, this message translates to:
+  /// **'Load more issues'**
+  String get loadMoreIssues;
+
+  /// No description provided for @showingResults.
+  ///
+  /// In en, this message translates to:
+  /// **'Showing {shown} of {total} issues'**
+  String showingResults(int shown, int total);
+
   /// No description provided for @quickActions.
   ///
   /// In en, this message translates to:
@@ -495,6 +513,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. {error}'**
   String trackerDataLoadFailed(String error);
+
+  /// No description provided for @searchFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Search failed: {error}'**
+  String searchFailed(String error);
 
   /// No description provided for @repositoryConfigFallback.
   ///

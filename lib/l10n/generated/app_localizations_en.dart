@@ -61,6 +61,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get searchIssues => 'Search issues';
 
   @override
+  String get loadMore => 'Load more';
+
+  @override
+  String get loadMoreIssues => 'Load more issues';
+
+  @override
+  String showingResults(int shown, int total) {
+    return 'Showing $shown of $total issues';
+  }
+
+  @override
   String get quickActions => 'Quick actions';
 
   @override
@@ -211,6 +222,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String trackerDataLoadFailed(String error) {
     return 'TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. $error';
+  }
+
+  @override
+  String searchFailed(String error) {
+    return 'Search failed: $error';
   }
 
   @override

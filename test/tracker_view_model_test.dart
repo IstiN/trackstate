@@ -25,6 +25,26 @@ void main() {
     expect(viewModel.searchResults, isNotEmpty);
   });
 
+  test('view model appends the next search page through load more', () async {
+    final viewModel = TrackerViewModel(
+      repository: DemoTrackStateRepository(
+        snapshot: _searchPaginationSnapshot(),
+      ),
+    );
+
+    await viewModel.load();
+
+    expect(viewModel.searchResults.length, 6);
+    expect(viewModel.totalSearchResults, 8);
+    expect(viewModel.hasMoreSearchResults, isTrue);
+
+    await viewModel.loadMoreSearchResults();
+
+    expect(viewModel.searchResults.length, 8);
+    expect(viewModel.searchResults.last.key, 'TRACK-8');
+    expect(viewModel.hasMoreSearchResults, isFalse);
+  });
+
   test('view model changes sections and toggles theme', () async {
     final viewModel = TrackerViewModel(
       repository: const DemoTrackStateRepository(),
@@ -216,6 +236,19 @@ class _LocalRuntimeRepository implements TrackStateRepository {
       _demoRepository.loadSnapshot();
 
   @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => _demoRepository.searchIssuePage(
+    jql,
+    startAt: startAt,
+    maxResults: maxResults,
+    continuationToken: continuationToken,
+  );
+
+  @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
       _demoRepository.searchIssues(jql);
 
@@ -275,5 +308,68 @@ class _RecordingIssueMutationService extends IssueMutationService {
     operation: 'create',
     issueKey: _created.key,
     value: _created,
+  );
+}
+
+TrackerSnapshot _searchPaginationSnapshot() {
+  final issues = [
+    for (var index = 1; index <= 8; index += 1)
+      TrackStateIssue(
+        key: 'TRACK-$index',
+        project: 'TRACK',
+        issueType: IssueType.story,
+        issueTypeId: 'story',
+        status: IssueStatus.inProgress,
+        statusId: 'in-progress',
+        priority: IssuePriority.medium,
+        priorityId: 'medium',
+        summary: 'Paged issue $index',
+        description: 'Search result $index',
+        assignee: 'user-$index',
+        reporter: 'demo-user',
+        labels: const ['paged'],
+        components: const [],
+        fixVersionIds: const [],
+        watchers: const [],
+        customFields: const {},
+        parentKey: null,
+        epicKey: null,
+        parentPath: null,
+        epicPath: null,
+        progress: 0,
+        updatedLabel: 'just now',
+        acceptanceCriteria: const ['Visible in search pagination'],
+        comments: const [],
+        links: const [],
+        attachments: const [],
+        isArchived: false,
+        storagePath: 'TRACK/TRACK-$index/main.md',
+        rawMarkdown: '',
+      ),
+  ];
+  return TrackerSnapshot(
+    project: const ProjectConfig(
+      key: 'TRACK',
+      name: 'TrackState',
+      repository: 'trackstate/trackstate',
+      branch: 'main',
+      defaultLocale: 'en',
+      issueTypeDefinitions: [TrackStateConfigEntry(id: 'story', name: 'Story')],
+      statusDefinitions: [
+        TrackStateConfigEntry(id: 'in-progress', name: 'In Progress'),
+      ],
+      fieldDefinitions: [
+        TrackStateFieldDefinition(
+          id: 'summary',
+          name: 'Summary',
+          type: 'string',
+          required: true,
+        ),
+      ],
+      priorityDefinitions: [
+        TrackStateConfigEntry(id: 'medium', name: 'Medium'),
+      ],
+    ),
+    issues: issues,
   );
 }

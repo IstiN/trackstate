@@ -15,6 +15,7 @@ enum TrackerMessageTone { info, error }
 
 enum TrackerMessageKind {
   dataLoadFailed,
+  searchFailed,
   repositoryConfigFallback,
   localGitTokensNotNeeded,
   tokenEmpty,
@@ -55,6 +56,12 @@ class TrackerMessage {
 
   factory TrackerMessage.dataLoadFailed(Object error) => TrackerMessage._(
     TrackerMessageKind.dataLoadFailed,
+    tone: TrackerMessageTone.error,
+    error: '$error',
+  );
+
+  factory TrackerMessage.searchFailed(Object error) => TrackerMessage._(
+    TrackerMessageKind.searchFailed,
     tone: TrackerMessageTone.error,
     error: '$error',
   );
@@ -171,6 +178,8 @@ class TrackerMessage {
 }
 
 class TrackerViewModel extends ChangeNotifier {
+  static const int _searchPageSize = 6;
+
   TrackerViewModel({
     required TrackStateRepository repository,
     IssueMutationService? issueMutationService,
@@ -193,6 +202,9 @@ class TrackerViewModel extends ChangeNotifier {
   ThemePreference _themePreference = ThemePreference.light;
   String _jql = 'project = TRACK AND status != Done ORDER BY priority DESC';
   List<TrackStateIssue> _searchResults = const [];
+  TrackStateIssueSearchPage _searchPage = const TrackStateIssueSearchPage.empty(
+    maxResults: _searchPageSize,
+  );
   TrackStateIssue? _selectedIssue;
   TrackerSection? _issueDetailReturnSection;
   bool _isLoading = false;
@@ -200,12 +212,16 @@ class TrackerViewModel extends ChangeNotifier {
   TrackerMessage? _message;
   bool _isConnected = false;
   RepositoryUser? _connectedUser;
+  bool _isLoadingMoreSearchResults = false;
 
   TrackerSnapshot? get snapshot => _snapshot;
   TrackerSection get section => _section;
   ThemePreference get themePreference => _themePreference;
   String get jql => _jql;
   List<TrackStateIssue> get searchResults => _searchResults;
+  int get totalSearchResults => _searchPage.total;
+  bool get hasMoreSearchResults => _searchPage.hasMore;
+  bool get isLoadingMoreSearchResults => _isLoadingMoreSearchResults;
   TrackStateIssue? get selectedIssue => _selectedIssue;
   TrackerSection? get issueDetailReturnSection => _issueDetailReturnSection;
   bool get isLoading => _isLoading;
@@ -275,7 +291,11 @@ class TrackerViewModel extends ChangeNotifier {
         (issue) => !issue.isEpic,
         orElse: () => issues.first,
       );
-      _searchResults = await _repository.searchIssues(_jql);
+      final searchPage = await _repository.searchIssuePage(
+        _jql,
+        maxResults: _searchPageSize,
+      );
+      _applySearchPage(searchPage);
       if (usesLocalPersistence) {
         await _loadLocalRepositoryUser();
       } else if (supportsGitHubAuth) {
@@ -302,7 +322,39 @@ class TrackerViewModel extends ChangeNotifier {
 
   Future<void> updateQuery(String query) async {
     _jql = query;
-    _searchResults = await _repository.searchIssues(query);
+    try {
+      final searchPage = await _repository.searchIssuePage(
+        query,
+        maxResults: _searchPageSize,
+      );
+      _applySearchPage(searchPage);
+      _message = null;
+    } on Object catch (error) {
+      _message = TrackerMessage.searchFailed(error);
+    }
+    notifyListeners();
+  }
+
+  Future<void> loadMoreSearchResults() async {
+    if (_isLoadingMoreSearchResults || !_searchPage.hasMore) {
+      return;
+    }
+    _isLoadingMoreSearchResults = true;
+    notifyListeners();
+    try {
+      final searchPage = await _repository.searchIssuePage(
+        _jql,
+        startAt: _searchPage.nextStartAt!,
+        maxResults: _searchPageSize,
+        continuationToken: _searchPage.nextPageToken,
+      );
+      _applySearchPage(searchPage, append: true);
+      _message = null;
+    } on Object catch (error) {
+      _message = TrackerMessage.searchFailed(error);
+    } finally {
+      _isLoadingMoreSearchResults = false;
+    }
     notifyListeners();
   }
 
@@ -430,7 +482,7 @@ class TrackerViewModel extends ChangeNotifier {
         (current) => current.key == saved.key,
         orElse: () => saved,
       );
-      _searchResults = await _repository.searchIssues(_jql);
+      await _refreshSearchResultsAfterMutation();
       _message = usesLocalPersistence
           ? TrackerMessage.localGitMoveCommitted(
               issueKey: issue.key,
@@ -519,7 +571,7 @@ class TrackerViewModel extends ChangeNotifier {
         (issue) => issue.key == created.key,
         orElse: () => created,
       );
-      _searchResults = await _repository.searchIssues(_jql);
+      await _refreshSearchResultsAfterMutation();
       _section = TrackerSection.search;
       _issueDetailReturnSection =
           returnSection == null || returnSection == TrackerSection.search
@@ -561,7 +613,7 @@ class TrackerViewModel extends ChangeNotifier {
         (current) => current.key == saved.key,
         orElse: () => saved,
       );
-      _searchResults = await _repository.searchIssues(_jql);
+      await _refreshSearchResultsAfterMutation();
       return true;
     } on Object catch (error) {
       _message = TrackerMessage.issueSaveFailed(error);
@@ -573,6 +625,29 @@ class TrackerViewModel extends ChangeNotifier {
     } finally {
       _isSaving = false;
       notifyListeners();
+    }
+  }
+
+  void _applySearchPage(TrackStateIssueSearchPage page, {bool append = false}) {
+    _searchPage = page;
+    _searchResults = append ? [..._searchResults, ...page.issues] : page.issues;
+    if (_searchResults.isEmpty) {
+      return;
+    }
+    _selectedIssue ??= _searchResults.first;
+  }
+
+  Future<void> _refreshSearchResultsAfterMutation() async {
+    try {
+      final searchPage = await _repository.searchIssuePage(
+        _jql,
+        maxResults: _searchResults.isEmpty
+            ? _searchPageSize
+            : _searchResults.length,
+      );
+      _applySearchPage(searchPage);
+    } on Object catch (_) {
+      // Keep the existing search results when a background refresh fails.
     }
   }
 
