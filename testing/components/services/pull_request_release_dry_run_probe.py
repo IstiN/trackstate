@@ -613,6 +613,11 @@ class PullRequestReleaseDryRunProbeService:
 
     def _workflow_declares_pull_request(self, workflow_text: str) -> bool:
         if re.search(
+            r"(?m)^\s*on\s*:\s*['\"]?pull_request(?:_target)?['\"]?\s*$",
+            workflow_text,
+        ):
+            return True
+        if re.search(
             r"(?m)^\s*on\s*:\s*\[(?:[^\]]*\bpull_request(?:_target)?\b[^\]]*)\]\s*$",
             workflow_text,
         ):

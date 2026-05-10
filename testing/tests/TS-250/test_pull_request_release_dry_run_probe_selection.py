@@ -45,9 +45,15 @@ def _build_probe(responses: dict[str, object] | None = None) -> PullRequestRelea
 
 
 class PullRequestReleaseDryRunProbeSelectionTest(unittest.TestCase):
-    def test_workflow_declares_pull_request_for_inline_and_target_triggers(self) -> None:
+    def test_workflow_declares_pull_request_for_scalar_inline_and_target_triggers(
+        self,
+    ) -> None:
         probe = _build_probe()
 
+        self.assertTrue(probe._workflow_declares_pull_request("on: pull_request\n"))
+        self.assertTrue(
+            probe._workflow_declares_pull_request("on: pull_request_target\n")
+        )
         self.assertTrue(
             probe._workflow_declares_pull_request(
                 "on:\n  pull_request: [opened, synchronize]\n"
