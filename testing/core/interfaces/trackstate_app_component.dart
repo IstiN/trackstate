@@ -64,6 +64,8 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> expectMessageBannerContains(String text);
 
+  Future<void> expectMessageBannerAnnouncedAsLiveRegion(String text);
+
   Future<bool> dismissMessageBannerContaining(String text);
 
   Future<bool> isMessageBannerVisibleContaining(String text);

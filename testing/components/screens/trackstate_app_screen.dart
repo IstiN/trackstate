@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -432,6 +433,29 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final finder = _text(text);
     await _waitForVisible(finder, timeout: const Duration(seconds: 10));
     expect(finder, findsWidgets);
+  }
+
+  @override
+  Future<void> expectMessageBannerAnnouncedAsLiveRegion(String text) async {
+    await expectMessageBannerContains(text);
+    final visibleTexts = visibleTextsSnapshot();
+    final visibleSemantics = visibleSemanticsLabelsSnapshot();
+    final liveRegionAlert = find.semantics.byPredicate((node) {
+      final data = node.getSemanticsData();
+      return data.label.trim() == text &&
+          data.hasFlag(SemanticsFlag.isLiveRegion);
+    }, describeMatch: (_) => 'live-region semantics node for "$text"');
+
+    expect(
+      liveRegionAlert.evaluate(),
+      isNotEmpty,
+      reason:
+          'Step 3 failed: the move validation failure text was visible, but '
+          'no matching live-region alert semantics node announced it to '
+          'screen readers. Visible semantics: '
+          '${_formatSnapshot(visibleSemantics)}. Visible texts: '
+          '${_formatSnapshot(visibleTexts)}.',
+    );
   }
 
   Finder _messageBanner(String text) => find.ancestor(
