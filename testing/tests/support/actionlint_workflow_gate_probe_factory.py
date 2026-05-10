@@ -16,9 +16,11 @@ from testing.frameworks.python.gh_cli_api_client import GhCliApiClient
 
 def create_actionlint_workflow_gate_probe(
     repository_root: Path,
+    *,
+    config_path: Path | None = None,
 ) -> ActionlintWorkflowGateProbe:
     config = ActionlintWorkflowGateConfig.from_file(
-        repository_root / "testing/tests/TS-251/config.yaml"
+        config_path or repository_root / "testing/tests/TS-251/config.yaml"
     )
     return ActionlintWorkflowGateProbeService(
         config,

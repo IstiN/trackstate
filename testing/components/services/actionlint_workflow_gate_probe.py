@@ -129,7 +129,7 @@ class ActionlintWorkflowGateProbeService:
         workflow_id_to_path: dict[int, str],
         actionlint_workflow_paths: set[str],
     ) -> dict[str, object]:
-        temp_repository_root = Path(tempfile.mkdtemp(prefix="ts251-"))
+        temp_repository_root = Path(tempfile.mkdtemp(prefix="actionlint-gate-"))
         branch_name = self._unique_branch_name()
         branch_pushed = False
         cleanup_deleted_branch = False
@@ -170,23 +170,11 @@ class ActionlintWorkflowGateProbeService:
                 cwd=temp_repository_root,
             )
 
-            target_workflow = temp_repository_root / self._config.target_workflow_path
-            original_workflow_text = target_workflow.read_text(encoding="utf-8")
-            mutated_workflow_text = original_workflow_text.replace(
-                self._config.mutation_search_text,
-                self._config.mutation_replacement_text,
-                1,
+            changed_paths, mutated_line_preview = self._apply_workflow_change(
+                temp_repository_root
             )
-            if mutated_workflow_text == original_workflow_text:
-                raise ActionlintWorkflowGateError(
-                    "TS-251 could not apply the configured workflow mutation.\n"
-                    f"Target file: {target_workflow}\n"
-                    f"Expected to replace: {self._config.mutation_search_text}"
-                )
-            target_workflow.write_text(mutated_workflow_text, encoding="utf-8")
-
             self._run_command(
-                ["git", "add", self._config.target_workflow_path],
+                ["git", "add", *changed_paths],
                 cwd=temp_repository_root,
             )
             self._run_command(
@@ -231,10 +219,51 @@ class ActionlintWorkflowGateProbeService:
 
         if observation is None:
             raise ActionlintWorkflowGateError(
-                "TS-251 did not produce a disposable branch observation."
+                "Actionlint workflow gate did not produce a disposable branch observation."
             )
         return observation
 
+    def _apply_workflow_change(
+        self,
+        temp_repository_root: Path,
+    ) -> tuple[list[str], str]:
+        target_workflow = temp_repository_root / self._config.target_workflow_path
+        if self._config.mutation_mode == "create_file":
+            if target_workflow.exists():
+                raise ActionlintWorkflowGateError(
+                    "Actionlint workflow gate expected to create a new workflow file, "
+                    "but the target path already exists on the disposable branch.\n"
+                    f"Target file: {target_workflow}"
+                )
+            target_workflow.parent.mkdir(parents=True, exist_ok=True)
+            assert self._config.created_workflow_contents is not None
+            target_workflow.write_text(
+                self._config.created_workflow_contents + "\n",
+                encoding="utf-8",
+            )
+            preview_source = (
+                self._config.mutation_replacement_text
+                or self._config.created_workflow_contents
+            )
+            return [self._config.target_workflow_path], self._preview_text(preview_source)
+
+        original_workflow_text = target_workflow.read_text(encoding="utf-8")
+        mutated_workflow_text = original_workflow_text.replace(
+            self._config.mutation_search_text,
+            self._config.mutation_replacement_text,
+            1,
+        )
+        if mutated_workflow_text == original_workflow_text:
+            raise ActionlintWorkflowGateError(
+                "Actionlint workflow gate could not apply the configured workflow "
+                "mutation.\n"
+                f"Target file: {target_workflow}\n"
+                f"Expected to replace: {self._config.mutation_search_text}"
+            )
+        target_workflow.write_text(mutated_workflow_text, encoding="utf-8")
+        return [self._config.target_workflow_path], self._preview_text(
+            self._config.mutation_replacement_text
+        )
     def _wait_for_branch_runs(
         self,
         branch_name: str,
@@ -253,6 +282,7 @@ class ActionlintWorkflowGateProbeService:
         actionlint_job_name: str | None = None
         actionlint_step_name: str | None = None
         actionlint_step_conclusion: str | None = None
+        actionlint_run_id: int | None = None
         actionlint_log_excerpt: str | None = None
 
         while time.time() < deadline:
@@ -272,9 +302,10 @@ class ActionlintWorkflowGateProbeService:
                 actionlint_job_name = candidate["job_name"]
                 actionlint_step_name = candidate["step_name"]
                 actionlint_step_conclusion = candidate["step_conclusion"]
+                actionlint_run_id = int(candidate["run_id"])
                 if actionlint_run_status == "completed":
-                    actionlint_log_excerpt = self._read_failed_run_log_excerpt(
-                        int(candidate["run_id"])
+                    actionlint_log_excerpt = self._extract_actionlint_log_excerpt(
+                        self._read_actionlint_run_log(actionlint_run_id)
                     )
                     break
             time.sleep(self._config.poll_interval_seconds)
@@ -334,8 +365,8 @@ class ActionlintWorkflowGateProbeService:
                 continue
 
             return {
-                "jobs": jobs,
                 "run_id": run_id,
+                "jobs": jobs,
                 "run_name": run_name or None,
                 "run_path": workflow_path,
                 "run_url": self._optional_string(run.get("html_url")),
@@ -459,8 +490,8 @@ class ActionlintWorkflowGateProbeService:
         branch_query = quote(f"branch:{branch_name}", safe="")
         return f"https://github.com/{self._config.repository}/actions?query={branch_query}"
 
-    def _read_failed_run_log_excerpt(self, run_id: int) -> str | None:
-        completed = self._run_command(
+    def _read_actionlint_run_log(self, run_id: int) -> str:
+        return self._run_command(
             [
                 "gh",
                 "run",
@@ -468,16 +499,69 @@ class ActionlintWorkflowGateProbeService:
                 str(run_id),
                 "--repo",
                 self._config.repository,
-                "--log-failed",
+                "--log",
             ],
             cwd=None,
+        ).stdout
+
+    def _extract_actionlint_log_excerpt(self, log_text: str) -> str:
+        lines = [line.rstrip() for line in log_text.splitlines()]
+        if not lines:
+            return ""
+
+        primary_markers = [
+            self._config.target_workflow_path.lower(),
+            *[marker.lower() for marker in self._config.expected_log_markers],
+        ]
+        fallback_markers = (
+            "##[error]",
+            " error ",
+            "\terror\t",
+            "unable to resolve action",
+            "failed",
         )
-        log_text = completed.stdout.strip()
-        if not log_text:
-            return None
-        if len(log_text) <= 4000:
-            return log_text
-        return log_text[-4000:]
+
+        match_index: int | None = None
+        for index, line in enumerate(lines):
+            lowered_line = line.lower()
+            if any(marker and marker in lowered_line for marker in primary_markers):
+                match_index = index
+                break
+
+        if match_index is None:
+            for index, line in enumerate(lines):
+                lowered_line = line.lower()
+                if any(marker in lowered_line for marker in fallback_markers):
+                    match_index = index
+                    break
+
+        if match_index is None:
+            for index, line in enumerate(lines):
+                lowered_line = line.lower()
+                if self._config.expected_actionlint_marker.lower() in lowered_line:
+                    match_index = index
+                    break
+
+        if match_index is None:
+            excerpt_lines = lines[-40:]
+        else:
+            if any(marker in lines[match_index].lower() for marker in fallback_markers):
+                excerpt_lines = lines[max(0, match_index - 3) : min(len(lines), match_index + 8)]
+            else:
+                excerpt_lines = lines[max(0, match_index - 1) : min(len(lines), match_index + 15)]
+
+        excerpt = "\n".join(excerpt_lines).strip()
+        if len(excerpt) <= 4000:
+            return excerpt
+        return excerpt[:4000].rstrip()
+
+    @staticmethod
+    def _preview_text(source_text: str) -> str:
+        for line in source_text.splitlines():
+            stripped = line.strip()
+            if stripped:
+                return stripped
+        return source_text.strip()
 
     def _run_command(
         self,

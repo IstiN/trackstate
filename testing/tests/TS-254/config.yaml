@@ -1,0 +1,10 @@
+test_id: TS-254
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI with network access to the live IstiN/trackstate-setup repository
+  - GitHub API access for README and git tree inspection
+notes:
+  - Reads the deployed upstream trackstate-setup README from the live repository.
+  - Verifies documented negative validation paths are unique, absent from the live main-branch tree, and return a terminal-visible 404 when executed with gh api.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import re
 import shlex
 import unittest
 
@@ -18,9 +19,11 @@ from testing.tests.support.project_cli_probe_factory import create_project_cli_p
 class QuickStartCliMissingProjectFileTest(unittest.TestCase):
     def setUp(self) -> None:
         self.repository_root = Path(__file__).resolve().parents[3]
+        self.missing_project_path = "DEMO/project.missing.json"
         base_config = ProjectCliValidationConfig.from_env()
         self.config = replace(
             base_config,
+            project_path=self.missing_project_path,
             readme_repository_override=base_config.upstream_repository,
         )
         self.probe: ProjectCliProbe = create_project_cli_probe(self.repository_root)
@@ -79,11 +82,24 @@ class QuickStartCliMissingProjectFileTest(unittest.TestCase):
         )
         self.assertEqual(
             result.documented_project_file,
+            "DEMO/project.json",
+            "Step 2 failed: the README quick-start section no longer documents the "
+            "default TrackState project file used by the positive connectivity check.\n"
+            f"Documented project file: {result.documented_project_file}",
+        )
+        self.assertEqual(
             result.project_path,
-            "Step 2 failed: the README quick-start section no longer points at the "
-            "same project file used by this validation.\n"
-            f"Documented project file: {result.documented_project_file}\n"
+            self.missing_project_path,
+            "Step 2 failed: TS-237 did not validate the explicit negative-check "
+            "project path introduced by the linked bug fix.\n"
             f"Validated project file: {result.project_path}",
+        )
+        self.assertIn(
+            self.missing_project_path,
+            result.documented_command_template or "",
+            "Step 2 failed: the copied README command was not the explicit "
+            "negative-check command added for the missing-file scenario.\n"
+            f"Observed command template: {result.documented_command_template}",
         )
         self.assertEqual(
             result.documented_source_repository,
@@ -169,11 +185,13 @@ class QuickStartCliMissingProjectFileTest(unittest.TestCase):
             f"stderr:\n{result.project_fetch.stderr}",
         )
         self.assertEqual(
-            result.project_fetch.stdout.strip(),
-            "",
-            "Step 4 failed: the missing-file validation command still printed a "
-            "JSON payload instead of surfacing only the 404 error.\n"
-            f"stdout:\n{result.project_fetch.stdout}",
+            result.project_fetch.exit_code,
+            1,
+            "Step 4 failed: the missing-file validation command did not return "
+            "the expected non-zero exit status for a 404 response.\n"
+            f"Exit code: {result.project_fetch.exit_code}\n"
+            f"stdout:\n{result.project_fetch.stdout}\n"
+            f"stderr:\n{result.project_fetch.stderr}",
         )
         self.assertFalse(
             result.expected_project_fetch.succeeded,
@@ -190,21 +208,36 @@ class QuickStartCliMissingProjectFileTest(unittest.TestCase):
             f"stderr:\n{result.expected_project_fetch.stderr}",
         )
         self.assertIsNone(
-            None
-            if result.project_fetch.stdout.strip() == ""
-            else result.project_fetch.stdout,
+            result.actual_project
+            if result.actual_project == result.expected_project
+            else None,
             "Human-style verification failed: the README command still produced "
-            "parseable project JSON instead of a user-visible 404 error.\n"
+            "the real project payload instead of a missing-file error response.\n"
             f"stdout:\n{result.project_fetch.stdout}",
         )
-        self.assertEqual(
-            result.project_fetch.stdout.strip(),
-            "",
-            "Human-style verification failed: the missing-file scenario still "
-            "rendered visible project JSON instead of an empty stdout plus 404 "
-            "stderr in the terminal.\n"
-            f"Observed payload:\n{result.project_fetch.stdout}",
+        observed_output = "\n".join(
+            fragment
+            for fragment in (
+                result.project_fetch.stdout.strip(),
+                result.project_fetch.stderr.strip(),
+            )
+            if fragment
         )
+        self.assertRegex(
+            observed_output,
+            re.compile(r"(404|Not Found)", re.IGNORECASE),
+            "Human-style verification failed: the terminal output did not surface "
+            "a visible missing-file error to the user.\n"
+            f"Observed output:\n{observed_output}",
+        )
+        for visible_snippet in self.config.visible_project_fields:
+            self.assertNotIn(
+                visible_snippet,
+                observed_output,
+                "Human-style verification failed: the terminal output still looked "
+                "like the real project JSON instead of a 404 missing-file error.\n"
+                f"Observed output:\n{observed_output}",
+            )
 
 
 if __name__ == "__main__":

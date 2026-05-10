@@ -65,13 +65,11 @@ class ProjectQuickStartAuthFailureValidator:
         quick_start_section = self._quick_start_validator._read_quick_start_section(
             readme_text,
         )
-        documented_project_file = self._quick_start_validator._documented_project_file(
-            quick_start_section,
-        )
-        project_path = documented_project_file or config.project_path
+        project_path = config.project_path
         documented_command_template = (
             self._quick_start_validator._documented_validation_command(
                 quick_start_section,
+                project_path=project_path,
             )
         )
         documented_command = self._quick_start_validator._expand_documented_command(
@@ -119,4 +117,3 @@ class ProjectQuickStartAuthFailureValidator:
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = previous_value
-
