@@ -50,6 +50,28 @@ void main() {
     },
   );
 
+  test('service rejects sub-task creation without a parent issue', () async {
+    final repo = await _createMutationRepository();
+    addTearDown(() => repo.delete(recursive: true));
+
+    final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+    await repository.loadSnapshot();
+    await repository.connect(
+      const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+    );
+    final service = IssueMutationService(repository: repository);
+
+    final result = await service.createIssue(
+      summary: 'Detached sub-task',
+      issueTypeId: 'sub-task',
+    );
+
+    expect(result.isSuccess, isFalse);
+    expect(result.failure?.category, IssueMutationErrorCategory.validation);
+    expect(result.failure?.message, 'Sub-task issues require a parent issue.');
+    expect(File('${repo.path}/DEMO/DEMO-11/main.md').existsSync(), isFalse);
+  });
+
   test(
     'service updates fields and acceptance criteria in one mutation',
     () async {

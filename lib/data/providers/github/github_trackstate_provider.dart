@@ -326,9 +326,8 @@ class GitHubTrackStateProvider
         'GitHub content response for $path did not contain file content.',
       );
     }
-    final pointerText = utf8.decode(base64Decode(encoded));
-    final pointerInfo = _parseLfsPointer(pointerText);
     var bytes = Uint8List.fromList(base64Decode(encoded));
+    final pointerInfo = _parseLfsPointerBytes(bytes);
     if (pointerInfo != null) {
       final downloadUrl = json['download_url']?.toString();
       if (downloadUrl != null && downloadUrl.isNotEmpty) {
@@ -403,11 +402,7 @@ class GitHubTrackStateProvider
     final commitsJson =
         await _getGitHubJson(
               '/repos/$repositoryName/commits',
-              queryParameters: {
-                'sha': ref,
-                'path': path,
-                'per_page': '$limit',
-              },
+              queryParameters: {'sha': ref, 'path': path, 'per_page': '$limit'},
             )
             as List<Object?>;
     final commits = <RepositoryHistoryCommit>[];
@@ -420,7 +415,8 @@ class GitHubTrackStateProvider
           await _getGitHubJson('/repos/$repositoryName/commits/$sha')
               as Map<String, Object?>;
       final commitJson = detail['commit'] as Map<String, Object?>? ?? const {};
-      final authorJson = commitJson['author'] as Map<String, Object?>? ?? const {};
+      final authorJson =
+          commitJson['author'] as Map<String, Object?>? ?? const {};
       final files = detail['files'] as List<Object?>? ?? const [];
       commits.add(
         RepositoryHistoryCommit(
@@ -768,6 +764,26 @@ bool _attributePatternMatches(String pattern, String path) {
   return RegExp(expression.toString()).hasMatch(path);
 }
 
+_LfsPointerInfo? _parseLfsPointerBytes(Uint8List bytes) {
+  const pointerPrefix = 'version https://git-lfs.github.com/spec/v1';
+  if (bytes.length < pointerPrefix.length || bytes.length > 512) {
+    return null;
+  }
+  for (var index = 0; index < pointerPrefix.length; index++) {
+    if (bytes[index] != pointerPrefix.codeUnitAt(index)) {
+      return null;
+    }
+  }
+  for (final byte in bytes) {
+    final isWhitespace = byte == 0x09 || byte == 0x0A || byte == 0x0D;
+    final isPrintableAscii = byte >= 0x20 && byte <= 0x7E;
+    if (!isWhitespace && !isPrintableAscii) {
+      return null;
+    }
+  }
+  return _parseLfsPointer(ascii.decode(bytes));
+}
+
 _LfsPointerInfo? _parseLfsPointer(String content) {
   if (!content.contains('version https://git-lfs.github.com/spec/v1')) {
     return null;
@@ -776,7 +792,10 @@ _LfsPointerInfo? _parseLfsPointer(String content) {
     r'^oid sha256:([a-f0-9]+)$',
     multiLine: true,
   ).firstMatch(content);
-  final sizeMatch = RegExp(r'^size (\d+)$', multiLine: true).firstMatch(content);
+  final sizeMatch = RegExp(
+    r'^size (\d+)$',
+    multiLine: true,
+  ).firstMatch(content);
   return _LfsPointerInfo(
     oid: oidMatch?.group(1),
     sizeBytes: int.tryParse(sizeMatch?.group(1) ?? ''),

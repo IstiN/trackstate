@@ -99,6 +99,15 @@ class IssueMutationService {
           details: hierarchy.failure!.details,
         );
       }
+      if (_canonicalConfigId(issueTypeDefinition.id) == 'subtask' &&
+          hierarchy.parentKey == null) {
+        return _failure(
+          operation: operation,
+          issueKey: key,
+          category: IssueMutationErrorCategory.validation,
+          message: 'Sub-task issues require a parent issue.',
+        );
+      }
 
       final issueRoot = hierarchy.issueRoot(projectRoot, key);
       final issuePath = '$issueRoot/main.md';

@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/issue_mutation_service.dart';
+import 'package:trackstate/domain/models/issue_mutation_models.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.dart';
 
@@ -109,6 +111,90 @@ void main() {
       viewModel.dispose();
     },
   );
+
+  test(
+    'view model preserves return context when opening an issue detail',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: const DemoTrackStateRepository(),
+      );
+      await viewModel.load();
+
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+      viewModel.selectIssue(issue, returnSection: TrackerSection.board);
+
+      expect(viewModel.section, TrackerSection.search);
+      expect(viewModel.issueDetailReturnSection, TrackerSection.board);
+
+      viewModel.returnFromIssueDetail();
+
+      expect(viewModel.section, TrackerSection.board);
+      expect(viewModel.issueDetailReturnSection, isNull);
+    },
+  );
+
+  test(
+    'view model uses shared mutations and preserves the origin after create',
+    () async {
+      final repository = const DemoTrackStateRepository();
+      final createdIssue = TrackStateIssue(
+        key: 'TRACK-99',
+        project: 'TRACK',
+        issueType: IssueType.story,
+        issueTypeId: 'story',
+        status: IssueStatus.todo,
+        statusId: 'todo',
+        priority: IssuePriority.medium,
+        priorityId: 'medium',
+        summary: 'Created through view model',
+        description: 'Uses shared mutation result.',
+        assignee: 'demo-user',
+        reporter: 'demo-user',
+        labels: const ['ux'],
+        components: const [],
+        fixVersionIds: const [],
+        watchers: const [],
+        customFields: const {},
+        parentKey: null,
+        epicKey: 'TRACK-1',
+        parentPath: null,
+        epicPath: 'TRACK/TRACK-1',
+        progress: 0,
+        updatedLabel: 'just now',
+        acceptanceCriteria: const [],
+        comments: const [],
+        links: const [],
+        attachments: const [],
+        isArchived: false,
+        storagePath: 'TRACK/TRACK-1/TRACK-99/main.md',
+        rawMarkdown: '',
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        issueMutationService: _RecordingIssueMutationService(createdIssue),
+      );
+
+      await viewModel.load();
+
+      final success = await viewModel.createIssue(
+        summary: 'Created through view model',
+        description: 'Uses shared mutation result.',
+        issueTypeId: 'story',
+        priorityId: 'medium',
+        assignee: 'demo-user',
+        epicKey: 'TRACK-1',
+        labels: const ['ux'],
+        returnSection: TrackerSection.hierarchy,
+      );
+
+      expect(success, isTrue);
+      expect(viewModel.section, TrackerSection.search);
+      expect(viewModel.issueDetailReturnSection, TrackerSection.hierarchy);
+      expect(viewModel.selectedIssue?.key, 'TRACK-99');
+    },
+  );
 }
 
 class _LocalRuntimeRepository implements TrackStateRepository {
@@ -196,4 +282,28 @@ class _LocalRuntimeRepository implements TrackStateRepository {
     required String name,
     required Uint8List bytes,
   }) async => issue;
+}
+
+class _RecordingIssueMutationService extends IssueMutationService {
+  _RecordingIssueMutationService(this._created)
+    : super(repository: const DemoTrackStateRepository());
+
+  final TrackStateIssue _created;
+
+  @override
+  Future<IssueMutationResult<TrackStateIssue>> createIssue({
+    required String summary,
+    String description = '',
+    String? issueTypeId,
+    String? priorityId,
+    String? assignee,
+    String? reporter,
+    String? parentKey,
+    String? epicKey,
+    Map<String, Object?> fields = const {},
+  }) async => IssueMutationResult.success(
+    operation: 'create',
+    issueKey: _created.key,
+    value: _created,
+  );
 }

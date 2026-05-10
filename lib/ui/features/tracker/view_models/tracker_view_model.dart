@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../data/providers/trackstate_provider.dart';
 import '../../../../data/repositories/trackstate_repository.dart';
+import '../../../../data/services/issue_mutation_service.dart';
 import '../../../../data/services/trackstate_auth_store.dart';
 import '../../../../domain/models/trackstate_models.dart';
 
@@ -172,14 +173,18 @@ class TrackerMessage {
 class TrackerViewModel extends ChangeNotifier {
   TrackerViewModel({
     required TrackStateRepository repository,
+    IssueMutationService? issueMutationService,
     TrackStateAuthStore authStore =
         const SharedPreferencesTrackStateAuthStore(),
   }) : _repository = repository,
+       _issueMutationService =
+           issueMutationService ?? IssueMutationService(repository: repository),
        _authStore = authStore {
     _bindProviderSession();
   }
 
   final TrackStateRepository _repository;
+  final IssueMutationService _issueMutationService;
   final TrackStateAuthStore _authStore;
   ProviderSession? _boundProviderSession;
 
@@ -191,6 +196,7 @@ class TrackerViewModel extends ChangeNotifier {
   TrackStateIssue? _selectedIssue;
   final Map<String, List<IssueHistoryEntry>> _issueHistoryByKey = {};
   final Set<String> _loadingIssueHistory = <String>{};
+  TrackerSection? _issueDetailReturnSection;
   bool _isLoading = false;
   bool _isSaving = false;
   TrackerMessage? _message;
@@ -203,6 +209,7 @@ class TrackerViewModel extends ChangeNotifier {
   String get jql => _jql;
   List<TrackStateIssue> get searchResults => _searchResults;
   TrackStateIssue? get selectedIssue => _selectedIssue;
+  TrackerSection? get issueDetailReturnSection => _issueDetailReturnSection;
   bool get isLoading => _isLoading;
   bool get isSaving => _isSaving;
   bool isIssueHistoryLoading(String issueKey) =>
@@ -305,12 +312,29 @@ class TrackerViewModel extends ChangeNotifier {
 
   void selectSection(TrackerSection section) {
     _section = section;
+    if (section != TrackerSection.search) {
+      _issueDetailReturnSection = null;
+    }
     notifyListeners();
   }
 
-  void selectIssue(TrackStateIssue issue) {
+  void selectIssue(TrackStateIssue issue, {TrackerSection? returnSection}) {
     _selectedIssue = issue;
     _section = TrackerSection.search;
+    _issueDetailReturnSection =
+        returnSection == null || returnSection == TrackerSection.search
+        ? null
+        : returnSection;
+    notifyListeners();
+  }
+
+  void returnFromIssueDetail() {
+    final returnSection = _issueDetailReturnSection;
+    if (returnSection == null) {
+      return;
+    }
+    _issueDetailReturnSection = null;
+    _section = returnSection;
     notifyListeners();
   }
 
@@ -328,6 +352,7 @@ class TrackerViewModel extends ChangeNotifier {
     _section = previous._section;
     _themePreference = previous._themePreference;
     _jql = previous._jql;
+    _issueDetailReturnSection = previous._issueDetailReturnSection;
   }
 
   void dismissMessage() {
@@ -445,6 +470,13 @@ class TrackerViewModel extends ChangeNotifier {
     required String summary,
     String description = '',
     Map<String, String> customFields = const {},
+    String? issueTypeId,
+    String? priorityId,
+    String? assignee,
+    String? parentKey,
+    String? epicKey,
+    List<String> labels = const [],
+    TrackerSection? returnSection,
   }) async {
     final normalizedSummary = summary.trim();
     if (normalizedSummary.isEmpty) {
@@ -461,11 +493,34 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final created = await _repository.createIssue(
+      final mergedFields = <String, Object?>{
+        for (final entry in customFields.entries) entry.key: entry.value,
+        if (labels.isNotEmpty) 'labels': labels,
+      };
+      final mutationResult = await _issueMutationService.createIssue(
         summary: normalizedSummary,
         description: description,
-        customFields: customFields,
+        issueTypeId: issueTypeId,
+        priorityId: priorityId,
+        assignee: assignee,
+        parentKey: parentKey,
+        epicKey: epicKey,
+        fields: mergedFields,
       );
+      final created = mutationResult.isSuccess && mutationResult.value != null
+          ? mutationResult.value!
+          : _repository is! ProviderBackedTrackStateRepository &&
+                mutationResult.failure?.message ==
+                    'This repository implementation does not expose shared mutations.'
+          ? await _repository.createIssue(
+              summary: normalizedSummary,
+              description: description,
+              customFields: customFields,
+            )
+          : throw TrackStateRepositoryException(
+              mutationResult.failure?.message ??
+                  'The issue could not be created with the current repository session.',
+            );
       _snapshot = await _repository.loadSnapshot();
       _selectedIssue = _snapshot!.issues.firstWhere(
         (issue) => issue.key == created.key,
@@ -473,6 +528,10 @@ class TrackerViewModel extends ChangeNotifier {
       );
       _searchResults = await _repository.searchIssues(_jql);
       _section = TrackerSection.search;
+      _issueDetailReturnSection =
+          returnSection == null || returnSection == TrackerSection.search
+          ? null
+          : returnSection;
       return true;
     } on Object catch (error) {
       _message = TrackerMessage.issueSaveFailed(error);

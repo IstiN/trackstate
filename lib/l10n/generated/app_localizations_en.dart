@@ -36,6 +36,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get createIssue => 'Create issue';
 
   @override
+  String get createChildIssue => 'Create child issue';
+
+  @override
+  String get back => 'Back to';
+
+  @override
   String get edit => 'Edit';
 
   @override
@@ -115,13 +121,28 @@ class AppLocalizationsEn extends AppLocalizations {
   String get details => 'Details';
 
   @override
+  String get issueType => 'Issue Type';
+
+  @override
   String get status => 'Status';
+
+  @override
+  String get initialStatus => 'Initial status';
 
   @override
   String get priority => 'Priority';
 
   @override
   String get assignee => 'Assignee';
+
+  @override
+  String get labels => 'Labels';
+
+  @override
+  String get parent => 'Parent';
+
+  @override
+  String get epic => 'Epic';
 
   @override
   String get reporter => 'Reporter';
@@ -289,6 +310,25 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get connectGitHub => 'Connect GitHub';
+
+  @override
+  String get optional => 'Optional';
+
+  @override
+  String get derivedFromParent => 'Derived from parent';
+
+  @override
+  String get epicDerivedFromParent =>
+      'Epic is derived from the selected parent issue.';
+
+  @override
+  String get subTaskParentRequired => 'Sub-tasks require a parent issue.';
+
+  @override
+  String get noEligibleParents => 'No eligible parent issues available.';
+
+  @override
+  String get labelsTokenHelper => 'Press comma or Enter to add a label.';
 
   @override
   String get fineGrainedToken => 'Fine-grained token';
