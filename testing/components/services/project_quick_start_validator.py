@@ -29,9 +29,16 @@ class ProjectQuickStartValidator:
         target_repository = self._resolve_target_repository(config, viewer_login)
         repository_info = self._probe.repository_metadata(target_repository)
         default_branch = self._repository_default_branch(repository_info)
+        documentation_repository = config.resolved_documentation_repository
+        documentation_repository_info = self._probe.repository_metadata(
+            documentation_repository,
+        )
+        documentation_default_branch = self._repository_default_branch(
+            documentation_repository_info,
+        )
         readme_fetch = self._probe.get_contents(
-            target_repository,
-            default_branch,
+            documentation_repository,
+            documentation_default_branch,
             config.readme_path.name,
         )
         readme_text = self._decode_repository_text(readme_fetch)
@@ -60,6 +67,7 @@ class ProjectQuickStartValidator:
         return ProjectCliValidationResult(
             target_repository=target_repository,
             upstream_repository=config.upstream_repository,
+            documentation_repository=documentation_repository,
             project_path=project_path,
             readme_text=readme_text,
             quick_start_section=quick_start_section,
@@ -138,6 +146,22 @@ class ProjectQuickStartValidator:
         return match.group(1)
 
     def _documented_validation_command(self, quick_start_section: str) -> str | None:
+        for candidate in self.documented_validation_commands_in_code_blocks(
+            quick_start_section,
+        ):
+            return candidate
+        inline_commands = re.findall(r"`(gh [^`]+)`", quick_start_section)
+        for candidate in inline_commands:
+            stripped_candidate = candidate.strip()
+            if stripped_candidate.startswith("gh "):
+                return stripped_candidate
+        return None
+
+    def documented_validation_commands_in_code_blocks(
+        self,
+        quick_start_section: str,
+    ) -> tuple[str, ...]:
+        commands: list[str] = []
         code_blocks = re.findall(
             r"```(?:bash|shell|sh|text)?\n(.*?)```",
             quick_start_section,
@@ -147,13 +171,8 @@ class ProjectQuickStartValidator:
             for line in block.splitlines():
                 candidate = line.strip()
                 if candidate.startswith("gh "):
-                    return candidate
-        inline_commands = re.findall(r"`(gh [^`]+)`", quick_start_section)
-        for candidate in inline_commands:
-            stripped_candidate = candidate.strip()
-            if stripped_candidate.startswith("gh "):
-                return stripped_candidate
-        return None
+                    commands.append(candidate)
+        return tuple(commands)
 
     def _expand_documented_command(
         self,

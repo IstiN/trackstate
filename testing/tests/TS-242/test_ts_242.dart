@@ -104,7 +104,6 @@ void main() {
           .map((entry) => entry['key'])
           .whereType<String>()
           .toSet();
-
       // Reload repository and verify human-style search results
       final LocalGitRepositoryPort reloadedRepositoryPort = dependencies
           .createLocalGitRepositoryPort(tester);
@@ -120,7 +119,6 @@ void main() {
           'TS-242 post-delete repository reload did not complete.',
         );
       }
-
       final afterSearchKeys = afterDeletion.allVisibleIssueSearchResults
           .map((issue) => issue.key)
           .toList();
