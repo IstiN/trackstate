@@ -13,13 +13,13 @@ void main() {
       final beforeDelete = await fixture.observeBeforeDeleteAttempt();
 
       expect(
-        beforeDelete.parentIssue.key,
+        beforeDelete.parentIssue?.key,
         Ts283DeleteParentWithChildrenFixture.parentIssueKey,
         reason:
             'Precondition failed: ${Ts283DeleteParentWithChildrenFixture.parentIssueKey} must exist before the delete attempt starts.',
       );
       expect(
-        beforeDelete.childIssue.key,
+        beforeDelete.childIssue?.key,
         Ts283DeleteParentWithChildrenFixture.childIssueKey,
         reason:
             'Precondition failed: ${Ts283DeleteParentWithChildrenFixture.childIssueKey} must exist before the delete attempt starts.',
@@ -105,6 +105,18 @@ void main() {
             'Expected result mismatch: a blocked delete must not return a tombstone payload.',
       );
 
+      expect(
+        afterDelete.parentIssue?.key,
+        Ts283DeleteParentWithChildrenFixture.parentIssueKey,
+        reason:
+            'Expected result mismatch: ${Ts283DeleteParentWithChildrenFixture.parentIssueKey} must still exist in the refreshed snapshot after the blocked delete.',
+      );
+      expect(
+        afterDelete.childIssue?.key,
+        Ts283DeleteParentWithChildrenFixture.childIssueKey,
+        reason:
+            'Expected result mismatch: ${Ts283DeleteParentWithChildrenFixture.childIssueKey} must still exist in the refreshed snapshot after the blocked delete.',
+      );
       expect(
         afterDelete.parentIssueFileExists,
         isTrue,
@@ -202,7 +214,7 @@ void main() {
             'Human-style verification failed: the parent issue should still expose its active child relationship after the blocked delete.',
       );
       expect(
-        afterDelete.childIssue.epicKey,
+        afterDelete.childIssue?.epicKey,
         Ts283DeleteParentWithChildrenFixture.parentIssueKey,
         reason:
             'Human-style verification failed: the child issue should still belong to ${Ts283DeleteParentWithChildrenFixture.parentIssueKey} after the blocked delete.',

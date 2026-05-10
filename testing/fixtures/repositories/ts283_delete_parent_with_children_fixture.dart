@@ -71,29 +71,25 @@ class Ts283DeleteParentWithChildrenFixture {
     required TrackerSnapshot snapshot,
     IssueMutationResult<DeletedIssueTombstone>? result,
   }) async {
-    final parentIssue = snapshot.issues.singleWhere(
-      (candidate) => candidate.key == parentIssueKey,
-    );
-    final childIssue = snapshot.issues.singleWhere(
-      (candidate) => candidate.key == childIssueKey,
-    );
+    final parentIssue = _findIssue(snapshot, parentIssueKey);
+    final childIssue = _findIssue(snapshot, childIssueKey);
+    final parentIssueFile = File('$repositoryPath/$parentIssuePath');
+    final childIssueFile = File('$repositoryPath/$childIssuePath');
+    final parentIssueFileExists = await parentIssueFile.exists();
+    final childIssueFileExists = await childIssueFile.exists();
     return Ts283DeleteParentWithChildrenObservation(
       snapshot: snapshot,
       result: result,
       parentIssue: parentIssue,
       childIssue: childIssue,
-      parentIssueMarkdown: await File(
-        '$repositoryPath/$parentIssuePath',
-      ).readAsString(),
-      childIssueMarkdown: await File(
-        '$repositoryPath/$childIssuePath',
-      ).readAsString(),
-      parentIssueFileExists: await File(
-        '$repositoryPath/$parentIssuePath',
-      ).exists(),
-      childIssueFileExists: await File(
-        '$repositoryPath/$childIssuePath',
-      ).exists(),
+      parentIssueMarkdown: parentIssueFileExists
+          ? await parentIssueFile.readAsString()
+          : null,
+      childIssueMarkdown: childIssueFileExists
+          ? await childIssueFile.readAsString()
+          : null,
+      parentIssueFileExists: parentIssueFileExists,
+      childIssueFileExists: childIssueFileExists,
       tombstoneDirectoryExists: await Directory(
         '$repositoryPath/$tombstoneDirectoryPath',
       ).exists(),
@@ -122,6 +118,15 @@ class Ts283DeleteParentWithChildrenFixture {
       latestCommitSubject: await _gitOutput(['log', '-1', '--pretty=%s']),
       worktreeStatusLines: await _gitOutputLines(['status', '--short']),
     );
+  }
+
+  TrackStateIssue? _findIssue(TrackerSnapshot snapshot, String key) {
+    for (final issue in snapshot.issues) {
+      if (issue.key == key) {
+        return issue;
+      }
+    }
+    return null;
   }
 
   Future<void> _seedRepository() async {
@@ -267,10 +272,10 @@ class Ts283DeleteParentWithChildrenObservation {
 
   final TrackerSnapshot snapshot;
   final IssueMutationResult<DeletedIssueTombstone>? result;
-  final TrackStateIssue parentIssue;
-  final TrackStateIssue childIssue;
-  final String parentIssueMarkdown;
-  final String childIssueMarkdown;
+  final TrackStateIssue? parentIssue;
+  final TrackStateIssue? childIssue;
+  final String? parentIssueMarkdown;
+  final String? childIssueMarkdown;
   final bool parentIssueFileExists;
   final bool childIssueFileExists;
   final bool tombstoneDirectoryExists;
