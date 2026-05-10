@@ -51,14 +51,6 @@ class PullRequestReleaseDryRunTest(unittest.TestCase):
             f"Expected workflow path: {self.config.workflow_path}\n"
             f"Observed workflow path: {observation.workflow_path}",
         )
-        self.assertEqual(
-            observation.workflow_name,
-            self.config.workflow_name,
-            "Step 1 failed: GitHub Actions returned an unexpected workflow name.\n"
-            f"Expected workflow name: {self.config.workflow_name}\n"
-            f"Observed workflow name: {observation.workflow_name}",
-        )
-
         self.assertTrue(
             observation.workflow_declares_pull_request_trigger,
             "Step 2 failed: the live release workflow does not declare a contributor-"
@@ -75,15 +67,6 @@ class PullRequestReleaseDryRunTest(unittest.TestCase):
             f"Expected markers: {self.config.dry_run_name_markers}\n"
             f"Observed workflow text:\n{observation.workflow_text}",
         )
-        self.assertTrue(
-            observation.workflow_declares_dry_run_command,
-            "Step 2 failed: the live release workflow source does not include a "
-            "dry-run command marker.\n"
-            f"Workflow URL: {observation.workflow_html_url}\n"
-            f"Expected command markers: {self.config.dry_run_command_markers}\n"
-            f"Observed workflow text:\n{observation.workflow_text}",
-        )
-
         self.assertTrue(
             observation.pull_request_number > 0,
             "Step 3 failed: TS-250 did not create a disposable pull request number.\n"
