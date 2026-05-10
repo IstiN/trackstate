@@ -29,7 +29,7 @@ class ProjectQuickStartValidator:
         target_repository = self._resolve_target_repository(config, viewer_login)
         repository_info = self._probe.repository_metadata(target_repository)
         default_branch = self._repository_default_branch(repository_info)
-        documentation_repository = config.documentation_repository
+        documentation_repository = config.resolved_documentation_repository
         documentation_repository_info = self._probe.repository_metadata(
             documentation_repository,
         )
@@ -67,6 +67,7 @@ class ProjectQuickStartValidator:
         return ProjectCliValidationResult(
             target_repository=target_repository,
             upstream_repository=config.upstream_repository,
+            documentation_repository=documentation_repository,
             project_path=project_path,
             readme_text=readme_text,
             quick_start_section=quick_start_section,

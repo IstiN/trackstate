@@ -10,6 +10,7 @@ class ProjectCliValidationConfig:
     upstream_repository: str
     documentation_repository: str
     target_repository_override: str | None
+    readme_repository_override: str | None
     fork_repository_name: str
     project_path: str
     readme_path: Path
@@ -24,25 +25,27 @@ class ProjectCliValidationConfig:
             "TS74_SETUP_REPOSITORY",
             os.environ.get("TRACKSTATE_SETUP_REPOSITORY"),
         )
+        documentation_repository = os.environ.get(
+            "TS74_DOCUMENTATION_REPOSITORY",
+            os.environ.get(
+                "TS74_README_REPOSITORY",
+                os.environ.get(
+                    "TRACKSTATE_SETUP_README_REPOSITORY",
+                    os.environ.get(
+                        "TS74_UPSTREAM_SETUP_REPOSITORY",
+                        "IstiN/trackstate-setup",
+                    ),
+                ),
+            ),
+        )
         return cls(
             upstream_repository=os.environ.get(
                 "TS74_UPSTREAM_SETUP_REPOSITORY",
                 "IstiN/trackstate-setup",
             ),
-            documentation_repository=os.environ.get(
-                "TS74_DOCUMENTATION_REPOSITORY",
-                os.environ.get(
-                    "TS74_README_REPOSITORY",
-                    os.environ.get(
-                        "TRACKSTATE_SETUP_README_REPOSITORY",
-                        os.environ.get(
-                            "TS74_UPSTREAM_SETUP_REPOSITORY",
-                            "IstiN/trackstate-setup",
-                        ),
-                    ),
-                ),
-            ),
+            documentation_repository=documentation_repository,
             target_repository_override=target_repository_override,
+            readme_repository_override=documentation_repository,
             fork_repository_name=os.environ.get(
                 "TS74_FORK_REPOSITORY_NAME",
                 "trackstate-setup",
@@ -69,3 +72,7 @@ class ProjectCliValidationConfig:
                 '"configPath": "config"',
             ),
         )
+
+    @property
+    def resolved_documentation_repository(self) -> str:
+        return self.readme_repository_override or self.documentation_repository
