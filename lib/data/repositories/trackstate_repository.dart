@@ -749,15 +749,23 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       configRoot: configRoot,
       locale: defaultLocale,
     );
-    final issueTypes = await _getConfigEntries(
+    final issueTypes = await _loadRequiredConfigEntries(
       _joinPath(configRoot, 'issue-types.json'),
+      blobPaths: blobPaths,
       localizedLabels: localizedLabels['issueTypes'] ?? const {},
       locale: defaultLocale,
+      loadWarnings: loadWarnings,
+      warningSubject: 'issue types',
+      fallbackEntries: _issueTypeDefinitions,
     );
-    final statuses = await _getConfigEntries(
+    final statuses = await _loadRequiredConfigEntries(
       _joinPath(configRoot, 'statuses.json'),
+      blobPaths: blobPaths,
       localizedLabels: localizedLabels['statuses'] ?? const {},
       locale: defaultLocale,
+      loadWarnings: loadWarnings,
+      warningSubject: 'statuses',
+      fallbackEntries: _statusDefinitions,
     );
     final fields = await _getFieldDefinitions(
       _joinPath(configRoot, 'fields.json'),
@@ -959,6 +967,35 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       localizedLabels: localizedLabels,
       locale: locale,
     );
+  }
+
+  Future<List<TrackStateConfigEntry>> _loadRequiredConfigEntries(
+    String path, {
+    required Set<String> blobPaths,
+    required Map<String, String> localizedLabels,
+    required String locale,
+    required List<String> loadWarnings,
+    required String warningSubject,
+    required List<TrackStateConfigEntry> fallbackEntries,
+  }) async {
+    if (!blobPaths.contains(path)) {
+      loadWarnings.add(
+        'Falling back to built-in $warningSubject because $path is missing.',
+      );
+      return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
+    }
+    try {
+      return await _getConfigEntries(
+        path,
+        localizedLabels: localizedLabels,
+        locale: locale,
+      );
+    } on FormatException catch (error) {
+      loadWarnings.add(
+        'Falling back to built-in $warningSubject after failing to parse $path: $error',
+      );
+      return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
+    }
   }
 
   Future<List<TrackStateConfigEntry>> _loadOptionalConfigEntries({
