@@ -351,7 +351,12 @@ class PullRequestReleaseDryRunProbeService:
                 dry_run_step_name = candidate["step_name"]
                 dry_run_step_status = candidate["step_status"]
                 dry_run_step_conclusion = candidate["step_conclusion"]
-                if dry_run_run_status == "completed":
+                if self._dry_run_step_has_terminal_conclusion(
+                    dry_run_step_status,
+                    dry_run_step_conclusion,
+                ):
+                    break
+                if dry_run_run_status == "completed" and dry_run_step_name is None:
                     break
             time.sleep(self._config.poll_interval_seconds)
 
@@ -388,9 +393,7 @@ class PullRequestReleaseDryRunProbeService:
             if not isinstance(run_id, int) or run_workflow_id != workflow_id:
                 continue
 
-            jobs: list[dict[str, Any]] = []
-            if self._optional_string(run.get("status")) == "completed":
-                jobs = self._read_jobs(run_id)
+            jobs = self._read_jobs(run_id)
 
             step_name, job_name, step_status, step_conclusion = self._find_dry_run_step(
                 jobs
@@ -431,6 +434,13 @@ class PullRequestReleaseDryRunProbeService:
                         self._optional_string(step.get("conclusion")),
                     )
         return None, None, None, None
+
+    @staticmethod
+    def _dry_run_step_has_terminal_conclusion(
+        step_status: str | None,
+        step_conclusion: str | None,
+    ) -> bool:
+        return step_status == "completed" and step_conclusion is not None
 
     def _wait_for_pull_request_state(
         self,
