@@ -14,7 +14,9 @@ python3 -m unittest discover -s testing/tests/TS-272 -p 'test_*.py' -v
 
 No Python packages are required beyond the standard library. The repository
 under test must have a Dart SDK available on `PATH`, or `TRACKSTATE_DART_BIN`
-must point to the Dart executable used to run `dart run trackstate`.
+must point to the Dart executable used to run `dart run trackstate`. The probe
+always executes the CLI from this checkout via `dart run trackstate` so it
+cannot validate an unrelated standalone `trackstate` binary from `PATH`.
 
 ## Expected passing output
 

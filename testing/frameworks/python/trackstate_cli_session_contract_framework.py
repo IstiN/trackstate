@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 
@@ -54,19 +53,16 @@ class PythonTrackStateCliSessionContractFramework(TrackStateCliSessionContractPr
         fallback_command: tuple[str, ...],
         repository_path: Path,
     ) -> TrackStateCliSessionContractObservation:
-        preferred_binary = shutil.which(requested_command[0])
-        if preferred_binary:
-            executed_command = (preferred_binary, *requested_command[1:])
-            fallback_reason = None
-        else:
-            configured_dart = os.environ.get("TRACKSTATE_DART_BIN")
-            if configured_dart:
-                fallback_command = (configured_dart, *fallback_command[1:])
-            executed_command = fallback_command
-            fallback_reason = (
-                f'"{requested_command[0]}" was not available on PATH, so the test '
-                "used the package executable via `dart run trackstate`."
-            )
+        configured_dart = os.environ.get("TRACKSTATE_DART_BIN")
+        executed_command = (
+            (configured_dart, *fallback_command[1:])
+            if configured_dart
+            else fallback_command
+        )
+        fallback_reason = (
+            "Pinned execution to the repository-local CLI via `dart run trackstate` "
+            "so the probe cannot execute an unrelated `trackstate` binary from PATH."
+        )
 
         return TrackStateCliSessionContractObservation(
             requested_command=requested_command,
