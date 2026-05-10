@@ -6,7 +6,8 @@ import 'package:http/http.dart' as http;
 import '../../../domain/models/trackstate_models.dart';
 import '../trackstate_provider.dart';
 
-class GitHubTrackStateProvider implements TrackStateProviderAdapter {
+class GitHubTrackStateProvider
+    implements TrackStateProviderAdapter, RepositoryFileMutator {
   GitHubTrackStateProvider({
     http.Client? client,
     this.repositoryName = defaultRepositoryName,
@@ -196,6 +197,97 @@ class GitHubTrackStateProvider implements TrackStateProviderAdapter {
   }
 
   @override
+  Future<RepositoryCommitResult> applyFileChanges(
+    RepositoryFileChangeRequest request,
+  ) async {
+    final connection = _requireConnection();
+    final headCommitSha = await _gitRefSha(
+      repository: connection.repository,
+      ref: 'heads/${request.branch}',
+    );
+    if (request.changes.isEmpty) {
+      return RepositoryCommitResult(
+        branch: request.branch,
+        message: request.message,
+        revision: headCommitSha,
+      );
+    }
+
+    final baseTreeSha = await _commitTreeSha(
+      repository: connection.repository,
+      commitSha: headCommitSha,
+    );
+    for (final change in request.changes) {
+      await _ensureExpectedRevisionMatches(
+        repository: connection.repository,
+        ref: headCommitSha,
+        change: change,
+      );
+    }
+
+    final treeEntries = <Map<String, Object?>>[];
+    for (final change in request.changes) {
+      switch (change) {
+        case RepositoryTextFileChange():
+          treeEntries.add({
+            'path': change.path,
+            'mode': '100644',
+            'type': 'blob',
+            'content': change.content,
+          });
+        case RepositoryBinaryFileChange():
+          final blobSha = await _createBlob(
+            repository: connection.repository,
+            bytes: change.bytes,
+          );
+          treeEntries.add({
+            'path': change.path,
+            'mode': '100644',
+            'type': 'blob',
+            'sha': blobSha,
+          });
+        case RepositoryDeleteFileChange():
+          treeEntries.add({
+            'path': change.path,
+            'mode': '100644',
+            'type': 'blob',
+            'sha': null,
+          });
+      }
+    }
+
+    final treeSha = await _createTree(
+      repository: connection.repository,
+      baseTreeSha: baseTreeSha,
+      entries: treeEntries,
+    );
+    if (treeSha == baseTreeSha) {
+      return RepositoryCommitResult(
+        branch: request.branch,
+        message: request.message,
+        revision: headCommitSha,
+      );
+    }
+
+    final commitSha = await _createGitCommit(
+      repository: connection.repository,
+      message: request.message,
+      treeSha: treeSha,
+      parentCommitSha: headCommitSha,
+    );
+    await _updateGitRef(
+      repository: connection.repository,
+      ref: 'heads/${request.branch}',
+      commitSha: commitSha,
+    );
+    return RepositoryCommitResult(
+      branch: request.branch,
+      message: request.message,
+      revision: commitSha,
+    );
+  }
+
+  @override
   Future<void> ensureCleanWorktree() async {}
 
   @override
@@ -289,6 +381,196 @@ class GitHubTrackStateProvider implements TrackStateProviderAdapter {
     } on TrackStateProviderException {
       return false;
     }
+  }
+
+  Future<void> _ensureExpectedRevisionMatches({
+    required String repository,
+    required String ref,
+    required RepositoryFileChange change,
+  }) async {
+    final expectedRevision = change.expectedRevision;
+    if (change is RepositoryDeleteFileChange && expectedRevision == null) {
+      return;
+    }
+    final currentRevision = await _currentPathRevision(
+      repository: repository,
+      path: change.path,
+      ref: ref,
+    );
+    if (expectedRevision == currentRevision) {
+      return;
+    }
+    throw TrackStateProviderException(
+      'Cannot save ${change.path} because it changed in the current branch. '
+      'Expected revision ${expectedRevision ?? 'for a new file'}, '
+      'found ${currentRevision ?? 'no file at HEAD'}.',
+    );
+  }
+
+  Future<String?> _currentPathRevision({
+    required String repository,
+    required String path,
+    required String ref,
+  }) async {
+    final response = await _http.get(
+      _githubUri('/repos/$repository/contents/$path', {'ref': ref}),
+      headers: _githubHeaders(_connection?.token),
+    );
+    if (response.statusCode == 404) {
+      return null;
+    }
+    if (response.statusCode != 200) {
+      throw TrackStateProviderException(
+        'GitHub API request failed for /repos/$repository/contents/$path '
+        '(${response.statusCode}): ${response.body}',
+      );
+    }
+    final json = jsonDecode(response.body) as Map<String, Object?>;
+    return json['sha']?.toString();
+  }
+
+  Future<String> _gitRefSha({
+    required String repository,
+    required String ref,
+  }) async {
+    final json =
+        await _sendGitHubJson(
+              method: 'GET',
+              path: '/repos/$repository/git/ref/$ref',
+            )
+            as Map<String, Object?>;
+    final object = json['object'];
+    if (object is! Map<String, Object?> || object['sha'] == null) {
+      throw TrackStateProviderException(
+        'GitHub ref response for $ref did not contain a commit SHA.',
+      );
+    }
+    return object['sha']!.toString();
+  }
+
+  Future<String> _commitTreeSha({
+    required String repository,
+    required String commitSha,
+  }) async {
+    final json =
+        await _sendGitHubJson(
+              method: 'GET',
+              path: '/repos/$repository/git/commits/$commitSha',
+            )
+            as Map<String, Object?>;
+    final tree = json['tree'];
+    if (tree is! Map<String, Object?> || tree['sha'] == null) {
+      throw TrackStateProviderException(
+        'GitHub commit $commitSha did not expose its tree SHA.',
+      );
+    }
+    return tree['sha']!.toString();
+  }
+
+  Future<String> _createBlob({
+    required String repository,
+    required Uint8List bytes,
+  }) async {
+    final json =
+        await _sendGitHubJson(
+              method: 'POST',
+              path: '/repos/$repository/git/blobs',
+              body: {'content': base64Encode(bytes), 'encoding': 'base64'},
+              expectedStatusCodes: const {201},
+            )
+            as Map<String, Object?>;
+    final sha = json['sha']?.toString();
+    if (sha == null || sha.isEmpty) {
+      throw const TrackStateProviderException(
+        'GitHub blob creation did not return a blob SHA.',
+      );
+    }
+    return sha;
+  }
+
+  Future<String> _createTree({
+    required String repository,
+    required String baseTreeSha,
+    required List<Map<String, Object?>> entries,
+  }) async {
+    final json =
+        await _sendGitHubJson(
+              method: 'POST',
+              path: '/repos/$repository/git/trees',
+              body: {'base_tree': baseTreeSha, 'tree': entries},
+              expectedStatusCodes: const {201},
+            )
+            as Map<String, Object?>;
+    final sha = json['sha']?.toString();
+    if (sha == null || sha.isEmpty) {
+      throw const TrackStateProviderException(
+        'GitHub tree creation did not return a tree SHA.',
+      );
+    }
+    return sha;
+  }
+
+  Future<String> _createGitCommit({
+    required String repository,
+    required String message,
+    required String treeSha,
+    required String parentCommitSha,
+  }) async {
+    final json =
+        await _sendGitHubJson(
+              method: 'POST',
+              path: '/repos/$repository/git/commits',
+              body: {
+                'message': message,
+                'tree': treeSha,
+                'parents': [parentCommitSha],
+              },
+              expectedStatusCodes: const {201},
+            )
+            as Map<String, Object?>;
+    final sha = json['sha']?.toString();
+    if (sha == null || sha.isEmpty) {
+      throw const TrackStateProviderException(
+        'GitHub commit creation did not return a commit SHA.',
+      );
+    }
+    return sha;
+  }
+
+  Future<void> _updateGitRef({
+    required String repository,
+    required String ref,
+    required String commitSha,
+  }) async {
+    await _sendGitHubJson(
+      method: 'PATCH',
+      path: '/repos/$repository/git/refs/$ref',
+      body: {'sha': commitSha, 'force': false},
+    );
+  }
+
+  Future<Object?> _sendGitHubJson({
+    required String method,
+    required String path,
+    Object? body,
+    Set<int> expectedStatusCodes = const {200},
+  }) async {
+    final response = await _http.send(
+      http.Request(method, _githubUri(path))
+        ..headers.addAll({
+          ..._githubHeaders(_connection?.token),
+          if (body != null) 'content-type': 'application/json; charset=utf-8',
+        })
+        ..body = body == null ? '' : jsonEncode(body),
+    );
+    final materialized = await http.Response.fromStream(response);
+    if (!expectedStatusCodes.contains(materialized.statusCode)) {
+      throw TrackStateProviderException(
+        'GitHub API request failed for $path '
+        '(${materialized.statusCode}): ${materialized.body}',
+      );
+    }
+    return jsonDecode(materialized.body);
   }
 
   Future<Object?> _getGitHubJson(
