@@ -99,9 +99,22 @@ class ActionlintRulesetEnforcementTest(unittest.TestCase):
             f"Observed include patterns: {observation.matching_ruleset_include_patterns}",
         )
         self.assertFalse(
+            observation.protected_branches_missing_matching_ruleset_scope,
+            "Step 6 failed: the matching ruleset 'Applied to' scope does not cover "
+            "every protected branch required by TS-261.\n"
+            f"Protected branches: {observation.protected_branches}\n"
+            f"Branches missing ruleset scope coverage: "
+            f"{observation.protected_branches_missing_matching_ruleset_scope}\n"
+            f"Observed include patterns: {observation.matching_ruleset_include_patterns}\n"
+            f"Observed exclude patterns: {observation.matching_ruleset_exclude_patterns}\n"
+            f"Observed covered branches by ruleset: "
+            f"{observation.matching_ruleset_scope_covered_branches}",
+        )
+        self.assertFalse(
             observation.branches_missing_actionlint_required,
-            "Step 6 failed: not every protected branch resolves to an effective "
-            "actionlint required-status-check rule from rulesets.\n"
+            "Expected-result verification failed: not every protected branch "
+            "resolves to an effective actionlint required-status-check rule from "
+            "rulesets.\n"
             f"Protected branches: {observation.protected_branches}\n"
             f"Branches missing actionlint: {observation.branches_missing_actionlint_required}\n"
             f"Observed branch contexts: {observation.branch_required_check_contexts}\n"

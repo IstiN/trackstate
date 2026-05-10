@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from fnmatch import fnmatchcase
 import json
 from typing import Any
 
@@ -43,6 +44,26 @@ class ActionlintRulesetEnforcementProbeService:
             ruleset
             for ruleset in active_branch_rulesets
             if self._ruleset_requires_actionlint(ruleset)
+        ]
+        matching_ruleset_scope_covered_branches = {
+            self._ruleset_name(ruleset): [
+                branch_name
+                for branch_name in protected_branches
+                if self._ruleset_scope_covers_branch(
+                    ruleset,
+                    branch_name=branch_name,
+                    default_branch=default_branch,
+                )
+            ]
+            for ruleset in matching_rulesets
+        }
+        protected_branches_missing_matching_ruleset_scope = [
+            branch_name
+            for branch_name in protected_branches
+            if not any(
+                branch_name in covered_branches
+                for covered_branches in matching_ruleset_scope_covered_branches.values()
+            )
         ]
 
         branch_required_check_contexts: dict[str, list[str]] = {}
@@ -98,6 +119,7 @@ class ActionlintRulesetEnforcementProbeService:
                 )
                 for ruleset in matching_rulesets
             },
+            matching_ruleset_scope_covered_branches=matching_ruleset_scope_covered_branches,
             matching_ruleset_required_status_checks={
                 self._ruleset_name(ruleset): self._ruleset_required_status_checks(ruleset)
                 for ruleset in matching_rulesets
@@ -105,6 +127,9 @@ class ActionlintRulesetEnforcementProbeService:
             branch_required_check_contexts=branch_required_check_contexts,
             branch_required_rule_descriptions=branch_required_rule_descriptions,
             branch_actionlint_ruleset_ids=branch_actionlint_ruleset_ids,
+            protected_branches_missing_matching_ruleset_scope=(
+                protected_branches_missing_matching_ruleset_scope
+            ),
             branches_with_actionlint_required=branches_with_actionlint_required,
             branches_missing_actionlint_required=branches_missing_actionlint_required,
         )
@@ -182,6 +207,49 @@ class ActionlintRulesetEnforcementProbeService:
             return []
         values = [pattern.strip() for pattern in raw_patterns if isinstance(pattern, str)]
         return self._dedupe([value for value in values if value])
+
+    def _ruleset_scope_covers_branch(
+        self,
+        ruleset: dict[str, Any],
+        *,
+        branch_name: str,
+        default_branch: str,
+    ) -> bool:
+        include_patterns = self._ruleset_ref_patterns(ruleset, pattern_key="include")
+        if not any(
+            self._ref_pattern_matches_branch(
+                pattern,
+                branch_name=branch_name,
+                default_branch=default_branch,
+            )
+            for pattern in include_patterns
+        ):
+            return False
+
+        exclude_patterns = self._ruleset_ref_patterns(ruleset, pattern_key="exclude")
+        return not any(
+            self._ref_pattern_matches_branch(
+                pattern,
+                branch_name=branch_name,
+                default_branch=default_branch,
+            )
+            for pattern in exclude_patterns
+        )
+
+    def _ref_pattern_matches_branch(
+        self,
+        pattern: str,
+        *,
+        branch_name: str,
+        default_branch: str,
+    ) -> bool:
+        if pattern == "~DEFAULT_BRANCH":
+            return branch_name == default_branch
+        if pattern == "~ALL":
+            return True
+
+        branch_ref = f"refs/heads/{branch_name}"
+        return fnmatchcase(branch_name, pattern) or fnmatchcase(branch_ref, pattern)
 
     def _read_effective_branch_rules(self, branch_name: str) -> list[dict[str, Any]]:
         payload = self._read_json_array(
