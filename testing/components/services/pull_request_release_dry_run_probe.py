@@ -30,6 +30,11 @@ class PullRequestReleaseDryRunError(RuntimeError):
 
 
 class PullRequestReleaseDryRunProbeService:
+    _CONTRIBUTOR_VISIBLE_PULL_REQUEST_EVENTS = (
+        "pull_request",
+        "pull_request_target",
+    )
+
     def __init__(
         self,
         config: PullRequestReleaseDryRunConfig,
@@ -507,7 +512,7 @@ class PullRequestReleaseDryRunProbeService:
     ) -> list[dict[str, Any]]:
         payload = self._read_json_object(
             f"/repos/{self._config.repository}/actions/runs"
-            f"?event=pull_request&branch={quote(branch_name, safe='')}&per_page=50"
+            f"?branch={quote(branch_name, safe='')}&per_page=100"
         )
         workflow_runs = payload.get("workflow_runs")
         if not isinstance(workflow_runs, list):
@@ -521,6 +526,10 @@ class PullRequestReleaseDryRunProbeService:
             if not isinstance(run, dict):
                 continue
             if self._optional_string(run.get("head_branch")) != branch_name:
+                continue
+            if not self._is_contributor_visible_pull_request_event(
+                self._optional_string(run.get("event"))
+            ):
                 continue
             created_at = self._run_created_at_epoch(run)
             if created_at is None or created_at < started_floor:
@@ -603,7 +612,19 @@ class PullRequestReleaseDryRunProbeService:
         return [job for job in jobs if isinstance(job, dict)]
 
     def _workflow_declares_pull_request(self, workflow_text: str) -> bool:
-        return bool(re.search(r"(?m)^\s*pull_request:\s*$", workflow_text))
+        if re.search(
+            r"(?m)^\s*on\s*:\s*\[(?:[^\]]*\bpull_request(?:_target)?\b[^\]]*)\]\s*$",
+            workflow_text,
+        ):
+            return True
+        if re.search(
+            r"(?m)^\s*on\s*:\s*\{(?:[^}]*\bpull_request(?:_target)?\s*:[^}]*)\}\s*$",
+            workflow_text,
+        ):
+            return True
+        return bool(
+            re.search(r"(?m)^\s*pull_request(?:_target)?\s*:\s*(?:.*)?$", workflow_text)
+        )
 
     def _workflow_declares_dry_run_step(self, workflow_text: str) -> bool:
         step_names = re.findall(r"(?im)^\s*-\s*name:\s*(.+?)\s*$", workflow_text)
@@ -618,6 +639,11 @@ class PullRequestReleaseDryRunProbeService:
             return False
         lowered = value.lower()
         return any(marker in lowered for marker in self._dry_run_name_markers)
+
+    def _is_contributor_visible_pull_request_event(self, event: str | None) -> bool:
+        if event is None:
+            return False
+        return event in self._CONTRIBUTOR_VISIBLE_PULL_REQUEST_EVENTS
 
     def _origin_clone_url(self) -> str:
         return f"https://github.com/{self._config.repository}.git"

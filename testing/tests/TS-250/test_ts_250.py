@@ -61,9 +61,9 @@ class PullRequestReleaseDryRunTest(unittest.TestCase):
 
         self.assertTrue(
             observation.workflow_declares_pull_request_trigger,
-            "Step 2 failed: the live release workflow does not declare a "
-            "`pull_request` trigger, so opening a pull request to main cannot execute "
-            "a release dry-run.\n"
+            "Step 2 failed: the live release workflow does not declare a contributor-"
+            "visible pull request trigger (`pull_request` or `pull_request_target`), "
+            "so opening a pull request to main cannot execute a release dry-run.\n"
             f"Workflow URL: {observation.workflow_html_url}\n"
             f"Observed workflow text:\n{observation.workflow_text}",
         )
@@ -106,9 +106,10 @@ class PullRequestReleaseDryRunTest(unittest.TestCase):
             observation.observed_branch_run_count,
             0,
             "Step 3 failed: opening the disposable pull request did not produce any "
-            "pull_request workflow run to inspect.\n"
+            "contributor-visible pull request workflow run to inspect.\n"
             f"Pull Request URL: {observation.pull_request_url}\n"
             f"Checks URL: {observation.pull_request_checks_url}\n"
+            f"Observed events: {observation.observed_branch_run_events}\n"
             f"Observed runs: {observation.observed_branch_run_names}",
         )
         self.assertEqual(
@@ -120,11 +121,11 @@ class PullRequestReleaseDryRunTest(unittest.TestCase):
             f"Checks URL: {observation.pull_request_checks_url}\n"
             f"Observed run paths: {observation.observed_branch_run_paths}",
         )
-        self.assertEqual(
+        self.assertIn(
             observation.dry_run_run_event,
-            "pull_request",
+            {"pull_request", "pull_request_target"},
             "Step 3 failed: the observed release workflow run was not triggered by "
-            "the disposable pull request event.\n"
+            "a contributor-visible pull request event.\n"
             f"Run URL: {observation.dry_run_run_url}\n"
             f"Observed event: {observation.dry_run_run_event}",
         )

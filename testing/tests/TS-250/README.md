@@ -11,6 +11,9 @@ The automation:
 4. observes the pull request checks on GitHub Actions, and
 5. verifies a contributor-visible dry-run release step completed successfully.
 
+Contributor-visible PR checks may be implemented with either the
+`pull_request` or `pull_request_target` GitHub Actions event.
+
 ## Run this test
 
 ```bash
