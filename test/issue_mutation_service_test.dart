@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/issue_mutation_service.dart';
@@ -83,6 +85,34 @@ void main() {
           '${repo.path}/DEMO/DEMO-1/DEMO-2/acceptance_criteria.md',
         ).readAsStringSync(),
         '- Keeps markdown-backed acceptance criteria.\n',
+      );
+    },
+  );
+
+  test(
+    'service rejects direct issue type edits in generic field mutations',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final result = await service.updateFields(
+        issueKey: 'DEMO-2',
+        fields: const {'issueType': 'epic'},
+      );
+
+      expect(result.isSuccess, isFalse);
+      expect(result.failure!.category, IssueMutationErrorCategory.validation);
+      expect(result.failure!.message, contains('issueType'));
+      expect(
+        File('${repo.path}/DEMO/DEMO-1/DEMO-2/main.md').readAsStringSync(),
+        contains('issueType: story'),
       );
     },
   );
@@ -384,6 +414,50 @@ void main() {
       isTrue,
     );
   });
+
+  test(
+    'github provider validates expected revisions against the captured commit sha',
+    () async {
+      final backend = _HostedRepositoryBackend(files: _mutationFixtureFiles());
+      final provider = GitHubTrackStateProvider(
+        client: backend.client,
+        repositoryName: SetupTrackStateRepository.repositoryName,
+      );
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: SetupTrackStateRepository.repositoryName,
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      final original = await provider.readTextFile(
+        'DEMO/DEMO-10/main.md',
+        ref: 'main',
+      );
+      final capturedHeadCommitSha = backend.headCommitSha;
+      backend.clearObservedContentRefs();
+
+      await provider.applyFileChanges(
+        RepositoryFileChangeRequest(
+          branch: 'main',
+          message: 'Update DEMO-10',
+          changes: [
+            RepositoryTextFileChange(
+              path: original.path,
+              content: original.content.replaceFirst(
+                'Alternative epic',
+                'Updated epic',
+              ),
+              expectedRevision: original.revision,
+            ),
+          ],
+        ),
+      );
+
+      expect(backend.observedContentRefs, [capturedHeadCommitSha]);
+    },
+  );
 }
 
 Future<Directory> _createMutationRepository() async {
@@ -626,12 +700,20 @@ class _HostedRepositoryBackend {
   final Map<String, Map<String, Uint8List>> _commitSnapshots =
       <String, Map<String, Uint8List>>{};
   final Map<String, String> _commitTrees = <String, String>{};
+  final List<String> _observedContentRefs = <String>[];
   int _shaCounter = 0;
   late String _headCommitSha;
 
   late final http.Client client = MockClient(_handle);
 
   bool exists(String path) => _files.containsKey(path);
+
+  String get headCommitSha => _headCommitSha;
+
+  List<String> get observedContentRefs =>
+      List.unmodifiable(_observedContentRefs);
+
+  void clearObservedContentRefs() => _observedContentRefs.clear();
 
   String readText(String path) => utf8.decode(_files[path]!);
 
@@ -763,7 +845,11 @@ class _HostedRepositoryBackend {
     final contentsPrefix = '/repos/$_repository/contents/';
     if (path.startsWith(contentsPrefix) && request.method == 'GET') {
       final filePath = path.substring(contentsPrefix.length);
-      final bytes = _files[filePath];
+      final ref = request.url.queryParameters['ref'];
+      if (ref != null && ref.isNotEmpty) {
+        _observedContentRefs.add(ref);
+      }
+      final bytes = _snapshotForRef(ref)[filePath];
       if (bytes == null) {
         return http.Response('{"message":"Not Found"}', 404);
       }
@@ -777,6 +863,13 @@ class _HostedRepositoryBackend {
     for (final entry in source.entries)
       entry.key: Uint8List.fromList(entry.value),
   };
+
+  Map<String, Uint8List> _snapshotForRef(String? ref) {
+    if (ref == null || ref.isEmpty || ref == 'main') {
+      return _files;
+    }
+    return _commitSnapshots[ref] ?? _files;
+  }
 
   String _nextSha(String prefix) {
     _shaCounter++;

@@ -226,6 +226,7 @@ class IssueMutationService {
     final prohibitedFields = [
       for (final key in fields.keys)
         if (key == 'status' ||
+            key == 'issueType' ||
             key == 'parent' ||
             key == 'epic' ||
             key == 'archived')
@@ -294,22 +295,6 @@ class IssueMutationService {
         if (entry.key == 'description') {
           final description = _normalizeNullableString(entry.value) ?? '';
           body = _upsertSection(body, 'Description', description);
-          continue;
-        }
-        if (entry.key == 'issueType') {
-          final issueTypeDefinition = _resolveConfigEntry(
-            entry.value?.toString(),
-            snapshot.project.issueTypeDefinitions,
-          );
-          if (issueTypeDefinition == null) {
-            return _failure(
-              operation: operation,
-              issueKey: issueKey,
-              category: IssueMutationErrorCategory.validation,
-              message: 'Unknown issue type ${entry.value}.',
-            );
-          }
-          frontmatter['issueType'] = issueTypeDefinition.id;
           continue;
         }
         if (entry.key == 'priority') {

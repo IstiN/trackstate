@@ -220,7 +220,7 @@ class GitHubTrackStateProvider
     for (final change in request.changes) {
       await _ensureExpectedRevisionMatches(
         repository: connection.repository,
-        branch: request.branch,
+        ref: headCommitSha,
         change: change,
       );
     }
@@ -385,7 +385,7 @@ class GitHubTrackStateProvider
 
   Future<void> _ensureExpectedRevisionMatches({
     required String repository,
-    required String branch,
+    required String ref,
     required RepositoryFileChange change,
   }) async {
     final expectedRevision = change.expectedRevision;
@@ -395,7 +395,7 @@ class GitHubTrackStateProvider
     final currentRevision = await _currentPathRevision(
       repository: repository,
       path: change.path,
-      ref: branch,
+      ref: ref,
     );
     if (expectedRevision == currentRevision) {
       return;
