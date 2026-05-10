@@ -1,0 +1,9 @@
+test_id: TS-283
+type: api
+framework: flutter_test
+platform: linux
+dependencies:
+  - Local Git-backed repository writes enabled through the production LocalTrackStateRepository provider
+notes:
+  - Exercises the concrete IssueMutationService.deleteIssue flow against a temporary repository hierarchy with parent issue EPIC-10 and child TASK-20.
+  - Verifies the returned typed validation failure, preserves all active issue files, leaves the git worktree clean, and confirms no tombstone artifacts are created.
