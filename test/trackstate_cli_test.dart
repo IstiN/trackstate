@@ -101,6 +101,34 @@ void main() {
     });
 
     test(
+      'treats a throwing gh auth token lookup as missing credentials',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            environment: <String, String>{},
+            readGhAuthToken: _throwingGhToken,
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'session',
+          '--target',
+          'hosted',
+          '--provider',
+          'github',
+          '--repository',
+          'owner/repo',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+
+        expect(result.exitCode, 3);
+        expect(error['code'], 'AUTHENTICATION_FAILED');
+        expect(error['category'], 'auth');
+      },
+    );
+
+    test(
       'rejects malformed hosted repositories as invalid targets before provider access',
       () async {
         for (final repository in const <String>[
@@ -344,6 +372,10 @@ void main() {
 Future<String?> _ghToken() async => 'gh-token';
 
 Future<String?> _emptyGhToken() async => '';
+
+Future<String?> _throwingGhToken() async {
+  throw Exception('gh is unavailable');
+}
 
 class _FakeTrackStateCliProviderFactory
     implements TrackStateCliProviderFactory {

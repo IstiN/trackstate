@@ -9,11 +9,15 @@ Future<void> main(List<String> arguments) async {
       workingDirectory: Directory.current.path,
       resolvePath: (path) => Directory(path).absolute.path,
       readGhAuthToken: () async {
-        final result = await Process.run('gh', ['auth', 'token']);
-        if (result.exitCode != 0) {
+        try {
+          final result = await Process.run('gh', ['auth', 'token']);
+          if (result.exitCode != 0) {
+            return null;
+          }
+          return result.stdout.toString().trim();
+        } on ProcessException {
           return null;
         }
-        return result.stdout.toString().trim();
       },
     ),
   );

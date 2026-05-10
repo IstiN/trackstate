@@ -699,7 +699,12 @@ class TrackStateCliCredentialResolver {
       return TrackStateCliCredential(token: environmentToken, source: 'env');
     }
 
-    final ghToken = (await readGhToken())?.trim() ?? '';
+    String ghToken = '';
+    try {
+      ghToken = (await readGhToken())?.trim() ?? '';
+    } on Exception {
+      ghToken = '';
+    }
     if (ghToken.isNotEmpty) {
       return TrackStateCliCredential(token: ghToken, source: 'gh');
     }
