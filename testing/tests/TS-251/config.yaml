@@ -15,8 +15,10 @@ runtime_inputs:
   mutation_search_text: "    branches: [main]"
   mutation_replacement_text: "    branches: [main"
   expected_actionlint_marker: actionlint
+  expected_log_markers:
+    - .github/workflows/release-on-main.yml
   poll_interval_seconds: 5
-  run_timeout_seconds: 60
+  run_timeout_seconds: 90
 notes:
   - Creates a disposable branch in IstiN/trackstate-setup and corrupts release-on-main.yml with invalid YAML.
   - Expects a contributor-visible GitHub Actions pipeline to fail on actionlint after the branch push.
