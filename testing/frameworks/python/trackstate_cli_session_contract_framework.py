@@ -52,6 +52,7 @@ class PythonTrackStateCliSessionContractFramework(TrackStateCliSessionContractPr
         requested_command: tuple[str, ...],
         fallback_command: tuple[str, ...],
         repository_path: Path,
+        command_cwd: Path | None = None,
     ) -> TrackStateCliSessionContractObservation:
         configured_dart = os.environ.get("TRACKSTATE_DART_BIN")
         executed_command = (
@@ -69,16 +70,25 @@ class PythonTrackStateCliSessionContractFramework(TrackStateCliSessionContractPr
             executed_command=executed_command,
             fallback_reason=fallback_reason,
             repository_path=str(repository_path),
-            result=self._run(executed_command),
+            result=(
+                self._run(executed_command)
+                if command_cwd is None
+                else self._run(executed_command, cwd=command_cwd)
+            ),
         )
 
-    def _run(self, command: tuple[str, ...]) -> CliCommandResult:
+    def _run(
+        self,
+        command: tuple[str, ...],
+        *,
+        cwd: Path | None = None,
+    ) -> CliCommandResult:
         env = os.environ.copy()
         env.setdefault("CI", "true")
         env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
         completed = subprocess.run(
             command,
-            cwd=self._repository_root,
+            cwd=cwd or self._repository_root,
             env=env,
             capture_output=True,
             text=True,
