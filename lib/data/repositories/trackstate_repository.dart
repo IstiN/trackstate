@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -66,8 +68,29 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   final Map<String, DeletedIssueTombstone> _knownTombstonesByKey =
       <String, DeletedIssueTombstone>{};
   final ProviderSession _session;
+  final Queue<Completer<void>> _pendingDeleteMutations =
+      Queue<Completer<void>>();
+  bool _deleteMutationInProgress = false;
 
   ProviderSession? get session => _session;
+
+  Future<void> _acquireDeleteMutationLock() async {
+    if (!_deleteMutationInProgress) {
+      _deleteMutationInProgress = true;
+      return;
+    }
+    final waiter = Completer<void>();
+    _pendingDeleteMutations.addLast(waiter);
+    await waiter.future;
+  }
+
+  void _releaseDeleteMutationLock() {
+    if (_pendingDeleteMutations.isEmpty) {
+      _deleteMutationInProgress = false;
+      return;
+    }
+    _pendingDeleteMutations.removeFirst().complete();
+  }
 
   @override
   Future<RepositoryUser> connect(RepositoryConnection connection) async {
@@ -508,177 +531,196 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
 
   @override
   Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async {
-    if (issue.storagePath.isEmpty) {
-      throw const TrackStateRepositoryException(
-        'This issue has no repository file path and cannot be deleted.',
-      );
-    }
-    final permission = await _provider.getPermission();
-    if (!permission.canWrite) {
-      throw const TrackStateRepositoryException(
-        'Connect a repository session with write access first.',
-      );
-    }
-    final mutator = switch (_provider) {
-      final RepositoryFileMutator supported => supported,
-      _ => throw const TrackStateRepositoryException(
-        'This repository provider does not support deleting issues yet.',
-      ),
-    };
-    final snapshot = _snapshot ?? await loadSnapshot();
-    final currentIssue = snapshot.issues.firstWhere(
-      (candidate) => candidate.key == issue.key,
-      orElse: () => issue,
-    );
-    final indexEntry = snapshot.repositoryIndex.entryForKey(currentIssue.key);
-    if (indexEntry != null && indexEntry.childKeys.isNotEmpty) {
-      throw TrackStateRepositoryException(
-        'Cannot delete ${currentIssue.key} because it still has child issues: '
-        '${indexEntry.childKeys.join(', ')}.',
-      );
-    }
-
-    final writeBranch = await _provider.resolveWriteBranch();
-    final tree = await _provider.listTree(ref: writeBranch);
-    final blobPaths = tree
-        .where((entry) => entry.type == 'blob')
-        .map((entry) => entry.path)
-        .toSet();
-    final projectRoot = currentIssue.storagePath.split('/').first;
-    if (projectRoot.isEmpty) {
-      throw const TrackStateRepositoryException(
-        'Could not resolve the project root for the issue being deleted.',
-      );
-    }
-    final issueRoot = currentIssue.storagePath.substring(
-      0,
-      currentIssue.storagePath.lastIndexOf('/'),
-    );
-    final issueArtifactPaths =
-        blobPaths
-            .where(
-              (path) =>
-                  path == currentIssue.storagePath ||
-                  path.startsWith('$issueRoot/'),
-            )
-            .toList()
-          ..sort();
-    if (issueArtifactPaths.isEmpty) {
-      throw TrackStateRepositoryException(
-        'Could not find repository artifacts for ${currentIssue.key}.',
-      );
-    }
-
-    final tombstone = DeletedIssueTombstone(
-      key: currentIssue.key,
-      project: currentIssue.project,
-      formerPath: currentIssue.storagePath,
-      deletedAt: DateTime.now().toUtc().toIso8601String(),
-      summary: currentIssue.summary,
-      issueTypeId: currentIssue.issueTypeId.isEmpty
-          ? null
-          : currentIssue.issueTypeId,
-      parentKey: currentIssue.parentKey,
-      epicKey: currentIssue.epicKey,
-    );
-    _knownTombstoneKeys.add(tombstone.key);
-    _knownTombstonesByKey[tombstone.key] = tombstone;
-    final latestSnapshot = _snapshot ?? snapshot;
-    final snapshotDeletedByKey = {
-      for (final entry in latestSnapshot.repositoryIndex.deleted)
-        entry.key: entry,
-      ..._knownTombstonesByKey,
-      tombstone.key: tombstone,
-    };
-    final snapshotDeletedTombstones = snapshotDeletedByKey.values.toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
-    final remainingIssues = latestSnapshot.issues
-        .where((candidate) => candidate.key != currentIssue.key)
-        .toList(growable: false);
-    final repositoryIndex = _deriveRepositoryIndex(
-      remainingIssues,
-      snapshotDeletedTombstones,
-    );
-    final indexedRemainingIssues = [
-      for (final remainingIssue in remainingIssues)
-        remainingIssue.withRepositoryIndex(
-          repositoryIndex.entryForKey(remainingIssue.key),
-        ),
-    ]..sort((a, b) => a.key.compareTo(b.key));
-    final updatedSnapshot = TrackerSnapshot(
-      project: latestSnapshot.project,
-      repositoryIndex: repositoryIndex,
-      issues: indexedRemainingIssues,
-    );
-
-    final tombstoneArtifactPrefix = _joinPath(
-      projectRoot,
-      '.trackstate/tombstones/',
-    );
-    final tombstoneKeysInArtifacts = blobPaths
-        .where(
-          (path) =>
-              path.startsWith(tombstoneArtifactPrefix) &&
-              path.endsWith('.json'),
-        )
-        .map((path) => path.split('/').last.replaceAll('.json', ''))
-        .toSet();
-    final tombstoneKeysForIndex = <String>{
-      ..._knownTombstoneKeys,
-      ...tombstoneKeysInArtifacts,
-    };
-    final tombstoneIndexTombstones =
-        snapshotDeletedTombstones
-            .where((entry) => tombstoneKeysForIndex.contains(entry.key))
-            .toList(growable: false)
-          ..sort((a, b) => a.key.compareTo(b.key));
-
-    final tombstoneIndexPath = _joinPath(
-      projectRoot,
-      '.trackstate/index/tombstones.json',
-    );
-    final tombstoneArtifactPath = _tombstoneArtifactPath(
-      projectRoot,
-      tombstone.key,
-    );
-    final changes = <RepositoryFileChange>[
-      for (final path in issueArtifactPaths)
-        RepositoryDeleteFileChange(path: path),
-      RepositoryTextFileChange(
-        path: tombstoneIndexPath,
-        content:
-            '${jsonEncode(_tombstoneIndexEntriesJson(projectRoot, tombstoneIndexTombstones))}\n',
-        expectedRevision: await _existingRevision(
-          path: tombstoneIndexPath,
-          ref: writeBranch,
-          blobPaths: blobPaths,
-        ),
-      ),
-      RepositoryTextFileChange(
-        path: tombstoneArtifactPath,
-        content: '${jsonEncode(_deletedIssueTombstoneJson(tombstone))}\n',
-        expectedRevision: await _existingRevision(
-          path: tombstoneArtifactPath,
-          ref: writeBranch,
-          blobPaths: blobPaths,
-        ),
-      ),
-    ];
-
+    await _acquireDeleteMutationLock();
     try {
-      await mutator.applyFileChanges(
-        RepositoryFileChangeRequest(
-          branch: writeBranch,
-          message: 'Delete ${currentIssue.key} and reserve tombstone',
-          changes: changes,
+      if (issue.storagePath.isEmpty) {
+        throw const TrackStateRepositoryException(
+          'This issue has no repository file path and cannot be deleted.',
+        );
+      }
+      final permission = await _provider.getPermission();
+      if (!permission.canWrite) {
+        throw const TrackStateRepositoryException(
+          'Connect a repository session with write access first.',
+        );
+      }
+      final mutator = switch (_provider) {
+        final RepositoryFileMutator supported => supported,
+        _ => throw const TrackStateRepositoryException(
+          'This repository provider does not support deleting issues yet.',
         ),
+      };
+      final snapshot = _snapshot ?? await loadSnapshot();
+      final currentIssue = snapshot.issues.firstWhere(
+        (candidate) => candidate.key == issue.key,
+        orElse: () => issue,
       );
-      _snapshot = updatedSnapshot;
-      return tombstone;
-    } catch (_) {
-      _knownTombstoneKeys.remove(tombstone.key);
-      _knownTombstonesByKey.remove(tombstone.key);
-      rethrow;
+      final indexEntry = snapshot.repositoryIndex.entryForKey(currentIssue.key);
+      if (indexEntry != null && indexEntry.childKeys.isNotEmpty) {
+        throw TrackStateRepositoryException(
+          'Cannot delete ${currentIssue.key} because it still has child issues: '
+          '${indexEntry.childKeys.join(', ')}.',
+        );
+      }
+
+      final writeBranch = await _provider.resolveWriteBranch();
+      final tree = await _provider.listTree(ref: writeBranch);
+      final blobPaths = tree
+          .where((entry) => entry.type == 'blob')
+          .map((entry) => entry.path)
+          .toSet();
+      final projectRoot = currentIssue.storagePath.split('/').first;
+      if (projectRoot.isEmpty) {
+        throw const TrackStateRepositoryException(
+          'Could not resolve the project root for the issue being deleted.',
+        );
+      }
+      final issueRoot = currentIssue.storagePath.substring(
+        0,
+        currentIssue.storagePath.lastIndexOf('/'),
+      );
+      final issueArtifactPaths =
+          blobPaths
+              .where(
+                (path) =>
+                    path == currentIssue.storagePath ||
+                    path.startsWith('$issueRoot/'),
+              )
+              .toList()
+            ..sort();
+      if (issueArtifactPaths.isEmpty) {
+        throw TrackStateRepositoryException(
+          'Could not find repository artifacts for ${currentIssue.key}.',
+        );
+      }
+
+      final tombstone = DeletedIssueTombstone(
+        key: currentIssue.key,
+        project: currentIssue.project,
+        formerPath: currentIssue.storagePath,
+        deletedAt: DateTime.now().toUtc().toIso8601String(),
+        summary: currentIssue.summary,
+        issueTypeId: currentIssue.issueTypeId.isEmpty
+            ? null
+            : currentIssue.issueTypeId,
+        parentKey: currentIssue.parentKey,
+        epicKey: currentIssue.epicKey,
+      );
+      _knownTombstoneKeys.add(tombstone.key);
+      _knownTombstonesByKey[tombstone.key] = tombstone;
+      final latestSnapshot = _snapshot ?? snapshot;
+      final snapshotDeletedByKey = {
+        for (final entry in latestSnapshot.repositoryIndex.deleted)
+          entry.key: entry,
+        ..._knownTombstonesByKey,
+        tombstone.key: tombstone,
+      };
+      final snapshotDeletedTombstones = snapshotDeletedByKey.values.toList()
+        ..sort((a, b) => a.key.compareTo(b.key));
+      final remainingIssues = latestSnapshot.issues
+          .where((candidate) => candidate.key != currentIssue.key)
+          .toList(growable: false);
+      final repositoryIndex = _deriveRepositoryIndex(
+        remainingIssues,
+        snapshotDeletedTombstones,
+      );
+      final indexedRemainingIssues = [
+        for (final remainingIssue in remainingIssues)
+          remainingIssue.withRepositoryIndex(
+            repositoryIndex.entryForKey(remainingIssue.key),
+          ),
+      ]..sort((a, b) => a.key.compareTo(b.key));
+      final updatedSnapshot = TrackerSnapshot(
+        project: latestSnapshot.project,
+        repositoryIndex: repositoryIndex,
+        issues: indexedRemainingIssues,
+      );
+
+      final tombstoneArtifactPrefix = _joinPath(
+        projectRoot,
+        '.trackstate/tombstones/',
+      );
+      final tombstoneKeysInArtifacts = blobPaths
+          .where(
+            (path) =>
+                path.startsWith(tombstoneArtifactPrefix) &&
+                path.endsWith('.json'),
+          )
+          .map((path) => path.split('/').last.replaceAll('.json', ''))
+          .toSet();
+      final tombstoneKeysForIndex = <String>{
+        ..._knownTombstoneKeys,
+        ...tombstoneKeysInArtifacts,
+      };
+      final tombstoneIndexTombstones =
+          snapshotDeletedTombstones
+              .where((entry) => tombstoneKeysForIndex.contains(entry.key))
+              .toList(growable: false)
+            ..sort((a, b) => a.key.compareTo(b.key));
+
+      final tombstoneIndexPath = _joinPath(
+        projectRoot,
+        '.trackstate/index/tombstones.json',
+      );
+      final issuesIndexPath = _joinPath(
+        projectRoot,
+        '.trackstate/index/issues.json',
+      );
+      final tombstoneArtifactPath = _tombstoneArtifactPath(
+        projectRoot,
+        tombstone.key,
+      );
+      final changes = <RepositoryFileChange>[
+        for (final path in issueArtifactPaths)
+          RepositoryDeleteFileChange(path: path),
+        RepositoryTextFileChange(
+          path: issuesIndexPath,
+          content:
+              '${jsonEncode(_repositoryIndexEntriesJson(repositoryIndex.entries))}\n',
+          expectedRevision: await _existingRevision(
+            path: issuesIndexPath,
+            ref: writeBranch,
+            blobPaths: blobPaths,
+          ),
+        ),
+        RepositoryTextFileChange(
+          path: tombstoneIndexPath,
+          content:
+              '${jsonEncode(_tombstoneIndexEntriesJson(projectRoot, tombstoneIndexTombstones))}\n',
+          expectedRevision: await _existingRevision(
+            path: tombstoneIndexPath,
+            ref: writeBranch,
+            blobPaths: blobPaths,
+          ),
+        ),
+        RepositoryTextFileChange(
+          path: tombstoneArtifactPath,
+          content: '${jsonEncode(_deletedIssueTombstoneJson(tombstone))}\n',
+          expectedRevision: await _existingRevision(
+            path: tombstoneArtifactPath,
+            ref: writeBranch,
+            blobPaths: blobPaths,
+          ),
+        ),
+      ];
+
+      try {
+        await mutator.applyFileChanges(
+          RepositoryFileChangeRequest(
+            branch: writeBranch,
+            message: 'Delete ${currentIssue.key} and reserve tombstone',
+            changes: changes,
+          ),
+        );
+        _snapshot = updatedSnapshot;
+        return tombstone;
+      } catch (_) {
+        _knownTombstoneKeys.remove(tombstone.key);
+        _knownTombstonesByKey.remove(tombstone.key);
+        rethrow;
+      }
+    } finally {
+      _releaseDeleteMutationLock();
     }
   }
 
@@ -707,15 +749,23 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       configRoot: configRoot,
       locale: defaultLocale,
     );
-    final issueTypes = await _getConfigEntries(
+    final issueTypes = await _loadRequiredConfigEntries(
       _joinPath(configRoot, 'issue-types.json'),
+      blobPaths: blobPaths,
       localizedLabels: localizedLabels['issueTypes'] ?? const {},
       locale: defaultLocale,
+      loadWarnings: loadWarnings,
+      warningSubject: 'issue types',
+      fallbackEntries: _issueTypeDefinitions,
     );
-    final statuses = await _getConfigEntries(
+    final statuses = await _loadRequiredConfigEntries(
       _joinPath(configRoot, 'statuses.json'),
+      blobPaths: blobPaths,
       localizedLabels: localizedLabels['statuses'] ?? const {},
       locale: defaultLocale,
+      loadWarnings: loadWarnings,
+      warningSubject: 'statuses',
+      fallbackEntries: _statusDefinitions,
     );
     final fields = await _getFieldDefinitions(
       _joinPath(configRoot, 'fields.json'),
@@ -917,6 +967,35 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       localizedLabels: localizedLabels,
       locale: locale,
     );
+  }
+
+  Future<List<TrackStateConfigEntry>> _loadRequiredConfigEntries(
+    String path, {
+    required Set<String> blobPaths,
+    required Map<String, String> localizedLabels,
+    required String locale,
+    required List<String> loadWarnings,
+    required String warningSubject,
+    required List<TrackStateConfigEntry> fallbackEntries,
+  }) async {
+    if (!blobPaths.contains(path)) {
+      loadWarnings.add(
+        'Falling back to built-in $warningSubject because $path is missing.',
+      );
+      return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
+    }
+    try {
+      return await _getConfigEntries(
+        path,
+        localizedLabels: localizedLabels,
+        locale: locale,
+      );
+    } on FormatException catch (error) {
+      loadWarnings.add(
+        'Falling back to built-in $warningSubject after failing to parse $path: $error',
+      );
+      return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
+    }
   }
 
   Future<List<TrackStateConfigEntry>> _loadOptionalConfigEntries({

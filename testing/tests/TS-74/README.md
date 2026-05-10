@@ -1,12 +1,12 @@
 # TS-74
 
-Validates the CLI quick-start fork connectivity path by reading `README.md`
-from the actual fork under test, resolving the authenticated user's
-`trackstate-setup` fork by default, extracting an executable GitHub CLI command
-from the `CLI quick start` section, and running that documented command against
-the fork. The test only passes when the README itself documents a runnable
-quick-start command whose JSON output matches the fork's live
-`DEMO/project.json`.
+Validates the CLI quick-start fork connectivity path by reading the canonical
+`README.md` from `IstiN/trackstate-setup` (or a `TS74_DOCUMENTATION_REPOSITORY`
+override), resolving the authenticated user's `trackstate-setup` fork by
+default, extracting an executable GitHub CLI command from the `CLI quick
+start` section, and running that documented command against the fork. The test
+only passes when the setup README documents a runnable quick-start command
+whose JSON output matches the fork's live `DEMO/project.json`.
 
 ## Install dependencies
 
@@ -31,6 +31,9 @@ python3 -m unittest discover -s testing/tests/TS-74 -p 'test_*.py'
 - `TS74_SETUP_REPOSITORY` or `TRACKSTATE_SETUP_REPOSITORY` (optional): setup
   repository to validate. When omitted, the test targets
   `<authenticated-login>/trackstate-setup`.
+- `TS74_DOCUMENTATION_REPOSITORY` (optional): repository whose `README.md`
+  provides the canonical CLI quick-start instructions. Defaults to
+  `IstiN/trackstate-setup`.
 - `TS74_UPSTREAM_SETUP_REPOSITORY` (optional): upstream template repository
   that the fork must point to. Defaults to `IstiN/trackstate-setup`.
 - `TS74_FORK_REPOSITORY_NAME` (optional): repository name used when deriving the

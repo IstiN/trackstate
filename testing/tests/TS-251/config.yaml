@@ -1,0 +1,22 @@
+test_id: TS-251
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate-setup
+  - network access to GitHub REST APIs
+runtime_inputs:
+  repository: IstiN/trackstate-setup
+  base_branch: main
+  target_workflow_name: Release on main
+  target_workflow_path: .github/workflows/release-on-main.yml
+  branch_prefix: ts251-actionlint-probe
+  commit_message: "TS-251 probe: push invalid release workflow"
+  mutation_search_text: "    branches: [main]"
+  mutation_replacement_text: "    branches: [main"
+  expected_actionlint_marker: actionlint
+  poll_interval_seconds: 5
+  run_timeout_seconds: 60
+notes:
+  - Creates a disposable branch in IstiN/trackstate-setup and corrupts release-on-main.yml with invalid YAML.
+  - Expects a contributor-visible GitHub Actions pipeline to fail on actionlint after the branch push.

@@ -100,44 +100,10 @@ void main() {
           'TS-242 post-delete artifact observation did not complete.',
         );
       }
-
-      // Step 2: Verify that issues.json no longer contains TRACK-4 or TRACK-5
-      expect(
-        afterDeletionArtifacts.activeIndexExists,
-        isTrue,
-        reason:
-            'Expected: ${afterDeletionArtifacts.activeIndexPath} should still exist after concurrent deletion.',
-      );
-
       final afterIssueKeys = afterDeletionArtifacts.activeIndexJson
           .map((entry) => entry['key'])
           .whereType<String>()
           .toSet();
-
-      for (final deletedKey
-          in Ts242ConcurrentActiveIndexFixture.deleteIssueKeys) {
-        expect(
-          afterIssueKeys,
-          isNot(contains(deletedKey)),
-          reason:
-              'Expected Result: ${afterDeletionArtifacts.activeIndexPath} should no longer contain $deletedKey after concurrent deletion.',
-        );
-      }
-
-      expect(
-        afterIssueKeys,
-        contains(Ts242ConcurrentActiveIndexFixture.survivingIssueKey),
-        reason:
-            'Expected Result: ${afterDeletionArtifacts.activeIndexPath} should still contain the surviving issue (${Ts242ConcurrentActiveIndexFixture.survivingIssueKey}).',
-      );
-
-      expect(
-        afterDeletionArtifacts.worktreeStatusLines,
-        isEmpty,
-        reason:
-            'Expected result: the concurrent delete workflow should leave the Git worktree clean, but git status returned ${afterDeletionArtifacts.worktreeStatusLines.join(' | ')}.',
-      );
-
       // Reload repository and verify human-style search results
       final LocalGitRepositoryPort reloadedRepositoryPort = dependencies
           .createLocalGitRepositoryPort(tester);
@@ -153,37 +119,98 @@ void main() {
           'TS-242 post-delete repository reload did not complete.',
         );
       }
-
-      // Human-style verification: search no longer returns deleted issues
       final afterSearchKeys = afterDeletion.allVisibleIssueSearchResults
           .map((issue) => issue.key)
           .toList();
-      expect(
-        afterSearchKeys,
-        [Ts242ConcurrentActiveIndexFixture.survivingIssueKey],
-        reason:
-            'Human-style verification: repository search should show only the surviving issue after concurrent deletion.',
-      );
-
-      // Verify that the active index entries match search results
       final finalIndexKeys = afterDeletion.activeIndexJson
           .map((entry) => entry['key'])
           .whereType<String>()
           .toSet();
-      expect(
-        finalIndexKeys,
-        unorderedEquals(afterSearchKeys.toSet()),
-        reason:
-            'Expected result: the active search index should be strictly tied to the existence of issues in the underlying Git tree.',
-      );
 
-      expect(
-        afterDeletion.worktreeStatusLines,
-        isEmpty,
-        reason:
-            'Expected result: the concurrent delete workflow should leave the Git worktree clean after reload, but git status returned ${afterDeletion.worktreeStatusLines.join(' | ')}.',
-      );
+      final failures = <String>[];
+
+      if (!afterDeletionArtifacts.activeIndexExists) {
+        failures.add(
+          'Step 2 failed: ${afterDeletionArtifacts.activeIndexPath} should still exist after concurrent deletion.',
+        );
+      }
+
+      for (final deletedKey
+          in Ts242ConcurrentActiveIndexFixture.deleteIssueKeys) {
+        if (afterIssueKeys.contains(deletedKey)) {
+          failures.add(
+            'Step 2 failed: ${afterDeletionArtifacts.activeIndexPath} still contained $deletedKey after concurrent deletion.',
+          );
+        }
+      }
+
+      if (!afterIssueKeys.contains(
+        Ts242ConcurrentActiveIndexFixture.survivingIssueKey,
+      )) {
+        failures.add(
+          'Step 2 failed: ${afterDeletionArtifacts.activeIndexPath} no longer contained the surviving issue (${Ts242ConcurrentActiveIndexFixture.survivingIssueKey}).',
+        );
+      }
+
+      if (afterDeletionArtifacts.worktreeStatusLines.isNotEmpty) {
+        failures.add(
+          'Step 2 failed: the concurrent delete workflow left the Git worktree dirty before reload (${afterDeletionArtifacts.worktreeStatusLines.join(' | ')}).',
+        );
+      }
+
+      if (!_sameKeys(afterSearchKeys.toSet(), <String>{
+        Ts242ConcurrentActiveIndexFixture.survivingIssueKey,
+      })) {
+        failures.add(
+          'Human-style verification failed: repository search after reload returned $afterSearchKeys instead of only ${Ts242ConcurrentActiveIndexFixture.survivingIssueKey}.',
+        );
+      }
+
+      if (!_sameKeys(finalIndexKeys, afterSearchKeys.toSet())) {
+        failures.add(
+          'Expected result failed: the reloaded active search index keys $finalIndexKeys did not match the user-visible search results $afterSearchKeys.',
+        );
+      }
+
+      if (afterDeletion.worktreeStatusLines.isNotEmpty) {
+        failures.add(
+          'Expected result failed: the concurrent delete workflow left the Git worktree dirty after reload (${afterDeletion.worktreeStatusLines.join(' | ')}).',
+        );
+      }
+
+      if (failures.isNotEmpty) {
+        fail(
+          'Expected concurrent deletes to remove TRACK-4 and TRACK-5 from the active issues index and leave only TRACK-3 visible after reload. '
+          '${failures.join(' ')} '
+          '${_describePostDeleteState(afterDeletionArtifacts, afterDeletion)}',
+        );
+      }
     },
     timeout: const Timeout(Duration(seconds: 20)),
   );
+}
+
+bool _sameKeys(Set<String> actual, Set<String> expected) =>
+    actual.length == expected.length && actual.containsAll(expected);
+
+String _describePostDeleteState(
+  Ts242ConcurrentDeleteArtifactsObservation afterDeletionArtifacts,
+  Ts242ConcurrentDeleteObservation afterDeletion,
+) {
+  final artifactIndexKeys = afterDeletionArtifacts.activeIndexJson
+      .map((entry) => entry['key'])
+      .whereType<String>()
+      .toList(growable: false);
+  final reloadedIndexKeys = afterDeletion.activeIndexJson
+      .map((entry) => entry['key'])
+      .whereType<String>()
+      .toList(growable: false);
+  final searchKeys = afterDeletion.allVisibleIssueSearchResults
+      .map((issue) => issue.key)
+      .toList(growable: false);
+  return 'Observed artifactState(activeIndexExists=${afterDeletionArtifacts.activeIndexExists}, '
+      'activeIndexKeys=$artifactIndexKeys, head=${afterDeletionArtifacts.headRevision}, '
+      'worktreeStatus=${afterDeletionArtifacts.worktreeStatusLines}) '
+      'and reloadedState(searchKeys=$searchKeys, activeIndexKeys=$reloadedIndexKeys, '
+      'head=${afterDeletion.headRevision}, worktreeStatus=${afterDeletion.worktreeStatusLines}).';
 }

@@ -499,6 +499,48 @@ void main() {
   );
 
   test(
+    'local repository falls back to built-in config when the config directory is missing',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      await _git(repo.path, ['rm', '-r', 'DEMO/config']);
+      await _git(repo.path, ['commit', '-m', 'Remove config directory']);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+
+      expect(snapshot.project.issueTypeDefinitions.map((type) => type.id), contains('story'));
+      expect(snapshot.project.statusDefinitions.map((status) => status.id), contains('todo'));
+      expect(snapshot.project.fieldLabel('summary'), 'Summary');
+      expect(snapshot.project.fieldLabel('description'), 'Description');
+      expect(
+        snapshot.loadWarnings,
+        contains(
+          contains(
+            'Falling back to built-in issue types because DEMO/config/issue-types.json is missing',
+          ),
+        ),
+      );
+      expect(
+        snapshot.loadWarnings,
+        contains(
+          contains(
+            'Falling back to built-in statuses because DEMO/config/statuses.json is missing',
+          ),
+        ),
+      );
+      expect(
+        snapshot.loadWarnings,
+        contains(
+          contains('Falling back to built-in fields because DEMO/config/fields.json is missing'),
+        ),
+      );
+      expect(snapshot.issues, isNotEmpty);
+    },
+  );
+
+  test(
     'local provider rejects stale attachment writes with expected revisions',
     () async {
       final repo = await _createLocalRepository();
