@@ -118,19 +118,24 @@ class ActionlintNonWorkflowPullRequestGateTest(unittest.TestCase):
             f"Observed mergeStateStatus: {observation.pull_request_merge_state_status}\n"
             f"Observed status checks: {observation.observed_status_check_names}",
         )
-        self.assertIn(
-            observation.pull_request_merge_state_status,
-            {"CLEAN", "HAS_HOOKS", "UNSTABLE"},
-            "Human-style verification failed for Step 4: the GitHub PR surface did "
-            "not keep the merge button in an enabled-style state for the README-only "
-            "change.\n"
-            f"Pull Request URL: {observation.pull_request_url}\n"
-            f"Checks URL: {observation.pull_request_checks_url}\n"
-            f"Observed mergeStateStatus: {observation.pull_request_merge_state_status}\n"
-            f"Observed mergeable: {observation.pull_request_mergeable}\n"
-            f"Observed status checks: {observation.observed_status_check_names}\n"
-            f"Observed workflow checks: {observation.observed_status_check_workflow_names}",
-        )
+        unrelated_required_gates = self._unrelated_required_gates(observation)
+        if not unrelated_required_gates:
+            self.assertIn(
+                observation.pull_request_merge_state_status,
+                {"CLEAN", "HAS_HOOKS", "UNSTABLE"},
+                "Human-style verification failed for Step 4: the GitHub PR surface did "
+                "not keep the merge button in an enabled-style state for the README-only "
+                "change when no unrelated required checks were configured.\n"
+                f"Pull Request URL: {observation.pull_request_url}\n"
+                f"Checks URL: {observation.pull_request_checks_url}\n"
+                f"Observed mergeStateStatus: {observation.pull_request_merge_state_status}\n"
+                f"Observed mergeable: {observation.pull_request_mergeable}\n"
+                f"Observed status checks: {observation.observed_status_check_names}\n"
+                f"Observed workflow checks: {observation.observed_status_check_workflow_names}\n"
+                f"Required check contexts: {observation.required_check_contexts}\n"
+                f"Required workflow names: {observation.required_check_workflow_names}\n"
+                f"Required workflow paths: {observation.required_check_workflow_paths}",
+            )
 
     def _assert_actionlint_gate(
         self,
@@ -178,6 +183,22 @@ class ActionlintNonWorkflowPullRequestGateTest(unittest.TestCase):
                 f"Observed steps: {observation.observed_step_names}\n"
                 f"Observed log excerpt:\n{observation.actionlint_log_excerpt}",
             )
+
+    def _unrelated_required_gates(
+        self,
+        observation: ActionlintNonWorkflowPullRequestGateObservation,
+    ) -> list[str]:
+        marker = self.config.expected_actionlint_marker.lower()
+        required_gate_entries = [
+            *observation.required_check_contexts,
+            *observation.required_check_workflow_names,
+            *observation.required_check_workflow_paths,
+        ]
+        return [
+            entry
+            for entry in required_gate_entries
+            if entry and marker not in entry.lower()
+        ]
 
     def _write_result_if_requested(self, payload: dict[str, object]) -> None:
         result_path = os.environ.get("TS262_RESULT_PATH")
