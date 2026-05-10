@@ -72,6 +72,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       Queue<Completer<void>>();
   bool _deleteMutationInProgress = false;
 
+  TrackStateProviderAdapter get providerAdapter => _provider;
   ProviderSession? get session => _session;
 
   Future<void> _acquireDeleteMutationLock() async {
@@ -1728,11 +1729,16 @@ String _body(String markdown) {
 }
 
 String _section(String markdown, String title) {
-  final match = RegExp(
-    '^# $title\\s*\\n([\\s\\S]*?)(?=\\n# |\\z)',
-    multiLine: true,
-  ).firstMatch(markdown);
-  return match?.group(1)?.trim() ?? '';
+  final header = '# $title';
+  final start = markdown.indexOf(header);
+  if (start == -1) return '';
+  final contentStart = markdown.indexOf('\n', start);
+  if (contentStart == -1) return '';
+  final nextHeaderStart = markdown.indexOf('\n# ', contentStart + 1);
+  final content = nextHeaderStart == -1
+      ? markdown.substring(contentStart + 1)
+      : markdown.substring(contentStart + 1, nextHeaderStart);
+  return content.trim();
 }
 
 String _replaceFrontmatterValue(String markdown, String key, String value) {
@@ -1745,12 +1751,17 @@ String _replaceFrontmatterValue(String markdown, String key, String value) {
 
 String _replaceSection(String markdown, String title, String content) {
   final normalizedContent = content.trim();
-  final pattern = RegExp(
-    '^# $title\\s*\\n([\\s\\S]*?)(?=\\n# |\\z)',
-    multiLine: true,
-  );
-  if (pattern.hasMatch(markdown)) {
-    return markdown.replaceFirst(pattern, '# $title\n\n$normalizedContent');
+  final header = '# $title';
+  final start = markdown.indexOf(header);
+  if (start != -1) {
+    final nextHeaderStart = markdown.indexOf('\n# ', start + header.length);
+    final prefix = markdown.substring(0, start);
+    final replacement = '# $title\n\n$normalizedContent';
+    if (nextHeaderStart == -1) {
+      return '$prefix$replacement';
+    }
+    final suffix = markdown.substring(nextHeaderStart + 1);
+    return '$prefix$replacement\n\n$suffix';
   }
   final trimmed = markdown.trimRight();
   final separator = trimmed.isEmpty ? '' : '\n\n';
