@@ -65,6 +65,7 @@ class DependabotGitHubActionsMonitorTest(unittest.TestCase):
             "Step 2 failed: the Dependabot configuration file did not decode to a "
             "YAML mapping.\n"
             f"File path: {self.config.dependabot_path}\n"
+            f"YAML parse error: {observation.raw_file_parse_error}\n"
             f"Observed file contents:\n{observation.raw_file_text}",
         )
         self.assertTrue(

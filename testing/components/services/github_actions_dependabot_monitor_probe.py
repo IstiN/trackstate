@@ -63,36 +63,43 @@ class GitHubActionsDependabotMonitorProbeService(
             raw_file_error = str(error)
 
         parsed_file_is_mapping = False
+        raw_file_parse_error: str | None = None
         updates_count = 0
         github_actions_update_present = False
         github_actions_directory: str | None = None
         github_actions_schedule_keys: list[str] = []
         github_actions_schedule_interval: str | None = None
         if raw_file_text:
-            parsed = yaml.safe_load(raw_file_text)
-            if isinstance(parsed, dict):
-                parsed_file_is_mapping = True
-                updates = parsed.get("updates")
-                if isinstance(updates, list):
-                    updates_count = len(updates)
-                    github_actions_update = self._github_actions_update(updates)
-                    if github_actions_update is not None:
-                        github_actions_update_present = True
-                        github_actions_directory = self._read_string_value(
-                            github_actions_update,
-                            "directory",
-                        )
-                        schedule = github_actions_update.get("schedule")
-                        if isinstance(schedule, dict):
-                            github_actions_schedule_keys = [
-                                key
-                                for key in schedule.keys()
-                                if isinstance(key, str) and key.strip()
-                            ]
-                            github_actions_schedule_interval = self._read_string_value(
-                                schedule,
-                                "interval",
+            try:
+                parsed = yaml.safe_load(raw_file_text)
+            except yaml.YAMLError as error:
+                raw_file_parse_error = str(error)
+            else:
+                if isinstance(parsed, dict):
+                    parsed_file_is_mapping = True
+                    updates = parsed.get("updates")
+                    if isinstance(updates, list):
+                        updates_count = len(updates)
+                        github_actions_update = self._github_actions_update(updates)
+                        if github_actions_update is not None:
+                            github_actions_update_present = True
+                            github_actions_directory = self._read_string_value(
+                                github_actions_update,
+                                "directory",
                             )
+                            schedule = github_actions_update.get("schedule")
+                            if isinstance(schedule, dict):
+                                github_actions_schedule_keys = [
+                                    key
+                                    for key in schedule.keys()
+                                    if isinstance(key, str) and key.strip()
+                                ]
+                                github_actions_schedule_interval = (
+                                    self._read_string_value(
+                                        schedule,
+                                        "interval",
+                                    )
+                                )
 
         ui_expected_texts = tuple(
             dict.fromkeys(
@@ -139,6 +146,7 @@ class GitHubActionsDependabotMonitorProbeService(
             raw_file_api_endpoint=raw_file_endpoint,
             raw_file_error=raw_file_error,
             raw_file_text=raw_file_text,
+            raw_file_parse_error=raw_file_parse_error,
             parsed_file_is_mapping=parsed_file_is_mapping,
             updates_count=updates_count,
             github_actions_update_present=github_actions_update_present,

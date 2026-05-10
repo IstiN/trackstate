@@ -7,7 +7,6 @@ from testing.components.pages.github_repository_file_page import (
     GitHubRepositoryFilePage,
 )
 from testing.core.interfaces.web_app_session import WebAppSession
-from testing.frameworks.python.urllib_web_app_session import UrllibWebAppRuntime
 
 WebAppRuntimeFactory = Callable[[], AbstractContextManager[WebAppSession]]
 
@@ -43,7 +42,10 @@ def _default_runtime_factory() -> AbstractContextManager[WebAppSession]:
         from testing.frameworks.python.playwright_web_app_session import (
             PlaywrightWebAppRuntime,
         )
-
-        return PlaywrightWebAppRuntime()
-    except ModuleNotFoundError:
-        return UrllibWebAppRuntime()
+    except ModuleNotFoundError as error:
+        raise AssertionError(
+            "Playwright browser verification is required for GitHub file-page "
+            "checks, but the Playwright runtime is not available in this "
+            "environment."
+        ) from error
+    return PlaywrightWebAppRuntime()

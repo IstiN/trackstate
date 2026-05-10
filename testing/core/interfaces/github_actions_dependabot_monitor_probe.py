@@ -14,6 +14,7 @@ class GitHubActionsDependabotMonitorObservation:
     raw_file_api_endpoint: str
     raw_file_error: str | None
     raw_file_text: str
+    raw_file_parse_error: str | None
     parsed_file_is_mapping: bool
     updates_count: int
     github_actions_update_present: bool
