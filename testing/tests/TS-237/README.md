@@ -1,11 +1,11 @@
 # TS-237
 
-Validates the README `CLI quick start` command behavior when the target
-`DEMO/project.json` file is missing from the fork under test. The test reads the
-deployed `IstiN/trackstate-setup` quick-start documentation, extracts the
-documented `gh api` validation command, executes that exact command against the
-fork under test, and expects the terminal-visible result to be a 404 error
-instead of JSON content.
+Validates the README `CLI quick start` negative-check command behavior for the
+missing-file scenario. The test reads the deployed `IstiN/trackstate-setup`
+quick-start documentation, extracts the documented `gh api` command for
+`DEMO/project.missing.json`, executes that exact command against the fork under
+test, and expects the terminal-visible result to be a 404 error instead of JSON
+content.
 
 ## Install dependencies
 
@@ -17,8 +17,8 @@ are available before running the test:
 3. An authenticated GitHub CLI session (`gh auth status`)
 4. A fork of `IstiN/trackstate-setup` for the authenticated GitHub user, or a
    `TS74_SETUP_REPOSITORY` / `TRACKSTATE_SETUP_REPOSITORY` override that points
-   to a fork of `IstiN/trackstate-setup` where `DEMO/project.json` is missing
-   or renamed
+   to a fork of `IstiN/trackstate-setup` where
+   `DEMO/project.missing.json` does not exist
 
 ## Run this test
 
