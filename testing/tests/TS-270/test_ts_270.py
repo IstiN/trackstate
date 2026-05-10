@@ -41,6 +41,28 @@ class LocalTargetValidationCliContractTest(unittest.TestCase):
             f"Expected command: {' '.join(self.config.requested_command)}\n"
             f"Observed command: {observation.requested_command_text}",
         )
+        self.assertIsNotNone(
+            observation.compiled_binary_path,
+            "Precondition failed: TS-270 must execute a binary compiled from this "
+            "checkout so the probe cannot pass against an unrelated installation.\n"
+            f"Executed command: {observation.executed_command_text}\n"
+            f"Fallback reason: {observation.fallback_reason}",
+        )
+        self.assertEqual(
+            observation.executed_command[0],
+            observation.compiled_binary_path,
+            "Precondition failed: TS-270 did not run the compiled repository-local "
+            "binary from this checkout.\n"
+            f"Executed command: {observation.executed_command_text}\n"
+            f"Compiled binary path: {observation.compiled_binary_path}",
+        )
+        self.assertIn(
+            "compiled from this checkout",
+            observation.fallback_reason or "",
+            "Precondition failed: TS-270 no longer documents why it avoided PATH "
+            "resolution for the TrackState executable.\n"
+            f"Fallback reason: {observation.fallback_reason}",
+        )
         self.assertIsInstance(
             payload,
             dict,

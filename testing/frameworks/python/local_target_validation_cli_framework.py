@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import tempfile
 
@@ -28,20 +27,8 @@ class PythonLocalTargetValidationCliFramework(LocalTargetValidationCliProbe):
         *,
         config: LocalTargetValidationCliConfig,
     ) -> LocalTargetValidationCliObservation:
-        preferred_binary = shutil.which(config.requested_command[0])
         with tempfile.TemporaryDirectory(prefix="trackstate-ts-270-") as temp_dir:
             working_directory = Path(temp_dir)
-            if preferred_binary:
-                executed_command = (preferred_binary, *config.requested_command[1:])
-                return LocalTargetValidationCliObservation(
-                    requested_command=config.requested_command,
-                    executed_command=executed_command,
-                    fallback_reason=None,
-                    working_directory=str(working_directory),
-                    compiled_binary_path=None,
-                    result=self._run(executed_command, cwd=working_directory),
-                )
-
             with tempfile.TemporaryDirectory(prefix="trackstate-ts-270-bin-") as bin_dir:
                 executable_path = Path(bin_dir) / "trackstate"
                 self._compile_executable(executable_path)
@@ -53,9 +40,9 @@ class PythonLocalTargetValidationCliFramework(LocalTargetValidationCliProbe):
                     requested_command=config.requested_command,
                     executed_command=executed_command,
                     fallback_reason=(
-                        '"trackstate" was not available on PATH, so the probe compiled '
-                        "a temporary repository-local executable to reproduce the "
-                        "standalone invocation from a non-repository working directory."
+                        "Pinned execution to a temporary executable compiled from this "
+                        "checkout so TS-270 cannot validate an unrelated `trackstate` "
+                        "binary from PATH."
                     ),
                     working_directory=str(working_directory),
                     compiled_binary_path=str(executable_path),

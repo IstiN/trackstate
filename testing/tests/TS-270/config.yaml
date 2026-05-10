@@ -8,4 +8,4 @@ dependencies:
 notes:
   - Executes `trackstate session --target local` from a temporary directory that is not a Git repository.
   - Verifies the CLI exits with code 4 and returns `ok: false` with `error.code: "REPOSITORY_OPEN_FAILED"`.
-  - Falls back to a temporary compiled executable when `trackstate` is not installed on PATH.
+  - Always compiles a temporary executable from this checkout before invoking the CLI from the non-repository directory, so the probe never depends on any `trackstate` binary already installed on PATH.
