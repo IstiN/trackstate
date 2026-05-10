@@ -133,6 +133,41 @@ class ActionlintWorkflowGateTest(unittest.TestCase):
             f"Observed steps: {observation.observed_step_names}\n"
             f"Observed step conclusion: {observation.actionlint_step_conclusion}",
         )
+        self.assertIsNotNone(
+            observation.actionlint_log_excerpt,
+            "Human-style verification failed: the actionlint run did not expose any "
+            "failed log output that a contributor could use to understand the "
+            "workflow problem.\n"
+            f"Run URL: {observation.actionlint_run_url}\n"
+            f"Observed jobs: {observation.observed_job_names}",
+        )
+        assert observation.actionlint_log_excerpt is not None
+        log_excerpt = observation.actionlint_log_excerpt.lower()
+        target_file_name = Path(self.config.target_workflow_path).name.lower()
+        self.assertTrue(
+            (
+                self.config.target_workflow_path.lower() in log_excerpt
+                or target_file_name in log_excerpt
+            )
+            and any(
+                marker in log_excerpt
+                for marker in ("syntax", "trigger", "yaml", "parse", "invalid", "unexpected")
+            ),
+            "Human-style verification failed: the visible actionlint failure did not "
+            "identify the broken workflow syntax or trigger configuration.\n"
+            f"Run URL: {observation.actionlint_run_url}\n"
+            f"Target workflow: {self.config.target_workflow_path}\n"
+            f"Observed log excerpt:\n{observation.actionlint_log_excerpt}",
+        )
+        self.assertNotIn(
+            "unable to resolve action",
+            log_excerpt,
+            "Human-style verification failed: the actionlint workflow failed during "
+            "its own setup instead of reporting the invalid workflow syntax or "
+            "trigger error.\n"
+            f"Run URL: {observation.actionlint_run_url}\n"
+            f"Observed log excerpt:\n{observation.actionlint_log_excerpt}",
+        )
 
     def _write_result_if_requested(self, payload: dict[str, object]) -> None:
         result_path = os.environ.get("TS251_RESULT_PATH")

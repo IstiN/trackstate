@@ -102,6 +102,9 @@ class ActionlintWorkflowGateProbeService:
             actionlint_step_conclusion=self._optional_string(
                 branch_observation.get("actionlint_step_conclusion")
             ),
+            actionlint_log_excerpt=self._optional_string(
+                branch_observation.get("actionlint_log_excerpt")
+            ),
             mutated_line_preview=str(branch_observation["mutated_line_preview"]),
             cleanup_deleted_branch=bool(branch_observation["cleanup_deleted_branch"]),
         )
@@ -250,6 +253,7 @@ class ActionlintWorkflowGateProbeService:
         actionlint_job_name: str | None = None
         actionlint_step_name: str | None = None
         actionlint_step_conclusion: str | None = None
+        actionlint_log_excerpt: str | None = None
 
         while time.time() < deadline:
             latest_runs = self._list_branch_runs(branch_name, started_at)
@@ -269,6 +273,9 @@ class ActionlintWorkflowGateProbeService:
                 actionlint_step_name = candidate["step_name"]
                 actionlint_step_conclusion = candidate["step_conclusion"]
                 if actionlint_run_status == "completed":
+                    actionlint_log_excerpt = self._read_failed_run_log_excerpt(
+                        int(candidate["run_id"])
+                    )
                     break
             time.sleep(self._config.poll_interval_seconds)
 
@@ -289,6 +296,7 @@ class ActionlintWorkflowGateProbeService:
             "actionlint_job_name": actionlint_job_name,
             "actionlint_step_name": actionlint_step_name,
             "actionlint_step_conclusion": actionlint_step_conclusion,
+            "actionlint_log_excerpt": actionlint_log_excerpt,
         }
 
     def _find_actionlint_run(
@@ -327,6 +335,7 @@ class ActionlintWorkflowGateProbeService:
 
             return {
                 "jobs": jobs,
+                "run_id": run_id,
                 "run_name": run_name or None,
                 "run_path": workflow_path,
                 "run_url": self._optional_string(run.get("html_url")),
@@ -449,6 +458,26 @@ class ActionlintWorkflowGateProbeService:
     def _branch_actions_page_url(self, branch_name: str) -> str:
         branch_query = quote(f"branch:{branch_name}", safe="")
         return f"https://github.com/{self._config.repository}/actions?query={branch_query}"
+
+    def _read_failed_run_log_excerpt(self, run_id: int) -> str | None:
+        completed = self._run_command(
+            [
+                "gh",
+                "run",
+                "view",
+                str(run_id),
+                "--repo",
+                self._config.repository,
+                "--log-failed",
+            ],
+            cwd=None,
+        )
+        log_text = completed.stdout.strip()
+        if not log_text:
+            return None
+        if len(log_text) <= 4000:
+            return log_text
+        return log_text[-4000:]
 
     def _run_command(
         self,
