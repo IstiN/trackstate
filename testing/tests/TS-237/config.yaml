@@ -6,4 +6,5 @@ dependencies:
   - GitHub CLI authenticated with a token that can read the setup repository
   - A fork of IstiN/trackstate-setup for the authenticated user, or a
     TS74_SETUP_REPOSITORY / TRACKSTATE_SETUP_REPOSITORY override that points
-    to such a fork where DEMO/project.json is missing or renamed
+    to such a fork where the README negative-check path
+    DEMO/project.missing.json does not exist
