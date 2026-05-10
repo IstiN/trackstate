@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 import re
@@ -162,6 +163,9 @@ class ActionlintRequiredPullRequestGateProbeService:
             ),
             actionlint_step_conclusion=self._optional_string(
                 pull_request_observation.get("actionlint_step_conclusion")
+            ),
+            actionlint_log_excerpt=self._optional_string(
+                pull_request_observation.get("actionlint_log_excerpt")
             ),
             mutated_line_preview=str(pull_request_observation["mutated_line_preview"]),
             cleanup_closed_pull_request=bool(
@@ -457,6 +461,8 @@ class ActionlintRequiredPullRequestGateProbeService:
         actionlint_job_name: str | None = None
         actionlint_step_name: str | None = None
         actionlint_step_conclusion: str | None = None
+        actionlint_run_id: int | None = None
+        actionlint_log_excerpt: str | None = None
 
         while time.time() < deadline:
             latest_runs = self._list_branch_runs(branch_name, started_at)
@@ -475,7 +481,11 @@ class ActionlintRequiredPullRequestGateProbeService:
                 actionlint_job_name = candidate["job_name"]
                 actionlint_step_name = candidate["step_name"]
                 actionlint_step_conclusion = candidate["step_conclusion"]
+                actionlint_run_id = int(candidate["run_id"])
                 if actionlint_run_status == "completed":
+                    actionlint_log_excerpt = self._extract_actionlint_log_excerpt(
+                        self._read_actionlint_run_log(actionlint_run_id)
+                    )
                     break
             time.sleep(self._config.poll_interval_seconds)
 
@@ -496,6 +506,7 @@ class ActionlintRequiredPullRequestGateProbeService:
             "actionlint_job_name": actionlint_job_name,
             "actionlint_step_name": actionlint_step_name,
             "actionlint_step_conclusion": actionlint_step_conclusion,
+            "actionlint_log_excerpt": actionlint_log_excerpt,
         }
 
     def _wait_for_pull_request_surface(
@@ -696,6 +707,7 @@ class ActionlintRequiredPullRequestGateProbeService:
             ):
                 continue
             return {
+                "run_id": run_id,
                 "jobs": jobs,
                 "run_name": run_name or None,
                 "run_path": workflow_path,
@@ -874,6 +886,71 @@ class ActionlintRequiredPullRequestGateProbeService:
     def _origin_clone_url(self) -> str:
         return f"https://github.com/{self._config.repository}.git"
 
+    def _read_actionlint_run_log(self, run_id: int) -> str:
+        return self._run_command(
+            [
+                "gh",
+                "run",
+                "view",
+                str(run_id),
+                "--repo",
+                self._config.repository,
+                "--log",
+            ],
+            cwd=None,
+        ).stdout
+
+    def _extract_actionlint_log_excerpt(self, log_text: str) -> str:
+        lines = [line.rstrip() for line in log_text.splitlines()]
+        if not lines:
+            return ""
+
+        primary_markers = [
+            self._config.target_workflow_path.lower(),
+            self._config.target_workflow_name.lower(),
+        ]
+        fallback_markers = (
+            "##[error]",
+            " error ",
+            "\terror\t",
+            "unable to resolve action",
+            "failed",
+        )
+
+        match_index: int | None = None
+        for index, line in enumerate(lines):
+            lowered_line = line.lower()
+            if any(marker and marker in lowered_line for marker in primary_markers):
+                match_index = index
+                break
+
+        if match_index is None:
+            for index, line in enumerate(lines):
+                lowered_line = line.lower()
+                if any(marker in lowered_line for marker in fallback_markers):
+                    match_index = index
+                    break
+
+        if match_index is None:
+            for index, line in enumerate(lines):
+                lowered_line = line.lower()
+                if self._config.expected_actionlint_marker.lower() in lowered_line:
+                    match_index = index
+                    break
+
+        if match_index is None:
+            excerpt_lines = lines[-40:]
+        else:
+            if any(marker in lines[match_index].lower() for marker in fallback_markers):
+                excerpt_lines = lines[max(0, match_index - 3) : min(len(lines), match_index + 8)]
+            else:
+                excerpt_lines = lines[max(0, match_index - 1) : min(len(lines), match_index + 15)]
+
+        excerpt = "\n".join(excerpt_lines).strip()
+        if len(excerpt) <= 4000:
+            return excerpt
+        return excerpt[:4000].rstrip()
+
     def _extract_pull_request_number(self, pull_request_url: str) -> int:
         match = re.search(r"/pull/(\d+)$", pull_request_url.strip())
         if match is None:
@@ -889,9 +966,13 @@ class ActionlintRequiredPullRequestGateProbeService:
         *,
         cwd: Path | None,
     ) -> subprocess.CompletedProcess[str]:
+        environment = os.environ.copy()
+        environment.setdefault("GH_PAGER", "cat")
+        environment.setdefault("GIT_TERMINAL_PROMPT", "0")
         completed = subprocess.run(
             command,
             cwd=cwd,
+            env=environment,
             check=False,
             capture_output=True,
             text=True,

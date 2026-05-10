@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import unittest
 
 from testing.core.config.actionlint_required_pull_request_gate_config import (
@@ -125,6 +126,28 @@ class ActionlintRequiredPullRequestGateTest(unittest.TestCase):
             f"Observed jobs: {observation.observed_job_names}\n"
             f"Observed steps: {observation.observed_step_names}\n"
             f"Observed step conclusion: {observation.actionlint_step_conclusion}",
+        )
+        self.assertIsNotNone(
+            observation.actionlint_log_excerpt,
+            "Step 3 failed: TS-257 could not read the visible actionlint run log.\n"
+            f"Pull Request URL: {observation.pull_request_url}\n"
+            f"Run URL: {observation.actionlint_run_url}",
+        )
+        assert observation.actionlint_log_excerpt is not None
+        self.assertIn(
+            self.config.target_workflow_path,
+            observation.actionlint_log_excerpt,
+            "Step 3 failed: the visible actionlint log did not mention the mutated "
+            "release workflow file.\n"
+            f"Expected file path: {self.config.target_workflow_path}\n"
+            f"Observed log excerpt:\n{observation.actionlint_log_excerpt}",
+        )
+        self.assertRegex(
+            observation.actionlint_log_excerpt,
+            re.compile(r"(unexpected|invalid|syntax|schema|error)", re.IGNORECASE),
+            "Step 3 failed: the visible actionlint log did not surface a syntax or "
+            "schema error for the mutated release workflow.\n"
+            f"Observed log excerpt:\n{observation.actionlint_log_excerpt}",
         )
 
         self.assertIsNotNone(
