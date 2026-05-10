@@ -67,6 +67,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   final Set<String> _knownTombstoneKeys = <String>{};
   final Map<String, DeletedIssueTombstone> _knownTombstonesByKey =
       <String, DeletedIssueTombstone>{};
+  final Map<String, String?> _snapshotArtifactRevisions = <String, String?>{};
   final ProviderSession _session;
   final Queue<Completer<void>> _pendingDeleteMutations =
       Queue<Completer<void>>();
@@ -142,6 +143,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async {
+    _snapshotArtifactRevisions.clear();
     final snapshot = await _loadSetupSnapshot();
     _snapshot = snapshot;
     return snapshot;
@@ -594,7 +596,6 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
           'Could not find repository artifacts for ${currentIssue.key}.',
         );
       }
-
       final tombstone = DeletedIssueTombstone(
         key: currentIssue.key,
         project: currentIssue.project,
@@ -673,7 +674,16 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       );
       final changes = <RepositoryFileChange>[
         for (final path in issueArtifactPaths)
-          RepositoryDeleteFileChange(path: path),
+          RepositoryDeleteFileChange(
+            path: path,
+            expectedRevision:
+                _snapshotArtifactRevisions[path] ??
+                await _existingArtifactRevision(
+                  path: path,
+                  ref: writeBranch,
+                  blobPaths: blobPaths,
+                ),
+          ),
         RepositoryTextFileChange(
           path: issuesIndexPath,
           content:
@@ -844,7 +854,10 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         blobPaths: blobPaths,
         issueRoot: issueRoot,
       );
-      final attachments = _loadAttachments(tree: tree, issueRoot: issueRoot);
+      final attachments = await _loadAttachments(
+        tree: tree,
+        issueRoot: issueRoot,
+      );
       issues.add(
         _parseIssue(
           storagePath: path,
@@ -931,8 +944,11 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     return normalizedPath;
   }
 
-  Future<String> _getRepositoryText(String path) async =>
-      (await _provider.readTextFile(path, ref: _provider.dataRef)).content;
+  Future<String> _getRepositoryText(String path) async {
+    final file = await _provider.readTextFile(path, ref: _provider.dataRef);
+    _snapshotArtifactRevisions[path] = file.revision;
+    return file.content;
+  }
 
   Future<Object?> _getRepositoryJson(String path) async =>
       jsonDecode(await _getRepositoryText(path));
@@ -1190,27 +1206,32 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         .toList(growable: false);
   }
 
-  List<IssueAttachment> _loadAttachments({
+  Future<List<IssueAttachment>> _loadAttachments({
     required List<RepositoryTreeEntry> tree,
     required String issueRoot,
-  }) {
+  }) async {
     final attachmentPrefix = _joinPath(issueRoot, 'attachments/');
-    return tree
-        .where(
-          (entry) =>
-              entry.type == 'blob' &&
-              entry.path.startsWith(attachmentPrefix) &&
-              entry.path.length > attachmentPrefix.length,
-        )
-        .map(
-          (entry) => IssueAttachment(
-            name: entry.path.split('/').last,
-            storagePath: entry.path,
-            mediaType: _mediaTypeForPath(entry.path),
-          ),
-        )
-        .toList(growable: false)
-      ..sort((a, b) => a.name.compareTo(b.name));
+    final attachments = <IssueAttachment>[];
+    for (final entry in tree.where(
+      (candidate) =>
+          candidate.type == 'blob' &&
+          candidate.path.startsWith(attachmentPrefix) &&
+          candidate.path.length > attachmentPrefix.length,
+    )) {
+      final attachment = await _provider.readAttachment(
+        entry.path,
+        ref: _provider.dataRef,
+      );
+      _snapshotArtifactRevisions[entry.path] = attachment.revision;
+      attachments.add(
+        IssueAttachment(
+          name: entry.path.split('/').last,
+          storagePath: entry.path,
+          mediaType: _mediaTypeForPath(entry.path),
+        ),
+      );
+    }
+    return attachments..sort((a, b) => a.name.compareTo(b.name));
   }
 
   void _replaceCachedIssue(TrackStateIssue updatedIssue) {

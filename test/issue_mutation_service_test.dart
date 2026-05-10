@@ -415,6 +415,68 @@ void main() {
     );
   });
 
+  test('repository rejects stale local deletes with a conflict', () async {
+    final repo = await _createMutationRepository();
+    addTearDown(() => repo.delete(recursive: true));
+
+    final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+    final snapshot = await repository.loadSnapshot();
+    await repository.connect(
+      const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+    );
+    final issue = snapshot.issues.singleWhere(
+      (candidate) => candidate.key == 'DEMO-10',
+    );
+
+    await _writeFile(
+      repo,
+      'DEMO/DEMO-10/main.md',
+      File('${repo.path}/DEMO/DEMO-10/main.md').readAsStringSync().replaceFirst(
+        'Alternative epic',
+        'Concurrent delete edit',
+      ),
+    );
+    await _git(repo.path, ['add', 'DEMO/DEMO-10/main.md']);
+    await _git(repo.path, ['commit', '-m', 'Concurrent delete edit']);
+
+    await expectLater(
+      () => repository.deleteIssue(issue),
+      throwsA(
+        isA<TrackStateProviderException>().having(
+          (error) => error.message,
+          'message',
+          contains('changed in the current branch'),
+        ),
+      ),
+    );
+    expect(File('${repo.path}/DEMO/DEMO-10/main.md').existsSync(), isTrue);
+  });
+
+  test('repository rejects stale hosted deletes with a conflict', () async {
+    final harness = await _createHostedMutationHarness();
+    final issue = (await harness.repository.loadSnapshot()).issues.singleWhere(
+      (candidate) => candidate.key == 'DEMO-10',
+    );
+    harness.backend.advanceHeadText(
+      'DEMO/DEMO-10/main.md',
+      harness.backend
+          .readText('DEMO/DEMO-10/main.md')
+          .replaceFirst('Alternative epic', 'Concurrent hosted delete edit'),
+    );
+
+    await expectLater(
+      () => harness.repository.deleteIssue(issue),
+      throwsA(
+        isA<TrackStateProviderException>().having(
+          (error) => error.message,
+          'message',
+          contains('changed in the current branch'),
+        ),
+      ),
+    );
+    expect(harness.backend.exists('DEMO/DEMO-10/main.md'), isTrue);
+  });
+
   test(
     'github provider validates expected revisions against the captured commit sha',
     () async {
@@ -649,6 +711,7 @@ Future<_HostedMutationHarness> _createHostedMutationHarness() async {
   );
   return _HostedMutationHarness(
     backend: backend,
+    repository: repository,
     service: IssueMutationService(repository: repository),
   );
 }
@@ -671,9 +734,14 @@ Future<void> _git(String repositoryPath, List<String> args) async {
 }
 
 class _HostedMutationHarness {
-  const _HostedMutationHarness({required this.backend, required this.service});
+  const _HostedMutationHarness({
+    required this.backend,
+    required this.repository,
+    required this.service,
+  });
 
   final _HostedRepositoryBackend backend;
+  final SetupTrackStateRepository repository;
   final IssueMutationService service;
 }
 
@@ -714,6 +782,17 @@ class _HostedRepositoryBackend {
       List.unmodifiable(_observedContentRefs);
 
   void clearObservedContentRefs() => _observedContentRefs.clear();
+
+  void advanceHeadText(String path, String content) {
+    _files[path] = Uint8List.fromList(utf8.encode(content));
+    final snapshot = _copyFiles(_files);
+    final treeSha = _nextSha('tree');
+    _treeSnapshots[treeSha] = snapshot;
+    final commitSha = _nextSha('commit');
+    _commitSnapshots[commitSha] = _copyFiles(snapshot);
+    _commitTrees[commitSha] = treeSha;
+    _headCommitSha = commitSha;
+  }
 
   String readText(String path) => utf8.decode(_files[path]!);
 
