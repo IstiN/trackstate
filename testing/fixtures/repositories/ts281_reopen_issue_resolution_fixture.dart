@@ -1,11 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
-import 'package:trackstate/data/services/issue_mutation_service.dart';
-import 'package:trackstate/domain/models/issue_mutation_models.dart';
-import 'package:trackstate/domain/models/trackstate_models.dart';
-
 class Ts281ReopenIssueResolutionFixture {
   Ts281ReopenIssueResolutionFixture._(this.directory);
 
@@ -34,37 +29,13 @@ class Ts281ReopenIssueResolutionFixture {
 
   Future<void> dispose() => directory.delete(recursive: true);
 
-  Future<Ts281IssueStateObservation> observeRepositoryState() async {
-    final repository = LocalTrackStateRepository(
-      repositoryPath: repositoryPath,
-    );
-    final snapshot = await repository.loadSnapshot();
-    final issue = snapshot.issues.singleWhere(
-      (candidate) => candidate.key == issueKey,
-    );
-    final searchResults = await repository.searchIssues(
-      'project = $projectKey',
-    );
-    return Ts281IssueStateObservation(
-      snapshot: snapshot,
-      issue: issue,
-      searchResults: searchResults,
+  Future<Ts281PersistedRepositoryObservation>
+  observePersistedRepositoryState() async {
+    return Ts281PersistedRepositoryObservation(
       issueMarkdown: await File('$repositoryPath/$issuePath').readAsString(),
       issueFileRevision: await _gitOutput(['rev-parse', 'HEAD:$issuePath']),
       headRevision: await _gitOutput(['rev-parse', 'HEAD']),
-      latestCommitSubject: await _gitOutput(['log', '-1', '--pretty=%s']),
       worktreeStatusLines: await _gitOutputLines(['status', '--short']),
-    );
-  }
-
-  Future<IssueMutationResult<TrackStateIssue>> reopenIssue() async {
-    final repository = LocalTrackStateRepository(
-      repositoryPath: repositoryPath,
-    );
-    final service = IssueMutationService(repository: repository);
-    return service.transitionIssue(
-      issueKey: issueKey,
-      status: reopenedStatusId,
     );
   }
 
@@ -188,24 +159,16 @@ This issue starts in Done with a Fixed resolution so TS-281 can verify reopening
   }
 }
 
-class Ts281IssueStateObservation {
-  const Ts281IssueStateObservation({
-    required this.snapshot,
-    required this.issue,
-    required this.searchResults,
+class Ts281PersistedRepositoryObservation {
+  const Ts281PersistedRepositoryObservation({
     required this.issueMarkdown,
     required this.issueFileRevision,
     required this.headRevision,
-    required this.latestCommitSubject,
     required this.worktreeStatusLines,
   });
 
-  final TrackerSnapshot snapshot;
-  final TrackStateIssue issue;
-  final List<TrackStateIssue> searchResults;
   final String issueMarkdown;
   final String issueFileRevision;
   final String headRevision;
-  final String latestCommitSubject;
   final List<String> worktreeStatusLines;
 }

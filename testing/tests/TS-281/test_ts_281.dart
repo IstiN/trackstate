@@ -1,24 +1,59 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/domain/models/trackstate_models.dart';
 
+import '../../components/factories/testing_dependencies.dart';
+import '../../core/interfaces/issue_aggregate_loader.dart';
+import '../../core/interfaces/issue_transition_mutation_port.dart';
 import '../../fixtures/repositories/ts281_reopen_issue_resolution_fixture.dart';
 
 void main() {
-  test(
+  testWidgets(
     'TS-281 reopens a done issue to to-do and clears the persisted resolution',
-    () async {
-      final fixture = await Ts281ReopenIssueResolutionFixture.create();
-      addTearDown(fixture.dispose);
+    (tester) async {
+      final fixture = await _runAsync(
+        tester,
+        Ts281ReopenIssueResolutionFixture.create,
+        'TS-281 fixture creation did not complete.',
+      );
+      addTearDown(() async {
+        await _runAsync(
+          tester,
+          fixture.dispose,
+          'TS-281 fixture disposal did not complete.',
+        );
+      });
 
-      final beforeTransition = await fixture.observeRepositoryState();
+      const dependencies = defaultTestingDependencies;
+      final beforeRepository = await dependencies
+          .createLocalGitRepositoryPort(tester)
+          .openRepository(repositoryPath: fixture.repositoryPath);
+      final beforeIssue = await _loadIssue(
+        tester: tester,
+        repository: beforeRepository,
+        issueKey: Ts281ReopenIssueResolutionFixture.issueKey,
+      );
+      final beforeSearchResults = await _runAsync(
+        tester,
+        () => beforeRepository.searchIssues(
+          'project = ${Ts281ReopenIssueResolutionFixture.projectKey}',
+        ),
+        'TS-281 pre-transition search did not complete.',
+      );
+      final beforeTransition = await _runAsync(
+        tester,
+        fixture.observePersistedRepositoryState,
+        'TS-281 pre-transition persisted state observation did not complete.',
+      );
 
       expect(
-        beforeTransition.issue.statusId,
+        beforeIssue.statusId,
         Ts281ReopenIssueResolutionFixture.doneStatusId,
         reason:
             'Precondition failed: ${Ts281ReopenIssueResolutionFixture.issueKey} must start in done before Step 1 reopens it.',
       );
       expect(
-        beforeTransition.issue.resolutionId,
+        beforeIssue.resolutionId,
         Ts281ReopenIssueResolutionFixture.resolutionId,
         reason:
             'Precondition failed: ${Ts281ReopenIssueResolutionFixture.issueKey} must start with resolution=${Ts281ReopenIssueResolutionFixture.resolutionId} before Step 1 reopens it.',
@@ -30,7 +65,7 @@ void main() {
             'Precondition failed: ${Ts281ReopenIssueResolutionFixture.issuePath} must persist a done/fixed frontmatter state before Step 1 runs.\nObserved markdown:\n${beforeTransition.issueMarkdown}',
       );
       expect(
-        beforeTransition.searchResults.map((issue) => issue.key).toList(),
+        beforeSearchResults.map((issue) => issue.key).toList(),
         [Ts281ReopenIssueResolutionFixture.issueKey],
         reason:
             'Human-style precondition failed: repository search should show only ${Ts281ReopenIssueResolutionFixture.issueKey} before reopening.',
@@ -42,8 +77,39 @@ void main() {
             'Precondition failed: the seeded repository must start clean, but `git status --short` returned ${beforeTransition.worktreeStatusLines.join(' | ')}.',
       );
 
-      final result = await fixture.reopenIssue();
-      final afterTransition = await fixture.observeRepositoryState();
+      final IssueTransitionMutationPort transitionPort = dependencies
+          .createIssueTransitionMutationPort(tester);
+      final result = await transitionPort.transitionIssue(
+        repositoryPath: fixture.repositoryPath,
+        issueKey: Ts281ReopenIssueResolutionFixture.issueKey,
+        status: Ts281ReopenIssueResolutionFixture.reopenedStatusId,
+      );
+
+      final afterRepository = await dependencies
+          .createLocalGitRepositoryPort(tester)
+          .openRepository(repositoryPath: fixture.repositoryPath);
+      final afterIssue = await _loadIssue(
+        tester: tester,
+        repository: afterRepository,
+        issueKey: Ts281ReopenIssueResolutionFixture.issueKey,
+      );
+      final afterSnapshot = await _runAsync(
+        tester,
+        afterRepository.loadSnapshot,
+        'TS-281 post-transition snapshot load did not complete.',
+      );
+      final afterSearchResults = await _runAsync(
+        tester,
+        () => afterRepository.searchIssues(
+          'project = ${Ts281ReopenIssueResolutionFixture.projectKey}',
+        ),
+        'TS-281 post-transition search did not complete.',
+      );
+      final afterTransition = await _runAsync(
+        tester,
+        fixture.observePersistedRepositoryState,
+        'TS-281 post-transition persisted state observation did not complete.',
+      );
 
       expect(
         result.isSuccess,
@@ -77,13 +143,13 @@ void main() {
       );
 
       expect(
-        afterTransition.issue.statusId,
+        afterIssue.statusId,
         Ts281ReopenIssueResolutionFixture.reopenedStatusId,
         reason:
             'Step 2 failed: the reloaded issue should persist status=${Ts281ReopenIssueResolutionFixture.reopenedStatusId} after reopening.',
       );
       expect(
-        afterTransition.issue.resolutionId,
+        afterIssue.resolutionId,
         isNull,
         reason:
             'Step 2 failed: the reloaded issue should persist a cleared resolution after reopening from done.',
@@ -122,27 +188,25 @@ void main() {
       );
 
       expect(
-        afterTransition.searchResults.map((issue) => issue.key).toList(),
+        afterSearchResults.map((issue) => issue.key).toList(),
         [Ts281ReopenIssueResolutionFixture.issueKey],
         reason:
             'Human-style verification failed: repository search should still show ${Ts281ReopenIssueResolutionFixture.issueKey} after reopening.',
       );
       expect(
-        afterTransition.searchResults.single.summary,
+        afterSearchResults.single.summary,
         Ts281ReopenIssueResolutionFixture.issueSummary,
         reason:
             'Human-style verification failed: repository search should still expose the visible issue summary after reopening.',
       );
       expect(
-        afterTransition.snapshot.project.statusLabel(
-          afterTransition.issue.statusId,
-        ),
+        afterSnapshot.project.statusLabel(afterIssue.statusId),
         Ts281ReopenIssueResolutionFixture.reopenedStatusLabel,
         reason:
             'Human-style verification failed: repository consumers should label the reopened issue as "${Ts281ReopenIssueResolutionFixture.reopenedStatusLabel}".',
       );
       expect(
-        afterTransition.searchResults.single.resolutionId,
+        afterSearchResults.single.resolutionId,
         isNull,
         reason:
             'Human-style verification failed: repository consumers should observe no resolution after reopening the issue.',
@@ -156,4 +220,30 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 20)),
   );
+}
+
+Future<TrackStateIssue> _loadIssue({
+  required WidgetTester tester,
+  required TrackStateRepository repository,
+  required String issueKey,
+}) async {
+  final IssueAggregateLoader loader = defaultTestingDependencies
+      .createIssueAggregateLoader(repository);
+  return _runAsync(
+    tester,
+    () => loader.loadIssue(issueKey),
+    'Loading issue aggregate for $issueKey did not complete.',
+  );
+}
+
+Future<T> _runAsync<T>(
+  WidgetTester tester,
+  Future<T> Function() action,
+  String errorMessage,
+) async {
+  final result = await tester.runAsync(action);
+  if (result == null) {
+    throw StateError(errorMessage);
+  }
+  return result;
 }

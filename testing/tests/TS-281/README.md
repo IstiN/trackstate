@@ -6,8 +6,8 @@ resolution in both the mutation result and the stored issue frontmatter.
 The automation covers the production-visible flow by:
 1. seeding a clean Local Git-backed repository with `TRACK-122` in `done` and
    `resolution: fixed`
-2. calling `IssueMutationService.transitionIssue(issueKey: "TRACK-122", status:
-   "to-do")`
+2. calling the shared testing transition-mutation port, which drives
+   `transitionIssue(issueKey: "TRACK-122", status: "to-do")`
 3. verifying the returned typed issue payload reports `statusId: "to-do"` and
    `resolutionId: null`
 4. confirming `TRACK/TRACK-122/main.md` and a fresh repository reload both
