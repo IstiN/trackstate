@@ -145,6 +145,22 @@ class ProjectQuickStartValidator:
         return match.group(1)
 
     def _documented_validation_command(self, quick_start_section: str) -> str | None:
+        for candidate in self.documented_validation_commands_in_code_blocks(
+            quick_start_section,
+        ):
+            return candidate
+        inline_commands = re.findall(r"`(gh [^`]+)`", quick_start_section)
+        for candidate in inline_commands:
+            stripped_candidate = candidate.strip()
+            if stripped_candidate.startswith("gh "):
+                return stripped_candidate
+        return None
+
+    def documented_validation_commands_in_code_blocks(
+        self,
+        quick_start_section: str,
+    ) -> tuple[str, ...]:
+        commands: list[str] = []
         code_blocks = re.findall(
             r"```(?:bash|shell|sh|text)?\n(.*?)```",
             quick_start_section,
@@ -154,13 +170,8 @@ class ProjectQuickStartValidator:
             for line in block.splitlines():
                 candidate = line.strip()
                 if candidate.startswith("gh "):
-                    return candidate
-        inline_commands = re.findall(r"`(gh [^`]+)`", quick_start_section)
-        for candidate in inline_commands:
-            stripped_candidate = candidate.strip()
-            if stripped_candidate.startswith("gh "):
-                return stripped_candidate
-        return None
+                    commands.append(candidate)
+        return tuple(commands)
 
     def _expand_documented_command(
         self,

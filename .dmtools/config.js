@@ -7,7 +7,34 @@
 const GOAL_INSTRUCTIONS = './.dmtools/instructions/goal/goal.md';
 const DESIGN_REFERENCE = './.dmtools/instructions/goal/DESIGN.md';
 const SETUP_REPO_INSTRUCTIONS = './.dmtools/instructions/product/trackstate_setup_repo.md';
-const TRACKSTATE_SETUP_SUBMODULES = [{ path: 'trackstate-setup', branch: 'main' }];
+const TRACKSTATE_SETUP_SUBMODULES = [
+    { path: 'trackstate-setup', branch: 'main', tagPrefix: 'stable' }
+];
+const POST_ACTION_FEEDBACK = {
+    postAction: {
+        enabled: true,
+        maxAttempts: 2
+    }
+};
+const FLUTTER_FEEDBACK = {
+    postAction: {
+        enabled: true,
+        maxAttempts: 2
+    },
+    qualityGates: {
+        enabled: true,
+        gates: [
+            { name: 'flutter-analyze', command: 'flutter analyze', maxAttempts: 2 },
+            { name: 'flutter-test', command: 'flutter test --coverage', maxAttempts: 2 }
+        ]
+    },
+    policyGates: {
+        enabled: true,
+        gates: [
+            { name: 'theme-token-lint', command: 'dart run tool/check_theme_tokens.dart', maxAttempts: 2 }
+        ]
+    }
+};
 
 module.exports = {
     repository: {
@@ -61,6 +88,16 @@ module.exports = {
             GOAL_INSTRUCTIONS,
             './.dmtools/instructions/architecture/trackstate_scope.md',
             './.dmtools/prompts/rework_focus.md'
+        ],
+        pr_test_automation_review: [
+            GOAL_INSTRUCTIONS,
+            './.dmtools/instructions/architecture/trackstate_scope.md',
+            './.dmtools/prompts/test_review_focus.md'
+        ],
+        pr_test_automation_rework: [
+            GOAL_INSTRUCTIONS,
+            './.dmtools/instructions/architecture/trackstate_scope.md',
+            './.dmtools/prompts/test_rework_focus.md'
         ]
     },
 
@@ -152,12 +189,16 @@ module.exports = {
             customParams: {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
+                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
+                feedbackLoop: FLUTTER_FEEDBACK
             }
         },
         bug_development: {
             customParams: {
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
+                autoStartReview: true,
+                autoStartReviewConfigFile: 'agents/pr_review.json',
+                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
+                feedbackLoop: FLUTTER_FEEDBACK
             }
         },
         test_case_automation: {
@@ -172,17 +213,37 @@ module.exports = {
                 autoStartReworkConfigFile: 'agents/pr_rework.json'
             }
         },
+        pr_test_automation_review: {
+            customParams: {
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/pr_test_automation_rework.json'
+            }
+        },
         pr_rework: {
             customParams: {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES
+                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
+                feedbackLoop: FLUTTER_FEEDBACK
             }
         },
         pr_test_automation_rework: {
             customParams: {
                 autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_test_automation_review.json'
+                autoStartReviewConfigFile: 'agents/pr_test_automation_review.json',
+                feedbackLoop: POST_ACTION_FEEDBACK
+            }
+        },
+        retry_merge: {
+            customParams: {
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/pr_rework.json'
+            }
+        },
+        retry_merge_test: {
+            customParams: {
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/pr_test_automation_rework.json'
             }
         }
     },

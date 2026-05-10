@@ -4,36 +4,155 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../../../../../data/repositories/trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository_factory.dart';
+import '../../../../../data/repositories/trackstate_runtime.dart';
 import '../../../../../domain/models/trackstate_models.dart';
 import '../../../../../l10n/generated/app_localizations.dart';
 import '../../../core/trackstate_icons.dart';
 import '../../../core/trackstate_theme.dart';
 import '../view_models/tracker_view_model.dart';
 
+typedef LocalRepositoryLoader =
+    Future<TrackStateRepository> Function({
+      required String repositoryPath,
+      required String writeBranch,
+    });
+
+typedef LocalRepositoryConfigurationApplier =
+    Future<void> Function({
+      required String repositoryPath,
+      required String writeBranch,
+    });
+
 class TrackStateApp extends StatefulWidget {
-  const TrackStateApp({super.key, this.repository});
+  const TrackStateApp({super.key, this.repository, this.openLocalRepository});
 
   final TrackStateRepository? repository;
+  final LocalRepositoryLoader? openLocalRepository;
 
   @override
   State<TrackStateApp> createState() => _TrackStateAppState();
 }
 
 class _TrackStateAppState extends State<TrackStateApp> {
-  late final TrackerViewModel viewModel;
+  late TrackerViewModel viewModel;
+  bool _isCreateIssueVisible = false;
+  String? _activeLocalGitConfigurationKey;
+  String? _pendingLocalGitConfigurationKey;
 
   @override
   void initState() {
     super.initState();
-    viewModel = TrackerViewModel(
-      repository: widget.repository ?? createTrackStateRepository(),
-    )..load();
+    viewModel = _createViewModel();
+  }
+
+  @override
+  void didUpdateWidget(covariant TrackStateApp oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.repository == widget.repository) {
+      return;
+    }
+    final previousViewModel = viewModel;
+    viewModel = _createViewModel(previous: previousViewModel);
+    previousViewModel.dispose();
+    _isCreateIssueVisible = false;
   }
 
   @override
   void dispose() {
     viewModel.dispose();
     super.dispose();
+  }
+
+  TrackerViewModel _createViewModel({
+    TrackStateRepository? repository,
+    TrackerViewModel? previous,
+    bool autoLoad = true,
+  }) {
+    final nextViewModel = TrackerViewModel(
+      repository:
+          repository ?? widget.repository ?? createTrackStateRepository(),
+    );
+    if (previous != null) {
+      nextViewModel.restorePresentationStateFrom(previous);
+    }
+    if (autoLoad) {
+      nextViewModel.load();
+    }
+    return nextViewModel;
+  }
+
+  Future<TrackStateRepository> _openLocalRepository({
+    required String repositoryPath,
+    required String writeBranch,
+  }) async {
+    final loader = widget.openLocalRepository;
+    if (loader != null) {
+      return loader(repositoryPath: repositoryPath, writeBranch: writeBranch);
+    }
+    return createTrackStateRepository(
+      runtime: TrackStateRuntime.localGit,
+      localRepositoryPath: repositoryPath,
+    );
+  }
+
+  Future<void> _switchToLocalRepository({
+    required String repositoryPath,
+    required String writeBranch,
+  }) async {
+    final normalizedRepositoryPath = repositoryPath.trim();
+    final normalizedWriteBranch = writeBranch.trim();
+    if (normalizedRepositoryPath.isEmpty || normalizedWriteBranch.isEmpty) {
+      return;
+    }
+    final configurationKey =
+        '$normalizedRepositoryPath\n$normalizedWriteBranch';
+    if (_activeLocalGitConfigurationKey == configurationKey ||
+        _pendingLocalGitConfigurationKey == configurationKey) {
+      return;
+    }
+
+    _pendingLocalGitConfigurationKey = configurationKey;
+    final previousViewModel = viewModel;
+    try {
+      final nextRepository = await _openLocalRepository(
+        repositoryPath: normalizedRepositoryPath,
+        writeBranch: normalizedWriteBranch,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      final nextViewModel = _createViewModel(
+        repository: nextRepository,
+        previous: previousViewModel,
+        autoLoad: false,
+      );
+      setState(() {
+        viewModel = nextViewModel;
+        _activeLocalGitConfigurationKey = configurationKey;
+        _isCreateIssueVisible = false;
+      });
+      previousViewModel.dispose();
+      await nextViewModel.load();
+    } finally {
+      if (_pendingLocalGitConfigurationKey == configurationKey) {
+        _pendingLocalGitConfigurationKey = null;
+      }
+    }
+  }
+
+  void _openCreateIssue() {
+    if (_isCreateIssueVisible) {
+      return;
+    }
+    setState(() => _isCreateIssueVisible = true);
+  }
+
+  void _closeCreateIssue() {
+    if (!_isCreateIssueVisible) {
+      return;
+    }
+    setState(() => _isCreateIssueVisible = false);
   }
 
   @override
@@ -56,7 +175,13 @@ class _TrackStateAppState extends State<TrackStateApp> {
             GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
-          home: _TrackerHome(viewModel: viewModel),
+          home: _TrackerHome(
+            viewModel: viewModel,
+            isCreateIssueVisible: _isCreateIssueVisible,
+            onOpenCreateIssue: _openCreateIssue,
+            onCloseCreateIssue: _closeCreateIssue,
+            onApplyLocalGitConfiguration: _switchToLocalRepository,
+          ),
         );
       },
     );
@@ -64,9 +189,19 @@ class _TrackStateAppState extends State<TrackStateApp> {
 }
 
 class _TrackerHome extends StatelessWidget {
-  const _TrackerHome({required this.viewModel});
+  const _TrackerHome({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+    required this.onApplyLocalGitConfiguration,
+  });
 
   final TrackerViewModel viewModel;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
+  final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
 
   @override
   Widget build(BuildContext context) {
@@ -91,6 +226,9 @@ class _TrackerHome extends StatelessWidget {
               constraints: const BoxConstraints(maxWidth: 720),
               child: _MessageBanner(
                 message: viewModel.message,
+                onDismiss: viewModel.message == null
+                    ? null
+                    : viewModel.dismissMessage,
               ),
             ),
           ),
@@ -128,8 +266,22 @@ class _TrackerHome extends StatelessWidget {
                 backgroundColor: colors.page,
                 body: SafeArea(
                   child: isCompact
-                      ? _MobileShell(viewModel: viewModel)
-                      : _DesktopShell(viewModel: viewModel),
+                      ? _MobileShell(
+                          viewModel: viewModel,
+                          isCreateIssueVisible: isCreateIssueVisible,
+                          onOpenCreateIssue: onOpenCreateIssue,
+                          onCloseCreateIssue: onCloseCreateIssue,
+                          onApplyLocalGitConfiguration:
+                              onApplyLocalGitConfiguration,
+                        )
+                      : _DesktopShell(
+                          viewModel: viewModel,
+                          isCreateIssueVisible: isCreateIssueVisible,
+                          onOpenCreateIssue: onOpenCreateIssue,
+                          onCloseCreateIssue: onCloseCreateIssue,
+                          onApplyLocalGitConfiguration:
+                              onApplyLocalGitConfiguration,
+                        ),
                 ),
                 bottomNavigationBar: isCompact
                     ? _BottomNavigation(viewModel: viewModel)
@@ -149,9 +301,19 @@ class _SelectSectionIntent extends Intent {
 }
 
 class _DesktopShell extends StatelessWidget {
-  const _DesktopShell({required this.viewModel});
+  const _DesktopShell({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+    required this.onApplyLocalGitConfiguration,
+  });
 
   final TrackerViewModel viewModel;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
+  final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
 
   @override
   Widget build(BuildContext context) {
@@ -159,11 +321,12 @@ class _DesktopShell extends StatelessWidget {
       children: [
         SizedBox(width: 268, child: _Sidebar(viewModel: viewModel)),
         Expanded(
-          child: Column(
-            children: [
-              _TopBar(viewModel: viewModel),
-              Expanded(child: _SectionBody(viewModel: viewModel)),
-            ],
+          child: _TrackerMainPane(
+            viewModel: viewModel,
+            isCreateIssueVisible: isCreateIssueVisible,
+            onOpenCreateIssue: onOpenCreateIssue,
+            onCloseCreateIssue: onCloseCreateIssue,
+            onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
           ),
         ),
       ],
@@ -172,16 +335,80 @@ class _DesktopShell extends StatelessWidget {
 }
 
 class _MobileShell extends StatelessWidget {
-  const _MobileShell({required this.viewModel});
+  const _MobileShell({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+    required this.onApplyLocalGitConfiguration,
+  });
 
   final TrackerViewModel viewModel;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
+  final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return _TrackerMainPane(
+      viewModel: viewModel,
+      compact: true,
+      isCreateIssueVisible: isCreateIssueVisible,
+      onOpenCreateIssue: onOpenCreateIssue,
+      onCloseCreateIssue: onCloseCreateIssue,
+      onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+    );
+  }
+}
+
+class _TrackerMainPane extends StatelessWidget {
+  const _TrackerMainPane({
+    required this.viewModel,
+    required this.isCreateIssueVisible,
+    required this.onOpenCreateIssue,
+    required this.onCloseCreateIssue,
+    required this.onApplyLocalGitConfiguration,
+    this.compact = false,
+  });
+
+  final TrackerViewModel viewModel;
+  final bool compact;
+  final bool isCreateIssueVisible;
+  final VoidCallback onOpenCreateIssue;
+  final VoidCallback onCloseCreateIssue;
+  final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
       children: [
-        _TopBar(viewModel: viewModel, compact: true),
-        Expanded(child: _SectionBody(viewModel: viewModel, compact: true)),
+        Column(
+          children: [
+            _TopBar(
+              viewModel: viewModel,
+              compact: compact,
+              onOpenCreateIssue: onOpenCreateIssue,
+            ),
+            Expanded(
+              child: _SectionBody(
+                viewModel: viewModel,
+                compact: compact,
+                onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+              ),
+            ),
+          ],
+        ),
+        if (isCreateIssueVisible)
+          Positioned.fill(
+            child: _CreateIssueOverlay(
+              compact: compact,
+              child: _CreateIssueDialog(
+                viewModel: viewModel,
+                onDismiss: onCloseCreateIssue,
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -257,9 +484,14 @@ class _Sidebar extends StatelessWidget {
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.viewModel, this.compact = false});
+  const _TopBar({
+    required this.viewModel,
+    required this.onOpenCreateIssue,
+    this.compact = false,
+  });
 
   final TrackerViewModel viewModel;
+  final VoidCallback onOpenCreateIssue;
   final bool compact;
 
   @override
@@ -267,6 +499,9 @@ class _TopBar extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
     final repositoryAccessLabel = _repositoryAccessLabel(l10n, viewModel);
+    final openCreateIssue = viewModel.hasReadOnlySession || viewModel.isSaving
+        ? null
+        : onOpenCreateIssue;
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 12, 12, 6),
       child: Row(
@@ -313,10 +548,23 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: 12),
           if (compact)
             _IconButtonSurface(
+              label: l10n.createIssue,
+              glyph: TrackStateIconGlyph.plus,
+              onPressed: openCreateIssue,
+            )
+          else
+            _PrimaryButton(
+              label: l10n.createIssue,
+              icon: TrackStateIconGlyph.plus,
+              onPressed: openCreateIssue,
+            ),
+          const SizedBox(width: 8),
+          if (compact)
+            _IconButtonSurface(
               label: repositoryAccessLabel,
               glyph: TrackStateIconGlyph.gitBranch,
               onPressed: viewModel.isSaving
-                  ? () {}
+                  ? null
                   : () => _showRepositoryAccessDialog(context, viewModel),
             )
           else
@@ -324,7 +572,7 @@ class _TopBar extends StatelessWidget {
               label: repositoryAccessLabel,
               icon: TrackStateIconGlyph.gitBranch,
               onPressed: viewModel.isSaving
-                  ? () {}
+                  ? null
                   : () => _showRepositoryAccessDialog(context, viewModel),
             ),
           const SizedBox(width: 8),
@@ -338,6 +586,48 @@ class _TopBar extends StatelessWidget {
             onPressed: viewModel.toggleTheme,
           ),
           const SizedBox(width: 8),
+          if (_hasVisibleProfileIdentity(viewModel)) ...[
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: compact ? 160 : 240),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Semantics(
+                    container: true,
+                    label: _profileDisplayName(viewModel),
+                    child: ExcludeSemantics(
+                      child: Text(
+                        _profileDisplayName(viewModel),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: colors.text,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_profileLogin(viewModel) case final login?)
+                    Semantics(
+                      container: true,
+                      label: login,
+                      child: ExcludeSemantics(
+                        child: Text(
+                          login,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodySmall?.copyWith(color: colors.muted),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
           CircleAvatar(
             radius: 18,
             backgroundColor: colors.primarySoft,
@@ -496,6 +786,34 @@ String _profileInitials(AppLocalizations l10n, TrackerViewModel viewModel) {
   return _initialsFromText(l10n.appTitle);
 }
 
+String _profileDisplayName(TrackerViewModel viewModel) {
+  final user = viewModel.connectedUser;
+  if (user == null) {
+    return '';
+  }
+  final displayName = user.displayName.trim();
+  if (displayName.isNotEmpty) {
+    return displayName;
+  }
+  return user.login.trim();
+}
+
+String? _profileLogin(TrackerViewModel viewModel) {
+  final user = viewModel.connectedUser;
+  if (user == null) {
+    return null;
+  }
+  final login = user.login.trim();
+  if (login.isEmpty) {
+    return null;
+  }
+  return login == _profileDisplayName(viewModel) ? null : login;
+}
+
+bool _hasVisibleProfileIdentity(TrackerViewModel viewModel) =>
+    _profileDisplayName(viewModel).isNotEmpty ||
+    (_profileLogin(viewModel)?.isNotEmpty ?? false);
+
 String _initialsFromText(String value) {
   final parts = value
       .split(RegExp(r'[\s._-]+'))
@@ -506,7 +824,8 @@ String _initialsFromText(String value) {
   }
   final compact = value.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
   if (compact.isEmpty) return '';
-  return compact.substring(0, compact.length < 2 ? compact.length : 2)
+  return compact
+      .substring(0, compact.length < 2 ? compact.length : 2)
       .toUpperCase();
 }
 
@@ -515,13 +834,16 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
     TrackerMessageKind.dataLoadFailed => l10n.trackerDataLoadFailed(
       message.error!,
     ),
+    TrackerMessageKind.repositoryConfigFallback =>
+      l10n.repositoryConfigFallback(message.error!),
     TrackerMessageKind.localGitTokensNotNeeded => l10n.localGitTokensNotNeeded,
     TrackerMessageKind.tokenEmpty => l10n.tokenEmpty,
-    TrackerMessageKind.githubConnectedDragCards => l10n
-        .githubConnectedDragCards(message.login!, message.repository!),
+    TrackerMessageKind.githubConnectedDragCards =>
+      l10n.githubConnectedDragCards(message.login!, message.repository!),
     TrackerMessageKind.githubConnectionFailed => l10n.githubConnectionFailed(
       message.error!,
     ),
+    TrackerMessageKind.issueSaveFailed => l10n.saveFailed(message.error!),
     TrackerMessageKind.localGitMoveCommitted => l10n.localGitMoveCommitted(
       message.issueKey!,
       message.statusLabel!,
@@ -531,8 +853,8 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
       message.issueKey!,
       message.statusLabel!,
     ),
-    TrackerMessageKind.movePendingGitHubPersistence => l10n
-        .movePendingGitHubPersistence(message.issueKey!),
+    TrackerMessageKind.movePendingGitHubPersistence =>
+      l10n.movePendingGitHubPersistence(message.issueKey!),
     TrackerMessageKind.moveFailed => l10n.moveFailed(message.error!),
     TrackerMessageKind.localGitHubAppUnavailable =>
       l10n.localGitHubAppUnavailable,
@@ -544,15 +866,16 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
       message.login!,
       message.repository!,
     ),
-    TrackerMessageKind.storedGitHubTokenInvalid => l10n
-        .storedGitHubTokenInvalid(message.error!),
+    TrackerMessageKind.storedGitHubTokenInvalid =>
+      l10n.storedGitHubTokenInvalid(message.error!),
   };
 }
 
 class _MessageBanner extends StatelessWidget {
-  const _MessageBanner({required this.message});
+  const _MessageBanner({required this.message, this.onDismiss});
 
   final TrackerMessage? message;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -573,6 +896,7 @@ class _MessageBanner extends StatelessWidget {
         border: Border.all(color: isError ? colors.accent : colors.primary),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           TrackStateIcon(
             isError ? TrackStateIconGlyph.issue : TrackStateIconGlyph.gitBranch,
@@ -582,6 +906,20 @@ class _MessageBanner extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(child: Text(resolvedMessage)),
+          if (onDismiss != null) ...[
+            const SizedBox(width: 8),
+            Semantics(
+              button: true,
+              label: l10n.close,
+              child: TextButton(
+                onPressed: onDismiss,
+                style: TextButton.styleFrom(
+                  foregroundColor: isError ? colors.accent : colors.primary,
+                ),
+                child: Text(l10n.close),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -589,9 +927,14 @@ class _MessageBanner extends StatelessWidget {
 }
 
 class _SectionBody extends StatelessWidget {
-  const _SectionBody({required this.viewModel, this.compact = false});
+  const _SectionBody({
+    required this.viewModel,
+    required this.onApplyLocalGitConfiguration,
+    this.compact = false,
+  });
 
   final TrackerViewModel viewModel;
+  final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final bool compact;
 
   @override
@@ -601,7 +944,10 @@ class _SectionBody extends StatelessWidget {
       TrackerSection.board => _Board(viewModel: viewModel),
       TrackerSection.search => _SearchAndDetail(viewModel: viewModel),
       TrackerSection.hierarchy => _Hierarchy(viewModel: viewModel),
-      TrackerSection.settings => _Settings(viewModel: viewModel),
+      TrackerSection.settings => _Settings(
+        viewModel: viewModel,
+        onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+      ),
     };
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 8, compact ? 12 : 18, 24),
@@ -612,7 +958,10 @@ class _SectionBody extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (viewModel.message != null) ...[
-                _MessageBanner(message: viewModel.message!),
+                _MessageBanner(
+                  message: viewModel.message!,
+                  onDismiss: viewModel.dismissMessage,
+                ),
                 const SizedBox(height: 12),
               ],
               AnimatedSwitcher(
@@ -772,18 +1121,29 @@ class _SearchAndDetail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final viewModel = this.viewModel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _ScreenHeading(
-          title: l10n.jqlSearch,
-          subtitle: l10n.issueCount(viewModel.searchResults.length),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _ScreenHeading(
+                title: l10n.jqlSearch,
+                subtitle: l10n.issueCount(viewModel.searchResults.length),
+              ),
+            ),
+          ],
         ),
         LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 980;
             final list = _IssueList(viewModel: viewModel);
-            final detail = _IssueDetail(issue: viewModel.selectedIssue!);
+            final detail = _IssueDetail(
+              issue: viewModel.selectedIssue!,
+              viewModel: viewModel,
+            );
             return compact
                 ? Column(children: [list, const SizedBox(height: 16), detail])
                 : Row(
@@ -800,6 +1160,56 @@ class _SearchAndDetail extends StatelessWidget {
     );
   }
 }
+
+const Set<String> _hiddenCreateFieldIds = {
+  'summary',
+  'description',
+  'issueType',
+  'status',
+  'priority',
+  'assignee',
+  'reporter',
+  'labels',
+  'components',
+  'fixVersions',
+  'watchers',
+  'parent',
+  'epic',
+  'archived',
+  'resolution',
+};
+
+List<TrackStateFieldDefinition> _createIssueFieldDefinitions(
+  ProjectConfig? project,
+) {
+  if (project == null) {
+    return const [];
+  }
+  return project.fieldDefinitions
+      .where((field) => !_hiddenCreateFieldIds.contains(field.id))
+      .toList(growable: false);
+}
+
+void _syncCreateFieldControllers(
+  Map<String, TextEditingController> controllers,
+  List<TrackStateFieldDefinition> fields,
+) {
+  final activeFieldIds = fields.map((field) => field.id).toSet();
+  final staleFieldIds = controllers.keys
+      .where((fieldId) => !activeFieldIds.contains(fieldId))
+      .toList(growable: false);
+  for (final fieldId in staleFieldIds) {
+    controllers.remove(fieldId)?.dispose();
+  }
+  for (final field in fields) {
+    controllers.putIfAbsent(field.id, TextEditingController.new);
+  }
+}
+
+String _createIssueFieldLabel(
+  ProjectConfig? project,
+  TrackStateFieldDefinition field,
+) => project?.fieldLabel(field.id) ?? field.name;
 
 class _Hierarchy extends StatelessWidget {
   const _Hierarchy({required this.viewModel});
@@ -844,9 +1254,13 @@ class _Hierarchy extends StatelessWidget {
 }
 
 class _Settings extends StatefulWidget {
-  const _Settings({required this.viewModel});
+  const _Settings({
+    required this.viewModel,
+    required this.onApplyLocalGitConfiguration,
+  });
 
   final TrackerViewModel viewModel;
+  final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
 
   @override
   State<_Settings> createState() => _SettingsState();
@@ -854,11 +1268,30 @@ class _Settings extends StatefulWidget {
 
 class _SettingsState extends State<_Settings> {
   late _SettingsProviderSelection _selectedProvider;
+  final TextEditingController _repositoryPathController =
+      TextEditingController();
+  final TextEditingController _writeBranchController = TextEditingController();
+  final FocusNode _repositoryPathFocusNode = FocusNode();
+  final FocusNode _writeBranchFocusNode = FocusNode();
+  String? _lastAppliedLocalGitConfigurationKey;
 
   @override
   void initState() {
     super.initState();
     _selectedProvider = _initialProvider(widget.viewModel);
+    _repositoryPathController.addListener(_maybeApplyLocalGitConfiguration);
+    _writeBranchController.addListener(_maybeApplyLocalGitConfiguration);
+    _repositoryPathFocusNode.addListener(_maybeApplyLocalGitConfiguration);
+    _writeBranchFocusNode.addListener(_maybeApplyLocalGitConfiguration);
+  }
+
+  @override
+  void dispose() {
+    _repositoryPathController.dispose();
+    _writeBranchController.dispose();
+    _repositoryPathFocusNode.dispose();
+    _writeBranchFocusNode.dispose();
+    super.dispose();
   }
 
   @override
@@ -876,6 +1309,56 @@ class _SettingsState extends State<_Settings> {
         : _SettingsProviderSelection.hosted;
   }
 
+  void _clearLocalGitDraft() {
+    _repositoryPathController.clear();
+    _writeBranchController.clear();
+    _lastAppliedLocalGitConfigurationKey = null;
+  }
+
+  Future<void> _maybeApplyLocalGitConfiguration() async {
+    if (_selectedProvider != _SettingsProviderSelection.localGit ||
+        _repositoryPathFocusNode.hasFocus ||
+        _writeBranchFocusNode.hasFocus) {
+      return;
+    }
+    final repositoryPath = _repositoryPathController.text.trim();
+    final writeBranch = _writeBranchController.text.trim();
+    if (repositoryPath.isEmpty || writeBranch.isEmpty) {
+      return;
+    }
+    final configurationKey = '$repositoryPath\n$writeBranch';
+    if (_lastAppliedLocalGitConfigurationKey == configurationKey) {
+      return;
+    }
+    _lastAppliedLocalGitConfigurationKey = configurationKey;
+    var appliedSuccessfully = false;
+    try {
+      await widget.onApplyLocalGitConfiguration(
+        repositoryPath: repositoryPath,
+        writeBranch: writeBranch,
+      );
+      appliedSuccessfully = true;
+    } finally {
+      if (!appliedSuccessfully &&
+          _lastAppliedLocalGitConfigurationKey == configurationKey) {
+        _lastAppliedLocalGitConfigurationKey = null;
+      }
+    }
+  }
+
+  void _selectProvider(_SettingsProviderSelection selection) {
+    if (_selectedProvider == selection) {
+      return;
+    }
+    setState(() {
+      if (_selectedProvider == _SettingsProviderSelection.localGit &&
+          selection != _SettingsProviderSelection.localGit) {
+        _clearLocalGitDraft();
+      }
+      _selectedProvider = selection;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
@@ -886,9 +1369,12 @@ class _SettingsState extends State<_Settings> {
         _SettingsProviderButton(
           label: hostedLabel,
           selected: _selectedProvider == _SettingsProviderSelection.hosted,
-          onPressed: () {
-            setState(() => _selectedProvider = _SettingsProviderSelection.hosted);
-          },
+          tone:
+              widget.viewModel.repositoryAccessState ==
+                  RepositoryAccessState.connected
+              ? _SettingsProviderButtonTone.connected
+              : _SettingsProviderButtonTone.defaultTone,
+          onPressed: () => _selectProvider(_SettingsProviderSelection.hosted),
         ),
         if (_selectedProvider == _SettingsProviderSelection.hosted) ...[
           const SizedBox(height: 12),
@@ -902,13 +1388,16 @@ class _SettingsState extends State<_Settings> {
       _SettingsProviderButton(
         label: l10n.repositoryAccessLocalGit,
         selected: _selectedProvider == _SettingsProviderSelection.localGit,
-        onPressed: () {
-          setState(() => _selectedProvider = _SettingsProviderSelection.localGit);
-        },
+        onPressed: () => _selectProvider(_SettingsProviderSelection.localGit),
       ),
       if (_selectedProvider == _SettingsProviderSelection.localGit) ...[
         const SizedBox(height: 12),
-        _LocalGitConfiguration(project: project),
+        _LocalGitConfiguration(
+          repositoryPathController: _repositoryPathController,
+          writeBranchController: _writeBranchController,
+          repositoryPathFocusNode: _repositoryPathFocusNode,
+          writeBranchFocusNode: _writeBranchFocusNode,
+        ),
       ],
     ];
     return Column(
@@ -963,37 +1452,133 @@ class _SettingsState extends State<_Settings> {
 
 enum _SettingsProviderSelection { hosted, localGit }
 
-class _IssueDetail extends StatelessWidget {
-  const _IssueDetail({required this.issue});
+class _IssueDetail extends StatefulWidget {
+  const _IssueDetail({required this.issue, required this.viewModel});
 
   final TrackStateIssue issue;
+  final TrackerViewModel viewModel;
+
+  @override
+  State<_IssueDetail> createState() => _IssueDetailState();
+}
+
+class _IssueDetailState extends State<_IssueDetail> {
+  late final TextEditingController _descriptionController;
+  bool _isEditing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _descriptionController = TextEditingController(
+      text: widget.issue.description,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _IssueDetail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final issueChanged = oldWidget.issue.key != widget.issue.key;
+    final descriptionChanged =
+        oldWidget.issue.description != widget.issue.description;
+    if (issueChanged) {
+      _isEditing = false;
+    }
+    if (issueChanged || (!_isEditing && descriptionChanged)) {
+      _descriptionController.text = widget.issue.description;
+    }
+  }
+
+  @override
+  void dispose() {
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveDescription() async {
+    final success = await widget.viewModel.saveIssueDescription(
+      widget.issue,
+      _descriptionController.text,
+    );
+    if (!mounted || !success) {
+      return;
+    }
+    setState(() {
+      _isEditing = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final issue = widget.issue;
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
+    final hasReadOnlySession = widget.viewModel.hasReadOnlySession;
+    final canUseWriteActions =
+        !hasReadOnlySession && !widget.viewModel.isSaving;
+    final actions = [
+      _PrimaryButton(
+        label: l10n.transition,
+        icon: TrackStateIconGlyph.gitBranch,
+        onPressed: canUseWriteActions ? () {} : null,
+      ),
+      if (_isEditing)
+        _IssueDetailActionButton(
+          label: l10n.save,
+          emphasized: true,
+          onPressed: canUseWriteActions ? _saveDescription : null,
+        )
+      else
+        _IssueDetailActionButton(
+          label: l10n.edit,
+          onPressed: canUseWriteActions
+              ? () {
+                  setState(() {
+                    _isEditing = true;
+                    _descriptionController.text = issue.description;
+                  });
+                }
+              : null,
+        ),
+      if (_isEditing)
+        _IssueDetailActionButton(
+          label: l10n.cancel,
+          onPressed: widget.viewModel.isSaving
+              ? null
+              : () {
+                  setState(() {
+                    _isEditing = false;
+                    _descriptionController.text = issue.description;
+                  });
+                },
+        ),
+    ];
     return _SurfaceCard(
       semanticLabel: '${l10n.issueDetail} ${issue.key}',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _IssueTypeGlyph(issue.issueType),
               const SizedBox(width: 8),
-              Text(
-                issue.key,
-                style: TextStyle(
-                  fontFamily: 'JetBrains Mono',
-                  color: colors.muted,
-                  fontWeight: FontWeight.w600,
+              Expanded(
+                child: Text(
+                  issue.key,
+                  style: TextStyle(
+                    fontFamily: 'JetBrains Mono',
+                    color: colors.muted,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-              const Spacer(),
-              _PrimaryButton(
-                label: l10n.transition,
-                icon: TrackStateIconGlyph.gitBranch,
-                onPressed: () {},
+              Flexible(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.end,
+                  children: actions,
+                ),
               ),
             ],
           ),
@@ -1003,6 +1588,15 @@ class _IssueDetail extends StatelessWidget {
             style: Theme.of(context).textTheme.headlineMedium,
           ),
           const SizedBox(height: 12),
+          if (hasReadOnlySession) ...[
+            Text(
+              l10n.issueDetailReadOnlyMessage,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: colors.muted),
+            ),
+            const SizedBox(height: 12),
+          ],
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -1014,7 +1608,23 @@ class _IssueDetail extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           _SectionTitle(l10n.description),
-          Text(issue.description),
+          if (_isEditing)
+            Semantics(
+              label: l10n.description,
+              textField: true,
+              child: TextField(
+                controller: _descriptionController,
+                minLines: 4,
+                maxLines: null,
+                enabled: !widget.viewModel.isSaving,
+                decoration: InputDecoration(
+                  labelText: l10n.description,
+                  alignLabelWithHint: true,
+                ),
+              ),
+            )
+          else
+            Text(issue.description),
           const SizedBox(height: 18),
           _SectionTitle(l10n.acceptanceCriteria),
           for (final criteria in issue.acceptanceCriteria)
@@ -1046,6 +1656,55 @@ class _IssueDetail extends StatelessWidget {
               _CommentBubble(comment: comment),
         ],
       ),
+    );
+  }
+}
+
+class _IssueDetailActionButton extends StatelessWidget {
+  const _IssueDetailActionButton({
+    required this.label,
+    required this.onPressed,
+    this.emphasized = false,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final child = Text(label);
+    final button = emphasized
+        ? FilledButton(
+            onPressed: onPressed,
+            style: FilledButton.styleFrom(
+              backgroundColor: colors.primary,
+              foregroundColor: colors.page,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: child,
+          )
+        : OutlinedButton(
+            onPressed: onPressed,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: colors.text,
+              side: BorderSide(color: colors.border),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: child,
+          );
+    return Semantics(
+      button: true,
+      label: label,
+      excludeSemantics: true,
+      child: button,
     );
   }
 }
@@ -1445,26 +2104,19 @@ class _SettingsProviderButton extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onPressed,
+    this.tone = _SettingsProviderButtonTone.defaultTone,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onPressed;
+  final _SettingsProviderButtonTone tone;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
     final style = selected
-        ? FilledButton.styleFrom(
-            backgroundColor: colors.primary,
-            foregroundColor: const Color(0xFFFAF8F4),
-            alignment: Alignment.centerLeft,
-            minimumSize: const Size.fromHeight(52),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          )
+        ? _selectedStyle(context, colors)
         : OutlinedButton.styleFrom(
             foregroundColor: colors.text,
             alignment: Alignment.centerLeft,
@@ -1485,7 +2137,11 @@ class _SettingsProviderButton extends StatelessWidget {
       child: SizedBox(
         width: double.infinity,
         child: selected
-            ? FilledButton(onPressed: onPressed, style: style, child: Text(label))
+            ? FilledButton(
+                onPressed: onPressed,
+                style: style,
+                child: Text(label),
+              )
             : OutlinedButton(
                 onPressed: onPressed,
                 style: style,
@@ -1494,7 +2150,52 @@ class _SettingsProviderButton extends StatelessWidget {
       ),
     );
   }
+
+  ButtonStyle _selectedStyle(BuildContext context, TrackStateColors colors) {
+    if (tone == _SettingsProviderButtonTone.connected) {
+      return _connectedStyle(context, colors);
+    }
+    final hoveredBackground = Color.lerp(colors.primary, colors.text, 0.04)!;
+    final pressedBackground = Color.lerp(colors.primary, colors.text, 0.08)!;
+
+    return FilledButton.styleFrom(
+      foregroundColor: colors.page,
+      alignment: Alignment.centerLeft,
+      minimumSize: const Size.fromHeight(52),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    ).copyWith(
+      backgroundColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.pressed)) {
+          return pressedBackground;
+        }
+        if (states.contains(WidgetState.hovered) ||
+            states.contains(WidgetState.focused)) {
+          return hoveredBackground;
+        }
+        return colors.primary;
+      }),
+      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+    );
+  }
+
+  ButtonStyle _connectedStyle(BuildContext context, TrackStateColors colors) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final foreground = isDark ? colors.page : colors.text;
+
+    return FilledButton.styleFrom(
+      backgroundColor: colors.success,
+      foregroundColor: foreground,
+      alignment: Alignment.centerLeft,
+      minimumSize: const Size.fromHeight(52),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      overlayColor: Colors.transparent,
+    );
+  }
 }
+
+enum _SettingsProviderButtonTone { defaultTone, connected }
 
 class _HostedProviderConfiguration extends StatelessWidget {
   const _HostedProviderConfiguration({
@@ -1537,37 +2238,55 @@ class _HostedProviderConfiguration extends StatelessWidget {
 }
 
 class _LocalGitConfiguration extends StatelessWidget {
-  const _LocalGitConfiguration({required this.project});
+  const _LocalGitConfiguration({
+    required this.repositoryPathController,
+    required this.writeBranchController,
+    required this.repositoryPathFocusNode,
+    required this.writeBranchFocusNode,
+  });
 
-  final ProjectConfig project;
+  final TextEditingController repositoryPathController;
+  final TextEditingController writeBranchController;
+  final FocusNode repositoryPathFocusNode;
+  final FocusNode writeBranchFocusNode;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     return Column(
       children: [
-        _SettingsValueField(
+        _SettingsTextField(
           label: l10n.repositoryPath,
-          value: project.repository,
+          controller: repositoryPathController,
+          focusNode: repositoryPathFocusNode,
         ),
         const SizedBox(height: 12),
-        _SettingsValueField(label: l10n.writeBranch, value: project.branch),
+        _SettingsTextField(
+          label: l10n.writeBranch,
+          controller: writeBranchController,
+          focusNode: writeBranchFocusNode,
+        ),
       ],
     );
   }
 }
 
-class _SettingsValueField extends StatelessWidget {
-  const _SettingsValueField({required this.label, required this.value});
+class _SettingsTextField extends StatelessWidget {
+  const _SettingsTextField({
+    required this.label,
+    required this.controller,
+    required this.focusNode,
+  });
 
   final String label;
-  final String value;
+  final TextEditingController controller;
+  final FocusNode focusNode;
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
-      initialValue: value,
-      readOnly: true,
+      controller: controller,
+      focusNode: focusNode,
       decoration: InputDecoration(labelText: label),
     );
   }
@@ -1637,7 +2356,7 @@ class _PrimaryButton extends StatelessWidget {
 
   final String label;
   final TrackStateIconGlyph icon;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -1670,13 +2389,15 @@ class _IconButtonSurface extends StatelessWidget {
 
   final String label;
   final TrackStateIconGlyph glyph;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final enabled = onPressed != null;
     return Semantics(
       button: true,
+      enabled: enabled,
       label: label,
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
@@ -1688,7 +2409,181 @@ class _IconButtonSurface extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: colors.border),
           ),
-          child: TrackStateIcon(glyph, color: colors.text, size: 18),
+          foregroundDecoration: enabled
+              ? null
+              : BoxDecoration(
+                  color: colors.page.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+          child: TrackStateIcon(
+            glyph,
+            color: enabled ? colors.text : colors.muted,
+            size: 18,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CreateIssueDialog extends StatefulWidget {
+  const _CreateIssueDialog({required this.viewModel, required this.onDismiss});
+
+  final TrackerViewModel viewModel;
+  final VoidCallback onDismiss;
+
+  @override
+  State<_CreateIssueDialog> createState() => _CreateIssueDialogState();
+}
+
+class _CreateIssueOverlay extends StatelessWidget {
+  const _CreateIssueOverlay({required this.child, this.compact = false});
+
+  final Widget child;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: compact ? Alignment.topCenter : Alignment.center,
+      child: child,
+    );
+  }
+}
+
+class _CreateIssueDialogState extends State<_CreateIssueDialog> {
+  late final TextEditingController _summaryController;
+  late final TextEditingController _descriptionController;
+  final Map<String, TextEditingController> _customFieldControllers = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _summaryController = TextEditingController();
+    _descriptionController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _summaryController.dispose();
+    _descriptionController.dispose();
+    for (final controller in _customFieldControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _submitCreateIssue() async {
+    final customFields = <String, String>{};
+    for (final field in _createIssueFieldDefinitions(
+      widget.viewModel.project,
+    )) {
+      final value = _customFieldControllers[field.id]?.text.trim() ?? '';
+      if (value.isEmpty) {
+        continue;
+      }
+      customFields[field.id] = value;
+    }
+    final success = await widget.viewModel.createIssue(
+      summary: _summaryController.text,
+      description: _descriptionController.text,
+      customFields: customFields,
+    );
+    if (!mounted || !success) {
+      return;
+    }
+    widget.onDismiss();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final project = widget.viewModel.project;
+    final summaryLabel = project?.fieldLabel('summary') ?? 'Summary';
+    final createFields = _createIssueFieldDefinitions(project);
+    _syncCreateFieldControllers(_customFieldControllers, createFields);
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: ListenableBuilder(
+          listenable: widget.viewModel,
+          builder: (context, _) {
+            final canSubmit =
+                !widget.viewModel.hasReadOnlySession &&
+                !widget.viewModel.isSaving;
+            return _SurfaceCard(
+              semanticLabel: l10n.createIssue,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _SectionTitle(l10n.createIssue),
+                  const SizedBox(height: 12),
+                  Semantics(
+                    label: summaryLabel,
+                    textField: true,
+                    child: TextField(
+                      controller: _summaryController,
+                      enabled: !widget.viewModel.isSaving,
+                      decoration: InputDecoration(labelText: summaryLabel),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Semantics(
+                    label: l10n.description,
+                    textField: true,
+                    child: TextField(
+                      controller: _descriptionController,
+                      minLines: 3,
+                      maxLines: null,
+                      enabled: !widget.viewModel.isSaving,
+                      decoration: InputDecoration(
+                        labelText: l10n.description,
+                        alignLabelWithHint: true,
+                      ),
+                    ),
+                  ),
+                  for (final field in createFields) ...[
+                    const SizedBox(height: 12),
+                    Semantics(
+                      label: _createIssueFieldLabel(project, field),
+                      textField: true,
+                      child: TextField(
+                        key: ValueKey('create-field-${field.id}'),
+                        controller: _customFieldControllers[field.id],
+                        minLines: field.type == 'markdown' ? 3 : 1,
+                        maxLines: field.type == 'markdown' ? null : 1,
+                        enabled: !widget.viewModel.isSaving,
+                        decoration: InputDecoration(
+                          labelText: _createIssueFieldLabel(project, field),
+                          alignLabelWithHint: field.type == 'markdown',
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _IssueDetailActionButton(
+                        label: l10n.save,
+                        emphasized: true,
+                        onPressed: canSubmit ? _submitCreateIssue : null,
+                      ),
+                      _IssueDetailActionButton(
+                        label: l10n.cancel,
+                        onPressed: widget.viewModel.isSaving
+                            ? null
+                            : widget.onDismiss,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
@@ -1728,14 +2623,14 @@ class _NavButton extends StatelessWidget {
               children: [
                 TrackStateIcon(
                   item.glyph,
-                  color: selected ? const Color(0xFFFAF8F4) : colors.muted,
+                  color: selected ? colors.page : colors.muted,
                   size: 18,
                 ),
                 const SizedBox(width: 10),
                 Text(
                   item.label,
                   style: TextStyle(
-                    color: selected ? const Color(0xFFFAF8F4) : colors.text,
+                    color: selected ? colors.page : colors.text,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),

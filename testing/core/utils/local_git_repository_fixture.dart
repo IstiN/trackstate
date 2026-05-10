@@ -25,14 +25,14 @@ class LocalGitRepositoryFixture {
 
   Future<void> configureAuthor({String? userName, String? userEmail}) async {
     if (userName == null) {
-      await _git(['config', '--unset-all', 'user.name']);
+      await _git(['config', '--local', '--unset-all', 'user.name']);
     } else {
-      await _git(['config', 'user.name', userName]);
+      await _git(['config', '--local', 'user.name', userName]);
     }
     if (userEmail == null) {
-      await _git(['config', '--unset-all', 'user.email']);
+      await _git(['config', '--local', '--unset-all', 'user.email']);
     } else {
-      await _git(['config', 'user.email', userEmail]);
+      await _git(['config', '--local', 'user.email', userEmail]);
     }
   }
 
@@ -105,8 +105,8 @@ Loaded from local Git.
     );
 
     await _git(['init', '-b', branch]);
-    await _git(['config', 'user.name', userName]);
-    await _git(['config', 'user.email', userEmail]);
+    await _git(['config', '--local', 'user.name', userName]);
+    await _git(['config', '--local', 'user.email', userEmail]);
     await stageAll();
     await commit('Initial local runtime fixture');
   }

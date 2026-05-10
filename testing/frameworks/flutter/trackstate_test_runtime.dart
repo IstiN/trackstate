@@ -12,6 +12,13 @@ Future<TrackStateRepository> createLocalGitTestRepository({
     runtime: TrackStateRuntime.localGit,
     localRepositoryPath: repositoryPath,
   );
+  return preloadLocalGitTestRepository(tester: tester, repository: repository);
+}
+
+Future<TrackStateRepository> preloadLocalGitTestRepository({
+  required WidgetTester tester,
+  required TrackStateRepository repository,
+}) async {
   final snapshot = await tester.runAsync(repository.loadSnapshot);
   if (snapshot == null) {
     throw StateError('Local Git snapshot loading did not complete.');
@@ -36,7 +43,7 @@ Future<TrackStateRepository> createLocalGitTestRepository({
 }
 
 class _PreloadedLocalGitRepository implements TrackStateRepository {
-  const _PreloadedLocalGitRepository({
+  _PreloadedLocalGitRepository({
     required this.repository,
     required this.snapshot,
     required this.user,
@@ -45,6 +52,7 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
   final TrackStateRepository repository;
   final TrackerSnapshot snapshot;
   final RepositoryUser user;
+  bool _servedInitialSnapshot = false;
 
   @override
   bool get supportsGitHubAuth => repository.supportsGitHubAuth;
@@ -56,18 +64,46 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
   Future<RepositoryUser> connect(RepositoryConnection connection) async => user;
 
   @override
-  Future<TrackerSnapshot> loadSnapshot() async => snapshot;
+  Future<TrackerSnapshot> loadSnapshot() async {
+    if (!_servedInitialSnapshot) {
+      _servedInitialSnapshot = true;
+      return snapshot;
+    }
+    return repository.loadSnapshot();
+  }
 
   @override
-  Future<List<TrackStateIssue>> searchIssues(String jql) {
-    return repository.searchIssues(jql);
-  }
+  Future<List<TrackStateIssue>> searchIssues(String jql) =>
+      repository.searchIssues(jql);
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+    Map<String, String> customFields = const {},
+  }) => repository.createIssue(
+    summary: summary,
+    description: description,
+    customFields: customFields,
+  );
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) => repository.updateIssueDescription(issue, description);
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) =>
+      repository.archiveIssue(issue);
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) =>
+      repository.deleteIssue(issue);
 
   @override
   Future<TrackStateIssue> updateIssueStatus(
     TrackStateIssue issue,
     IssueStatus status,
-  ) {
-    return repository.updateIssueStatus(issue, status);
-  }
+  ) => repository.updateIssueStatus(issue, status);
 }

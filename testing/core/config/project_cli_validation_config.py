@@ -32,8 +32,14 @@ class ProjectCliValidationConfig:
             documentation_repository=os.environ.get(
                 "TS74_DOCUMENTATION_REPOSITORY",
                 os.environ.get(
-                    "TS74_UPSTREAM_SETUP_REPOSITORY",
-                    "IstiN/trackstate-setup",
+                    "TS74_README_REPOSITORY",
+                    os.environ.get(
+                        "TRACKSTATE_SETUP_README_REPOSITORY",
+                        os.environ.get(
+                            "TS74_UPSTREAM_SETUP_REPOSITORY",
+                            "IstiN/trackstate-setup",
+                        ),
+                    ),
                 ),
             ),
             target_repository_override=target_repository_override,

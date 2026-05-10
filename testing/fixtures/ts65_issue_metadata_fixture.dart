@@ -88,6 +88,9 @@ The UI should resolve the stored status ID to the localized status label.
   String get dataRef => 'main';
 
   @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
   String get repositoryLabel => 'trackstate/trackstate';
 
   @override
@@ -152,6 +155,9 @@ The UI should resolve the stored status ID to the localized status label.
       'TS-65 should not attempt to create commits.',
     );
   }
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
 
   @override
   Future<RepositoryWriteResult> writeTextFile(

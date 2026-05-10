@@ -76,8 +76,11 @@ class TrackStateIssue {
   TrackStateIssue copyWith({
     IssueStatus? status,
     String? statusId,
+    String? description,
     String? rawMarkdown,
     String? updatedLabel,
+    bool? isArchived,
+    String? storagePath,
   }) {
     return TrackStateIssue(
       key: key,
@@ -89,7 +92,7 @@ class TrackStateIssue {
       priority: priority,
       priorityId: priorityId,
       summary: summary,
-      description: description,
+      description: description ?? this.description,
       assignee: assignee,
       reporter: reporter,
       labels: labels,
@@ -107,9 +110,9 @@ class TrackStateIssue {
       comments: comments,
       links: links,
       attachments: attachments,
-      isArchived: isArchived,
+      isArchived: isArchived ?? this.isArchived,
       resolutionId: resolutionId,
-      storagePath: storagePath,
+      storagePath: storagePath ?? this.storagePath,
       rawMarkdown: rawMarkdown ?? this.rawMarkdown,
     );
   }
@@ -402,11 +405,13 @@ class TrackerSnapshot {
     required this.project,
     required this.issues,
     this.repositoryIndex = const RepositoryIndex(),
+    this.loadWarnings = const [],
   });
 
   final ProjectConfig project;
   final List<TrackStateIssue> issues;
   final RepositoryIndex repositoryIndex;
+  final List<String> loadWarnings;
 
   List<TrackStateIssue> get epics =>
       issues.where((issue) => issue.issueType == IssueType.epic).toList();
@@ -453,7 +458,8 @@ class RepositoryUser {
     }
     final compact = source.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
     if (compact.isEmpty) return '';
-    return compact.substring(0, compact.length < 2 ? compact.length : 2)
+    return compact
+        .substring(0, compact.length < 2 ? compact.length : 2)
         .toUpperCase();
   }
 }

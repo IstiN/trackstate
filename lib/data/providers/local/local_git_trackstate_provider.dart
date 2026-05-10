@@ -5,7 +5,8 @@ import 'dart:typed_data';
 import '../../../domain/models/trackstate_models.dart';
 import '../trackstate_provider.dart';
 
-class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
+class LocalGitTrackStateProvider
+    implements TrackStateProviderAdapter, RepositoryFileMutator {
   LocalGitTrackStateProvider({
     required this.repositoryPath,
     this.dataRef = 'HEAD',
@@ -17,6 +18,9 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
 
   @override
   final String dataRef;
+
+  @override
+  ProviderType get providerType => ProviderType.local;
 
   @override
   String get repositoryLabel => repositoryPath;
@@ -31,10 +35,7 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
     }
     final name = await _gitConfigValue('user.name');
     final email = await _gitConfigValue('user.email');
-    return RepositoryUser(
-      login: email.ifEmpty('local-user'),
-      displayName: name.ifEmpty(email.ifEmpty('Local User')),
-    );
+    return RepositoryUser(login: email, displayName: name.ifEmpty(email));
   }
 
   @override
@@ -99,9 +100,7 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
       expectedRevision: request.expectedRevision,
       currentRevision: await _currentHeadRevision(request.path),
     );
-    final file = File(_absolutePath(request.path));
-    await file.parent.create(recursive: true);
-    await file.writeAsString(request.content);
+    await _writeTextToWorktree(path: request.path, content: request.content);
     await _runGit(['add', '--', request.path]);
     if (!await _hasStagedChanges(request.path)) {
       final revision = await _tryGit(['rev-parse', 'HEAD:${request.path}']);
@@ -141,6 +140,81 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
   }
 
   @override
+  Future<RepositoryCommitResult> applyFileChanges(
+    RepositoryFileChangeRequest request,
+  ) async {
+    await _ensureOnBranch(request.branch);
+    final paths = {
+      for (final change in request.changes) change.path,
+    }.toList(growable: false);
+    for (final change in request.changes) {
+      await _ensurePathClean(change.path);
+      switch (change) {
+        case RepositoryTextFileChange():
+          _ensureExpectedRevisionMatches(
+            path: change.path,
+            expectedRevision: change.expectedRevision,
+            currentRevision: await _currentHeadRevision(change.path),
+          );
+          await _writeTextToWorktree(
+            path: change.path,
+            content: change.content,
+          );
+          await _runGit(['add', '--', change.path]);
+        case RepositoryBinaryFileChange():
+          _ensureExpectedRevisionMatches(
+            path: change.path,
+            expectedRevision: change.expectedRevision,
+            currentRevision: await _currentHeadRevision(change.path),
+          );
+          await _writeBytesToWorktree(path: change.path, bytes: change.bytes);
+          await _runGit(['add', '--', change.path]);
+        case RepositoryDeleteFileChange():
+          if (change.expectedRevision != null) {
+            _ensureExpectedRevisionMatches(
+              path: change.path,
+              expectedRevision: change.expectedRevision,
+              currentRevision: await _currentHeadRevision(change.path),
+            );
+          }
+          final currentRevision = await _currentHeadRevision(change.path);
+          if (currentRevision == null) {
+            await _deleteWorktreeFileIfExists(change.path);
+            continue;
+          }
+          await _runGit(['rm', '-f', '--', change.path]);
+      }
+    }
+    if (!await _hasStagedChangesForPaths(paths)) {
+      final revision = await _tryGit(['rev-parse', 'HEAD']);
+      return RepositoryCommitResult(
+        branch: request.branch,
+        message: request.message,
+        revision: revision?.stdout.trim(),
+      );
+    }
+    await _runGit(['commit', '-m', request.message, '--', ...paths]);
+    final revision = await _runGit(['rev-parse', 'HEAD']);
+    return RepositoryCommitResult(
+      branch: request.branch,
+      message: request.message,
+      revision: revision.stdout.trim(),
+    );
+  }
+
+  @override
+  Future<void> ensureCleanWorktree() async {
+    final result = await _runGit(['status', '--porcelain']);
+    if (result.stdout.trim().isEmpty) {
+      return;
+    }
+    throw const TrackStateProviderException(
+      'Cannot create an issue because this repository has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
+    );
+  }
+
+  @override
   Future<RepositoryPermission> getPermission() async {
     final branch = await resolveWriteBranch();
     final exists = await getBranch(branch);
@@ -176,9 +250,7 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
       expectedRevision: request.expectedRevision,
       currentRevision: await _currentHeadRevision(request.path),
     );
-    final file = File(_absolutePath(request.path));
-    await file.parent.create(recursive: true);
-    await file.writeAsBytes(request.bytes);
+    await _writeBytesToWorktree(path: request.path, bytes: request.bytes);
     await _runGit(['add', '--', request.path]);
     if (!await _hasStagedChanges(request.path)) {
       final revision = await _tryGit(['rev-parse', 'HEAD:${request.path}']);
@@ -223,8 +295,19 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
     return result.stdout.trim().isNotEmpty;
   }
 
+  Future<bool> _hasStagedChangesForPaths(List<String> paths) async {
+    final result = await _runGit([
+      'diff',
+      '--cached',
+      '--name-only',
+      '--',
+      ...paths,
+    ]);
+    return result.stdout.trim().isNotEmpty;
+  }
+
   Future<String> _gitConfigValue(String key) async =>
-      (await _tryGit(['config', key]))?.stdout.trim() ?? '';
+      (await _tryGit(['config', '--local', key]))?.stdout.trim() ?? '';
 
   Future<void> _ensurePathClean(String path) async {
     final result = await _runGit(['status', '--porcelain', '--', path]);
@@ -232,7 +315,8 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
       return;
     }
     throw TrackStateProviderException(
-      'Cannot save $path because it has staged or unstaged local changes.',
+      'Cannot save $path because it has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
     );
   }
 
@@ -254,6 +338,63 @@ class LocalGitTrackStateProvider implements TrackStateProviderAdapter {
       'Expected revision ${expectedRevision ?? 'for a new file'}, '
       'found ${currentRevision ?? 'no file at HEAD'}.',
     );
+  }
+
+  Future<void> _writeTextToWorktree({
+    required String path,
+    required String content,
+  }) async {
+    final file = File(_absolutePath(path));
+    await _withFileSystemErrorMapping(
+      path: path,
+      operation: 'write text file',
+      action: () async {
+        await file.parent.create(recursive: true);
+        await file.writeAsString(content);
+      },
+    );
+  }
+
+  Future<void> _writeBytesToWorktree({
+    required String path,
+    required List<int> bytes,
+  }) async {
+    final file = File(_absolutePath(path));
+    await _withFileSystemErrorMapping(
+      path: path,
+      operation: 'write binary file',
+      action: () async {
+        await file.parent.create(recursive: true);
+        await file.writeAsBytes(bytes);
+      },
+    );
+  }
+
+  Future<void> _deleteWorktreeFileIfExists(String path) async {
+    final file = File(_absolutePath(path));
+    await _withFileSystemErrorMapping(
+      path: path,
+      operation: 'delete file',
+      action: () async {
+        if (await file.exists()) {
+          await file.delete();
+        }
+      },
+    );
+  }
+
+  Future<void> _withFileSystemErrorMapping({
+    required String path,
+    required String operation,
+    required Future<void> Function() action,
+  }) async {
+    try {
+      await action();
+    } on FileSystemException {
+      throw TrackStateProviderException(
+        'Local repository could not $operation at $path because the filesystem rejected the change.',
+      );
+    }
   }
 
   Future<GitCommandResult> _runGit(

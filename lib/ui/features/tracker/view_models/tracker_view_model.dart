@@ -1,19 +1,25 @@
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../data/providers/trackstate_provider.dart';
 import '../../../../data/repositories/trackstate_repository.dart';
 import '../../../../data/services/trackstate_auth_store.dart';
 import '../../../../domain/models/trackstate_models.dart';
 
 enum TrackerSection { dashboard, board, search, hierarchy, settings }
+
 enum RepositoryAccessState { localGit, connected, connectGitHub }
+
 enum TrackerMessageTone { info, error }
+
 enum TrackerMessageKind {
   dataLoadFailed,
+  repositoryConfigFallback,
   localGitTokensNotNeeded,
   tokenEmpty,
   githubConnectedDragCards,
   githubConnectionFailed,
+  issueSaveFailed,
   localGitMoveCommitted,
   githubMoveCommitted,
   movePendingGitHubPersistence,
@@ -52,6 +58,13 @@ class TrackerMessage {
     error: '$error',
   );
 
+  factory TrackerMessage.repositoryConfigFallback(Object error) =>
+      TrackerMessage._(
+        TrackerMessageKind.repositoryConfigFallback,
+        tone: TrackerMessageTone.error,
+        error: '$error',
+      );
+
   factory TrackerMessage.localGitTokensNotNeeded() => const TrackerMessage._(
     TrackerMessageKind.localGitTokensNotNeeded,
     tone: TrackerMessageTone.info,
@@ -78,6 +91,12 @@ class TrackerMessage {
         tone: TrackerMessageTone.error,
         error: '$error',
       );
+
+  factory TrackerMessage.issueSaveFailed(Object error) => TrackerMessage._(
+    TrackerMessageKind.issueSaveFailed,
+    tone: TrackerMessageTone.error,
+    error: '$error',
+  );
 
   factory TrackerMessage.localGitMoveCommitted({
     required String issueKey,
@@ -156,10 +175,13 @@ class TrackerViewModel extends ChangeNotifier {
     TrackStateAuthStore authStore =
         const SharedPreferencesTrackStateAuthStore(),
   }) : _repository = repository,
-       _authStore = authStore;
+       _authStore = authStore {
+    _bindProviderSession();
+  }
 
   final TrackStateRepository _repository;
   final TrackStateAuthStore _authStore;
+  ProviderSession? _boundProviderSession;
 
   TrackerSnapshot? _snapshot;
   TrackerSection _section = TrackerSection.dashboard;
@@ -186,6 +208,18 @@ class TrackerViewModel extends ChangeNotifier {
   RepositoryUser? get connectedUser => _connectedUser;
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
   bool get supportsGitHubAuth => _repository.supportsGitHubAuth;
+  ProviderSession? get providerSession => switch (_repository) {
+    ProviderBackedTrackStateRepository repository => repository.session,
+    _ => null,
+  };
+  bool get hasReadOnlySession {
+    final session = providerSession;
+    return session != null &&
+        session.connectionState == ProviderConnectionState.connected &&
+        session.canRead &&
+        !session.canWrite;
+  }
+
   RepositoryAccessState get repositoryAccessState => usesLocalPersistence
       ? RepositoryAccessState.localGit
       : _isConnected
@@ -240,12 +274,23 @@ class TrackerViewModel extends ChangeNotifier {
       } else if (supportsGitHubAuth) {
         await _restoreGitHubConnection();
       }
+      if (_message == null && _snapshot!.loadWarnings.isNotEmpty) {
+        _message = TrackerMessage.repositoryConfigFallback(
+          _snapshot!.loadWarnings.first,
+        );
+      }
     } on Object catch (error) {
       _message = TrackerMessage.dataLoadFailed(error);
     } finally {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  @override
+  void dispose() {
+    _boundProviderSession?.removeListener(_handleProviderSessionChanged);
+    super.dispose();
   }
 
   Future<void> updateQuery(String query) async {
@@ -269,6 +314,20 @@ class TrackerViewModel extends ChangeNotifier {
     _themePreference = _themePreference == ThemePreference.light
         ? ThemePreference.dark
         : ThemePreference.light;
+    notifyListeners();
+  }
+
+  void restorePresentationStateFrom(TrackerViewModel previous) {
+    _section = previous._section;
+    _themePreference = previous._themePreference;
+    _jql = previous._jql;
+  }
+
+  void dismissMessage() {
+    if (_message == null) {
+      return;
+    }
+    _message = null;
     notifyListeners();
   }
 
@@ -310,6 +369,7 @@ class TrackerViewModel extends ChangeNotifier {
       _message = TrackerMessage.githubConnectionFailed(error);
       _isConnected = false;
     } finally {
+      _bindProviderSession();
       _isSaving = false;
       notifyListeners();
     }
@@ -368,6 +428,89 @@ class TrackerViewModel extends ChangeNotifier {
         orElse: () => issue,
       );
       _message = TrackerMessage.moveFailed(error);
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> createIssue({
+    required String summary,
+    String description = '',
+    Map<String, String> customFields = const {},
+  }) async {
+    final normalizedSummary = summary.trim();
+    if (normalizedSummary.isEmpty) {
+      _message = TrackerMessage.issueSaveFailed(
+        const TrackStateRepositoryException(
+          'Issue summary is required before creating an issue.',
+        ),
+      );
+      notifyListeners();
+      return false;
+    }
+    _isSaving = true;
+    _message = null;
+    notifyListeners();
+
+    try {
+      final created = await _repository.createIssue(
+        summary: normalizedSummary,
+        description: description,
+        customFields: customFields,
+      );
+      _snapshot = await _repository.loadSnapshot();
+      _selectedIssue = _snapshot!.issues.firstWhere(
+        (issue) => issue.key == created.key,
+        orElse: () => created,
+      );
+      _searchResults = await _repository.searchIssues(_jql);
+      _section = TrackerSection.search;
+      return true;
+    } on Object catch (error) {
+      _message = TrackerMessage.issueSaveFailed(error);
+      return false;
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> saveIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async {
+    final normalizedDescription = description.trim();
+    if (normalizedDescription == issue.description.trim()) {
+      return true;
+    }
+    final snapshot = _snapshot;
+    if (snapshot == null) {
+      return false;
+    }
+    _isSaving = true;
+    _message = null;
+    notifyListeners();
+
+    try {
+      final saved = await _repository.updateIssueDescription(
+        issue,
+        normalizedDescription,
+      );
+      _snapshot = await _repository.loadSnapshot();
+      _selectedIssue = _snapshot!.issues.firstWhere(
+        (current) => current.key == saved.key,
+        orElse: () => saved,
+      );
+      _searchResults = await _repository.searchIssues(_jql);
+      return true;
+    } on Object catch (error) {
+      _message = TrackerMessage.issueSaveFailed(error);
+      _selectedIssue = snapshot.issues.firstWhere(
+        (current) => current.key == issue.key,
+        orElse: () => issue,
+      );
+      return false;
     } finally {
       _isSaving = false;
       notifyListeners();
@@ -439,6 +582,8 @@ class TrackerViewModel extends ChangeNotifier {
     } on Object catch (error) {
       _message = TrackerMessage.storedGitHubTokenInvalid(error);
       await _authStore.clearToken(project.repository);
+    } finally {
+      _bindProviderSession();
     }
   }
 
@@ -452,6 +597,21 @@ class TrackerViewModel extends ChangeNotifier {
         token: '',
       ),
     );
+    _bindProviderSession();
+  }
+
+  void _bindProviderSession() {
+    final session = providerSession;
+    if (identical(_boundProviderSession, session)) {
+      return;
+    }
+    _boundProviderSession?.removeListener(_handleProviderSessionChanged);
+    _boundProviderSession = session;
+    _boundProviderSession?.addListener(_handleProviderSessionChanged);
+  }
+
+  void _handleProviderSessionChanged() {
+    notifyListeners();
   }
 
   String? _callbackToken() {

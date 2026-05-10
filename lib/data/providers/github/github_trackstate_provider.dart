@@ -36,6 +36,9 @@ class GitHubTrackStateProvider implements TrackStateProviderAdapter {
   http.Client get _http => _client ?? http.Client();
 
   @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
   String get repositoryLabel => repositoryName;
 
   @override
@@ -191,6 +194,9 @@ class GitHubTrackStateProvider implements TrackStateProviderAdapter {
       revision: result.revision,
     );
   }
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
 
   @override
   Future<RepositoryPermission> getPermission() async {

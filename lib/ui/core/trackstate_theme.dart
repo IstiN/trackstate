@@ -150,10 +150,14 @@ class TrackStateTheme {
   static ThemeData dark() => _theme(Brightness.dark, TrackStateColors.dark);
 
   static ThemeData _theme(Brightness brightness, TrackStateColors colors) {
+    final onPrimary =
+        brightness == Brightness.light
+            ? const Color(0xFFFAF8F4)
+            : const Color(0xFF2D2A26);
     final scheme = ColorScheme(
       brightness: brightness,
       primary: colors.primary,
-      onPrimary: const Color(0xFF111413),
+      onPrimary: onPrimary,
       secondary: colors.secondary,
       onSecondary: colors.text,
       error: colors.error,
