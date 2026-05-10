@@ -101,6 +101,56 @@ void main() {
     });
 
     test(
+      'rejects malformed hosted repositories as invalid targets before provider access',
+      () async {
+        for (final repository in const <String>[
+          '/name',
+          'owner/',
+          'owner/name/extra',
+        ]) {
+          final hostedProvider = _FakeHostedTrackStateProvider(
+            user: const RepositoryUser(
+              login: 'octocat',
+              displayName: 'Octo Cat',
+            ),
+            permission: const RepositoryPermission(
+              canRead: true,
+              canWrite: true,
+              isAdmin: false,
+            ),
+          );
+          final cli = TrackStateCli(
+            environment: const TrackStateCliEnvironment(
+              environment: <String, String>{
+                trackStateCliTokenEnvironmentVariable: 'env-token',
+              },
+            ),
+            providerFactory: _FakeTrackStateCliProviderFactory(
+              hostedProvider: hostedProvider,
+            ),
+          );
+
+          final result = await cli.run(<String>[
+            'session',
+            '--target',
+            'hosted',
+            '--provider',
+            'github',
+            '--repository',
+            repository,
+          ]);
+          final json = jsonDecode(result.stdout) as Map<String, Object?>;
+          final error = json['error']! as Map<String, Object?>;
+
+          expect(result.exitCode, 2, reason: repository);
+          expect(error['code'], 'INVALID_TARGET', reason: repository);
+          expect(error['category'], 'validation', reason: repository);
+          expect(hostedProvider.connection, isNull, reason: repository);
+        }
+      },
+    );
+
+    test(
       'uses credential precedence flag over env over gh for hosted targets',
       () async {
         final hostedProvider = _FakeHostedTrackStateProvider(

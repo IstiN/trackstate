@@ -292,7 +292,7 @@ class TrackStateCli {
     }
 
     final repository = results['repository']?.toString().trim() ?? '';
-    if (repository.isEmpty || !repository.contains('/')) {
+    if (!_isValidHostedRepository(repository)) {
       throw _TrackStateCliException(
         code: 'INVALID_TARGET',
         category: TrackStateCliErrorCategory.validation,
@@ -311,6 +311,16 @@ class TrackStateCli {
           GitHubTrackStateProvider.defaultSourceRef,
       token: results['token']?.toString().trim() ?? '',
     );
+  }
+
+  bool _isValidHostedRepository(String repository) {
+    if (repository.isEmpty) {
+      return false;
+    }
+
+    final segments = repository.split('/');
+    return segments.length == 2 &&
+        segments.every((segment) => segment.trim().isNotEmpty);
   }
 
   TrackStateRuntime _parseProviderRuntime(String provider) {
