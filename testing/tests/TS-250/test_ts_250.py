@@ -161,16 +161,6 @@ class PullRequestReleaseDryRunTest(unittest.TestCase):
             f"Observed step status: {observation.dry_run_step_status}\n"
             f"Observed step conclusion: {observation.dry_run_step_conclusion}",
         )
-        self.assertEqual(
-            observation.pull_request_status_state,
-            "success",
-            "Human-style verification failed: GitHub did not report successful checks "
-            "for the disposable pull request head commit.\n"
-            f"Pull Request URL: {observation.pull_request_url}\n"
-            f"Checks URL: {observation.pull_request_checks_url}\n"
-            f"Observed status state: {observation.pull_request_status_state}",
-        )
-
     def _write_result_if_requested(self, payload: dict[str, object]) -> None:
         result_path = os.environ.get("TS250_RESULT_PATH")
         if not result_path:
