@@ -268,6 +268,18 @@ abstract class AppLocalizations {
   /// **'Attachments'**
   String get attachments;
 
+  /// No description provided for @history.
+  ///
+  /// In en, this message translates to:
+  /// **'History'**
+  String get history;
+
+  /// No description provided for @postComment.
+  ///
+  /// In en, this message translates to:
+  /// **'Post comment'**
+  String get postComment;
+
   /// No description provided for @linkedIssues.
   ///
   /// In en, this message translates to:
