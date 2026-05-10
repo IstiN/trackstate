@@ -39,6 +39,9 @@ void main() {
       expect(snapshot.project.branch, 'main');
       expect(snapshot.project.repository, repo.path);
       expect(user.displayName, 'Local Tester');
+      expect(snapshot.issues.single.attachments.single.name, 'design.png');
+      expect(snapshot.issues.single.attachments.single.author, 'Local Tester');
+      expect(snapshot.issues.single.attachments.single.sizeBytes, greaterThan(0));
       expect(updated.status, IssueStatus.done);
       expect(refreshed.issues.single.status, IssueStatus.done);
       expect(log.stdout.toString().trim(), 'Move DEMO-1 to Done');
@@ -54,6 +57,67 @@ void main() {
     expect(await provider.isLfsTracked('attachments/screenshot.png'), isTrue);
     expect(await provider.isLfsTracked('README.md'), isFalse);
   });
+
+  test(
+    'local repository appends comments as sequential markdown files',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+
+      final updated = await repository.addIssueComment(
+        snapshot.issues.single,
+        'Persisted from a local repository test.',
+      );
+      final commentFile = File('${repo.path}/DEMO/DEMO-1/comments/0001.md');
+      final log = await Process.run('git', [
+        '-C',
+        repo.path,
+        'log',
+        '-1',
+        '--pretty=%s',
+      ]);
+
+      expect(updated.comments.single.id, '0001');
+      expect(await commentFile.exists(), isTrue);
+      expect(await commentFile.readAsString(), contains('Persisted from a local repository test.'));
+      expect(log.stdout.toString().trim(), 'Add comment to DEMO-1');
+    },
+  );
+
+  test(
+    'local repository derives issue history entries from git commits',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+
+      final issue = snapshot.issues.single;
+      await repository.addIssueComment(issue, 'History comment');
+      final refreshed = await repository.loadSnapshot();
+      final history = await repository.loadIssueHistory(refreshed.issues.single);
+
+      expect(history, isNotEmpty);
+      expect(
+        history.any(
+          (entry) =>
+              entry.affectedEntity == IssueHistoryEntity.issue &&
+              entry.changeType == IssueHistoryChangeType.created,
+        ),
+        isTrue,
+      );
+    },
+  );
 
   test(
     'local provider rejects stale text writes with expected revisions',
@@ -684,6 +748,7 @@ Loaded from local git.
     'DEMO/DEMO-1/acceptance_criteria.md',
     '- Can be loaded from local Git\n',
   );
+  await _writeFile(directory, 'DEMO/DEMO-1/attachments/design.png', 'issue-binary');
   await _writeFile(directory, 'attachments/screenshot.png', 'binary-content');
 
   await _git(directory.path, ['init', '-b', 'main']);

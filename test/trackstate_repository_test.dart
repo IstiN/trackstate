@@ -76,7 +76,9 @@ void main() {
             issueTypeDefinitions: [
               TrackStateConfigEntry(id: 'story', name: 'Story'),
             ],
-            statusDefinitions: [TrackStateConfigEntry(id: 'todo', name: 'To Do')],
+            statusDefinitions: [
+              TrackStateConfigEntry(id: 'todo', name: 'To Do'),
+            ],
             fieldDefinitions: [
               TrackStateFieldDefinition(
                 id: 'summary',
@@ -330,7 +332,10 @@ This comment demonstrates markdown-backed collaboration history.
             'tombstone index or the legacy deleted index.',
       );
       if (files.containsKey('DEMO/.trackstate/index/tombstones.json')) {
-        expect(files.keys, contains('DEMO/.trackstate/tombstones/DEMO-99.json'));
+        expect(
+          files.keys,
+          contains('DEMO/.trackstate/tombstones/DEMO-99.json'),
+        );
       }
 
       final repository = _mockSetupRepository(files: files);
@@ -763,6 +768,84 @@ README.md -filter
   );
 
   test(
+    'github provider reads non-LFS binary attachments without UTF-8 decoding',
+    () async {
+      final bytes = Uint8List.fromList(const [
+        0x89,
+        0x50,
+        0x4E,
+        0x47,
+        0x00,
+        0xFF,
+      ]);
+      final provider = GitHubTrackStateProvider(
+        client: MockClient((request) async {
+          if (request.url.path.endsWith(
+            '/contents/attachments/screenshot.png',
+          )) {
+            return _binaryContentResponse(bytes);
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      final attachment = await provider.readAttachment(
+        'attachments/screenshot.png',
+        ref: 'main',
+      );
+
+      expect(attachment.bytes, bytes);
+      expect(attachment.lfsOid, isNull);
+      expect(attachment.declaredSizeBytes, isNull);
+    },
+  );
+
+  test(
+    'github provider downloads LFS attachment content after pointer detection',
+    () async {
+      final pointer = '''
+version https://git-lfs.github.com/spec/v1
+oid sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+size 6
+''';
+      final bytes = Uint8List.fromList(const [
+        0x25,
+        0x50,
+        0x44,
+        0x46,
+        0x00,
+        0x01,
+      ]);
+      final provider = GitHubTrackStateProvider(
+        client: MockClient((request) async {
+          if (request.url.path.endsWith('/contents/attachments/manual.pdf')) {
+            return _contentResponse(
+              pointer,
+              downloadUrl: 'https://example.test/lfs/manual.pdf',
+            );
+          }
+          if (request.url.toString() == 'https://example.test/lfs/manual.pdf') {
+            return http.Response.bytes(bytes, 200);
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      final attachment = await provider.readAttachment(
+        'attachments/manual.pdf',
+        ref: 'main',
+      );
+
+      expect(attachment.bytes, bytes);
+      expect(
+        attachment.lfsOid,
+        '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      );
+      expect(attachment.declaredSizeBytes, 6);
+    },
+  );
+
+  test(
     'github provider reports LFS attachment uploads as unsupported',
     () async {
       var putAttempted = false;
@@ -923,9 +1006,28 @@ SetupTrackStateRepository _mockSetupRepository({
   );
 }
 
-http.Response _contentResponse(String content) {
+http.Response _contentResponse(String content, {String? downloadUrl}) {
   final encoded = base64Encode(utf8.encode(content));
-  return http.Response('{"content":"$encoded","sha":"abc123"}', 200);
+  return http.Response(
+    jsonEncode({
+      'content': encoded,
+      'sha': 'abc123',
+      if (downloadUrl != null) 'download_url': downloadUrl,
+    }),
+    200,
+  );
+}
+
+http.Response _binaryContentResponse(Uint8List content, {String? downloadUrl}) {
+  final encoded = base64Encode(content);
+  return http.Response(
+    jsonEncode({
+      'content': encoded,
+      'sha': 'abc123',
+      if (downloadUrl != null) 'download_url': downloadUrl,
+    }),
+    200,
+  );
 }
 
 Map<String, String> _fixtureFilesFromDisk(String rootPath) {

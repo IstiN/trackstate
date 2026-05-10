@@ -34,6 +34,8 @@
   "done": "Done",
   "comments": "Comments",
   "attachments": "Attachments",
+  "history": "History",
+  "postComment": "Post comment",
   "linkedIssues": "Linked issues",
   "description": "Description",
   "acceptanceCriteria": "Acceptance Criteria",

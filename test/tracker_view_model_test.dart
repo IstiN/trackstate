@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/issue_mutation_service.dart';
@@ -252,6 +253,35 @@ class _LocalRuntimeRepository implements TrackStateRepository {
     TrackStateIssue issue,
     IssueStatus status,
   ) async => issue.copyWith(status: status, updatedLabel: 'just now');
+
+  @override
+  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) async =>
+      issue.copyWith(
+        comments: [
+          ...issue.comments,
+          IssueComment(
+            id: (issue.comments.length + 1).toString().padLeft(4, '0'),
+            author: 'local-user',
+            body: body,
+            updatedLabel: 'just now',
+          ),
+        ],
+      );
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
+      Uint8List(0);
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) async =>
+      const <IssueHistoryEntry>[];
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async => issue;
 }
 
 class _RecordingIssueMutationService extends IssueMutationService {

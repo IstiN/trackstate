@@ -81,6 +81,8 @@ class TrackStateIssue {
     String? updatedLabel,
     bool? isArchived,
     String? storagePath,
+    List<IssueComment>? comments,
+    List<IssueAttachment>? attachments,
   }) {
     return TrackStateIssue(
       key: key,
@@ -107,9 +109,9 @@ class TrackStateIssue {
       progress: progress,
       updatedLabel: updatedLabel ?? this.updatedLabel,
       acceptanceCriteria: acceptanceCriteria,
-      comments: comments,
+      comments: comments ?? this.comments,
       links: links,
-      attachments: attachments,
+      attachments: attachments ?? this.attachments,
       isArchived: isArchived ?? this.isArchived,
       resolutionId: resolutionId,
       storagePath: storagePath ?? this.storagePath,
@@ -189,14 +191,65 @@ class IssueLink {
 
 class IssueAttachment {
   const IssueAttachment({
+    required this.id,
     required this.name,
-    required this.storagePath,
     required this.mediaType,
+    required this.sizeBytes,
+    required this.author,
+    required this.createdAt,
+    required this.storagePath,
+    required this.revisionOrOid,
   });
 
+  final String id;
   final String name;
-  final String storagePath;
   final String mediaType;
+  final int sizeBytes;
+  final String author;
+  final String createdAt;
+  final String storagePath;
+  final String revisionOrOid;
+}
+
+enum IssueHistoryChangeType {
+  created,
+  updated,
+  deleted,
+  restored,
+  archived,
+  moved,
+  added,
+  removed,
+}
+
+enum IssueHistoryEntity { issue, comment, attachment, hierarchy }
+
+class IssueHistoryEntry {
+  const IssueHistoryEntry({
+    required this.commitSha,
+    required this.timestamp,
+    required this.author,
+    required this.changeType,
+    required this.affectedEntity,
+    required this.summary,
+    required this.changedPaths,
+    this.affectedEntityId,
+    this.fieldName,
+    this.before,
+    this.after,
+  });
+
+  final String commitSha;
+  final String timestamp;
+  final String author;
+  final IssueHistoryChangeType changeType;
+  final IssueHistoryEntity affectedEntity;
+  final String summary;
+  final List<String> changedPaths;
+  final String? affectedEntityId;
+  final String? fieldName;
+  final String? before;
+  final String? after;
 }
 
 class TrackStateConfigEntry {

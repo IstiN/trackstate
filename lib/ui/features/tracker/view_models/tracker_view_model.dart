@@ -194,6 +194,8 @@ class TrackerViewModel extends ChangeNotifier {
   String _jql = 'project = TRACK AND status != Done ORDER BY priority DESC';
   List<TrackStateIssue> _searchResults = const [];
   TrackStateIssue? _selectedIssue;
+  final Map<String, List<IssueHistoryEntry>> _issueHistoryByKey = {};
+  final Set<String> _loadingIssueHistory = <String>{};
   TrackerSection? _issueDetailReturnSection;
   bool _isLoading = false;
   bool _isSaving = false;
@@ -210,6 +212,8 @@ class TrackerViewModel extends ChangeNotifier {
   TrackerSection? get issueDetailReturnSection => _issueDetailReturnSection;
   bool get isLoading => _isLoading;
   bool get isSaving => _isSaving;
+  bool isIssueHistoryLoading(String issueKey) =>
+      _loadingIssueHistory.contains(issueKey);
   TrackerMessage? get message => _message;
   bool get isConnected => _isConnected;
   RepositoryUser? get connectedUser => _connectedUser;
@@ -333,6 +337,9 @@ class TrackerViewModel extends ChangeNotifier {
     _section = returnSection;
     notifyListeners();
   }
+
+  List<IssueHistoryEntry> issueHistoryFor(String issueKey) =>
+      _issueHistoryByKey[issueKey] ?? const <IssueHistoryEntry>[];
 
   void toggleTheme() {
     _themePreference = _themePreference == ThemePreference.light
@@ -572,6 +579,56 @@ class TrackerViewModel extends ChangeNotifier {
       return false;
     } finally {
       _isSaving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> postIssueComment(TrackStateIssue issue, String body) async {
+    final normalizedBody = body.trim();
+    if (normalizedBody.isEmpty) {
+      _message = TrackerMessage.issueSaveFailed(
+        const TrackStateRepositoryException(
+          'Comment body is required before saving.',
+        ),
+      );
+      notifyListeners();
+      return false;
+    }
+    _isSaving = true;
+    _message = null;
+    notifyListeners();
+    try {
+      final saved = await _repository.addIssueComment(issue, body);
+      _snapshot = await _repository.loadSnapshot();
+      _selectedIssue = _snapshot!.issues.firstWhere(
+        (current) => current.key == saved.key,
+        orElse: () => saved,
+      );
+      _searchResults = await _repository.searchIssues(_jql);
+      _issueHistoryByKey.remove(issue.key);
+      return true;
+    } on Object catch (error) {
+      _message = TrackerMessage.issueSaveFailed(error);
+      return false;
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> ensureIssueHistoryLoaded(TrackStateIssue issue) async {
+    if (_issueHistoryByKey.containsKey(issue.key) ||
+        _loadingIssueHistory.contains(issue.key)) {
+      return;
+    }
+    _loadingIssueHistory.add(issue.key);
+    notifyListeners();
+    try {
+      _issueHistoryByKey[issue.key] = await _repository.loadIssueHistory(issue);
+    } on Object catch (error) {
+      _message = TrackerMessage.issueSaveFailed(error);
+    } finally {
+      _loadingIssueHistory.remove(issue.key);
       notifyListeners();
     }
   }

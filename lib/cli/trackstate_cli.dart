@@ -565,6 +565,7 @@ class TrackStateCli {
         'isAdmin': permission.isAdmin,
         'canCreateBranch': permission.canCreateBranch,
         'canManageAttachments': permission.canManageAttachments,
+        'attachmentUploadMode': permission.attachmentUploadMode.name,
         'canCheckCollaborators': permission.canCheckCollaborators,
       };
 
@@ -589,6 +590,7 @@ class TrackStateCli {
           'admin=${permissions['isAdmin']} '
           'create-branch=${permissions['canCreateBranch']} '
           'attachments=${permissions['canManageAttachments']} '
+          'attachment-upload-mode=${permissions['attachmentUploadMode']} '
           'collaborators=${permissions['canCheckCollaborators']}',
     ].join('\n');
   }
