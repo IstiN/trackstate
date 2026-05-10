@@ -67,8 +67,16 @@ class UnsupportedProviderCliContractTest(unittest.TestCase):
             f"stdout:\n{observation.result.stdout}\n"
             f"stderr:\n{observation.result.stderr}",
         )
-        self.assertFalse(
+        self.assertIn(
+            "ok",
+            payload_dict,
+            "Step 2 failed: the JSON envelope omitted the required `ok` field for "
+            "the unsupported-provider scenario.\n"
+            f"Observed payload: {payload_dict}",
+        )
+        self.assertIs(
             payload_dict.get("ok"),
+            False,
             "Step 2 failed: the JSON envelope did not report `ok: false` for the "
             "unsupported-provider scenario.\n"
             f"Observed payload: {payload_dict}",
