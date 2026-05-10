@@ -155,6 +155,18 @@ class ActionlintNonWorkflowPullRequestGateTest(unittest.TestCase):
                 f"Observed branch runs: {observation.observed_branch_run_names}\n"
                 f"Observed branch run paths: {observation.observed_branch_run_paths}",
             )
+            self.assertFalse(
+                observation.repository_declares_actionlint_required_check,
+                "Step 4 failed: the repository still declares actionlint as a "
+                "required gate for the README-only pull request even though GitHub "
+                "did not surface a visible actionlint check or workflow run.\n"
+                f"Pull Request URL: {observation.pull_request_url}\n"
+                f"Checks URL: {observation.pull_request_checks_url}\n"
+                f"Required rule descriptions: {observation.required_rule_descriptions}\n"
+                f"Required check contexts: {observation.required_check_contexts}\n"
+                f"Required workflow names: {observation.required_check_workflow_names}\n"
+                f"Required workflow paths: {observation.required_check_workflow_paths}",
+            )
             return
 
         self.assertNotIn(
