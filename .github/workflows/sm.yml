@@ -80,8 +80,6 @@ jobs:
           SOURCE_GITHUB_WORKSPACE: IstiN
           SOURCE_GITHUB_REPOSITORY: trackstate
 
-          SM_MAX_WORKFLOWS: ${{ vars.SM_MAX_WORKFLOWS || '' }}
-
           CLI_ALLOWED_COMMANDS: "find,ls,cat,mkdir,bash,run-agent.sh"
           DMTOOLS_FILE_READ_ALLOWED_PATHS: "../.dmtools/**"
         run: |
