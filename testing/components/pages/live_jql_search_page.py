@@ -14,6 +14,7 @@ class LiveJqlSearchObservation:
     body_text: str
     count_summary: str | None
     issue_result_count: int
+    issue_labels: tuple[str, ...]
 
 
 class LiveJqlSearchPage:
@@ -101,12 +102,14 @@ class LiveJqlSearchPage:
         field_selector: str,
     ) -> LiveJqlSearchObservation:
         body_text = self.current_body_text()
+        issue_labels = self._visible_issue_labels()
         return LiveJqlSearchObservation(
             query=query,
             visible_query=self._session.read_value(field_selector, timeout_ms=30_000),
             body_text=body_text,
             count_summary=self._count_summary(body_text),
-            issue_result_count=self._session.count(self._issue_button_selector),
+            issue_result_count=len(issue_labels),
+            issue_labels=issue_labels,
         )
 
     def _wait_for_search_field(self) -> str:
@@ -155,3 +158,16 @@ class LiveJqlSearchPage:
         if match is None:
             return None
         return match.group(0)
+
+    def _visible_issue_labels(self) -> tuple[str, ...]:
+        payload = self._session.evaluate(
+            """
+            (selector) => Array.from(document.querySelectorAll(selector))
+                .map((element) => (element.getAttribute('aria-label') || '').trim())
+                .filter((label) => label.length > 0)
+            """,
+            arg=self._issue_button_selector,
+        )
+        if not isinstance(payload, list):
+            return ()
+        return tuple(str(label) for label in payload if str(label).strip())
