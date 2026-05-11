@@ -41,7 +41,13 @@ abstract interface class CreateIssueAccessibilityScreenHandle {
     required double height,
   });
 
+  Future<void> submitCreateIssue();
+
+  Future<void> waitWithoutInteraction(Duration duration);
+
   Future<void> scrollToBottom();
+
+  Future<void> scrollToTop();
 
   Future<void> dispose();
 }
