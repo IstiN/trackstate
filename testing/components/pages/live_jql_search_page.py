@@ -21,16 +21,20 @@ class LiveJqlSearchPage:
     _button_selector = 'flt-semantics[role="button"]'
     _active_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
     _panel_selector = 'flt-semantics[role="group"][aria-label="JQL Search"]'
-    _panel_search_field_selector = f'{_panel_selector} input[aria-label="Search issues"]'
+    _panel_search_field_selector = (
+        f'{_panel_selector} input[data-semantics-role="text-field"]:not([disabled])'
+    )
     _search_field_candidates = (
         _panel_search_field_selector,
-        'input[data-semantics-role="text-field"]:not([disabled]):not([aria-label])',
-        'textarea[data-semantics-role="text-field"]:not([disabled]):not([aria-label])',
-        'input[aria-label="Search issues"]',
-        'textarea[aria-label="Search issues"]',
-        '[role="textbox"][aria-label="Search issues"]',
+        f'{_panel_selector} textarea[data-semantics-role="text-field"]:not([disabled])',
+        f'{_panel_selector} [data-semantics-role="text-field"]:not([disabled])',
+        f'{_panel_selector} input[aria-label^="Search issues"]',
+        f'{_panel_selector} textarea[aria-label="Search issues"]',
+        f'{_panel_selector} [role="textbox"][aria-label="Search issues"]',
     )
-    _issue_button_selector = 'flt-semantics[role="button"][aria-label^="Open DEMO-"]'
+    _issue_button_selector = (
+        f'{_panel_selector} flt-semantics[role="button"][aria-label^="Open DEMO-"]'
+    )
     _no_results_text = "No results"
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
@@ -149,12 +153,12 @@ class LiveJqlSearchPage:
         for selector in self._search_field_candidates:
             try:
                 self._session.wait_for_selector(selector, timeout_ms=10_000)
-                return selector, max(self._session.count(selector) - 1, 0)
+                return selector, 0
             except WebAppTimeoutError as error:
                 errors.append(str(error))
         raise AssertionError(
             "Step 3 failed: the live app did not expose the visible JQL Search text "
-            "field.\n"
+            "field inside the JQL Search panel.\n"
             f"Observed body text:\n{self.current_body_text()}\n"
             f"Selector attempts: {errors}",
         )
