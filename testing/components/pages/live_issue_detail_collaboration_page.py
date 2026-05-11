@@ -79,25 +79,46 @@ class LiveIssueDetailCollaborationPage:
         return self._session.count(self._issue_detail_selector(issue_key))
 
     def tab_button_count(self, label: str) -> int:
-        return self._session.count(self._tab_selector(label))
+        return self._session.count(self._button_selector, has_text=label)
 
     def open_collaboration_tab(self, label: str) -> None:
-        selector = self._tab_selector(label)
-        self._session.wait_for_selector(selector, timeout_ms=30_000)
-        self._session.click(selector, timeout_ms=30_000)
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text=label,
+            timeout_ms=30_000,
+        )
+        self._session.click(
+            self._button_selector,
+            has_text=label,
+            timeout_ms=30_000,
+        )
 
     def text_fragment_count(self, fragment: str) -> int:
-        return self._session.count(
-            f'flt-semantics[aria-label*="{self._escape(fragment)}"]',
-        )
+        return self._session.count("body", has_text=fragment)
 
     def button_label_fragment_count(self, fragment: str) -> int:
-        return self._session.count(
-            f'flt-semantics[role="button"][aria-label*="{self._escape(fragment)}"]',
-        )
+        return self._session.count(self._button_selector, has_text=fragment)
 
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
+
+    def wait_for_text_fragment(
+        self,
+        fragment: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> int:
+        self._session.wait_for_text(fragment, timeout_ms=timeout_ms)
+        return self.text_fragment_count(fragment)
+
+    def wait_for_text_fragment_to_disappear(
+        self,
+        fragment: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> int:
+        self._session.wait_for_text_absence(fragment, timeout_ms=timeout_ms)
+        return self.text_fragment_count(fragment)
 
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
@@ -120,13 +141,6 @@ class LiveIssueDetailCollaborationPage:
     @staticmethod
     def _issue_detail_selector(issue_key: str) -> str:
         return f'flt-semantics[aria-label*="Issue detail {LiveIssueDetailCollaborationPage._escape(issue_key)}"]'
-
-    @staticmethod
-    def _tab_selector(label: str) -> str:
-        return (
-            'flt-semantics[role="button"]'
-            f'[aria-label="{LiveIssueDetailCollaborationPage._escape(label)}"]'
-        )
 
     @staticmethod
     def _escape(value: str) -> str:

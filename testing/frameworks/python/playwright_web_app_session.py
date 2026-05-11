@@ -138,6 +138,24 @@ class PlaywrightWebAppSession(WebAppSession):
             ) from error
         return self.body_text()
 
+    def wait_for_text_absence(
+        self,
+        text: str,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> str:
+        try:
+            self._page.wait_for_function(
+                "(expectedText) => !(document.body?.innerText ?? '').includes(expectedText)",
+                arg=text,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for text "{text}" to disappear.',
+            ) from error
+        return self.body_text()
+
     def wait_for_any_text(
         self,
         texts: Sequence[str],

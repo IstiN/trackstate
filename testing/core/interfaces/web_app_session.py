@@ -83,6 +83,13 @@ class WebAppSession(Protocol):
         timeout_ms: int = 60_000,
     ) -> str: ...
 
+    def wait_for_text_absence(
+        self,
+        text: str,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> str: ...
+
     def wait_for_any_text(
         self,
         texts: Sequence[str],
