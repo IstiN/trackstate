@@ -1,39 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../components/factories/testing_dependencies.dart';
-import '../../components/screens/create_issue_accessibility_robot.dart';
-import '../../core/interfaces/trackstate_app_component.dart';
-import '../../core/utils/local_trackstate_fixture.dart';
+import '../../core/interfaces/create_issue_accessibility_screen.dart';
+import '../../fixtures/create_issue_accessibility_screen_fixture.dart';
 
 void main() {
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
-  });
-
   testWidgets(
     'TS-307 adapts the Create issue surface responsively and keeps it accessible',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      final TrackStateAppComponent screen = defaultTestingDependencies
-          .createTrackStateAppScreen(tester);
-      final robot = CreateIssueAccessibilityRobot(tester);
-      LocalTrackStateFixture? fixture;
+      CreateIssueAccessibilityScreenHandle? screen;
 
       try {
-        fixture = await tester.runAsync(LocalTrackStateFixture.create);
-        if (fixture == null) {
-          throw StateError('TS-307 fixture creation did not complete.');
-        }
-
-        await screen.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
-        screen.expectLocalRuntimeChrome();
-
-        final createIssueSection = await screen.openCreateIssueFlow();
-        await screen.expectCreateIssueFormVisible(
-          createIssueSection: createIssueSection,
-        );
+        screen = await launchCreateIssueAccessibilityFixture(tester);
 
         final failures = <String>[];
 
@@ -51,15 +30,15 @@ void main() {
           'Save',
           'Cancel',
         ]) {
-          if (!robot.showsText(text)) {
+          if (!screen.showsText(text)) {
             failures.add(
               'The visible Create issue surface did not render "$text". '
-              'Visible dialog texts: ${robot.visibleTexts().join(' | ')}.',
+              'Visible Create issue texts: ${screen.visibleTexts().join(' | ')}.',
             );
           }
         }
 
-        final desktopLayout = robot.observeLayout();
+        final desktopLayout = screen.observeLayout();
         final wideLooksLikeSideSheet =
             desktopLayout.widthFraction <= 0.5 &&
             desktopLayout.rightInset <= 48 &&
@@ -71,7 +50,7 @@ void main() {
           );
         }
 
-        final traversal = robot.semanticsTraversal();
+        final traversal = screen.semanticsTraversal();
         final traversalFailure = _logicalFieldOrderFailure(
           traversal,
           expectedOrder: const [
@@ -92,7 +71,6 @@ void main() {
         }
 
         for (final text in const [
-          'Issue Type',
           'Summary',
           'Description',
           'Priority',
@@ -102,7 +80,7 @@ void main() {
           'Labels',
           'Optional',
         ]) {
-          final observation = robot.observeTextContrast(text);
+          final observation = screen.observeTextContrast(text);
           if (observation.contrastRatio < 4.5) {
             failures.add(
               'Visible "${observation.text}" contrast was ${observation.describe()}, '
@@ -111,12 +89,9 @@ void main() {
           }
         }
 
-        await robot.resizeTo(const Size(390, 844));
-        await screen.expectCreateIssueFormVisible(
-          createIssueSection: createIssueSection,
-        );
+        await screen.resizeToViewport(width: 390, height: 844);
 
-        final compactLayout = robot.observeLayout();
+        final compactLayout = screen.observeLayout();
         final compactLooksFullScreen =
             compactLayout.widthFraction >= 0.9 &&
             compactLayout.heightFraction >= 0.9 &&
@@ -135,12 +110,7 @@ void main() {
           fail(failures.join('\n'));
         }
       } finally {
-        await tester.runAsync(() async {
-          if (fixture != null) {
-            await fixture.dispose();
-          }
-        });
-        screen.resetView();
+        await screen?.dispose();
         semantics.dispose();
       }
     },

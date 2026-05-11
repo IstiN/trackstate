@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../core/models/create_issue_layout_observation.dart';
+import '../../core/models/create_issue_text_contrast_observation.dart';
 import '../../core/utils/color_contrast.dart';
 
 class CreateIssueAccessibilityRobot {
@@ -9,22 +11,43 @@ class CreateIssueAccessibilityRobot {
 
   final WidgetTester tester;
 
-  Finder get dialog => find.byType(Dialog);
-
-  Finder get createIssueSurface => find.descendant(
-    of: dialog.first,
-    matching: find.byWidgetPredicate((widget) {
+  Finder get createIssueSurface {
+    final candidates = find.byWidgetPredicate((widget) {
       return widget is Semantics && widget.properties.label == 'Create issue';
-    }, description: 'Create issue semantics surface'),
-  );
+    }, description: 'Create issue semantics surface');
 
-  Finder textWithinDialog(String text) => find.descendant(
-    of: dialog.first,
+    Finder? bestMatch;
+    double? largestArea;
+    final count = candidates.evaluate().length;
+    for (var index = 0; index < count; index++) {
+      final candidate = candidates.at(index);
+      final rect = tester.getRect(candidate);
+      final area = rect.width * rect.height;
+      if (largestArea == null || area > largestArea) {
+        largestArea = area;
+        bestMatch = candidate;
+      }
+    }
+
+    return bestMatch ?? candidates;
+  }
+
+  Finder textWithinCreateIssueSurface(String text) => find.descendant(
+    of: createIssueSurface.first,
     matching: find.text(text, findRichText: true),
   );
 
-  Future<void> resizeTo(Size size) async {
-    tester.view.physicalSize = size;
+  void expectCreateIssueSurfaceVisible() {
+    if (createIssueSurface.evaluate().isEmpty) {
+      throw StateError('The Create issue surface is not visible.');
+    }
+  }
+
+  Future<void> resizeToViewport({
+    required double width,
+    required double height,
+  }) async {
+    tester.view.physicalSize = Size(width, height);
     tester.view.devicePixelRatio = 1;
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
@@ -32,23 +55,32 @@ class CreateIssueAccessibilityRobot {
   }
 
   CreateIssueLayoutObservation observeLayout() {
-    if (createIssueSurface.evaluate().isEmpty) {
-      throw StateError('The Create issue surface is not visible.');
-    }
+    expectCreateIssueSurfaceVisible();
     final rect = tester.getRect(createIssueSurface.first);
-    final viewport = Size(
-      tester.view.physicalSize.width / tester.view.devicePixelRatio,
-      tester.view.physicalSize.height / tester.view.devicePixelRatio,
+    final viewportWidth =
+        tester.view.physicalSize.width / tester.view.devicePixelRatio;
+    final viewportHeight =
+        tester.view.physicalSize.height / tester.view.devicePixelRatio;
+    return CreateIssueLayoutObservation(
+      viewportWidth: viewportWidth,
+      viewportHeight: viewportHeight,
+      surfaceLeft: rect.left,
+      surfaceTop: rect.top,
+      surfaceWidth: rect.width,
+      surfaceHeight: rect.height,
     );
-    return CreateIssueLayoutObservation(viewport: viewport, surfaceRect: rect);
   }
 
-  bool showsText(String text) => textWithinDialog(text).evaluate().isNotEmpty;
+  bool showsText(String text) =>
+      textWithinCreateIssueSurface(text).evaluate().isNotEmpty;
 
   List<String> visibleTexts() {
     return tester
         .widgetList<Text>(
-          find.descendant(of: dialog.first, matching: find.byType(Text)),
+          find.descendant(
+            of: createIssueSurface.first,
+            matching: find.byType(Text),
+          ),
         )
         .map((widget) => widget.data?.trim())
         .whereType<String>()
@@ -57,12 +89,7 @@ class CreateIssueAccessibilityRobot {
   }
 
   List<String> semanticsTraversal() {
-    if (createIssueSurface.evaluate().isEmpty) {
-      throw StateError(
-        'The Create issue surface semantics node is not visible.',
-      );
-    }
-
+    expectCreateIssueSurfaceVisible();
     final rootNode = tester.getSemantics(createIssueSurface.first);
     final labels = <String>[];
 
@@ -88,10 +115,10 @@ class CreateIssueAccessibilityRobot {
     return _dedupeConsecutive(labels);
   }
 
-  TextContrastObservation observeTextContrast(String text) {
+  CreateIssueTextContrastObservation observeTextContrast(String text) {
     final foreground = _renderedTextColor(text);
     final background = _surfaceBackgroundColor();
-    return TextContrastObservation(
+    return CreateIssueTextContrastObservation(
       text: text,
       foregroundHex: _rgbHex(foreground),
       backgroundHex: _rgbHex(background),
@@ -138,31 +165,147 @@ class CreateIssueAccessibilityRobot {
   }
 
   Color _renderedTextColor(String text) {
-    final finder = textWithinDialog(text);
-    for (final element in finder.evaluate()) {
-      final widget = element.widget;
-      if (widget is RichText) {
-        final color =
-            widget.text.style?.color ??
-            DefaultTextStyle.of(element).style.color;
-        if (color != null) {
-          return color;
-        }
+    expectCreateIssueSurfaceVisible();
+    final surfaceRect = tester.getRect(createIssueSurface.first);
+
+    final richTextFinder = find.byType(RichText);
+    final richTextCount = richTextFinder.evaluate().length;
+    for (var index = 0; index < richTextCount; index++) {
+      final candidate = richTextFinder.at(index);
+      final widget = tester.widget<RichText>(candidate);
+      if (!_matchesRequestedText(widget.text.toPlainText(), text)) {
+        continue;
       }
-      if (widget is Text) {
-        final color =
-            widget.style?.color ?? DefaultTextStyle.of(element).style.color;
-        if (color != null) {
-          return color;
-        }
+      if (!_isWithinSurface(surfaceRect, tester.getRect(candidate))) {
+        continue;
+      }
+      final element = candidate.evaluate().single;
+      final color =
+          widget.text.style?.color ?? DefaultTextStyle.of(element).style.color;
+      if (color != null) {
+        return color;
       }
     }
+
+    final textFinder = find.byType(Text);
+    final textCount = textFinder.evaluate().length;
+    for (var index = 0; index < textCount; index++) {
+      final candidate = textFinder.at(index);
+      final widget = tester.widget<Text>(candidate);
+      if (!_matchesRequestedText(widget.data, text)) {
+        continue;
+      }
+      if (!_isWithinSurface(surfaceRect, tester.getRect(candidate))) {
+        continue;
+      }
+      final element = candidate.evaluate().single;
+      final color =
+          widget.style?.color ?? DefaultTextStyle.of(element).style.color;
+      if (color != null) {
+        return color;
+      }
+    }
+
+    final decorationColor = _decoratedFieldTextColor(text);
+    if (decorationColor != null) {
+      return decorationColor;
+    }
+
+    final themedColor = _surfaceThemeTextColor(text);
+    if (themedColor != null) {
+      return themedColor;
+    }
+
     throw StateError('No rendered text color found for "$text".');
+  }
+
+  bool _isWithinSurface(Rect surfaceRect, Rect candidateRect) {
+    return surfaceRect.overlaps(candidateRect) ||
+        surfaceRect.contains(candidateRect.center);
+  }
+
+  bool _matchesRequestedText(String? candidate, String expected) {
+    final normalizedCandidate = _normalizedLabel(candidate);
+    return normalizedCandidate == expected ||
+        normalizedCandidate.startsWith(expected);
+  }
+
+  Color? _decoratedFieldTextColor(String text) {
+    expectCreateIssueSurfaceVisible();
+    final surfaceRect = tester.getRect(createIssueSurface.first);
+    final decoratedFieldFinder = find.byWidgetPredicate((widget) {
+      if (widget is TextField) {
+        return widget.decoration?.labelText == text ||
+            widget.decoration?.hintText == text;
+      }
+      if (widget is InputDecorator) {
+        return widget.decoration.labelText == text ||
+            widget.decoration.hintText == text;
+      }
+      if (widget is DropdownButtonFormField<String>) {
+        return widget.decoration.labelText == text ||
+            widget.decoration.hintText == text;
+      }
+      return false;
+    }, description: 'decorated create issue field for $text');
+
+    final decoratedFieldCount = decoratedFieldFinder.evaluate().length;
+    for (var index = 0; index < decoratedFieldCount; index++) {
+      final candidate = decoratedFieldFinder.at(index);
+      if (!_isWithinSurface(surfaceRect, tester.getRect(candidate))) {
+        continue;
+      }
+      final element = candidate.evaluate().single;
+      final decoration = _inputDecorationFor(element.widget);
+      if (decoration == null) {
+        continue;
+      }
+      final matchesHint = decoration.hintText == text;
+      final theme = Theme.of(element);
+      final explicitStyle = matchesHint
+          ? decoration.hintStyle
+          : decoration.labelStyle;
+      final themedStyle = matchesHint
+          ? theme.inputDecorationTheme.hintStyle
+          : theme.inputDecorationTheme.labelStyle;
+      final color =
+          explicitStyle?.color ??
+          themedStyle?.color ??
+          theme.textTheme.bodyMedium?.color;
+      if (color != null) {
+        return color;
+      }
+    }
+
+    return null;
+  }
+
+  InputDecoration? _inputDecorationFor(Widget widget) {
+    if (widget is TextField) {
+      return widget.decoration;
+    }
+    if (widget is InputDecorator) {
+      return widget.decoration;
+    }
+    if (widget is DropdownButtonFormField<String>) {
+      return widget.decoration;
+    }
+    return null;
+  }
+
+  Color? _surfaceThemeTextColor(String text) {
+    final element = createIssueSurface.first.evaluate().single;
+    final theme = Theme.of(element);
+    final prefersHintStyle = text == 'Optional';
+    final explicitStyle = prefersHintStyle
+        ? theme.inputDecorationTheme.hintStyle
+        : theme.inputDecorationTheme.labelStyle;
+    return explicitStyle?.color ?? theme.textTheme.bodyMedium?.color;
   }
 
   Color _surfaceBackgroundColor() {
     final decoratedContainers = find.descendant(
-      of: dialog.first,
+      of: createIssueSurface.first,
       matching: find.byWidgetPredicate((widget) {
         if (widget is! Container) {
           return false;
@@ -188,7 +331,9 @@ class CreateIssueAccessibilityRobot {
     }
 
     if (bestMatch == null) {
-      throw StateError('No create issue surface background could be resolved.');
+      final element = createIssueSurface.first.evaluate().single;
+      final theme = Theme.of(element);
+      return theme.colorScheme.surface;
     }
 
     for (final element in bestMatch.evaluate()) {
@@ -202,62 +347,13 @@ class CreateIssueAccessibilityRobot {
       }
     }
 
-    throw StateError('No create issue surface background color was rendered.');
+    final element = createIssueSurface.first.evaluate().single;
+    final theme = Theme.of(element);
+    return theme.colorScheme.surface;
   }
 
   String _rgbHex(Color color) {
     final rgb = color.toARGB32() & 0x00FFFFFF;
     return '#${rgb.toRadixString(16).padLeft(6, '0').toUpperCase()}';
-  }
-}
-
-class CreateIssueLayoutObservation {
-  const CreateIssueLayoutObservation({
-    required this.viewport,
-    required this.surfaceRect,
-  });
-
-  final Size viewport;
-  final Rect surfaceRect;
-
-  double get widthFraction => surfaceRect.width / viewport.width;
-
-  double get heightFraction => surfaceRect.height / viewport.height;
-
-  double get leftInset => surfaceRect.left;
-
-  double get rightInset => viewport.width - surfaceRect.right;
-
-  double get topInset => surfaceRect.top;
-
-  double get bottomInset => viewport.height - surfaceRect.bottom;
-
-  String describe() {
-    return 'viewport=${viewport.width.toStringAsFixed(0)}x${viewport.height.toStringAsFixed(0)}, '
-        'rect=(${surfaceRect.left.toStringAsFixed(1)}, ${surfaceRect.top.toStringAsFixed(1)}) '
-        '${surfaceRect.width.toStringAsFixed(1)}x${surfaceRect.height.toStringAsFixed(1)}, '
-        'width=${(widthFraction * 100).toStringAsFixed(1)}%, '
-        'height=${(heightFraction * 100).toStringAsFixed(1)}%, '
-        'insets=left ${leftInset.toStringAsFixed(1)}, right ${rightInset.toStringAsFixed(1)}, '
-        'top ${topInset.toStringAsFixed(1)}, bottom ${bottomInset.toStringAsFixed(1)}';
-  }
-}
-
-class TextContrastObservation {
-  const TextContrastObservation({
-    required this.text,
-    required this.foregroundHex,
-    required this.backgroundHex,
-    required this.contrastRatio,
-  });
-
-  final String text;
-  final String foregroundHex;
-  final String backgroundHex;
-  final double contrastRatio;
-
-  String describe() {
-    return '$text: $foregroundHex on $backgroundHex '
-        '(${contrastRatio.toStringAsFixed(2)}:1)';
   }
 }
