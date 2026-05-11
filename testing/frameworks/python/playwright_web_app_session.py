@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+import json
 from typing import Sequence
 
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
@@ -90,6 +91,24 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out filling selector "{selector}".',
             ) from error
 
+    def press(
+        self,
+        selector: str,
+        key: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            locator.press(key, timeout=timeout_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out pressing key "{key}" on selector "{selector}".',
+            ) from error
+
     def count(
         self,
         selector: str,
@@ -172,6 +191,59 @@ class PlaywrightWebAppRuntime(AbstractContextManager[PlaywrightWebAppSession]):
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=True)
         self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
+        self._page = self._context.new_page()
+        return PlaywrightWebAppSession(self._page)
+
+    def __exit__(self, exc_type, exc, exc_tb) -> None:
+        if self._context is not None:
+            self._context.close()
+        if self._browser is not None:
+            self._browser.close()
+        if self._playwright is not None:
+            self._playwright.stop()
+        return None
+
+
+class PlaywrightStoredTokenWebAppRuntime(
+    AbstractContextManager[PlaywrightWebAppSession],
+):
+    def __init__(self, *, repository: str, token: str) -> None:
+        self._repository = repository
+        self._token = token
+        self._playwright = None
+        self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
+        self._page: Page | None = None
+
+    def __enter__(self) -> PlaywrightWebAppSession:
+        self._playwright = sync_playwright().start()
+        self._browser = self._playwright.chromium.launch(headless=True)
+        self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
+        self._context.route(
+            "https://api.github.com/**",
+            lambda route: route.continue_(
+                headers={
+                    **route.request.headers,
+                    "Authorization": f"Bearer {self._token}",
+                },
+            ),
+        )
+        storage_key = self._repository.replace("/", ".")
+        self._context.add_init_script(
+            script=(
+                "(() => {"
+                f"const repositoryStorageKey = {json.dumps(storage_key)};"
+                f"const token = {json.dumps(self._token)};"
+                "const keys = ["
+                "  `trackstate.githubToken.${repositoryStorageKey}`,"
+                "  `flutter.trackstate.githubToken.${repositoryStorageKey}`,"
+                "];"
+                "for (const key of keys) {"
+                "  window.localStorage.setItem(key, token);"
+                "}"
+                "})()"
+            ),
+        )
         self._page = self._context.new_page()
         return PlaywrightWebAppSession(self._page)
 
