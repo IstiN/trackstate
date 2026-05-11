@@ -10,8 +10,9 @@ The automation:
    `In Progress` status ID and `Sub-task` issue-type ID is returned
 4. runs `status != Done AND project = TRACK`
 5. verifies only the non-done `TRACK` issues remain visible and done or
-   cross-project issues stay hidden, including a decoy whose enum/display values
-   look like an `In Progress` `Sub-task` but whose canonical IDs map elsewhere
+   cross-project issues stay hidden, including field-isolated decoys that look
+   like an `In Progress` `Sub-task` through their enum/display values while
+   their canonical status or issue-type IDs map elsewhere
 
 ## Run this test
 
@@ -30,7 +31,8 @@ flutter test testing/tests/TS-313/test_ts_313.dart --reporter expanded
 ```text
 Pass: quoted multi-word values for status and issueType are parsed as single
 values, canonical field names are accepted, and the visible issue rows are
-filtered by the configured IDs behind those labels.
+filtered by the configured IDs behind those labels, with separate counterexamples
+proving both status and issueType lookups independently.
 
 Fail: quoted values are split incorrectly, canonical field names are rejected,
 or the visible issue rows do not match the expected stable issue keys.

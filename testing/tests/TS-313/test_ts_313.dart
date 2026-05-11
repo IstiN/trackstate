@@ -30,9 +30,11 @@ void main() {
       const inProgressStoryLabel = 'Open TRACK-303 Story still moving';
       const todoStoryLabel = 'Open TRACK-304 Story waiting for development';
       const doneBugLabel = 'Open TRACK-305 Done regression fix';
-      const canonicalDecoyLabel =
-          'Open TRACK-306 Canonical decoy looks in progress sub-task';
+      const statusDecoyLabel =
+          'Open TRACK-306 Status decoy looks in progress sub-task';
       const externalProjectLabel = 'Open OTHER-401 External project work item';
+      const issueTypeDecoyLabel =
+          'Open OTHER-402 Issue-type decoy looks in progress sub-task';
 
       try {
         await screen.pump(const _Ts313CanonicalFieldRepository());
@@ -61,11 +63,15 @@ void main() {
         );
         screen.expectIssueSearchResultAbsent(
           'TRACK-306',
-          'Canonical decoy looks in progress sub-task',
+          'Status decoy looks in progress sub-task',
         );
         screen.expectIssueSearchResultAbsent(
           'OTHER-401',
           'External project work item',
+        );
+        screen.expectIssueSearchResultAbsent(
+          'OTHER-402',
+          'Issue-type decoy looks in progress sub-task',
         );
 
         await _expectSearchMatches(
@@ -89,11 +95,15 @@ void main() {
         );
         screen.expectIssueSearchResultAbsent(
           'TRACK-306',
-          'Canonical decoy looks in progress sub-task',
+          'Status decoy looks in progress sub-task',
         );
         screen.expectIssueSearchResultAbsent(
           'OTHER-401',
           'External project work item',
+        );
+        screen.expectIssueSearchResultAbsent(
+          'OTHER-402',
+          'Issue-type decoy looks in progress sub-task',
         );
 
         expect(
@@ -109,8 +119,9 @@ void main() {
               'Visible issue rows: '
               '${_formatSnapshot(screen.visibleIssueSearchResultLabelsSnapshot())}. '
               'Hidden rows should still exclude $doneSubtaskLabel, '
-              '$canonicalDecoyLabel, '
-              '$doneBugLabel, and $externalProjectLabel.',
+              '$statusDecoyLabel, '
+              '$doneBugLabel, $externalProjectLabel, and '
+              '$issueTypeDecoyLabel.',
         );
       } finally {
         screen.resetView();
@@ -249,10 +260,10 @@ class _Ts313CanonicalFieldRepository implements TrackStateRepository {
     ),
     _Ts313IssueFactory.issue(
       key: 'TRACK-306',
-      summary: 'Canonical decoy looks in progress sub-task',
+      summary: 'Status decoy looks in progress sub-task',
       project: _trackProjectKey,
       issueType: IssueType.subtask,
-      issueTypeId: _storyTypeId,
+      issueTypeId: _subtaskTypeId,
       status: IssueStatus.inProgress,
       statusId: _doneStatusId,
     ),
@@ -260,6 +271,15 @@ class _Ts313CanonicalFieldRepository implements TrackStateRepository {
       key: 'OTHER-401',
       summary: 'External project work item',
       project: 'OTHER',
+      status: IssueStatus.inProgress,
+      statusId: _inProgressStatusId,
+    ),
+    _Ts313IssueFactory.issue(
+      key: 'OTHER-402',
+      summary: 'Issue-type decoy looks in progress sub-task',
+      project: 'OTHER',
+      issueType: IssueType.subtask,
+      issueTypeId: _storyTypeId,
       status: IssueStatus.inProgress,
       statusId: _inProgressStatusId,
     ),
