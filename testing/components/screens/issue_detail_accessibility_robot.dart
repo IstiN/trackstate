@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/ui/core/trackstate_icons.dart';
@@ -39,6 +40,49 @@ class IssueDetailAccessibilityRobot
     await tester.ensureVisible(tab.first);
     await tester.tap(tab.first, warnIfMissed: false);
     await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<List<String>> collectForwardCollaborationTabFocusOrder(
+    String issueKey,
+  ) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+
+    final candidates = <String, Finder>{
+      for (final label in const [
+        'Detail',
+        'Comments',
+        'Attachments',
+        'History',
+      ])
+        label: _collaborationTab(issueKey, label),
+    };
+
+    final order = <String>[];
+    for (var index = 0; index < 18; index += 1) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      final label = _focusedLabel(candidates);
+      if (label != null) {
+        order.add(label);
+        break;
+      }
+    }
+
+    for (var index = 0; index < 6; index += 1) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+      final label = _focusedLabel(candidates);
+      if (label != null && (order.isEmpty || order.last != label)) {
+        order.add(label);
+      }
+      if (order.length == 4) {
+        break;
+      }
+    }
+
+    return order;
   }
 
   Finder _issueDetail(String issueKey) {
@@ -255,6 +299,53 @@ class IssueDetailAccessibilityRobot
         of: find.text(label, findRichText: true),
         matching: find.byType(TextButton),
       ),
+    );
+  }
+
+  String? _focusedLabel(Map<String, Finder> candidates) {
+    final focusedSemantics = find.semantics.byPredicate(
+      (node) => node.getSemanticsData().flagsCollection.isFocused,
+      describeMatch: (_) => 'focused semantics node',
+    );
+    if (focusedSemantics.evaluate().isEmpty) {
+      return null;
+    }
+
+    for (final entry in candidates.entries) {
+      final exactFocusedMatch = find.semantics.byPredicate(
+        (node) =>
+            node.getSemanticsData().flagsCollection.isFocused &&
+            _normalizedLabel(node.label) == entry.key,
+        describeMatch: (_) => 'focused semantics labeled ${entry.key}',
+      );
+      if (exactFocusedMatch.evaluate().isNotEmpty) {
+        return entry.key;
+      }
+
+      final matches = entry.value.evaluate().length;
+      if (matches == 0) {
+        continue;
+      }
+      for (var index = 0; index < matches; index += 1) {
+        final candidateSemantics = _semanticsFinderFor(entry.value.at(index));
+        final ownsFocusedNode = find.semantics.descendant(
+          of: candidateSemantics,
+          matching: focusedSemantics,
+          matchRoot: true,
+        );
+        if (ownsFocusedNode.evaluate().isNotEmpty) {
+          return entry.key;
+        }
+      }
+    }
+    return null;
+  }
+
+  FinderBase<SemanticsNode> _semanticsFinderFor(Finder finder) {
+    final semanticsId = tester.getSemantics(finder).id;
+    return find.semantics.byPredicate(
+      (node) => node.id == semanticsId,
+      describeMatch: (_) => 'semantics node for $finder',
     );
   }
 
