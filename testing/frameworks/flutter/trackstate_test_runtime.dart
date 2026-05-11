@@ -91,7 +91,8 @@ Future<TrackStateRepository> preloadLocalGitTestRepository({
   );
 }
 
-class _PreloadedLocalGitRepository implements TrackStateRepository {
+class _PreloadedLocalGitRepository
+    implements TrackStateRepository, ProjectSettingsRepository {
   _PreloadedLocalGitRepository({
     required this.repository,
     required this.snapshot,
@@ -119,6 +120,17 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
       return snapshot;
     }
     return repository.loadSnapshot();
+  }
+
+  @override
+  Future<TrackerSnapshot> saveProjectSettings(ProjectSettingsCatalog settings) {
+    if (repository
+        case final ProjectSettingsRepository projectSettingsRepository) {
+      return projectSettingsRepository.saveProjectSettings(settings);
+    }
+    throw StateError(
+      'Local Git preloaded repository does not expose project settings mutations.',
+    );
   }
 
   @override
@@ -186,9 +198,6 @@ class _PreloadedLocalGitRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
-  }) => repository.uploadIssueAttachment(
-    issue: issue,
-    name: name,
-    bytes: bytes,
-  );
+  }) =>
+      repository.uploadIssueAttachment(issue: issue, name: name, bytes: bytes);
 }
