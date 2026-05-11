@@ -90,12 +90,13 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     );
   }
 
-  Finder get _jqlSearchPanel => find.bySemanticsLabel(RegExp('^JQL Search\$'));
-
-  Finder get _jqlSearchField => find.descendant(
-    of: _exactSemanticsLabel('Search issues'),
-    matching: find.byType(TextField),
+  Finder get _jqlSearchPanel => find.byWidgetPredicate(
+    (widget) => widget is Semantics && widget.properties.label == 'JQL Search',
+    description: 'JQL Search panel',
   );
+
+  Finder get _jqlSearchField =>
+      find.descendant(of: _jqlSearchPanel, matching: find.byType(TextField));
 
   Finder _statusColumn(String label) =>
       find.bySemanticsLabel(RegExp('${RegExp.escape(label)} column'));
@@ -342,6 +343,20 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await tester.enterText(_jqlSearchField.first, query);
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<String?> readJqlSearchFieldValue() async {
+    await tester.pump();
+    if (_jqlSearchField.evaluate().isEmpty) {
+      return null;
+    }
+    return _readTextFieldValue(
+      _jqlSearchField.first,
+      failureDescription:
+          'Expected the JQL Search panel field to expose a readable value, but '
+          'no controller-backed editable widget was found.',
+    );
   }
 
   @override
@@ -642,8 +657,19 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     if (field.evaluate().isEmpty) {
       return null;
     }
+    return _readTextFieldValue(
+      field.first,
+      failureDescription:
+          'Expected the visible text field labeled "$label" to expose a '
+          'readable value, but no controller-backed editable widget was found.',
+    );
+  }
 
-    final widget = tester.widget(field.first);
+  String? _readTextFieldValue(
+    Finder field, {
+    required String failureDescription,
+  }) {
+    final widget = tester.widget(field);
     if (widget is EditableText) {
       return widget.controller.text;
     }
@@ -652,17 +678,14 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     }
 
     final editableText = find.descendant(
-      of: field.first,
+      of: field,
       matching: find.byType(EditableText),
     );
     if (editableText.evaluate().isNotEmpty) {
       return tester.widget<EditableText>(editableText.first).controller.text;
     }
 
-    fail(
-      'Expected the visible text field labeled "$label" to expose a readable '
-      'value, but no controller-backed editable widget was found.',
-    );
+    fail(failureDescription);
   }
 
   @override

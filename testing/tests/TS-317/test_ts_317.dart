@@ -46,7 +46,7 @@ void main() {
         await screen.searchIssues(query);
 
         expect(
-          await screen.readLabeledTextFieldValue('Search issues'),
+          await screen.readJqlSearchFieldValue(),
           query,
           reason:
               'Step 1 failed: the JQL Search bar did not keep the exact query '
@@ -92,7 +92,7 @@ void main() {
         );
 
         expect(
-          await screen.readLabeledTextFieldValue('Search issues'),
+          await screen.readJqlSearchFieldValue(),
           query,
           reason:
               'Step 3 failed: after appending results, the JQL Search bar no '

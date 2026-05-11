@@ -34,6 +34,8 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> searchIssues(String query);
 
+  Future<String?> readJqlSearchFieldValue();
+
   Future<void> expectIssueSearchResultVisible(String key, String summary);
 
   void expectIssueSearchResultAbsent(String key, String summary);
