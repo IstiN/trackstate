@@ -457,6 +457,189 @@ This comment demonstrates markdown-backed collaboration history.
   );
 
   test(
+    'setup repository recovers from hosted tombstone rate limits with summary data intact',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'defaultLocale': 'en',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+            {'id': 'in-progress', 'name': 'In Progress'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'epic', 'name': 'Epic'},
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'parentPath': null,
+              'epicPath': null,
+              'summary': 'Root epic',
+              'issueType': 'epic',
+              'status': 'in-progress',
+              'priority': 'medium',
+              'assignee': 'demo-admin',
+              'labels': ['root'],
+              'updated': '2026-05-05T00:00:00Z',
+              'children': ['DEMO-2'],
+              'archived': false,
+            },
+            {
+              'key': 'DEMO-2',
+              'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+              'parent': null,
+              'epic': 'DEMO-1',
+              'parentPath': null,
+              'epicPath': 'DEMO/DEMO-1/main.md',
+              'summary': 'Indexed markdown issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'priority': 'medium',
+              'assignee': 'demo-user',
+              'labels': ['setup'],
+              'updated': '2026-05-05T00:05:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/.trackstate/index/tombstones.json': jsonEncode([
+            {
+              'key': 'DEMO-99',
+              'path': 'DEMO/.trackstate/tombstones/DEMO-99.json',
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: epic
+status: in-progress
+priority: medium
+summary: Root epic
+assignee: demo-admin
+reporter: demo-admin
+updated: 2026-05-05T00:00:00Z
+---
+
+# Description
+
+Root epic.
+''',
+          'DEMO/DEMO-1/DEMO-2/main.md': '''
+---
+key: DEMO-2
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Indexed markdown issue
+assignee: demo-user
+reporter: demo-admin
+epic: DEMO-1
+updated: 2026-05-05T00:05:00Z
+---
+
+# Description
+
+Summary data stays available.
+''',
+        },
+        responseOverrides: {
+          'DEMO/.trackstate/index/tombstones.json': http.Response(
+            '{"message":"API rate limit exceeded"}',
+            403,
+            headers: {
+              'x-ratelimit-remaining': '0',
+              'x-ratelimit-reset': '1760000000',
+            },
+          ),
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot();
+
+      expect(snapshot.issues.map((issue) => issue.key), ['DEMO-1', 'DEMO-2']);
+      expect(snapshot.repositoryIndex.deleted, isEmpty);
+      expect(
+        snapshot.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.githubRateLimit,
+      );
+    },
+  );
+
+  test(
+    'setup repository keeps startup blocked when issue summary index is rate limited',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'defaultLocale': 'en',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': '[]',
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Summary missing from hosted index
+updated: 2026-05-05T00:00:00Z
+---
+''',
+        },
+        responseOverrides: {
+          'DEMO/.trackstate/index/issues.json': http.Response(
+            '{"message":"API rate limit exceeded"}',
+            403,
+            headers: {
+              'x-ratelimit-remaining': '0',
+              'x-ratelimit-reset': '1760000000',
+            },
+          ),
+        },
+      );
+
+      await expectLater(
+        repository.loadSnapshot,
+        throwsA(isA<GitHubRateLimitException>()),
+      );
+    },
+  );
+
+  test(
     'setup repository keeps compatibility with legacy display labels',
     () async {
       final repository = _mockSetupRepository(
@@ -1144,6 +1327,7 @@ size 6
 
 SetupTrackStateRepository _mockSetupRepository({
   required Map<String, String> files,
+  Map<String, http.Response> responseOverrides = const {},
 }) {
   return SetupTrackStateRepository(
     client: MockClient((request) async {
@@ -1158,6 +1342,10 @@ SetupTrackStateRepository _mockSetupRepository({
           '/repos/${SetupTrackStateRepository.repositoryName}/contents/';
       if (path.startsWith(contentsPrefix)) {
         final filePath = path.substring(contentsPrefix.length);
+        final override = responseOverrides[filePath];
+        if (override != null) {
+          return override;
+        }
         final content = files[filePath];
         if (content != null) {
           return _contentResponse(content);
