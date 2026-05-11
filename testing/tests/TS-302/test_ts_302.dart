@@ -1,5 +1,5 @@
-import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 import '../../components/factories/testing_dependencies.dart';
 import '../../components/screens/create_issue_accessibility_robot.dart';
@@ -32,11 +32,17 @@ void main() {
         await screen.openSection('Hierarchy');
         await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
 
-        await _openHierarchyChildCreate(
-          tester,
-          screen,
-          issueKey: Ts302HierarchyPrefillFixture.epicKey,
-          failingStep: 2,
+        final openedEpicChildCreate = await screen
+            .openHierarchyChildCreateForIssue(
+              Ts302HierarchyPrefillFixture.epicKey,
+            );
+        expect(
+          openedEpicChildCreate,
+          isTrue,
+          reason:
+              'Step 2 failed: the Hierarchy row for ${Ts302HierarchyPrefillFixture.epicKey} did not expose a visible contextual child-create action. '
+              'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
+              'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
         );
         await screen.expectCreateIssueFormVisible(
           createIssueSection: 'Hierarchy',
@@ -78,11 +84,17 @@ void main() {
         await screen.openSection('Hierarchy');
         await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
 
-        await _openHierarchyChildCreate(
-          tester,
-          screen,
-          issueKey: Ts302HierarchyPrefillFixture.storyKey,
-          failingStep: 2,
+        final openedStoryChildCreate = await screen
+            .openHierarchyChildCreateForIssue(
+              Ts302HierarchyPrefillFixture.storyKey,
+            );
+        expect(
+          openedStoryChildCreate,
+          isTrue,
+          reason:
+              'Step 2 failed: the Hierarchy row for ${Ts302HierarchyPrefillFixture.storyKey} did not expose a visible contextual child-create action. '
+              'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
+              'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
         );
         await screen.expectCreateIssueFormVisible(
           createIssueSection: 'Hierarchy',
@@ -119,27 +131,6 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 20)),
   );
-}
-
-Future<void> _openHierarchyChildCreate(
-  WidgetTester tester,
-  TrackStateAppComponent screen, {
-  required String issueKey,
-  required int failingStep,
-}) async {
-  final action = find.bySemanticsLabel(
-    RegExp('^Create child issue for ${RegExp.escape(issueKey)}\$'),
-  );
-  if (action.evaluate().isEmpty) {
-    fail(
-      'Step $failingStep failed: the Hierarchy row for $issueKey did not expose a visible contextual child-create action. '
-      'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
-      'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-    );
-  }
-  await tester.ensureVisible(action.first);
-  await tester.tap(action.first, warnIfMissed: false);
-  await tester.pumpAndSettle();
 }
 
 void _expectCreateIssueTexts(
