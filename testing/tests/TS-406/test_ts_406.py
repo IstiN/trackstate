@@ -29,6 +29,8 @@ BUG_WORKFLOW_ID = "bug-workflow"
 BUG_WORKFLOW_NAME = "Bug Workflow"
 BUG_ISSUE_TYPE_ID = "bug"
 BUG_ISSUE_TYPE_NAME = "Bug"
+WORKFLOW_TRANSITION_ID = "complete-bug"
+WORKFLOW_TRANSITION_NAME = "Complete bug"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts406_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts406_success.png"
@@ -50,7 +52,7 @@ def main() -> None:
     user = service.fetch_authenticated_user()
     initial_workflows = service.fetch_workflow_config_map(PROJECT_KEY)
     initial_issue_types = service.fetch_issue_type_config_entries(PROJECT_KEY)
-    _assert_preconditions(initial_issue_types)
+    _assert_preconditions(initial_workflows, initial_issue_types)
 
     result: dict[str, object] = {
         "status": "failed",
@@ -120,49 +122,44 @@ def main() -> None:
 
                 if settings_page.workflow_exists(BUG_WORKFLOW_NAME):
                     workflow_row = settings_page.workflow_row_label(BUG_WORKFLOW_NAME)
-                    result["workflow_creation_mode"] = "reused-existing"
-                    _record_step(
-                        result,
-                        step=3,
-                        status="passed",
-                        action=(
-                            "Confirm the named Bug Workflow already exists in the live "
-                            "Workflows catalog."
-                        ),
-                        observed=workflow_row,
+                    raise AssertionError(
+                        "Precondition failed: the live Workflows tab already shows Bug "
+                        "Workflow, so TS-406 cannot prove the Add workflow flow creates it "
+                        "during this run.\n"
+                        f"Observed workflow row:\n{workflow_row}",
                     )
-                else:
-                    workflow_row = settings_page.create_bug_workflow()
-                    result["workflow_creation_mode"] = "created"
-                    _record_step(
-                        result,
-                        step=3,
-                        status="passed",
-                        action="Create a new workflow named Bug Workflow.",
-                        observed=workflow_row,
+
+                workflow_row = settings_page.create_bug_workflow()
+                result["workflow_creation_mode"] = "created"
+                _record_step(
+                    result,
+                    step=3,
+                    status="passed",
+                    action="Create a new workflow named Bug Workflow.",
+                    observed=workflow_row,
+                )
+                if "Statuses: done, todo" not in workflow_row:
+                    raise AssertionError(
+                        "Step 4 failed: the Bug Workflow row did not visibly keep only "
+                        "the To Do and Done statuses after saving the workflow editor.\n"
+                        f"Observed workflow row:\n{workflow_row}",
                     )
-                    if "Statuses: done, todo" not in workflow_row:
-                        raise AssertionError(
-                            "Step 4 failed: the Bug Workflow row did not visibly keep only "
-                            "the To Do and Done statuses after saving the workflow editor.\n"
-                            f"Observed workflow row:\n{workflow_row}",
-                        )
-                    if "Transitions: 1" not in workflow_row:
-                        raise AssertionError(
-                            "Step 4 failed: the Bug Workflow row did not visibly report a "
-                            "single saved transition.\n"
-                            f"Observed workflow row:\n{workflow_row}",
-                        )
-                    _record_step(
-                        result,
-                        step=4,
-                        status="passed",
-                        action=(
-                            "Select To Do and Done as allowed statuses, define the To Do -> "
-                            "Done transition, and save the workflow draft."
-                        ),
-                        observed=workflow_row,
+                if "Transitions: 1" not in workflow_row:
+                    raise AssertionError(
+                        "Step 4 failed: the Bug Workflow row did not visibly report a "
+                        "single saved transition.\n"
+                        f"Observed workflow row:\n{workflow_row}",
                     )
+                _record_step(
+                    result,
+                    step=4,
+                    status="passed",
+                    action=(
+                        "Select To Do and Done as allowed statuses, define the To Do -> "
+                        "Done transition, and save the workflow draft."
+                    ),
+                    observed=workflow_row,
+                )
 
                 settings_page.open_tab(settings_page.ISSUE_TYPES_TAB)
                 _record_step(
@@ -172,6 +169,18 @@ def main() -> None:
                     action="Navigate to the Issue Types tab.",
                     observed=settings_page.current_body_text(),
                 )
+
+                initial_bug_issue_type_row = settings_page.issue_type_row_label(
+                    BUG_ISSUE_TYPE_NAME,
+                )
+                result["initial_bug_issue_type_row"] = initial_bug_issue_type_row
+                if f"Workflow: {BUG_WORKFLOW_ID}" in initial_bug_issue_type_row:
+                    raise AssertionError(
+                        "Precondition failed: the live Issue Types tab already shows Bug "
+                        "assigned to bug-workflow, so TS-406 cannot prove the reassignment "
+                        "step changes the workflow during this run.\n"
+                        f"Observed issue type row:\n{initial_bug_issue_type_row}",
+                    )
 
                 workflow_dropdown_text, bug_issue_row = (
                     settings_page.assign_bug_issue_type_to_bug_workflow()
@@ -300,12 +309,31 @@ def main() -> None:
         print(json.dumps(result, indent=2))
 
 
-def _assert_preconditions(issue_types: list[dict[str, object]]) -> None:
+def _assert_preconditions(
+    workflows: dict[str, dict[str, object]],
+    issue_types: list[dict[str, object]],
+) -> None:
+    workflow = workflows.get(BUG_WORKFLOW_ID)
+    if workflow is not None:
+        raise AssertionError(
+            "Precondition failed: the live DEMO workflow config already defines "
+            "bug-workflow, so TS-406 cannot prove the named workflow is created "
+            "from a clean starting state.\n"
+            f"Observed workflow config:\n{json.dumps(workflow, indent=2)}",
+        )
+
     bug_issue_type = _bug_issue_type_entry(issue_types)
     if bug_issue_type is None:
         raise AssertionError(
             "Precondition failed: the live DEMO issue-types.json does not define the Bug "
             "issue type required by TS-406.",
+        )
+    if bug_issue_type.get("workflow") == BUG_WORKFLOW_ID:
+        raise AssertionError(
+            "Precondition failed: the live DEMO issue-types.json already links Bug to "
+            "bug-workflow, so TS-406 cannot prove the issue-type reassignment changes "
+            "the workflow.\n"
+            f"Observed issue type config:\n{json.dumps(bug_issue_type, indent=2)}",
         )
 
 
@@ -378,7 +406,12 @@ def _workflow_matches_expectation(workflow: object) -> bool:
     transition = transitions[0]
     if not isinstance(transition, dict):
         return False
-    return transition.get("from") == "todo" and transition.get("to") == "done"
+    return (
+        transition.get("id") == WORKFLOW_TRANSITION_ID
+        and transition.get("name") == WORKFLOW_TRANSITION_NAME
+        and transition.get("from") == "todo"
+        and transition.get("to") == "done"
+    )
 
 
 def _bug_issue_type_matches_expectation(issue_type: object) -> bool:

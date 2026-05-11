@@ -19,6 +19,7 @@ class LiveProjectSettingsAdminPage:
     BUG_WORKFLOW_NAME = "Bug Workflow"
     BUG_WORKFLOW_ID = "bug-workflow"
     BUG_ISSUE_TYPE_NAME = "Bug"
+    WORKFLOW_TRANSITION_ID = "complete-bug"
     WORKFLOW_TRANSITION_NAME = "Complete bug"
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
@@ -88,6 +89,23 @@ class LiveProjectSettingsAdminPage:
 
         self.session.wait_for_selector('input[aria-label="Transition name"]', timeout_ms=30_000)
         self.session.fill(
+            'input[aria-label="ID"]',
+            self.WORKFLOW_TRANSITION_ID,
+            index=1,
+            timeout_ms=30_000,
+        )
+        transition_id = self.session.read_value(
+            'input[aria-label="ID"]',
+            index=1,
+            timeout_ms=30_000,
+        )
+        if transition_id != self.WORKFLOW_TRANSITION_ID:
+            raise AssertionError(
+                "The hosted transition ID field did not keep the saved value.\n"
+                f"Expected: {self.WORKFLOW_TRANSITION_ID}\n"
+                f"Observed: {transition_id}",
+            )
+        self.session.fill(
             'input[aria-label="Transition name"]',
             self.WORKFLOW_TRANSITION_NAME,
             timeout_ms=30_000,
@@ -151,8 +169,16 @@ class LiveProjectSettingsAdminPage:
         self.session.wait_for_text_absence("Edit issue type", timeout_ms=30_000)
         return dropdown_label, self.issue_type_row_label(self.BUG_ISSUE_TYPE_NAME)
 
-    def issue_type_row_label(self, issue_type_name: str) -> str:
-        selector = self._issue_type_group_selector(issue_type_name)
+    def issue_type_row_label(
+        self,
+        issue_type_name: str,
+        *,
+        workflow_id: str | None = None,
+    ) -> str:
+        selector = self._issue_type_group_selector(
+            issue_type_name,
+            workflow_id=workflow_id,
+        )
         self._scroll_into_view(selector)
         self.session.wait_for_selector(selector, timeout_ms=30_000)
         label = self._read_attribute(selector, "aria-label")
@@ -181,11 +207,16 @@ class LiveProjectSettingsAdminPage:
     def _workflow_group_selector(self, workflow_name: str) -> str:
         return f'{self.GROUP_SELECTOR}[aria-label*="{workflow_name}"]'
 
-    def _issue_type_group_selector(self, issue_type_name: str) -> str:
-        return (
-            f'{self.GROUP_SELECTOR}[aria-label*="{issue_type_name}"]'
-            f'[aria-label*="Workflow: {self.BUG_WORKFLOW_ID}"]'
-        )
+    def _issue_type_group_selector(
+        self,
+        issue_type_name: str,
+        *,
+        workflow_id: str | None = None,
+    ) -> str:
+        selector = f'{self.GROUP_SELECTOR}[aria-label*="{issue_type_name}"]'
+        if workflow_id is not None:
+            selector += f'[aria-label*="Workflow: {workflow_id}"]'
+        return selector
 
     def _click_button_text(self, text: str) -> None:
         self._scroll_into_view(self.BUTTON_SELECTOR, has_text=text)
