@@ -151,6 +151,44 @@ class MutableIssueDetailTrackStateProvider
   {"id": "labels", "name": "Labels", "type": "array", "required": false}
 ]
 ''',
+    '.trackstate/index/issues.json': '''
+[
+  {
+    "key": "TRACK-11",
+    "path": "TRACK-11/main.md",
+    "parent": null,
+    "epic": null,
+    "parentPath": null,
+    "epicPath": null,
+    "summary": "Stabilize dashboard polling",
+    "issueType": "story",
+    "status": "todo",
+    "priority": "highest",
+    "assignee": "Denis",
+    "labels": ["dashboard"],
+    "updated": "2 minutes ago",
+    "children": [],
+    "archived": false
+  },
+  {
+    "key": "TRACK-12",
+    "path": "TRACK-12/main.md",
+    "parent": null,
+    "epic": null,
+    "parentPath": null,
+    "epicPath": null,
+    "summary": "Implement Git sync service",
+    "issueType": "story",
+    "status": "in-progress",
+    "priority": "high",
+    "assignee": "Denis",
+    "labels": ["sync"],
+    "updated": "5 minutes ago",
+    "children": [],
+    "archived": false
+  }
+]
+''',
     'TRACK-11/main.md': '''
 ---
 key: TRACK-11
