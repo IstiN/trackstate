@@ -18,6 +18,14 @@ class WaitMatch:
 
 
 @dataclass(frozen=True)
+class ElementBoundingBox:
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+@dataclass(frozen=True)
 class FocusedElementObservation:
     tag_name: str
     role: str | None
@@ -183,3 +191,21 @@ class WebAppSession(Protocol):
     ) -> str: ...
 
     def screenshot(self, path: str) -> None: ...
+
+    def bounding_box(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> ElementBoundingBox: ...
+
+    def mouse_click(self, x: float, y: float, *, delay_ms: int = 0) -> None: ...
+
+    def wait_for_text_absent(
+        self,
+        text: str,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> str: ...
