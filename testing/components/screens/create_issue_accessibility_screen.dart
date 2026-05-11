@@ -117,7 +117,25 @@ class CreateIssueAccessibilityScreen
   }
 
   @override
+  Future<void> submitCreateIssue() async {
+    final createIssueSection = _createIssueSection;
+    if (createIssueSection == null) {
+      throw StateError(
+        'The Create issue flow was not opened before submission.',
+      );
+    }
+    await _app.submitCreateIssue(createIssueSection: createIssueSection);
+  }
+
+  @override
+  Future<void> waitWithoutInteraction(Duration duration) =>
+      _app.waitWithoutInteraction(duration);
+
+  @override
   Future<void> scrollToBottom() => _robot.scrollToBottom();
+
+  @override
+  Future<void> scrollToTop() => _robot.scrollToTop();
 
   @override
   Future<void> dispose() async {
