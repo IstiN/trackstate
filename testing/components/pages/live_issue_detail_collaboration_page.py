@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
+from testing.core.interfaces.web_app_session import FocusedElementObservation
 
 
 @dataclass(frozen=True)
@@ -232,6 +233,42 @@ class LiveIssueDetailCollaborationPage:
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
 
+    def focus_collaboration_tab(self, label: str) -> None:
+        selector = self._tab_selector(label)
+        if self._session.count(selector) > 0:
+            self._session.focus(selector, timeout_ms=30_000)
+            return
+        self._session.focus(
+            self._button_selector,
+            has_text=label,
+            timeout_ms=30_000,
+        )
+
+    def active_element(self) -> FocusedElementObservation:
+        return self._session.active_element()
+
+    def press_key(self, key: str) -> None:
+        self._session.press_key(key, timeout_ms=30_000)
+
+    def attachment_download_button_count(self, attachment_name: str) -> int:
+        return self._session.count(
+            self._button_selector,
+            has_text=self._download_button_label(attachment_name),
+        )
+
+    def attachment_download_button_label(self, attachment_name: str) -> str:
+        return self._session.read_text(
+            self._button_selector,
+            has_text=self._download_button_label(attachment_name),
+            timeout_ms=30_000,
+        ).strip()
+
+    def trigger_focused_download(self) -> str:
+        return self._session.wait_for_download_after_keypress(
+            "Enter",
+            timeout_ms=60_000,
+        )
+
     def _is_connected(self, connected_banner: str) -> bool:
         return (
             self._session.count(self._connected_button_selector) > 0
@@ -257,6 +294,10 @@ class LiveIssueDetailCollaborationPage:
             'flt-semantics[role="button"]'
             f'[aria-label="{LiveIssueDetailCollaborationPage._escape(label)}"]'
         )
+
+    @staticmethod
+    def _download_button_label(attachment_name: str) -> str:
+        return f"Download {attachment_name}"
 
     @staticmethod
     def _escape(value: str) -> str:

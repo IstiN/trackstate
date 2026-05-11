@@ -119,7 +119,7 @@ def main() -> None:
                 live_issue_page.open_collaboration_tab("Comments")
                 live_issue_page.wait_for_text(COMMENT_BODY, timeout_ms=60_000)
                 comments_text = live_issue_page.current_body_text()
-                result["comments_body_text_light"] = comments_text
+                result["comments_body_text_initial"] = comments_text
                 for visible_text in (
                     "Comments",
                     COMMENT_AUTHOR,
@@ -135,79 +135,90 @@ def main() -> None:
 
                 initial_toggle_label = live_issue_page.theme_toggle_label()
                 result["initial_theme_toggle_label"] = initial_toggle_label
-                if initial_toggle_label != "Dark theme":
-                    failures.append(
-                        "Step 3 failed: the live tracker did not start in the default "
-                        'light theme expected for the first contrast check.\n'
-                        f"Observed theme toggle label: {initial_toggle_label}\n"
-                        f"Observed body text:\n{comments_text}",
-                    )
+                initial_theme_name = _theme_name_for_toggle_label(initial_toggle_label)
+                result["initial_theme_name"] = initial_theme_name
 
-                light_observation = _observe_comment_metadata(
+                initial_observation = _observe_comment_metadata(
                     live_issue_page=live_issue_page,
                     probe=probe,
-                    screenshot_path=LIGHT_SCREENSHOT_PATH,
-                    theme_name="light",
+                    screenshot_path=_screenshot_path_for_theme(initial_theme_name),
+                    theme_name=initial_theme_name,
                 )
                 result["observations"] = [
-                    _observation_to_dict(light_observation),
+                    _observation_to_dict(initial_observation),
                 ]
+                result[f"comments_body_text_{initial_theme_name}"] = comments_text
                 _record_step(
                     result,
                     step=3,
                     status="passed",
-                    action="Open the Comments tab in the default light theme and inspect the visible metadata row.",
+                    action=(
+                        "Inspect the visible Comments metadata row in the current "
+                        f"{initial_theme_name} theme."
+                    ),
                     observed=comments_text,
                 )
-                if light_observation.contrast_ratio < 4.5:
+                if initial_observation.contrast_ratio < 4.5:
                     failures.append(
-                        "Step 3 failed: the visible Comments metadata in the default light "
+                        f"Step 3 failed: the visible Comments metadata in the current {initial_theme_name} "
                         "theme did not meet the required WCAG AA 4.5:1 contrast ratio.\n"
-                        f"Observed {light_observation.describe()}\n"
+                        f"Observed {initial_observation.describe()}\n"
                         f"Visible body text:\n{comments_text}",
                     )
 
                 toggled_label = live_issue_page.toggle_theme()
-                result["dark_theme_toggle_label"] = toggled_label
+                result["toggled_theme_toggle_label"] = toggled_label
+                toggled_theme_name = _theme_name_for_toggle_label(toggled_label)
+                result["toggled_theme_name"] = toggled_theme_name
+                if toggled_theme_name == initial_theme_name:
+                    failures.append(
+                        "Step 4 failed: toggling the theme did not switch the UI to the opposite theme.\n"
+                        f"Initial toggle label: {initial_toggle_label}\n"
+                        f"Toggle label after click: {toggled_label}\n"
+                        f"Observed body text:\n{live_issue_page.current_body_text()}",
+                    )
                 live_issue_page.wait_for_text(COMMENT_BODY, timeout_ms=60_000)
-                comments_text_dark = live_issue_page.current_body_text()
-                result["comments_body_text_dark"] = comments_text_dark
+                comments_text_toggled = live_issue_page.current_body_text()
+                result[f"comments_body_text_{toggled_theme_name}"] = comments_text_toggled
                 for visible_text in (
                     "Comments",
                     COMMENT_AUTHOR,
                     COMMENT_BODY,
                     COMMENT_TIMESTAMP,
                 ):
-                    if visible_text not in comments_text_dark:
+                    if visible_text not in comments_text_toggled:
                         failures.append(
-                            "Step 4 failed: after switching themes, the Comments tab did "
+                            f"Step 4 failed: after switching to the {toggled_theme_name} theme, the Comments tab did "
                             f"not keep the expected user-visible text {visible_text!r} "
                             "on screen.\n"
-                            f"Observed body text:\n{comments_text_dark}",
+                            f"Observed body text:\n{comments_text_toggled}",
                         )
 
-                dark_observation = _observe_comment_metadata(
+                toggled_observation = _observe_comment_metadata(
                     live_issue_page=live_issue_page,
                     probe=probe,
-                    screenshot_path=DARK_SCREENSHOT_PATH,
-                    theme_name="dark",
+                    screenshot_path=_screenshot_path_for_theme(toggled_theme_name),
+                    theme_name=toggled_theme_name,
                 )
                 observations = result.setdefault("observations", [])
                 assert isinstance(observations, list)
-                observations.append(_observation_to_dict(dark_observation))
+                observations.append(_observation_to_dict(toggled_observation))
                 _record_step(
                     result,
                     step=4,
                     status="passed",
-                    action="Switch to the dark theme and re-check the same visible comment metadata.",
-                    observed=comments_text_dark,
+                    action=(
+                        "Switch themes and re-check the same visible Comments metadata row "
+                        f"in the {toggled_theme_name} theme."
+                    ),
+                    observed=comments_text_toggled,
                 )
-                if dark_observation.contrast_ratio < 4.5:
+                if toggled_observation.contrast_ratio < 4.5:
                     failures.append(
-                        "Step 4 failed: the visible Comments metadata in the dark theme "
+                        f"Step 4 failed: the visible Comments metadata in the {toggled_theme_name} theme "
                         "did not meet the required WCAG AA 4.5:1 contrast ratio.\n"
-                        f"Observed {dark_observation.describe()}\n"
-                        f"Visible body text:\n{comments_text_dark}",
+                        f"Observed {toggled_observation.describe()}\n"
+                        f"Visible body text:\n{comments_text_toggled}",
                     )
             except Exception:
                 live_issue_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
@@ -269,12 +280,23 @@ def _observation_to_dict(
         "theme_name": observation.theme_name,
         "row_background_hex": observation.row_background_hex,
         "expected_background_hex": observation.expected_background_hex,
+        "actual_foreground_hex": observation.actual_foreground_hex,
         "inferred_token_name": observation.inferred_token_name,
-        "inferred_foreground_hex": observation.inferred_foreground_hex,
+        "inferred_token_hex": observation.inferred_token_hex,
         "contrast_ratio": round(observation.contrast_ratio, 4),
         "screenshot_path": observation.screenshot_path,
         "timestamp_crop_box": list(observation.timestamp_crop_box),
     }
+
+
+def _theme_name_for_toggle_label(toggle_label: str) -> str:
+    return "light" if toggle_label == "Dark theme" else "dark"
+
+
+def _screenshot_path_for_theme(theme_name: str) -> Path:
+    if theme_name == "light":
+        return LIGHT_SCREENSHOT_PATH
+    return DARK_SCREENSHOT_PATH
 
 
 def _record_step(

@@ -28,8 +28,9 @@ class CommentMetadataContrastObservation:
     theme_name: str
     row_background_hex: str
     expected_background_hex: str
+    actual_foreground_hex: str
     inferred_token_name: str
-    inferred_foreground_hex: str
+    inferred_token_hex: str
     contrast_ratio: float
     screenshot_path: str
     timestamp_crop_box: tuple[int, int, int, int]
@@ -38,7 +39,8 @@ class CommentMetadataContrastObservation:
         return (
             f"theme={self.theme_name}, background={self.row_background_hex}, "
             f"expectedBackground={self.expected_background_hex}, "
-            f"metadataToken={self.inferred_token_name} ({self.inferred_foreground_hex}), "
+            f"actualForeground={self.actual_foreground_hex}, "
+            f"metadataToken={self.inferred_token_name} ({self.inferred_token_hex}), "
             f"contrast={self.contrast_ratio:.2f}:1, screenshot={self.screenshot_path}, "
             f"timestampCrop={self.timestamp_crop_box}"
         )
@@ -85,18 +87,22 @@ class LiveCommentMetadataContrastProbe:
 
         timestamp_box = self._comment_timestamp_box(image, row_rect)
         timestamp_crop = image.crop(timestamp_box)
-        inferred_name, inferred_color = self._infer_foreground_token(
+        actual_foreground = self._sample_rendered_foreground(
             timestamp_crop,
             background=row_background,
+        )
+        inferred_name, inferred_color = self._infer_palette_token(
+            actual_foreground=actual_foreground,
             palette=palette,
         )
         return CommentMetadataContrastObservation(
             theme_name=theme_name,
             row_background_hex=rgb_to_hex(row_background),
             expected_background_hex=rgb_to_hex(palette.surface_alt),
+            actual_foreground_hex=rgb_to_hex(actual_foreground),
             inferred_token_name=inferred_name,
-            inferred_foreground_hex=rgb_to_hex(inferred_color),
-            contrast_ratio=contrast_ratio(inferred_color, row_background),
+            inferred_token_hex=rgb_to_hex(inferred_color),
+            contrast_ratio=contrast_ratio(actual_foreground, row_background),
             screenshot_path=str(screenshot_path),
             timestamp_crop_box=timestamp_box,
         )
@@ -126,13 +132,12 @@ class LiveCommentMetadataContrastProbe:
         color, _ = counts.most_common(1)[0]
         return color
 
-    def _infer_foreground_token(
+    def _sample_rendered_foreground(
         self,
         image: Image.Image,
         *,
         background: RgbColor,
-        palette: ThemePalette,
-    ) -> tuple[str, RgbColor]:
+    ) -> RgbColor:
         counts = Counter(image.getdata())
         samples = [
             (color, count)
@@ -145,70 +150,44 @@ class LiveCommentMetadataContrastProbe:
                 "pixels to evaluate contrast.",
             )
 
+        strongest_distance = max(
+            self._manhattan_distance(color, background)
+            for color, _ in samples
+        )
+        strongest_samples = [
+            (color, count)
+            for color, count in samples
+            if strongest_distance - self._manhattan_distance(color, background) <= 8
+        ]
+        red = round(
+            sum(color[0] * count for color, count in strongest_samples)
+            / sum(count for _, count in strongest_samples),
+        )
+        green = round(
+            sum(color[1] * count for color, count in strongest_samples)
+            / sum(count for _, count in strongest_samples),
+        )
+        blue = round(
+            sum(color[2] * count for color, count in strongest_samples)
+            / sum(count for _, count in strongest_samples),
+        )
+        return (red, green, blue)
+
+    @staticmethod
+    def _infer_palette_token(
+        *,
+        actual_foreground: RgbColor,
+        palette: ThemePalette,
+    ) -> tuple[str, RgbColor]:
         candidates: dict[str, RgbColor] = {
             "text": palette.text,
             "muted": palette.muted,
         }
-        scored = sorted(
-            (
-                (
-                    self._fit_score(
-                        samples=samples,
-                        background=background,
-                        foreground=foreground,
-                    ),
-                    name,
-                    foreground,
-                )
-                for name, foreground in candidates.items()
-            ),
-            key=lambda entry: entry[0],
+        best_name, best_color = min(
+            candidates.items(),
+            key=lambda entry: color_distance(actual_foreground, entry[1]),
         )
-        _, best_name, best_color = scored[0]
         return best_name, best_color
-
-    def _fit_score(
-        self,
-        *,
-        samples: list[tuple[RgbColor, int]],
-        background: RgbColor,
-        foreground: RgbColor,
-    ) -> float:
-        weighted_error = 0.0
-        total_weight = 0
-        for observed, count in samples:
-            best_error = min(
-                self._squared_distance(
-                    observed,
-                    self._alpha_blend(background=background, foreground=foreground, alpha=alpha),
-                )
-                for alpha in range(1, 256)
-            )
-            weighted_error += best_error * count
-            total_weight += count
-        return weighted_error / max(total_weight, 1)
-
-    @staticmethod
-    def _alpha_blend(
-        *,
-        background: RgbColor,
-        foreground: RgbColor,
-        alpha: int,
-    ) -> RgbColor:
-        normalized_alpha = alpha / 255
-        return (
-            round((normalized_alpha * foreground[0]) + ((1 - normalized_alpha) * background[0])),
-            round((normalized_alpha * foreground[1]) + ((1 - normalized_alpha) * background[1])),
-            round((normalized_alpha * foreground[2]) + ((1 - normalized_alpha) * background[2])),
-        )
-
-    @staticmethod
-    def _squared_distance(left: RgbColor, right: RgbColor) -> int:
-        return (
-            ((left[0] - right[0]) ** 2)
-            + ((left[1] - right[1]) ** 2)
-            + ((left[2] - right[2]) ** 2)
-        )
 
     @staticmethod
     def _manhattan_distance(left: RgbColor, right: RgbColor) -> int:
