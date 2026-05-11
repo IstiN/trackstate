@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/data/services/issue_mutation_service.dart';
 import 'package:trackstate/domain/models/issue_mutation_models.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -45,6 +46,30 @@ void main() {
     expect(viewModel.searchResults.last.key, 'TRACK-8');
     expect(viewModel.hasMoreSearchResults, isFalse);
   });
+
+  test(
+    'view model restores the last valid query after a search failure',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: const _ThrowingSearchRepository(),
+      );
+
+      await viewModel.load();
+      final previousQuery = viewModel.jql;
+      final previousResults = viewModel.searchResults
+          .map((issue) => issue.key)
+          .toList();
+
+      await viewModel.updateQuery('text = broken');
+
+      expect(viewModel.jql, previousQuery);
+      expect(
+        viewModel.searchResults.map((issue) => issue.key),
+        previousResults,
+      );
+      expect(viewModel.message?.kind, TrackerMessageKind.searchFailed);
+    },
+  );
 
   test('view model changes sections and toggles theme', () async {
     final viewModel = TrackerViewModel(
@@ -288,26 +313,29 @@ class _LocalRuntimeRepository implements TrackStateRepository {
   ) async => issue.copyWith(status: status, updatedLabel: 'just now');
 
   @override
-  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) async =>
-      issue.copyWith(
-        comments: [
-          ...issue.comments,
-          IssueComment(
-            id: (issue.comments.length + 1).toString().padLeft(4, '0'),
-            author: 'local-user',
-            body: body,
-            updatedLabel: 'just now',
-          ),
-        ],
-      );
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => issue.copyWith(
+    comments: [
+      ...issue.comments,
+      IssueComment(
+        id: (issue.comments.length + 1).toString().padLeft(4, '0'),
+        author: 'local-user',
+        body: body,
+        updatedLabel: 'just now',
+      ),
+    ],
+  );
 
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
       Uint8List(0);
 
   @override
-  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) async =>
-      const <IssueHistoryEntry>[];
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
 
   @override
   Future<TrackStateIssue> uploadIssueAttachment({
@@ -315,6 +343,28 @@ class _LocalRuntimeRepository implements TrackStateRepository {
     required String name,
     required Uint8List bytes,
   }) async => issue;
+}
+
+class _ThrowingSearchRepository extends _LocalRuntimeRepository {
+  const _ThrowingSearchRepository();
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) {
+    if (jql == 'text = broken') {
+      throw const JqlSearchException('Unsupported JQL clause "text = broken".');
+    }
+    return super.searchIssuePage(
+      jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+  }
 }
 
 class _RecordingIssueMutationService extends IssueMutationService {

@@ -81,6 +81,7 @@ class _JqlParser {
     'epic': _SupportedField.epic,
     'key': _SupportedField.key,
     'summary': _SupportedField.summary,
+    'text': _SupportedField.text,
   };
 
   _ParsedJqlQuery parse(String jql) {
@@ -133,12 +134,36 @@ class _JqlParser {
       );
     }
 
+    final textSearchMatch = RegExp(
+      r'^([A-Za-z][A-Za-z0-9]*)\s*(!~|~)\s*(.+)$',
+      caseSensitive: false,
+    ).firstMatch(clause);
+    if (textSearchMatch != null) {
+      final field = _resolveField(textSearchMatch.group(1)!);
+      final operatorText = textSearchMatch.group(2)!;
+      if (field != _SupportedField.text) {
+        throw JqlSearchException(
+          'Field "${textSearchMatch.group(1)}" does not support $operatorText.',
+        );
+      }
+      final value = _unquote(textSearchMatch.group(3)!.trim());
+      if (value.isEmpty) {
+        throw JqlSearchException('Clause "$clause" is missing a value.');
+      }
+      return _TextSearchClause(value, isNegated: operatorText == '!~');
+    }
+
     final equalityMatch = RegExp(
       r'^([A-Za-z][A-Za-z0-9]*)\s*(!=|=)\s*(.+)$',
       caseSensitive: false,
     ).firstMatch(clause);
     if (equalityMatch != null) {
       final field = _resolveField(equalityMatch.group(1)!);
+      if (field == _SupportedField.text) {
+        throw JqlSearchException(
+          'Field "${equalityMatch.group(1)}" does not support ${equalityMatch.group(2)}.',
+        );
+      }
       final rawValue = equalityMatch.group(3)!.trim();
       if (field == _SupportedField.project && !_isQuoted(rawValue)) {
         final parts = rawValue.split(RegExp(r'\s+'));
@@ -164,7 +189,7 @@ class _JqlParser {
       );
     }
 
-    if (clause.contains('=') || clause.contains('!')) {
+    if (clause.contains('=') || clause.contains('!') || clause.contains('~')) {
       throw JqlSearchException('Unsupported JQL clause "$clause".');
     }
     final leadingTokenMatch = RegExp(
@@ -422,6 +447,7 @@ class _ComparisonJqlClause extends _JqlClause {
         (issue.epicKey ?? '').toLowerCase() == normalizedValue,
       _SupportedField.key => issue.key.toLowerCase() == normalizedValue,
       _SupportedField.summary => issue.summary.toLowerCase() == normalizedValue,
+      _SupportedField.text => _searchableText(issue).contains(normalizedValue),
     };
     return isNegated ? !matches : matches;
   }
@@ -462,20 +488,16 @@ class _EmptyJqlClause extends _JqlClause {
 }
 
 class _TextSearchClause extends _JqlClause {
-  const _TextSearchClause(this.value);
+  const _TextSearchClause(this.value, {this.isNegated = false});
 
   final String value;
+  final bool isNegated;
 
   @override
   bool matches(TrackStateIssue issue, ProjectConfig project) {
     final normalizedValue = value.toLowerCase();
-    final searchableText = [
-      issue.key,
-      issue.summary,
-      issue.description,
-      ...issue.acceptanceCriteria,
-    ].join('\n').toLowerCase();
-    return searchableText.contains(normalizedValue);
+    final matches = _searchableText(issue).contains(normalizedValue);
+    return isNegated ? !matches : matches;
   }
 }
 
@@ -537,6 +559,10 @@ class _OrderByTerm {
       ),
       _SupportedField.key => _compareIssueKeys(left.key, right.key),
       _SupportedField.summary => _compareText(left.summary, right.summary),
+      _SupportedField.text => _compareText(
+        _searchableText(left),
+        _searchableText(right),
+      ),
     };
     return descending ? -comparison : comparison;
   }
@@ -575,6 +601,7 @@ enum _SupportedField {
   epic,
   key,
   summary,
+  text,
 }
 
 int _comparePriority(IssuePriority left, IssuePriority right) =>
@@ -589,6 +616,13 @@ int _priorityRank(IssuePriority priority) => switch (priority) {
 
 int _compareText(String left, String right) =>
     left.toLowerCase().compareTo(right.toLowerCase());
+
+String _searchableText(TrackStateIssue issue) => [
+  issue.key,
+  issue.summary,
+  issue.description,
+  ...issue.acceptanceCriteria,
+].join('\n').toLowerCase();
 
 int _compareIssueKeys(String left, String right) {
   final pattern = RegExp(r'^([A-Za-z][A-Za-z0-9]*)-(\d+)$');

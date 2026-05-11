@@ -113,6 +113,17 @@ void main() {
     expect(page.total, 1);
   });
 
+  test('supports canonical text clauses with the ~ operator', () {
+    final page = service.search(
+      issues: issues,
+      project: project,
+      jql: 'project = TRACK AND text ~ "deterministic pagination"',
+    );
+
+    expect(page.issues.map((issue) => issue.key), ['TRACK-4']);
+    expect(page.total, 1);
+  });
+
   test('supports empty checks and label membership semantics', () {
     final emptyAssignee = service.search(
       issues: issues,

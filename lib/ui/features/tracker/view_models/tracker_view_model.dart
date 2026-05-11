@@ -325,6 +325,7 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   Future<void> updateQuery(String query) async {
+    final previousQuery = _jql;
     _jql = query;
     try {
       final searchPage = await _repository.searchIssuePage(
@@ -334,6 +335,7 @@ class TrackerViewModel extends ChangeNotifier {
       _applySearchPage(searchPage);
       _message = null;
     } on Object catch (error) {
+      _jql = previousQuery;
       _message = TrackerMessage.searchFailed(error);
     }
     notifyListeners();
