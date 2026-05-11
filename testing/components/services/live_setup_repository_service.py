@@ -38,6 +38,7 @@ class LiveHostedIssueFixture:
     path: str
     summary: str
     description: str
+    priority_id: str
     acceptance_criteria: list[str]
     attachment_paths: list[str]
     comment_paths: list[str]
@@ -119,6 +120,7 @@ class LiveSetupRepositoryService:
             path=issue_path,
             summary=summary or issue_key,
             description=self._markdown_section(main_markdown, heading="Description"),
+            priority_id=self._front_matter_value(main_markdown, key="priority") or "",
             acceptance_criteria=self._markdown_bullets(acceptance_markdown),
             attachment_paths=attachment_paths,
             comment_paths=comment_paths,
