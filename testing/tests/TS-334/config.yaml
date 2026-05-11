@@ -1,0 +1,8 @@
+test_id: TS-334
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies the desktop Create issue surface stays right-docked at 1440x960.
+  - Confirms the right edge is flush with the viewport so the prior 276px right inset regression does not return.
