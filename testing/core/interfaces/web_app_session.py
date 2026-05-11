@@ -151,6 +151,13 @@ class WebAppSession(Protocol):
         timeout_ms: int = 90_000,
     ) -> WaitMatch: ...
 
+    def evaluate(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+    ) -> object: ...
+
     def active_element(self) -> FocusedElementObservation: ...
 
     def wait_for_download_after_keypress(
