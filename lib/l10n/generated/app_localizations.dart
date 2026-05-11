@@ -952,6 +952,30 @@ abstract class AppLocalizations {
   /// **'Settings is the canonical place to review repository access and reconnect safely.'**
   String get repositoryAccessSettingsHint;
 
+  /// No description provided for @startupRecovery.
+  ///
+  /// In en, this message translates to:
+  /// **'Startup recovery'**
+  String get startupRecovery;
+
+  /// No description provided for @startupRateLimitRecoveryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'GitHub startup limit reached'**
+  String get startupRateLimitRecoveryTitle;
+
+  /// No description provided for @startupRateLimitRecoveryBlockingMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted startup hit GitHub\'\'s rate limit before TrackState finished loading the required repository data. Retry later or connect GitHub for a higher limit. TrackState will retry once after GitHub authentication succeeds.'**
+  String get startupRateLimitRecoveryBlockingMessage;
+
+  /// No description provided for @startupRateLimitRecoveryShellMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.'**
+  String get startupRateLimitRecoveryShellMessage;
+
   /// No description provided for @repositoryPath.
   ///
   /// In en, this message translates to:
@@ -1117,6 +1141,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Connect GitHub'**
   String get connectGitHub;
+
+  /// No description provided for @retry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get retry;
 
   /// No description provided for @editIssue.
   ///

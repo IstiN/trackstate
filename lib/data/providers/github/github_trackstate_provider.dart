@@ -56,8 +56,10 @@ class GitHubTrackStateProvider
       headers: _githubHeaders(connection.token),
     );
     if (repoResponse.statusCode != 200) {
-      throw TrackStateProviderException(
-        'GitHub connection failed (${repoResponse.statusCode}): ${repoResponse.body}',
+      _throwGitHubResponseException(
+        path: '/repos/${connection.repository}',
+        response: repoResponse,
+        prefix: 'GitHub connection failed',
       );
     }
     final userJson =
@@ -176,8 +178,10 @@ class GitHubTrackStateProvider
       return RepositoryBranch(name: name, exists: false, isCurrent: false);
     }
     if (response.statusCode != 200) {
-      throw TrackStateProviderException(
-        'GitHub branch lookup failed for $name (${response.statusCode}): ${response.body}',
+      _throwGitHubResponseException(
+        path: '/repos/$repositoryName/branches/$name',
+        response: response,
+        prefix: 'GitHub branch lookup failed for $name',
       );
     }
     final currentBranch = await resolveWriteBranch();
@@ -207,8 +211,10 @@ class GitHubTrackStateProvider
       }),
     );
     if (response.statusCode != 200 && response.statusCode != 201) {
-      throw TrackStateProviderException(
-        'Could not save ${request.path} (${response.statusCode}): ${response.body}',
+      _throwGitHubResponseException(
+        path: '/repos/${connection.repository}/contents/${request.path}',
+        response: response,
+        prefix: 'Could not save ${request.path}',
       );
     }
     final json = jsonDecode(response.body) as Map<String, Object?>;
@@ -682,9 +688,10 @@ class GitHubTrackStateProvider
     );
     final materialized = await http.Response.fromStream(response);
     if (!expectedStatusCodes.contains(materialized.statusCode)) {
-      throw TrackStateProviderException(
-        'GitHub API request failed for $path '
-        '(${materialized.statusCode}): ${materialized.body}',
+      _throwGitHubResponseException(
+        path: path,
+        response: materialized,
+        prefix: 'GitHub API request failed for $path',
       );
     }
     return jsonDecode(materialized.body);
@@ -700,8 +707,10 @@ class GitHubTrackStateProvider
       headers: _githubHeaders(token ?? _connection?.token),
     );
     if (response.statusCode != 200) {
-      throw TrackStateProviderException(
-        'GitHub API request failed for $path (${response.statusCode}): ${response.body}',
+      _throwGitHubResponseException(
+        path: path,
+        response: response,
+        prefix: 'GitHub API request failed for $path',
       );
     }
     return jsonDecode(response.body);
@@ -712,6 +721,53 @@ class GitHubTrackStateProvider
     if (connection != null) return connection;
     throw const TrackStateProviderException(
       'Connect a GitHub token with repository Contents write access first.',
+    );
+  }
+
+  Never _throwGitHubResponseException({
+    required String path,
+    required http.Response response,
+    required String prefix,
+  }) {
+    if (_isGitHubRateLimitResponse(response)) {
+      throw GitHubRateLimitException(
+        message: '$prefix (${response.statusCode}): ${response.body}',
+        requestPath: path,
+        statusCode: response.statusCode,
+        retryAfter: _githubRetryAfter(response),
+      );
+    }
+    throw TrackStateProviderException(
+      '$prefix (${response.statusCode}): ${response.body}',
+    );
+  }
+
+  bool _isGitHubRateLimitResponse(http.Response response) {
+    if (response.statusCode != 403 && response.statusCode != 429) {
+      return false;
+    }
+    final body = response.body.toLowerCase();
+    return response.headers['x-ratelimit-remaining'] == '0' ||
+        body.contains('rate limit exceeded') ||
+        body.contains('secondary rate limit');
+  }
+
+  DateTime? _githubRetryAfter(http.Response response) {
+    final retryAfter = response.headers['retry-after'];
+    if (retryAfter != null) {
+      final seconds = int.tryParse(retryAfter);
+      if (seconds != null) {
+        return DateTime.now().toUtc().add(Duration(seconds: seconds));
+      }
+    }
+    final reset = response.headers['x-ratelimit-reset'];
+    final resetSeconds = int.tryParse(reset ?? '');
+    if (resetSeconds == null) {
+      return null;
+    }
+    return DateTime.fromMillisecondsSinceEpoch(
+      resetSeconds * 1000,
+      isUtc: true,
     );
   }
 }

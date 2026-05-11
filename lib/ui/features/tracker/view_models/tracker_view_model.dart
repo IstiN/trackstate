@@ -278,9 +278,11 @@ class TrackerViewModel extends ChangeNotifier {
   bool _isLoading = false;
   bool _isSaving = false;
   TrackerMessage? _message;
+  TrackerStartupRecovery? _startupRecovery;
   bool _isConnected = false;
   RepositoryUser? _connectedUser;
   bool _isLoadingMoreSearchResults = false;
+  bool _didAutoResumeStartupRecoveryAfterAuthentication = false;
 
   TrackerSnapshot? get snapshot => _snapshot;
   TrackerSection get section => _section;
@@ -308,6 +310,9 @@ class TrackerViewModel extends ChangeNotifier {
   bool isIssueAttachmentsLoading(String issueKey) =>
       _loadingIssueAttachments.contains(issueKey);
   TrackerMessage? get message => _message;
+  TrackerStartupRecovery? get startupRecovery =>
+      _snapshot?.startupRecovery ?? _startupRecovery;
+  bool get hasStartupRecovery => startupRecovery != null;
   bool get isConnected => _isConnected;
   RepositoryUser? get connectedUser => _connectedUser;
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
@@ -409,40 +414,53 @@ class TrackerViewModel extends ChangeNotifier {
   Future<void> load() async {
     _isLoading = true;
     _message = null;
+    _startupRecovery = null;
+    _didAutoResumeStartupRecoveryAfterAuthentication = false;
     notifyListeners();
     try {
-      _snapshot = await _repository.loadSnapshot();
-      if (_jql.contains('project = TRACK') && project?.key != 'TRACK') {
-        _jql = _jql.replaceFirst(
-          'project = TRACK',
-          'project = ${project!.key}',
-        );
-      }
-      _selectedIssue = issues.firstWhere(
-        (issue) => !issue.isEpic,
-        orElse: () => issues.first,
-      );
-      final searchPage = await _repository.searchIssuePage(
-        _jql,
-        maxResults: _searchPageSize,
-      );
-      _applySearchPage(searchPage);
+      await _loadSnapshotAndSearch();
       if (usesLocalPersistence) {
         await _loadLocalRepositoryUser();
       } else if (supportsGitHubAuth) {
         await _restoreGitHubConnection();
       }
-      if (_message == null && _snapshot!.loadWarnings.isNotEmpty) {
+      if (_message == null && _snapshot?.loadWarnings.isNotEmpty == true) {
         _message = TrackerMessage.repositoryConfigFallback(
           _snapshot!.loadWarnings.first,
         );
       }
+      if (hasStartupRecovery && _snapshot != null) {
+        _section = TrackerSection.settings;
+      }
     } on Object catch (error) {
-      _message = TrackerMessage.dataLoadFailed(error);
+      final recovery = _startupRecoveryFrom(error);
+      if (recovery == null) {
+        _message = TrackerMessage.dataLoadFailed(error);
+      } else {
+        _startupRecovery = recovery;
+        if (supportsGitHubAuth) {
+          await _restoreGitHubConnection();
+        }
+        if (_message == null && _snapshot?.loadWarnings.isNotEmpty == true) {
+          _message = TrackerMessage.repositoryConfigFallback(
+            _snapshot!.loadWarnings.first,
+          );
+        }
+        if (hasStartupRecovery && _snapshot != null) {
+          _section = TrackerSection.settings;
+        }
+      }
     } finally {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> retryStartupRecovery() async {
+    if (_isLoading) {
+      return;
+    }
+    await load();
   }
 
   @override
@@ -571,8 +589,10 @@ class TrackerViewModel extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final project = _snapshot?.project;
-    if (project == null) return;
+    final target = _connectionTarget();
+    if (target == null) {
+      return;
+    }
     final normalizedToken = token.trim();
     if (normalizedToken.isEmpty) {
       _message = TrackerMessage.tokenEmpty();
@@ -585,19 +605,20 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       final user = await _repository.connect(
         GitHubConnection(
-          repository: project.repository,
-          branch: project.branch,
+          repository: target.repository,
+          branch: target.branch,
           token: normalizedToken,
         ),
       );
       if (remember) {
-        await _authStore.saveToken(project.repository, normalizedToken);
+        await _authStore.saveToken(target.repository, normalizedToken);
       }
       _isConnected = true;
       _connectedUser = user;
+      await _resumeStartupRecoveryAfterAuthentication();
       _message = TrackerMessage.githubConnectedDragCards(
         login: user.login,
-        repository: project.repository,
+        repository: target.repository,
       );
     } on Object catch (error) {
       _message = TrackerMessage.githubConnectionFailed(error);
@@ -1496,11 +1517,11 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   Future<void> _restoreGitHubConnection() async {
-    final project = _snapshot?.project;
-    if (project == null || _isConnected) return;
+    final target = _connectionTarget();
+    if (target == null || _isConnected) return;
     final callbackToken = _callbackToken();
     final storedToken =
-        callbackToken ?? await _authStore.readToken(project.repository);
+        callbackToken ?? await _authStore.readToken(target.repository);
     if (storedToken == null || storedToken.isEmpty) {
       if (_callbackCode() != null) {
         _message = TrackerMessage.githubAuthorizationCodeReturned();
@@ -1510,23 +1531,24 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       final user = await _repository.connect(
         GitHubConnection(
-          repository: project.repository,
-          branch: project.branch,
+          repository: target.repository,
+          branch: target.branch,
           token: storedToken,
         ),
       );
       _connectedUser = user;
       _isConnected = true;
       if (callbackToken != null) {
-        await _authStore.saveToken(project.repository, callbackToken);
+        await _authStore.saveToken(target.repository, callbackToken);
       }
+      await _resumeStartupRecoveryAfterAuthentication();
       _message = TrackerMessage.githubConnected(
         login: user.login,
-        repository: project.repository,
+        repository: target.repository,
       );
     } on Object catch (error) {
       _message = TrackerMessage.storedGitHubTokenInvalid(error);
-      await _authStore.clearToken(project.repository);
+      await _authStore.clearToken(target.repository);
     } finally {
       _bindProviderSession();
     }
@@ -1596,6 +1618,88 @@ class TrackerViewModel extends ChangeNotifier {
     } finally {
       loadingSet.remove(issue.key);
       notifyListeners();
+    }
+  }
+
+  Future<void> _loadSnapshotAndSearch() async {
+    final snapshot = await _repository.loadSnapshot();
+    final previousSelectedKey = _selectedIssue?.key;
+    _snapshot = snapshot;
+    _startupRecovery = snapshot.startupRecovery;
+    if (_jql.contains('project = TRACK') && project?.key != 'TRACK') {
+      _jql = _jql.replaceFirst('project = TRACK', 'project = ${project!.key}');
+    }
+    _selectedIssue = _resolveSelectedIssue(
+      previousSelectedKey,
+      snapshot.issues,
+    );
+    final searchPage = await _repository.searchIssuePage(
+      _jql,
+      maxResults: _searchPageSize,
+    );
+    _applySearchPage(searchPage);
+  }
+
+  TrackStateIssue? _resolveSelectedIssue(
+    String? previousSelectedKey,
+    List<TrackStateIssue> issues,
+  ) {
+    if (issues.isEmpty) {
+      return null;
+    }
+    if (previousSelectedKey != null) {
+      for (final issue in issues) {
+        if (issue.key == previousSelectedKey) {
+          return issue;
+        }
+      }
+    }
+    for (final issue in issues) {
+      if (!issue.isEpic) {
+        return issue;
+      }
+    }
+    return issues.first;
+  }
+
+  TrackerStartupRecovery? _startupRecoveryFrom(Object error) {
+    if (error is! GitHubRateLimitException) {
+      return null;
+    }
+    return TrackerStartupRecovery(
+      kind: TrackerStartupRecoveryKind.githubRateLimit,
+      failedPath: error.requestPath,
+      retryAfter: error.retryAfter,
+    );
+  }
+
+  ({String repository, String branch})? _connectionTarget() {
+    final project = _snapshot?.project;
+    if (project != null) {
+      return (repository: project.repository, branch: project.branch);
+    }
+    return switch (_repository) {
+      ProviderBackedTrackStateRepository repository => (
+        repository: repository.providerAdapter.repositoryLabel,
+        branch: repository.providerAdapter.dataRef,
+      ),
+      _ => null,
+    };
+  }
+
+  Future<void> _resumeStartupRecoveryAfterAuthentication() async {
+    if (!hasStartupRecovery ||
+        _didAutoResumeStartupRecoveryAfterAuthentication) {
+      return;
+    }
+    _didAutoResumeStartupRecoveryAfterAuthentication = true;
+    try {
+      await _loadSnapshotAndSearch();
+    } on Object catch (error) {
+      _startupRecovery = _startupRecoveryFrom(error) ?? _startupRecovery;
+    }
+    if (hasStartupRecovery && _snapshot != null) {
+      _section = TrackerSection.settings;
     }
   }
 
