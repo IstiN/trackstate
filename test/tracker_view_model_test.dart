@@ -495,6 +495,118 @@ void main() {
       );
     },
   );
+
+  test(
+    'view model blocks done fallback saves without a required resolution',
+    () async {
+      final initialSnapshot = await const DemoTrackStateRepository()
+          .loadSnapshot();
+      final repository = _MutableEditRepository(
+        snapshot: _snapshotWithResolutions(initialSnapshot, const [
+          TrackStateConfigEntry(id: 'done', name: 'Done'),
+          TrackStateConfigEntry(id: 'wont-fix', name: "Won't Fix"),
+        ]),
+        usesLocalPersistence: true,
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: 'Blocked resolution save',
+          description: issue.description,
+          priorityId: issue.priorityId,
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: issue.parentKey,
+          epicKey: issue.epicKey,
+          transitionStatusId: 'done',
+        ),
+      );
+
+      expect(success, isFalse);
+      expect(viewModel.message?.kind, TrackerMessageKind.issueSaveFailed);
+      expect(
+        viewModel.message?.error,
+        contains('Done transitions require a resolution before saving.'),
+      );
+      expect(viewModel.selectedIssue?.summary, issue.summary);
+      expect(viewModel.selectedIssue?.statusId, issue.statusId);
+    },
+  );
+
+  test(
+    'view model applies the single available resolution for done fallback saves',
+    () async {
+      final initialSnapshot = await const DemoTrackStateRepository()
+          .loadSnapshot();
+      final repository = _MutableEditRepository(
+        snapshot: _snapshotWithResolutions(initialSnapshot, const [
+          TrackStateConfigEntry(id: 'done', name: 'Done'),
+        ]),
+        usesLocalPersistence: true,
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: 'Single resolution fallback',
+          description: issue.description,
+          priorityId: issue.priorityId,
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: issue.parentKey,
+          epicKey: issue.epicKey,
+          transitionStatusId: 'done',
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(viewModel.selectedIssue?.summary, 'Single resolution fallback');
+      expect(viewModel.selectedIssue?.statusId, 'done');
+      expect(viewModel.selectedIssue?.resolutionId, 'done');
+    },
+  );
+}
+
+TrackerSnapshot _snapshotWithResolutions(
+  TrackerSnapshot snapshot,
+  List<TrackStateConfigEntry> resolutionDefinitions,
+) {
+  return TrackerSnapshot(
+    project: ProjectConfig(
+      key: snapshot.project.key,
+      name: snapshot.project.name,
+      repository: snapshot.project.repository,
+      branch: snapshot.project.branch,
+      defaultLocale: snapshot.project.defaultLocale,
+      issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+      statusDefinitions: snapshot.project.statusDefinitions,
+      fieldDefinitions: snapshot.project.fieldDefinitions,
+      priorityDefinitions: snapshot.project.priorityDefinitions,
+      versionDefinitions: snapshot.project.versionDefinitions,
+      componentDefinitions: snapshot.project.componentDefinitions,
+      resolutionDefinitions: resolutionDefinitions,
+    ),
+    issues: snapshot.issues,
+    repositoryIndex: snapshot.repositoryIndex,
+    loadWarnings: snapshot.loadWarnings,
+  );
 }
 
 class _LocalRuntimeRepository implements TrackStateRepository {

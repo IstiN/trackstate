@@ -816,6 +816,25 @@ class TrackerViewModel extends ChangeNotifier {
         normalizedTransitionStatusId != null &&
         _canonicalConfigId(normalizedTransitionStatusId) !=
             _canonicalConfigId(currentIssue.statusId);
+    final normalizedEffectiveResolutionId = !transitionChanged
+        ? normalizedResolutionId
+        : (_canonicalConfigId(normalizedTransitionStatusId) == 'done'
+              ? (normalizedResolutionId ??
+                    (snapshot.project.resolutionDefinitions.length == 1
+                        ? snapshot.project.resolutionDefinitions.single.id
+                        : null))
+              : null);
+    if (transitionChanged &&
+        _canonicalConfigId(normalizedTransitionStatusId) == 'done' &&
+        normalizedEffectiveResolutionId == null) {
+      _message = TrackerMessage.issueSaveFailed(
+        const TrackStateRepositoryException(
+          'Done transitions require a resolution before saving.',
+        ),
+      );
+      notifyListeners();
+      return false;
+    }
     if (fields.isEmpty && !hierarchyChanged && !transitionChanged) {
       return true;
     }
@@ -864,7 +883,7 @@ class TrackerViewModel extends ChangeNotifier {
         final transitionResult = await _issueMutationService.transitionIssue(
           issueKey: currentIssue.key,
           status: normalizedTransitionStatusId,
-          resolution: normalizedResolutionId,
+          resolution: normalizedEffectiveResolutionId,
         );
         if (_isSharedMutationUnsupported(transitionResult)) {
           shouldUseLegacyFallback = true;
@@ -915,7 +934,7 @@ class TrackerViewModel extends ChangeNotifier {
           parentKey: normalizedParentKey,
           epicKey: normalizedEpicKey,
           transitionStatusId: normalizedTransitionStatusId,
-          resolutionId: normalizedResolutionId,
+          resolutionId: normalizedEffectiveResolutionId,
         );
         usedInMemoryLocalFallback = true;
       } else if (shouldUseLegacyFallback) {

@@ -4035,6 +4035,21 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
       return;
     }
     final l10n = AppLocalizations.of(context)!;
+    final project = widget.viewModel.project;
+    final resolutionOptions =
+        project?.resolutionDefinitions ?? const <TrackStateConfigEntry>[];
+    final targetStatusIsDone =
+        _selectedTransitionStatusId != null &&
+        _canonicalConfigId(_selectedTransitionStatusId) == 'done';
+    final resolutionId = !targetStatusIsDone
+        ? null
+        : (_selectedResolutionId ??
+              (resolutionOptions.length == 1
+                  ? resolutionOptions.single.id
+                  : null));
+    if (targetStatusIsDone && resolutionId == null) {
+      return;
+    }
     final confirmed = await _confirmHierarchyMove(l10n);
     if (!confirmed) {
       return;
@@ -4056,11 +4071,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                   ? _derivedEpicKey()
                   : _emptyToNull(_selectedEpicKey)),
         transitionStatusId: _selectedTransitionStatusId,
-        resolutionId:
-            _selectedTransitionStatusId != null &&
-                _canonicalConfigId(_selectedTransitionStatusId) == 'done'
-            ? _selectedResolutionId
-            : null,
+        resolutionId: resolutionId,
       ),
     );
     if (!mounted || !success) {
@@ -4228,9 +4239,12 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                 onChanged: (value) {
                                   setState(() {
                                     _selectedTransitionStatusId = value;
-                                    if (_canonicalConfigId(value) != 'done') {
-                                      _selectedResolutionId = null;
-                                    }
+                                    _selectedResolutionId =
+                                        _canonicalConfigId(value) != 'done'
+                                        ? null
+                                        : (resolutionOptions.length == 1
+                                              ? resolutionOptions.single.id
+                                              : _selectedResolutionId);
                                   });
                                 },
                               ),

@@ -245,6 +245,36 @@ void main() {
     },
   );
 
+  testWidgets(
+    'edit issue dialog blocks done transitions until a resolution is selected',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final screen = defaultTestingDependencies.createTrackStateAppScreen(
+        tester,
+      );
+      try {
+        await screen.pump(const _EditIssueFieldsLocalRuntimeRepository());
+
+        await screen.openSection('Search');
+        await screen.openIssue('TRACK-12', 'Implement Git sync service');
+        await screen.tapIssueDetailAction('TRACK-12', label: 'Edit');
+
+        await screen.selectDropdownOption('Status', optionText: 'Done');
+        await screen.tapVisibleControl('Save');
+
+        expect(
+          find.text('Resolution is required for this transition.'),
+          findsOneWidget,
+        );
+        expect(await screen.isDropdownFieldVisible('Resolution'), isTrue);
+        expect(await screen.isTextFieldVisible('Summary'), isTrue);
+      } finally {
+        screen.resetView();
+        semantics.dispose();
+      }
+    },
+  );
+
   testWidgets('local runtime shows repository access instead of GitHub auth', (
     tester,
   ) async {
