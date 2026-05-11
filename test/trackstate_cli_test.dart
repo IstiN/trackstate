@@ -432,26 +432,26 @@ void main() {
         '1',
       ]);
       final json = jsonDecode(result.stdout) as Map<String, Object?>;
-      final issues = json['issues']! as List<Object?>;
+      final data = json['data']! as Map<String, Object?>;
+      final issues = data['issues']! as List<Object?>;
 
       expect(result.exitCode, 0);
-      expect(json.containsKey('ok'), isFalse);
-      expect(json['startAt'], 0);
-      expect(json['maxResults'], 1);
-      expect(json['total'], 3);
+      expect(json['ok'], isTrue);
+      expect(json['provider'], 'local-git');
+      expect(data['startAt'], 0);
+      expect(data['maxResults'], 1);
+      expect(data['total'], 3);
+      expect(data['isLastPage'], isFalse);
+      expect(data['page'], <String, Object?>{
+        'startAt': 0,
+        'maxResults': 1,
+        'total': 3,
+      });
       expect(issues, hasLength(1));
       final issue = issues.single as Map<String, Object?>;
       expect(issue['key'], 'TRACK-2');
-      expect(issue['id'], '2');
-      final fields = issue['fields']! as Map<String, Object?>;
-      expect(fields['summary'], 'Implement pagination');
-      expect(fields['issuetype'], <String, Object?>{
-        'id': 'story',
-        'name': 'Story',
-        'subtask': false,
-        'description': '',
-        'hierarchyLevel': 0,
-      });
+      expect(issue['summary'], 'Implement pagination');
+      expect(issue['issueType'], 'story');
     });
 
     test(
@@ -547,16 +547,19 @@ void main() {
           '2',
         ]);
         final json = jsonDecode(result.stdout) as Map<String, Object?>;
-        final issues = json['issues'] as List<Object?>?;
+        final data = json['data']! as Map<String, Object?>;
+        final issues = data['issues'] as List<Object?>?;
 
         expect(result.exitCode, 0);
         expect(repositoryFactory.lastRepositoryPath, '/workspace/repo');
         expect(repository.lastJql, 'project = TRACK');
         expect(repository.lastStartAt, 0);
         expect(repository.lastMaxResults, 2);
-        expect(json['startAt'], 0);
-        expect(json['maxResults'], 2);
-        expect(json['total'], 2);
+        expect(json['ok'], isTrue);
+        expect(data['startAt'], 0);
+        expect(data['maxResults'], 2);
+        expect(data['total'], 2);
+        expect(data['isLastPage'], isTrue);
         expect(issues, isA<List<Object?>>());
       },
     );
@@ -805,7 +808,7 @@ void main() {
       },
     );
 
-    test('returns unsupported for account-by-email lookups', () async {
+    test('resolves the active local account by email', () async {
       final cli = TrackStateCli(
         environment: const TrackStateCliEnvironment(
           workingDirectory: '/workspace/repo',
@@ -814,6 +817,13 @@ void main() {
           localRepository: _FakeSearchRepository(
             snapshot: _sampleSnapshot(),
             page: const TrackStateIssueSearchPage.empty(),
+            connectedUser: const RepositoryUser(
+              login: 'user@example.com',
+              displayName: 'Local User',
+              accountId: 'local-user',
+              emailAddress: 'user@example.com',
+              active: true,
+            ),
           ),
         ),
       );
@@ -825,12 +835,89 @@ void main() {
         'user@example.com',
       ]);
       final json = jsonDecode(result.stdout) as Map<String, Object?>;
-      final error = json['error']! as Map<String, Object?>;
 
-      expect(result.exitCode, 5);
-      expect(error['code'], 'UNSUPPORTED_OPERATION');
-      expect(error['category'], 'unsupported');
+      expect(result.exitCode, 0);
+      expect(json, <String, Object?>{
+        'accountId': 'local-user',
+        'displayName': 'Local User',
+        'active': true,
+        'emailAddress': 'user@example.com',
+      });
     });
+
+    test(
+      'supports hosted account-by-email lookup when the provider exposes it',
+      () async {
+        final repository = _FakeSearchRepository(
+          snapshot: _sampleSnapshot(),
+          page: const TrackStateIssueSearchPage.empty(),
+          connectedUser: const RepositoryUser(
+            login: 'octocat',
+            displayName: 'Octo Cat',
+            accountId: '42',
+            emailAddress: 'octo@example.com',
+            active: true,
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            environment: <String, String>{
+              trackStateCliTokenEnvironmentVariable: 'env-token',
+            },
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: repository,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            hostedProvider: _FakeHostedTrackStateProvider(
+              user: const RepositoryUser(
+                login: 'octocat',
+                displayName: 'Octo Cat',
+                accountId: '42',
+                emailAddress: 'octo@example.com',
+                active: true,
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: false,
+                isAdmin: false,
+              ),
+              usersByEmail: const {
+                'hubot@example.com': RepositoryUser(
+                  login: 'hubot',
+                  displayName: 'Hubot',
+                  accountId: '99',
+                  emailAddress: 'hubot@example.com',
+                  active: true,
+                ),
+              },
+            ),
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'read',
+          'account-by-email',
+          '--target',
+          'hosted',
+          '--provider',
+          'github',
+          '--repository',
+          'owner/repo',
+          '--email',
+          'hubot@example.com',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json, <String, Object?>{
+          'accountId': '99',
+          'displayName': 'Hubot',
+          'active': true,
+          'emailAddress': 'hubot@example.com',
+        });
+      },
+    );
   });
 }
 
@@ -1145,11 +1232,13 @@ class _FakeHostedTrackStateProvider
     required this.user,
     required this.permission,
     this.usersByLogin = const {},
+    this.usersByEmail = const {},
   });
 
   final RepositoryUser user;
   final RepositoryPermission permission;
   final Map<String, RepositoryUser> usersByLogin;
+  final Map<String, RepositoryUser> usersByEmail;
   RepositoryConnection? connection;
 
   @override
@@ -1170,6 +1259,15 @@ class _FakeHostedTrackStateProvider
   @override
   Future<RepositoryUser> lookupUserByLogin(String login) async {
     final resolved = usersByLogin[login];
+    if (resolved == null) {
+      throw const TrackStateProviderException('User was not found.');
+    }
+    return resolved;
+  }
+
+  @override
+  Future<RepositoryUser> lookupUserByEmail(String email) async {
+    final resolved = usersByEmail[email];
     if (resolved == null) {
       throw const TrackStateProviderException('User was not found.');
     }

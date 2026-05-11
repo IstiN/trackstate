@@ -17,6 +17,7 @@ abstract interface class RepositorySessionManager {
 
 abstract interface class RepositoryUserLookup {
   Future<RepositoryUser> lookupUserByLogin(String login);
+  Future<RepositoryUser> lookupUserByEmail(String email);
 }
 
 abstract interface class RepositoryCommitManager {

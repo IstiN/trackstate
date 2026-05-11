@@ -89,6 +89,31 @@ class GitHubTrackStateProvider
   }
 
   @override
+  Future<RepositoryUser> lookupUserByEmail(String email) async {
+    final connection = _requireConnection();
+    final searchJson =
+        await _getGitHubJson(
+              '/search/users',
+              queryParameters: {'q': '${email.trim()} in:email'},
+              token: connection.token,
+            )
+            as Map<String, Object?>;
+    final items = searchJson['items'];
+    if (items is! List<Object?> || items.isEmpty) {
+      throw TrackStateProviderException('User was not found for email $email.');
+    }
+    final match = items.first;
+    if (match is! Map<String, Object?>) {
+      throw TrackStateProviderException('User was not found for email $email.');
+    }
+    final login = match['login']?.toString().trim() ?? '';
+    if (login.isEmpty) {
+      throw TrackStateProviderException('User was not found for email $email.');
+    }
+    return lookupUserByLogin(login);
+  }
+
+  @override
   Future<List<RepositoryTreeEntry>> listTree({required String ref}) async {
     final json =
         await _getGitHubJson(

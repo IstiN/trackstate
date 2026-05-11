@@ -279,6 +279,7 @@ class TrackStateCli {
     final continuationToken = rawContinuationToken.isEmpty
         ? null
         : rawContinuationToken;
+    final includeLegacyPage = results.wasParsed('target');
 
     try {
       return await switch (target.type) {
@@ -289,6 +290,7 @@ class TrackStateCli {
           startAt: startAt,
           maxResults: maxResults,
           continuationToken: continuationToken,
+          includeLegacyPage: includeLegacyPage,
         ),
         TrackStateCliTargetType.hosted => _runHostedSearch(
           target,
@@ -297,6 +299,7 @@ class TrackStateCli {
           startAt: startAt,
           maxResults: maxResults,
           continuationToken: continuationToken,
+          includeLegacyPage: includeLegacyPage,
         ),
       };
     } on _TrackStateCliException catch (error) {
@@ -586,7 +589,8 @@ class TrackStateCli {
     RepositoryUser? currentUser;
     if (target.type == TrackStateCliTargetType.hosted ||
         resource == 'profile' ||
-        resource == 'user') {
+        resource == 'user' ||
+        resource == 'account-by-email') {
       currentUser = await repository.connect(
         RepositoryConnection(
           repository: target.value,
@@ -737,13 +741,19 @@ class TrackStateCli {
         );
       case 'account-by-email':
         final email = _requiredTrimmedOption(results, 'email');
-        throw _TrackStateCliException(
-          code: 'UNSUPPORTED_OPERATION',
-          category: TrackStateCliErrorCategory.unsupported,
-          message:
-              'Account lookup by email is not supported by the current TrackState identity model.',
-          exitCode: 5,
-          details: <String, Object?>{'email': email},
+        final resolvedUser = await _resolveAccountByEmail(
+          currentUser: currentUser!,
+          requestedEmail: email,
+          target: target,
+          provider: providerLookup,
+        );
+        return _ReadResponse(
+          text: _userText(
+            title: 'Account',
+            user: resolvedUser,
+            authSource: authSource,
+          ),
+          jsonPayload: _jiraUserPayload(resolvedUser),
         );
       default:
         throw _TrackStateCliException(
@@ -766,18 +776,49 @@ class TrackStateCli {
       return currentUser;
     }
     if (provider case final RepositoryUserLookup lookup) {
-      return lookup.lookupUserByLogin(requestedLogin);
+      try {
+        return await lookup.lookupUserByLogin(requestedLogin);
+      } on TrackStateProviderException catch (error) {
+        throw _lookupNotFoundError(
+          field: 'login',
+          value: requestedLogin,
+          target: target,
+          reason: error.message,
+        );
+      }
     }
-    throw _TrackStateCliException(
-      code: 'UNSUPPORTED_OPERATION',
-      category: TrackStateCliErrorCategory.unsupported,
-      message:
-          'User lookup is only supported when the active provider exposes a native login-based directory.',
-      exitCode: 5,
-      details: <String, Object?>{
-        'provider': target.provider,
-        'login': requestedLogin,
-      },
+    throw _lookupNotFoundError(
+      field: 'login',
+      value: requestedLogin,
+      target: target,
+    );
+  }
+
+  Future<RepositoryUser> _resolveAccountByEmail({
+    required RepositoryUser currentUser,
+    required String requestedEmail,
+    required _ResolvedTarget target,
+    required TrackStateProviderAdapter? provider,
+  }) async {
+    if (_matchesUserEmail(currentUser, requestedEmail)) {
+      return currentUser;
+    }
+    if (provider case final RepositoryUserLookup lookup) {
+      try {
+        return await lookup.lookupUserByEmail(requestedEmail);
+      } on TrackStateProviderException catch (error) {
+        throw _lookupNotFoundError(
+          field: 'email',
+          value: requestedEmail,
+          target: target,
+          reason: error.message,
+        );
+      }
+    }
+    throw _lookupNotFoundError(
+      field: 'email',
+      value: requestedEmail,
+      target: target,
     );
   }
 
@@ -790,6 +831,33 @@ class TrackStateCli {
         user.displayName.trim().toLowerCase() == normalizedCandidate ||
         (user.accountId?.trim().toLowerCase() ?? '') == normalizedCandidate;
   }
+
+  bool _matchesUserEmail(RepositoryUser user, String email) {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty) {
+      return false;
+    }
+    return (user.emailAddress?.trim().toLowerCase() ?? '') == normalizedEmail ||
+        user.login.trim().toLowerCase() == normalizedEmail;
+  }
+
+  _TrackStateCliException _lookupNotFoundError({
+    required String field,
+    required String value,
+    required _ResolvedTarget target,
+    String? reason,
+  }) => _TrackStateCliException(
+    code: 'NOT_FOUND',
+    category: TrackStateCliErrorCategory.repository,
+    message: 'No account matching $field "$value" was found.',
+    exitCode: 4,
+    details: <String, Object?>{
+      'provider': target.provider,
+      'target': target.value,
+      field: value,
+      if (reason != null && reason.isNotEmpty) 'reason': reason,
+    },
+  );
 
   void _validateProjectOption(ArgResults results, ProjectConfig project) {
     final projectOption = results['project']?.toString().trim() ?? '';
@@ -1168,13 +1236,13 @@ class TrackStateCli {
     required int startAt,
     required int maxResults,
     required String? continuationToken,
+    required bool includeLegacyPage,
   }) async {
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
       dataRef: target.branch.ifEmpty('HEAD'),
     );
     try {
-      final snapshot = await repository.loadSnapshot();
       final page = await repository.searchIssuePage(
         jql,
         startAt: startAt,
@@ -1187,7 +1255,7 @@ class TrackStateCli {
         jql: jql,
         authSource: 'none',
         page: page,
-        project: snapshot.project,
+        includeLegacyPage: includeLegacyPage,
       );
     } on Object catch (error) {
       throw _mapSearchError(error, target, jql: jql);
@@ -1201,6 +1269,7 @@ class TrackStateCli {
     required int startAt,
     required int maxResults,
     required String? continuationToken,
+    required bool includeLegacyPage,
   }) async {
     final credential = await _credentialResolver.resolve(
       explicitToken: target.token,
@@ -1239,7 +1308,6 @@ class TrackStateCli {
           token: credential.token,
         ),
       );
-      final snapshot = await repository.loadSnapshot();
       final page = await repository.searchIssuePage(
         jql,
         startAt: startAt,
@@ -1252,17 +1320,18 @@ class TrackStateCli {
         jql: jql,
         authSource: credential.source,
         page: page,
-        project: snapshot.project,
+        includeLegacyPage: includeLegacyPage,
       );
     } on Object catch (error) {
       throw _mapSearchError(error, target, jql: jql);
     }
   }
 
-  Map<String, Object?> _searchTextData({
+  Map<String, Object?> _searchData({
     required String jql,
     required TrackStateIssueSearchPage page,
     required String authSource,
+    required bool includeLegacyPage,
   }) => <String, Object?>{
     'command': 'search',
     'jql': jql,
@@ -1273,6 +1342,12 @@ class TrackStateCli {
     'nextStartAt': page.nextStartAt,
     'nextPageToken': page.nextPageToken,
     'isLastPage': !page.hasMore,
+    if (includeLegacyPage)
+      'page': <String, Object?>{
+        'startAt': page.startAt,
+        'maxResults': page.maxResults,
+        'total': page.total,
+      },
     'issues': [
       for (final issue in page.issues)
         <String, Object?>{
@@ -1295,22 +1370,19 @@ class TrackStateCli {
     required String jql,
     required String authSource,
     required TrackStateIssueSearchPage page,
-    required ProjectConfig project,
+    required bool includeLegacyPage,
   }) {
-    if (output == TrackStateCliOutput.text) {
-      return TrackStateCliExecution.success(
-        output: output,
-        content: _textSuccess(
-          targetType: target.type,
-          targetValue: target.value,
-          provider: target.provider,
-          data: _searchTextData(jql: jql, page: page, authSource: authSource),
-        ),
-      );
-    }
-    return TrackStateCliExecution.success(
+    return _success(
+      targetType: target.type,
+      targetValue: target.value,
+      provider: target.provider,
       output: output,
-      content: _encodeJson(_jiraSearchPayload(page: page, project: project)),
+      data: _searchData(
+        jql: jql,
+        page: page,
+        authSource: authSource,
+        includeLegacyPage: includeLegacyPage,
+      ),
     );
   }
 
@@ -1414,34 +1486,6 @@ class TrackStateCli {
       details: <String, Object?>{'error': error.toString()},
     );
   }
-
-  Map<String, Object?> _jiraSearchPayload({
-    required TrackStateIssueSearchPage page,
-    required ProjectConfig project,
-  }) => <String, Object?>{
-    'startAt': page.startAt,
-    'maxResults': page.maxResults,
-    'total': page.total,
-    'issues': [
-      for (final issue in page.issues)
-        <String, Object?>{
-          'id': _jiraEntityId(issue.key),
-          'key': issue.key,
-          'fields': <String, Object?>{
-            'summary': issue.summary,
-            'issuetype': _jiraIssueTypePayload(
-              _findConfigEntry(project.issueTypeDefinitions, issue.issueTypeId),
-            ),
-            'status': _jiraStatusPayload(
-              _findConfigEntry(project.statusDefinitions, issue.statusId),
-            ),
-            'priority': _jiraPriorityPayload(
-              _findConfigEntry(project.priorityDefinitions, issue.priorityId),
-            ),
-          },
-        },
-    ],
-  };
 
   Map<String, Object?> _jiraTicketPayload({
     required TrackStateIssue issue,
@@ -1859,7 +1903,7 @@ class TrackStateCli {
   String _searchHelpText(ArgParser parser) => [
     'trackstate search',
     '',
-    'Execute a paged JQL search and return raw Jira-shaped search JSON.',
+    'Execute a paged JQL search and return the TrackState success envelope with flattened Jira-compatible pagination data.',
     '',
     'Usage:',
     '  trackstate search --jql \'project = TRACK ORDER BY key ASC\' [--path /repo] [--start-at 0|--startAt 0] [--max-results 50|--maxResults 50] [--continuation-token <token>] [--output json|text]',
@@ -1871,7 +1915,7 @@ class TrackStateCli {
     'Notes:',
     '  When --target is omitted, search defaults to the current local repository.',
     '  Jira-style --startAt/--maxResults aliases are accepted for pagination.',
-    '  JSON success output matches the Jira search response shape and does not use the TrackState envelope.',
+    '  JSON success output keeps the TrackState envelope and exposes Jira-compatible pagination fields inside `data`.',
     '',
     'Credential precedence for hosted targets:',
     '  1. --token',
@@ -1896,7 +1940,7 @@ class TrackStateCli {
         '  link-types        List canonical issue link types.',
         '  profile           Read the current provider identity.',
         '  user              Read a provider user by login when supported.',
-        '  account-by-email  Declared but currently unsupported.',
+        '  account-by-email  Read an account by email when the active provider can resolve it.',
         '',
         'Canonical examples:',
         '  trackstate read ticket --key TRACK-1',
@@ -1943,7 +1987,7 @@ class TrackStateCli {
       'user' =>
         '  Local runtime only supports returning the current Git identity when the login matches.',
       'account-by-email' =>
-        '  This command currently exits with UNSUPPORTED_OPERATION in both local and hosted modes.',
+        '  Local runtime resolves the active Git identity by email; hosted GitHub mode also searches provider-native email matches.',
       _ =>
         '  JSON success output matches the equivalent Jira response family and omits TrackState-only wrappers.',
     };
