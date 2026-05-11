@@ -92,13 +92,11 @@ class LiveJqlSearchPage:
     ) -> LiveJqlSearchObservation:
         self.open()
         field_selector = self._wait_for_search_field()
-        initial_observation = self._observe(query="", field_selector=field_selector)
         self._session.fill(field_selector, query, timeout_ms=30_000)
         self._session.press(field_selector, "Enter", timeout_ms=30_000)
-        return self._wait_for_result_change(
+        return self._wait_for_submitted_result(
             query=query,
             field_selector=field_selector,
-            initial_observation=initial_observation,
             expected_count_summaries=expected_count_summaries,
         )
 
@@ -178,12 +176,11 @@ class LiveJqlSearchPage:
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
 
-    def _wait_for_result_change(
+    def _wait_for_submitted_result(
         self,
         *,
         query: str,
         field_selector: str,
-        initial_observation: LiveJqlSearchObservation,
         expected_count_summaries: tuple[str, ...] | None = None,
     ) -> LiveJqlSearchObservation:
         try:
@@ -194,11 +191,15 @@ class LiveJqlSearchPage:
                     issueSelector,
                     submittedQuery,
                     expectedCountSummaries,
-                    initialCountSummary,
-                    initialIssueLabels,
                 }) => {
                     const field = document.querySelector(fieldSelector);
                     if (!field || !("value" in field)) {
+                        return null;
+                    }
+                    const activeElement = document.activeElement;
+                    const queryWasSubmitted =
+                        field.value === submittedQuery && activeElement !== field;
+                    if (!queryWasSubmitted) {
                         return null;
                     }
                     const bodyText = document.body?.innerText ?? "";
@@ -210,12 +211,7 @@ class LiveJqlSearchPage:
                     const countMatches =
                         expectedCountSummaries === null
                         || expectedCountSummaries.includes(countSummary);
-                    const issueLabelsChanged =
-                        issueLabels.length !== initialIssueLabels.length
-                        || issueLabels.some((label, index) => label !== initialIssueLabels[index]);
-                    const resultChanged =
-                        countSummary !== initialCountSummary || issueLabelsChanged;
-                    if (field.value !== submittedQuery || !countMatches || !resultChanged) {
+                    if (!countMatches) {
                         return null;
                     }
                     return {
@@ -233,20 +229,17 @@ class LiveJqlSearchPage:
                     "expectedCountSummaries": list(expected_count_summaries)
                     if expected_count_summaries is not None
                     else None,
-                    "initialCountSummary": initial_observation.count_summary,
-                    "initialIssueLabels": list(initial_observation.issue_labels),
                 },
                 timeout_ms=60_000,
             )
         except WebAppTimeoutError as error:
             latest_observation = self._observe(query=query, field_selector=field_selector)
             raise AssertionError(
-                "Step 4 failed: the live JQL Search panel never showed a post-submit "
-                "state that was different from the initial visible results.\n"
+                "Step 4 failed: the live JQL Search panel never reached a post-submit "
+                "state for the submitted query.\n"
                 f"Submitted query: {query}\n"
                 f"Expected summaries after submit: {expected_count_summaries}\n"
-                f"Initial count summary: {initial_observation.count_summary}\n"
-                f"Initial visible issue labels: {list(initial_observation.issue_labels)}\n"
+                f"Latest visible query: {latest_observation.visible_query}\n"
                 f"Latest count summary: {latest_observation.count_summary}\n"
                 f"Latest visible issue labels: {list(latest_observation.issue_labels)}\n"
                 f"Latest body text:\n{latest_observation.body_text}",

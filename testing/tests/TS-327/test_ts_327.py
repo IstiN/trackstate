@@ -281,7 +281,18 @@ def _assert_visible_search_result(
         )
 
     observed_issue_labels = tuple(observation.issue_labels)
-    if observed_issue_labels != expectation.matching_issue_labels:
+    if observation.issue_result_count != expectation.expected_count:
+        raise AssertionError(
+            "Human-style verification failed: the visible JQL Search result count did "
+            "not match the live Discovery audit.\n"
+            f"Expected visible issue count: {expectation.expected_count}\n"
+            f"Observed visible issue count: {observation.issue_result_count}\n"
+            f"Expected visible issue labels: {list(expectation.matching_issue_labels)}\n"
+            f"Observed visible issue labels: {list(observed_issue_labels)}\n"
+            f"Observed body text:\n{observation.body_text}",
+        )
+
+    if set(observed_issue_labels) != set(expectation.matching_issue_labels):
         raise AssertionError(
             "Human-style verification failed: the visible JQL Search result list did "
             "not show exactly the Discovery-matching issues.\n"

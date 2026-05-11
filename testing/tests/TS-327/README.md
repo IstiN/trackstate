@@ -36,11 +36,10 @@ python testing/tests/TS-327/test_ts_327.py
 Pass: The live repository contains the seeded Discovery matches, the hosted JQL
 Search field keeps the query visible, the result count matches the live corpus,
 and only the matching issues remain visible to the user after the submitted
-query changes the visible result state.
+query completes.
 
 Fail: The hosted JQL Search results do not match the live Discovery audit, or
-the submitted query never produces a post-submit state change distinct from the
-initial visible results. If the seeded Discovery coverage is missing but the UI
-matches the live corpus, treat that as a precondition failure rather than a
-search regression.
+the submitted query never reaches a post-submit state for the submitted value.
+If the seeded Discovery coverage is missing but the UI matches the live corpus,
+treat that as a precondition failure rather than a search regression.
 ```
