@@ -1,3 +1,5 @@
+import 'dart:ui' show Rect;
+
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../core/interfaces/create_issue_accessibility_screen.dart';
@@ -60,6 +62,10 @@ class CreateIssueAccessibilityScreen
   List<String> visibleTexts() => _robot.visibleTexts();
 
   @override
+  List<String> visibleSemanticsLabels() =>
+      _app.visibleSemanticsLabelsSnapshot();
+
+  @override
   CreateIssueLayoutObservation observeLayout() => _robot.observeLayout();
 
   @override
@@ -68,6 +74,28 @@ class CreateIssueAccessibilityScreen
   @override
   CreateIssueTextContrastObservation observeTextContrast(String text) =>
       _robot.observeTextContrast(text);
+
+  @override
+  Future<void> populateCreateIssueForm({
+    required String summary,
+    String? description,
+  }) async {
+    await _app.populateCreateIssueForm(
+      summary: summary,
+      description: description,
+    );
+  }
+
+  @override
+  Future<String?> readLabeledTextFieldValue(String label) async =>
+      _robot.readLabeledTextFieldValue(label);
+
+  @override
+  Rect? observeLabeledTextFieldRect(String label) =>
+      _robot.observeLabeledTextFieldRect(label);
+
+  @override
+  Rect? observeControlRect(String label) => _robot.observeControlRect(label);
 
   @override
   Future<void> resizeToViewport({

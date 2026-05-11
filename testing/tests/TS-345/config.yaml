@@ -1,0 +1,8 @@
+test_id: TS-345
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies long Summary and Description content stay intact while the Create issue form resizes from desktop to mobile widths.
+  - Confirms the visible input fields and actions remain inside the rendered Create issue surface with no RenderFlex overflow exceptions.
