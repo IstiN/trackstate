@@ -34,6 +34,12 @@ SCREENSHOT_PATH = OUTPUTS_DIR / "ts408_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts408_success.png"
 EXPECTED_RESERVED_FIELD_ID = "summary"
 EXPECTED_RESERVED_FIELD_TYPE = "string"
+CUSTOM_FIELD_ID = "environment"
+CUSTOM_FIELD_NAME = "Environment"
+CUSTOM_FIELD_TYPE = "option"
+CUSTOM_FIELD_OPTIONS = ("Production", "Staging", "Development")
+CUSTOM_FIELD_OPTIONS_TEXT = ", ".join(CUSTOM_FIELD_OPTIONS)
+CUSTOM_FIELD_ISSUE_TYPES = {"Bug"}
 
 
 def main() -> None:
@@ -145,6 +151,100 @@ def main() -> None:
                     observed=editor.body_text,
                 )
 
+                had_existing_environment = settings_page.field_exists(CUSTOM_FIELD_NAME)
+                result["environment_field_preexisting"] = had_existing_environment
+                if had_existing_environment:
+                    settings_page.delete_field(CUSTOM_FIELD_NAME)
+                    settings_page.save_settings()
+                    refreshed_fields_text = _reopen_fields_tab(
+                        tracker_page=tracker_page,
+                        settings_page=settings_page,
+                        collaboration_page=collaboration_page,
+                        token=token,
+                        repository=service.repository,
+                        user_login=user.login,
+                    )
+                    result["fields_tab_body_text_after_environment_cleanup"] = (
+                        refreshed_fields_text
+                    )
+                    if settings_page.field_exists(CUSTOM_FIELD_NAME):
+                        raise AssertionError(
+                            "Precondition failed: a previous Environment custom field "
+                            "could not be removed before the TS-408 create-field flow.\n"
+                            f"Observed body text:\n{refreshed_fields_text}",
+                        )
+
+                settings_page.open_add_field_editor()
+                settings_page.fill_editor_input("ID", CUSTOM_FIELD_ID)
+                settings_page.fill_editor_input("Name", CUSTOM_FIELD_NAME)
+                settings_page.select_field_type(CUSTOM_FIELD_TYPE)
+                settings_page.fill_editor_input("Options", CUSTOM_FIELD_OPTIONS_TEXT)
+                settings_page.set_applicable_issue_types(CUSTOM_FIELD_ISSUE_TYPES)
+                environment_editor_draft = settings_page.read_editor_observation()
+                result["environment_editor_before_save"] = _editor_payload(
+                    environment_editor_draft,
+                )
+                _assert_environment_field_editor(
+                    environment_editor_draft,
+                    step=6,
+                    action_description=(
+                        "creating the Environment field before saving settings"
+                    ),
+                )
+                settings_page.save_field_editor(field_name=CUSTOM_FIELD_NAME)
+                environment_row_before_save = settings_page.field_row_observation(
+                    CUSTOM_FIELD_NAME,
+                )
+                result["environment_row_before_save_settings"] = _row_payload(
+                    environment_row_before_save,
+                )
+                _assert_custom_field_row(environment_row_before_save)
+                settings_page.save_settings()
+                refreshed_fields_text = _reopen_fields_tab(
+                    tracker_page=tracker_page,
+                    settings_page=settings_page,
+                    collaboration_page=collaboration_page,
+                    token=token,
+                    repository=service.repository,
+                    user_login=user.login,
+                )
+                result["fields_tab_body_text_after_environment_save"] = refreshed_fields_text
+                environment_row = settings_page.field_row_observation(CUSTOM_FIELD_NAME)
+                result["environment_row"] = _row_payload(environment_row)
+                _assert_custom_field_row(environment_row)
+                _record_step(
+                    result,
+                    step=6,
+                    status="passed",
+                    action=(
+                        "Create the Environment custom field, set its type to Select, "
+                        "add three option values, and save the hosted field catalog."
+                    ),
+                    observed=environment_row.aria_label,
+                )
+
+                settings_page.open_field_editor(CUSTOM_FIELD_NAME)
+                environment_editor = settings_page.read_editor_observation()
+                result["environment_editor"] = _editor_payload(environment_editor)
+                _assert_environment_field_editor(
+                    environment_editor,
+                    step=7,
+                    action_description=(
+                        "re-opening the saved Environment field editor after the hosted "
+                        "save completed"
+                    ),
+                )
+                _record_step(
+                    result,
+                    step=7,
+                    status="passed",
+                    action=(
+                        "Verify the saved Environment field keeps its option metadata and "
+                        "applies only to Bug."
+                    ),
+                    observed=environment_editor.body_text,
+                )
+
                 settings_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
             except Exception:
@@ -166,8 +266,9 @@ def main() -> None:
     else:
         result["status"] = "passed"
         result["summary"] = (
-            "Verified the hosted Settings > Fields screen keeps the Summary field "
-            "protected and does not expose a delete action."
+            "Verified the hosted Settings > Fields screen keeps the reserved Summary "
+            "field immutable and can create a Bug-only Environment select field with "
+            "three option values."
         )
         _write_result_if_requested(result)
         print(json.dumps(result, indent=2))
@@ -238,6 +339,92 @@ def _assert_reserved_field_editor(editor: FieldEditorObservation) -> None:
     )
 
 
+def _assert_custom_field_row(environment_row: SettingsFieldRowObservation) -> None:
+    failures: list[str] = []
+    expected_edit_label = f"Edit field {CUSTOM_FIELD_NAME}"
+    if expected_edit_label not in environment_row.aria_label:
+        failures.append(
+            f'the field list did not expose the "{expected_edit_label}" action label',
+        )
+    if not environment_row.delete_action_visible:
+        failures.append(
+            f'the field list did not expose a delete action for "{CUSTOM_FIELD_NAME}"',
+        )
+    if not failures:
+        return
+    raise AssertionError(
+        "Step 6 failed: the Environment field row did not expose the expected "
+        "custom-field CRUD actions after creation.\n"
+        f"Observed Environment row: {environment_row.aria_label}\n"
+        f"Detailed failures: {failures}",
+    )
+
+
+def _assert_environment_field_editor(
+    editor: FieldEditorObservation,
+    *,
+    step: int,
+    action_description: str,
+) -> None:
+    failures: list[str] = []
+    id_input = editor.id_input
+    if id_input is None:
+        failures.append("the editor did not expose any ID input")
+    elif id_input.value != CUSTOM_FIELD_ID:
+        failures.append(
+            f'the ID input did not retain "{CUSTOM_FIELD_ID}"',
+        )
+
+    name_input = editor.name_input
+    if name_input is None:
+        failures.append("the editor did not expose any Name input")
+    elif name_input.value != CUSTOM_FIELD_NAME:
+        failures.append(
+            f'the Name input did not retain "{CUSTOM_FIELD_NAME}"',
+        )
+
+    options_input = editor.options_input
+    if options_input is None:
+        failures.append("the editor did not expose any Options input")
+    elif _normalize_option_values(options_input.value) != _normalize_option_values(
+        CUSTOM_FIELD_OPTIONS_TEXT,
+    ):
+        failures.append(
+            f"the Options input did not retain the expected values {CUSTOM_FIELD_OPTIONS}",
+        )
+
+    type_control = editor.type_control
+    if type_control is None:
+        failures.append("the editor did not expose any Type control")
+    elif type_control.text != f"Type {CUSTOM_FIELD_TYPE}":
+        failures.append(
+            f'the Type control did not retain "{CUSTOM_FIELD_TYPE}"',
+        )
+
+    selected_issue_types = {
+        chip.text for chip in editor.issue_type_chips if chip.selected == "true"
+    }
+    if selected_issue_types != CUSTOM_FIELD_ISSUE_TYPES:
+        failures.append(
+            "the Applicable issue types selection was not limited to Bug only",
+        )
+
+    if not failures:
+        return
+
+    raise AssertionError(
+        f"Step {step} failed: the hosted Environment field editor did not retain the "
+        f"expected metadata after {action_description}.\n"
+        f"Observed ID input: {_describe_input(id_input)}\n"
+        f"Observed Name input: {_describe_input(name_input)}\n"
+        f"Observed Options input: {_describe_input(options_input)}\n"
+        f"Observed Type control: {_describe_type_control(type_control)}\n"
+        f"Observed issue-type chips: {_describe_issue_type_chips(editor)}\n"
+        f"Observed editor text:\n{editor.body_text}\n"
+        f"Detailed failures: {failures}",
+    )
+
+
 def _describe_input(observation: TextInputObservation | None) -> str:
     if observation is None:
         return "<missing>"
@@ -264,6 +451,14 @@ def _describe_issue_type_chips(editor: FieldEditorObservation) -> str:
         return "<none>"
     return " | ".join(
         f'{chip.text} (selected={chip.selected})' for chip in editor.issue_type_chips
+    )
+
+
+def _normalize_option_values(value: str) -> tuple[str, ...]:
+    return tuple(
+        item.strip()
+        for item in value.split(",")
+        if item.strip()
     )
 
 
@@ -332,6 +527,32 @@ def _record_step(
             "observed": observed,
         },
     )
+
+
+def _reopen_fields_tab(
+    *,
+    tracker_page,
+    settings_page: LiveSettingsFieldsPage,
+    collaboration_page: LiveIssueDetailCollaborationPage,
+    token: str,
+    repository: str,
+    user_login: str,
+) -> str:
+    runtime = tracker_page.open()
+    if runtime.kind != "ready":
+        raise AssertionError(
+            "The hosted app did not return to a ready state after saving field "
+            "settings.\n"
+            f"Observed body text:\n{runtime.body_text}",
+        )
+    collaboration_page.ensure_connected(
+        token=token,
+        repository=repository,
+        user_login=user_login,
+    )
+    collaboration_page.dismiss_connection_banner()
+    settings_page.open_settings_admin()
+    return settings_page.open_fields_tab()
 
 
 def _write_result_if_requested(payload: dict[str, object]) -> None:
