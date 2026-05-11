@@ -533,6 +533,32 @@ void main() {
   );
 
   test(
+    'view model preserves empty successful workflow transitions',
+    () async {
+      final initialSnapshot = await const DemoTrackStateRepository()
+          .loadSnapshot();
+      final repository = _MutableEditRepository(snapshot: initialSnapshot);
+      final service = _RecordingEditIssueMutationService(
+        repository,
+        transitions: const [],
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        issueMutationService: service,
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final transitions = await viewModel.availableWorkflowTransitions(issue);
+
+      expect(transitions, isEmpty);
+    },
+  );
+
+  test(
     'view model falls back to in-memory local edits when shared mutations are unavailable',
     () async {
       final initialSnapshot = await const DemoTrackStateRepository()
@@ -1015,10 +1041,17 @@ class _MutableEditRepository implements TrackStateRepository {
 }
 
 class _RecordingEditIssueMutationService extends IssueMutationService {
-  _RecordingEditIssueMutationService(this._repository)
+  _RecordingEditIssueMutationService(
+    this._repository, {
+    this.transitions = const [
+      TrackStateConfigEntry(id: 'in-review', name: 'In Review'),
+      TrackStateConfigEntry(id: 'done', name: 'Done'),
+    ],
+  })
     : super(repository: const DemoTrackStateRepository());
 
   final _MutableEditRepository _repository;
+  final List<TrackStateConfigEntry> transitions;
   Map<String, Object?> updatedFields = const {};
   String? reassignedParentKey;
   String? reassignedEpicKey;
@@ -1030,10 +1063,7 @@ class _RecordingEditIssueMutationService extends IssueMutationService {
       IssueMutationResult.success(
         operation: 'available-transitions',
         issueKey: issueKey,
-        value: const [
-          TrackStateConfigEntry(id: 'in-review', name: 'In Review'),
-          TrackStateConfigEntry(id: 'done', name: 'Done'),
-        ],
+        value: transitions,
       );
 
   @override

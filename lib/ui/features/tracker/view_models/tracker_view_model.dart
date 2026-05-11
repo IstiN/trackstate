@@ -754,10 +754,8 @@ class TrackerViewModel extends ChangeNotifier {
       final result = await _issueMutationService.availableTransitions(
         issueKey: issue.key,
       );
-      if (result.isSuccess &&
-          result.value != null &&
-          result.value!.isNotEmpty) {
-        return result.value!;
+      if (result.isSuccess) {
+        return result.value ?? const <TrackStateConfigEntry>[];
       }
     } on Object catch (_) {}
     final project = _snapshot?.project;
