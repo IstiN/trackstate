@@ -15,6 +15,20 @@ enum TrackerDataDomain {
 
 enum TrackerSectionKey { dashboard, board, search, hierarchy, settings }
 
+enum TrackerStartupRecoveryKind { githubRateLimit }
+
+class TrackerStartupRecovery {
+  const TrackerStartupRecovery({
+    required this.kind,
+    this.failedPath,
+    this.retryAfter,
+  });
+
+  final TrackerStartupRecoveryKind kind;
+  final String? failedPath;
+  final DateTime? retryAfter;
+}
+
 class TrackerBootstrapReadiness {
   const TrackerBootstrapReadiness({
     this.sectionStates = const {},
@@ -711,6 +725,7 @@ class TrackerSnapshot {
     this.repositoryIndex = const RepositoryIndex(),
     this.loadWarnings = const [],
     this.readiness = const TrackerBootstrapReadiness(),
+    this.startupRecovery,
   });
 
   final ProjectConfig project;
@@ -718,6 +733,7 @@ class TrackerSnapshot {
   final RepositoryIndex repositoryIndex;
   final List<String> loadWarnings;
   final TrackerBootstrapReadiness readiness;
+  final TrackerStartupRecovery? startupRecovery;
 
   List<TrackStateIssue> get epics =>
       issues.where((issue) => issue.issueType == IssueType.epic).toList();
