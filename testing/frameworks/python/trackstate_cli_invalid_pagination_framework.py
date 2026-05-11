@@ -6,6 +6,9 @@ from pathlib import Path
 from testing.core.config.trackstate_cli_invalid_pagination_config import (
     TrackStateCliInvalidPaginationConfig,
 )
+from testing.core.config.trackstate_cli_jira_search_config import (
+    TrackStateCliJiraSearchConfig,
+)
 from testing.core.interfaces.trackstate_cli_invalid_pagination_probe import (
     TrackStateCliInvalidPaginationProbe,
 )
@@ -37,7 +40,10 @@ class PythonTrackStateCliInvalidPaginationFramework(
                 prefix="trackstate-ts-338-repo-"
             ) as temp_dir:
                 repository_path = Path(temp_dir)
-                self._seed_local_repository(repository_path)
+                self._seed_local_repository(
+                    repository_path,
+                    config=TrackStateCliJiraSearchConfig.from_defaults(),
+                )
                 fallback_reason = (
                     "Pinned execution to a temporary executable compiled from this "
                     "checkout so TS-338 can run the exact ticket commands from the "

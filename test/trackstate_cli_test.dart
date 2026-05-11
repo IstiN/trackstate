@@ -19,6 +19,7 @@ void main() {
       expect(result.exitCode, 0);
       expect(result.stdout, contains('trackstate session --target local'));
       expect(result.stdout, contains('trackstate search --target local'));
+      expect(result.stdout, contains('trackstate read ticket --key TRACK-1'));
     });
 
     test('reports validation errors in the JSON envelope', () async {
@@ -370,15 +371,14 @@ void main() {
       expect(result.stdout, contains('Provider: local-git'));
     });
 
-    test(
-      'returns flattened paged search metadata for CLI consumers',
-      () async {
+    test('returns flattened paged search metadata for CLI consumers', () async {
       final cli = TrackStateCli(
         environment: const TrackStateCliEnvironment(
           workingDirectory: '/workspace/repo',
         ),
         repositoryFactory: _FakeTrackStateCliRepositoryFactory(
           localRepository: _FakeSearchRepository(
+            snapshot: _sampleSnapshot(),
             page: TrackStateIssueSearchPage(
               issues: const [
                 TrackStateIssue(
@@ -436,23 +436,29 @@ void main() {
       final issues = data['issues']! as List<Object?>;
 
       expect(result.exitCode, 0);
-      expect(data['command'], 'search');
-      expect(data['jql'], 'text ~ "pagination"');
+      expect(json['ok'], isTrue);
+      expect(json['provider'], 'local-git');
       expect(data['startAt'], 0);
       expect(data['maxResults'], 1);
       expect(data['total'], 3);
       expect(data['isLastPage'], isFalse);
-      expect(data['nextStartAt'], 1);
-      expect(data['nextPageToken'], 'offset:1');
-      expect(data.containsKey('page'), isFalse);
+      expect(data['page'], <String, Object?>{
+        'startAt': 0,
+        'maxResults': 1,
+        'total': 3,
+      });
       expect(issues, hasLength(1));
-      expect((issues.single as Map<String, Object?>)['key'], 'TRACK-2');
+      final issue = issues.single as Map<String, Object?>;
+      expect(issue['key'], 'TRACK-2');
+      expect(issue['summary'], 'Implement pagination');
+      expect(issue['issueType'], 'story');
     });
 
     test(
       'supports Jira-style search flags without an explicit target and returns top-level pagination fields',
       () async {
         final repository = _FakeSearchRepository(
+          snapshot: _sampleSnapshot(),
           page: TrackStateIssueSearchPage(
             issues: const [
               TrackStateIssue(
@@ -541,19 +547,375 @@ void main() {
           '2',
         ]);
         final json = jsonDecode(result.stdout) as Map<String, Object?>;
-        final data = json['data'] as Map<String, Object?>?;
+        final data = json['data']! as Map<String, Object?>;
+        final issues = data['issues'] as List<Object?>?;
 
         expect(result.exitCode, 0);
         expect(repositoryFactory.lastRepositoryPath, '/workspace/repo');
         expect(repository.lastJql, 'project = TRACK');
         expect(repository.lastStartAt, 0);
         expect(repository.lastMaxResults, 2);
-        expect(data, isNotNull);
-        expect(data!['startAt'], 0);
+        expect(json['ok'], isTrue);
+        expect(data['startAt'], 0);
         expect(data['maxResults'], 2);
         expect(data['total'], 2);
         expect(data['isLastPage'], isTrue);
-        expect(data['issues'], isA<List<Object?>>());
+        expect(issues, isA<List<Object?>>());
+      },
+    );
+
+    test(
+      'returns Jira-shaped ticket JSON from the canonical read command',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+              page: const TrackStateIssueSearchPage.empty(),
+            ),
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'read',
+          'ticket',
+          '--key',
+          'TRACK-2',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final fields = json['fields']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json['key'], 'TRACK-2');
+        expect(json['id'], '2');
+        expect(fields['summary'], 'Implement pagination');
+        expect(fields['project'], <String, Object?>{
+          'id': 'TRACK',
+          'key': 'TRACK',
+          'name': 'TrackState',
+        });
+        expect(fields['parent'], isNull);
+      },
+    );
+
+    test(
+      'supports compatibility aliases and returns Jira field metadata',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+              page: const TrackStateIssueSearchPage.empty(),
+            ),
+          ),
+        );
+
+        final result = await cli.run(const <String>['fields', 'list']);
+        final json = jsonDecode(result.stdout) as List<Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json, isNotEmpty);
+        expect(json.first, <String, Object?>{
+          'id': 'summary',
+          'key': 'summary',
+          'name': 'Summary',
+          'custom': false,
+          'orderable': true,
+          'navigable': true,
+          'searchable': true,
+          'schema': <String, Object?>{'type': 'string', 'system': 'summary'},
+        });
+      },
+    );
+
+    test('returns Jira project statuses grouped by issue type', () async {
+      final cli = TrackStateCli(
+        environment: const TrackStateCliEnvironment(
+          workingDirectory: '/workspace/repo',
+        ),
+        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+          localRepository: _FakeSearchRepository(
+            snapshot: _sampleSnapshot(),
+            page: const TrackStateIssueSearchPage.empty(),
+          ),
+        ),
+      );
+
+      final result = await cli.run(const <String>[
+        'read',
+        'statuses',
+        '--project',
+        'TRACK',
+      ]);
+      final json = jsonDecode(result.stdout) as List<Object?>;
+      final first = json.first as Map<String, Object?>;
+      final statuses = first['statuses']! as List<Object?>;
+
+      expect(result.exitCode, 0);
+      expect(first['name'], 'Epic');
+      expect(statuses.first, <String, Object?>{
+        'id': 'todo',
+        'name': 'To Do',
+        'statusCategory': <String, Object?>{
+          'id': 2,
+          'key': 'new',
+          'name': 'To Do',
+        },
+      });
+    });
+
+    test('returns canonical Jira issue link types', () async {
+      final cli = TrackStateCli(
+        environment: const TrackStateCliEnvironment(
+          workingDirectory: '/workspace/repo',
+        ),
+        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+          localRepository: _FakeSearchRepository(
+            snapshot: _sampleSnapshot(),
+            page: const TrackStateIssueSearchPage.empty(),
+          ),
+        ),
+      );
+
+      final result = await cli.run(const <String>['link-types', 'list']);
+      final json = jsonDecode(result.stdout) as List<Object?>;
+
+      expect(result.exitCode, 0);
+      expect(json, <Object?>[
+        {
+          'id': 'blocks',
+          'name': 'Blocks',
+          'outward': 'blocks',
+          'inward': 'is blocked by',
+        },
+        {
+          'id': 'relates-to',
+          'name': 'Relates',
+          'outward': 'relates to',
+          'inward': 'relates to',
+        },
+        {
+          'id': 'duplicates',
+          'name': 'Duplicates',
+          'outward': 'duplicates',
+          'inward': 'is duplicated by',
+        },
+        {
+          'id': 'clones',
+          'name': 'Clones',
+          'outward': 'clones',
+          'inward': 'is cloned by',
+        },
+      ]);
+    });
+
+    test(
+      'reads the current profile and supports hosted user lookup by login',
+      () async {
+        final repository = _FakeSearchRepository(
+          snapshot: _sampleSnapshot(),
+          page: const TrackStateIssueSearchPage.empty(),
+          connectedUser: const RepositoryUser(
+            login: 'octocat',
+            displayName: 'Octo Cat',
+            accountId: '42',
+            emailAddress: 'octo@example.com',
+            active: true,
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            environment: <String, String>{
+              trackStateCliTokenEnvironmentVariable: 'env-token',
+            },
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: repository,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            hostedProvider: _FakeHostedTrackStateProvider(
+              user: const RepositoryUser(
+                login: 'octocat',
+                displayName: 'Octo Cat',
+                accountId: '42',
+                emailAddress: 'octo@example.com',
+                active: true,
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: false,
+                isAdmin: false,
+              ),
+              usersByLogin: const {
+                'hubot': RepositoryUser(
+                  login: 'hubot',
+                  displayName: 'Hubot',
+                  accountId: '99',
+                  active: true,
+                ),
+              },
+            ),
+          ),
+        );
+
+        final profileResult = await cli.run(const <String>[
+          'read',
+          'profile',
+          '--target',
+          'hosted',
+          '--provider',
+          'github',
+          '--repository',
+          'owner/repo',
+        ]);
+        final profileJson =
+            jsonDecode(profileResult.stdout) as Map<String, Object?>;
+
+        final userResult = await cli.run(const <String>[
+          'user',
+          'get',
+          '--target',
+          'hosted',
+          '--provider',
+          'github',
+          '--repository',
+          'owner/repo',
+          '--login',
+          'hubot',
+        ]);
+        final userJson = jsonDecode(userResult.stdout) as Map<String, Object?>;
+
+        expect(profileResult.exitCode, 0);
+        expect(profileJson, <String, Object?>{
+          'accountId': '42',
+          'displayName': 'Octo Cat',
+          'active': true,
+          'emailAddress': 'octo@example.com',
+        });
+
+        expect(userResult.exitCode, 0);
+        expect(userJson, <String, Object?>{
+          'accountId': '99',
+          'displayName': 'Hubot',
+          'active': true,
+        });
+      },
+    );
+
+    test('resolves the active local account by email', () async {
+      final cli = TrackStateCli(
+        environment: const TrackStateCliEnvironment(
+          workingDirectory: '/workspace/repo',
+        ),
+        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+          localRepository: _FakeSearchRepository(
+            snapshot: _sampleSnapshot(),
+            page: const TrackStateIssueSearchPage.empty(),
+            connectedUser: const RepositoryUser(
+              login: 'user@example.com',
+              displayName: 'Local User',
+              accountId: 'local-user',
+              emailAddress: 'user@example.com',
+              active: true,
+            ),
+          ),
+        ),
+      );
+
+      final result = await cli.run(const <String>[
+        'read',
+        'account-by-email',
+        '--email',
+        'user@example.com',
+      ]);
+      final json = jsonDecode(result.stdout) as Map<String, Object?>;
+
+      expect(result.exitCode, 0);
+      expect(json, <String, Object?>{
+        'accountId': 'local-user',
+        'displayName': 'Local User',
+        'active': true,
+        'emailAddress': 'user@example.com',
+      });
+    });
+
+    test(
+      'supports hosted account-by-email lookup when the provider exposes it',
+      () async {
+        final repository = _FakeSearchRepository(
+          snapshot: _sampleSnapshot(),
+          page: const TrackStateIssueSearchPage.empty(),
+          connectedUser: const RepositoryUser(
+            login: 'octocat',
+            displayName: 'Octo Cat',
+            accountId: '42',
+            emailAddress: 'octo@example.com',
+            active: true,
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            environment: <String, String>{
+              trackStateCliTokenEnvironmentVariable: 'env-token',
+            },
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: repository,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            hostedProvider: _FakeHostedTrackStateProvider(
+              user: const RepositoryUser(
+                login: 'octocat',
+                displayName: 'Octo Cat',
+                accountId: '42',
+                emailAddress: 'octo@example.com',
+                active: true,
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: false,
+                isAdmin: false,
+              ),
+              usersByEmail: const {
+                'hubot@example.com': RepositoryUser(
+                  login: 'hubot',
+                  displayName: 'Hubot',
+                  accountId: '99',
+                  emailAddress: 'hubot@example.com',
+                  active: true,
+                ),
+              },
+            ),
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'read',
+          'account-by-email',
+          '--target',
+          'hosted',
+          '--provider',
+          'github',
+          '--repository',
+          'owner/repo',
+          '--email',
+          'hubot@example.com',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json, <String, Object?>{
+          'accountId': '99',
+          'displayName': 'Hubot',
+          'active': true,
+          'emailAddress': 'hubot@example.com',
+        });
       },
     );
   });
@@ -566,6 +928,80 @@ Future<String?> _emptyGhToken() async => '';
 Future<String?> _throwingGhToken() async {
   throw Exception('gh is unavailable');
 }
+
+TrackerSnapshot _sampleSnapshot() => TrackerSnapshot(
+  project: const ProjectConfig(
+    key: 'TRACK',
+    name: 'TrackState',
+    repository: 'trackstate/trackstate',
+    branch: 'main',
+    defaultLocale: 'en',
+    issueTypeDefinitions: [
+      TrackStateConfigEntry(id: 'epic', name: 'Epic'),
+      TrackStateConfigEntry(id: 'story', name: 'Story'),
+      TrackStateConfigEntry(id: 'subtask', name: 'Sub-task'),
+    ],
+    statusDefinitions: [
+      TrackStateConfigEntry(id: 'todo', name: 'To Do'),
+      TrackStateConfigEntry(id: 'in-progress', name: 'In Progress'),
+      TrackStateConfigEntry(id: 'done', name: 'Done'),
+    ],
+    fieldDefinitions: [
+      TrackStateFieldDefinition(
+        id: 'summary',
+        name: 'Summary',
+        type: 'string',
+        required: true,
+      ),
+      TrackStateFieldDefinition(
+        id: 'description',
+        name: 'Description',
+        type: 'markdown',
+        required: false,
+      ),
+    ],
+    priorityDefinitions: [
+      TrackStateConfigEntry(id: 'high', name: 'High'),
+      TrackStateConfigEntry(id: 'medium', name: 'Medium'),
+    ],
+    componentDefinitions: [
+      TrackStateConfigEntry(id: 'tracker-core', name: 'Tracker Core'),
+    ],
+    versionDefinitions: [TrackStateConfigEntry(id: 'mvp', name: 'MVP')],
+  ),
+  issues: [_sampleIssue()],
+);
+
+TrackStateIssue _sampleIssue() => const TrackStateIssue(
+  key: 'TRACK-2',
+  project: 'TRACK',
+  issueType: IssueType.story,
+  issueTypeId: 'story',
+  status: IssueStatus.inProgress,
+  statusId: 'in-progress',
+  priority: IssuePriority.high,
+  priorityId: 'high',
+  summary: 'Implement pagination',
+  description: 'Adds paged JQL output.',
+  assignee: 'ana',
+  reporter: 'ana',
+  labels: ['release'],
+  components: ['tracker-core'],
+  fixVersionIds: ['mvp'],
+  watchers: [],
+  customFields: {},
+  parentKey: null,
+  epicKey: 'TRACK-1',
+  parentPath: null,
+  epicPath: null,
+  progress: 0,
+  updatedLabel: 'just now',
+  acceptanceCriteria: ['Expose next page tokens.'],
+  comments: [],
+  links: [],
+  attachments: [],
+  isArchived: false,
+);
 
 class _FakeTrackStateCliProviderFactory
     implements TrackStateCliProviderFactory {
@@ -606,11 +1042,18 @@ class _FakeTrackStateCliProviderFactory
 
 class _FakeTrackStateCliRepositoryFactory
     implements TrackStateCliRepositoryFactory {
-  _FakeTrackStateCliRepositoryFactory({this.localRepository});
+  _FakeTrackStateCliRepositoryFactory({
+    this.localRepository,
+    this.hostedRepository,
+  });
 
   final TrackStateRepository? localRepository;
+  final TrackStateRepository? hostedRepository;
   String? lastRepositoryPath;
   String? lastDataRef;
+  String? lastHostedRepository;
+  String? lastHostedBranch;
+  String? lastHostedProvider;
 
   @override
   TrackStateRepository createLocal({
@@ -633,18 +1076,47 @@ class _FakeTrackStateCliRepositoryFactory
     required String branch,
     http.Client? client,
   }) {
-    throw StateError('Expected only fake local repository usage in this test.');
+    lastHostedProvider = provider;
+    lastHostedRepository = repository;
+    lastHostedBranch = branch;
+    final hosted = hostedRepository;
+    if (hosted == null) {
+      throw StateError('Expected a fake hosted repository.');
+    }
+    return hosted;
   }
 }
 
 class _FakeSearchRepository implements TrackStateRepository {
-  _FakeSearchRepository({required this.page});
+  _FakeSearchRepository({
+    required this.page,
+    this.snapshot = const TrackerSnapshot(
+      project: ProjectConfig(
+        key: 'TRACK',
+        name: 'TrackState',
+        repository: 'trackstate/trackstate',
+        branch: 'main',
+        defaultLocale: 'en',
+        issueTypeDefinitions: [],
+        statusDefinitions: [],
+        fieldDefinitions: [],
+      ),
+      issues: [],
+    ),
+    this.connectedUser = const RepositoryUser(
+      login: 'searcher',
+      displayName: 'Search User',
+    ),
+  });
 
   final TrackStateIssueSearchPage page;
+  final TrackerSnapshot snapshot;
+  final RepositoryUser connectedUser;
   String? lastJql;
   int? lastStartAt;
   int? lastMaxResults;
   String? lastContinuationToken;
+  RepositoryConnection? connection;
 
   @override
   bool get supportsGitHubAuth => false;
@@ -653,11 +1125,13 @@ class _FakeSearchRepository implements TrackStateRepository {
   bool get usesLocalPersistence => true;
 
   @override
-  Future<RepositoryUser> connect(RepositoryConnection connection) async =>
-      const RepositoryUser(login: 'searcher', displayName: 'Search User');
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    this.connection = connection;
+    return connectedUser;
+  }
 
   @override
-  Future<TrackerSnapshot> loadSnapshot() async => throw UnimplementedError();
+  Future<TrackerSnapshot> loadSnapshot() async => snapshot;
 
   @override
   Future<TrackStateIssueSearchPage> searchIssuePage(
@@ -752,11 +1226,19 @@ class _FakeLocalGitTrackStateProvider extends LocalGitTrackStateProvider {
   Future<RepositoryPermission> getPermission() async => permission;
 }
 
-class _FakeHostedTrackStateProvider implements TrackStateProviderAdapter {
-  _FakeHostedTrackStateProvider({required this.user, required this.permission});
+class _FakeHostedTrackStateProvider
+    implements TrackStateProviderAdapter, RepositoryUserLookup {
+  _FakeHostedTrackStateProvider({
+    required this.user,
+    required this.permission,
+    this.usersByLogin = const {},
+    this.usersByEmail = const {},
+  });
 
   final RepositoryUser user;
   final RepositoryPermission permission;
+  final Map<String, RepositoryUser> usersByLogin;
+  final Map<String, RepositoryUser> usersByEmail;
   RepositoryConnection? connection;
 
   @override
@@ -772,6 +1254,24 @@ class _FakeHostedTrackStateProvider implements TrackStateProviderAdapter {
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
     this.connection = connection;
     return user;
+  }
+
+  @override
+  Future<RepositoryUser> lookupUserByLogin(String login) async {
+    final resolved = usersByLogin[login];
+    if (resolved == null) {
+      throw const TrackStateProviderException('User was not found.');
+    }
+    return resolved;
+  }
+
+  @override
+  Future<RepositoryUser> lookupUserByEmail(String email) async {
+    final resolved = usersByEmail[email];
+    if (resolved == null) {
+      throw const TrackStateProviderException('User was not found.');
+    }
+    return resolved;
   }
 
   @override

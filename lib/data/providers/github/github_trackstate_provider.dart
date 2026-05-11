@@ -9,6 +9,7 @@ import '../trackstate_provider.dart';
 class GitHubTrackStateProvider
     implements
         TrackStateProviderAdapter,
+        RepositoryUserLookup,
         RepositoryFileMutator,
         RepositoryHistoryReader {
   GitHubTrackStateProvider({
@@ -66,7 +67,50 @@ class GitHubTrackStateProvider
     return RepositoryUser(
       login: userJson['login']?.toString() ?? 'github',
       displayName: userJson['name']?.toString() ?? '',
+      accountId: userJson['id']?.toString(),
+      emailAddress: userJson['email']?.toString(),
+      active: true,
     );
+  }
+
+  @override
+  Future<RepositoryUser> lookupUserByLogin(String login) async {
+    final connection = _requireConnection();
+    final userJson =
+        await _getGitHubJson('/users/$login', token: connection.token)
+            as Map<String, Object?>;
+    return RepositoryUser(
+      login: userJson['login']?.toString() ?? login,
+      displayName: userJson['name']?.toString() ?? '',
+      accountId: userJson['id']?.toString(),
+      emailAddress: userJson['email']?.toString(),
+      active: userJson['suspended_at'] == null,
+    );
+  }
+
+  @override
+  Future<RepositoryUser> lookupUserByEmail(String email) async {
+    final connection = _requireConnection();
+    final searchJson =
+        await _getGitHubJson(
+              '/search/users',
+              queryParameters: {'q': '${email.trim()} in:email'},
+              token: connection.token,
+            )
+            as Map<String, Object?>;
+    final items = searchJson['items'];
+    if (items is! List<Object?> || items.isEmpty) {
+      throw TrackStateProviderException('User was not found for email $email.');
+    }
+    final match = items.first;
+    if (match is! Map<String, Object?>) {
+      throw TrackStateProviderException('User was not found for email $email.');
+    }
+    final login = match['login']?.toString().trim() ?? '';
+    if (login.isEmpty) {
+      throw TrackStateProviderException('User was not found for email $email.');
+    }
+    return lookupUserByLogin(login);
   }
 
   @override
