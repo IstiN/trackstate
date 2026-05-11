@@ -178,6 +178,12 @@ abstract class AppLocalizations {
   /// **'Transition'**
   String get transition;
 
+  /// No description provided for @transitionIssue.
+  ///
+  /// In en, this message translates to:
+  /// **'Transition issue'**
+  String get transitionIssue;
+
   /// No description provided for @issueDetailReadOnlyMessage.
   ///
   /// In en, this message translates to:
@@ -459,6 +465,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Priority'**
   String get priority;
+
+  /// No description provided for @resolution.
+  ///
+  /// In en, this message translates to:
+  /// **'Resolution'**
+  String get resolution;
+
+  /// No description provided for @components.
+  ///
+  /// In en, this message translates to:
+  /// **'Components'**
+  String get components;
+
+  /// No description provided for @fixVersions.
+  ///
+  /// In en, this message translates to:
+  /// **'Fix versions'**
+  String get fixVersions;
 
   /// No description provided for @assignee.
   ///
@@ -836,11 +860,77 @@ abstract class AppLocalizations {
   /// **'Connect GitHub'**
   String get connectGitHub;
 
+  /// No description provided for @editIssue.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit issue'**
+  String get editIssue;
+
   /// No description provided for @optional.
   ///
   /// In en, this message translates to:
   /// **'Optional'**
   String get optional;
+
+  /// No description provided for @unassigned.
+  ///
+  /// In en, this message translates to:
+  /// **'Unassigned'**
+  String get unassigned;
+
+  /// No description provided for @noEpic.
+  ///
+  /// In en, this message translates to:
+  /// **'No epic'**
+  String get noEpic;
+
+  /// No description provided for @summaryRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Summary is required before saving.'**
+  String get summaryRequired;
+
+  /// No description provided for @statusTransitionHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Only valid workflow transitions are available.'**
+  String get statusTransitionHelper;
+
+  /// No description provided for @currentStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Current status'**
+  String get currentStatus;
+
+  /// No description provided for @noTransitionsAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'No workflow transitions available.'**
+  String get noTransitionsAvailable;
+
+  /// No description provided for @resolutionRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Resolution is required for this transition.'**
+  String get resolutionRequired;
+
+  /// No description provided for @hierarchyChangeConfirmationTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm hierarchy move'**
+  String get hierarchyChangeConfirmationTitle;
+
+  /// No description provided for @hierarchyChangeConfirmationMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving this hierarchy change will move the selected issue together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.'**
+  String hierarchyChangeConfirmationMessage(int descendantCount);
+
+  /// No description provided for @confirmMove.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm move'**
+  String get confirmMove;
 
   /// No description provided for @derivedFromParent.
   ///

@@ -17,6 +17,7 @@
   "edit": "Edit",
   "save": "Save",
   "transition": "Transition",
+  "transitionIssue": "Transition issue",
   "issueDetailReadOnlyMessage": "Write access is required to edit this issue or change its status.",
   "syncStatus": "Synced with Git",
   "searchIssues": "Search issues",
@@ -112,6 +113,9 @@
   "status": "Status",
   "initialStatus": "Initial status",
   "priority": "Priority",
+  "resolution": "Resolution",
+  "components": "Components",
+  "fixVersions": "Fix versions",
   "assignee": "Assignee",
   "labels": "Labels",
   "parent": "Parent",
@@ -280,7 +284,25 @@
   "localGitRuntimeDescription": "Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.",
   "close": "Close",
   "connectGitHub": "Connect GitHub",
+  "editIssue": "Edit issue",
   "optional": "Optional",
+  "unassigned": "Unassigned",
+  "noEpic": "No epic",
+  "summaryRequired": "Summary is required before saving.",
+  "statusTransitionHelper": "Only valid workflow transitions are available.",
+  "currentStatus": "Current status",
+  "noTransitionsAvailable": "No workflow transitions available.",
+  "resolutionRequired": "Resolution is required for this transition.",
+  "hierarchyChangeConfirmationTitle": "Confirm hierarchy move",
+  "hierarchyChangeConfirmationMessage": "Saving this hierarchy change will move the selected issue together with {descendantCount, plural, =0{no descendants} =1{1 descendant} other{{descendantCount} descendants}} to a new canonical path.",
+  "@hierarchyChangeConfirmationMessage": {
+    "placeholders": {
+      "descendantCount": {
+        "type": "int"
+      }
+    }
+  },
+  "confirmMove": "Confirm move",
   "derivedFromParent": "Derived from parent",
   "epicDerivedFromParent": "Epic is derived from the selected parent issue.",
   "subTaskParentRequired": "Sub-tasks require a parent issue.",

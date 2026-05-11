@@ -51,6 +51,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get transition => 'Transition';
 
   @override
+  String get transitionIssue => 'Transition issue';
+
+  @override
   String get issueDetailReadOnlyMessage =>
       'Write access is required to edit this issue or change its status.';
 
@@ -208,6 +211,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get priority => 'Priority';
+
+  @override
+  String get resolution => 'Resolution';
+
+  @override
+  String get components => 'Components';
+
+  @override
+  String get fixVersions => 'Fix versions';
 
   @override
   String get assignee => 'Assignee';
@@ -441,7 +453,51 @@ class AppLocalizationsEn extends AppLocalizations {
   String get connectGitHub => 'Connect GitHub';
 
   @override
+  String get editIssue => 'Edit issue';
+
+  @override
   String get optional => 'Optional';
+
+  @override
+  String get unassigned => 'Unassigned';
+
+  @override
+  String get noEpic => 'No epic';
+
+  @override
+  String get summaryRequired => 'Summary is required before saving.';
+
+  @override
+  String get statusTransitionHelper =>
+      'Only valid workflow transitions are available.';
+
+  @override
+  String get currentStatus => 'Current status';
+
+  @override
+  String get noTransitionsAvailable => 'No workflow transitions available.';
+
+  @override
+  String get resolutionRequired =>
+      'Resolution is required for this transition.';
+
+  @override
+  String get hierarchyChangeConfirmationTitle => 'Confirm hierarchy move';
+
+  @override
+  String hierarchyChangeConfirmationMessage(int descendantCount) {
+    String _temp0 = intl.Intl.pluralLogic(
+      descendantCount,
+      locale: localeName,
+      other: '$descendantCount descendants',
+      one: '1 descendant',
+      zero: 'no descendants',
+    );
+    return 'Saving this hierarchy change will move the selected issue together with $_temp0 to a new canonical path.';
+  }
+
+  @override
+  String get confirmMove => 'Confirm move';
 
   @override
   String get derivedFromParent => 'Derived from parent';

@@ -167,6 +167,23 @@ void main() {
     },
   );
 
+  test('service lists only valid outgoing workflow transitions', () async {
+    final repo = await _createMutationRepository();
+    addTearDown(() => repo.delete(recursive: true));
+
+    final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+    await repository.loadSnapshot();
+    await repository.connect(
+      const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+    );
+    final service = IssueMutationService(repository: repository);
+
+    final result = await service.availableTransitions(issueKey: 'DEMO-2');
+
+    expect(result.isSuccess, isTrue);
+    expect(result.value?.map((status) => status.id), ['done']);
+  });
+
   test(
     'service rejects workflow transitions that are not configured',
     () async {

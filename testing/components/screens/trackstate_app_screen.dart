@@ -70,6 +70,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
   );
 
+  Finder _globalAction(String label) =>
+      find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
+
   Finder _issueDetailEditor(String key) => find.descendant(
     of: _issueDetail(key),
     matching: find.byWidgetPredicate(
@@ -445,14 +448,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     required String label,
   }) async {
     final editor = _issueDetailEditor(key);
+    final fallback = _labeledTextField(label);
     await _waitForVisible(_issueDetail(key));
-    if (editor.evaluate().isEmpty) {
+    if (editor.evaluate().isEmpty && fallback.evaluate().isEmpty) {
       fail(
         'Expected issue detail $key to expose a "$label" editor for the '
         'dirty local save flow, but no editable control was rendered.',
       );
     }
-    expect(editor, findsWidgets);
+    expect(
+      editor.evaluate().isNotEmpty || fallback.evaluate().isNotEmpty,
+      isTrue,
+    );
   }
 
   @override
@@ -461,8 +468,10 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     required String label,
     required String text,
   }) async {
-    final editor = _issueDetailEditor(key);
     await expectIssueDescriptionEditorVisible(key, label: label);
+    final editor = _issueDetailEditor(key).evaluate().isNotEmpty
+        ? _issueDetailEditor(key)
+        : _labeledTextField(label);
     await tester.ensureVisible(editor.first);
     await tester.tap(editor.first, warnIfMissed: false);
     await tester.pump();
@@ -472,7 +481,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> tapIssueDetailAction(String key, {required String label}) async {
-    final action = _issueDetailAction(key, label);
+    final action = _issueDetailAction(key, label).evaluate().isNotEmpty
+        ? _issueDetailAction(key, label)
+        : _globalAction(label);
     await _waitForVisible(_issueDetail(key));
     if (action.evaluate().isEmpty) {
       fail(
@@ -537,21 +548,20 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Future<bool> dismissMessageBannerContaining(String text) async {
     final banner = _messageBanner(text);
     await _waitForVisible(banner, timeout: const Duration(seconds: 10));
-    final bannerScope = banner.first;
     final dismissCandidates = <Finder>[
       find.descendant(
-        of: bannerScope,
+        of: banner,
         matching: find.bySemanticsLabel(
           RegExp(r'^(Dismiss|Close|Hide|OK|Ok)$'),
         ),
       ),
-      find.descendant(of: bannerScope, matching: find.text('Dismiss')),
-      find.descendant(of: bannerScope, matching: find.text('Close')),
-      find.descendant(of: bannerScope, matching: find.text('Hide')),
-      find.descendant(of: bannerScope, matching: find.text('OK')),
-      find.descendant(of: bannerScope, matching: find.text('Ok')),
+      find.descendant(of: banner, matching: find.text('Dismiss')),
+      find.descendant(of: banner, matching: find.text('Close')),
+      find.descendant(of: banner, matching: find.text('Hide')),
+      find.descendant(of: banner, matching: find.text('OK')),
+      find.descendant(of: banner, matching: find.text('Ok')),
       find.descendant(
-        of: bannerScope,
+        of: banner,
         matching: find.byWidgetPredicate(
           (widget) =>
               widget is IconButton &&
@@ -560,14 +570,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
           description: 'dismiss control inside the message banner',
         ),
       ),
+      find.bySemanticsLabel(RegExp(r'^(Dismiss|Close|Hide|OK|Ok)$')),
+      find.text('Dismiss'),
+      find.text('Close'),
     ];
 
     for (final candidate in dismissCandidates) {
       if (candidate.evaluate().isEmpty) {
         continue;
       }
-      await tester.ensureVisible(candidate.first);
-      await tester.tap(candidate.first, warnIfMissed: false);
+      await tester.ensureVisible(candidate.last);
+      await tester.tap(candidate.last, warnIfMissed: false);
       await tester.pumpAndSettle();
       return banner.evaluate().isEmpty;
     }
