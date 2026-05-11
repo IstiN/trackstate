@@ -136,6 +136,15 @@ class IssueDetailCollaborationTabsHostedCapabilityTest(unittest.TestCase):
                     f"Inline comment visibility count: {inline_comment_count}\n"
                     f"Observed body text:\n{live_issue_page.current_body_text()}",
                 )
+                self.assertEqual(
+                    seeded_attachment_count,
+                    0,
+                    "Step 2 failed: seeded attachment content was visible on the initial "
+                    "issue detail surface before the Attachments tab was opened.\n"
+                    f"Seeded attachment: {seeded_attachment_name}\n"
+                    f"Inline attachment visibility count: {seeded_attachment_count}\n"
+                    f"Observed body text:\n{live_issue_page.current_body_text()}",
+                )
 
                 live_issue_page.open_collaboration_tab("Comments")
                 self.assertGreater(
