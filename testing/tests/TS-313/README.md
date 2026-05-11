@@ -10,7 +10,8 @@ The automation:
    `In Progress` status ID and `Sub-task` issue-type ID is returned
 4. runs `status != Done AND project = TRACK`
 5. verifies only the non-done `TRACK` issues remain visible and done or
-   cross-project issues stay hidden
+   cross-project issues stay hidden, including a decoy whose enum/display values
+   look like an `In Progress` `Sub-task` but whose canonical IDs map elsewhere
 
 ## Run this test
 

@@ -30,6 +30,8 @@ void main() {
       const inProgressStoryLabel = 'Open TRACK-303 Story still moving';
       const todoStoryLabel = 'Open TRACK-304 Story waiting for development';
       const doneBugLabel = 'Open TRACK-305 Done regression fix';
+      const canonicalDecoyLabel =
+          'Open TRACK-306 Canonical decoy looks in progress sub-task';
       const externalProjectLabel = 'Open OTHER-401 External project work item';
 
       try {
@@ -58,6 +60,10 @@ void main() {
           'Done regression fix',
         );
         screen.expectIssueSearchResultAbsent(
+          'TRACK-306',
+          'Canonical decoy looks in progress sub-task',
+        );
+        screen.expectIssueSearchResultAbsent(
           'OTHER-401',
           'External project work item',
         );
@@ -82,6 +88,10 @@ void main() {
           'Done regression fix',
         );
         screen.expectIssueSearchResultAbsent(
+          'TRACK-306',
+          'Canonical decoy looks in progress sub-task',
+        );
+        screen.expectIssueSearchResultAbsent(
           'OTHER-401',
           'External project work item',
         );
@@ -99,6 +109,7 @@ void main() {
               'Visible issue rows: '
               '${_formatSnapshot(screen.visibleIssueSearchResultLabelsSnapshot())}. '
               'Hidden rows should still exclude $doneSubtaskLabel, '
+              '$canonicalDecoyLabel, '
               '$doneBugLabel, and $externalProjectLabel.',
         );
       } finally {
@@ -236,6 +247,15 @@ class _Ts313CanonicalFieldRepository implements TrackStateRepository {
       status: IssueStatus.done,
       statusId: _doneStatusId,
     ),
+    _Ts313IssueFactory.issue(
+      key: 'TRACK-306',
+      summary: 'Canonical decoy looks in progress sub-task',
+      project: _trackProjectKey,
+      issueType: IssueType.subtask,
+      issueTypeId: _storyTypeId,
+      status: IssueStatus.inProgress,
+      statusId: _doneStatusId,
+    ),
     _Ts313IssueFactory.story(
       key: 'OTHER-401',
       summary: 'External project work item',
@@ -360,6 +380,26 @@ class _Ts313CanonicalFieldRepository implements TrackStateRepository {
 
 abstract final class _Ts313IssueFactory {
   static const String _priorityId = 'medium';
+
+  static TrackStateIssue issue({
+    required String key,
+    required String summary,
+    required String project,
+    required IssueType issueType,
+    required String issueTypeId,
+    required IssueStatus status,
+    required String statusId,
+  }) {
+    return _issue(
+      key: key,
+      project: project,
+      summary: summary,
+      issueType: issueType,
+      issueTypeId: issueTypeId,
+      status: status,
+      statusId: statusId,
+    );
+  }
 
   static TrackStateIssue story({
     required String key,
