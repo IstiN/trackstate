@@ -93,6 +93,27 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out filling selector "{selector}".',
             ) from error
 
+    def type_text(
+        self,
+        selector: str,
+        value: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+        delay_ms: int = 50,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            locator.click(timeout=timeout_ms)
+            self._page.wait_for_timeout(250)
+            self._page.keyboard.type(value, delay=delay_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out typing into selector "{selector}".',
+            ) from error
+
     def press(
         self,
         selector: str,

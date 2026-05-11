@@ -123,6 +123,32 @@ class LiveSetupRepositoryService:
             ],
         )
 
+    def fetch_issue_type_config_entries(
+        self,
+        project_key: str = "DEMO",
+    ) -> list[dict[str, object]]:
+        payload = self._read_repo_json(f"{project_key}/config/issue-types.json")
+        if not isinstance(payload, list):
+            raise RuntimeError(
+                f"GitHub response for {project_key}/config/issue-types.json was not a list.",
+            )
+        return [entry for entry in payload if isinstance(entry, dict)]
+
+    def fetch_workflow_config_map(
+        self,
+        project_key: str = "DEMO",
+    ) -> dict[str, dict[str, object]]:
+        payload = self._read_repo_json(f"{project_key}/config/workflows.json")
+        if not isinstance(payload, dict):
+            raise RuntimeError(
+                f"GitHub response for {project_key}/config/workflows.json was not an object.",
+            )
+        return {
+            str(key): value
+            for key, value in payload.items()
+            if isinstance(key, str) and isinstance(value, dict)
+        }
+
     def list_issue_paths(self, root_path: str = "DEMO") -> list[str]:
         issue_paths: list[str] = []
         pending_paths = [root_path]
