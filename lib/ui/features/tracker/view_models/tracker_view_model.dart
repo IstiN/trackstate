@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -269,6 +271,9 @@ class TrackerViewModel extends ChangeNotifier {
   TrackStateIssue? _selectedIssue;
   final Map<String, List<IssueHistoryEntry>> _issueHistoryByKey = {};
   final Set<String> _loadingIssueHistory = <String>{};
+  final Set<String> _loadingIssueDetails = <String>{};
+  final Set<String> _loadingIssueComments = <String>{};
+  final Set<String> _loadingIssueAttachments = <String>{};
   TrackerSection? _issueDetailReturnSection;
   bool _isLoading = false;
   bool _isSaving = false;
@@ -289,8 +294,19 @@ class TrackerViewModel extends ChangeNotifier {
   TrackerSection? get issueDetailReturnSection => _issueDetailReturnSection;
   bool get isLoading => _isLoading;
   bool get isSaving => _isSaving;
+  TrackerLoadState loadStateForDomain(TrackerDataDomain domain) =>
+      _snapshot?.readiness.domainState(domain) ?? TrackerLoadState.loading;
+  TrackerLoadState loadStateForSection(TrackerSection section) =>
+      _snapshot?.readiness.sectionState(_sectionKey(section)) ??
+      TrackerLoadState.loading;
   bool isIssueHistoryLoading(String issueKey) =>
       _loadingIssueHistory.contains(issueKey);
+  bool isIssueDetailLoading(String issueKey) =>
+      _loadingIssueDetails.contains(issueKey);
+  bool isIssueCommentsLoading(String issueKey) =>
+      _loadingIssueComments.contains(issueKey);
+  bool isIssueAttachmentsLoading(String issueKey) =>
+      _loadingIssueAttachments.contains(issueKey);
   TrackerMessage? get message => _message;
   bool get isConnected => _isConnected;
   RepositoryUser? get connectedUser => _connectedUser;
@@ -480,6 +496,10 @@ class TrackerViewModel extends ChangeNotifier {
     if (section != TrackerSection.search) {
       _issueDetailReturnSection = null;
     }
+    final issue = _selectedIssue;
+    if (section == TrackerSection.search && issue != null) {
+      unawaited(ensureIssueDetailLoaded(issue));
+    }
     notifyListeners();
   }
 
@@ -490,6 +510,7 @@ class TrackerViewModel extends ChangeNotifier {
         returnSection == null || returnSection == TrackerSection.search
         ? null
         : returnSection;
+    unawaited(ensureIssueDetailLoaded(issue));
     notifyListeners();
   }
 
@@ -1272,6 +1293,7 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       final saved = await _repository.addIssueComment(issue, normalizedBody);
       _snapshot = await _repository.loadSnapshot();
+      _mergeIssueIntoSnapshot(saved);
       _selectedIssue = _snapshot!.issues.firstWhere(
         (current) => current.key == saved.key,
         orElse: () => saved,
@@ -1303,6 +1325,30 @@ class TrackerViewModel extends ChangeNotifier {
       _loadingIssueHistory.remove(issue.key);
       notifyListeners();
     }
+  }
+
+  Future<void> ensureIssueDetailLoaded(TrackStateIssue issue) async {
+    await _ensureIssueHydrated(
+      issue,
+      loadingSet: _loadingIssueDetails,
+      scope: IssueHydrationScope.detail,
+    );
+  }
+
+  Future<void> ensureIssueCommentsLoaded(TrackStateIssue issue) async {
+    await _ensureIssueHydrated(
+      issue,
+      loadingSet: _loadingIssueComments,
+      scope: IssueHydrationScope.comments,
+    );
+  }
+
+  Future<void> ensureIssueAttachmentsLoaded(TrackStateIssue issue) async {
+    await _ensureIssueHydrated(
+      issue,
+      loadingSet: _loadingIssueAttachments,
+      scope: IssueHydrationScope.attachments,
+    );
   }
 
   Future<void> downloadIssueAttachment(IssueAttachment attachment) async {
@@ -1396,6 +1442,7 @@ class TrackerViewModel extends ChangeNotifier {
         bytes: bytes,
       );
       _snapshot = await _repository.loadSnapshot();
+      _mergeIssueIntoSnapshot(saved);
       _selectedIssue = _snapshot!.issues.firstWhere(
         (current) => current.key == saved.key,
         orElse: () => saved,
@@ -1495,6 +1542,85 @@ class TrackerViewModel extends ChangeNotifier {
     _bindProviderSession();
   }
 
+  Future<void> _ensureIssueHydrated(
+    TrackStateIssue issue, {
+    required Set<String> loadingSet,
+    required IssueHydrationScope scope,
+  }) async {
+    final repository = _repository;
+    if (repository is! ProviderBackedTrackStateRepository) {
+      return;
+    }
+    final snapshot = _snapshot;
+    final currentIssue = snapshot?.issues.firstWhere(
+      (candidate) => candidate.key == issue.key,
+      orElse: () => issue,
+    );
+    if (currentIssue == null || _isScopeLoaded(currentIssue, scope)) {
+      return;
+    }
+    if (loadingSet.contains(issue.key)) {
+      return;
+    }
+    loadingSet.add(issue.key);
+    notifyListeners();
+    try {
+      final hydrated = await repository.hydrateIssue(
+        currentIssue,
+        scopes: {scope},
+      );
+      final activeSnapshot = _snapshot;
+      if (activeSnapshot == null) {
+        return;
+      }
+      final updatedIssues = [
+        for (final candidate in activeSnapshot.issues)
+          if (candidate.key == hydrated.key) hydrated else candidate,
+      ]..sort((left, right) => left.key.compareTo(right.key));
+      _snapshot = TrackerSnapshot(
+        project: activeSnapshot.project,
+        issues: updatedIssues,
+        repositoryIndex: activeSnapshot.repositoryIndex,
+        loadWarnings: activeSnapshot.loadWarnings,
+        readiness: activeSnapshot.readiness,
+      );
+      if (_selectedIssue?.key == hydrated.key) {
+        _selectedIssue = hydrated;
+      }
+      _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+    } on Object catch (error) {
+      _message = TrackerMessage.issueSaveFailed(error);
+    } finally {
+      loadingSet.remove(issue.key);
+      notifyListeners();
+    }
+  }
+
+  void _mergeIssueIntoSnapshot(TrackStateIssue issue) {
+    final snapshot = _snapshot;
+    if (snapshot == null) {
+      return;
+    }
+    final updatedIssues = [
+      for (final candidate in snapshot.issues)
+        if (candidate.key == issue.key) issue else candidate,
+    ]..sort((left, right) => left.key.compareTo(right.key));
+    _snapshot = TrackerSnapshot(
+      project: snapshot.project,
+      issues: updatedIssues,
+      repositoryIndex: snapshot.repositoryIndex,
+      loadWarnings: snapshot.loadWarnings,
+      readiness: snapshot.readiness,
+    );
+  }
+
+  bool _isScopeLoaded(TrackStateIssue issue, IssueHydrationScope scope) =>
+      switch (scope) {
+        IssueHydrationScope.detail => issue.hasDetailLoaded,
+        IssueHydrationScope.comments => issue.hasCommentsLoaded,
+        IssueHydrationScope.attachments => issue.hasAttachmentsLoaded,
+      };
+
   void _bindProviderSession() {
     final session = providerSession;
     if (identical(_boundProviderSession, session)) {
@@ -1516,6 +1642,14 @@ class TrackerViewModel extends ChangeNotifier {
 
   String? _callbackCode() => Uri.base.queryParameters['code'];
 }
+
+TrackerSectionKey _sectionKey(TrackerSection section) => switch (section) {
+  TrackerSection.dashboard => TrackerSectionKey.dashboard,
+  TrackerSection.board => TrackerSectionKey.board,
+  TrackerSection.search => TrackerSectionKey.search,
+  TrackerSection.hierarchy => TrackerSectionKey.hierarchy,
+  TrackerSection.settings => TrackerSectionKey.settings,
+};
 
 enum ThemePreference { light, dark }
 

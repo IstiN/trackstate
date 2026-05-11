@@ -184,6 +184,15 @@ void main() {
               'path': 'DEMO/DEMO-1/main.md',
               'parent': null,
               'epic': null,
+              'parentPath': null,
+              'epicPath': null,
+              'summary': 'Root epic',
+              'issueType': 'epic',
+              'status': 'in-progress',
+              'priority': 'high',
+              'assignee': 'demo-admin',
+              'labels': ['root'],
+              'updated': '2026-05-05T00:00:00Z',
               'children': ['DEMO-2'],
               'archived': false,
             },
@@ -192,6 +201,16 @@ void main() {
               'path': 'DEMO/DEMO-1/DEMO-2/main.md',
               'parent': null,
               'epic': 'DEMO-1',
+              'parentPath': null,
+              'epicPath': 'DEMO/DEMO-1/main.md',
+              'summary': 'Indexed markdown issue',
+              'issueType': 'story',
+              'status': 'in-progress',
+              'priority': 'high',
+              'assignee': 'demo-user',
+              'labels': ['setup'],
+              'updated': '2026-05-05T00:05:00Z',
+              'resolution': 'done',
               'children': [],
               'archived': false,
             },
@@ -290,8 +309,16 @@ This comment demonstrates markdown-backed collaboration history.
       );
 
       final snapshot = await repository.loadSnapshot();
-      final issue = snapshot.issues.firstWhere(
+      final summaryIssue = snapshot.issues.firstWhere(
         (entry) => entry.key == 'DEMO-2',
+      );
+      final issue = await repository.hydrateIssue(
+        summaryIssue,
+        scopes: const {
+          IssueHydrationScope.detail,
+          IssueHydrationScope.comments,
+          IssueHydrationScope.attachments,
+        },
       );
 
       expect(snapshot.project.key, 'DEMO');
@@ -311,6 +338,9 @@ This comment demonstrates markdown-backed collaboration history.
       expect(issue.priorityId, 'high');
       expect(issue.fixVersionIds, ['mvp']);
       expect(issue.watchers, ['demo-admin']);
+      expect(summaryIssue.hasDetailLoaded, isFalse);
+      expect(summaryIssue.hasCommentsLoaded, isFalse);
+      expect(summaryIssue.hasAttachmentsLoaded, isFalse);
       expect(issue.customFields['storyPoints'], 5);
       expect(issue.customFields['releaseTrain'], ['web', 'mobile']);
       expect(issue.comments.single.id, '0001');
@@ -355,14 +385,26 @@ This comment demonstrates markdown-backed collaboration history.
 
       final repository = _mockSetupRepository(files: files);
       final snapshot = await repository.loadSnapshot();
-      final boardIssue = snapshot.issues.firstWhere(
+      final boardSummaryIssue = snapshot.issues.firstWhere(
         (entry) => entry.key == 'DEMO-2',
+      );
+      final boardIssue = await repository.hydrateIssue(
+        boardSummaryIssue,
+        scopes: const {
+          IssueHydrationScope.detail,
+          IssueHydrationScope.comments,
+          IssueHydrationScope.attachments,
+        },
       );
       final doneIssue = snapshot.issues.firstWhere(
         (entry) => entry.key == 'DEMO-4',
       );
-      final epicIssue = snapshot.issues.firstWhere(
+      final epicSummaryIssue = snapshot.issues.firstWhere(
         (entry) => entry.key == 'DEMO-1',
+      );
+      final epicIssue = await repository.hydrateIssue(
+        epicSummaryIssue,
+        scopes: const {IssueHydrationScope.detail},
       );
 
       expect(snapshot.project.fieldLabel('storyPoints'), 'Story Points');
@@ -439,6 +481,23 @@ This comment demonstrates markdown-backed collaboration history.
           ]),
           'DEMO/config/versions.json': jsonEncode([]),
           'DEMO/config/components.json': jsonEncode([]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Legacy markdown issue',
+              'issueType': 'feature-story',
+              'status': 'building',
+              'priority': 'p1',
+              'assignee': 'user',
+              'labels': [],
+              'updated': '2026-05-05T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
           'DEMO/DEMO-1/main.md': '''
 ---
 key: DEMO-1
@@ -503,6 +562,23 @@ Loaded from older demo data.
           ]),
           'DEMO/config/versions.json': jsonEncode([]),
           'DEMO/config/components.json': jsonEncode([]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Canonical ids stay intact',
+              'issueType': 'feature-story',
+              'status': 'building',
+              'priority': 'p1',
+              'assignee': 'user',
+              'labels': [],
+              'updated': 'from repo',
+              'children': [],
+              'archived': false,
+            },
+          ]),
           'DEMO/DEMO-1/main.md': '''
 ---
 key: DEMO-1
@@ -577,6 +653,23 @@ Machine ids should survive parsing.
           ]),
           'DEMO/config/versions.json': jsonEncode([]),
           'DEMO/config/components.json': jsonEncode([]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-63',
+              'path': 'DEMO/DEMO-63/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Inline custom fields issue',
+              'issueType': 'story',
+              'status': 'done',
+              'priority': 'high',
+              'assignee': 'qa-user',
+              'labels': [],
+              'updated': '2026-05-07T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
           'DEMO/DEMO-63/main.md': '''
 ---
 key: DEMO-63
@@ -599,7 +692,10 @@ Created from inline frontmatter custom fields.
       );
 
       final snapshot = await repository.loadSnapshot();
-      final issue = snapshot.issues.single;
+      final issue = await repository.hydrateIssue(
+        snapshot.issues.single,
+        scopes: const {IssueHydrationScope.detail},
+      );
 
       expect(issue.customFields['field_101'], 'value');
       expect(issue.status, IssueStatus.done);
@@ -627,6 +723,7 @@ Created from inline frontmatter custom fields.
     {"path": "DEMO/config/priorities.json", "type": "blob"},
     {"path": "DEMO/config/versions.json", "type": "blob"},
     {"path": "DEMO/config/components.json", "type": "blob"},
+    {"path": "DEMO/.trackstate/index/issues.json", "type": "blob"},
     {"path": "DEMO/DEMO-1/main.md", "type": "blob"}
   ]
 }
@@ -641,6 +738,12 @@ Created from inline frontmatter custom fields.
             return http.Response(
               '{"login":"demo-user","name":"Demo User"}',
               200,
+            );
+          }
+          if (path ==
+              '/repos/${SetupTrackStateRepository.repositoryName}/contents/DEMO/.trackstate/index/issues.json') {
+            return _contentResponse(
+              '[{"key":"DEMO-1","path":"DEMO/DEMO-1/main.md","parent":null,"epic":null,"summary":"Issue","issueType":"story","status":"building","priority":"high","assignee":"demo-user","labels":[],"updated":"from repo","children":[],"archived":false}]',
             );
           }
           if (path ==
@@ -752,6 +855,23 @@ reporter: demo-admin
         'DEMO/tracker-config/fields.json': jsonEncode([
           {'name': 'Summary'},
           {'name': 'Priority'},
+        ]),
+        'DEMO/.trackstate/index/issues.json': jsonEncode([
+          {
+            'key': 'DEMO-1',
+            'path': 'DEMO/DEMO-1/main.md',
+            'parent': null,
+            'epic': null,
+            'summary': 'Config-aware issue',
+            'issueType': 'Story',
+            'status': 'In Progress',
+            'priority': 'High',
+            'assignee': 'user',
+            'labels': [],
+            'updated': '2026-05-05T00:00:00Z',
+            'children': [],
+            'archived': false,
+          },
         ]),
         'DEMO/DEMO-1/main.md': '''
 ---
