@@ -1,0 +1,6 @@
+test_id: TS-328
+type: web
+framework: playwright
+platform: chrome
+dependencies:
+  - TS-322
