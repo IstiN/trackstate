@@ -207,6 +207,76 @@ void main() {
     },
   );
 
+  testWidgets(
+    'edit issue dialog exposes metadata, hierarchy, and workflow controls',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final screen = defaultTestingDependencies.createTrackStateAppScreen(
+        tester,
+      );
+      try {
+        await screen.pump(const _EditIssueFieldsLocalRuntimeRepository());
+
+        await screen.openSection('Search');
+        await screen.openIssue('TRACK-12', 'Implement Git sync service');
+        await screen.tapIssueDetailAction('TRACK-12', label: 'Edit');
+
+        expect(await screen.isTextFieldVisible('Summary'), isTrue);
+        expect(await screen.isTextFieldVisible('Description'), isTrue);
+        expect(await screen.isDropdownFieldVisible('Priority'), isTrue);
+        expect(await screen.isTextFieldVisible('Assignee'), isTrue);
+        expect(await screen.isDropdownFieldVisible('Assignee'), isFalse);
+        expect(await screen.isDropdownFieldVisible('Epic'), isTrue);
+        expect(await screen.isDropdownFieldVisible('Status'), isTrue);
+        await screen.expectTextVisible('Components');
+        await screen.expectTextVisible('Fix versions');
+
+        await screen.enterLabeledTextField('Assignee', text: 'fresh-teammate');
+        await screen.selectDropdownOption('Status', optionText: 'Done');
+        await screen.selectDropdownOption(
+          'Resolution',
+          optionText: "Won't Fix",
+        );
+        await screen.tapVisibleControl('Save');
+
+        await screen.expectIssueDetailText('TRACK-12', 'fresh-teammate');
+      } finally {
+        screen.resetView();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'edit issue dialog blocks done transitions until a resolution is selected',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final screen = defaultTestingDependencies.createTrackStateAppScreen(
+        tester,
+      );
+      try {
+        await screen.pump(const _EditIssueFieldsLocalRuntimeRepository());
+
+        await screen.openSection('Search');
+        await screen.openIssue('TRACK-12', 'Implement Git sync service');
+        await screen.tapIssueDetailAction('TRACK-12', label: 'Edit');
+
+        await screen.selectDropdownOption('Status', optionText: 'Done');
+        await screen.tapVisibleControl('Save');
+
+        expect(
+          find.text('Resolution is required for this transition.'),
+          findsOneWidget,
+        );
+        expect(await screen.isDropdownFieldVisible('Resolution'), isTrue);
+        expect(await screen.isTextFieldVisible('Summary'), isTrue);
+      } finally {
+        screen.resetView();
+        semantics.dispose();
+      }
+    },
+  );
+
   testWidgets('local runtime shows repository access instead of GitHub auth', (
     tester,
   ) async {
@@ -968,6 +1038,37 @@ class _CustomCreateFieldsLocalRuntimeRepository
     required String name,
     required Uint8List bytes,
   }) async => issue;
+}
+
+class _EditIssueFieldsLocalRuntimeRepository extends _LocalRuntimeRepository {
+  const _EditIssueFieldsLocalRuntimeRepository();
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    final snapshot = await super.loadSnapshot();
+    return TrackerSnapshot(
+      project: ProjectConfig(
+        key: snapshot.project.key,
+        name: snapshot.project.name,
+        repository: snapshot.project.repository,
+        branch: snapshot.project.branch,
+        defaultLocale: snapshot.project.defaultLocale,
+        issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+        statusDefinitions: snapshot.project.statusDefinitions,
+        fieldDefinitions: snapshot.project.fieldDefinitions,
+        priorityDefinitions: snapshot.project.priorityDefinitions,
+        versionDefinitions: snapshot.project.versionDefinitions,
+        componentDefinitions: snapshot.project.componentDefinitions,
+        resolutionDefinitions: const [
+          TrackStateConfigEntry(id: 'done', name: 'Done'),
+          TrackStateConfigEntry(id: 'wont-fix', name: "Won't Fix"),
+        ],
+      ),
+      issues: snapshot.issues,
+      repositoryIndex: snapshot.repositoryIndex,
+      loadWarnings: snapshot.loadWarnings,
+    );
+  }
 }
 
 TrackerSnapshot _searchPaginationSnapshot() {
