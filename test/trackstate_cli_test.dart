@@ -437,6 +437,10 @@ void main() {
       expect(result.exitCode, 0);
       expect(data['command'], 'search');
       expect(data['jql'], 'text ~ "pagination"');
+      expect(data['startAt'], 0);
+      expect(data['maxResults'], 1);
+      expect(data['total'], 3);
+      expect(data['isLastPage'], isFalse);
       expect(page['startAt'], 0);
       expect(page['maxResults'], 1);
       expect(page['total'], 3);
@@ -445,6 +449,114 @@ void main() {
       expect(issues, hasLength(1));
       expect((issues.single as Map<String, Object?>)['key'], 'TRACK-2');
     });
+
+    test(
+      'supports Jira-style search flags without an explicit target and returns top-level pagination fields',
+      () async {
+        final repository = _FakeSearchRepository(
+          page: TrackStateIssueSearchPage(
+            issues: const [
+              TrackStateIssue(
+                key: 'TRACK-1',
+                project: 'TRACK',
+                issueType: IssueType.story,
+                issueTypeId: 'story',
+                status: IssueStatus.todo,
+                statusId: 'todo',
+                priority: IssuePriority.medium,
+                priorityId: 'medium',
+                summary: 'Issue 1',
+                description: 'First issue.',
+                assignee: 'ana',
+                reporter: 'ana',
+                labels: [],
+                components: [],
+                fixVersionIds: [],
+                watchers: [],
+                customFields: {},
+                parentKey: null,
+                epicKey: null,
+                parentPath: null,
+                epicPath: null,
+                progress: 0,
+                updatedLabel: 'just now',
+                acceptanceCriteria: [],
+                comments: [],
+                links: [],
+                attachments: [],
+                isArchived: false,
+              ),
+              TrackStateIssue(
+                key: 'TRACK-2',
+                project: 'TRACK',
+                issueType: IssueType.story,
+                issueTypeId: 'story',
+                status: IssueStatus.todo,
+                statusId: 'todo',
+                priority: IssuePriority.medium,
+                priorityId: 'medium',
+                summary: 'Issue 2',
+                description: 'Second issue.',
+                assignee: 'sam',
+                reporter: 'sam',
+                labels: [],
+                components: [],
+                fixVersionIds: [],
+                watchers: [],
+                customFields: {},
+                parentKey: null,
+                epicKey: null,
+                parentPath: null,
+                epicPath: null,
+                progress: 0,
+                updatedLabel: 'just now',
+                acceptanceCriteria: [],
+                comments: [],
+                links: [],
+                attachments: [],
+                isArchived: false,
+              ),
+            ],
+            startAt: 0,
+            maxResults: 2,
+            total: 2,
+          ),
+        );
+        final repositoryFactory = _FakeTrackStateCliRepositoryFactory(
+          localRepository: repository,
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: repositoryFactory,
+        );
+
+        final result = await cli.run(const <String>[
+          'search',
+          '--jql',
+          'project = TRACK',
+          '--startAt',
+          '0',
+          '--maxResults',
+          '2',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data'] as Map<String, Object?>?;
+
+        expect(result.exitCode, 0);
+        expect(repositoryFactory.lastRepositoryPath, '/workspace/repo');
+        expect(repository.lastJql, 'project = TRACK');
+        expect(repository.lastStartAt, 0);
+        expect(repository.lastMaxResults, 2);
+        expect(data, isNotNull);
+        expect(data!['startAt'], 0);
+        expect(data['maxResults'], 2);
+        expect(data['total'], 2);
+        expect(data['isLastPage'], isTrue);
+        expect(data['issues'], isA<List<Object?>>());
+      },
+    );
   });
 }
 
@@ -495,15 +607,19 @@ class _FakeTrackStateCliProviderFactory
 
 class _FakeTrackStateCliRepositoryFactory
     implements TrackStateCliRepositoryFactory {
-  const _FakeTrackStateCliRepositoryFactory({this.localRepository});
+  _FakeTrackStateCliRepositoryFactory({this.localRepository});
 
   final TrackStateRepository? localRepository;
+  String? lastRepositoryPath;
+  String? lastDataRef;
 
   @override
   TrackStateRepository createLocal({
     required String repositoryPath,
     required String dataRef,
   }) {
+    lastRepositoryPath = repositoryPath;
+    lastDataRef = dataRef;
     final repository = localRepository;
     if (repository == null) {
       throw StateError('Expected a fake local repository.');
@@ -523,9 +639,13 @@ class _FakeTrackStateCliRepositoryFactory
 }
 
 class _FakeSearchRepository implements TrackStateRepository {
-  const _FakeSearchRepository({required this.page});
+  _FakeSearchRepository({required this.page});
 
   final TrackStateIssueSearchPage page;
+  String? lastJql;
+  int? lastStartAt;
+  int? lastMaxResults;
+  String? lastContinuationToken;
 
   @override
   bool get supportsGitHubAuth => false;
@@ -546,7 +666,13 @@ class _FakeSearchRepository implements TrackStateRepository {
     int startAt = 0,
     int maxResults = 50,
     String? continuationToken,
-  }) async => page;
+  }) async {
+    lastJql = jql;
+    lastStartAt = startAt;
+    lastMaxResults = maxResults;
+    lastContinuationToken = continuationToken;
+    return page;
+  }
 
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async => page.issues;
