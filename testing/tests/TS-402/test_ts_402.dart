@@ -24,6 +24,9 @@ void main() {
           'Priority',
           'Assignee',
           'Labels',
+          'Components',
+          'Fix versions',
+          'Epic',
           'Save',
           'Cancel',
         ]) {
@@ -43,6 +46,9 @@ void main() {
           'Priority',
           'Assignee',
           'Labels',
+          'Components',
+          'Fix versions',
+          'Epic',
           'Save',
           'Cancel',
         ]) {
@@ -64,6 +70,9 @@ void main() {
             'Priority',
             'Assignee',
             'Labels',
+            'Components',
+            'Fix versions',
+            'Epic',
             'Save',
             'Cancel',
           ],
@@ -84,6 +93,9 @@ void main() {
             'Priority',
             'Assignee',
             'Labels',
+            'Components',
+            'Fix versions',
+            'Epic',
             'Save',
             'Cancel',
           ],
@@ -117,6 +129,7 @@ void main() {
 
         final validationTexts = screen.visibleTexts();
         final validationSemantics = screen.visibleSemanticsLabels();
+        final accessibilityFeedback = screen.accessibilityFeedbackTexts();
         const validationMessage = 'Summary is required before saving.';
         final validationVisible = _containsLabel(
           validationTexts,
@@ -130,9 +143,9 @@ void main() {
         }
 
         final focusedLabel = screen.focusedSemanticsLabel();
-        final validationAnnounced =
-            _containsSummaryRequiredFeedback(validationSemantics) ||
-            _containsSummaryRequiredFeedback(validationTexts);
+        final validationAnnounced = _containsSummaryRequiredFeedback(
+          accessibilityFeedback,
+        );
         final focusReturnedToSummary =
             focusedLabel == 'Summary' ||
             (focusedLabel ?? '').startsWith('Summary ');
@@ -141,7 +154,7 @@ void main() {
             'Step 4 failed: after the summary-required validation error, focus did not return to Summary and no summary-required message was exposed in visible semantics. '
             'Focused semantics label: ${focusedLabel ?? '<none>'}. '
             'Visible semantics labels: ${_formatSnapshot(validationSemantics)}. '
-            'Visible edit-surface text: ${_formatSnapshot(validationTexts)}.',
+            'Accessibility feedback text: ${_formatSnapshot(accessibilityFeedback)}.',
           );
         }
 
