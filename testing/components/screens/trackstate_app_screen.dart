@@ -692,6 +692,77 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<List<String>> readDropdownOptions(String label) async {
+    await tester.pump();
+    final field = _labeledDropdownField(label);
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible dropdown field labeled "$label", but no matching '
+        'control was rendered.',
+      );
+    }
+    final optionTexts = <String>[];
+    final dropdownButton = find.descendant(
+      of: field.first,
+      matching: find.byType(DropdownButton<String>),
+    );
+    if (dropdownButton.evaluate().isEmpty) {
+      fail(
+        'Expected the "$label" dropdown field to render a DropdownButton, but '
+        'no dropdown button widget was found.',
+      );
+    }
+    final dropdown = tester.widget<DropdownButton<String>>(
+      dropdownButton.first,
+    );
+    for (final item in dropdown.items ?? const <DropdownMenuItem<String>>[]) {
+      final optionText = _dropdownItemText(item.child);
+      if (optionText == null || optionTexts.contains(optionText)) {
+        continue;
+      }
+      optionTexts.add(optionText);
+    }
+
+    return optionTexts;
+  }
+
+  String? _dropdownItemText(Widget? widget) {
+    if (widget == null) {
+      return null;
+    }
+    if (widget is Text) {
+      final text = widget.data?.trim() ?? widget.textSpan?.toPlainText().trim();
+      return text == null || text.isEmpty ? null : text;
+    }
+    if (widget is RichText) {
+      final text = widget.text.toPlainText().trim();
+      return text.isEmpty ? null : text;
+    }
+    if (widget is Semantics) {
+      final label = widget.properties.label?.trim();
+      if (label != null && label.isNotEmpty) {
+        return label;
+      }
+      return _dropdownItemText(widget.child);
+    }
+    if (widget is Icon) {
+      return null;
+    }
+    if (widget is SingleChildRenderObjectWidget) {
+      return _dropdownItemText(widget.child);
+    }
+    if (widget is MultiChildRenderObjectWidget) {
+      for (final child in widget.children) {
+        final text = _dropdownItemText(child);
+        if (text != null) {
+          return text;
+        }
+      }
+    }
+    return null;
+  }
+
+  @override
   Future<void> selectDropdownOption(
     String label, {
     required String optionText,
