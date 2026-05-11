@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/services/attachment_picker.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
@@ -199,6 +200,82 @@ void main() {
         await tester.tap(find.text('Attachments').first);
         await tester.pump();
         expect(find.text('Loading...'), findsWidgets);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'hosted dashboard and board loading hints clear after initial search hydration completes',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+        final repository = _BootstrapLoadingRepository(
+          snapshot: _hostedBootstrapSnapshot(snapshot),
+        );
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pump();
+        await tester.pump();
+
+        expect(
+          find.bySemanticsLabel(RegExp('Dashboard\\s+Loading')),
+          findsOneWidget,
+        );
+
+        repository.completeInitialSearch();
+        await tester.pumpAndSettle();
+
+        expect(
+          find.bySemanticsLabel(RegExp('Dashboard\\s+Loading')),
+          findsNothing,
+        );
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Board')).first);
+        await tester.pumpAndSettle();
+
+        expect(find.bySemanticsLabel(RegExp('Board\\s+Loading')), findsNothing);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'hosted search keeps bootstrap rows visible after the initial search fails',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: _FailingBootstrapSearchRepository(
+              snapshot: _hostedBootstrapSnapshot(snapshot),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('JQL Search').first);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.bySemanticsLabel(RegExp('JQL Search\\s+Loading')),
+          findsNothing,
+        );
+        expect(find.text('No issues match this query'), findsNothing);
+        expect(find.text('TRACK-12'), findsWidgets);
+        expect(find.text('Implement Git sync service'), findsWidgets);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
@@ -1159,6 +1236,7 @@ class _BootstrapLoadingRepository extends _LocalRuntimeRepository {
     : _snapshot = snapshot;
 
   final TrackerSnapshot _snapshot;
+  final JqlSearchService _searchService = const JqlSearchService();
   final Completer<TrackStateIssueSearchPage> _searchCompleter =
       Completer<TrackStateIssueSearchPage>();
 
@@ -1172,6 +1250,40 @@ class _BootstrapLoadingRepository extends _LocalRuntimeRepository {
     int maxResults = 50,
     String? continuationToken,
   }) => _searchCompleter.future;
+
+  void completeInitialSearch() {
+    if (_searchCompleter.isCompleted) {
+      return;
+    }
+    _searchCompleter.complete(
+      _searchService.search(
+        issues: _snapshot.issues,
+        project: _snapshot.project,
+        jql: 'project = TRACK AND status != Done ORDER BY priority DESC',
+        maxResults: 6,
+      ),
+    );
+  }
+}
+
+class _FailingBootstrapSearchRepository extends _LocalRuntimeRepository {
+  _FailingBootstrapSearchRepository({required TrackerSnapshot snapshot})
+    : _snapshot = snapshot;
+
+  final TrackerSnapshot _snapshot;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    throw const JqlSearchException('Hosted bootstrap search failed.');
+  }
 }
 
 class _SlowHistoryReactiveRepository

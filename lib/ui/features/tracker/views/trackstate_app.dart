@@ -1390,9 +1390,7 @@ class _Dashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final showBootstrapHint =
-        viewModel.loadStateForDomain(TrackerDataDomain.issueDetails) ==
-        TrackerLoadState.partial;
+    final showBootstrapHint = viewModel.showsInitialBootstrapPlaceholders;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1488,9 +1486,7 @@ class _Board extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final grouped = viewModel.issuesByStatus;
-    final showBootstrapHint =
-        viewModel.loadStateForDomain(TrackerDataDomain.issueDetails) ==
-        TrackerLoadState.partial;
+    final showBootstrapHint = viewModel.showsInitialBootstrapPlaceholders;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1561,9 +1557,17 @@ class _SearchAndDetail extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final viewModel = this.viewModel;
-    final subtitle = viewModel.hasLoadedInitialSearchResults
-        ? l10n.issueCount(viewModel.totalSearchResults)
-        : l10n.loading;
+    final subtitle = switch ((
+      viewModel.hasLoadedInitialSearchResults,
+      viewModel.shouldUseBootstrapSearchFallback,
+      viewModel.isLoading,
+    )) {
+      (true, _, _) => l10n.issueCount(viewModel.totalSearchResults),
+      (false, true, false) => l10n.issueCount(
+        math.min(viewModel.issues.length, 6),
+      ),
+      _ => l10n.loading,
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3690,13 +3694,13 @@ class _IssueList extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
     final searchResults = viewModel.searchResults;
-    final bootstrapResults = viewModel.isInitialSearchLoading
+    final bootstrapResults = viewModel.shouldUseBootstrapSearchFallback
         ? viewModel.issues.take(6).toList(growable: false)
         : const <TrackStateIssue>[];
     final visibleResults = searchResults.isEmpty
         ? bootstrapResults
         : searchResults;
-    final showSearchBootstrap = viewModel.isInitialSearchLoading;
+    final showSearchBootstrapLoading = viewModel.isInitialSearchLoading;
     return _SurfaceCard(
       semanticLabel: l10n.jqlSearch,
       explicitChildNodes: true,
@@ -3722,7 +3726,7 @@ class _IssueList extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          if (showSearchBootstrap) ...[
+          if (showSearchBootstrapLoading) ...[
             _SectionLoadingBanner(
               semanticLabel: '${l10n.jqlSearch} ${l10n.loading}',
               label: l10n.loading,
@@ -3732,7 +3736,7 @@ class _IssueList extends StatelessWidget {
           if (visibleResults.isEmpty)
             Text(l10n.noResults)
           else ...[
-            if (!showSearchBootstrap &&
+            if (!showSearchBootstrapLoading &&
                 searchResults.length < viewModel.totalSearchResults)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
@@ -3752,7 +3756,7 @@ class _IssueList extends StatelessWidget {
                 child: _IssueListRow(
                   issue: visibleResults[index],
                   onSelect: viewModel.selectIssue,
-                  trailingAction: showSearchBootstrap
+                  trailingAction: showSearchBootstrapLoading
                       ? _LoadingPill(
                           semanticLabel:
                               'Open ${visibleResults[index].key} ${visibleResults[index].summary} ${l10n.loading}',

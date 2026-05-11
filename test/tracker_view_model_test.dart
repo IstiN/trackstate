@@ -72,6 +72,28 @@ void main() {
   );
 
   test(
+    'view model keeps bootstrap search fallback after the initial hosted search fails',
+    () async {
+      final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+      final viewModel = TrackerViewModel(
+        repository: _FailingInitialSearchRepository(
+          snapshot: _hostedBootstrapSnapshot(snapshot),
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.isLoading, isFalse);
+      expect(viewModel.hasLoadedInitialSearchResults, isFalse);
+      expect(viewModel.showsInitialBootstrapPlaceholders, isFalse);
+      expect(viewModel.shouldUseBootstrapSearchFallback, isTrue);
+      expect(viewModel.selectedIssue?.key, 'TRACK-12');
+      expect(viewModel.message?.kind, TrackerMessageKind.dataLoadFailed);
+    },
+  );
+
+  test(
     'view model routes hosted startup recovery into settings when reduced bootstrap succeeds',
     () async {
       final snapshot = await const DemoTrackStateRepository().loadSnapshot();
@@ -1097,6 +1119,26 @@ class _DelayedInitialSearchRepository extends _LocalRuntimeRepository {
         maxResults: 6,
       ),
     );
+  }
+}
+
+class _FailingInitialSearchRepository extends _LocalRuntimeRepository {
+  _FailingInitialSearchRepository({required TrackerSnapshot snapshot})
+    : _snapshot = snapshot;
+
+  final TrackerSnapshot _snapshot;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    throw const JqlSearchException('Hosted bootstrap search failed.');
   }
 }
 

@@ -297,8 +297,13 @@ class TrackerViewModel extends ChangeNotifier {
   TrackerSection? get issueDetailReturnSection => _issueDetailReturnSection;
   bool get isLoading => _isLoading;
   bool get hasLoadedInitialSearchResults => _hasLoadedInitialSearchResults;
+  bool get hasPublishedBootstrapSnapshot => _snapshot != null;
   bool get isInitialSearchLoading =>
       _isLoading && !_hasLoadedInitialSearchResults;
+  bool get showsInitialBootstrapPlaceholders =>
+      hasPublishedBootstrapSnapshot && isInitialSearchLoading;
+  bool get shouldUseBootstrapSearchFallback =>
+      hasPublishedBootstrapSnapshot && !_hasLoadedInitialSearchResults;
   bool get isSaving => _isSaving;
   TrackerLoadState loadStateForDomain(TrackerDataDomain domain) =>
       _snapshot?.readiness.domainState(domain) ?? TrackerLoadState.loading;
