@@ -157,6 +157,17 @@ class UrllibWebAppSession(WebAppSession):
             f"Timed out waiting for any expected text: {list(texts)}."
         )
 
+    def evaluate(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+    ) -> object:
+        del expression, arg
+        raise NotImplementedError(
+            "DOM evaluation is not supported by the urllib web session fallback."
+        )
+
     def screenshot(self, path: str) -> None:
         del path
         return None

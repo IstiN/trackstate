@@ -1,6 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
+
+
+@dataclass(frozen=True)
+class ScreenRect:
+    left: float
+    top: float
+    width: float
+    height: float
 
 
 class LiveIssueDetailCollaborationPage:
@@ -126,6 +136,95 @@ class LiveIssueDetailCollaborationPage:
         if labeled_button_count > 0:
             return labeled_button_count
         return self._session.count(self._button_selector, has_text=fragment)
+
+    def theme_toggle_label(self) -> str:
+        for label in ("Dark theme", "Light theme"):
+            if self.button_label_fragment_count(label) > 0:
+                return label
+        raise AssertionError(
+            "Step 3 failed: the live tracker did not expose the theme toggle needed "
+            "to validate collaboration metadata contrast across themes.\n"
+            f"Observed body text:\n{self.current_body_text()}",
+        )
+
+    def toggle_theme(self, *, timeout_ms: int = 30_000) -> str:
+        current_label = self.theme_toggle_label()
+        next_label = "Light theme" if current_label == "Dark theme" else "Dark theme"
+        self._session.click(
+            self._button_selector,
+            has_text=current_label,
+            timeout_ms=timeout_ms,
+        )
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text=next_label,
+            timeout_ms=timeout_ms,
+        )
+        return next_label
+
+    def find_semantics_rect_containing_text(
+        self,
+        text: str,
+        *,
+        max_width: float = 1_000,
+        max_height: float = 400,
+    ) -> ScreenRect:
+        payload = self._session.evaluate(
+            """
+            ({ text, maxWidth, maxHeight }) => {
+              const matches = Array.from(document.querySelectorAll("flt-semantics"))
+                .map((element) => {
+                  const label = element.getAttribute("aria-label") ?? "";
+                  const innerText = element.innerText ?? "";
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    label,
+                    innerText,
+                    width: rect.width,
+                    height: rect.height,
+                    left: rect.left,
+                    top: rect.top,
+                    area: rect.width * rect.height,
+                  };
+                })
+                .filter((candidate) =>
+                  (candidate.label.includes(text) || candidate.innerText.includes(text)) &&
+                  candidate.width > 0 &&
+                  candidate.height > 0 &&
+                  candidate.width < maxWidth &&
+                  candidate.height < maxHeight,
+                )
+                .sort((left, right) => left.area - right.area);
+              if (matches.length === 0) {
+                return null;
+              }
+              const match = matches[0];
+              return {
+                left: match.left,
+                top: match.top,
+                width: match.width,
+                height: match.height,
+              };
+            }
+            """,
+            arg={
+                "text": text,
+                "maxWidth": max_width,
+                "maxHeight": max_height,
+            },
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 2 failed: the live issue detail did not expose a visible "
+                f"semantics region containing {text!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return ScreenRect(
+            left=float(payload["left"]),
+            top=float(payload["top"]),
+            width=float(payload["width"]),
+            height=float(payload["height"]),
+        )
 
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()

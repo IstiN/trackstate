@@ -239,6 +239,14 @@ class PlaywrightWebAppSession(WebAppSession):
             body_text=str(payload["bodyText"]),
         )
 
+    def evaluate(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+    ) -> object:
+        return self._page.evaluate(expression, arg)
+
     def screenshot(self, path: str) -> None:
         self._page.screenshot(path=path, full_page=True)
 
