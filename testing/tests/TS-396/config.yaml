@@ -1,0 +1,9 @@
+test_id: TS-396
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Exercises the deployed tracker at https://istin.github.io/trackstate-setup/.
+  - Verifies the shared Edit issue surface preloads Summary, Description, and Priority from the Board card Edit affordance and the JQL Search issue detail pane.
+  - Verifies desktop opens a right-side drawer-like edit surface and compact 390px opens a near full-width sheet.
