@@ -117,6 +117,48 @@ class PlaywrightWebAppSession(WebAppSession):
     ) -> int:
         return self._locator(selector, has_text=has_text).count()
 
+    def wait_for_count(
+        self,
+        selector: str,
+        expected_count: int,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            self._page.wait_for_function(
+                """
+                ({ selector, expectedCount }) =>
+                  document.querySelectorAll(selector).length === expectedCount
+                """,
+                arg={
+                    "selector": selector,
+                    "expectedCount": expected_count,
+                },
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                'Timed out waiting for selector '
+                f'"{selector}" to reach count {expected_count}.',
+            ) from error
+
+    def read_value(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            return locator.input_value(timeout=timeout_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out reading the value for selector "{selector}".',
+            ) from error
+
     def body_text(self) -> str:
         return self._page.locator("body").inner_text()
 
