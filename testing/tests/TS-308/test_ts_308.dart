@@ -12,6 +12,23 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  test('TS-308 decodes escaped quoted YAML author scalars', () {
+    const markdown = '''---
+author: "qa \\"lead\\" \\\\ reviewer"
+created: 2026-05-11T00:05:00Z
+updated: 2026-05-11T00:05:00Z
+---
+
+Saved comment body.''';
+
+    final savedComment = _parseSavedComment(markdown);
+
+    expect(savedComment.author, 'qa "lead" \\ reviewer');
+    expect(savedComment.createdAt, '2026-05-11T00:05:00Z');
+    expect(savedComment.updatedAt, '2026-05-11T00:05:00Z');
+    expect(savedComment.body, 'Saved comment body.');
+  });
+
   testWidgets(
     'TS-308 stores a new Local Git issue comment as sequential frontmatter markdown',
     (tester) async {
@@ -352,10 +369,35 @@ class _SavedComment {
 }
 
 String _decodeYamlScalar(String value) {
-  if (value.length >= 2 &&
-      ((value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'")))) {
-    return value.substring(1, value.length - 1);
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    final buffer = StringBuffer();
+    var isEscaped = false;
+    for (final char in value.substring(1, value.length - 1).split('')) {
+      if (isEscaped) {
+        buffer.write(switch (char) {
+          'n' => '\n',
+          'r' => '\r',
+          't' => '\t',
+          '"' => '"',
+          '\\' => '\\',
+          _ => char,
+        });
+        isEscaped = false;
+        continue;
+      }
+      if (char == '\\') {
+        isEscaped = true;
+        continue;
+      }
+      buffer.write(char);
+    }
+    if (isEscaped) {
+      buffer.write('\\');
+    }
+    return buffer.toString();
+  }
+  if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) {
+    return value.substring(1, value.length - 1).replaceAll("''", "'");
   }
   return value;
 }
