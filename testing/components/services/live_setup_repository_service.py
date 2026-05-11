@@ -22,6 +22,8 @@ class LiveHostedRepositoryMetadata:
     issue_types: list[str]
     statuses: list[str]
     fields: list[str]
+    versions: list[str]
+    components: list[str]
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,8 @@ class LiveSetupRepositoryService:
             issue_types=self._read_config_names("DEMO/config/issue-types.json"),
             statuses=self._read_config_names("DEMO/config/statuses.json"),
             fields=self._read_config_names("DEMO/config/fields.json"),
+            versions=self._read_config_names("DEMO/config/versions.json"),
+            components=self._read_config_names("DEMO/config/components.json"),
         )
 
     def fetch_authenticated_user(self) -> GitHubAuthenticatedUser:
