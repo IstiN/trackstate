@@ -398,3 +398,16 @@ class TrackStateProviderException implements Exception {
   @override
   String toString() => message;
 }
+
+class GitHubRateLimitException extends TrackStateProviderException {
+  const GitHubRateLimitException({
+    required String message,
+    required this.requestPath,
+    required this.statusCode,
+    this.retryAfter,
+  }) : super(message);
+
+  final String requestPath;
+  final int statusCode;
+  final DateTime? retryAfter;
+}
