@@ -3,6 +3,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../core/models/create_issue_layout_observation.dart';
+import '../../core/models/create_issue_scroll_observation.dart';
 import '../../core/models/create_issue_text_contrast_observation.dart';
 import '../../core/utils/color_contrast.dart';
 
@@ -35,6 +36,11 @@ class CreateIssueAccessibilityRobot {
   Finder textWithinCreateIssueSurface(String text) => find.descendant(
     of: createIssueSurface.first,
     matching: find.text(text, findRichText: true),
+  );
+
+  Finder get createIssueScrollable => find.descendant(
+    of: createIssueSurface.first,
+    matching: find.byType(Scrollable),
   );
 
   void expectCreateIssueSurfaceVisible() {
@@ -71,8 +77,40 @@ class CreateIssueAccessibilityRobot {
     );
   }
 
+  CreateIssueScrollObservation observeVerticalScroll() {
+    expectCreateIssueSurfaceVisible();
+    if (createIssueScrollable.evaluate().isEmpty) {
+      throw StateError(
+        'No vertical Scrollable was rendered inside the Create issue surface.',
+      );
+    }
+    final scrollableState = tester.state<ScrollableState>(
+      createIssueScrollable.first,
+    );
+    final position = scrollableState.position;
+    return CreateIssueScrollObservation(
+      offset: position.pixels,
+      maxScrollExtent: position.maxScrollExtent,
+      viewportDimension: position.viewportDimension,
+    );
+  }
+
   bool showsText(String text) =>
       textWithinCreateIssueSurface(text).evaluate().isNotEmpty;
+
+  bool isTextVisibleInViewport(String text) {
+    expectCreateIssueSurfaceVisible();
+    final surfaceRect = tester.getRect(createIssueSurface.first);
+    final textFinder = textWithinCreateIssueSurface(text);
+    final count = textFinder.evaluate().length;
+    for (var index = 0; index < count; index++) {
+      final candidate = textFinder.at(index);
+      if (_isWithinSurface(surfaceRect, tester.getRect(candidate))) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   List<String> visibleTexts() {
     return tester
@@ -113,6 +151,20 @@ class CreateIssueAccessibilityRobot {
 
     visit(rootNode);
     return _dedupeConsecutive(labels);
+  }
+
+  Future<void> scrollToBottom() async {
+    final observation = observeVerticalScroll();
+    if (!observation.hasOverflow) {
+      await tester.pump();
+      return;
+    }
+    final scrollableState = tester.state<ScrollableState>(
+      createIssueScrollable.first,
+    );
+    scrollableState.position.jumpTo(scrollableState.position.maxScrollExtent);
+    await tester.pump();
+    await tester.pumpAndSettle();
   }
 
   CreateIssueTextContrastObservation observeTextContrast(String text) {
