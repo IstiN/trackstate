@@ -640,6 +640,7 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       final saved = await _repository.updateIssueStatus(issue, status);
       _snapshot = await _repository.loadSnapshot();
+      _mergeIssueIntoSnapshot(saved);
       _selectedIssue = _snapshot!.issues.firstWhere(
         (current) => current.key == saved.key,
         orElse: () => saved,
@@ -734,6 +735,7 @@ class TrackerViewModel extends ChangeNotifier {
                   'The issue could not be created with the current repository session.',
             );
       _snapshot = await _repository.loadSnapshot();
+      _mergeIssueIntoSnapshot(created);
       _selectedIssue = _snapshot!.issues.firstWhere(
         (issue) => issue.key == created.key,
         orElse: () => created,
@@ -992,6 +994,7 @@ class TrackerViewModel extends ChangeNotifier {
       }
       if (!usedInMemoryLocalFallback) {
         _snapshot = await _repository.loadSnapshot();
+        _mergeIssueIntoSnapshot(saved);
       }
       _selectedIssue = _snapshot!.issues.firstWhere(
         (current) => current.key == saved.key,

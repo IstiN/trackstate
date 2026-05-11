@@ -411,7 +411,7 @@ class ProviderBackedTrackStateRepository
   }) async {
     var snapshot = _snapshot ?? await loadSnapshot();
     if (!usesLocalPersistence &&
-        _jqlRequiresIssueDetails(jql) &&
+        _searchService.requiresIssueDetails(jql) &&
         snapshot.readiness.domainState(TrackerDataDomain.issueDetails) !=
             TrackerLoadState.ready) {
       for (final issue in snapshot.issues) {
@@ -1536,55 +1536,6 @@ class ProviderBackedTrackStateRepository
       }
     }
     return true;
-  }
-
-  bool _jqlRequiresIssueDetails(String jql) {
-    final normalized = jql.trim();
-    if (normalized.isEmpty) {
-      return false;
-    }
-    final orderByIndex = normalized.toUpperCase().indexOf('ORDER BY');
-    final filterSection = orderByIndex == -1
-        ? normalized
-        : normalized.substring(0, orderByIndex).trim();
-    final clauses = filterSection.split(
-      RegExp(r'\s+AND\s+', caseSensitive: false),
-    );
-    final operatorPattern = RegExp(
-      r'^[A-Za-z][A-Za-z0-9]*\s*(=|!=|~|!~)\s*.+$',
-      caseSensitive: false,
-    );
-    final emptyPattern = RegExp(
-      r'^[A-Za-z][A-Za-z0-9]*\s+IS(\s+NOT)?\s+EMPTY$',
-      caseSensitive: false,
-    );
-    for (final rawClause in clauses) {
-      final clause = rawClause.trim();
-      if (clause.isEmpty) {
-        continue;
-      }
-      if (emptyPattern.hasMatch(clause)) {
-        continue;
-      }
-      final operatorMatch = operatorPattern.firstMatch(clause);
-      if (operatorMatch != null) {
-        final field = clause
-            .substring(
-              0,
-              operatorMatch.group(1) == null
-                  ? clause.length
-                  : clause.indexOf(operatorMatch.group(1)!),
-            )
-            .trim()
-            .toLowerCase();
-        if (field == 'text') {
-          return true;
-        }
-        continue;
-      }
-      return true;
-    }
-    return false;
   }
 
   Future<String?> _tryReadIssueAcceptance(String issueRoot) async {

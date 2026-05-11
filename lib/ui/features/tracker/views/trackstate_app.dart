@@ -3138,7 +3138,7 @@ class _IssueDetailState extends State<_IssueDetail> {
   void initState() {
     super.initState();
     _commentController = TextEditingController();
-    widget.viewModel.ensureIssueDetailLoaded(widget.issue);
+    _ensureActiveIssueDataLoaded();
   }
 
   @override
@@ -3149,11 +3149,35 @@ class _IssueDetailState extends State<_IssueDetail> {
       _commentController.clear();
       _selectedAttachment = null;
       _attachmentUploadNotice = null;
-      widget.viewModel.ensureIssueDetailLoaded(widget.issue);
-      if (_selectedCollaborationTab == 3) {
-        widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
-      }
     }
+    if (issueChanged || !_activeTabDataLoaded(widget.issue)) {
+      _ensureActiveIssueDataLoaded();
+    }
+  }
+
+  void _ensureActiveIssueDataLoaded() {
+    widget.viewModel.ensureIssueDetailLoaded(widget.issue);
+    switch (_selectedCollaborationTab) {
+      case 1:
+        widget.viewModel.ensureIssueCommentsLoaded(widget.issue);
+      case 2:
+        widget.viewModel.ensureIssueAttachmentsLoaded(widget.issue);
+      case 3:
+        widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
+      case 0:
+        break;
+    }
+  }
+
+  bool _activeTabDataLoaded(TrackStateIssue issue) {
+    if (!issue.hasDetailLoaded) {
+      return false;
+    }
+    return switch (_selectedCollaborationTab) {
+      1 => issue.hasCommentsLoaded,
+      2 => issue.hasAttachmentsLoaded,
+      _ => true,
+    };
   }
 
   @override

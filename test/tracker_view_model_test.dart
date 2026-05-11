@@ -520,7 +520,10 @@ void main() {
     () async {
       final initialSnapshot = await const DemoTrackStateRepository()
           .loadSnapshot();
-      final repository = _MutableEditRepository(snapshot: initialSnapshot);
+      final repository = _MutableEditRepository(
+        snapshot: initialSnapshot,
+        reloadReturnsSummaryOnly: true,
+      );
       final service = _RecordingEditIssueMutationService(repository);
       final viewModel = TrackerViewModel(
         repository: repository,
@@ -554,9 +557,14 @@ void main() {
       expect(service.reassignedEpicKey, isNull);
       expect(service.transitionStatusId, 'done');
       expect(viewModel.selectedIssue?.summary, 'Refine Git sync service');
+      expect(
+        viewModel.selectedIssue?.description,
+        'Syncs repository-backed tracker data safely.',
+      );
       expect(viewModel.selectedIssue?.epicKey, isNull);
       expect(viewModel.selectedIssue?.statusId, 'done');
       expect(viewModel.selectedIssue?.resolutionId, 'done');
+      expect(viewModel.selectedIssue?.hasDetailLoaded, isTrue);
       expect(
         viewModel.searchResults.where(
           (candidate) => candidate.key == 'TRACK-12',
@@ -567,30 +575,50 @@ void main() {
   );
 
   test(
-    'view model preserves empty successful workflow transitions',
+    'view model keeps the selected issue hydrated after hosted same-key status reloads',
     () async {
       final initialSnapshot = await const DemoTrackStateRepository()
           .loadSnapshot();
-      final repository = _MutableEditRepository(snapshot: initialSnapshot);
-      final service = _RecordingEditIssueMutationService(
-        repository,
-        transitions: const [],
+      final repository = _MutableEditRepository(
+        snapshot: initialSnapshot,
+        reloadReturnsSummaryOnly: true,
       );
-      final viewModel = TrackerViewModel(
-        repository: repository,
-        issueMutationService: service,
-      );
+      final viewModel = TrackerViewModel(repository: repository);
 
       await viewModel.load();
-      final issue = viewModel.issues.firstWhere(
-        (candidate) => candidate.key == 'TRACK-12',
-      );
+      final issue = viewModel.selectedIssue!;
 
-      final transitions = await viewModel.availableWorkflowTransitions(issue);
+      await viewModel.moveIssue(issue, IssueStatus.done);
 
-      expect(transitions, isEmpty);
+      expect(viewModel.selectedIssue?.key, issue.key);
+      expect(viewModel.selectedIssue?.statusId, 'done');
+      expect(viewModel.selectedIssue?.description, issue.description);
+      expect(viewModel.selectedIssue?.hasDetailLoaded, isTrue);
     },
   );
+
+  test('view model preserves empty successful workflow transitions', () async {
+    final initialSnapshot = await const DemoTrackStateRepository()
+        .loadSnapshot();
+    final repository = _MutableEditRepository(snapshot: initialSnapshot);
+    final service = _RecordingEditIssueMutationService(
+      repository,
+      transitions: const [],
+    );
+    final viewModel = TrackerViewModel(
+      repository: repository,
+      issueMutationService: service,
+    );
+
+    await viewModel.load();
+    final issue = viewModel.issues.firstWhere(
+      (candidate) => candidate.key == 'TRACK-12',
+    );
+
+    final transitions = await viewModel.availableWorkflowTransitions(issue);
+
+    expect(transitions, isEmpty);
+  });
 
   test(
     'view model falls back to in-memory local edits when shared mutations are unavailable',
@@ -997,11 +1025,14 @@ class _MutableEditRepository implements TrackStateRepository {
   _MutableEditRepository({
     required TrackerSnapshot snapshot,
     this.usesLocalPersistence = false,
+    this.reloadReturnsSummaryOnly = false,
   }) : _snapshot = snapshot;
 
   TrackerSnapshot _snapshot;
   final JqlSearchService _searchService = const JqlSearchService();
   String? lastSavedDescription;
+
+  final bool reloadReturnsSummaryOnly;
 
   @override
   final bool usesLocalPersistence;
@@ -1014,7 +1045,18 @@ class _MutableEditRepository implements TrackStateRepository {
       const RepositoryUser(login: 'mutable-user', displayName: 'Mutable User');
 
   @override
-  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+  Future<TrackerSnapshot> loadSnapshot() async {
+    if (!reloadReturnsSummaryOnly) {
+      return _snapshot;
+    }
+    return TrackerSnapshot(
+      project: _snapshot.project,
+      issues: [for (final issue in _snapshot.issues) _summaryOnlyIssue(issue)],
+      repositoryIndex: _snapshot.repositoryIndex,
+      loadWarnings: _snapshot.loadWarnings,
+      readiness: _snapshot.readiness,
+    );
+  }
 
   @override
   Future<TrackStateIssueSearchPage> searchIssuePage(
@@ -1123,8 +1165,7 @@ class _RecordingEditIssueMutationService extends IssueMutationService {
       TrackStateConfigEntry(id: 'in-review', name: 'In Review'),
       TrackStateConfigEntry(id: 'done', name: 'Done'),
     ],
-  })
-    : super(repository: const DemoTrackStateRepository());
+  }) : super(repository: const DemoTrackStateRepository());
 
   final _MutableEditRepository _repository;
   final List<TrackStateConfigEntry> transitions;
@@ -1283,6 +1324,43 @@ IssuePriority _priorityForId(String id) {
     _ => IssuePriority.medium,
   };
 }
+
+TrackStateIssue _summaryOnlyIssue(TrackStateIssue issue) => TrackStateIssue(
+  key: issue.key,
+  project: issue.project,
+  issueType: issue.issueType,
+  issueTypeId: issue.issueTypeId,
+  status: issue.status,
+  statusId: issue.statusId,
+  priority: issue.priority,
+  priorityId: issue.priorityId,
+  summary: issue.summary,
+  description: '',
+  assignee: issue.assignee,
+  reporter: issue.reporter,
+  labels: issue.labels,
+  components: const [],
+  fixVersionIds: const [],
+  watchers: const [],
+  customFields: const {},
+  parentKey: issue.parentKey,
+  epicKey: issue.epicKey,
+  parentPath: issue.parentPath,
+  epicPath: issue.epicPath,
+  progress: issue.progress,
+  updatedLabel: issue.updatedLabel,
+  acceptanceCriteria: const [],
+  comments: const [],
+  links: const [],
+  attachments: const [],
+  isArchived: issue.isArchived,
+  hasDetailLoaded: false,
+  hasCommentsLoaded: false,
+  hasAttachmentsLoaded: false,
+  resolutionId: issue.resolutionId,
+  storagePath: issue.storagePath,
+  rawMarkdown: issue.rawMarkdown,
+);
 
 TrackerSnapshot _searchPaginationSnapshot() {
   final issues = [

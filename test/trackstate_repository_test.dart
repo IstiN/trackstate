@@ -415,7 +415,7 @@ This comment demonstrates markdown-backed collaboration history.
       );
       expect(snapshot.repositoryIndex.deleted.single.key, 'DEMO-99');
       expect(boardIssue.issueTypeId, 'story');
-      expect(boardIssue.statusId, 'in-review');
+      expect(boardIssue.statusId, 'in-progress');
       expect(boardIssue.priorityId, 'high');
       expect(boardIssue.fixVersionIds, ['mvp']);
       expect(boardIssue.watchers, ['demo-admin', 'demo-user']);
@@ -439,6 +439,9 @@ This comment demonstrates markdown-backed collaboration history.
       final descriptionResults = await repository.searchIssues(
         'project = DEMO AND ASSIGNEES',
       );
+      final implicitTextResults = await repository.searchIssues(
+        'project = DEMO accessibility',
+      );
       final acceptanceResults = await repository.searchIssues(
         'project = DEMO AND accessibility',
       );
@@ -447,6 +450,7 @@ This comment demonstrates markdown-backed collaboration history.
       );
 
       expect(descriptionResults.map((issue) => issue.key), ['DEMO-2']);
+      expect(implicitTextResults.map((issue) => issue.key), ['DEMO-2']);
       expect(acceptanceResults.map((issue) => issue.key), ['DEMO-2']);
       expect(commentOnlyResults, isEmpty);
     },

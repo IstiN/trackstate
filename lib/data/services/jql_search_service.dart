@@ -3,6 +3,9 @@ import '../../domain/models/trackstate_models.dart';
 class JqlSearchService {
   const JqlSearchService();
 
+  bool requiresIssueDetails(String jql) =>
+      _JqlParser().parse(jql).requiresIssueDetails;
+
   TrackStateIssueSearchPage search({
     required List<TrackStateIssue> issues,
     required ProjectConfig project,
@@ -372,6 +375,10 @@ class _ParsedJqlQuery {
   final List<_JqlClause> clauses;
   final List<_OrderByTerm> orderBys;
 
+  bool get requiresIssueDetails =>
+      clauses.any((clause) => clause.requiresIssueDetails) ||
+      orderBys.any((orderBy) => orderBy.requiresIssueDetails);
+
   bool matches(TrackStateIssue issue, ProjectConfig project) {
     for (final clause in clauses) {
       if (!clause.matches(issue, project)) {
@@ -403,6 +410,8 @@ abstract class _JqlClause {
   const _JqlClause();
 
   bool matches(TrackStateIssue issue, ProjectConfig project);
+
+  bool get requiresIssueDetails => false;
 }
 
 class _ComparisonJqlClause extends _JqlClause {
@@ -499,6 +508,9 @@ class _TextSearchClause extends _JqlClause {
     final matches = _searchableText(issue).contains(normalizedValue);
     return isNegated ? !matches : matches;
   }
+
+  @override
+  bool get requiresIssueDetails => true;
 }
 
 class _CompoundJqlClause extends _JqlClause {
@@ -515,6 +527,10 @@ class _CompoundJqlClause extends _JqlClause {
     }
     return true;
   }
+
+  @override
+  bool get requiresIssueDetails =>
+      clauses.any((clause) => clause.requiresIssueDetails);
 }
 
 class _OrderByTerm {
@@ -522,6 +538,8 @@ class _OrderByTerm {
 
   final _SupportedField field;
   final bool descending;
+
+  bool get requiresIssueDetails => field == _SupportedField.text;
 
   int compare(
     TrackStateIssue left,
