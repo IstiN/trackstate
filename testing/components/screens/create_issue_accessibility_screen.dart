@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../core/interfaces/create_issue_accessibility_screen.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../core/models/create_issue_layout_observation.dart';
+import '../../core/models/create_issue_scroll_observation.dart';
 import '../../core/models/create_issue_text_contrast_observation.dart';
 import '../../core/utils/local_trackstate_fixture.dart';
 import 'create_issue_accessibility_robot.dart';
@@ -69,6 +70,10 @@ class CreateIssueAccessibilityScreen
   CreateIssueLayoutObservation observeLayout() => _robot.observeLayout();
 
   @override
+  CreateIssueScrollObservation observeVerticalScroll() =>
+      _robot.observeVerticalScroll();
+
+  @override
   List<String> semanticsTraversal() => _robot.semanticsTraversal();
 
   @override
@@ -98,6 +103,10 @@ class CreateIssueAccessibilityScreen
   Rect? observeControlRect(String label) => _robot.observeControlRect(label);
 
   @override
+  bool isTextVisibleInViewport(String text) =>
+      _robot.isTextVisibleInViewport(text);
+
+  @override
   Future<void> resizeToViewport({
     required double width,
     required double height,
@@ -106,6 +115,9 @@ class CreateIssueAccessibilityScreen
     await _expectCreateIssueFormVisible();
     _robot.expectCreateIssueSurfaceVisible();
   }
+
+  @override
+  Future<void> scrollToBottom() => _robot.scrollToBottom();
 
   @override
   Future<void> dispose() async {

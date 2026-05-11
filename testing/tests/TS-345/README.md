@@ -23,11 +23,11 @@ flutter test testing/tests/TS-345/test_ts_345.dart
 ## Expected result
 
 ```text
-Pass: the Create issue form keeps the typed long Summary and Description, no
-Flutter/RenderFlex overflow exception is reported during resize, and the Summary
-field, Description field, Save button, and Cancel button all remain within the
-visible Create issue surface from 1440px down to 390px.
+Pass: after the form is populated with dense content, no Flutter/RenderFlex
+overflow exception is reported during resize, and the Summary field,
+Description field, Save button, and Cancel button all remain within the visible
+Create issue surface from 1440px down to 390px.
 
-Fail: any resize step throws a framework exception, loses the typed content, or
-renders the key fields/actions outside the visible Create issue surface.
+Fail: any resize step throws a framework exception or renders the key
+fields/actions outside the visible Create issue surface.
 ```

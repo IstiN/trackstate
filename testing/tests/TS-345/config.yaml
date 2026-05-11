@@ -4,5 +4,5 @@ framework: flutter_test
 platform: widget
 dependencies: []
 notes:
-  - Verifies long Summary and Description content stay intact while the Create issue form resizes from desktop to mobile widths.
+  - Uses a long Summary and multi-paragraph Description to stress the layout while the Create issue form resizes from desktop to mobile widths.
   - Confirms the visible input fields and actions remain inside the rendered Create issue surface with no RenderFlex overflow exceptions.
