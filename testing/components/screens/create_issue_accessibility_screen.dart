@@ -37,6 +37,9 @@ class CreateIssueAccessibilityScreen
   }
 
   @override
+  Finder get goldenTarget => _app.goldenTarget;
+
+  @override
   bool showsText(String text) => _robot.showsText(text);
 
   @override

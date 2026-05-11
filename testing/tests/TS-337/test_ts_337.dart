@@ -1,16 +1,9 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/create_issue_accessibility_screen.dart';
 import '../../fixtures/create_issue_accessibility_screen_fixture.dart';
 
 void main() {
-  goldenFileComparator = _TolerantGoldenFileComparator(
-    Uri.parse('testing/tests/TS-337/test_ts_337.dart'),
-    precisionTolerance: 0.04,
-  );
-
   testWidgets(
     'TS-337 Create issue desktop layout matches the right-docked golden',
     (tester) async {
@@ -69,7 +62,7 @@ void main() {
         );
 
         await expectLater(
-          find.byType(TrackStateApp),
+          screen.goldenTarget,
           matchesGoldenFile('goldens/create_issue_right_docked_desktop.png'),
         );
       } finally {
@@ -79,34 +72,4 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
-}
-
-class _TolerantGoldenFileComparator extends LocalFileComparator {
-  _TolerantGoldenFileComparator(
-    super.testFile, {
-    required double precisionTolerance,
-  }) : assert(
-         precisionTolerance >= 0 && precisionTolerance <= 1,
-         'precisionTolerance must be between 0 and 1',
-       ),
-       _precisionTolerance = precisionTolerance;
-
-  final double _precisionTolerance;
-
-  @override
-  Future<bool> compare(Uint8List imageBytes, Uri golden) async {
-    final result = await GoldenFileComparator.compareLists(
-      imageBytes,
-      await getGoldenBytes(golden),
-    );
-    final passed = result.passed || result.diffPercent <= _precisionTolerance;
-    if (passed) {
-      result.dispose();
-      return true;
-    }
-
-    final error = await generateFailureOutput(result, golden, basedir);
-    result.dispose();
-    throw FlutterError(error);
-  }
 }
