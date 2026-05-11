@@ -13,11 +13,20 @@ from testing.core.interfaces.web_app_session import WebAppTimeoutError
 class EditControlObservation:
     label: str | None
     text: str
+    tabindex: str | None
+    expanded: str | None
+
+    def contains(self, fragment: str) -> bool:
+        return fragment in self.text or (
+            self.label is not None and fragment in self.label
+        )
 
 
 class LiveMultiViewRefreshPage:
     _button_selector = 'flt-semantics[role="button"]'
     _edit_button_selector = 'flt-semantics[role="button"][aria-label="Edit"]'
+    _menu_item_selector = 'flt-semantics[role="menuitem"]'
+    _dialog_group_selector = 'flt-semantics[role="group"][aria-label="Edit issue"]'
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
         self._tracker_page = tracker_page
@@ -43,27 +52,42 @@ class LiveMultiViewRefreshPage:
             self._issue_selector(issue_key=issue_key, issue_summary=issue_summary),
             timeout_ms=60_000,
         )
-        self._session.click(
-            self._issue_selector(issue_key=issue_key, issue_summary=issue_summary),
-            timeout_ms=30_000,
+        self.open_issue_from_current_section(
+            issue_key=issue_key,
+            issue_summary=issue_summary,
         )
         self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
         self._session.click(self._edit_button_selector, timeout_ms=30_000)
         dialog_text = self._session.wait_for_text("Edit issue", timeout_ms=30_000)
         if issue_key not in dialog_text:
             raise AssertionError(
-                "Step 1 failed: opening the requested issue from JQL Search did not "
+                "Step 3 failed: opening the requested issue from JQL Search did not "
                 f"lead to the edit surface for {issue_key}.\n"
                 f"Expected issue key in edit dialog: {issue_key}\n"
                 f"Observed dialog text:\n{dialog_text}",
             )
         return dialog_text
 
+    def open_issue_from_current_section(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+    ) -> str:
+        selector = self._issue_selector(issue_key=issue_key, issue_summary=issue_summary)
+        self._session.wait_for_selector(selector, timeout_ms=60_000)
+        self._session.click(selector, timeout_ms=30_000)
+        self._session.wait_for_selector(
+            self._issue_detail_selector(issue_key),
+            timeout_ms=60_000,
+        )
+        return self.current_body_text()
+
     def navigate_to_section(self, label: str) -> None:
         bounds = self._button_bounds_for_sidebar_label(label)
         if bounds is None:
             raise AssertionError(
-                f'Step 1 failed: the hosted tracker did not expose a visible "{label}" '
+                f'Step failed: the hosted tracker did not expose a visible "{label}" '
                 "navigation entry in the sidebar.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
@@ -84,7 +108,7 @@ class LiveMultiViewRefreshPage:
             )
         except WebAppTimeoutError as error:
             raise AssertionError(
-                f'Step 1 failed: clicking the "{label}" sidebar entry did not activate '
+                f'Step failed: clicking the "{label}" sidebar entry did not activate '
                 "that section in the hosted tracker.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
@@ -125,6 +149,235 @@ class LiveMultiViewRefreshPage:
             )
         return observation
 
+    def change_priority(self, target_label: str) -> EditControlObservation:
+        control = self.priority_control()
+        if control.contains(target_label):
+            return control
+        options = self._open_focusable_dropdown(
+            selector=self._button_selector,
+            has_text="Priority",
+            control_name="Priority",
+        )
+        self._select_dropdown_option(
+            control_name="Priority",
+            target_label=target_label,
+            options=options,
+        )
+        updated = self.priority_control()
+        if not updated.contains(target_label):
+            raise AssertionError(
+                "Step 4 failed: selecting the Priority control did not update the visible "
+                f"value to {target_label}.\n"
+                f"Observed control label: {updated.label}\n"
+                f"Observed control text: {updated.text}\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        return updated
+
+    def change_status_transition(self, target_label: str) -> EditControlObservation:
+        control = self.status_control()
+        if control.contains("No workflow transitions available."):
+            raise AssertionError(
+                "Step 5 failed: the Edit issue surface for DEMO-3 did not expose any "
+                "workflow transitions, so the scenario could not change the Status to "
+                f"{target_label} before saving.\n"
+                f"Observed status control label: {control.label}\n"
+                f"Observed status helper text: {control.text}\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        if control.tabindex is None:
+            raise AssertionError(
+                "Step 5 failed: the visible Status control rendered as non-focusable in "
+                "the hosted edit dialog, so the test could not perform a production-visible "
+                f"workflow transition to {target_label}.\n"
+                f"Observed status control label: {control.label}\n"
+                f"Observed status helper text: {control.text}\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        if control.contains(target_label):
+            return control
+        options = self._open_focusable_dropdown(
+            selector='flt-semantics[role="button"][aria-label*="Status"]',
+            has_text=None,
+            control_name="Status",
+        )
+        self._select_dropdown_option(
+            control_name="Status",
+            target_label=target_label,
+            options=options,
+        )
+        updated = self.status_control()
+        if not updated.contains(target_label):
+            raise AssertionError(
+                "Step 5 failed: selecting the Status control did not update the visible "
+                f"workflow transition to {target_label}.\n"
+                f"Observed control label: {updated.label}\n"
+                f"Observed control text: {updated.text}\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        return updated
+
+    def save_issue_edits(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+    ) -> str:
+        self._session.click(
+            'flt-semantics[role="button"][aria-label="Save"]',
+            timeout_ms=30_000,
+        )
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ issueKey, issueSummary, dialogSelector, detailSelector, errorPrefix }) => {
+                  const bodyText = document.body?.innerText ?? '';
+                  if (bodyText.includes(errorPrefix)) {
+                    return { kind: 'error', bodyText };
+                  }
+                  const dialogVisible =
+                    document.querySelector(dialogSelector) !== null;
+                  if (dialogVisible) {
+                    return null;
+                  }
+                  const detailVisible =
+                    document.querySelector(detailSelector) !== null;
+                  if (!detailVisible) {
+                    return null;
+                  }
+                  return bodyText.includes(issueKey) && bodyText.includes(issueSummary)
+                    ? { kind: 'saved', bodyText }
+                    : null;
+                }
+                """,
+                arg={
+                    "issueKey": issue_key,
+                    "issueSummary": issue_summary,
+                    "dialogSelector": self._dialog_group_selector,
+                    "detailSelector": self._issue_detail_selector(issue_key),
+                    "errorPrefix": TrackStateTrackerPage.SAVE_FAILED_PREFIX,
+                },
+                timeout_ms=180_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 6 failed: clicking Save never closed the edit dialog and returned "
+                "the app to the issue detail surface.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 6 failed: saving the edited issue did not produce an observable "
+                "post-save state in the hosted tracker.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        if str(payload.get("kind")) == "error":
+            raise AssertionError(
+                "Step 6 failed: clicking Save surfaced a visible save error instead of "
+                "committing the edited issue.\n"
+                f"Observed body text:\n{payload.get('bodyText', self.current_body_text())}",
+            )
+        return str(payload["bodyText"])
+
+    def wait_for_issue_detail_state(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+        expected_status: str,
+        expected_priority: str,
+        step_number: int,
+    ) -> str:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ issueKey, issueSummary, detailSelector, expectedStatus, expectedPriority }) => {
+                  if (!document.querySelector(detailSelector)) {
+                    return null;
+                  }
+                  const bodyText = document.body?.innerText ?? '';
+                  const matches =
+                    bodyText.includes(issueKey) &&
+                    bodyText.includes(issueSummary) &&
+                    bodyText.includes(expectedStatus) &&
+                    bodyText.includes(expectedPriority);
+                  return matches ? { bodyText } : null;
+                }
+                """,
+                arg={
+                    "issueKey": issue_key,
+                    "issueSummary": issue_summary,
+                    "detailSelector": self._issue_detail_selector(issue_key),
+                    "expectedStatus": expected_status,
+                    "expectedPriority": expected_priority,
+                },
+                timeout_ms=60_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f"Step {step_number} failed: the hosted issue detail for {issue_key} did "
+                f"not visibly refresh to Status = {expected_status} and Priority = "
+                f"{expected_priority}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Step {step_number} failed: the hosted issue detail for {issue_key} did "
+                "not reach an observable refreshed state.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return str(payload["bodyText"])
+
+    def wait_for_board_projection(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+        expected_column: str,
+        expected_priority: str,
+    ) -> str:
+        self.navigate_to_section("Board")
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ issueKey, issueSummary, expectedColumn, expectedPriority }) => {
+                  const expectedAriaLabel = `${expectedColumn} column`;
+                  const column = Array.from(document.querySelectorAll('flt-semantics'))
+                    .find((element) => (element.getAttribute('aria-label') ?? '') === expectedAriaLabel);
+                  if (!column) {
+                    return null;
+                  }
+                  const text = (column.innerText || '').trim();
+                  return text.includes(issueKey)
+                    && text.includes(issueSummary)
+                    && text.includes(expectedPriority)
+                    ? { text }
+                    : null;
+                }
+                """,
+                arg={
+                    "issueKey": issue_key,
+                    "issueSummary": issue_summary,
+                    "expectedColumn": expected_column,
+                    "expectedPriority": expected_priority,
+                },
+                timeout_ms=60_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 7 failed: the Board view did not visibly refresh the edited issue "
+                f"into the {expected_column} column with Priority = {expected_priority}.\n"
+                f"Observed Board text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 7 failed: the Board view did not expose an observable refreshed "
+                f"projection for {issue_key}.\n"
+                f"Observed Board text:\n{self.current_body_text()}",
+            )
+        return str(payload["text"])
+
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
 
@@ -143,9 +396,22 @@ class LiveMultiViewRefreshPage:
                 .map((button) => ({{
                   label: button.getAttribute('aria-label'),
                   text: (button.innerText || '').trim(),
+                  tabindex: button.getAttribute('tabindex'),
+                  expanded: button.getAttribute('aria-expanded'),
                 }}))
                 .find((candidate) => predicate({{
-                  getAttribute: (name) => name === 'aria-label' ? candidate.label : null,
+                  getAttribute: (name) => {{
+                    if (name === 'aria-label') {{
+                      return candidate.label;
+                    }}
+                    if (name === 'tabindex') {{
+                      return candidate.tabindex;
+                    }}
+                    if (name === 'aria-expanded') {{
+                      return candidate.expanded;
+                    }}
+                    return null;
+                  }},
                   innerText: candidate.text,
                 }}));
               return match ?? null;
@@ -158,7 +424,118 @@ class LiveMultiViewRefreshPage:
         return EditControlObservation(
             label=str(payload["label"]) if payload["label"] is not None else None,
             text=str(payload["text"]),
+            tabindex=(
+                str(payload["tabindex"]) if payload["tabindex"] is not None else None
+            ),
+            expanded=(
+                str(payload["expanded"]) if payload["expanded"] is not None else None
+            ),
         )
+
+    def _open_focusable_dropdown(
+        self,
+        *,
+        selector: str,
+        has_text: str | None,
+        control_name: str,
+    ) -> tuple[str, ...]:
+        self._session.focus(
+            selector,
+            has_text=has_text,
+            timeout_ms=30_000,
+        )
+        for key in ("Enter", " ", "ArrowUp"):
+            self._session.press_key(key)
+            try:
+                self._session.wait_for_function(
+                    """
+                    () => document.querySelectorAll('flt-semantics[role="menuitem"]').length > 0
+                    """,
+                    timeout_ms=5_000,
+                )
+                active = self._session.active_element()
+                if active.role == "menuitem" and active.accessible_name is not None:
+                    return self._menu_options_from_active_item()
+            except WebAppTimeoutError:
+                continue
+        active = self._session.active_element()
+        raise AssertionError(
+            f"Step failed: opening the {control_name} control did not expose a "
+            "keyboard-selectable menu item in the hosted edit dialog.\n"
+            f"Active element after opening: {active}\n"
+            f"Observed body text:\n{self.current_body_text()}",
+        )
+
+    def _menu_options_from_active_item(self) -> tuple[str, ...]:
+        current = self._active_menu_item_label()
+        options = [current]
+        while True:
+            previous = self._active_menu_item_label()
+            self._session.press_key("ArrowUp")
+            candidate = self._active_menu_item_label()
+            if candidate == previous or candidate in options:
+                break
+            options.insert(0, candidate)
+        while True:
+            previous = self._active_menu_item_label()
+            self._session.press_key("ArrowDown")
+            candidate = self._active_menu_item_label()
+            if candidate == previous or candidate in options:
+                break
+            options.append(candidate)
+        return tuple(options)
+
+    def _select_dropdown_option(
+        self,
+        *,
+        control_name: str,
+        target_label: str,
+        options: tuple[str, ...],
+    ) -> None:
+        if target_label not in options:
+            raise AssertionError(
+                f"Step failed: the {control_name} control did not expose the required "
+                f'visible option "{target_label}".\n'
+                f"Visible options: {list(options)}",
+            )
+        active_label = self._active_menu_item_label()
+        difference = options.index(target_label) - options.index(active_label)
+        key = "ArrowDown" if difference > 0 else "ArrowUp"
+        for _ in range(abs(difference)):
+            self._session.press_key(key)
+        if self._active_menu_item_label() != target_label:
+            raise AssertionError(
+                f"Step failed: keyboard navigation did not move the {control_name} menu "
+                f'focus to "{target_label}".\n'
+                f"Visible options: {list(options)}\n"
+                f"Observed active option: {self._active_menu_item_label()}",
+            )
+        self._session.press_key("Enter")
+        try:
+            self._session.wait_for_function(
+                """
+                () =>
+                  document.querySelectorAll('flt-semantics[role="menuitem"]').length === 0
+                  && (document.body?.innerText ?? '').includes('Edit issue')
+                """,
+                timeout_ms=30_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f"Step failed: selecting {target_label} from the {control_name} menu did "
+                "not return the app to the hosted edit dialog.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+
+    def _active_menu_item_label(self) -> str:
+        active = self._session.active_element()
+        if active.role != "menuitem" or active.accessible_name is None:
+            raise AssertionError(
+                "The hosted dropdown menu lost focus before the test could finish "
+                "navigating its visible options.\n"
+                f"Observed active element: {active}",
+            )
+        return active.accessible_name
 
     def _button_bounds_for_sidebar_label(self, label: str) -> dict[str, float] | None:
         payload = self._session.evaluate(
@@ -195,4 +572,14 @@ class LiveMultiViewRefreshPage:
         return (
             'flt-semantics[role="button"]'
             f'[aria-label="Open {issue_key} {escaped_summary}"]'
+        )
+
+    @staticmethod
+    def _issue_detail_selector(issue_key: str) -> str:
+        escaped = issue_key.replace("\\", "\\\\").replace('"', '\\"')
+        return (
+            'flt-semantics[aria-label*="Issue detail '
+            f'{escaped}"], '
+            'flt-semantics-img[aria-label*="Issue detail '
+            f'{escaped}"]'
         )

@@ -10,7 +10,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from testing.components.pages.live_jql_search_page import LiveJqlSearchPage
 from testing.components.pages.live_multi_view_refresh_page import (
+    EditControlObservation,
     LiveMultiViewRefreshPage,
 )
 from testing.components.services.live_setup_repository_service import (
@@ -29,6 +31,7 @@ SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts401_success.png"
 TARGET_ISSUE_KEY = "DEMO-3"
 TARGET_STATUS_LABEL = "Done"
 TARGET_PRIORITY_LABEL = "Highest"
+EXPECTED_BOARD_COLUMN = "Done"
 
 
 def main() -> None:
@@ -100,6 +103,14 @@ def main() -> None:
                     issue_summary=issue_fixture.summary,
                 )
                 result["edit_dialog_text"] = dialog_text
+                initial_status_control = page.status_control()
+                initial_priority_control = page.priority_control()
+                result["status_control_before_edit"] = _control_payload(
+                    initial_status_control,
+                )
+                result["priority_control_before_edit"] = _control_payload(
+                    initial_priority_control,
+                )
                 _record_step(
                     result,
                     step=3,
@@ -108,37 +119,133 @@ def main() -> None:
                     observed=dialog_text,
                 )
 
-                status_control = page.status_control()
-                priority_control = page.priority_control()
-                result["status_control"] = {
-                    "label": status_control.label,
-                    "text": status_control.text,
-                }
-                result["priority_control"] = {
-                    "label": priority_control.label,
-                    "text": priority_control.text,
-                }
-
-                if status_control.label and "No workflow transitions available." in status_control.label:
-                    raise AssertionError(
-                        "Step 1 failed: the Edit issue surface for DEMO-3 did not expose "
-                        "any workflow transitions, so the scenario could not change the "
-                        "Status to Done before saving.\n"
-                        f"Expected visible status option: {TARGET_STATUS_LABEL}\n"
-                        f"Observed status control label: {status_control.label}\n"
-                        f"Observed priority control text: {priority_control.text}\n"
-                        f"Observed dialog text:\n{dialog_text}",
-                    )
-
-                page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
-                result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
+                updated_priority_control = page.change_priority(TARGET_PRIORITY_LABEL)
+                result["priority_control_after_edit"] = _control_payload(
+                    updated_priority_control,
+                )
                 _record_step(
                     result,
                     step=4,
                     status="passed",
-                    action="Verify the edit surface exposes both the current priority and a workflow transition control.",
-                    observed=dialog_text,
+                    action="Change Priority to Highest in the live Edit issue dialog.",
+                    observed=page.current_body_text(),
                 )
+
+                updated_status_control = page.change_status_transition(
+                    TARGET_STATUS_LABEL,
+                )
+                result["status_control_after_edit"] = _control_payload(
+                    updated_status_control,
+                )
+                _record_step(
+                    result,
+                    step=5,
+                    status="passed",
+                    action="Change Status to Done in the live Edit issue dialog.",
+                    observed=page.current_body_text(),
+                )
+
+                post_save_detail_text = page.save_issue_edits(
+                    issue_key=issue_fixture.key,
+                    issue_summary=issue_fixture.summary,
+                )
+                result["post_save_detail_text"] = post_save_detail_text
+                detail_projection_text = page.wait_for_issue_detail_state(
+                    issue_key=issue_fixture.key,
+                    issue_summary=issue_fixture.summary,
+                    expected_status=TARGET_STATUS_LABEL,
+                    expected_priority=TARGET_PRIORITY_LABEL,
+                    step_number=6,
+                )
+                result["detail_projection_text"] = detail_projection_text
+                _record_step(
+                    result,
+                    step=6,
+                    status="passed",
+                    action="Save the edit and wait for the issue detail to refresh.",
+                    observed=detail_projection_text,
+                )
+
+                board_projection_text = page.wait_for_board_projection(
+                    issue_key=issue_fixture.key,
+                    issue_summary=issue_fixture.summary,
+                    expected_column=EXPECTED_BOARD_COLUMN,
+                    expected_priority=TARGET_PRIORITY_LABEL,
+                )
+                result["board_projection_text"] = board_projection_text
+                _record_step(
+                    result,
+                    step=7,
+                    status="passed",
+                    action="Verify Board refreshes DEMO-3 into Done with Highest priority.",
+                    observed=board_projection_text,
+                )
+
+                page.navigate_to_section("Hierarchy")
+                hierarchy_body = page.open_issue_from_current_section(
+                    issue_key=issue_fixture.key,
+                    issue_summary=issue_fixture.summary,
+                )
+                hierarchy_detail_text = page.wait_for_issue_detail_state(
+                    issue_key=issue_fixture.key,
+                    issue_summary=issue_fixture.summary,
+                    expected_status=TARGET_STATUS_LABEL,
+                    expected_priority=TARGET_PRIORITY_LABEL,
+                    step_number=8,
+                )
+                result["hierarchy_body_text"] = hierarchy_body
+                result["hierarchy_detail_text"] = hierarchy_detail_text
+                _record_step(
+                    result,
+                    step=8,
+                    status="passed",
+                    action="Verify Hierarchy reopens DEMO-3 with the refreshed status and priority.",
+                    observed=hierarchy_detail_text,
+                )
+
+                search_page = LiveJqlSearchPage(tracker_page)
+                search_observation = search_page.search(query=issue_fixture.key)
+                result["jql_search_observation"] = {
+                    "query": search_observation.query,
+                    "visible_query": search_observation.visible_query,
+                    "count_summary": search_observation.count_summary,
+                    "issue_result_labels": list(search_observation.issue_labels),
+                    "body_text": search_observation.body_text,
+                }
+                if (
+                    search_observation.count_summary != "1 issue"
+                    or f"Open {issue_fixture.key} {issue_fixture.summary}"
+                    not in search_observation.issue_labels
+                ):
+                    raise AssertionError(
+                        "Step 9 failed: JQL Search did not visibly refresh down to the "
+                        "edited DEMO-3 issue after saving.\n"
+                        f"Observed count summary: {search_observation.count_summary}\n"
+                        f"Observed result labels: {list(search_observation.issue_labels)}\n"
+                        f"Observed JQL Search text:\n{search_observation.body_text}",
+                    )
+                page.open_issue_from_current_section(
+                    issue_key=issue_fixture.key,
+                    issue_summary=issue_fixture.summary,
+                )
+                jql_detail_text = page.wait_for_issue_detail_state(
+                    issue_key=issue_fixture.key,
+                    issue_summary=issue_fixture.summary,
+                    expected_status=TARGET_STATUS_LABEL,
+                    expected_priority=TARGET_PRIORITY_LABEL,
+                    step_number=9,
+                )
+                result["jql_detail_text"] = jql_detail_text
+                _record_step(
+                    result,
+                    step=9,
+                    status="passed",
+                    action="Verify JQL Search can reopen DEMO-3 with the refreshed status and priority.",
+                    observed=jql_detail_text,
+                )
+
+                page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
+                result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
             except Exception:
                 page.screenshot(str(SCREENSHOT_PATH))
                 result["screenshot"] = str(SCREENSHOT_PATH)
@@ -158,9 +265,9 @@ def main() -> None:
     else:
         result["status"] = "passed"
         result["summary"] = (
-            "Verified that the hosted edit surface opened for DEMO-3 and exposed "
-            "the visible controls needed to change status and priority for the "
-            "multi-view refresh scenario."
+            "Verified the live hosted edit flow for DEMO-3 end-to-end: Priority "
+            "changed to Highest, Status changed to Done, and the refreshed issue "
+            "state was observed from issue detail, Board, Hierarchy, and JQL Search."
         )
         _write_result_if_requested(result)
         print(json.dumps(result, indent=2))
@@ -201,6 +308,15 @@ def _record_step(
             "observed": observed,
         },
     )
+
+
+def _control_payload(control: EditControlObservation) -> dict[str, object]:
+    return {
+        "label": control.label,
+        "text": control.text,
+        "tabindex": control.tabindex,
+        "expanded": control.expanded,
+    }
 
 
 def _write_result_if_requested(payload: dict[str, object]) -> None:
