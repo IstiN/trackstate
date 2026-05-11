@@ -5,6 +5,67 @@ import '../testing/fixtures/create_issue_accessibility_screen_fixture.dart';
 
 void main() {
   testWidgets(
+    'create issue surface keeps resizing cleanly through intermediate breakpoints',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      CreateIssueAccessibilityScreenHandle? screen;
+
+      const requiredTexts = <String>[
+        'Create issue',
+        'Summary',
+        'Description',
+        'Save',
+        'Cancel',
+      ];
+      const resizePath = <({double width, double height})>[
+        (width: 1440, height: 960),
+        (width: 1280, height: 960),
+        (width: 1120, height: 960),
+        (width: 960, height: 900),
+        (width: 840, height: 900),
+        (width: 720, height: 844),
+        (width: 600, height: 844),
+        (width: 520, height: 844),
+        (width: 460, height: 844),
+        (width: 390, height: 844),
+      ];
+
+      try {
+        screen = await launchCreateIssueAccessibilityFixture(tester);
+
+        for (final viewport in resizePath) {
+          await screen.resizeToViewport(
+            width: viewport.width,
+            height: viewport.height,
+          );
+
+          expect(
+            _drainFrameworkExceptions(tester),
+            isEmpty,
+            reason:
+                'Unexpected framework exceptions while resizing to '
+                '${viewport.width.toStringAsFixed(0)}x'
+                '${viewport.height.toStringAsFixed(0)}.',
+          );
+          for (final text in requiredTexts) {
+            expect(
+              screen.showsText(text),
+              isTrue,
+              reason:
+                  'Expected "$text" to remain visible at '
+                  '${viewport.width.toStringAsFixed(0)}x'
+                  '${viewport.height.toStringAsFixed(0)}.',
+            );
+          }
+        }
+      } finally {
+        await screen?.dispose();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'create issue surface docks on desktop and expands on compact resize',
     (tester) async {
       final semantics = tester.ensureSemantics();
@@ -35,4 +96,13 @@ void main() {
       }
     },
   );
+}
+
+List<String> _drainFrameworkExceptions(WidgetTester tester) {
+  final messages = <String>[];
+  Object? exception;
+  while ((exception = tester.takeException()) != null) {
+    messages.add(exception.toString());
+  }
+  return messages;
 }

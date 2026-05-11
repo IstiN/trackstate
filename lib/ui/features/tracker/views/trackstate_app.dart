@@ -536,149 +536,158 @@ class _TopBar extends StatelessWidget {
           );
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 12, 12, 6),
-      child: Row(
-        children: [
-          if (compact) ...[
-            TrackStateIcon(
-              TrackStateIconGlyph.logo,
-              color: colors.secondary,
-              size: 32,
-              semanticLabel: l10n.appTitle,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                l10n.appTitle,
-                style: Theme.of(context).textTheme.titleMedium,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ] else ...[
-            _SyncPill(label: l10n.syncStatus),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Semantics(
-                label: l10n.searchIssues,
-                textField: true,
-                child: TextField(
-                  controller: TextEditingController(text: viewModel.jql),
-                  onSubmitted: viewModel.updateQuery,
-                  decoration: InputDecoration(
-                    prefixIcon: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: TrackStateIcon(
-                        TrackStateIconGlyph.search,
-                        color: colors.muted,
-                        semanticLabel: l10n.searchIssues,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final condensedDesktop = !compact && constraints.maxWidth < 1080;
+          final iconOnlyActions = compact || condensedDesktop;
+          final actionGap = iconOnlyActions ? 8.0 : 12.0;
+          return Row(
+            children: [
+              if (compact) ...[
+                TrackStateIcon(
+                  TrackStateIconGlyph.logo,
+                  color: colors.secondary,
+                  size: 32,
+                  semanticLabel: l10n.appTitle,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    l10n.appTitle,
+                    style: Theme.of(context).textTheme.titleMedium,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ] else ...[
+                _SyncPill(label: l10n.syncStatus),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Semantics(
+                    label: l10n.searchIssues,
+                    textField: true,
+                    child: TextField(
+                      controller: TextEditingController(text: viewModel.jql),
+                      onSubmitted: viewModel.updateQuery,
+                      decoration: InputDecoration(
+                        prefixIcon: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: TrackStateIcon(
+                            TrackStateIconGlyph.search,
+                            color: colors.muted,
+                            semanticLabel: l10n.searchIssues,
+                          ),
+                        ),
+                        hintText: l10n.jqlPlaceholder,
                       ),
                     ),
-                    hintText: l10n.jqlPlaceholder,
+                  ),
+                ),
+              ],
+              SizedBox(width: actionGap),
+              if (iconOnlyActions)
+                _IconButtonSurface(
+                  label: l10n.createIssue,
+                  glyph: TrackStateIconGlyph.plus,
+                  onPressed: openCreateIssue,
+                )
+              else
+                _PrimaryButton(
+                  label: l10n.createIssue,
+                  icon: TrackStateIconGlyph.plus,
+                  onPressed: openCreateIssue,
+                ),
+              const SizedBox(width: 8),
+              if (iconOnlyActions)
+                _IconButtonSurface(
+                  label: repositoryAccessLabel,
+                  glyph: TrackStateIconGlyph.gitBranch,
+                  onPressed: viewModel.isSaving
+                      ? null
+                      : () => _showRepositoryAccessDialog(context, viewModel),
+                )
+              else
+                _PrimaryButton(
+                  label: repositoryAccessLabel,
+                  icon: TrackStateIconGlyph.gitBranch,
+                  onPressed: viewModel.isSaving
+                      ? null
+                      : () => _showRepositoryAccessDialog(context, viewModel),
+                ),
+              const SizedBox(width: 8),
+              _IconButtonSurface(
+                label: viewModel.themePreference == ThemePreference.dark
+                    ? l10n.lightTheme
+                    : l10n.darkTheme,
+                glyph: viewModel.themePreference == ThemePreference.dark
+                    ? TrackStateIconGlyph.sun
+                    : TrackStateIconGlyph.moon,
+                onPressed: viewModel.toggleTheme,
+              ),
+              const SizedBox(width: 8),
+              if (_hasVisibleProfileIdentity(viewModel) &&
+                  !compact &&
+                  !condensedDesktop) ...[
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 240),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Semantics(
+                        container: true,
+                        label: _profileDisplayName(viewModel),
+                        child: ExcludeSemantics(
+                          child: Text(
+                            _profileDisplayName(viewModel),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  color: colors.text,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ),
+                      ),
+                      if (_profileLogin(viewModel) case final login?)
+                        Semantics(
+                          container: true,
+                          label: login,
+                          child: ExcludeSemantics(
+                            child: Text(
+                              login,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: colors.muted),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Semantics(
+                label: _profileDisplayName(viewModel),
+                image: true,
+                child: ExcludeSemantics(
+                  child: CircleAvatar(
+                    radius: 18,
+                    backgroundColor: colors.primarySoft,
+                    child: Text(
+                      _profileInitials(l10n, viewModel),
+                      style: TextStyle(
+                        color: colors.text,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
-          SizedBox(width: compact ? 8 : 12),
-          if (compact)
-            _IconButtonSurface(
-              label: l10n.createIssue,
-              glyph: TrackStateIconGlyph.plus,
-              onPressed: openCreateIssue,
-            )
-          else
-            _PrimaryButton(
-              label: l10n.createIssue,
-              icon: TrackStateIconGlyph.plus,
-              onPressed: openCreateIssue,
-            ),
-          const SizedBox(width: 8),
-          if (compact)
-            _IconButtonSurface(
-              label: repositoryAccessLabel,
-              glyph: TrackStateIconGlyph.gitBranch,
-              onPressed: viewModel.isSaving
-                  ? null
-                  : () => _showRepositoryAccessDialog(context, viewModel),
-            )
-          else
-            _PrimaryButton(
-              label: repositoryAccessLabel,
-              icon: TrackStateIconGlyph.gitBranch,
-              onPressed: viewModel.isSaving
-                  ? null
-                  : () => _showRepositoryAccessDialog(context, viewModel),
-            ),
-          const SizedBox(width: 8),
-          _IconButtonSurface(
-            label: viewModel.themePreference == ThemePreference.dark
-                ? l10n.lightTheme
-                : l10n.darkTheme,
-            glyph: viewModel.themePreference == ThemePreference.dark
-                ? TrackStateIconGlyph.sun
-                : TrackStateIconGlyph.moon,
-            onPressed: viewModel.toggleTheme,
-          ),
-          const SizedBox(width: 8),
-          if (_hasVisibleProfileIdentity(viewModel) && !compact) ...[
-            ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: compact ? 160 : 240),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Semantics(
-                    container: true,
-                    label: _profileDisplayName(viewModel),
-                    child: ExcludeSemantics(
-                      child: Text(
-                        _profileDisplayName(viewModel),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: colors.text,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (_profileLogin(viewModel) case final login?)
-                    Semantics(
-                      container: true,
-                      label: login,
-                      child: ExcludeSemantics(
-                        child: Text(
-                          login,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(
-                            context,
-                          ).textTheme.bodySmall?.copyWith(color: colors.muted),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-          ],
-          Semantics(
-            label: _profileDisplayName(viewModel),
-            image: true,
-            child: ExcludeSemantics(
-              child: CircleAvatar(
-                radius: 18,
-                backgroundColor: colors.primarySoft,
-                child: Text(
-                  _profileInitials(l10n, viewModel),
-                  style: TextStyle(
-                    color: colors.text,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }
@@ -1046,7 +1055,6 @@ class _Dashboard extends StatelessWidget {
         _ScreenHeading(title: l10n.dashboard, subtitle: l10n.appTagline),
         LayoutBuilder(
           builder: (context, constraints) {
-            final compact = constraints.maxWidth < 900;
             final cards = [
               _MetricCard(
                 label: l10n.openIssues,
@@ -1073,14 +1081,17 @@ class _Dashboard extends StatelessWidget {
                 tone: MetricTone.secondary,
               ),
             ];
-            return GridView.count(
+            return GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: compact ? 2 : 4,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: compact ? 1.05 : 1.75,
-              children: cards,
+              gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: constraints.maxWidth < 640 ? 420 : 280,
+                mainAxisExtent: 152,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+              ),
+              itemCount: cards.length,
+              itemBuilder: (context, index) => cards[index],
             );
           },
         ),
@@ -1910,12 +1921,7 @@ class _IssueDetailState extends State<_IssueDetail> {
           ),
           const SizedBox(height: 16),
           if (_selectedCollaborationTab == 0)
-            _detailTabContent(
-              context,
-              issue: issue,
-              l10n: l10n,
-              colors: colors,
-            )
+            _detailTabContent(context, issue: issue, l10n: l10n, colors: colors)
           else if (_selectedCollaborationTab == 1)
             _CommentsTab(
               issue: issue,
@@ -1981,11 +1987,7 @@ class _IssueDetailActionButton extends StatelessWidget {
             ),
             child: child,
           );
-    return Semantics(
-      button: true,
-      label: label,
-      child: button,
-    );
+    return Semantics(button: true, label: label, child: button);
   }
 }
 
@@ -2010,10 +2012,8 @@ class _IssueList extends StatelessWidget {
             child: Shortcuts(
               shortcuts: const <ShortcutActivator, Intent>{
                 SingleActivator(LogicalKeyboardKey.tab): NextFocusIntent(),
-                SingleActivator(
-                  LogicalKeyboardKey.tab,
-                  shift: true,
-                ): PreviousFocusIntent(),
+                SingleActivator(LogicalKeyboardKey.tab, shift: true):
+                    PreviousFocusIntent(),
               },
               child: TextField(
                 controller: TextEditingController(text: viewModel.jql),
@@ -3326,7 +3326,9 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                           child: TextField(
                             controller: _summaryController,
                             enabled: !widget.viewModel.isSaving,
-                            decoration: InputDecoration(labelText: summaryLabel),
+                            decoration: InputDecoration(
+                              labelText: summaryLabel,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -3446,7 +3448,9 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                           child: TextField(
                             controller: _assigneeController,
                             enabled: !widget.viewModel.isSaving,
-                            decoration: InputDecoration(labelText: assigneeLabel),
+                            decoration: InputDecoration(
+                              labelText: assigneeLabel,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -3477,7 +3481,10 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                               maxLines: field.type == 'markdown' ? null : 1,
                               enabled: !widget.viewModel.isSaving,
                               decoration: InputDecoration(
-                                labelText: _createIssueFieldLabel(project, field),
+                                labelText: _createIssueFieldLabel(
+                                  project,
+                                  field,
+                                ),
                                 alignLabelWithHint: field.type == 'markdown',
                               ),
                             ),
@@ -3833,7 +3840,9 @@ class _IssueDetailTabChip extends StatelessWidget {
             decoration: BoxDecoration(
               color: selected ? colors.primary : colors.surfaceAlt,
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: selected ? colors.primary : colors.border),
+              border: Border.all(
+                color: selected ? colors.primary : colors.border,
+              ),
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -3953,10 +3962,7 @@ class _AttachmentsTab extends StatelessWidget {
 }
 
 class _AttachmentRow extends StatelessWidget {
-  const _AttachmentRow({
-    required this.attachment,
-    required this.onDownload,
-  });
+  const _AttachmentRow({required this.attachment, required this.onDownload});
 
   final IssueAttachment attachment;
   final ValueChanged<IssueAttachment> onDownload;
@@ -4027,7 +4033,10 @@ class _AttachmentRow extends StatelessWidget {
                     iconSize: 18,
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
+                    ),
                     icon: TrackStateIcon(
                       TrackStateIconGlyph.attachment,
                       size: 18,
@@ -4062,10 +4071,7 @@ class _HistoryTab extends StatelessWidget {
       return Text(l10n.noResults, style: TextStyle(color: colors.muted));
     }
     return Column(
-      children: [
-        for (final entry in entries)
-          _HistoryRow(entry: entry),
-      ],
+      children: [for (final entry in entries) _HistoryRow(entry: entry)],
     );
   }
 }
@@ -4118,7 +4124,8 @@ class _HistoryRow extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.only(top: 6),
                         child: Text(
-                          '${entry.before ?? ''} -> ${entry.after ?? ''}'.trim(),
+                          '${entry.before ?? ''} -> ${entry.after ?? ''}'
+                              .trim(),
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ),
