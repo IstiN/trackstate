@@ -218,6 +218,20 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> openHierarchyChildCreateForIssue(String issueKey) {
+    return _tapControl(
+      label: 'Create child issue for $issueKey',
+      semanticsMatch: find.bySemanticsLabel(
+        RegExp('^Create child issue for ${RegExp.escape(issueKey)}\$'),
+      ),
+      textMatch: find.byWidgetPredicate(
+        (_) => false,
+        description: 'no text fallback for hierarchy child-create action',
+      ),
+    );
+  }
+
+  @override
   Future<void> switchToLocalGitInSettings({
     required String repositoryPath,
     required String writeBranch,
