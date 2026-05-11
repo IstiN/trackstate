@@ -188,7 +188,9 @@ class ProviderBackedTrackStateRepository
         'Connect a repository session with write access first.',
       );
     }
-    _projectSettingsValidationService.validate(settings);
+    final normalizedSettings = _projectSettingsValidationService
+        .normalizeForPersistence(settings);
+    _projectSettingsValidationService.validate(normalizedSettings);
     await _provider.ensureCleanWorktree();
 
     final writeBranch = await _provider.resolveWriteBranch();
@@ -218,7 +220,7 @@ class ProviderBackedTrackStateRepository
       RepositoryTextFileChange(
         path: _joinPath(configRoot, 'statuses.json'),
         content:
-            '${jsonEncode(_settingsStatusesJson(settings.statusDefinitions))}\n',
+            '${jsonEncode(_settingsStatusesJson(normalizedSettings.statusDefinitions))}\n',
         expectedRevision: await _existingRevision(
           path: _joinPath(configRoot, 'statuses.json'),
           ref: writeBranch,
@@ -228,7 +230,7 @@ class ProviderBackedTrackStateRepository
       RepositoryTextFileChange(
         path: _joinPath(configRoot, 'issue-types.json'),
         content:
-            '${jsonEncode(_settingsIssueTypesJson(settings.issueTypeDefinitions))}\n',
+            '${jsonEncode(_settingsIssueTypesJson(normalizedSettings.issueTypeDefinitions))}\n',
         expectedRevision: await _existingRevision(
           path: _joinPath(configRoot, 'issue-types.json'),
           ref: writeBranch,
@@ -238,7 +240,7 @@ class ProviderBackedTrackStateRepository
       RepositoryTextFileChange(
         path: _joinPath(configRoot, 'fields.json'),
         content:
-            '${jsonEncode(_settingsFieldsJson(settings.fieldDefinitions))}\n',
+            '${jsonEncode(_settingsFieldsJson(normalizedSettings.fieldDefinitions))}\n',
         expectedRevision: await _existingRevision(
           path: _joinPath(configRoot, 'fields.json'),
           ref: writeBranch,
@@ -248,7 +250,7 @@ class ProviderBackedTrackStateRepository
       RepositoryTextFileChange(
         path: _joinPath(configRoot, 'workflows.json'),
         content:
-            '${jsonEncode(_settingsWorkflowsJson(settings.workflowDefinitions))}\n',
+            '${jsonEncode(_settingsWorkflowsJson(normalizedSettings.workflowDefinitions))}\n',
         expectedRevision: await _existingRevision(
           path: _joinPath(configRoot, 'workflows.json'),
           ref: writeBranch,

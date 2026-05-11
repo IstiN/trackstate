@@ -4,6 +4,9 @@ import '../providers/trackstate_provider.dart';
 class ProjectSettingsValidationService {
   const ProjectSettingsValidationService();
 
+  static const String legacyDefaultWorkflowId = 'default';
+  static const String legacyDefaultWorkflowName = 'Default Workflow';
+
   static const Set<String> reservedFieldIds = {
     'summary',
     'description',
@@ -24,6 +27,42 @@ class ProjectSettingsValidationService {
     'storyPoints': 'number',
   };
 
+  ProjectSettingsCatalog normalizeForPersistence(
+    ProjectSettingsCatalog settings,
+  ) {
+    final workflows = settings.workflowDefinitions.isNotEmpty
+        ? List<TrackStateWorkflowDefinition>.from(
+            settings.workflowDefinitions,
+            growable: false,
+          )
+        : [
+            TrackStateWorkflowDefinition(
+              id: legacyDefaultWorkflowId,
+              name: legacyDefaultWorkflowName,
+              statusIds: [
+                for (final status in settings.statusDefinitions)
+                  if (status.id.trim().isNotEmpty) status.id.trim(),
+              ],
+            ),
+          ];
+    final fallbackWorkflowId =
+        workflows.any((workflow) => workflow.id == legacyDefaultWorkflowId)
+        ? legacyDefaultWorkflowId
+        : workflows.first.id;
+    return settings.copyWith(
+      workflowDefinitions: workflows,
+      issueTypeDefinitions: [
+        for (final issueType in settings.issueTypeDefinitions)
+          issueType.copyWith(
+            workflowId: _normalizedWorkflowId(
+              issueType.workflowId,
+              fallbackWorkflowId: fallbackWorkflowId,
+            ),
+          ),
+      ],
+    );
+  }
+
   void validate(ProjectSettingsCatalog settings) {
     _validateStatuses(settings.statusDefinitions);
     _validateWorkflows(
@@ -38,6 +77,17 @@ class ProjectSettingsValidationService {
       issueTypes: settings.issueTypeDefinitions,
       fields: settings.fieldDefinitions,
     );
+  }
+
+  String _normalizedWorkflowId(
+    String? workflowId, {
+    required String fallbackWorkflowId,
+  }) {
+    final trimmedWorkflowId = workflowId?.trim();
+    if (trimmedWorkflowId == null || trimmedWorkflowId.isEmpty) {
+      return fallbackWorkflowId;
+    }
+    return trimmedWorkflowId;
   }
 
   void _validateStatuses(List<TrackStateConfigEntry> statuses) {

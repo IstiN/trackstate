@@ -6,6 +6,7 @@ import 'package:trackstate/data/providers/local/local_git_trackstate_provider.da
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/project_settings_validation_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 import '../testing/fixtures/repositories/ts163_archive_provider_failure_fixture.dart';
@@ -632,6 +633,158 @@ void main() {
       contains('"bug-workflow"'),
     );
   });
+
+  test(
+    'local repository migrates legacy settings without workflows during save',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      await _writeFile(
+        repo,
+        'DEMO/config/statuses.json',
+        '[{"id":"todo","name":"To Do","category":"new"},'
+            '{"id":"done","name":"Done","category":"done"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/issue-types.json',
+        '[{"id":"story","name":"Story"},{"id":"bug","name":"Bug"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/fields.json',
+        '[{"id":"summary","name":"Summary","type":"string","required":true},'
+            '{"id":"description","name":"Description","type":"markdown","required":false},'
+            '{"id":"acceptanceCriteria","name":"Acceptance Criteria","type":"markdown","required":false},'
+            '{"id":"priority","name":"Priority","type":"option","required":false,"options":[{"id":"medium","name":"Medium"}]},'
+            '{"id":"assignee","name":"Assignee","type":"user","required":false},'
+            '{"id":"labels","name":"Labels","type":"array","required":false},'
+            '{"id":"storyPoints","name":"Story Points","type":"number","required":false}]\n',
+      );
+      await _git(repo.path, ['add', 'DEMO/config']);
+      await _git(repo.path, ['commit', '-m', 'Seed legacy settings fixture']);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+
+      expect(snapshot.project.workflowDefinitions, isEmpty);
+      expect(
+        snapshot.project.issueTypeDefinitions.every(
+          (issueType) => issueType.workflowId == null,
+        ),
+        isTrue,
+      );
+
+      final updatedSnapshot = await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog.copyWith(
+          statusDefinitions: [
+            ...snapshot.project.statusDefinitions,
+            const TrackStateConfigEntry(
+              id: 'blocked',
+              name: 'Blocked',
+              category: 'indeterminate',
+            ),
+          ],
+        ),
+      );
+
+      expect(
+        updatedSnapshot.project.workflowDefinitions.single.id,
+        ProjectSettingsValidationService.legacyDefaultWorkflowId,
+      );
+      expect(updatedSnapshot.project.workflowDefinitions.single.statusIds, [
+        'todo',
+        'done',
+        'blocked',
+      ]);
+      expect(
+        updatedSnapshot.project.issueTypeDefinitions
+            .map((issueType) => issueType.workflowId)
+            .toSet(),
+        {ProjectSettingsValidationService.legacyDefaultWorkflowId},
+      );
+      expect(
+        File('${repo.path}/DEMO/config/issue-types.json').readAsStringSync(),
+        contains('"workflow":"default"'),
+      );
+      expect(
+        File('${repo.path}/DEMO/config/workflows.json').readAsStringSync(),
+        contains('"default"'),
+      );
+    },
+  );
+
+  test(
+    'local repository assigns legacy issue types to the persisted default workflow',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      await _writeFile(
+        repo,
+        'DEMO/config/statuses.json',
+        '[{"id":"todo","name":"To Do","category":"new"},'
+            '{"id":"done","name":"Done","category":"done"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/issue-types.json',
+        '[{"id":"story","name":"Story"},{"id":"bug","name":"Bug"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/fields.json',
+        '[{"id":"summary","name":"Summary","type":"string","required":true},'
+            '{"id":"description","name":"Description","type":"markdown","required":false},'
+            '{"id":"acceptanceCriteria","name":"Acceptance Criteria","type":"markdown","required":false},'
+            '{"id":"priority","name":"Priority","type":"option","required":false,"options":[{"id":"medium","name":"Medium"}]},'
+            '{"id":"assignee","name":"Assignee","type":"user","required":false},'
+            '{"id":"labels","name":"Labels","type":"array","required":false},'
+            '{"id":"storyPoints","name":"Story Points","type":"number","required":false}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/workflows.json',
+        '{"default":{"name":"Default Workflow","statuses":["todo","done"],"transitions":[{"id":"finish","name":"Finish","from":"todo","to":"done"}]}}\n',
+      );
+      await _git(repo.path, ['add', 'DEMO/config']);
+      await _git(repo.path, [
+        'commit',
+        '-m',
+        'Seed partial workflow migration fixture',
+      ]);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+
+      expect(
+        snapshot.project.workflowDefinitions.map((workflow) => workflow.id),
+        ['default'],
+      );
+      expect(
+        snapshot.project.issueTypeDefinitions.every(
+          (issueType) => issueType.workflowId == null,
+        ),
+        isTrue,
+      );
+
+      final updatedSnapshot = await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog,
+      );
+
+      expect(
+        updatedSnapshot.project.issueTypeDefinitions
+            .map((issueType) => issueType.workflowId)
+            .toSet(),
+        {ProjectSettingsValidationService.legacyDefaultWorkflowId},
+      );
+      expect(
+        File('${repo.path}/DEMO/config/issue-types.json').readAsStringSync(),
+        contains('"workflow":"default"'),
+      );
+    },
+  );
 
   test('local repository rejects invalid project settings writes', () async {
     final repo = await _createLocalRepository();
