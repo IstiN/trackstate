@@ -8,6 +8,7 @@ from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from testing.core.interfaces.web_app_session import (
+    ElementBoundingBox,
     WaitMatch,
     WaitState,
     WebAppSession,
@@ -211,6 +212,24 @@ class PlaywrightWebAppSession(WebAppSession):
             ) from error
         return self.body_text()
 
+    def wait_for_text_absent(
+        self,
+        text: str,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> str:
+        try:
+            self._page.wait_for_function(
+                "(expectedText) => !(document.body?.innerText ?? '').includes(expectedText)",
+                arg=text,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for text "{text}" to disappear.',
+            ) from error
+        return self.body_text()
+
     def wait_for_any_text(
         self,
         texts: Sequence[str],
@@ -241,6 +260,80 @@ class PlaywrightWebAppSession(WebAppSession):
 
     def screenshot(self, path: str) -> None:
         self._page.screenshot(path=path, full_page=True)
+
+    def bounding_box(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> ElementBoundingBox:
+        try:
+            self._page.wait_for_function(
+                """
+                ({ selector, hasText, index }) => {
+                    const matches = Array.from(document.querySelectorAll(selector)).filter(
+                      (element) => {
+                        if (!hasText) {
+                          return true;
+                        }
+                        const text = element.innerText ?? element.textContent ?? '';
+                        const ariaLabel = element.getAttribute('aria-label') ?? '';
+                        return text.includes(hasText) || ariaLabel.includes(hasText);
+                      }
+                    );
+                    return matches.length > index;
+                }
+                """,
+                arg={
+                    "selector": selector,
+                    "hasText": has_text,
+                    "index": index,
+                },
+                timeout=timeout_ms,
+            )
+            payload = self._page.evaluate(
+                """
+                ({ selector, hasText, index }) => {
+                    const matches = Array.from(document.querySelectorAll(selector)).filter(
+                      (element) => {
+                        if (!hasText) {
+                          return true;
+                        }
+                        const text = element.innerText ?? element.textContent ?? '';
+                        const ariaLabel = element.getAttribute('aria-label') ?? '';
+                        return text.includes(hasText) || ariaLabel.includes(hasText);
+                      }
+                    );
+                    const rect = matches[index].getBoundingClientRect();
+                    return {
+                      x: rect.x,
+                      y: rect.y,
+                      width: rect.width,
+                      height: rect.height,
+                    };
+                }
+                """,
+                arg={
+                    "selector": selector,
+                    "hasText": has_text,
+                    "index": index,
+                },
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out locating bounding box for selector "{selector}".',
+            ) from error
+        return ElementBoundingBox(
+            x=float(payload["x"]),
+            y=float(payload["y"]),
+            width=float(payload["width"]),
+            height=float(payload["height"]),
+        )
+
+    def mouse_click(self, x: float, y: float, *, delay_ms: int = 0) -> None:
+        self._page.mouse.click(x, y, delay=delay_ms)
 
     def _locator(
         self,

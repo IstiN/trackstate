@@ -8,6 +8,7 @@ class LiveIssueDetailCollaborationPage:
     _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
+    _search_input_selector = 'input[aria-label="Search issues"]'
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
         self._tracker_page = tracker_page
@@ -75,21 +76,72 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=60_000,
         )
 
+    def dismiss_connection_banner(self) -> None:
+        if self._session.count(self._button_selector, has_text="Close") == 0:
+            return
+        self._session.click(self._button_selector, has_text="Close", timeout_ms=30_000)
+
+    def search_and_select_issue(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+        query: str | None = None,
+    ) -> None:
+        self.open_jql_search()
+        search_query = query or issue_key
+        self._session.fill(
+            self._search_input_selector,
+            search_query,
+            index=1,
+            timeout_ms=30_000,
+        )
+        self._session.press(
+            self._search_input_selector,
+            "Enter",
+            index=1,
+            timeout_ms=30_000,
+        )
+        self._session.wait_for_input_value(
+            self._search_input_selector,
+            search_query,
+            index=1,
+            timeout_ms=30_000,
+        )
+        self._session.wait_for_any_text(["1 issue", "No issues"], timeout_ms=60_000)
+        issue_row = self._session.bounding_box(
+            self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary),
+            timeout_ms=30_000,
+        )
+        self._session.mouse_click(
+            issue_row.x + (issue_row.width / 2),
+            issue_row.y + (issue_row.height / 2),
+        )
+
     def issue_detail_count(self, issue_key: str) -> int:
         return self._session.count(self._issue_detail_selector(issue_key))
 
     def tab_button_count(self, label: str) -> int:
-        return self._session.count(self._tab_selector(label))
+        return self._session.count(self._button_selector, has_text=label)
 
     def open_collaboration_tab(self, label: str) -> None:
-        selector = self._tab_selector(label)
-        self._session.wait_for_selector(selector, timeout_ms=30_000)
-        self._session.click(selector, timeout_ms=30_000)
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text=label,
+            timeout_ms=30_000,
+        )
+        self._session.click(self._button_selector, has_text=label, timeout_ms=30_000)
 
     def text_fragment_count(self, fragment: str) -> int:
         return self._session.count(
             f'flt-semantics[aria-label*="{self._escape(fragment)}"]',
         )
+
+    def wait_for_text(self, text: str, *, timeout_ms: int = 60_000) -> str:
+        return self._session.wait_for_text(text, timeout_ms=timeout_ms)
+
+    def wait_for_text_absent(self, text: str, *, timeout_ms: int = 60_000) -> str:
+        return self._session.wait_for_text_absent(text, timeout_ms=timeout_ms)
 
     def button_label_fragment_count(self, fragment: str) -> int:
         return self._session.count(
@@ -120,13 +172,6 @@ class LiveIssueDetailCollaborationPage:
     @staticmethod
     def _issue_detail_selector(issue_key: str) -> str:
         return f'flt-semantics[aria-label*="Issue detail {LiveIssueDetailCollaborationPage._escape(issue_key)}"]'
-
-    @staticmethod
-    def _tab_selector(label: str) -> str:
-        return (
-            'flt-semantics[role="button"]'
-            f'[aria-label="{LiveIssueDetailCollaborationPage._escape(label)}"]'
-        )
 
     @staticmethod
     def _escape(value: str) -> str:
