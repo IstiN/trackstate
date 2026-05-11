@@ -162,6 +162,37 @@ class PlaywrightWebAppSession(WebAppSession):
     def body_text(self) -> str:
         return self._page.locator("body").inner_text()
 
+    def wait_for_input_value(
+        self,
+        selector: str,
+        expected_value: str,
+        *,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            self._page.wait_for_function(
+                """
+                ({ selector, expectedValue, index }) => {
+                    const elements = document.querySelectorAll(selector);
+                    const element = elements[index];
+                    return !!element && 'value' in element && element.value === expectedValue;
+                }
+                """,
+                arg={
+                    "selector": selector,
+                    "expectedValue": expected_value,
+                    "index": index,
+                },
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for selector "{selector}" to reach the input value '
+                f'"{expected_value}".',
+            ) from error
+        return self.read_value(selector, index=index, timeout_ms=timeout_ms)
+
     def wait_for_text(
         self,
         text: str,
