@@ -823,7 +823,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       return false;
     }
     await tester.ensureVisible(target.first);
-    if (label == 'Create' || label == 'Save') {
+    if (label == 'Create' || label == 'Save' || label == 'Post comment') {
       await tester.runAsync(() async {
         await tester.tap(target.first, warnIfMissed: false);
         await tester.pump();
