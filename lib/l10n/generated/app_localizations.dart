@@ -286,6 +286,12 @@ abstract class AppLocalizations {
   /// **'Done'**
   String get done;
 
+  /// No description provided for @detail.
+  ///
+  /// In en, this message translates to:
+  /// **'Detail'**
+  String get detail;
+
   /// No description provided for @comments.
   ///
   /// In en, this message translates to:
@@ -303,6 +309,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'History'**
   String get history;
+
+  /// No description provided for @downloadAttachment.
+  ///
+  /// In en, this message translates to:
+  /// **'Download {fileName}'**
+  String downloadAttachment(String fileName);
 
   /// No description provided for @postComment.
   ///
@@ -567,6 +579,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Save failed: {error}'**
   String saveFailed(String error);
+
+  /// No description provided for @attachmentDownloadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachment download failed: {error}'**
+  String attachmentDownloadFailed(String error);
 
   /// No description provided for @localGitMoveCommitted.
   ///

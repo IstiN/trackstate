@@ -108,6 +108,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get done => 'Done';
 
   @override
+  String get detail => 'Detail';
+
+  @override
   String get comments => 'Comments';
 
   @override
@@ -115,6 +118,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get history => 'History';
+
+  @override
+  String downloadAttachment(String fileName) {
+    return 'Download $fileName';
+  }
 
   @override
   String get postComment => 'Post comment';
@@ -260,6 +268,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String saveFailed(String error) {
     return 'Save failed: $error';
+  }
+
+  @override
+  String attachmentDownloadFailed(String error) {
+    return 'Attachment download failed: $error';
   }
 
   @override
