@@ -65,6 +65,9 @@ class SettingsScreenRobot {
   );
   Finder get darkThemeControl => find.bySemanticsLabel('Dark theme').first;
   Finder get placeholderText => find.text(jqlPlaceholderText);
+  Finder get saveSettingsButton => actionButton('Save settings');
+  Finder get resetSettingsButton => actionButton('Reset');
+  Finder get settingsEditorDialog => find.byType(Dialog);
 
   Future<void> pumpApp({
     required TrackStateRepository repository,
@@ -100,6 +103,76 @@ class SettingsScreenRobot {
   Future<void> openSettings() async {
     await tester.tap(settingsNavigation);
     await tester.pumpAndSettle();
+  }
+
+  Future<void> resize(Size size) async {
+    tester.view.physicalSize = size;
+    tester.view.devicePixelRatio = 1;
+    await tester.pumpAndSettle();
+  }
+
+  Size get viewportSize => tester.view.physicalSize;
+
+  Finder tabByLabel(String label) => find.widgetWithText(Tab, label);
+
+  Future<void> selectTab(String label) async {
+    final tab = tabByLabel(label);
+    await tester.ensureVisible(tab);
+    await tester.tap(tab, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  Finder actionButton(String label) {
+    final semanticsScope = find.bySemanticsLabel(
+      RegExp('^${RegExp.escape(label)}\$'),
+    );
+    final descendantButtons = find.descendant(
+      of: semanticsScope,
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    if (descendantButtons.evaluate().isNotEmpty) {
+      return _lowestButton(descendantButtons);
+    }
+
+    final textButtons = find.ancestor(
+      of: find.text(label),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    if (textButtons.evaluate().isNotEmpty) {
+      return _lowestButton(textButtons);
+    }
+
+    return _lowestButton(semanticsScope);
+  }
+
+  Future<void> tapActionButton(String label) async {
+    final button = actionButton(label);
+    await tester.ensureVisible(button);
+    await tester.tap(button, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  Finder editorTitle(String title) => find.text(title);
+
+  Rect editorSurfaceRect(String title) {
+    final titleFinder = editorTitle(title);
+    final materialSurface = find.ancestor(
+      of: titleFinder,
+      matching: find.byType(Material),
+    );
+    if (materialSurface.evaluate().isNotEmpty) {
+      return tester.getRect(_smallestByArea(materialSurface));
+    }
+
+    final dialogSurface = find.ancestor(
+      of: titleFinder,
+      matching: find.byType(Dialog),
+    );
+    if (dialogSurface.evaluate().isNotEmpty) {
+      return tester.getRect(_smallestByArea(dialogSurface));
+    }
+
+    throw StateError('No settings editor surface found for "$title".');
   }
 
   Finder providerControl(String label) => find.descendant(
