@@ -307,8 +307,20 @@ abstract class AppLocalizations {
   /// No description provided for @attachmentsDownloadOnlyMessage.
   ///
   /// In en, this message translates to:
-  /// **'This repository session is download-only for Git LFS attachments.'**
+  /// **'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.'**
   String get attachmentsDownloadOnlyMessage;
+
+  /// No description provided for @attachmentsAccessMessageDisconnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect GitHub with repository write access to enable Git-backed attachment changes. Existing attachments remain available for download.'**
+  String get attachmentsAccessMessageDisconnected;
+
+  /// No description provided for @attachmentsAccessMessageReadOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'This repository connection cannot push attachment changes. Existing attachments remain available for download.'**
+  String get attachmentsAccessMessageReadOnly;
 
   /// No description provided for @history.
   ///
@@ -514,11 +526,65 @@ abstract class AppLocalizations {
   /// **'Connect GitHub'**
   String get repositoryAccessConnectGitHub;
 
+  /// No description provided for @repositoryAccessReadOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Read-only'**
+  String get repositoryAccessReadOnly;
+
+  /// No description provided for @repositoryAccessAttachmentsRestricted.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachments limited'**
+  String get repositoryAccessAttachmentsRestricted;
+
   /// No description provided for @repositoryAccessSettings.
   ///
   /// In en, this message translates to:
   /// **'Repository access'**
   String get repositoryAccessSettings;
+
+  /// No description provided for @repositoryAccessDisconnectedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'GitHub write access is not connected'**
+  String get repositoryAccessDisconnectedTitle;
+
+  /// No description provided for @repositoryAccessDisconnectedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Create, edit, comment, and status changes stay read-only until you connect GitHub with a fine-grained token that has repository Contents write access. PAT is the default browser path.'**
+  String get repositoryAccessDisconnectedMessage;
+
+  /// No description provided for @repositoryAccessReadOnlyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This repository session is read-only'**
+  String get repositoryAccessReadOnlyTitle;
+
+  /// No description provided for @repositoryAccessReadOnlyMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.'**
+  String get repositoryAccessReadOnlyMessage;
+
+  /// No description provided for @repositoryAccessAttachmentRestrictedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachments stay download-only in the browser'**
+  String get repositoryAccessAttachmentRestrictedTitle;
+
+  /// No description provided for @repositoryAccessAttachmentRestrictedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Issue edits and comments can continue, but attachment upload is unavailable in this browser session because Git LFS upload is not supported here yet.'**
+  String get repositoryAccessAttachmentRestrictedMessage;
+
+  /// No description provided for @repositoryAccessSettingsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings is the canonical place to review repository access and reconnect safely.'**
+  String get repositoryAccessSettingsHint;
 
   /// No description provided for @repositoryPath.
   ///
@@ -763,6 +829,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Connect token'**
   String get connectToken;
+
+  /// No description provided for @manageGitHubAccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage GitHub access'**
+  String get manageGitHubAccess;
+
+  /// No description provided for @openSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Open settings'**
+  String get openSettings;
+
+  /// No description provided for @reconnectWriteAccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnect for write access'**
+  String get reconnectWriteAccess;
 
   /// No description provided for @issueCount.
   ///

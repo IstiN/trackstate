@@ -9,9 +9,18 @@ class ReactiveIssueDetailTrackStateRepository
   ReactiveIssueDetailTrackStateRepository._(this._provider)
     : super(provider: _provider);
 
-  factory ReactiveIssueDetailTrackStateRepository() =>
+  factory ReactiveIssueDetailTrackStateRepository({
+    RepositoryPermission permission = const RepositoryPermission(
+      canRead: true,
+      canWrite: true,
+      isAdmin: false,
+      canCreateBranch: true,
+      canManageAttachments: true,
+      canCheckCollaborators: false,
+    ),
+  }) =>
       ReactiveIssueDetailTrackStateRepository._(
-        MutableIssueDetailTrackStateProvider(),
+        MutableIssueDetailTrackStateProvider(permission: permission),
       );
 
   final MutableIssueDetailTrackStateProvider _provider;
@@ -46,19 +55,53 @@ class ReactiveIssueDetailTrackStateRepository
       canCheckCollaborators: readOnlyPermission.canCheckCollaborators,
     );
   }
+
+  void synchronizeSessionToAttachmentRestricted() {
+    final currentSession = session;
+    if (currentSession == null) {
+      throw StateError(
+        'Cannot restrict attachments before the provider session is connected.',
+      );
+    }
+
+    const attachmentRestrictedPermission = RepositoryPermission(
+      canRead: true,
+      canWrite: true,
+      isAdmin: false,
+      canCreateBranch: true,
+      canManageAttachments: false,
+      attachmentUploadMode: AttachmentUploadMode.noLfs,
+      canCheckCollaborators: false,
+    );
+
+    _provider.updatePermission(attachmentRestrictedPermission);
+    currentSession.update(
+      providerType: currentSession.providerType,
+      connectionState: ProviderConnectionState.connected,
+      resolvedUserIdentity: currentSession.resolvedUserIdentity,
+      canRead: attachmentRestrictedPermission.canRead,
+      canWrite: attachmentRestrictedPermission.canWrite,
+      canCreateBranch: attachmentRestrictedPermission.canCreateBranch,
+      canManageAttachments: attachmentRestrictedPermission.canManageAttachments,
+      attachmentUploadMode: attachmentRestrictedPermission.attachmentUploadMode,
+      canCheckCollaborators:
+          attachmentRestrictedPermission.canCheckCollaborators,
+    );
+  }
 }
 
 class MutableIssueDetailTrackStateProvider
     implements TrackStateProviderAdapter {
-  MutableIssueDetailTrackStateProvider()
-    : _permission = const RepositoryPermission(
-        canRead: true,
-        canWrite: true,
-        isAdmin: false,
-        canCreateBranch: true,
-        canManageAttachments: true,
-        canCheckCollaborators: false,
-      );
+  MutableIssueDetailTrackStateProvider({
+    RepositoryPermission permission = const RepositoryPermission(
+      canRead: true,
+      canWrite: true,
+      isAdmin: false,
+      canCreateBranch: true,
+      canManageAttachments: true,
+      canCheckCollaborators: false,
+    ),
+  }) : _permission = permission;
 
   RepositoryPermission _permission;
 

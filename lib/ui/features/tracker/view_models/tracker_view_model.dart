@@ -11,6 +11,13 @@ enum TrackerSection { dashboard, board, search, hierarchy, settings }
 
 enum RepositoryAccessState { localGit, connected, connectGitHub }
 
+enum HostedRepositoryAccessMode {
+  disconnected,
+  readOnly,
+  writable,
+  attachmentRestricted,
+}
+
 enum TrackerMessageTone { info, error }
 
 enum TrackerMessageKind {
@@ -247,19 +254,51 @@ class TrackerViewModel extends ChangeNotifier {
     ProviderBackedTrackStateRepository repository => repository.session,
     _ => null,
   };
-  bool get hasReadOnlySession {
+  bool get exposesHostedAccessGates =>
+      !usesLocalPersistence && providerSession != null;
+  HostedRepositoryAccessMode get hostedRepositoryAccessMode {
+    if (usesLocalPersistence) {
+      return HostedRepositoryAccessMode.writable;
+    }
     final session = providerSession;
-    return session != null &&
-        session.connectionState == ProviderConnectionState.connected &&
-        session.canRead &&
-        !session.canWrite;
+    if (session == null ||
+        session.connectionState != ProviderConnectionState.connected) {
+      return HostedRepositoryAccessMode.disconnected;
+    }
+    if (!session.canWrite) {
+      return HostedRepositoryAccessMode.readOnly;
+    }
+    if (session.attachmentUploadMode != AttachmentUploadMode.full) {
+      return HostedRepositoryAccessMode.attachmentRestricted;
+    }
+    return HostedRepositoryAccessMode.writable;
   }
+
+  bool get hasReadOnlySession {
+    return hostedRepositoryAccessMode == HostedRepositoryAccessMode.readOnly;
+  }
+  bool get hasBlockedWriteAccess => !usesLocalPersistence && switch (
+        exposesHostedAccessGates ? hostedRepositoryAccessMode : HostedRepositoryAccessMode.writable
+      ) {
+        HostedRepositoryAccessMode.disconnected ||
+        HostedRepositoryAccessMode.readOnly => true,
+        HostedRepositoryAccessMode.writable ||
+        HostedRepositoryAccessMode.attachmentRestricted => false,
+      };
+  bool get hasAttachmentUploadRestriction =>
+      exposesHostedAccessGates &&
+      hostedRepositoryAccessMode ==
+      HostedRepositoryAccessMode.attachmentRestricted;
 
   RepositoryAccessState get repositoryAccessState => usesLocalPersistence
       ? RepositoryAccessState.localGit
-      : _isConnected
-      ? RepositoryAccessState.connected
-      : RepositoryAccessState.connectGitHub;
+      : !exposesHostedAccessGates
+      ? (_isConnected
+            ? RepositoryAccessState.connected
+            : RepositoryAccessState.connectGitHub)
+      : hostedRepositoryAccessMode == HostedRepositoryAccessMode.disconnected
+      ? RepositoryAccessState.connectGitHub
+      : RepositoryAccessState.connected;
   bool get isGitHubAppAuthAvailable =>
       supportsGitHubAuth &&
       (_githubAppClientId.isNotEmpty || _githubAuthProxyUrl.isNotEmpty);
@@ -425,6 +464,22 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  TrackStateRepositoryException? _hostedWriteAccessException(String action) {
+    if (usesLocalPersistence || !exposesHostedAccessGates) {
+      return null;
+    }
+    return switch (hostedRepositoryAccessMode) {
+      HostedRepositoryAccessMode.disconnected => TrackStateRepositoryException(
+        'Connect GitHub with repository Contents write access before you $action.',
+      ),
+      HostedRepositoryAccessMode.readOnly => TrackStateRepositoryException(
+        'This repository session is read-only. Reconnect with repository Contents write access before you $action.',
+      ),
+      HostedRepositoryAccessMode.writable ||
+      HostedRepositoryAccessMode.attachmentRestricted => null,
+    };
+  }
+
   Future<void> connectGitHub(String token, {bool remember = false}) async {
     if (!supportsGitHubAuth) {
       _message = TrackerMessage.localGitTokensNotNeeded();
@@ -471,6 +526,11 @@ class TrackerViewModel extends ChangeNotifier {
 
   Future<void> moveIssue(TrackStateIssue issue, IssueStatus status) async {
     if (issue.status == status) return;
+    if (_hostedWriteAccessException('change issue status') case final error?) {
+      _message = TrackerMessage.moveFailed(error);
+      notifyListeners();
+      return;
+    }
     final snapshot = _snapshot;
     if (snapshot == null) return;
     final previousIssues = snapshot.issues;
@@ -540,6 +600,11 @@ class TrackerViewModel extends ChangeNotifier {
     List<String> labels = const [],
     TrackerSection? returnSection,
   }) async {
+    if (_hostedWriteAccessException('create issues') case final error?) {
+      _message = TrackerMessage.issueSaveFailed(error);
+      notifyListeners();
+      return false;
+    }
     final normalizedSummary = summary.trim();
     if (normalizedSummary.isEmpty) {
       _message = TrackerMessage.issueSaveFailed(
@@ -608,6 +673,11 @@ class TrackerViewModel extends ChangeNotifier {
     TrackStateIssue issue,
     String description,
   ) async {
+    if (_hostedWriteAccessException('edit issue details') case final error?) {
+      _message = TrackerMessage.issueSaveFailed(error);
+      notifyListeners();
+      return false;
+    }
     final normalizedDescription = description.trim();
     if (normalizedDescription == issue.description.trim()) {
       return true;
@@ -669,6 +739,11 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   Future<bool> postIssueComment(TrackStateIssue issue, String body) async {
+    if (_hostedWriteAccessException('post comments') case final error?) {
+      _message = TrackerMessage.issueSaveFailed(error);
+      notifyListeners();
+      return false;
+    }
     final normalizedBody = body.trim();
     if (normalizedBody.isEmpty) {
       _message = TrackerMessage.issueSaveFailed(
