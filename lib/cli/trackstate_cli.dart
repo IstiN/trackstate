@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import '../data/providers/github/github_trackstate_provider.dart';
 import '../data/providers/local/local_git_trackstate_provider.dart';
 import '../data/providers/trackstate_provider.dart';
+import '../data/repositories/trackstate_repository.dart';
+import '../data/services/jql_search_service.dart';
 import '../data/repositories/trackstate_runtime.dart';
 import '../domain/models/trackstate_models.dart';
 
@@ -17,17 +19,24 @@ class TrackStateCli {
     TrackStateCliEnvironment? environment,
     TrackStateCliCredentialResolver? credentialResolver,
     TrackStateCliProviderFactory? providerFactory,
+    TrackStateCliRepositoryFactory? repositoryFactory,
     http.Client? httpClient,
   }) : _environment = environment ?? const TrackStateCliEnvironment(),
        _credentialResolver =
            credentialResolver ?? const TrackStateCliCredentialResolver(),
        _providerFactory =
            providerFactory ?? const DefaultTrackStateCliProviderFactory(),
+       _repositoryFactory =
+           repositoryFactory ??
+           _ProviderBackedTrackStateCliRepositoryFactory(
+             providerFactory ?? const DefaultTrackStateCliProviderFactory(),
+           ),
        _httpClient = httpClient;
 
   final TrackStateCliEnvironment _environment;
   final TrackStateCliCredentialResolver _credentialResolver;
   final TrackStateCliProviderFactory _providerFactory;
+  final TrackStateCliRepositoryFactory _repositoryFactory;
   final http.Client? _httpClient;
 
   Future<TrackStateCliExecution> run(List<String> arguments) async {
@@ -41,6 +50,7 @@ class TrackStateCli {
 
       return switch (arguments.first) {
         'session' => await _runSession(arguments.skip(1).toList()),
+        'search' => await _runSearch(arguments.skip(1).toList()),
         _ => _error(
           _TrackStateCliException(
             code: 'INVALID_TARGET',
@@ -151,6 +161,116 @@ class TrackStateCli {
           exitCode: 1,
           details: <String, Object?>{'error': error.toString()},
         ),
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: output,
+      );
+    }
+  }
+
+  Future<TrackStateCliExecution> _runSearch(List<String> arguments) async {
+    final parser = ArgParser(allowTrailingOptions: false)
+      ..addFlag('help', abbr: 'h', negatable: false)
+      ..addOption('target', help: 'Target type: local or hosted.')
+      ..addOption(
+        'provider',
+        help: 'Provider name. Supported values: local-git, github.',
+      )
+      ..addOption('repository', help: 'Hosted repository in owner/name form.')
+      ..addOption(
+        'path',
+        help:
+            'Local repository path. Defaults to the current working directory.',
+      )
+      ..addOption('branch', help: 'Branch to use for the search session.')
+      ..addOption('token', help: 'Hosted access token.')
+      ..addOption('jql', help: 'JQL query to execute.')
+      ..addOption(
+        'start-at',
+        defaultsTo: '0',
+        help: 'Zero-based result offset. Defaults to 0.',
+      )
+      ..addOption(
+        'max-results',
+        defaultsTo: '50',
+        help: 'Maximum results to return. Defaults to 50.',
+      )
+      ..addOption(
+        'continuation-token',
+        help: 'Opaque page token returned by a previous search response.',
+      )
+      ..addOption(
+        'output',
+        defaultsTo: 'json',
+        allowed: TrackStateCliOutput.values.map((value) => value.name).toList(),
+        help: 'Output format. Defaults to json.',
+      );
+
+    late final ArgResults results;
+    try {
+      results = parser.parse(arguments);
+    } on FormatException catch (error) {
+      throw _TrackStateCliException(
+        code: 'INVALID_TARGET',
+        category: TrackStateCliErrorCategory.validation,
+        message: error.message,
+        exitCode: 2,
+        details: <String, Object?>{'arguments': arguments},
+      );
+    }
+
+    if (results['help'] == true) {
+      return TrackStateCliExecution.success(
+        output: TrackStateCliOutput.text,
+        content: _searchHelpText(parser),
+      );
+    }
+
+    final output = TrackStateCliOutput.values.byName(
+      results['output']!.toString(),
+    );
+    final target = await _resolveTarget(results);
+    final jql = results['jql']?.toString().trim() ?? '';
+    if (jql.isEmpty) {
+      throw _TrackStateCliException(
+        code: 'INVALID_QUERY',
+        category: TrackStateCliErrorCategory.validation,
+        message: 'Missing required option "--jql".',
+        exitCode: 2,
+        details: const <String, Object?>{'option': 'jql'},
+      );
+    }
+    final startAt = _parseNonNegativeIntOption(results, 'start-at');
+    final maxResults = _parseNonNegativeIntOption(results, 'max-results');
+    final rawContinuationToken =
+        results['continuation-token']?.toString().trim() ?? '';
+    final continuationToken = rawContinuationToken.isEmpty
+        ? null
+        : rawContinuationToken;
+
+    try {
+      return await switch (target.type) {
+        TrackStateCliTargetType.local => _runLocalSearch(
+          target,
+          output,
+          jql: jql,
+          startAt: startAt,
+          maxResults: maxResults,
+          continuationToken: continuationToken,
+        ),
+        TrackStateCliTargetType.hosted => _runHostedSearch(
+          target,
+          output,
+          jql: jql,
+          startAt: startAt,
+          maxResults: maxResults,
+          continuationToken: continuationToken,
+        ),
+      };
+    } on _TrackStateCliException catch (error) {
+      return _error(
+        error,
         targetType: target.type,
         targetValue: target.value,
         provider: target.provider,
@@ -338,6 +458,21 @@ class TrackStateCli {
     }
   }
 
+  int _parseNonNegativeIntOption(ArgResults results, String option) {
+    final rawValue = results[option]?.toString().trim() ?? '';
+    final parsed = int.tryParse(rawValue);
+    if (parsed == null || parsed < 0) {
+      throw _TrackStateCliException(
+        code: 'INVALID_TARGET',
+        category: TrackStateCliErrorCategory.validation,
+        message: 'Option "--$option" must be a non-negative integer.',
+        exitCode: 2,
+        details: <String, Object?>{'option': option, 'value': rawValue},
+      );
+    }
+    return parsed;
+  }
+
   Future<TrackStateCliExecution> _runLocalSession(
     _ResolvedTarget target,
     TrackStateCliOutput output,
@@ -458,6 +593,185 @@ class TrackStateCli {
     }
   }
 
+  Future<TrackStateCliExecution> _runLocalSearch(
+    _ResolvedTarget target,
+    TrackStateCliOutput output, {
+    required String jql,
+    required int startAt,
+    required int maxResults,
+    required String? continuationToken,
+  }) async {
+    final repository = _repositoryFactory.createLocal(
+      repositoryPath: target.value,
+      dataRef: target.branch.ifEmpty('HEAD'),
+    );
+    try {
+      final page = await repository.searchIssuePage(
+        jql,
+        startAt: startAt,
+        maxResults: maxResults,
+        continuationToken: continuationToken,
+      );
+      return _success(
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: output,
+        data: _searchData(jql: jql, page: page, authSource: 'none'),
+      );
+    } on Object catch (error) {
+      throw _mapSearchError(error, target, jql: jql);
+    }
+  }
+
+  Future<TrackStateCliExecution> _runHostedSearch(
+    _ResolvedTarget target,
+    TrackStateCliOutput output, {
+    required String jql,
+    required int startAt,
+    required int maxResults,
+    required String? continuationToken,
+  }) async {
+    final credential = await _credentialResolver.resolve(
+      explicitToken: target.token,
+      environment: _environment.environment,
+      readGhToken: _environment.readGhAuthToken,
+    );
+    if (credential == null) {
+      throw _TrackStateCliException(
+        code: 'AUTHENTICATION_FAILED',
+        category: TrackStateCliErrorCategory.auth,
+        message:
+            'Authentication is required for the selected provider. Pass --token, set TRACKSTATE_TOKEN, or authenticate with gh.',
+        exitCode: 3,
+        details: <String, Object?>{
+          'provider': target.provider,
+          'repository': target.value,
+        },
+      );
+    }
+
+    final branch = target.branch.ifEmpty(
+      GitHubTrackStateProvider.defaultSourceRef,
+    );
+    final repository = _repositoryFactory.createHosted(
+      provider: target.provider,
+      repository: target.value,
+      branch: branch,
+      client: _httpClient,
+    );
+
+    try {
+      await repository.connect(
+        RepositoryConnection(
+          repository: target.value,
+          branch: branch,
+          token: credential.token,
+        ),
+      );
+      final page = await repository.searchIssuePage(
+        jql,
+        startAt: startAt,
+        maxResults: maxResults,
+        continuationToken: continuationToken,
+      );
+      return _success(
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: output,
+        data: _searchData(jql: jql, page: page, authSource: credential.source),
+      );
+    } on Object catch (error) {
+      throw _mapSearchError(error, target, jql: jql);
+    }
+  }
+
+  Map<String, Object?> _searchData({
+    required String jql,
+    required TrackStateIssueSearchPage page,
+    required String authSource,
+  }) => <String, Object?>{
+    'command': 'search',
+    'jql': jql,
+    'authSource': authSource,
+    'page': <String, Object?>{
+      'startAt': page.startAt,
+      'maxResults': page.maxResults,
+      'total': page.total,
+      'nextStartAt': page.nextStartAt,
+      'nextPageToken': page.nextPageToken,
+    },
+    'issues': [
+      for (final issue in page.issues)
+        <String, Object?>{
+          'key': issue.key,
+          'summary': issue.summary,
+          'issueType': issue.issueTypeId,
+          'status': issue.statusId,
+          'priority': issue.priorityId,
+          'assignee': issue.assignee,
+          'parent': issue.parentKey,
+          'epic': issue.epicKey,
+          'labels': issue.labels,
+        },
+    ],
+  };
+
+  _TrackStateCliException _mapSearchError(
+    Object error,
+    _ResolvedTarget target, {
+    required String jql,
+  }) {
+    if (error is _TrackStateCliException) {
+      return error;
+    }
+    if (error is JqlSearchException) {
+      return _TrackStateCliException(
+        code: 'INVALID_QUERY',
+        category: TrackStateCliErrorCategory.validation,
+        message: error.message,
+        exitCode: 2,
+        details: <String, Object?>{'jql': jql},
+      );
+    }
+    if (error is TrackStateProviderException) {
+      return target.type == TrackStateCliTargetType.hosted
+          ? _mapHostedProviderError(error, target)
+          : _TrackStateCliException(
+              code: 'REPOSITORY_OPEN_FAILED',
+              category: TrackStateCliErrorCategory.repository,
+              message:
+                  'Local repository search could not be opened for "${target.value}".',
+              exitCode: 4,
+              details: <String, Object?>{
+                'path': target.value,
+                'reason': error.message,
+              },
+            );
+    }
+    if (error is TrackStateRepositoryException) {
+      return _TrackStateCliException(
+        code: 'REPOSITORY_OPEN_FAILED',
+        category: TrackStateCliErrorCategory.repository,
+        message: 'Search failed for "${target.value}".',
+        exitCode: 4,
+        details: <String, Object?>{
+          'provider': target.provider,
+          'target': target.value,
+          'reason': error.message,
+        },
+      );
+    }
+    return _TrackStateCliException(
+      code: 'UNEXPECTED_ERROR',
+      category: TrackStateCliErrorCategory.validation,
+      message: 'TrackState CLI failed unexpectedly.',
+      exitCode: 1,
+      details: <String, Object?>{'error': error.toString()},
+    );
+  }
+
   _TrackStateCliException _mapHostedProviderError(
     TrackStateProviderException error,
     _ResolvedTarget target,
@@ -575,6 +889,33 @@ class TrackStateCli {
     required String provider,
     required Map<String, Object?> data,
   }) {
+    final command = data['command'];
+    if (command == 'search') {
+      final page = data['page']! as Map<String, Object?>;
+      final issues = data['issues']! as List<Object?>;
+      final lines = <String>[
+        'Search results',
+        'Target: ${targetType.name} ($targetValue)',
+        'Provider: $provider',
+        'Auth source: ${data['authSource']}',
+        'JQL: ${data['jql']}',
+        'Page: startAt=${page['startAt']} maxResults=${page['maxResults']} total=${page['total']}',
+      ];
+      if (page['nextPageToken'] != null) {
+        lines.add(
+          'Next page: startAt=${page['nextStartAt']} token=${page['nextPageToken']}',
+        );
+      }
+      if (issues.isEmpty) {
+        lines.add('No issues matched.');
+      } else {
+        for (final item in issues.cast<Map<String, Object?>>()) {
+          lines.add('${item['key']}: ${item['summary']}');
+        }
+      }
+      return lines.join('\n');
+    }
+
     final user = data['user']! as Map<String, Object?>;
     final permissions = data['permissions']! as Map<String, Object?>;
     return [
@@ -620,6 +961,24 @@ class TrackStateCli {
     '  3. gh auth token',
   ].join('\n');
 
+  String _searchHelpText(ArgParser parser) => [
+    'trackstate search',
+    '',
+    'Execute a paged JQL search and return Jira-style pagination metadata plus any continuation token.',
+    '',
+    'Usage:',
+    '  trackstate search --target local --jql \'project = TRACK ORDER BY key ASC\' [--path /repo] [--start-at 0] [--max-results 50] [--continuation-token <token>] [--output json|text]',
+    '  trackstate search --target hosted --provider github --repository owner/name --jql \'text ~ "pagination"\' [--branch main] [--token <token>] [--start-at 0] [--max-results 50] [--continuation-token <token>] [--output json|text]',
+    '',
+    'Options:',
+    parser.usage,
+    '',
+    'Credential precedence for hosted targets:',
+    '  1. --token',
+    '  2. $trackStateCliTokenEnvironmentVariable',
+    '  3. gh auth token',
+  ].join('\n');
+
   String get _rootHelpText => [
     'trackstate',
     '',
@@ -630,10 +989,12 @@ class TrackStateCli {
     '',
     'Commands:',
     '  session    Resolve the target and print session metadata.',
+    '  search     Execute a paged JQL search.',
     '',
     'Examples:',
     '  trackstate session --target local',
     '  trackstate session --target hosted --provider github --repository owner/name',
+    '  trackstate search --target local --jql \'project = TRACK ORDER BY key ASC\'',
     '',
     'Use "trackstate <command> --help" for command-specific options.',
   ].join('\n');
@@ -734,6 +1095,55 @@ abstract interface class TrackStateCliProviderFactory {
     required String branch,
     http.Client? client,
   });
+}
+
+abstract interface class TrackStateCliRepositoryFactory {
+  TrackStateRepository createLocal({
+    required String repositoryPath,
+    required String dataRef,
+  });
+
+  TrackStateRepository createHosted({
+    required String provider,
+    required String repository,
+    required String branch,
+    http.Client? client,
+  });
+}
+
+class _ProviderBackedTrackStateCliRepositoryFactory
+    implements TrackStateCliRepositoryFactory {
+  const _ProviderBackedTrackStateCliRepositoryFactory(this.providerFactory);
+
+  final TrackStateCliProviderFactory providerFactory;
+
+  @override
+  TrackStateRepository createLocal({
+    required String repositoryPath,
+    required String dataRef,
+  }) => ProviderBackedTrackStateRepository(
+    provider: providerFactory.createLocal(
+      repositoryPath: repositoryPath,
+      dataRef: dataRef,
+    ),
+    usesLocalPersistence: true,
+    supportsGitHubAuth: false,
+  );
+
+  @override
+  TrackStateRepository createHosted({
+    required String provider,
+    required String repository,
+    required String branch,
+    http.Client? client,
+  }) => ProviderBackedTrackStateRepository(
+    provider: providerFactory.createHosted(
+      provider: provider,
+      repository: repository,
+      branch: branch,
+      client: client,
+    ),
+  );
 }
 
 class DefaultTrackStateCliProviderFactory

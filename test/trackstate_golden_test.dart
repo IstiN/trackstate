@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 void main() {
@@ -70,6 +71,29 @@ void main() {
       matchesGoldenFile('goldens/mobile_board.png'),
     );
   });
+
+  testWidgets('desktop search pagination golden', (tester) async {
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      TrackStateApp(
+        repository: DemoTrackStateRepository(
+          snapshot: _searchPaginationSnapshot(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('JQL Search').first);
+    await tester.pumpAndSettle();
+
+    await expectLater(
+      find.byType(TrackStateApp),
+      matchesGoldenFile('goldens/search_pagination_desktop.png'),
+    );
+  });
 }
 
 class _TolerantGoldenFileComparator extends LocalFileComparator {
@@ -100,4 +124,67 @@ class _TolerantGoldenFileComparator extends LocalFileComparator {
     result.dispose();
     throw FlutterError(error);
   }
+}
+
+TrackerSnapshot _searchPaginationSnapshot() {
+  final issues = [
+    for (var index = 1; index <= 8; index += 1)
+      TrackStateIssue(
+        key: 'TRACK-$index',
+        project: 'TRACK',
+        issueType: IssueType.story,
+        issueTypeId: 'story',
+        status: IssueStatus.inProgress,
+        statusId: 'in-progress',
+        priority: IssuePriority.medium,
+        priorityId: 'medium',
+        summary: 'Paged issue $index',
+        description: 'Search result $index',
+        assignee: 'user-$index',
+        reporter: 'demo-user',
+        labels: const ['paged'],
+        components: const [],
+        fixVersionIds: const [],
+        watchers: const [],
+        customFields: const {},
+        parentKey: null,
+        epicKey: null,
+        parentPath: null,
+        epicPath: null,
+        progress: 0,
+        updatedLabel: 'just now',
+        acceptanceCriteria: const ['Visible in search pagination'],
+        comments: const [],
+        links: const [],
+        attachments: const [],
+        isArchived: false,
+        storagePath: 'TRACK/TRACK-$index/main.md',
+        rawMarkdown: '',
+      ),
+  ];
+  return TrackerSnapshot(
+    project: const ProjectConfig(
+      key: 'TRACK',
+      name: 'TrackState',
+      repository: 'trackstate/trackstate',
+      branch: 'main',
+      defaultLocale: 'en',
+      issueTypeDefinitions: [TrackStateConfigEntry(id: 'story', name: 'Story')],
+      statusDefinitions: [
+        TrackStateConfigEntry(id: 'in-progress', name: 'In Progress'),
+      ],
+      fieldDefinitions: [
+        TrackStateFieldDefinition(
+          id: 'summary',
+          name: 'Summary',
+          type: 'string',
+          required: true,
+        ),
+      ],
+      priorityDefinitions: [
+        TrackStateConfigEntry(id: 'medium', name: 'Medium'),
+      ],
+    ),
+    issues: issues,
+  );
 }

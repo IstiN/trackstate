@@ -20,6 +20,19 @@
   "issueDetailReadOnlyMessage": "Write access is required to edit this issue or change its status.",
   "syncStatus": "Synced with Git",
   "searchIssues": "Search issues",
+  "loadMore": "Load more",
+  "loadMoreIssues": "Load more issues",
+  "showingResults": "Showing {shown} of {total} issues",
+  "@showingResults": {
+    "placeholders": {
+      "shown": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
   "quickActions": "Quick actions",
   "activeEpics": "Active Epics",
   "recentActivity": "Recent Activity",
@@ -73,6 +86,14 @@
   "trackerDataNotFound": "TrackState data was not found.",
   "trackerDataLoadFailed": "TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. {error}",
   "@trackerDataLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "searchFailed": "Search failed: {error}",
+  "@searchFailed": {
     "placeholders": {
       "error": {
         "type": "String"

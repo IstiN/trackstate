@@ -96,6 +96,19 @@ class _Ts286MoveValidationFailureRepository implements TrackStateRepository {
   Future<TrackerSnapshot> loadSnapshot() => _delegate.loadSnapshot();
 
   @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => _delegate.searchIssuePage(
+    jql,
+    startAt: startAt,
+    maxResults: maxResults,
+    continuationToken: continuationToken,
+  );
+
+  @override
   Future<List<TrackStateIssue>> searchIssues(String jql) =>
       _delegate.searchIssues(jql);
 

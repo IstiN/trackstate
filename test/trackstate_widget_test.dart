@@ -125,6 +125,41 @@ void main() {
     }
   });
 
+  testWidgets('search screen appends results through the load more action', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        TrackStateApp(
+          repository: DemoTrackStateRepository(
+            snapshot: _searchPaginationSnapshot(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Showing 6 of 8 issues'), findsOneWidget);
+      expect(find.bySemanticsLabel('Load more issues'), findsOneWidget);
+      expect(find.text('Paged issue 8'), findsNothing);
+
+      await tester.tap(find.bySemanticsLabel('Load more issues'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Paged issue 8'), findsOneWidget);
+      expect(find.bySemanticsLabel('Load more issues'), findsNothing);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      semantics.dispose();
+    }
+  });
+
   testWidgets('issue detail exposes comments, attachments, and history tabs', (
     tester,
   ) async {
@@ -140,7 +175,9 @@ void main() {
       await tester.tap(find.bySemanticsLabel(RegExp('Board')).first);
       await tester.pumpAndSettle();
       await tester.tap(
-        find.bySemanticsLabel(RegExp('Open TRACK-12 Implement Git sync service')),
+        find.bySemanticsLabel(
+          RegExp('Open TRACK-12 Implement Git sync service'),
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -158,7 +195,10 @@ void main() {
 
       await tester.tap(find.bySemanticsLabel(RegExp('History')).first);
       await tester.pumpAndSettle();
-      expect(find.textContaining('Updated description on TRACK-12'), findsOneWidget);
+      expect(
+        find.textContaining('Updated description on TRACK-12'),
+        findsOneWidget,
+      );
     } finally {
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
@@ -462,6 +502,19 @@ class _LocalRuntimeRepository implements TrackStateRepository {
       _demoRepository.loadSnapshot();
 
   @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => _demoRepository.searchIssuePage(
+    jql,
+    startAt: startAt,
+    maxResults: maxResults,
+    continuationToken: continuationToken,
+  );
+
+  @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
       _demoRepository.searchIssues(jql);
 
@@ -500,16 +553,19 @@ class _LocalRuntimeRepository implements TrackStateRepository {
   ) async => issue.copyWith(status: status, updatedLabel: 'just now');
 
   @override
-  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) async =>
-      issue;
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => issue;
 
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
       Uint8List(0);
 
   @override
-  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) async =>
-      const <IssueHistoryEntry>[];
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
 
   @override
   Future<TrackStateIssue> uploadIssueAttachment({
@@ -537,6 +593,19 @@ class _FailingLocalRuntimeRepository implements TrackStateRepository {
   @override
   Future<TrackerSnapshot> loadSnapshot() async =>
       _demoRepository.loadSnapshot();
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => _demoRepository.searchIssuePage(
+    jql,
+    startAt: startAt,
+    maxResults: maxResults,
+    continuationToken: continuationToken,
+  );
 
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
@@ -588,7 +657,10 @@ class _FailingLocalRuntimeRepository implements TrackStateRepository {
   ) async => issue.copyWith(status: status, updatedLabel: 'just now');
 
   @override
-  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) async {
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async {
     throw const TrackStateRepositoryException(
       'Cannot save DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
       'commit, stash, or clean those local changes before trying again.',
@@ -600,8 +672,9 @@ class _FailingLocalRuntimeRepository implements TrackStateRepository {
       Uint8List(0);
 
   @override
-  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) async =>
-      const <IssueHistoryEntry>[];
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
 
   @override
   Future<TrackStateIssue> uploadIssueAttachment({
@@ -690,6 +763,27 @@ class _CustomCreateFieldsLocalRuntimeRepository
   }
 
   @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    final issues = (await loadSnapshot()).issues;
+    final total = issues.length;
+    final boundedStartAt = startAt.clamp(0, total);
+    final endAt = (boundedStartAt + maxResults).clamp(0, total);
+    return TrackStateIssueSearchPage(
+      issues: issues.sublist(boundedStartAt, endAt),
+      startAt: boundedStartAt,
+      maxResults: maxResults,
+      total: total,
+      nextStartAt: endAt < total ? endAt : null,
+      nextPageToken: endAt < total ? 'offset:$endAt' : null,
+    );
+  }
+
+  @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
       (await loadSnapshot()).issues;
 
@@ -730,16 +824,19 @@ class _CustomCreateFieldsLocalRuntimeRepository
   ) async => issue.copyWith(status: status, updatedLabel: 'just now');
 
   @override
-  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) async =>
-      issue;
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => issue;
 
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
       Uint8List(0);
 
   @override
-  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) async =>
-      const <IssueHistoryEntry>[];
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
 
   @override
   Future<TrackStateIssue> uploadIssueAttachment({
@@ -747,4 +844,67 @@ class _CustomCreateFieldsLocalRuntimeRepository
     required String name,
     required Uint8List bytes,
   }) async => issue;
+}
+
+TrackerSnapshot _searchPaginationSnapshot() {
+  final issues = [
+    for (var index = 1; index <= 8; index += 1)
+      TrackStateIssue(
+        key: 'TRACK-$index',
+        project: 'TRACK',
+        issueType: IssueType.story,
+        issueTypeId: 'story',
+        status: IssueStatus.inProgress,
+        statusId: 'in-progress',
+        priority: IssuePriority.medium,
+        priorityId: 'medium',
+        summary: 'Paged issue $index',
+        description: 'Search result $index',
+        assignee: 'user-$index',
+        reporter: 'demo-user',
+        labels: const ['paged'],
+        components: const [],
+        fixVersionIds: const [],
+        watchers: const [],
+        customFields: const {},
+        parentKey: null,
+        epicKey: null,
+        parentPath: null,
+        epicPath: null,
+        progress: 0,
+        updatedLabel: 'just now',
+        acceptanceCriteria: const ['Visible in search pagination'],
+        comments: const [],
+        links: const [],
+        attachments: const [],
+        isArchived: false,
+        storagePath: 'TRACK/TRACK-$index/main.md',
+        rawMarkdown: '',
+      ),
+  ];
+  return TrackerSnapshot(
+    project: const ProjectConfig(
+      key: 'TRACK',
+      name: 'TrackState',
+      repository: 'trackstate/trackstate',
+      branch: 'main',
+      defaultLocale: 'en',
+      issueTypeDefinitions: [TrackStateConfigEntry(id: 'story', name: 'Story')],
+      statusDefinitions: [
+        TrackStateConfigEntry(id: 'in-progress', name: 'In Progress'),
+      ],
+      fieldDefinitions: [
+        TrackStateFieldDefinition(
+          id: 'summary',
+          name: 'Summary',
+          type: 'string',
+          required: true,
+        ),
+      ],
+      priorityDefinitions: [
+        TrackStateConfigEntry(id: 'medium', name: 'Medium'),
+      ],
+    ),
+    issues: issues,
+  );
 }
