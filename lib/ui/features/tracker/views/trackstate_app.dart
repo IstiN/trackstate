@@ -1916,6 +1916,7 @@ class _IssueDetailState extends State<_IssueDetail> {
             _AttachmentsTab(
               issue: issue,
               onDownload: widget.viewModel.downloadIssueAttachment,
+              readOnly: hasReadOnlySession,
             )
           else
             _HistoryTab(
@@ -1942,7 +1943,7 @@ class _IssueDetailActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    final child = Text(label);
+    final child = ExcludeSemantics(child: Text(label));
     final button = emphasized
         ? FilledButton(
             onPressed: onPressed,
@@ -1971,7 +1972,6 @@ class _IssueDetailActionButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
-      excludeSemantics: true,
       child: button,
     );
   }
@@ -2261,49 +2261,51 @@ class _IssueCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  _IssueTypeGlyph(issue.issueType),
-                  const SizedBox(width: 8),
-                  Text(
-                    issue.key,
-                    style: TextStyle(
-                      fontFamily: 'JetBrains Mono',
-                      fontSize: 12,
-                      color: colors.muted,
+        child: ExcludeSemantics(
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    _IssueTypeGlyph(issue.issueType),
+                    const SizedBox(width: 8),
+                    Text(
+                      issue.key,
+                      style: TextStyle(
+                        fontFamily: 'JetBrains Mono',
+                        fontSize: 12,
+                        color: colors.muted,
+                      ),
                     ),
-                  ),
-                  const Spacer(),
-                  _Avatar(name: issue.assignee),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                issue.summary,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  _Chip(label: issue.issueType.label),
-                  _PriorityBadge(priority: issue.priority),
-                ],
-              ),
-            ],
+                    const Spacer(),
+                    _Avatar(name: issue.assignee),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  issue.summary,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    _Chip(label: issue.issueType.label),
+                    _PriorityBadge(priority: issue.priority),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -2341,47 +2343,65 @@ class _IssueListRow extends StatelessWidget {
       container: true,
       button: true,
       label: 'Open ${issue.key} ${issue.summary}',
-      child: InkWell(
-        canRequestFocus: true,
-        onTap: () => onSelect(issue),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: colors.border)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: ExcludeSemantics(
-                  child: Row(
-                    children: [
-                      _IssueTypeGlyph(issue.issueType),
-                      const SizedBox(width: 10),
-                      SizedBox(
-                        width: 86,
-                        child: Text(
-                          issue.key,
-                          style: TextStyle(
-                            fontFamily: 'JetBrains Mono',
-                            color: colors.muted,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: colors.border)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Stack(
+                children: [
+                  ExcludeSemantics(
+                    child: Row(
+                      children: [
+                        _IssueTypeGlyph(issue.issueType),
+                        const SizedBox(width: 10),
+                        SizedBox(
+                          width: 86,
+                          child: Text(
+                            issue.key,
+                            style: TextStyle(
+                              fontFamily: 'JetBrains Mono',
+                              color: colors.muted,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(issue.summary)),
-                      _StatusBadge(status: issue.status),
-                      const SizedBox(width: 8),
-                      _Avatar(name: issue.assignee),
-                    ],
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(issue.summary)),
+                        _StatusBadge(status: issue.status),
+                        const SizedBox(width: 8),
+                        _Avatar(name: issue.assignee),
+                      ],
+                    ),
                   ),
-                ),
+                  Positioned.fill(
+                    child: TextButton(
+                      onPressed: () => onSelect(issue),
+                      style: TextButton.styleFrom(
+                        foregroundColor: colors.text,
+                        backgroundColor: Colors.transparent,
+                        overlayColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        surfaceTintColor: Colors.transparent,
+                        padding: EdgeInsets.zero,
+                        alignment: Alignment.centerLeft,
+                        shape: const RoundedRectangleBorder(),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
+                ],
               ),
-              if (trailingAction != null) ...[
-                const SizedBox(width: 8),
-                trailingAction!,
-              ],
+            ),
+            if (trailingAction != null) ...[
+              const SizedBox(width: 8),
+              trailingAction!,
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -3483,28 +3503,30 @@ class _NavButton extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           onTap: onPressed,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-            decoration: BoxDecoration(
-              color: selected ? colors.secondary : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                TrackStateIcon(
-                  item.glyph,
-                  color: selected ? colors.page : colors.muted,
-                  size: 18,
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  item.label,
-                  style: TextStyle(
-                    color: selected ? colors.page : colors.text,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          child: ExcludeSemantics(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+              decoration: BoxDecoration(
+                color: selected ? colors.secondary : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  TrackStateIcon(
+                    item.glyph,
+                    color: selected ? colors.page : colors.muted,
+                    size: 18,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  Text(
+                    item.label,
+                    style: TextStyle(
+                      color: selected ? colors.page : colors.text,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -3539,23 +3561,25 @@ class _BottomNavigation extends StatelessWidget {
                   label: item.label,
                   child: InkWell(
                     onTap: () => viewModel.selectSection(item.section),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          TrackStateIcon(
-                            item.glyph,
-                            color: viewModel.section == item.section
-                                ? colors.primary
-                                : colors.muted,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            item.label,
-                            style: Theme.of(context).textTheme.labelSmall,
-                          ),
-                        ],
+                    child: ExcludeSemantics(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TrackStateIcon(
+                              item.glyph,
+                              color: viewModel.section == item.section
+                                  ? colors.primary
+                                  : colors.muted,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              item.label,
+                              style: Theme.of(context).textTheme.labelSmall,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -3763,18 +3787,30 @@ class _IssueDetailTabChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    return TextButton(
-      onPressed: onPressed,
-      style: TextButton.styleFrom(
-        foregroundColor: selected ? colors.page : colors.text,
-        backgroundColor: selected ? colors.primary : colors.surfaceAlt,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(999),
-          side: BorderSide(color: selected ? colors.primary : colors.border),
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onPressed,
+        child: ExcludeSemantics(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: selected ? colors.primary : colors.surfaceAlt,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: selected ? colors.primary : colors.border),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Text(
+                label,
+                style: TextStyle(color: selected ? colors.page : colors.text),
+              ),
+            ),
+          ),
         ),
       ),
-      child: Text(label),
     );
   }
 }
@@ -3838,10 +3874,15 @@ class _CommentsTab extends StatelessWidget {
 }
 
 class _AttachmentsTab extends StatelessWidget {
-  const _AttachmentsTab({required this.issue, required this.onDownload});
+  const _AttachmentsTab({
+    required this.issue,
+    required this.onDownload,
+    required this.readOnly,
+  });
 
   final TrackStateIssue issue;
   final ValueChanged<IssueAttachment> onDownload;
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -3851,7 +3892,25 @@ class _AttachmentsTab extends StatelessWidget {
       return Text(l10n.noResults, style: TextStyle(color: colors.muted));
     }
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (readOnly) ...[
+          Semantics(
+            container: true,
+            label: l10n.attachmentsDownloadOnlyMessage,
+            child: ExcludeSemantics(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  l10n.attachmentsDownloadOnlyMessage,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: colors.muted),
+                ),
+              ),
+            ),
+          ),
+        ],
         for (final attachment in issue.attachments)
           _AttachmentRow(attachment: attachment, onDownload: onDownload),
       ],
@@ -3873,6 +3932,8 @@ class _AttachmentRow extends StatelessWidget {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
     final downloadLabel = l10n.downloadAttachment(attachment.name);
+    final summaryLabel =
+        '${attachment.name} ${attachment.author} ${attachment.createdAt}';
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
@@ -3891,20 +3952,26 @@ class _AttachmentRow extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  attachment.name,
-                  style: Theme.of(context).textTheme.labelLarge,
+            child: Semantics(
+              container: true,
+              label: summaryLabel,
+              child: ExcludeSemantics(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      attachment.name,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    Text(
+                      '${attachment.author} · ${attachment.createdAt}',
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelSmall?.copyWith(color: colors.text),
+                    ),
+                  ],
                 ),
-                Text(
-                  '${attachment.author} · ${attachment.createdAt}',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelSmall?.copyWith(color: colors.text),
-                ),
-              ],
+              ),
             ),
           ),
           const SizedBox(width: 12),
@@ -3977,46 +4044,56 @@ class _HistoryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colors.surfaceAlt,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TrackStateIcon(
-            TrackStateIconGlyph.sync,
-            color: colors.text,
-            semanticLabel: entry.summary,
+    return Semantics(
+      container: true,
+      label: '${entry.summary} ${entry.author} ${entry.timestamp}',
+      child: ExcludeSemantics(
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: colors.surfaceAlt,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colors.border),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(entry.summary, style: Theme.of(context).textTheme.labelLarge),
-                Text(
-                  '${entry.author} · ${entry.timestamp}',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelSmall?.copyWith(color: colors.text),
-                ),
-                if ((entry.before ?? '').isNotEmpty || (entry.after ?? '').isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      '${entry.before ?? ''} -> ${entry.after ?? ''}'.trim(),
-                      style: Theme.of(context).textTheme.bodySmall,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TrackStateIcon(
+                TrackStateIconGlyph.sync,
+                color: colors.text,
+                semanticLabel: entry.summary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      entry.summary,
+                      style: Theme.of(context).textTheme.labelLarge,
                     ),
-                  ),
-              ],
-            ),
+                    Text(
+                      '${entry.author} · ${entry.timestamp}',
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelSmall?.copyWith(color: colors.text),
+                    ),
+                    if ((entry.before ?? '').isNotEmpty ||
+                        (entry.after ?? '').isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          '${entry.before ?? ''} -> ${entry.after ?? ''}'.trim(),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -4030,36 +4107,42 @@ class _CommentBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colors.surfaceAlt,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _Avatar(name: comment.author),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  comment.author,
-                  style: Theme.of(context).textTheme.labelLarge,
+    return Semantics(
+      container: true,
+      label: '${comment.author} ${comment.body} ${comment.updatedLabel}',
+      child: ExcludeSemantics(
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: colors.surfaceAlt,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colors.border),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Avatar(name: comment.author),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      comment.author,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    Text(comment.body),
+                  ],
                 ),
-                Text(comment.body),
-              ],
-            ),
+              ),
+              Text(
+                comment.updatedLabel,
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+            ],
           ),
-          Text(
-            comment.updatedLabel,
-            style: Theme.of(context).textTheme.labelSmall,
-          ),
-        ],
+        ),
       ),
     );
   }
