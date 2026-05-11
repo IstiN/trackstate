@@ -57,6 +57,16 @@ class WebAppSession(Protocol):
         timeout_ms: int = 30_000,
     ) -> None: ...
 
+    def press(
+        self,
+        selector: str,
+        key: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None: ...
+
     def count(
         self,
         selector: str,
