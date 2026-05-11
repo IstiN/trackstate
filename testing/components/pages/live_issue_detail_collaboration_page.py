@@ -20,10 +20,19 @@ class LiveIssueDetailCollaborationPage:
         repository: str,
         user_login: str,
     ) -> None:
-        if self._session.count(self._connected_button_selector) > 0:
+        connected_banner = TrackStateTrackerPage.CONNECTED_BANNER_TEMPLATE.format(
+            user_login=user_login,
+            repository=repository,
+        )
+        if self._is_connected(connected_banner):
             return
         if self._session.count(self._connect_button_selector) == 0:
-            return
+            raise AssertionError(
+                "Step 1 failed: the hosted session did not expose either the connected "
+                "state or the Connect GitHub action needed to prove the authentication "
+                "precondition for TS-311.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
 
         self._session.click(self._connect_button_selector, timeout_ms=30_000)
         self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
@@ -36,12 +45,12 @@ class LiveIssueDetailCollaborationPage:
         )
         wait_match = self._session.wait_for_any_text(
             [
-                f"Connected as {user_login} to {repository}.",
+                connected_banner,
                 "GitHub connection failed:",
             ],
             timeout_ms=120_000,
         )
-        if wait_match.matched_text.startswith("GitHub connection failed:"):
+        if wait_match.matched_text != connected_banner:
             raise AssertionError(
                 "Step 1 failed: the hosted GitHub connection flow did not reach the "
                 "connected state required for TS-311.\n"
@@ -70,13 +79,21 @@ class LiveIssueDetailCollaborationPage:
         return self._session.count(self._issue_detail_selector(issue_key))
 
     def tab_button_count(self, label: str) -> int:
-        return self._session.count(
-            f'flt-semantics[role="button"][aria-label="{self._escape(label)}"]',
-        )
+        return self._session.count(self._tab_selector(label))
+
+    def open_collaboration_tab(self, label: str) -> None:
+        selector = self._tab_selector(label)
+        self._session.wait_for_selector(selector, timeout_ms=30_000)
+        self._session.click(selector, timeout_ms=30_000)
 
     def text_fragment_count(self, fragment: str) -> int:
         return self._session.count(
             f'flt-semantics[aria-label*="{self._escape(fragment)}"]',
+        )
+
+    def button_label_fragment_count(self, fragment: str) -> int:
+        return self._session.count(
+            f'flt-semantics[role="button"][aria-label*="{self._escape(fragment)}"]',
         )
 
     def current_body_text(self) -> str:
@@ -84,6 +101,12 @@ class LiveIssueDetailCollaborationPage:
 
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
+
+    def _is_connected(self, connected_banner: str) -> bool:
+        return (
+            self._session.count(self._connected_button_selector) > 0
+            or connected_banner in self.current_body_text()
+        )
 
     @staticmethod
     def _open_issue_selector(*, issue_key: str, issue_summary: str) -> str:
@@ -97,6 +120,13 @@ class LiveIssueDetailCollaborationPage:
     @staticmethod
     def _issue_detail_selector(issue_key: str) -> str:
         return f'flt-semantics[aria-label*="Issue detail {LiveIssueDetailCollaborationPage._escape(issue_key)}"]'
+
+    @staticmethod
+    def _tab_selector(label: str) -> str:
+        return (
+            'flt-semantics[role="button"]'
+            f'[aria-label="{LiveIssueDetailCollaborationPage._escape(label)}"]'
+        )
 
     @staticmethod
     def _escape(value: str) -> str:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-import traceback
 from pathlib import Path
 import unittest
 
@@ -23,6 +22,10 @@ from testing.tests.support.live_tracker_app_factory import (
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts311_failure.png"
+SEEDED_COMMENT_FRAGMENT = "This comment demonstrates markdown-backed collaboration history."
+READ_ONLY_ATTACHMENT_MESSAGE = "download-only for Git LFS attachments"
+DOWNLOAD_BUTTON_LABEL_FRAGMENT = "Download"
+UPLOAD_BUTTON_LABEL_FRAGMENT = "Upload attachment to"
 
 
 class IssueDetailCollaborationTabsHostedCapabilityTest(unittest.TestCase):
@@ -96,7 +99,7 @@ class IssueDetailCollaborationTabsHostedCapabilityTest(unittest.TestCase):
                 history_tabs = live_issue_page.tab_button_count("History")
                 seeded_attachment_name = Path(issue_fixture.attachment_paths[0]).name
                 inline_comment_count = live_issue_page.text_fragment_count(
-                    "This comment demonstrates markdown-backed collaboration history.",
+                    SEEDED_COMMENT_FRAGMENT,
                 )
                 seeded_attachment_count = live_issue_page.text_fragment_count(
                     seeded_attachment_name,
@@ -131,6 +134,75 @@ class IssueDetailCollaborationTabsHostedCapabilityTest(unittest.TestCase):
                     "Step 2 failed: collaboration content was rendered inline inside the "
                     "issue detail surface instead of being isolated behind tabs.\n"
                     f"Inline comment visibility count: {inline_comment_count}\n"
+                    f"Observed body text:\n{live_issue_page.current_body_text()}",
+                )
+
+                live_issue_page.open_collaboration_tab("Comments")
+                self.assertGreater(
+                    live_issue_page.text_fragment_count(SEEDED_COMMENT_FRAGMENT),
+                    0,
+                    "Step 2 failed: opening the Comments tab did not reveal the seeded "
+                    "comment content for DEMO-2.\n"
+                    f"Observed body text:\n{live_issue_page.current_body_text()}",
+                )
+
+                live_issue_page.open_collaboration_tab("History")
+                self.assertEqual(
+                    live_issue_page.text_fragment_count(SEEDED_COMMENT_FRAGMENT),
+                    0,
+                    "Step 2 failed: opening the History tab left the Comments tab content "
+                    "visible, so tab navigation did not switch collaboration panels.\n"
+                    f"Observed body text:\n{live_issue_page.current_body_text()}",
+                )
+                self.assertEqual(
+                    live_issue_page.text_fragment_count(seeded_attachment_name),
+                    0,
+                    "Step 2 failed: opening the History tab left the Attachments tab "
+                    "content visible, so tab navigation did not switch collaboration "
+                    "panels.\n"
+                    f"Observed body text:\n{live_issue_page.current_body_text()}",
+                )
+
+                live_issue_page.open_collaboration_tab("Attachments")
+                self.assertGreater(
+                    live_issue_page.text_fragment_count(seeded_attachment_name),
+                    0,
+                    "Step 3 failed: opening the Attachments tab did not reveal the seeded "
+                    f"attachment {seeded_attachment_name}.\n"
+                    f"Observed body text:\n{live_issue_page.current_body_text()}",
+                )
+
+                read_only_message_count = live_issue_page.text_fragment_count(
+                    READ_ONLY_ATTACHMENT_MESSAGE,
+                )
+                download_button_count = live_issue_page.button_label_fragment_count(
+                    DOWNLOAD_BUTTON_LABEL_FRAGMENT,
+                )
+                upload_button_count = live_issue_page.button_label_fragment_count(
+                    UPLOAD_BUTTON_LABEL_FRAGMENT,
+                )
+
+                self.assertEqual(
+                    upload_button_count,
+                    0,
+                    "Step 3 failed: the hosted Attachments tab still exposed an upload "
+                    "action even though Git LFS uploads are unsupported in the hosted "
+                    "session.\n"
+                    f"Observed body text:\n{live_issue_page.current_body_text()}",
+                )
+                self.assertGreater(
+                    read_only_message_count,
+                    0,
+                    "Step 3 failed: the hosted Attachments tab did not explain that this "
+                    "session is read-only/download-only for Git LFS attachments.\n"
+                    f"Observed body text:\n{live_issue_page.current_body_text()}",
+                )
+                self.assertGreater(
+                    download_button_count,
+                    0,
+                    "Step 3 failed: the hosted Attachments tab did not expose any "
+                    "download action for the seeded LFS attachment.\n"
+                    f"Seeded attachment: {seeded_attachment_name}\n"
                     f"Observed body text:\n{live_issue_page.current_body_text()}",
                 )
             except Exception:
