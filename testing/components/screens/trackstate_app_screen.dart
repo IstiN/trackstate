@@ -112,6 +112,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         widget.properties.readOnly == true;
   }, description: 'read-only field labeled $label');
 
+  Finder get _dialogScope {
+    final alertDialog = find.byType(AlertDialog);
+    if (alertDialog.evaluate().isNotEmpty) {
+      return alertDialog.last;
+    }
+    final dialog = find.byType(Dialog);
+    if (dialog.evaluate().isNotEmpty) {
+      return dialog.last;
+    }
+    return alertDialog;
+  }
+
   Finder get _jqlSearchPanel => find.byWidgetPredicate(
     (widget) => widget is Semantics && widget.properties.label == 'JQL Search',
     description: 'JQL Search panel',
@@ -664,6 +676,47 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         matching: _exactSemanticsLabel(label),
       ),
       textMatch: find.descendant(of: topBar, matching: find.text(label)),
+    );
+  }
+
+  @override
+  Future<bool> isDialogTextVisible(String text) async {
+    await tester.pump();
+    final dialogScope = _dialogScope;
+    if (dialogScope.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(of: dialogScope, matching: _text(text))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  List<String> visibleDialogTextsSnapshot() {
+    final dialogScope = _dialogScope;
+    if (dialogScope.evaluate().isEmpty) {
+      return const <String>[];
+    }
+    return _textSnapshotWithin(dialogScope);
+  }
+
+  @override
+  Future<bool> tapDialogControl(String label) async {
+    final dialogScope = _dialogScope;
+    if (dialogScope.evaluate().isEmpty) {
+      return false;
+    }
+    return _tapControl(
+      label: label,
+      semanticsMatch: find.descendant(
+        of: dialogScope,
+        matching: _exactSemanticsLabel(label),
+      ),
+      textMatch: find.descendant(
+        of: dialogScope,
+        matching: find.text(label, findRichText: true),
+      ),
     );
   }
 
