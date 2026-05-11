@@ -133,6 +133,7 @@ class ProviderBackedTrackStateRepository
   final Queue<Completer<void>> _pendingDeleteMutations =
       Queue<Completer<void>>();
   bool _deleteMutationInProgress = false;
+  TrackerStartupRecovery? _startupRecovery;
 
   TrackStateProviderAdapter get providerAdapter => _provider;
   ProviderSession? get session => _session;
@@ -204,6 +205,7 @@ class ProviderBackedTrackStateRepository
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async {
+    _startupRecovery = null;
     _snapshotArtifactRevisions.clear();
     final snapshot = await _loadSetupSnapshot();
     _snapshot = snapshot;
@@ -1346,6 +1348,7 @@ class ProviderBackedTrackStateRepository
             TrackerSectionKey.settings: TrackerLoadState.ready,
           },
         ),
+        startupRecovery: _startupRecovery,
       );
     }
     final issuePaths =
@@ -1440,6 +1443,7 @@ class ProviderBackedTrackStateRepository
           TrackerSectionKey.settings: TrackerLoadState.ready,
         },
       ),
+      startupRecovery: _startupRecovery,
     );
   }
 
@@ -1883,7 +1887,13 @@ class ProviderBackedTrackStateRepository
     final deletedPath = _joinPath(dataRoot, '.trackstate/index/deleted.json');
     final deleted = <DeletedIssueTombstone>[];
     if (blobPaths.contains(tombstonesPath)) {
-      final json = await _getRepositoryJson(tombstonesPath);
+      Object? json;
+      try {
+        json = await _getRepositoryJson(tombstonesPath);
+      } on GitHubRateLimitException catch (error) {
+        _captureHostedStartupRecovery(error);
+        return _dedupeDeletedIssueTombstones(deleted);
+      }
       if (json is List) {
         for (final entry in json.whereType<Map>()) {
           final tombstonePath =
@@ -1897,7 +1907,13 @@ class ProviderBackedTrackStateRepository
             );
             continue;
           }
-          final tombstoneJson = await _getRepositoryJson(tombstonePath);
+          Object? tombstoneJson;
+          try {
+            tombstoneJson = await _getRepositoryJson(tombstonePath);
+          } on GitHubRateLimitException catch (error) {
+            _captureHostedStartupRecovery(error);
+            return _dedupeDeletedIssueTombstones(deleted);
+          }
           if (tombstoneJson is! Map) {
             throw TrackStateRepositoryException(
               'Tombstone artifact $tombstonePath did not contain a JSON object.',
@@ -1913,7 +1929,13 @@ class ProviderBackedTrackStateRepository
       }
     }
     if (includeLegacyDeletedIndex && blobPaths.contains(deletedPath)) {
-      final json = await _getRepositoryJson(deletedPath);
+      Object? json;
+      try {
+        json = await _getRepositoryJson(deletedPath);
+      } on GitHubRateLimitException catch (error) {
+        _captureHostedStartupRecovery(error);
+        return _dedupeDeletedIssueTombstones(deleted);
+      }
       if (json is List) {
         deleted.addAll(
           json.whereType<Map>().map(
@@ -1926,6 +1948,14 @@ class ProviderBackedTrackStateRepository
       }
     }
     return _dedupeDeletedIssueTombstones(deleted);
+  }
+
+  void _captureHostedStartupRecovery(GitHubRateLimitException error) {
+    _startupRecovery ??= TrackerStartupRecovery(
+      kind: TrackerStartupRecoveryKind.githubRateLimit,
+      failedPath: error.requestPath,
+      retryAfter: error.retryAfter,
+    );
   }
 
   Future<List<IssueComment>> _loadComments({

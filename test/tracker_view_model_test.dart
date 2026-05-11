@@ -28,6 +28,54 @@ void main() {
     expect(viewModel.searchResults, isNotEmpty);
   });
 
+  test(
+    'view model routes hosted startup recovery into settings when reduced bootstrap succeeds',
+    () async {
+      final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+      final recoveryRepository = _StartupRecoveryRepository(
+        loadResults: [_withStartupRecovery(snapshot)],
+      );
+      final viewModel = TrackerViewModel(repository: recoveryRepository);
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNotNull);
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.githubRateLimit,
+      );
+      expect(viewModel.section, TrackerSection.settings);
+      expect(recoveryRepository.loadCount, 1);
+    },
+  );
+
+  test(
+    'view model maps blocking hosted rate limits into recovery instead of generic data-load failure',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: _StartupRecoveryRepository(
+          loadResults: const [
+            GitHubRateLimitException(
+              message:
+                  'GitHub API request failed for /repos/demo/contents/.trackstate/index/issues.json (403): {"message":"API rate limit exceeded"}',
+              requestPath: '/repos/demo/contents/.trackstate/index/issues.json',
+              statusCode: 403,
+            ),
+          ],
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNull);
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.githubRateLimit,
+      );
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
+    },
+  );
+
   test('view model appends the next search page through load more', () async {
     final viewModel = TrackerViewModel(
       repository: DemoTrackStateRepository(
@@ -98,6 +146,25 @@ void main() {
     expect(viewModel.isConnected, isTrue);
     expect(viewModel.connectedUser?.initials, 'DU');
   });
+
+  test(
+    'view model resumes startup recovery once after GitHub authentication succeeds',
+    () async {
+      final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+      final repository = _StartupRecoveryRepository(
+        loadResults: [_withStartupRecovery(snapshot), snapshot],
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      await viewModel.connectGitHub('token');
+
+      expect(repository.loadCount, 2);
+      expect(repository.connectCount, 1);
+      expect(viewModel.startupRecovery, isNull);
+      expect(viewModel.section, TrackerSection.settings);
+    },
+  );
 
   test(
     'view model loads the local repository user for avatar details',
@@ -1423,4 +1490,133 @@ TrackerSnapshot _searchPaginationSnapshot() {
     ),
     issues: issues,
   );
+}
+
+TrackerSnapshot _withStartupRecovery(TrackerSnapshot snapshot) {
+  return TrackerSnapshot(
+    project: snapshot.project,
+    issues: snapshot.issues,
+    repositoryIndex: snapshot.repositoryIndex,
+    loadWarnings: snapshot.loadWarnings,
+    readiness: snapshot.readiness,
+    startupRecovery: const TrackerStartupRecovery(
+      kind: TrackerStartupRecoveryKind.githubRateLimit,
+      failedPath:
+          '/repos/trackstate/trackstate/contents/.trackstate/index/tombstones.json',
+    ),
+  );
+}
+
+class _StartupRecoveryRepository implements TrackStateRepository {
+  _StartupRecoveryRepository({required List<Object> loadResults})
+    : _loadResults = List<Object>.from(loadResults);
+
+  final List<Object> _loadResults;
+  final JqlSearchService _searchService = const JqlSearchService();
+  int loadCount = 0;
+  int connectCount = 0;
+  TrackerSnapshot? _currentSnapshot;
+
+  @override
+  bool get supportsGitHubAuth => true;
+
+  @override
+  bool get usesLocalPersistence => false;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    connectCount += 1;
+    return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+  }
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    final index = loadCount < _loadResults.length
+        ? loadCount
+        : _loadResults.length - 1;
+    loadCount += 1;
+    final result = _loadResults[index];
+    if (result is TrackerSnapshot) {
+      _currentSnapshot = result;
+      return result;
+    }
+    throw result;
+  }
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    final snapshot =
+        _currentSnapshot ??
+        await const DemoTrackStateRepository().loadSnapshot();
+    return _searchService.search(
+      issues: snapshot.issues,
+      project: snapshot.project,
+      jql: jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+  }
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) async =>
+      (await searchIssuePage(jql, maxResults: 500)).issues;
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Startup recovery test repository does not support archiving.',
+      );
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Startup recovery test repository does not support deletion.',
+      );
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+    Map<String, String> customFields = const {},
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async => issue;
+
+  @override
+  Future<TrackStateIssue> updateIssueStatus(
+    TrackStateIssue issue,
+    IssueStatus status,
+  ) async => issue;
+
+  @override
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => issue;
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
+      Uint8List(0);
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async => issue;
 }
