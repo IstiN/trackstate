@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -19,6 +20,8 @@ void main() {
       expect(result.exitCode, 0);
       expect(result.stdout, contains('trackstate session --target local'));
       expect(result.stdout, contains('trackstate search --target local'));
+      expect(result.stdout, contains('trackstate attachment upload'));
+      expect(result.stdout, contains('jira_execute_request'));
     });
 
     test('reports validation errors in the JSON envelope', () async {
@@ -370,9 +373,7 @@ void main() {
       expect(result.stdout, contains('Provider: local-git'));
     });
 
-    test(
-      'returns flattened paged search metadata for CLI consumers',
-      () async {
+    test('returns flattened paged search metadata for CLI consumers', () async {
       final cli = TrackStateCli(
         environment: const TrackStateCliEnvironment(
           workingDirectory: '/workspace/repo',
@@ -556,8 +557,415 @@ void main() {
         expect(data['issues'], isA<List<Object?>>());
       },
     );
+
+    test(
+      'uploads attachments through the Jira alias and returns attachment metadata in the envelope',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'trackstate-cli-upload',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
+        final uploadFile = File('${tempDir.path}/design.png');
+        await uploadFile.writeAsBytes(const <int>[1, 2, 3, 4]);
+        final repository = _FakeSearchRepository(
+          snapshot: _sampleSnapshot(),
+          user: const RepositoryUser(
+            login: 'uploader',
+            displayName: 'Upload User',
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+                canManageAttachments: true,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'jira_attach_file_to_ticket',
+          '--target',
+          'local',
+          '--issueKey',
+          'TRACK-1',
+          '--file',
+          uploadFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final attachment = data['attachment']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(data['command'], 'attachment-upload');
+        expect(data['issue'], 'TRACK-1');
+        expect(attachment['name'], 'design.png');
+        expect(attachment['sizeBytes'], 4);
+        expect(repository.lastUploadIssue?.key, 'TRACK-1');
+        expect(repository.lastUploadName, 'design.png');
+      },
+    );
+
+    test(
+      'downloads attachments through the Jira alias and writes the requested output file',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'trackstate-cli-download',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
+        final outFile = '${tempDir.path}/downloads/design.png';
+        final repository = _FakeSearchRepository(
+          snapshot: _sampleSnapshot(),
+          downloadBytes: <String, List<int>>{
+            'TRACK/TRACK-1/attachments/design.png': <int>[9, 8, 7],
+          },
+        );
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+                canManageAttachments: true,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'jira_download_attachment',
+          '--target',
+          'local',
+          '--attachmentId',
+          'TRACK/TRACK-1/attachments/design.png',
+          '--out',
+          outFile,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(data['command'], 'attachment-download');
+        expect(data['savedFile'], outFile);
+        expect(await File(outFile).readAsBytes(), <int>[9, 8, 7]);
+        expect(
+          repository.lastDownloadedAttachmentId,
+          'TRACK/TRACK-1/attachments/design.png',
+        );
+      },
+    );
+
+    test(
+      'returns raw Jira-compatible search JSON for jira_execute_request',
+      () async {
+        final repository = _FakeSearchRepository(
+          snapshot: _sampleSnapshot(),
+          page: TrackStateIssueSearchPage(
+            issues: const <TrackStateIssue>[_sampleIssue],
+            startAt: 0,
+            maxResults: 1,
+            total: 1,
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'jira_execute_request',
+          '--target',
+          'local',
+          '--method',
+          'GET',
+          '--request-path',
+          '/rest/api/2/search',
+          '--query',
+          'jql=project = TRACK',
+          '--query',
+          'maxResults=1',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final issues = json['issues']! as List<Object?>;
+        final firstIssue = issues.single as Map<String, Object?>;
+        final fields = firstIssue['fields']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json.containsKey('schemaVersion'), isFalse);
+        expect(json['startAt'], 0);
+        expect(json['maxResults'], 1);
+        expect(fields['summary'], 'Implement attachments');
+        expect(
+          (fields['attachment'] as List<Object?>).single,
+          isA<Map<String, Object?>>(),
+        );
+      },
+    );
+
+    test(
+      'supports POST jira_execute_request bodies with field selection',
+      () async {
+        final repository = _FakeSearchRepository(
+          snapshot: _sampleSnapshot(),
+          page: TrackStateIssueSearchPage(
+            issues: const <TrackStateIssue>[_sampleIssue],
+            startAt: 0,
+            maxResults: 1,
+            total: 1,
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'jira_execute_request',
+          '--target',
+          'local',
+          '--method',
+          'POST',
+          '--request-path',
+          '/rest/api/2/search',
+          '--body',
+          '{"jql":"project = TRACK","fields":["summary"]}',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final firstIssue =
+            (json['issues']! as List<Object?>).single as Map<String, Object?>;
+        final fields = firstIssue['fields']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(fields.keys, <String>['summary']);
+      },
+    );
+
+    test(
+      'supports hosted jira_execute_request through the shared repository contract',
+      () async {
+        final repository = _FakeSearchRepository(
+          snapshot: _sampleSnapshot(),
+          page: TrackStateIssueSearchPage(
+            issues: const <TrackStateIssue>[_sampleIssue],
+            startAt: 0,
+            maxResults: 1,
+            total: 1,
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            environment: <String, String>{
+              trackStateCliTokenEnvironmentVariable: 'env-token',
+            },
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            hostedRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'jira_execute_request',
+          '--target',
+          'hosted',
+          '--provider',
+          'github',
+          '--repository',
+          'owner/repo',
+          '--method',
+          'GET',
+          '--request-path',
+          '/rest/api/2/issue/TRACK-1',
+          '--query',
+          'fields=summary',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final fields = json['fields']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(fields.keys, <String>['summary']);
+      },
+    );
+
+    test(
+      'rejects unsupported attachment paths for jira_execute_request',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'jira_execute_request',
+          '--target',
+          'local',
+          '--method',
+          'GET',
+          '--request-path',
+          '/rest/api/2/attachment/123',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+
+        expect(result.exitCode, 5);
+        expect(error['code'], 'UNSUPPORTED_REQUEST');
+        expect(error['category'], 'unsupported');
+      },
+    );
   });
 }
+
+const TrackStateIssue _sampleIssue = TrackStateIssue(
+  key: 'TRACK-1',
+  project: 'TRACK',
+  issueType: IssueType.story,
+  issueTypeId: 'story',
+  status: IssueStatus.inProgress,
+  statusId: 'in-progress',
+  priority: IssuePriority.high,
+  priorityId: 'high',
+  summary: 'Implement attachments',
+  description: 'Add upload and download support.',
+  assignee: 'ana',
+  reporter: 'sam',
+  labels: <String>['cli'],
+  components: <String>['tracker-cli'],
+  fixVersionIds: <String>['2026.05'],
+  watchers: <String>[],
+  customFields: <String, Object?>{'customfield_10001': 'CLI'},
+  parentKey: null,
+  epicKey: null,
+  parentPath: null,
+  epicPath: null,
+  progress: 0.5,
+  updatedLabel: 'just now',
+  acceptanceCriteria: <String>['Expose attachment commands.'],
+  comments: <IssueComment>[
+    IssueComment(
+      id: '0001',
+      author: 'sam',
+      body: 'Please keep the contract explicit.',
+      updatedLabel: '2026-05-11T00:00:00Z',
+      createdAt: '2026-05-11T00:00:00Z',
+      updatedAt: '2026-05-11T00:00:00Z',
+      storagePath: 'TRACK/TRACK-1/comments/0001.md',
+    ),
+  ],
+  links: <IssueLink>[],
+  attachments: <IssueAttachment>[
+    IssueAttachment(
+      id: 'TRACK/TRACK-1/attachments/design.png',
+      name: 'design.png',
+      mediaType: 'image/png',
+      sizeBytes: 3,
+      author: 'sam',
+      createdAt: '2026-05-11T00:00:00Z',
+      storagePath: 'TRACK/TRACK-1/attachments/design.png',
+      revisionOrOid: 'oid-design',
+    ),
+  ],
+  isArchived: false,
+  storagePath: 'TRACK/TRACK-1/main.md',
+);
+
+TrackerSnapshot _sampleSnapshot() => TrackerSnapshot(
+  project: const ProjectConfig(
+    key: 'TRACK',
+    name: 'TrackState',
+    repository: 'owner/repo',
+    branch: 'main',
+    defaultLocale: 'en',
+    issueTypeDefinitions: <TrackStateConfigEntry>[
+      TrackStateConfigEntry(id: 'story', name: 'Story'),
+    ],
+    statusDefinitions: <TrackStateConfigEntry>[
+      TrackStateConfigEntry(id: 'in-progress', name: 'In Progress'),
+    ],
+    fieldDefinitions: <TrackStateFieldDefinition>[],
+    priorityDefinitions: <TrackStateConfigEntry>[
+      TrackStateConfigEntry(id: 'high', name: 'High'),
+    ],
+  ),
+  repositoryIndex: const RepositoryIndex(
+    entries: <RepositoryIssueIndexEntry>[
+      RepositoryIssueIndexEntry(
+        key: 'TRACK-1',
+        path: 'TRACK/TRACK-1/main.md',
+        childKeys: <String>[],
+      ),
+    ],
+  ),
+  issues: const <TrackStateIssue>[_sampleIssue],
+);
 
 Future<String?> _ghToken() async => 'gh-token';
 
@@ -606,11 +1014,17 @@ class _FakeTrackStateCliProviderFactory
 
 class _FakeTrackStateCliRepositoryFactory
     implements TrackStateCliRepositoryFactory {
-  _FakeTrackStateCliRepositoryFactory({this.localRepository});
+  _FakeTrackStateCliRepositoryFactory({
+    this.localRepository,
+    this.hostedRepository,
+  });
 
   final TrackStateRepository? localRepository;
+  final TrackStateRepository? hostedRepository;
   String? lastRepositoryPath;
   String? lastDataRef;
+  String? lastHostedRepository;
+  String? lastHostedBranch;
 
   @override
   TrackStateRepository createLocal({
@@ -633,18 +1047,39 @@ class _FakeTrackStateCliRepositoryFactory
     required String branch,
     http.Client? client,
   }) {
-    throw StateError('Expected only fake local repository usage in this test.');
+    lastHostedRepository = repository;
+    lastHostedBranch = branch;
+    final targetRepository = hostedRepository;
+    if (targetRepository == null) {
+      throw StateError('Expected a fake hosted repository.');
+    }
+    return targetRepository;
   }
 }
 
 class _FakeSearchRepository implements TrackStateRepository {
-  _FakeSearchRepository({required this.page});
+  _FakeSearchRepository({
+    this.page,
+    this.snapshot,
+    this.user = const RepositoryUser(
+      login: 'searcher',
+      displayName: 'Search User',
+    ),
+    this.downloadBytes = const <String, List<int>>{},
+  });
 
-  final TrackStateIssueSearchPage page;
+  final TrackStateIssueSearchPage? page;
+  TrackerSnapshot? snapshot;
+  final RepositoryUser user;
+  final Map<String, List<int>> downloadBytes;
   String? lastJql;
   int? lastStartAt;
   int? lastMaxResults;
   String? lastContinuationToken;
+  RepositoryConnection? connection;
+  TrackStateIssue? lastUploadIssue;
+  String? lastUploadName;
+  String? lastDownloadedAttachmentId;
 
   @override
   bool get supportsGitHubAuth => false;
@@ -653,11 +1088,19 @@ class _FakeSearchRepository implements TrackStateRepository {
   bool get usesLocalPersistence => true;
 
   @override
-  Future<RepositoryUser> connect(RepositoryConnection connection) async =>
-      const RepositoryUser(login: 'searcher', displayName: 'Search User');
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    this.connection = connection;
+    return user;
+  }
 
   @override
-  Future<TrackerSnapshot> loadSnapshot() async => throw UnimplementedError();
+  Future<TrackerSnapshot> loadSnapshot() async {
+    final currentSnapshot = snapshot;
+    if (currentSnapshot == null) {
+      throw StateError('Expected a snapshot for this fake repository.');
+    }
+    return currentSnapshot;
+  }
 
   @override
   Future<TrackStateIssueSearchPage> searchIssuePage(
@@ -670,11 +1113,18 @@ class _FakeSearchRepository implements TrackStateRepository {
     lastStartAt = startAt;
     lastMaxResults = maxResults;
     lastContinuationToken = continuationToken;
-    return page;
+    return page ??
+        TrackStateIssueSearchPage(
+          issues: snapshot?.issues ?? const <TrackStateIssue>[],
+          startAt: startAt,
+          maxResults: maxResults,
+          total: snapshot?.issues.length ?? 0,
+        );
   }
 
   @override
-  Future<List<TrackStateIssue>> searchIssues(String jql) async => page.issues;
+  Future<List<TrackStateIssue>> searchIssues(String jql) async =>
+      (page ?? await searchIssuePage(jql)).issues;
 
   @override
   Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
@@ -714,11 +1164,49 @@ class _FakeSearchRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
-  }) async => throw UnimplementedError();
+  }) async {
+    lastUploadIssue = issue;
+    lastUploadName = name;
+    final currentSnapshot = snapshot;
+    if (currentSnapshot == null) {
+      throw StateError('Expected a snapshot for uploads.');
+    }
+    final attachment = IssueAttachment(
+      id: '${issue.project}/${issue.key}/attachments/$name',
+      name: name,
+      mediaType: 'image/png',
+      sizeBytes: bytes.length,
+      author: user.displayName,
+      createdAt: '2026-05-11T00:00:00Z',
+      storagePath: '${issue.project}/${issue.key}/attachments/$name',
+      revisionOrOid: 'revision-$name',
+    );
+    final updatedIssue = issue.copyWith(
+      attachments: <IssueAttachment>[
+        ...issue.attachments.where(
+          (existing) => existing.name != attachment.name,
+        ),
+        attachment,
+      ],
+    );
+    snapshot = TrackerSnapshot(
+      project: currentSnapshot.project,
+      repositoryIndex: currentSnapshot.repositoryIndex,
+      issues: <TrackStateIssue>[
+        for (final candidate in currentSnapshot.issues)
+          if (candidate.key == issue.key) updatedIssue else candidate,
+      ],
+    );
+    return updatedIssue;
+  }
 
   @override
-  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
-      throw UnimplementedError();
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async {
+    lastDownloadedAttachmentId = attachment.id;
+    return Uint8List.fromList(
+      downloadBytes[attachment.id] ?? utf8.encode('download:${attachment.id}'),
+    );
+  }
 
   @override
   Future<List<IssueHistoryEntry>> loadIssueHistory(
