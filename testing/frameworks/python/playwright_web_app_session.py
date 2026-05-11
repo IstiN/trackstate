@@ -21,6 +21,9 @@ class PlaywrightWebAppSession(WebAppSession):
     def __init__(self, page: Page) -> None:
         self._page = page
 
+    def set_viewport_size(self, *, width: int, height: int) -> None:
+        self._page.set_viewport_size({"width": width, "height": height})
+
     def goto(
         self,
         url: str,
@@ -475,6 +478,9 @@ class PlaywrightWebAppSession(WebAppSession):
 
     def mouse_click(self, x: float, y: float, *, delay_ms: int = 0) -> None:
         self._page.mouse.click(x, y, delay=delay_ms)
+
+    def mouse_move(self, x: float, y: float) -> None:
+        self._page.mouse.move(x, y)
 
     def _locator(
         self,
