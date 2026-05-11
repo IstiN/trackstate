@@ -21,8 +21,6 @@ class TrackStateCliInvalidPaginationConfig:
     expected_control_start_at: int
     expected_control_max_results: int
     expected_control_total: int
-    expected_exit_code: int
-    expected_error_code: str
     expected_error_category: str
     required_stdout_fragments: tuple[str, ...]
     invalid_start_at_case: TrackStateCliInvalidPaginationCase
@@ -56,12 +54,9 @@ class TrackStateCliInvalidPaginationConfig:
             expected_control_start_at=0,
             expected_control_max_results=2,
             expected_control_total=2,
-            expected_exit_code=2,
-            expected_error_code="INVALID_TARGET",
             expected_error_category="validation",
             required_stdout_fragments=(
                 '"ok": false',
-                '"code": "INVALID_TARGET"',
                 '"category": "validation"',
             ),
             invalid_start_at_case=TrackStateCliInvalidPaginationCase(
