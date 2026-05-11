@@ -170,6 +170,7 @@ class TrackStateCli {
   }
 
   Future<TrackStateCliExecution> _runSearch(List<String> arguments) async {
+    final normalizedArguments = _normalizeSearchArguments(arguments);
     final parser = ArgParser(allowTrailingOptions: false)
       ..addFlag('help', abbr: 'h', negatable: false)
       ..addOption('target', help: 'Target type: local or hosted.')
@@ -209,7 +210,7 @@ class TrackStateCli {
 
     late final ArgResults results;
     try {
-      results = parser.parse(arguments);
+      results = parser.parse(normalizedArguments);
     } on FormatException catch (error) {
       throw _TrackStateCliException(
         code: 'INVALID_TARGET',
@@ -230,7 +231,10 @@ class TrackStateCli {
     final output = TrackStateCliOutput.values.byName(
       results['output']!.toString(),
     );
-    final target = await _resolveTarget(results);
+    final target = await _resolveTarget(
+      results,
+      defaultTargetType: TrackStateCliTargetType.local,
+    );
     final jql = results['jql']?.toString().trim() ?? '';
     if (jql.isEmpty) {
       throw _TrackStateCliException(
@@ -279,9 +283,21 @@ class TrackStateCli {
     }
   }
 
-  Future<_ResolvedTarget> _resolveTarget(ArgResults results) async {
-    final targetValue = results['target']?.toString().trim() ?? '';
-    if (targetValue.isEmpty) {
+  List<String> _normalizeSearchArguments(List<String> arguments) => [
+    for (final argument in arguments)
+      switch (argument) {
+        '--startAt' => '--start-at',
+        '--maxResults' => '--max-results',
+        _ => argument,
+      },
+  ];
+
+  Future<_ResolvedTarget> _resolveTarget(
+    ArgResults results, {
+    TrackStateCliTargetType? defaultTargetType,
+  }) async {
+    final configuredTargetValue = results['target']?.toString().trim() ?? '';
+    if (configuredTargetValue.isEmpty && defaultTargetType == null) {
       throw _TrackStateCliException(
         code: 'INVALID_TARGET',
         category: TrackStateCliErrorCategory.validation,
@@ -290,6 +306,10 @@ class TrackStateCli {
         details: <String, Object?>{'option': 'target'},
       );
     }
+
+    final targetValue = configuredTargetValue.isEmpty
+        ? defaultTargetType!.name
+        : configuredTargetValue;
 
     final normalizedTarget = switch (targetValue.toLowerCase()) {
       'local' => TrackStateCliTargetType.local,
@@ -695,6 +715,10 @@ class TrackStateCli {
     'command': 'search',
     'jql': jql,
     'authSource': authSource,
+    'startAt': page.startAt,
+    'maxResults': page.maxResults,
+    'total': page.total,
+    'isLastPage': !page.hasMore,
     'page': <String, Object?>{
       'startAt': page.startAt,
       'maxResults': page.maxResults,
@@ -967,11 +991,15 @@ class TrackStateCli {
     'Execute a paged JQL search and return Jira-style pagination metadata plus any continuation token.',
     '',
     'Usage:',
-    '  trackstate search --target local --jql \'project = TRACK ORDER BY key ASC\' [--path /repo] [--start-at 0] [--max-results 50] [--continuation-token <token>] [--output json|text]',
+    '  trackstate search --jql \'project = TRACK ORDER BY key ASC\' [--path /repo] [--start-at 0|--startAt 0] [--max-results 50|--maxResults 50] [--continuation-token <token>] [--output json|text]',
     '  trackstate search --target hosted --provider github --repository owner/name --jql \'text ~ "pagination"\' [--branch main] [--token <token>] [--start-at 0] [--max-results 50] [--continuation-token <token>] [--output json|text]',
     '',
     'Options:',
     parser.usage,
+    '',
+    'Notes:',
+    '  When --target is omitted, search defaults to the current local repository.',
+    '  Jira-style --startAt/--maxResults aliases are accepted for pagination.',
     '',
     'Credential precedence for hosted targets:',
     '  1. --token',
