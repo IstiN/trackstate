@@ -1,3 +1,5 @@
+import 'dart:ui' show Rect;
+
 import 'package:flutter_test/flutter_test.dart';
 
 import '../models/create_issue_layout_observation.dart';
@@ -11,6 +13,8 @@ abstract interface class CreateIssueAccessibilityScreenHandle {
 
   List<String> visibleTexts();
 
+  List<String> visibleSemanticsLabels();
+
   CreateIssueLayoutObservation observeLayout();
 
   CreateIssueScrollObservation observeVerticalScroll();
@@ -18,6 +22,17 @@ abstract interface class CreateIssueAccessibilityScreenHandle {
   List<String> semanticsTraversal();
 
   CreateIssueTextContrastObservation observeTextContrast(String text);
+
+  Future<void> populateCreateIssueForm({
+    required String summary,
+    String? description,
+  });
+
+  Future<String?> readLabeledTextFieldValue(String label);
+
+  Rect? observeLabeledTextFieldRect(String label);
+
+  Rect? observeControlRect(String label);
 
   bool isTextVisibleInViewport(String text);
 
