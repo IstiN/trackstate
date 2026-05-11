@@ -233,7 +233,7 @@ class _TrackerHome extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
-    if (viewModel.isLoading) {
+    if (viewModel.snapshot == null && viewModel.isLoading) {
       return Scaffold(
         body: Center(
           child: Semantics(
@@ -1390,10 +1390,20 @@ class _Dashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final showBootstrapHint =
+        viewModel.loadStateForDomain(TrackerDataDomain.issueDetails) ==
+        TrackerLoadState.partial;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _ScreenHeading(title: l10n.dashboard, subtitle: l10n.appTagline),
+        if (showBootstrapHint) ...[
+          _SectionLoadingBanner(
+            semanticLabel: '${l10n.dashboard} ${l10n.loading}',
+            label: l10n.loading,
+          ),
+          const SizedBox(height: 16),
+        ],
         LayoutBuilder(
           builder: (context, constraints) {
             final cards = [
@@ -1402,24 +1412,29 @@ class _Dashboard extends StatelessWidget {
                 value: '${viewModel.openIssueCount}',
                 delta: '-6d',
                 tone: MetricTone.accent,
+                showDeltaPlaceholder: showBootstrapHint,
               ),
               _MetricCard(
                 label: l10n.issuesInProgress,
                 value: '${viewModel.inProgressIssueCount}',
                 delta: '+4',
                 tone: MetricTone.primary,
+                showDeltaPlaceholder: showBootstrapHint,
               ),
               _MetricCard(
                 label: l10n.completed,
                 value: '${viewModel.completedIssueCount}',
                 delta: '+12',
                 tone: MetricTone.secondary,
+                showDeltaPlaceholder: showBootstrapHint,
               ),
               _MetricCard(
                 label: l10n.teamVelocity,
                 value: '42',
                 delta: '+18%',
                 tone: MetricTone.secondary,
+                showValuePlaceholder: showBootstrapHint,
+                showDeltaPlaceholder: showBootstrapHint,
               ),
             ];
             return GridView.builder(
@@ -1473,10 +1488,20 @@ class _Board extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final grouped = viewModel.issuesByStatus;
+    final showBootstrapHint =
+        viewModel.loadStateForDomain(TrackerDataDomain.issueDetails) ==
+        TrackerLoadState.partial;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _ScreenHeading(title: l10n.board, subtitle: l10n.kanbanHint),
+        if (showBootstrapHint) ...[
+          _SectionLoadingBanner(
+            semanticLabel: '${l10n.board} ${l10n.loading}',
+            label: l10n.loading,
+          ),
+          const SizedBox(height: 16),
+        ],
         LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 900;
@@ -1536,6 +1561,9 @@ class _SearchAndDetail extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final viewModel = this.viewModel;
+    final subtitle = viewModel.hasLoadedInitialSearchResults
+        ? l10n.issueCount(viewModel.totalSearchResults)
+        : l10n.loading;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1543,10 +1571,7 @@ class _SearchAndDetail extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: _ScreenHeading(
-                title: l10n.jqlSearch,
-                subtitle: l10n.issueCount(viewModel.totalSearchResults),
-              ),
+              child: _ScreenHeading(title: l10n.jqlSearch, subtitle: subtitle),
             ),
           ],
         ),
@@ -3424,13 +3449,10 @@ class _IssueDetailState extends State<_IssueDetail> {
   }) {
     if (widget.viewModel.isIssueDetailLoading(issue.key) ||
         !issue.hasDetailLoaded) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const LinearProgressIndicator(minHeight: 2),
-          const SizedBox(height: 12),
-          Text(l10n.loading, style: TextStyle(color: colors.muted)),
-        ],
+      return _SectionContentPlaceholder(
+        semanticLabel: '${l10n.detail} ${l10n.loading}',
+        lineWidths: const [.94, .78, .88, .72],
+        blockCount: 3,
       );
     }
     return Column(
@@ -3668,6 +3690,13 @@ class _IssueList extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
     final searchResults = viewModel.searchResults;
+    final bootstrapResults = viewModel.isInitialSearchLoading
+        ? viewModel.issues.take(6).toList(growable: false)
+        : const <TrackStateIssue>[];
+    final visibleResults = searchResults.isEmpty
+        ? bootstrapResults
+        : searchResults;
+    final showSearchBootstrap = viewModel.isInitialSearchLoading;
     return _SurfaceCard(
       semanticLabel: l10n.jqlSearch,
       explicitChildNodes: true,
@@ -3693,10 +3722,18 @@ class _IssueList extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          if (searchResults.isEmpty)
+          if (showSearchBootstrap) ...[
+            _SectionLoadingBanner(
+              semanticLabel: '${l10n.jqlSearch} ${l10n.loading}',
+              label: l10n.loading,
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (visibleResults.isEmpty)
             Text(l10n.noResults)
           else ...[
-            if (searchResults.length < viewModel.totalSearchResults)
+            if (!showSearchBootstrap &&
+                searchResults.length < viewModel.totalSearchResults)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
@@ -3709,12 +3746,19 @@ class _IssueList extends StatelessWidget {
                   ).textTheme.labelMedium?.copyWith(color: colors.muted),
                 ),
               ),
-            for (var index = 0; index < searchResults.length; index += 1)
+            for (var index = 0; index < visibleResults.length; index += 1)
               FocusTraversalOrder(
                 order: NumericFocusOrder(index + 2.0),
                 child: _IssueListRow(
-                  issue: searchResults[index],
+                  issue: visibleResults[index],
                   onSelect: viewModel.selectIssue,
+                  trailingAction: showSearchBootstrap
+                      ? _LoadingPill(
+                          semanticLabel:
+                              'Open ${visibleResults[index].key} ${visibleResults[index].summary} ${l10n.loading}',
+                          label: l10n.loading,
+                        )
+                      : null,
                 ),
               ),
             if (viewModel.hasMoreSearchResults)
@@ -4123,12 +4167,16 @@ class _MetricCard extends StatelessWidget {
     required this.value,
     required this.delta,
     required this.tone,
+    this.showValuePlaceholder = false,
+    this.showDeltaPlaceholder = false,
   });
 
   final String label;
   final String value;
   final String delta;
   final MetricTone tone;
+  final bool showValuePlaceholder;
+  final bool showDeltaPlaceholder;
 
   @override
   Widget build(BuildContext context) {
@@ -4139,17 +4187,23 @@ class _MetricCard extends StatelessWidget {
       MetricTone.accent => colors.accent,
     };
     return _SurfaceCard(
-      semanticLabel: '$label $value',
+      semanticLabel: showValuePlaceholder ? '$label loading' : '$label $value',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: Theme.of(context).textTheme.labelLarge),
-          Text(value, style: Theme.of(context).textTheme.headlineLarge),
-          Text(
-            delta,
-            style: TextStyle(color: toneColor, fontWeight: FontWeight.w700),
-          ),
+          if (showValuePlaceholder)
+            const _SkeletonBar(widthFactor: .42, height: 34)
+          else
+            Text(value, style: Theme.of(context).textTheme.headlineLarge),
+          if (showDeltaPlaceholder)
+            const _SkeletonBar(widthFactor: .34)
+          else
+            Text(
+              delta,
+              style: TextStyle(color: toneColor, fontWeight: FontWeight.w700),
+            ),
         ],
       ),
     );
@@ -4157,6 +4211,164 @@ class _MetricCard extends StatelessWidget {
 }
 
 enum MetricTone { primary, secondary, accent }
+
+class _LoadingPill extends StatelessWidget {
+  const _LoadingPill({required this.semanticLabel, required this.label});
+
+  final String semanticLabel;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return Semantics(
+      container: true,
+      label: semanticLabel,
+      child: ExcludeSemantics(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: colors.surfaceAlt,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: colors.border),
+          ),
+          child: Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: colors.muted),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionLoadingBanner extends StatelessWidget {
+  const _SectionLoadingBanner({
+    required this.semanticLabel,
+    required this.label,
+  });
+
+  final String semanticLabel;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return Semantics(
+      container: true,
+      label: semanticLabel,
+      child: ExcludeSemantics(
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: colors.surfaceAlt,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colors.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: colors.primarySoft,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: colors.primary),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelMedium?.copyWith(color: colors.muted),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionContentPlaceholder extends StatelessWidget {
+  const _SectionContentPlaceholder({
+    required this.semanticLabel,
+    this.lineWidths = const [.94, .82, .68],
+    this.blockCount = 0,
+  });
+
+  final String semanticLabel;
+  final List<double> lineWidths;
+  final int blockCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.ts;
+    return Semantics(
+      container: true,
+      label: semanticLabel,
+      child: ExcludeSemantics(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SectionLoadingBanner(
+              semanticLabel: semanticLabel,
+              label: l10n.loading,
+            ),
+            const SizedBox(height: 12),
+            for (final width in lineWidths) ...[
+              _SkeletonBar(widthFactor: width),
+              const SizedBox(height: 10),
+            ],
+            for (var index = 0; index < blockCount; index += 1) ...[
+              Container(
+                width: double.infinity,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: colors.surfaceAlt,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: colors.border),
+                ),
+              ),
+              if (index != blockCount - 1) const SizedBox(height: 10),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SkeletonBar extends StatelessWidget {
+  const _SkeletonBar({required this.widthFactor, this.height = 12});
+
+  final double widthFactor;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return FractionallySizedBox(
+      widthFactor: widthFactor,
+      alignment: Alignment.centerLeft,
+      child: Container(
+        height: height,
+        decoration: BoxDecoration(
+          color: colors.surfaceAlt,
+          borderRadius: BorderRadius.circular(height / 2),
+          border: Border.all(color: colors.border),
+        ),
+      ),
+    );
+  }
+}
 
 class _SettingsProviderButton extends StatelessWidget {
   const _SettingsProviderButton({
@@ -6385,7 +6597,11 @@ class _CommentsTab extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         if (isLoading || !issue.hasCommentsLoaded)
-          const LinearProgressIndicator(minHeight: 2)
+          _SectionContentPlaceholder(
+            semanticLabel: '${l10n.comments} ${l10n.loading}',
+            lineWidths: const [.96, .88, .72],
+            blockCount: 2,
+          )
         else if (issue.comments.isEmpty)
           Text(l10n.noResults, style: TextStyle(color: colors.muted))
         else
@@ -6535,7 +6751,11 @@ class _AttachmentsTab extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         if (isLoading || !issue.hasAttachmentsLoaded)
-          const LinearProgressIndicator(minHeight: 2)
+          _SectionContentPlaceholder(
+            semanticLabel: '${l10n.attachments} ${l10n.loading}',
+            lineWidths: const [.58, .42],
+            blockCount: 2,
+          )
         else if (issue.attachments.isEmpty)
           Text(l10n.noResults, style: TextStyle(color: colors.muted))
         else
@@ -6650,7 +6870,11 @@ class _HistoryTab extends StatelessWidget {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
     if (isLoading) {
-      return const LinearProgressIndicator(minHeight: 2);
+      return _SectionContentPlaceholder(
+        semanticLabel: '${l10n.history} ${l10n.loading}',
+        lineWidths: const [.9, .76],
+        blockCount: 3,
+      );
     }
     if (entries.isEmpty) {
       return Text(l10n.noResults, style: TextStyle(color: colors.muted));

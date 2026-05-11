@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -163,6 +164,50 @@ void main() {
   });
 
   testWidgets(
+    'first hosted load keeps the shell visible and shows bootstrap-backed placeholders',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+        final repository = _BootstrapLoadingRepository(
+          snapshot: _hostedBootstrapSnapshot(snapshot),
+        );
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.bySemanticsLabel(RegExp('Dashboard')), findsWidgets);
+        expect(
+          find.bySemanticsLabel(RegExp('Dashboard\\s+Loading')),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.text('JQL Search').first);
+        await tester.pump();
+
+        expect(find.text('Loading...'), findsWidgets);
+        expect(find.text('TRACK-12'), findsWidgets);
+        expect(find.text('Implement Git sync service'), findsWidgets);
+        expect(find.text('Description'), findsNothing);
+
+        await tester.tap(find.text('Comments').first);
+        await tester.pump();
+        expect(find.text('Loading...'), findsWidgets);
+
+        await tester.tap(find.text('Attachments').first);
+        await tester.pump();
+        expect(find.text('Loading...'), findsWidgets);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'issue detail exposes detail, comments, attachments, and history tabs',
     (tester) async {
       final semantics = tester.ensureSemantics();
@@ -193,12 +238,50 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('sync-sequence.svg'), findsOneWidget);
 
-        await tester.tap(find.bySemanticsLabel(RegExp('History')).first);
+        await tester.tap(find.text('History').first);
         await tester.pumpAndSettle();
         expect(
           find.textContaining('Updated description on TRACK-12'),
           findsOneWidget,
         );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'hosted issue detail keeps the header visible while tab hydration loads in place',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(repository: _SlowHistoryReactiveRepository()),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Board')).first);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.bySemanticsLabel(
+            RegExp('Open TRACK-12 Implement Git sync service'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Implement Git sync service'), findsWidgets);
+
+        await tester.ensureVisible(find.text('History').first);
+        await tester.tap(find.text('History').first);
+        await tester.pump();
+
+        expect(find.text('Loading...'), findsOneWidget);
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.pumpAndSettle();
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
@@ -1071,6 +1154,40 @@ class _EditIssueFieldsLocalRuntimeRepository extends _LocalRuntimeRepository {
   }
 }
 
+class _BootstrapLoadingRepository extends _LocalRuntimeRepository {
+  _BootstrapLoadingRepository({required TrackerSnapshot snapshot})
+    : _snapshot = snapshot;
+
+  final TrackerSnapshot _snapshot;
+  final Completer<TrackStateIssueSearchPage> _searchCompleter =
+      Completer<TrackStateIssueSearchPage>();
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => _searchCompleter.future;
+}
+
+class _SlowHistoryReactiveRepository
+    extends ProviderBackedTrackStateRepository {
+  _SlowHistoryReactiveRepository()
+    : super(provider: MutableIssueDetailTrackStateProvider());
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async {
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    return super.loadIssueHistory(issue);
+  }
+}
+
 TrackerSnapshot _searchPaginationSnapshot() {
   final issues = [
     for (var index = 1; index <= 8; index += 1)
@@ -1133,3 +1250,64 @@ TrackerSnapshot _searchPaginationSnapshot() {
     issues: issues,
   );
 }
+
+TrackerSnapshot _hostedBootstrapSnapshot(TrackerSnapshot snapshot) {
+  return TrackerSnapshot(
+    project: snapshot.project,
+    issues: [for (final issue in snapshot.issues) _summaryOnlyIssue(issue)],
+    repositoryIndex: snapshot.repositoryIndex,
+    loadWarnings: snapshot.loadWarnings,
+    readiness: const TrackerBootstrapReadiness(
+      domainStates: {
+        TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+        TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
+        TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+        TrackerDataDomain.issueDetails: TrackerLoadState.partial,
+      },
+      sectionStates: {
+        TrackerSectionKey.dashboard: TrackerLoadState.ready,
+        TrackerSectionKey.board: TrackerLoadState.ready,
+        TrackerSectionKey.search: TrackerLoadState.partial,
+        TrackerSectionKey.hierarchy: TrackerLoadState.ready,
+        TrackerSectionKey.settings: TrackerLoadState.ready,
+      },
+    ),
+  );
+}
+
+TrackStateIssue _summaryOnlyIssue(TrackStateIssue issue) => TrackStateIssue(
+  key: issue.key,
+  project: issue.project,
+  issueType: issue.issueType,
+  issueTypeId: issue.issueTypeId,
+  status: issue.status,
+  statusId: issue.statusId,
+  priority: issue.priority,
+  priorityId: issue.priorityId,
+  summary: issue.summary,
+  description: '',
+  assignee: issue.assignee,
+  reporter: issue.reporter,
+  labels: issue.labels,
+  components: const [],
+  fixVersionIds: const [],
+  watchers: const [],
+  customFields: const {},
+  parentKey: issue.parentKey,
+  epicKey: issue.epicKey,
+  parentPath: issue.parentPath,
+  epicPath: issue.epicPath,
+  progress: issue.progress,
+  updatedLabel: issue.updatedLabel,
+  acceptanceCriteria: const [],
+  comments: const [],
+  links: const [],
+  attachments: const [],
+  isArchived: issue.isArchived,
+  hasDetailLoaded: false,
+  hasCommentsLoaded: false,
+  hasAttachmentsLoaded: false,
+  resolutionId: issue.resolutionId,
+  storagePath: issue.storagePath,
+  rawMarkdown: issue.rawMarkdown,
+);

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -27,6 +28,48 @@ void main() {
     expect(viewModel.selectedIssue?.key, 'TRACK-12');
     expect(viewModel.searchResults, isNotEmpty);
   });
+
+  test(
+    'view model publishes bootstrap snapshot before initial search hydration completes',
+    () async {
+      final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+      final repository = _DelayedInitialSearchRepository(
+        snapshot: _hostedBootstrapSnapshot(snapshot),
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+      final states =
+          <({bool isLoading, bool hasLoadedSearch, bool hasSnapshot})>[];
+      viewModel.addListener(() {
+        states.add((
+          isLoading: viewModel.isLoading,
+          hasLoadedSearch: viewModel.hasLoadedInitialSearchResults,
+          hasSnapshot: viewModel.snapshot != null,
+        ));
+      });
+
+      final loadFuture = viewModel.load();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.isLoading, isTrue);
+      expect(viewModel.hasLoadedInitialSearchResults, isFalse);
+      expect(viewModel.selectedIssue?.hasDetailLoaded, isFalse);
+      expect(
+        states.any(
+          (state) =>
+              state.hasSnapshot && state.isLoading && !state.hasLoadedSearch,
+        ),
+        isTrue,
+      );
+
+      repository.completeInitialSearch();
+      await loadFuture;
+
+      expect(viewModel.hasLoadedInitialSearchResults, isTrue);
+      expect(viewModel.searchResults, isNotEmpty);
+    },
+  );
 
   test(
     'view model routes hosted startup recovery into settings when reduced bootstrap succeeds',
@@ -1022,6 +1065,41 @@ class _ThrowingSearchRepository extends _LocalRuntimeRepository {
   }
 }
 
+class _DelayedInitialSearchRepository extends _LocalRuntimeRepository {
+  _DelayedInitialSearchRepository({required TrackerSnapshot snapshot})
+    : _snapshot = snapshot;
+
+  final TrackerSnapshot _snapshot;
+  final JqlSearchService _searchService = const JqlSearchService();
+  final Completer<TrackStateIssueSearchPage> _searchCompleter =
+      Completer<TrackStateIssueSearchPage>();
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => _searchCompleter.future;
+
+  void completeInitialSearch() {
+    if (_searchCompleter.isCompleted) {
+      return;
+    }
+    _searchCompleter.complete(
+      _searchService.search(
+        issues: _snapshot.issues,
+        project: _snapshot.project,
+        jql: 'project = TRACK AND status != Done ORDER BY priority DESC',
+        maxResults: 6,
+      ),
+    );
+  }
+}
+
 class _EditableSettingsRepository extends _LocalRuntimeRepository
     implements ProjectSettingsRepository {
   _EditableSettingsRepository()
@@ -1428,6 +1506,30 @@ TrackStateIssue _summaryOnlyIssue(TrackStateIssue issue) => TrackStateIssue(
   storagePath: issue.storagePath,
   rawMarkdown: issue.rawMarkdown,
 );
+
+TrackerSnapshot _hostedBootstrapSnapshot(TrackerSnapshot snapshot) {
+  return TrackerSnapshot(
+    project: snapshot.project,
+    issues: [for (final issue in snapshot.issues) _summaryOnlyIssue(issue)],
+    repositoryIndex: snapshot.repositoryIndex,
+    loadWarnings: snapshot.loadWarnings,
+    readiness: const TrackerBootstrapReadiness(
+      domainStates: {
+        TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+        TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
+        TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+        TrackerDataDomain.issueDetails: TrackerLoadState.partial,
+      },
+      sectionStates: {
+        TrackerSectionKey.dashboard: TrackerLoadState.ready,
+        TrackerSectionKey.board: TrackerLoadState.ready,
+        TrackerSectionKey.search: TrackerLoadState.partial,
+        TrackerSectionKey.hierarchy: TrackerLoadState.ready,
+        TrackerSectionKey.settings: TrackerLoadState.ready,
+      },
+    ),
+  );
+}
 
 TrackerSnapshot _searchPaginationSnapshot() {
   final issues = [
