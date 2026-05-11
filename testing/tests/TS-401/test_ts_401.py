@@ -147,22 +147,30 @@ def main() -> None:
 
                 post_save_detail_text = page.save_issue_edits(
                     issue_key=issue_fixture.key,
-                    issue_summary=issue_fixture.summary,
+                    expected_status=TARGET_STATUS_LABEL,
                 )
                 result["post_save_detail_text"] = post_save_detail_text
+                _record_step(
+                    result,
+                    step=6,
+                    status="passed",
+                    action="Click Save and wait for the user-visible success banner.",
+                    observed=post_save_detail_text,
+                )
+
                 detail_projection_text = page.wait_for_issue_detail_state(
                     issue_key=issue_fixture.key,
                     issue_summary=issue_fixture.summary,
                     expected_status=TARGET_STATUS_LABEL,
                     expected_priority=TARGET_PRIORITY_LABEL,
-                    step_number=6,
+                    step_number=7,
                 )
                 result["detail_projection_text"] = detail_projection_text
                 _record_step(
                     result,
-                    step=6,
+                    step=7,
                     status="passed",
-                    action="Save the edit and wait for the issue detail to refresh.",
+                    action="Verify the issue detail refreshes to Done and Highest after save.",
                     observed=detail_projection_text,
                 )
 
@@ -175,32 +183,25 @@ def main() -> None:
                 result["board_projection_text"] = board_projection_text
                 _record_step(
                     result,
-                    step=7,
+                    step=8,
                     status="passed",
                     action="Verify Board refreshes DEMO-3 into Done with Highest priority.",
                     observed=board_projection_text,
                 )
 
-                page.navigate_to_section("Hierarchy")
-                hierarchy_body = page.open_issue_from_current_section(
-                    issue_key=issue_fixture.key,
-                    issue_summary=issue_fixture.summary,
-                )
-                hierarchy_detail_text = page.wait_for_issue_detail_state(
+                hierarchy_projection_text = page.wait_for_hierarchy_projection(
                     issue_key=issue_fixture.key,
                     issue_summary=issue_fixture.summary,
                     expected_status=TARGET_STATUS_LABEL,
                     expected_priority=TARGET_PRIORITY_LABEL,
-                    step_number=8,
                 )
-                result["hierarchy_body_text"] = hierarchy_body
-                result["hierarchy_detail_text"] = hierarchy_detail_text
+                result["hierarchy_projection_text"] = hierarchy_projection_text
                 _record_step(
                     result,
-                    step=8,
+                    step=9,
                     status="passed",
-                    action="Verify Hierarchy reopens DEMO-3 with the refreshed status and priority.",
-                    observed=hierarchy_detail_text,
+                    action="Verify the visible Hierarchy row refreshes to Done and Highest.",
+                    observed=hierarchy_projection_text,
                 )
 
                 search_page = LiveJqlSearchPage(tracker_page)
@@ -218,30 +219,26 @@ def main() -> None:
                     not in search_observation.issue_labels
                 ):
                     raise AssertionError(
-                        "Step 9 failed: JQL Search did not visibly refresh down to the "
+                        "Step 10 failed: JQL Search did not visibly refresh down to the "
                         "edited DEMO-3 issue after saving.\n"
                         f"Observed count summary: {search_observation.count_summary}\n"
                         f"Observed result labels: {list(search_observation.issue_labels)}\n"
                         f"Observed JQL Search text:\n{search_observation.body_text}",
                     )
-                page.open_issue_from_current_section(
-                    issue_key=issue_fixture.key,
-                    issue_summary=issue_fixture.summary,
-                )
-                jql_detail_text = page.wait_for_issue_detail_state(
+                jql_projection_text = page.wait_for_jql_search_projection(
                     issue_key=issue_fixture.key,
                     issue_summary=issue_fixture.summary,
                     expected_status=TARGET_STATUS_LABEL,
                     expected_priority=TARGET_PRIORITY_LABEL,
-                    step_number=9,
+                    expected_count_summary="1 issue",
                 )
-                result["jql_detail_text"] = jql_detail_text
+                result["jql_projection_text"] = jql_projection_text
                 _record_step(
                     result,
-                    step=9,
+                    step=10,
                     status="passed",
-                    action="Verify JQL Search can reopen DEMO-3 with the refreshed status and priority.",
-                    observed=jql_detail_text,
+                    action="Verify the visible JQL Search result row refreshes to Done and Highest.",
+                    observed=jql_projection_text,
                 )
 
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))

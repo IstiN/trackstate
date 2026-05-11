@@ -130,6 +130,8 @@ abstract interface class TrackStateAppComponent {
 
   Future<int> countDropdownFields(String label);
 
+  Future<List<String>> readDropdownOptions(String label);
+
   Future<void> selectDropdownOption(String label, {required String optionText});
 
   Future<String?> readDropdownFieldValue(String label);

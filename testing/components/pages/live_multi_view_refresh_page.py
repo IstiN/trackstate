@@ -221,7 +221,7 @@ class LiveMultiViewRefreshPage:
         self,
         *,
         issue_key: str,
-        issue_summary: str,
+        expected_status: str,
     ) -> str:
         self._session.click(
             'flt-semantics[role="button"][aria-label="Save"]',
@@ -230,14 +230,21 @@ class LiveMultiViewRefreshPage:
         try:
             payload = self._session.wait_for_function(
                 """
-                ({ issueKey, issueSummary, dialogSelector, detailSelector, errorPrefix }) => {
+                ({
+                  dialogSelector,
+                  detailSelector,
+                  errorPrefix,
+                  successMessages,
+                }) => {
                   const bodyText = document.body?.innerText ?? '';
                   if (bodyText.includes(errorPrefix)) {
                     return { kind: 'error', bodyText };
                   }
+                  const matchedSuccessMessage =
+                    successMessages.find((message) => bodyText.includes(message)) ?? null;
                   const dialogVisible =
                     document.querySelector(dialogSelector) !== null;
-                  if (dialogVisible) {
+                  if (dialogVisible || matchedSuccessMessage === null) {
                     return null;
                   }
                   const detailVisible =
@@ -245,24 +252,26 @@ class LiveMultiViewRefreshPage:
                   if (!detailVisible) {
                     return null;
                   }
-                  return bodyText.includes(issueKey) && bodyText.includes(issueSummary)
-                    ? { kind: 'saved', bodyText }
-                    : null;
+                  return { kind: 'saved', bodyText, matchedSuccessMessage };
                 }
                 """,
                 arg={
-                    "issueKey": issue_key,
-                    "issueSummary": issue_summary,
                     "dialogSelector": self._dialog_group_selector,
                     "detailSelector": self._issue_detail_selector(issue_key),
                     "errorPrefix": TrackStateTrackerPage.SAVE_FAILED_PREFIX,
+                    "successMessages": [
+                        f"{issue_key} moved to {expected_status} and committed to GitHub.",
+                        f"{issue_key} moved to {expected_status} and committed to local Git branch ",
+                        f"{issue_key} moved locally. Connect GitHub in Settings to persist.",
+                    ],
                 },
                 timeout_ms=180_000,
             )
         except WebAppTimeoutError as error:
             raise AssertionError(
-                "Step 6 failed: clicking Save never closed the edit dialog and returned "
-                "the app to the issue detail surface.\n"
+                "Step 6 failed: clicking Save never surfaced the required user-visible "
+                "success banner and returned the app to the refreshed issue detail "
+                "surface.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
 
@@ -366,23 +375,238 @@ class LiveMultiViewRefreshPage:
             )
         except WebAppTimeoutError as error:
             raise AssertionError(
-                "Step 7 failed: the Board view did not visibly refresh the edited issue "
+                "Step 8 failed: the Board view did not visibly refresh the edited issue "
                 f"into the {expected_column} column with Priority = {expected_priority}.\n"
                 f"Observed Board text:\n{self.current_body_text()}",
             ) from error
         if not isinstance(payload, dict):
             raise AssertionError(
-                "Step 7 failed: the Board view did not expose an observable refreshed "
+                "Step 8 failed: the Board view did not expose an observable refreshed "
                 f"projection for {issue_key}.\n"
                 f"Observed Board text:\n{self.current_body_text()}",
             )
         return str(payload["text"])
+
+    def wait_for_hierarchy_projection(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+        expected_status: str,
+        expected_priority: str,
+    ) -> str:
+        self.navigate_to_section("Hierarchy")
+        return self._wait_for_issue_projection(
+            issue_key=issue_key,
+            issue_summary=issue_summary,
+            expected_status=expected_status,
+            expected_priority=expected_priority,
+            section_label="Hierarchy",
+            step_number=9,
+        )
+
+    def wait_for_jql_search_projection(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+        expected_status: str,
+        expected_priority: str,
+        expected_count_summary: str,
+    ) -> str:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({
+                  expectedCountSummary,
+                  expectedPriority,
+                  expectedStatus,
+                  issueKey,
+                  issueSelector,
+                  issueSummary,
+                }) => {
+                  const bodyText = document.body?.innerText ?? '';
+                  const countMatch = bodyText.match(/\\b(?:No issues|\\d+ issues?)\\b/);
+                  const countSummary = countMatch ? countMatch[0] : null;
+                  if (countSummary !== expectedCountSummary) {
+                    return null;
+                  }
+
+                  const issue = document.querySelector(issueSelector);
+                  if (!issue) {
+                    return null;
+                  }
+
+                  let current = issue;
+                  while (current) {
+                    const projectionText = (current.innerText || current.textContent || '').trim();
+                    if (
+                      projectionText.includes(issueKey) &&
+                      projectionText.includes(issueSummary)
+                    ) {
+                      return projectionText.includes(expectedStatus) &&
+                          projectionText.includes(expectedPriority)
+                        ? { countSummary, projectionText }
+                        : null;
+                    }
+                    current = current.parentElement;
+                  }
+
+                  return null;
+                }
+                """,
+                arg={
+                    "expectedCountSummary": expected_count_summary,
+                    "expectedPriority": expected_priority,
+                    "expectedStatus": expected_status,
+                    "issueKey": issue_key,
+                    "issueSelector": self._issue_selector(
+                        issue_key=issue_key,
+                        issue_summary=issue_summary,
+                    ),
+                    "issueSummary": issue_summary,
+                },
+                timeout_ms=60_000,
+            )
+        except WebAppTimeoutError as error:
+            current_projection = self._current_issue_projection_text(
+                issue_key=issue_key,
+                issue_summary=issue_summary,
+            )
+            raise AssertionError(
+                "Step 10 failed: the JQL Search result row did not visibly refresh "
+                f"{issue_key} to Status = {expected_status} and Priority = "
+                f"{expected_priority} while showing {expected_count_summary}.\n"
+                f"Observed JQL Search projection: {current_projection}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 10 failed: the JQL Search result row did not expose an observable "
+                f"projection for {issue_key} after saving.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return str(payload["projectionText"])
 
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
 
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
+
+    def _wait_for_issue_projection(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+        expected_status: str,
+        expected_priority: str,
+        section_label: str,
+        step_number: int,
+    ) -> str:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({
+                  expectedPriority,
+                  expectedStatus,
+                  issueKey,
+                  issueSelector,
+                  issueSummary,
+                }) => {
+                  const issue = document.querySelector(issueSelector);
+                  if (!issue) {
+                    return null;
+                  }
+
+                  let current = issue;
+                  while (current) {
+                    const projectionText = (current.innerText || current.textContent || '').trim();
+                    if (
+                      projectionText.includes(issueKey) &&
+                      projectionText.includes(issueSummary)
+                    ) {
+                      return projectionText.includes(expectedStatus) &&
+                          projectionText.includes(expectedPriority)
+                        ? { projectionText }
+                        : null;
+                    }
+                    current = current.parentElement;
+                  }
+
+                  return null;
+                }
+                """,
+                arg={
+                    "expectedPriority": expected_priority,
+                    "expectedStatus": expected_status,
+                    "issueKey": issue_key,
+                    "issueSelector": self._issue_selector(
+                        issue_key=issue_key,
+                        issue_summary=issue_summary,
+                    ),
+                    "issueSummary": issue_summary,
+                },
+                timeout_ms=60_000,
+            )
+        except WebAppTimeoutError as error:
+            current_projection = self._current_issue_projection_text(
+                issue_key=issue_key,
+                issue_summary=issue_summary,
+            )
+            raise AssertionError(
+                f"Step {step_number} failed: the {section_label} projection did not visibly "
+                f"refresh {issue_key} to Status = {expected_status} and Priority = "
+                f"{expected_priority}.\n"
+                f"Observed {section_label} projection: {current_projection}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Step {step_number} failed: the {section_label} view did not expose an "
+                f"observable refreshed projection for {issue_key}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return str(payload["projectionText"])
+
+    def _current_issue_projection_text(self, *, issue_key: str, issue_summary: str) -> str:
+        payload = self._session.evaluate(
+            """
+            ({ issueKey, issueSelector, issueSummary }) => {
+              const issue = document.querySelector(issueSelector);
+              if (!issue) {
+                return { projectionText: '' };
+              }
+
+              let current = issue;
+              while (current) {
+                const projectionText = (current.innerText || current.textContent || '').trim();
+                if (
+                  projectionText.includes(issueKey) &&
+                  projectionText.includes(issueSummary)
+                ) {
+                  return { projectionText };
+                }
+                current = current.parentElement;
+              }
+
+              return {
+                projectionText: (issue.innerText || issue.textContent || '').trim(),
+              };
+            }
+            """,
+            arg={
+                "issueKey": issue_key,
+                "issueSelector": self._issue_selector(
+                    issue_key=issue_key,
+                    issue_summary=issue_summary,
+                ),
+                "issueSummary": issue_summary,
+            },
+        )
+        if not isinstance(payload, dict):
+            return ""
+        return str(payload.get("projectionText", ""))
 
     def _control_observation(
         self,
@@ -453,9 +677,9 @@ class LiveMultiViewRefreshPage:
                     """,
                     timeout_ms=5_000,
                 )
-                active = self._session.active_element()
-                if active.role == "menuitem" and active.accessible_name is not None:
-                    return self._menu_options_from_active_item()
+                options = self._visible_menu_options()
+                if options:
+                    return options
             except WebAppTimeoutError:
                 continue
         active = self._session.active_element()
@@ -466,24 +690,22 @@ class LiveMultiViewRefreshPage:
             f"Observed body text:\n{self.current_body_text()}",
         )
 
-    def _menu_options_from_active_item(self) -> tuple[str, ...]:
-        current = self._active_menu_item_label()
-        options = [current]
-        while True:
-            previous = self._active_menu_item_label()
-            self._session.press_key("ArrowUp")
-            candidate = self._active_menu_item_label()
-            if candidate == previous or candidate in options:
-                break
-            options.insert(0, candidate)
-        while True:
-            previous = self._active_menu_item_label()
-            self._session.press_key("ArrowDown")
-            candidate = self._active_menu_item_label()
-            if candidate == previous or candidate in options:
-                break
-            options.append(candidate)
-        return tuple(options)
+    def _visible_menu_options(self) -> tuple[str, ...]:
+        payload = self._session.evaluate(
+            """
+            (selector) => Array.from(document.querySelectorAll(selector))
+              .map((element) => {
+                const label = element.getAttribute('aria-label');
+                const text = (element.innerText || element.textContent || '').trim();
+                return (label || text || '').trim();
+              })
+              .filter((label) => label.length > 0)
+            """,
+            arg=self._menu_item_selector,
+        )
+        if not isinstance(payload, list):
+            return ()
+        return tuple(str(label) for label in payload)
 
     def _select_dropdown_option(
         self,
@@ -498,19 +720,33 @@ class LiveMultiViewRefreshPage:
                 f'visible option "{target_label}".\n'
                 f"Visible options: {list(options)}",
             )
-        active_label = self._active_menu_item_label()
-        difference = options.index(target_label) - options.index(active_label)
-        key = "ArrowDown" if difference > 0 else "ArrowUp"
-        for _ in range(abs(difference)):
-            self._session.press_key(key)
-        if self._active_menu_item_label() != target_label:
+        clicked = self._session.evaluate(
+            """
+            ({ selector, targetLabel }) => {
+              const match = Array.from(document.querySelectorAll(selector)).find((element) => {
+                const label = element.getAttribute('aria-label');
+                const text = (element.innerText || element.textContent || '').trim();
+                return label === targetLabel || text === targetLabel;
+              });
+              if (!match) {
+                return false;
+              }
+              match.click();
+              return true;
+            }
+            """,
+            arg={
+                "selector": self._menu_item_selector,
+                "targetLabel": target_label,
+            },
+        )
+        if clicked is not True:
             raise AssertionError(
-                f"Step failed: keyboard navigation did not move the {control_name} menu "
-                f'focus to "{target_label}".\n'
+                f"Step failed: the {control_name} menu did not expose a clickable option "
+                f'exactly labeled "{target_label}".\n'
                 f"Visible options: {list(options)}\n"
-                f"Observed active option: {self._active_menu_item_label()}",
+                f"Observed body text:\n{self.current_body_text()}",
             )
-        self._session.press_key("Enter")
         try:
             self._session.wait_for_function(
                 """
