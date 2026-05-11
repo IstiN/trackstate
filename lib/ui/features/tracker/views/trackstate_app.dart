@@ -416,6 +416,7 @@ class _TrackerMainPane extends StatelessWidget {
               compact: compact,
               onOpenCreateIssue: onOpenCreateIssue,
             ),
+            _RepositoryAccessBanner(viewModel: viewModel),
             Expanded(
               child: _SectionBody(
                 viewModel: viewModel,
@@ -547,7 +548,7 @@ class _TopBar extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
     final repositoryAccessLabel = _repositoryAccessLabel(l10n, viewModel);
-    final openCreateIssue = viewModel.hasReadOnlySession || viewModel.isSaving
+    final openCreateIssue = viewModel.isSaving
         ? null
         : () => onOpenCreateIssue(
             _CreateIssuePrefill(originSection: viewModel.section),
@@ -646,7 +647,7 @@ class _TopBar extends StatelessWidget {
                   !compact &&
                   !condensedDesktop) ...[
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 240),
+                  constraints: const BoxConstraints(maxWidth: 180),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     mainAxisSize: MainAxisSize.min,
@@ -753,6 +754,10 @@ Future<void> _showRepositoryAccessDialog(
   }
   final controller = TextEditingController();
   var rememberToken = true;
+  final accessMode = viewModel.hostedRepositoryAccessMode;
+  final dialogTitle = accessMode == HostedRepositoryAccessMode.disconnected
+      ? l10n.connectGitHub
+      : l10n.manageGitHubAccess;
   await showDialog<void>(
     context: context,
     builder: (context) {
@@ -760,7 +765,7 @@ Future<void> _showRepositoryAccessDialog(
       return StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            title: Text(l10n.connectGitHub),
+            title: Text(dialogTitle),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -769,6 +774,8 @@ Future<void> _showRepositoryAccessDialog(
                   '${l10n.repository}: '
                   '${project?.repository ?? l10n.configuredRepositoryFallback}',
                 ),
+                const SizedBox(height: 12),
+                Text(_repositoryAccessMessage(l10n, viewModel)),
                 const SizedBox(height: 12),
                 TextField(
                   controller: controller,
@@ -834,10 +841,77 @@ String _repositoryAccessLabel(
   AppLocalizations l10n,
   TrackerViewModel viewModel,
 ) {
+  if (viewModel.exposesHostedAccessGates) {
+    return switch (viewModel.hostedRepositoryAccessMode) {
+      HostedRepositoryAccessMode.disconnected => l10n.repositoryAccessConnectGitHub,
+      HostedRepositoryAccessMode.readOnly => l10n.repositoryAccessReadOnly,
+      HostedRepositoryAccessMode.writable => l10n.repositoryAccessConnected,
+      HostedRepositoryAccessMode.attachmentRestricted =>
+        l10n.repositoryAccessAttachmentsRestricted,
+    };
+  }
   return switch (viewModel.repositoryAccessState) {
     RepositoryAccessState.localGit => l10n.repositoryAccessLocalGit,
     RepositoryAccessState.connected => l10n.repositoryAccessConnected,
     RepositoryAccessState.connectGitHub => l10n.repositoryAccessConnectGitHub,
+  };
+}
+
+String _repositoryAccessPrimaryActionLabel(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  return switch (viewModel.hostedRepositoryAccessMode) {
+    HostedRepositoryAccessMode.disconnected => l10n.connectGitHub,
+    HostedRepositoryAccessMode.readOnly => l10n.reconnectWriteAccess,
+    HostedRepositoryAccessMode.writable ||
+    HostedRepositoryAccessMode.attachmentRestricted => l10n.manageGitHubAccess,
+  };
+}
+
+String _repositoryAccessTitle(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  return switch (viewModel.hostedRepositoryAccessMode) {
+    HostedRepositoryAccessMode.disconnected =>
+      l10n.repositoryAccessDisconnectedTitle,
+    HostedRepositoryAccessMode.readOnly => l10n.repositoryAccessReadOnlyTitle,
+    HostedRepositoryAccessMode.writable => l10n.repositoryAccessConnected,
+    HostedRepositoryAccessMode.attachmentRestricted =>
+      l10n.repositoryAccessAttachmentRestrictedTitle,
+  };
+}
+
+String _repositoryAccessMessage(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  return switch (viewModel.hostedRepositoryAccessMode) {
+    HostedRepositoryAccessMode.disconnected =>
+      l10n.repositoryAccessDisconnectedMessage,
+    HostedRepositoryAccessMode.readOnly => l10n.repositoryAccessReadOnlyMessage,
+    HostedRepositoryAccessMode.writable => l10n.githubConnected(
+      viewModel.connectedUser?.login ?? '',
+      viewModel.project?.repository ?? l10n.configuredRepositoryFallback,
+    ),
+    HostedRepositoryAccessMode.attachmentRestricted =>
+      l10n.repositoryAccessAttachmentRestrictedMessage,
+  };
+}
+
+String _attachmentsAccessMessage(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  return switch (viewModel.hostedRepositoryAccessMode) {
+    HostedRepositoryAccessMode.disconnected =>
+      l10n.attachmentsAccessMessageDisconnected,
+    HostedRepositoryAccessMode.readOnly =>
+      l10n.attachmentsAccessMessageReadOnly,
+    HostedRepositoryAccessMode.writable => '',
+    HostedRepositoryAccessMode.attachmentRestricted =>
+      l10n.attachmentsDownloadOnlyMessage,
   };
 }
 
@@ -993,6 +1067,116 @@ class _MessageBanner extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _RepositoryAccessBanner extends StatelessWidget {
+  const _RepositoryAccessBanner({required this.viewModel});
+
+  final TrackerViewModel viewModel;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!viewModel.exposesHostedAccessGates ||
+        viewModel.hostedRepositoryAccessMode ==
+            HostedRepositoryAccessMode.writable) {
+      return const SizedBox.shrink();
+    }
+    final l10n = AppLocalizations.of(context)!;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 0, 12, 6),
+      child: _AccessCallout(
+        semanticLabel: _repositoryAccessTitle(l10n, viewModel),
+        title: _repositoryAccessTitle(l10n, viewModel),
+        message: _repositoryAccessMessage(l10n, viewModel),
+        primaryActionLabel:
+            viewModel.hostedRepositoryAccessMode ==
+                HostedRepositoryAccessMode.attachmentRestricted
+            ? l10n.openSettings
+            : _repositoryAccessPrimaryActionLabel(l10n, viewModel),
+        onPrimaryAction:
+            viewModel.hostedRepositoryAccessMode ==
+                HostedRepositoryAccessMode.attachmentRestricted
+            ? () => viewModel.selectSection(TrackerSection.settings)
+            : () => _showRepositoryAccessDialog(context, viewModel),
+      ),
+    );
+  }
+}
+
+class _AccessCallout extends StatelessWidget {
+  const _AccessCallout({
+    required this.semanticLabel,
+    required this.title,
+    required this.message,
+    this.primaryActionLabel,
+    this.onPrimaryAction,
+  });
+
+  final String semanticLabel;
+  final String title;
+  final String message;
+  final String? primaryActionLabel;
+  final VoidCallback? onPrimaryAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return Semantics(
+      container: true,
+      label: '$semanticLabel $title $message',
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: colors.accent.withValues(alpha: .12),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: colors.accent),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TrackStateIcon(
+                  TrackStateIconGlyph.gitBranch,
+                  size: 18,
+                  color: colors.accent,
+                  semanticLabel: title,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(message),
+            if (primaryActionLabel != null && onPrimaryAction != null) ...[
+              const SizedBox(height: 12),
+              Semantics(
+                button: true,
+                label: primaryActionLabel,
+                child: OutlinedButton(
+                  onPressed: onPrimaryAction,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: colors.text,
+                    side: BorderSide(color: colors.accent),
+                  ),
+                  child: Text(primaryActionLabel!),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -1608,10 +1792,7 @@ class _SettingsState extends State<_Settings> {
         ),
         if (_selectedProvider == _SettingsProviderSelection.hosted) ...[
           const SizedBox(height: 12),
-          _HostedProviderConfiguration(
-            viewModel: widget.viewModel,
-            providerLabel: hostedLabel,
-          ),
+          _HostedProviderConfiguration(viewModel: widget.viewModel),
         ],
         const SizedBox(height: 12),
       ],
@@ -1781,7 +1962,9 @@ class _IssueDetailState extends State<_IssueDetail> {
               controller: _descriptionController,
               minLines: 4,
               maxLines: null,
-              enabled: !widget.viewModel.isSaving,
+              enabled:
+                  !widget.viewModel.isSaving &&
+                  !widget.viewModel.hasBlockedWriteAccess,
               decoration: InputDecoration(
                 labelText: l10n.description,
                 alignLabelWithHint: true,
@@ -1821,9 +2004,9 @@ class _IssueDetailState extends State<_IssueDetail> {
     final issue = widget.issue;
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
-    final hasReadOnlySession = widget.viewModel.hasReadOnlySession;
+    final hasBlockedWriteAccess = widget.viewModel.hasBlockedWriteAccess;
     final canUseWriteActions =
-        !hasReadOnlySession && !widget.viewModel.isSaving;
+        !hasBlockedWriteAccess && !widget.viewModel.isSaving;
     final actions = [
       if (widget.viewModel.issueDetailReturnSection case final returnSection?)
         _IssueDetailActionButton(
@@ -1837,7 +2020,7 @@ class _IssueDetailState extends State<_IssueDetail> {
       ),
       _IssueDetailActionButton(
         label: l10n.createChildIssue,
-        onPressed: canUseWriteActions ? widget.onCreateChildIssue : null,
+        onPressed: widget.viewModel.isSaving ? null : widget.onCreateChildIssue,
       ),
       if (_isEditing)
         _IssueDetailActionButton(
@@ -1906,12 +2089,14 @@ class _IssueDetailState extends State<_IssueDetail> {
             style: Theme.of(context).textTheme.headlineMedium,
           ),
           const SizedBox(height: 12),
-          if (hasReadOnlySession) ...[
-            Text(
-              l10n.issueDetailReadOnlyMessage,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: colors.muted),
+          if (hasBlockedWriteAccess) ...[
+            _AccessCallout(
+              semanticLabel: l10n.issueDetail,
+              title: _repositoryAccessTitle(l10n, widget.viewModel),
+              message: _repositoryAccessMessage(l10n, widget.viewModel),
+              primaryActionLabel: l10n.openSettings,
+              onPrimaryAction: () =>
+                  widget.viewModel.selectSection(TrackerSection.settings),
             ),
             const SizedBox(height: 12),
           ],
@@ -1943,16 +2128,17 @@ class _IssueDetailState extends State<_IssueDetail> {
           else if (_selectedCollaborationTab == 1)
             _CommentsTab(
               issue: issue,
+              viewModel: widget.viewModel,
               controller: _commentController,
               isSaving: widget.viewModel.isSaving,
-              readOnly: hasReadOnlySession,
+              writeBlocked: hasBlockedWriteAccess,
               onSave: canUseWriteActions ? _saveComment : null,
             )
           else if (_selectedCollaborationTab == 2)
             _AttachmentsTab(
               issue: issue,
+              viewModel: widget.viewModel,
               onDownload: widget.viewModel.downloadIssueAttachment,
-              readOnly: hasReadOnlySession,
             )
           else
             _HistoryTab(
@@ -2633,28 +2819,97 @@ class _SettingsProviderButton extends StatelessWidget {
 
 enum _SettingsProviderButtonTone { defaultTone, connected }
 
-class _HostedProviderConfiguration extends StatelessWidget {
-  const _HostedProviderConfiguration({
-    required this.viewModel,
-    required this.providerLabel,
-  });
+class _HostedProviderConfiguration extends StatefulWidget {
+  const _HostedProviderConfiguration({required this.viewModel});
 
   final TrackerViewModel viewModel;
-  final String providerLabel;
+
+  @override
+  State<_HostedProviderConfiguration> createState() =>
+      _HostedProviderConfigurationState();
+}
+
+class _HostedProviderConfigurationState
+    extends State<_HostedProviderConfiguration> {
+  late final TextEditingController _tokenController;
+  bool _rememberToken = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _tokenController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _tokenController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final viewModel = widget.viewModel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _AccessCallout(
+          semanticLabel: l10n.manageGitHubAccess,
+          title: _repositoryAccessTitle(l10n, viewModel),
+          message:
+              '${_repositoryAccessMessage(l10n, viewModel)} '
+              '${l10n.repositoryAccessSettingsHint}',
+        ),
+        const SizedBox(height: 12),
         TextFormField(
-          initialValue: '',
+          controller: _tokenController,
           obscureText: true,
           decoration: InputDecoration(
             labelText: l10n.fineGrainedToken,
             helperText: l10n.fineGrainedTokenHelper,
           ),
+        ),
+        const SizedBox(height: 8),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _rememberToken,
+          title: Text(l10n.rememberOnThisBrowser),
+          subtitle: Text(l10n.rememberOnThisBrowserHelp),
+          onChanged: viewModel.isSaving
+              ? null
+              : (value) =>
+                    setState(() => _rememberToken = value ?? _rememberToken),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            Semantics(
+              button: true,
+              label: l10n.connectToken,
+              child: FilledButton(
+                onPressed: viewModel.isSaving
+                    ? null
+                    : () => viewModel.connectGitHub(
+                        _tokenController.text,
+                        remember: _rememberToken,
+                      ),
+                child: Text(l10n.connectToken),
+              ),
+            ),
+            if (viewModel.isGitHubAppAuthAvailable)
+              Semantics(
+                button: true,
+                label: l10n.continueWithGitHubApp,
+                child: OutlinedButton(
+                  onPressed: viewModel.isSaving
+                      ? null
+                      : viewModel.startGitHubAppLogin,
+                  child: Text(l10n.continueWithGitHubApp),
+                ),
+              ),
+          ],
         ),
         if (viewModel.connectedUser != null) ...[
           const SizedBox(height: 12),
@@ -2664,9 +2919,6 @@ class _HostedProviderConfiguration extends StatelessWidget {
               viewModel.project!.repository,
             ),
           ),
-        ] else if (providerLabel != l10n.connectGitHub) ...[
-          const SizedBox(height: 12),
-          Text(providerLabel),
         ],
       ],
     );
@@ -3309,8 +3561,11 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
             child: ListenableBuilder(
               listenable: widget.viewModel,
               builder: (context, _) {
+                final canEditFields =
+                    !widget.viewModel.hasBlockedWriteAccess &&
+                    !widget.viewModel.isSaving;
                 final canSubmit =
-                    !widget.viewModel.hasReadOnlySession &&
+                    !widget.viewModel.hasBlockedWriteAccess &&
                     !widget.viewModel.isSaving;
                 return _SurfaceCard(
                   semanticLabel: l10n.createIssue,
@@ -3325,10 +3580,31 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                             children: [
                               _SectionTitle(l10n.createIssue),
                               const SizedBox(height: 12),
+                              if (widget.viewModel.hasBlockedWriteAccess) ...[
+                                _AccessCallout(
+                                  semanticLabel: l10n.createIssue,
+                                  title: _repositoryAccessTitle(
+                                    l10n,
+                                    widget.viewModel,
+                                  ),
+                                  message: _repositoryAccessMessage(
+                                    l10n,
+                                    widget.viewModel,
+                                  ),
+                                  primaryActionLabel: l10n.openSettings,
+                                  onPrimaryAction: () {
+                                    widget.onDismiss();
+                                    widget.viewModel.selectSection(
+                                      TrackerSection.settings,
+                                    );
+                                  },
+                                ),
+                                const SizedBox(height: 12),
+                              ],
                               _DropdownCreateField(
                                 label: issueTypeLabel,
                                 value: _selectedIssueTypeId,
-                                enabled: !widget.viewModel.isSaving,
+                                enabled: canEditFields,
                                 items: [
                                   for (final option in issueTypeOptions)
                                     DropdownMenuItem<String>(
@@ -3347,7 +3623,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                 textField: true,
                                 child: TextField(
                                   controller: _summaryController,
-                                  enabled: !widget.viewModel.isSaving,
+                                  enabled: canEditFields,
                                   decoration: InputDecoration(
                                     labelText: summaryLabel,
                                   ),
@@ -3361,7 +3637,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                   controller: _descriptionController,
                                   minLines: 3,
                                   maxLines: null,
-                                  enabled: !widget.viewModel.isSaving,
+                                  enabled: canEditFields,
                                   decoration: InputDecoration(
                                     labelText: l10n.description,
                                     alignLabelWithHint: true,
@@ -3372,7 +3648,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                               _DropdownCreateField(
                                 label: priorityLabel,
                                 value: _selectedPriorityId,
-                                enabled: !widget.viewModel.isSaving,
+                                enabled: canEditFields,
                                 items: [
                                   for (final option in priorityOptions)
                                     DropdownMenuItem<String>(
@@ -3406,7 +3682,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                 _DropdownCreateField(
                                   label: epicLabel,
                                   value: _selectedEpicKey,
-                                  enabled: !widget.viewModel.isSaving,
+                                  enabled: canEditFields,
                                   hintText: l10n.optional,
                                   items: [
                                     for (final option in epicOptions)
@@ -3430,7 +3706,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                 _DropdownCreateField(
                                   label: parentLabel,
                                   value: _selectedParentKey,
-                                  enabled: !widget.viewModel.isSaving,
+                                  enabled: canEditFields,
                                   hintText: parentOptions.isEmpty
                                       ? l10n.noEligibleParents
                                       : null,
@@ -3472,7 +3748,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                 textField: true,
                                 child: TextField(
                                   controller: _assigneeController,
-                                  enabled: !widget.viewModel.isSaving,
+                                  enabled: canEditFields,
                                   decoration: InputDecoration(
                                     labelText: assigneeLabel,
                                   ),
@@ -3483,7 +3759,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                 label: labelsLabel,
                                 controller: _labelEntryController,
                                 labels: _labels,
-                                enabled: !widget.viewModel.isSaving,
+                                enabled: canEditFields,
                                 helperText: l10n.labelsTokenHelper,
                                 onChanged: (_) => _commitLabels(),
                                 onSubmitted: (_) =>
@@ -3503,14 +3779,14 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                     key: ValueKey('create-field-${field.id}'),
                                     controller:
                                         _customFieldControllers[field.id],
-                                    minLines: field.type == 'markdown' ? 3 : 1,
-                                    maxLines: field.type == 'markdown'
-                                        ? null
-                                        : 1,
-                                    enabled: !widget.viewModel.isSaving,
-                                    decoration: InputDecoration(
-                                      labelText: _createIssueFieldLabel(
-                                        project,
+                                     minLines: field.type == 'markdown' ? 3 : 1,
+                                     maxLines: field.type == 'markdown'
+                                         ? null
+                                         : 1,
+                                     enabled: canEditFields,
+                                     decoration: InputDecoration(
+                                       labelText: _createIssueFieldLabel(
+                                         project,
                                         field,
                                       ),
                                       alignLabelWithHint:
@@ -3893,16 +4169,18 @@ class _IssueDetailTabChip extends StatelessWidget {
 class _CommentsTab extends StatelessWidget {
   const _CommentsTab({
     required this.issue,
+    required this.viewModel,
     required this.controller,
     required this.isSaving,
-    required this.readOnly,
+    required this.writeBlocked,
     required this.onSave,
   });
 
   final TrackStateIssue issue;
+  final TrackerViewModel viewModel;
   final TextEditingController controller;
   final bool isSaving;
-  final bool readOnly;
+  final bool writeBlocked;
   final VoidCallback? onSave;
 
   @override
@@ -3912,32 +4190,41 @@ class _CommentsTab extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (!readOnly) ...[
-          Semantics(
-            label: l10n.comments,
-            textField: true,
-            child: TextField(
-              controller: controller,
-              minLines: 3,
-              maxLines: null,
-              enabled: !isSaving,
-              decoration: InputDecoration(
-                labelText: l10n.comments,
-                alignLabelWithHint: true,
-              ),
-            ),
+        if (writeBlocked) ...[
+          _AccessCallout(
+            semanticLabel: l10n.comments,
+            title: _repositoryAccessTitle(l10n, viewModel),
+            message: _repositoryAccessMessage(l10n, viewModel),
+            primaryActionLabel: l10n.openSettings,
+            onPrimaryAction: () =>
+                viewModel.selectSection(TrackerSection.settings),
           ),
           const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerRight,
-            child: _IssueDetailActionButton(
-              label: l10n.postComment,
-              emphasized: true,
-              onPressed: onSave,
+        ],
+        Semantics(
+          label: l10n.comments,
+          textField: true,
+          child: TextField(
+            controller: controller,
+            minLines: 3,
+            maxLines: null,
+            enabled: !isSaving && !writeBlocked,
+            decoration: InputDecoration(
+              labelText: l10n.comments,
+              alignLabelWithHint: true,
             ),
           ),
-          const SizedBox(height: 16),
-        ],
+        ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerRight,
+          child: _IssueDetailActionButton(
+            label: l10n.postComment,
+            emphasized: true,
+            onPressed: writeBlocked ? null : onSave,
+          ),
+        ),
+        const SizedBox(height: 16),
         if (issue.comments.isEmpty)
           Text(l10n.noResults, style: TextStyle(color: colors.muted))
         else
@@ -3951,43 +4238,38 @@ class _CommentsTab extends StatelessWidget {
 class _AttachmentsTab extends StatelessWidget {
   const _AttachmentsTab({
     required this.issue,
+    required this.viewModel,
     required this.onDownload,
-    required this.readOnly,
   });
 
   final TrackStateIssue issue;
+  final TrackerViewModel viewModel;
   final ValueChanged<IssueAttachment> onDownload;
-  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
-    if (issue.attachments.isEmpty) {
-      return Text(l10n.noResults, style: TextStyle(color: colors.muted));
-    }
+    final accessMessage = _attachmentsAccessMessage(l10n, viewModel);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (readOnly) ...[
-          Semantics(
-            container: true,
-            label: l10n.attachmentsDownloadOnlyMessage,
-            child: ExcludeSemantics(
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  l10n.attachmentsDownloadOnlyMessage,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(color: colors.muted),
-                ),
-              ),
-            ),
+        if (accessMessage.isNotEmpty) ...[
+          _AccessCallout(
+            semanticLabel: l10n.attachments,
+            title: _repositoryAccessTitle(l10n, viewModel),
+            message: accessMessage,
+            primaryActionLabel: l10n.openSettings,
+            onPrimaryAction: () =>
+                viewModel.selectSection(TrackerSection.settings),
           ),
+          const SizedBox(height: 12),
         ],
-        for (final attachment in issue.attachments)
-          _AttachmentRow(attachment: attachment, onDownload: onDownload),
+        if (issue.attachments.isEmpty)
+          Text(l10n.noResults, style: TextStyle(color: colors.muted))
+        else
+          for (final attachment in issue.attachments)
+            _AttachmentRow(attachment: attachment, onDownload: onDownload),
       ],
     );
   }
