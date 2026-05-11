@@ -1,0 +1,10 @@
+test_id: TS-380
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+notes:
+  - Executes the exact ticket command `trackstate read fields` from a seeded Local Git repository.
+  - Verifies the visible stdout is a flat JSON array and that the `summary` field exposes Jira-style schema metadata instead of raw TrackState config keys.
+  - Confirms a custom field keeps a boolean `custom` flag and uses `schema.custom` without leaking TrackState-only markers.
