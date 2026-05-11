@@ -256,7 +256,21 @@ class CliReadFieldsJiraSchemaConsistencyTest(unittest.TestCase):
             f"Observed stdout:\n{observation.result.stdout}",
         )
         self.assertIn(
-            '"schema": {\n      "type": "string",\n      "system": "summary"\n    }',
+            '"schema"',
+            observation.result.stdout,
+            "Human-style verification failed: the visible CLI output did not show a "
+            "schema object for the `summary` field entry.\n"
+            f"Observed stdout:\n{observation.result.stdout}",
+        )
+        self.assertIn(
+            f'"type": "{self.config.summary_schema_type}"',
+            observation.result.stdout,
+            "Human-style verification failed: the visible CLI output did not show the "
+            "expected Jira-style schema type for the `summary` field.\n"
+            f"Observed stdout:\n{observation.result.stdout}",
+        )
+        self.assertIn(
+            f'"system": "{self.config.summary_field_id}"',
             observation.result.stdout,
             "Human-style verification failed: the visible CLI output did not show the "
             "Jira-style schema for the `summary` field.\n"
