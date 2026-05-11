@@ -467,6 +467,20 @@ class AppLocalizationsEn extends AppLocalizations {
       'Settings is the canonical place to review repository access and reconnect safely.';
 
   @override
+  String get startupRecovery => 'Startup recovery';
+
+  @override
+  String get startupRateLimitRecoveryTitle => 'GitHub startup limit reached';
+
+  @override
+  String get startupRateLimitRecoveryBlockingMessage =>
+      'Hosted startup hit GitHub\'s rate limit before TrackState finished loading the required repository data. Retry later or connect GitHub for a higher limit. TrackState will retry once after GitHub authentication succeeds.';
+
+  @override
+  String get startupRateLimitRecoveryShellMessage =>
+      'Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.';
+
+  @override
   String get repositoryPath => 'Repository Path';
 
   @override
@@ -581,6 +595,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get connectGitHub => 'Connect GitHub';
+
+  @override
+  String get retry => 'Retry';
 
   @override
   String get editIssue => 'Edit issue';
