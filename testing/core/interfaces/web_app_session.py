@@ -36,6 +36,8 @@ class FocusedElementObservation:
 
 
 class WebAppSession(Protocol):
+    def set_viewport_size(self, *, width: int, height: int) -> None: ...
+
     def goto(
         self,
         url: str,

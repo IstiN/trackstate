@@ -21,6 +21,9 @@ class PlaywrightWebAppSession(WebAppSession):
     def __init__(self, page: Page) -> None:
         self._page = page
 
+    def set_viewport_size(self, *, width: int, height: int) -> None:
+        self._page.set_viewport_size({"width": width, "height": height})
+
     def goto(
         self,
         url: str,

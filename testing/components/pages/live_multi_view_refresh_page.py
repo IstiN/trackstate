@@ -33,6 +33,37 @@ class ConstrainedChipFieldObservation:
     menu_item_count: int
 
 
+@dataclass(frozen=True)
+class EditSurfaceObservation:
+    viewport_width: float
+    viewport_height: float
+    left: float
+    top: float
+    width: float
+    height: float
+    summary_value: str
+    description_value: str
+    priority_label: str | None
+    priority_text: str
+    body_text: str
+
+    @property
+    def width_fraction(self) -> float:
+        return self.width / self.viewport_width if self.viewport_width else 0.0
+
+    @property
+    def height_fraction(self) -> float:
+        return self.height / self.viewport_height if self.viewport_height else 0.0
+
+    @property
+    def right_inset(self) -> float:
+        return self.viewport_width - (self.left + self.width)
+
+    @property
+    def bottom_inset(self) -> float:
+        return self.viewport_height - (self.top + self.height)
+
+
 class LiveMultiViewRefreshPage:
     _button_selector = 'flt-semantics[role="button"]'
     _edit_button_selector = 'flt-semantics[role="button"][aria-label="Edit"]'
@@ -57,6 +88,24 @@ class LiveMultiViewRefreshPage:
             user_login=user_login,
         )
 
+    def set_viewport(self, *, width: int, height: int) -> None:
+        self._session.set_viewport_size(width=width, height=height)
+        try:
+            self._session.wait_for_function(
+                """
+                ({ expectedWidth, expectedHeight }) =>
+                  window.innerWidth === expectedWidth && window.innerHeight === expectedHeight
+                """,
+                arg={"expectedWidth": width, "expectedHeight": height},
+                timeout_ms=15_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f"Step failed: resizing the hosted browser to {width}x{height} did not "
+                "settle to the requested viewport.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+
     def open_edit_dialog_for_issue(self, *, issue_key: str, issue_summary: str) -> str:
         self.navigate_to_section("JQL Search")
         self._session.wait_for_selector(
@@ -69,15 +118,113 @@ class LiveMultiViewRefreshPage:
         )
         self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
         self._session.click(self._edit_button_selector, timeout_ms=30_000)
-        dialog_text = self._session.wait_for_text("Edit issue", timeout_ms=30_000)
-        if issue_key not in dialog_text:
+        return self._wait_for_edit_dialog(issue_key=issue_key, origin_label="JQL Search")
+
+    def open_issue_from_board(self, *, issue_key: str, issue_summary: str) -> str:
+        self.navigate_to_section("Board")
+        self._session.wait_for_text(issue_summary, timeout_ms=60_000)
+        board_text = self.current_body_text()
+        if issue_summary not in board_text:
             raise AssertionError(
-                "Step 3 failed: opening the requested issue from JQL Search did not "
-                f"lead to the edit surface for {issue_key}.\n"
-                f"Expected issue key in edit dialog: {issue_key}\n"
-                f"Observed dialog text:\n{dialog_text}",
+                f"Step failed: the Board view did not visibly render {issue_key} before "
+                "the shared edit-surface scenario began.\n"
+                f"Observed Board text:\n{board_text}",
             )
-        return dialog_text
+        detail_text = self.open_issue_from_current_section(
+            issue_key=issue_key,
+            issue_summary=issue_summary,
+        )
+        if "Back to Board" not in detail_text:
+            raise AssertionError(
+                f"Step failed: opening {issue_key} from Board did not reach the "
+                "board-origin issue detail surface.\n"
+                f"Observed detail text:\n{detail_text}",
+            )
+        return detail_text
+
+    def open_edit_dialog_from_current_issue_detail(self, *, issue_key: str) -> str:
+        self._session.wait_for_selector(
+            self._issue_detail_selector(issue_key),
+            timeout_ms=60_000,
+        )
+        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
+        self._session.click(self._edit_button_selector, timeout_ms=30_000)
+        return self._wait_for_edit_dialog(
+            issue_key=issue_key,
+            origin_label="current issue detail",
+        )
+
+    def close_edit_dialog(self) -> None:
+        self._session.wait_for_selector(self._dialog_group_selector, timeout_ms=30_000)
+        self._session.click(self._button_selector, has_text="Cancel", timeout_ms=30_000)
+        try:
+            self._session.wait_for_count(self._dialog_group_selector, 0, timeout_ms=30_000)
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step failed: clicking Cancel did not close the hosted Edit issue surface.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+
+    def observe_edit_surface(
+        self,
+        *,
+        viewport_width: int,
+        viewport_height: int,
+    ) -> EditSurfaceObservation:
+        self._session.wait_for_selector(self._dialog_group_selector, timeout_ms=30_000)
+        rect = self._session.bounding_box(self._dialog_group_selector, timeout_ms=30_000)
+        summary_value = self.read_labeled_text_field_value("Summary")
+        description_value = self.read_labeled_text_field_value("Description")
+        priority = self.priority_control()
+        return EditSurfaceObservation(
+            viewport_width=float(viewport_width),
+            viewport_height=float(viewport_height),
+            left=rect.x,
+            top=rect.y,
+            width=rect.width,
+            height=rect.height,
+            summary_value=summary_value,
+            description_value=description_value,
+            priority_label=priority.label,
+            priority_text=priority.text,
+            body_text=self.current_body_text(),
+        )
+
+    def read_labeled_text_field_value(self, label: str) -> str:
+        payload = self._session.evaluate(
+            """
+            ({ dialogSelector, label }) => {
+              const root = document.querySelector(dialogSelector);
+              if (!root) {
+                return null;
+              }
+              const selectors = [
+                `input[aria-label="${label}"]`,
+                `textarea[aria-label="${label}"]`,
+                `[role="textbox"][aria-label="${label}"]`,
+              ];
+              for (const selector of selectors) {
+                const field = root.querySelector(selector);
+                if (!field) {
+                  continue;
+                }
+                if ('value' in field && typeof field.value === 'string') {
+                  return field.value;
+                }
+                return (field.innerText || field.textContent || '').trim();
+              }
+              return null;
+            }
+            """,
+            arg={"dialogSelector": self._dialog_group_selector, "label": label},
+        )
+        if not isinstance(payload, str):
+            raise AssertionError(
+                f"Human-style verification failed: the hosted Edit issue surface did not "
+                f"expose a readable {label!r} field value.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return payload
 
     def open_issue_from_current_section(
         self,
@@ -86,8 +233,55 @@ class LiveMultiViewRefreshPage:
         issue_summary: str,
     ) -> str:
         selector = self._issue_selector(issue_key=issue_key, issue_summary=issue_summary)
-        self._session.wait_for_selector(selector, timeout_ms=60_000)
-        self._session.click(selector, timeout_ms=30_000)
+        if self._session.count(selector) > 0:
+            self._session.click(selector, timeout_ms=30_000)
+        else:
+            clicked = self._session.evaluate(
+                """
+                ({ issueKey, issueSummary }) => {
+                  const candidates = Array.from(
+                    document.querySelectorAll('flt-semantics, flt-semantics-img'),
+                  )
+                    .map((element) => {
+                      const label = element.getAttribute('aria-label') ?? '';
+                      const text = (element.innerText || element.textContent || '').trim();
+                      const rect = element.getBoundingClientRect();
+                      return {
+                        element,
+                        label,
+                        text,
+                        width: rect.width,
+                        height: rect.height,
+                        left: rect.left,
+                        top: rect.top,
+                        area: rect.width * rect.height,
+                      };
+                    })
+                    .filter((candidate) =>
+                      candidate.width > 0
+                      && candidate.height > 0
+                      && (candidate.label.includes(issueKey) || candidate.text.includes(issueKey))
+                      && (
+                        candidate.label.includes(issueSummary)
+                        || candidate.text.includes(issueSummary)
+                      ),
+                    )
+                    .sort((left, right) => left.area - right.area);
+                  if (candidates.length === 0) {
+                    return false;
+                  }
+                  candidates[0].element.click();
+                  return true;
+                }
+                """,
+                arg={"issueKey": issue_key, "issueSummary": issue_summary},
+            )
+            if clicked is not True:
+                raise AssertionError(
+                    f"Step failed: the hosted tracker did not expose a visible clickable "
+                    f"region for {issue_key} in the current section.\n"
+                    f"Observed body text:\n{self.current_body_text()}",
+                )
         self._session.wait_for_selector(
             self._issue_detail_selector(issue_key),
             timeout_ms=60_000,
@@ -750,6 +944,35 @@ class LiveMultiViewRefreshPage:
                 str(payload["expanded"]) if payload["expanded"] is not None else None
             ),
         )
+
+    def _wait_for_edit_dialog(self, *, issue_key: str, origin_label: str) -> str:
+        self._session.wait_for_selector(self._dialog_group_selector, timeout_ms=30_000)
+        self._session.wait_for_function(
+            """
+            ({ dialogSelector }) => {
+              const root = document.querySelector(dialogSelector);
+              if (!root) {
+                return false;
+              }
+              return (
+                root.querySelector('input[aria-label="Summary"]') !== null
+                && root.querySelector('textarea[aria-label="Description"]') !== null
+                && (document.body?.innerText ?? '').includes('Edit issue')
+              );
+            }
+            """,
+            arg={"dialogSelector": self._dialog_group_selector},
+            timeout_ms=30_000,
+        )
+        dialog_text = self.current_body_text()
+        if issue_key not in dialog_text:
+            raise AssertionError(
+                f"Step failed: opening the requested issue from {origin_label} did not "
+                f"lead to the edit surface for {issue_key}.\n"
+                f"Expected issue key in edit dialog: {issue_key}\n"
+                f"Observed dialog text:\n{dialog_text}",
+            )
+        return dialog_text
 
     def _open_focusable_dropdown(
         self,
