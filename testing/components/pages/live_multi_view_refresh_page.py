@@ -120,7 +120,12 @@ class LiveMultiViewRefreshPage:
         self._session.click(self._edit_button_selector, timeout_ms=30_000)
         return self._wait_for_edit_dialog(issue_key=issue_key, origin_label="JQL Search")
 
-    def open_issue_from_board(self, *, issue_key: str, issue_summary: str) -> str:
+    def open_edit_dialog_from_board_card(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+    ) -> str:
         self.navigate_to_section("Board")
         self._session.wait_for_text(issue_summary, timeout_ms=60_000)
         board_text = self.current_body_text()
@@ -130,17 +135,31 @@ class LiveMultiViewRefreshPage:
                 "the shared edit-surface scenario began.\n"
                 f"Observed Board text:\n{board_text}",
             )
-        detail_text = self.open_issue_from_current_section(
+
+        card_bounds = self._board_issue_card_bounds(
             issue_key=issue_key,
             issue_summary=issue_summary,
         )
-        if "Back to Board" not in detail_text:
+        edit_bounds = self._reveal_board_issue_edit_button(card_bounds=card_bounds)
+        if edit_bounds is None:
+            nearby_controls = self._board_issue_controls_snapshot(card_bounds=card_bounds)
             raise AssertionError(
-                f"Step failed: opening {issue_key} from Board did not reach the "
-                "board-origin issue detail surface.\n"
-                f"Observed detail text:\n{detail_text}",
+                f"Step failed: the Board card for {issue_key} did not expose a visible "
+                "Edit affordance.\n"
+                "Expected the ticketed Board flow to let the user open Edit directly from "
+                "the issue card.\n"
+                f"Nearby visible controls after hovering the card: {nearby_controls}\n"
+                f"Observed Board text:\n{board_text}",
             )
-        return detail_text
+
+        self._session.mouse_click(
+            edit_bounds["x"] + (edit_bounds["width"] / 2),
+            edit_bounds["y"] + (edit_bounds["height"] / 2),
+        )
+        return self._wait_for_edit_dialog(
+            issue_key=issue_key,
+            origin_label="Board card Edit affordance",
+        )
 
     def open_edit_dialog_from_current_issue_detail(self, *, issue_key: str) -> str:
         self._session.wait_for_selector(
@@ -973,6 +992,232 @@ class LiveMultiViewRefreshPage:
                 f"Observed dialog text:\n{dialog_text}",
             )
         return dialog_text
+
+    def _reveal_board_issue_edit_button(
+        self,
+        *,
+        card_bounds: dict[str, float],
+    ) -> dict[str, float] | None:
+        for point in self._board_issue_hover_points(card_bounds=card_bounds):
+            self._session.mouse_move(point["x"], point["y"])
+            try:
+                self._session.wait_for_function(
+                    self._board_issue_edit_button_script(),
+                    arg={"cardBounds": card_bounds},
+                    timeout_ms=1_500,
+                )
+            except WebAppTimeoutError:
+                continue
+            edit_bounds = self._board_issue_edit_button_bounds(card_bounds=card_bounds)
+            if edit_bounds is not None:
+                return edit_bounds
+        return self._board_issue_edit_button_bounds(card_bounds=card_bounds)
+
+    @staticmethod
+    def _board_issue_hover_points(
+        *,
+        card_bounds: dict[str, float],
+    ) -> tuple[dict[str, float], ...]:
+        left = card_bounds["x"]
+        top = card_bounds["y"]
+        width = card_bounds["width"]
+        height = card_bounds["height"]
+        return (
+            {"x": left + (width / 2), "y": top + (height / 2)},
+            {"x": left + width - 24, "y": top + 24},
+            {"x": left + 24, "y": top + 24},
+            {"x": left + width - 24, "y": top + height - 24},
+        )
+
+    def _board_issue_card_bounds(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+    ) -> dict[str, float]:
+        payload = self._session.evaluate(
+            """
+            ({ issueKey, issueSummary }) => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return (
+                  rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none'
+                );
+              };
+              const candidates = Array.from(
+                document.querySelectorAll('flt-semantics, flt-semantics-img'),
+              )
+                .filter((element) => visible(element))
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  const label = element.getAttribute('aria-label') ?? '';
+                  const text = (element.innerText || element.textContent || '').trim();
+                  return {
+                    label,
+                    text,
+                    x: rect.left,
+                    y: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                    area: rect.width * rect.height,
+                  };
+                })
+                .filter((candidate) =>
+                  (candidate.label.includes(issueKey) || candidate.text.includes(issueKey))
+                  && (
+                    candidate.label.includes(issueSummary)
+                    || candidate.text.includes(issueSummary)
+                  ),
+                )
+                .sort((left, right) => left.area - right.area);
+              return candidates[0] ?? null;
+            }
+            """,
+            arg={"issueKey": issue_key, "issueSummary": issue_summary},
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Step failed: the Board view did not expose a visible card region for "
+                f"{issue_key}.\n"
+                f"Observed Board text:\n{self.current_body_text()}",
+            )
+        for key in ("x", "y", "width", "height"):
+            value = payload.get(key)
+            if not isinstance(value, int | float):
+                raise AssertionError(
+                    f"Step failed: the Board card geometry for {issue_key} was not readable.\n"
+                    f"Observed Board text:\n{self.current_body_text()}",
+                )
+        return {
+            "x": float(payload["x"]),
+            "y": float(payload["y"]),
+            "width": float(payload["width"]),
+            "height": float(payload["height"]),
+        }
+
+    def _board_issue_edit_button_bounds(
+        self,
+        *,
+        card_bounds: dict[str, float],
+    ) -> dict[str, float] | None:
+        payload = self._session.evaluate(
+            self._board_issue_edit_button_script(),
+            arg={"cardBounds": card_bounds},
+        )
+        if not isinstance(payload, dict):
+            return None
+        coordinates = (
+            payload.get("x"),
+            payload.get("y"),
+            payload.get("width"),
+            payload.get("height"),
+        )
+        if not all(isinstance(value, int | float) for value in coordinates):
+            return None
+        return {
+            "x": float(payload["x"]),
+            "y": float(payload["y"]),
+            "width": float(payload["width"]),
+            "height": float(payload["height"]),
+        }
+
+    def _board_issue_controls_snapshot(
+        self,
+        *,
+        card_bounds: dict[str, float],
+    ) -> tuple[str, ...]:
+        payload = self._session.evaluate(
+            """
+            ({ cardBounds }) => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return (
+                  rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none'
+                );
+              };
+              const overlapsCard = (rect) => (
+                rect.left < (cardBounds.x + cardBounds.width + 24)
+                && (rect.left + rect.width) > (cardBounds.x - 24)
+                && rect.top < (cardBounds.y + cardBounds.height + 24)
+                && (rect.top + rect.height) > (cardBounds.y - 24)
+              );
+              return Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+                .filter((element) => visible(element))
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  const label = (element.getAttribute('aria-label') ?? '').trim();
+                  const text = (element.innerText || element.textContent || '').trim();
+                  return {
+                    rect,
+                    label,
+                    text,
+                    description: `${label || '<no-aria>'} | ${text || '<no-text>'}`,
+                  };
+                })
+                .filter((candidate) => overlapsCard(candidate.rect))
+                .map((candidate) => candidate.description)
+                .slice(0, 8);
+            }
+            """,
+            arg={"cardBounds": card_bounds},
+        )
+        if not isinstance(payload, list):
+            return ()
+        return tuple(str(entry) for entry in payload if str(entry).strip())
+
+    @staticmethod
+    def _board_issue_edit_button_script() -> str:
+        return """
+            ({ cardBounds }) => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return (
+                  rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none'
+                );
+              };
+              const overlapsCard = (rect) => (
+                rect.left < (cardBounds.x + cardBounds.width + 24)
+                && (rect.left + rect.width) > (cardBounds.x - 24)
+                && rect.top < (cardBounds.y + cardBounds.height + 24)
+                && (rect.top + rect.height) > (cardBounds.y - 24)
+              );
+              const candidates = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .filter((element) => visible(element))
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  const label = element.getAttribute('aria-label') ?? '';
+                  const text = (element.innerText || element.textContent || '').trim();
+                  return {
+                    x: rect.left,
+                    y: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                    area: rect.width * rect.height,
+                    label,
+                    text,
+                    matchesEdit: /edit/i.test(`${label}\n${text}`),
+                    overlapsCard: overlapsCard(rect),
+                  };
+                })
+                .filter((candidate) => candidate.matchesEdit && candidate.overlapsCard)
+                .sort((left, right) => left.area - right.area);
+              return candidates[0] ?? null;
+            }
+        """
 
     def _open_focusable_dropdown(
         self,

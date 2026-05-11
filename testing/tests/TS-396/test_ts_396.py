@@ -100,7 +100,7 @@ def main() -> None:
                 )
 
                 page.set_viewport(**DESKTOP_VIEWPORT)
-                board_detail_text = page.open_issue_from_board(
+                board_edit_text = page.open_edit_dialog_from_board_card(
                     issue_key=issue_fixture.key,
                     issue_summary=issue_fixture.summary,
                 )
@@ -108,11 +108,10 @@ def main() -> None:
                     result,
                     step=3,
                     status="passed",
-                    action="Open the issue from Board and reach the board-origin issue detail view.",
-                    observed=board_detail_text,
+                    action="Use the Board card Edit affordance to open the shared Edit issue surface.",
+                    observed=board_edit_text,
                 )
 
-                page.open_edit_dialog_from_current_issue_detail(issue_key=issue_fixture.key)
                 desktop_board_observation = page.observe_edit_surface(
                     viewport_width=DESKTOP_VIEWPORT["width"],
                     viewport_height=DESKTOP_VIEWPORT["height"],
@@ -122,7 +121,7 @@ def main() -> None:
                     issue_fixture=issue_fixture,
                     expected_priority_label=expected_priority_label,
                     step_number=4,
-                    layout_mode="desktop Board-origin",
+                    layout_mode="desktop Board card",
                 )
                 _assert_desktop_drawer_layout(
                     observation=desktop_board_observation,
@@ -136,7 +135,7 @@ def main() -> None:
                     step=4,
                     status="passed",
                     action=(
-                        "Open Edit from the Board-origin issue detail and verify the desktop "
+                        "Open Edit from the Board card and verify the desktop "
                         "drawer layout plus the preloaded Summary, Description, and Priority."
                     ),
                     observed=_format_observation(desktop_board_observation),
@@ -226,7 +225,7 @@ def main() -> None:
     else:
         result["status"] = "passed"
         result["summary"] = (
-            "Verified the deployed Edit issue surface opens from the Board-origin and "
+            "Verified the deployed Edit issue surface opens from the Board card and "
             "issue-detail flows with preloaded Summary, Description, and Priority; "
             "desktop stays right-docked and compact expands to a near full-width sheet."
         )

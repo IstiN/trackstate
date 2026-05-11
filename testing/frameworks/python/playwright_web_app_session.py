@@ -479,6 +479,9 @@ class PlaywrightWebAppSession(WebAppSession):
     def mouse_click(self, x: float, y: float, *, delay_ms: int = 0) -> None:
         self._page.mouse.click(x, y, delay=delay_ms)
 
+    def mouse_move(self, x: float, y: float) -> None:
+        self._page.mouse.move(x, y)
+
     def _locator(
         self,
         selector: str,
