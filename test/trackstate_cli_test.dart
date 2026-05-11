@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:trackstate/cli/trackstate_cli.dart';
 import 'package:trackstate/data/providers/local/local_git_trackstate_provider.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 void main() {
@@ -16,6 +18,7 @@ void main() {
 
       expect(result.exitCode, 0);
       expect(result.stdout, contains('trackstate session --target local'));
+      expect(result.stdout, contains('trackstate search --target local'));
     });
 
     test('reports validation errors in the JSON envelope', () async {
@@ -366,6 +369,82 @@ void main() {
       expect(result.stdout, contains('Session ready'));
       expect(result.stdout, contains('Provider: local-git'));
     });
+
+    test('returns paged search metadata for CLI consumers', () async {
+      final cli = TrackStateCli(
+        environment: const TrackStateCliEnvironment(
+          workingDirectory: '/workspace/repo',
+        ),
+        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+          localRepository: _FakeSearchRepository(
+            page: TrackStateIssueSearchPage(
+              issues: const [
+                TrackStateIssue(
+                  key: 'TRACK-2',
+                  project: 'TRACK',
+                  issueType: IssueType.story,
+                  issueTypeId: 'story',
+                  status: IssueStatus.inProgress,
+                  statusId: 'in-progress',
+                  priority: IssuePriority.high,
+                  priorityId: 'high',
+                  summary: 'Implement pagination',
+                  description: 'Adds paged JQL output.',
+                  assignee: 'ana',
+                  reporter: 'ana',
+                  labels: ['release'],
+                  components: [],
+                  fixVersionIds: [],
+                  watchers: [],
+                  customFields: {},
+                  parentKey: null,
+                  epicKey: 'TRACK-1',
+                  parentPath: null,
+                  epicPath: null,
+                  progress: 0,
+                  updatedLabel: 'just now',
+                  acceptanceCriteria: ['Expose next page tokens.'],
+                  comments: [],
+                  links: [],
+                  attachments: [],
+                  isArchived: false,
+                ),
+              ],
+              startAt: 0,
+              maxResults: 1,
+              total: 3,
+              nextStartAt: 1,
+              nextPageToken: 'offset:1',
+            ),
+          ),
+        ),
+      );
+
+      final result = await cli.run(const <String>[
+        'search',
+        '--target',
+        'local',
+        '--jql',
+        'text ~ "pagination"',
+        '--max-results',
+        '1',
+      ]);
+      final json = jsonDecode(result.stdout) as Map<String, Object?>;
+      final data = json['data']! as Map<String, Object?>;
+      final page = data['page']! as Map<String, Object?>;
+      final issues = data['issues']! as List<Object?>;
+
+      expect(result.exitCode, 0);
+      expect(data['command'], 'search');
+      expect(data['jql'], 'text ~ "pagination"');
+      expect(page['startAt'], 0);
+      expect(page['maxResults'], 1);
+      expect(page['total'], 3);
+      expect(page['nextStartAt'], 1);
+      expect(page['nextPageToken'], 'offset:1');
+      expect(issues, hasLength(1));
+      expect((issues.single as Map<String, Object?>)['key'], 'TRACK-2');
+    });
   });
 }
 
@@ -412,6 +491,114 @@ class _FakeTrackStateCliProviderFactory
     }
     return adapter;
   }
+}
+
+class _FakeTrackStateCliRepositoryFactory
+    implements TrackStateCliRepositoryFactory {
+  const _FakeTrackStateCliRepositoryFactory({this.localRepository});
+
+  final TrackStateRepository? localRepository;
+
+  @override
+  TrackStateRepository createLocal({
+    required String repositoryPath,
+    required String dataRef,
+  }) {
+    final repository = localRepository;
+    if (repository == null) {
+      throw StateError('Expected a fake local repository.');
+    }
+    return repository;
+  }
+
+  @override
+  TrackStateRepository createHosted({
+    required String provider,
+    required String repository,
+    required String branch,
+    http.Client? client,
+  }) {
+    throw StateError('Expected only fake local repository usage in this test.');
+  }
+}
+
+class _FakeSearchRepository implements TrackStateRepository {
+  const _FakeSearchRepository({required this.page});
+
+  final TrackStateIssueSearchPage page;
+
+  @override
+  bool get supportsGitHubAuth => false;
+
+  @override
+  bool get usesLocalPersistence => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async =>
+      const RepositoryUser(login: 'searcher', displayName: 'Search User');
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async => page;
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) async => page.issues;
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+    Map<String, String> customFields = const {},
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async => throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> updateIssueStatus(
+    TrackStateIssue issue,
+    IssueStatus status,
+  ) async => throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => throw UnimplementedError();
 }
 
 class _FakeLocalGitTrackStateProvider extends LocalGitTrackStateProvider {

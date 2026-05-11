@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/data/services/issue_mutation_service.dart';
 import 'package:trackstate/domain/models/issue_mutation_models.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -25,6 +26,50 @@ void main() {
     expect(viewModel.selectedIssue?.key, 'TRACK-12');
     expect(viewModel.searchResults, isNotEmpty);
   });
+
+  test('view model appends the next search page through load more', () async {
+    final viewModel = TrackerViewModel(
+      repository: DemoTrackStateRepository(
+        snapshot: _searchPaginationSnapshot(),
+      ),
+    );
+
+    await viewModel.load();
+
+    expect(viewModel.searchResults.length, 6);
+    expect(viewModel.totalSearchResults, 8);
+    expect(viewModel.hasMoreSearchResults, isTrue);
+
+    await viewModel.loadMoreSearchResults();
+
+    expect(viewModel.searchResults.length, 8);
+    expect(viewModel.searchResults.last.key, 'TRACK-8');
+    expect(viewModel.hasMoreSearchResults, isFalse);
+  });
+
+  test(
+    'view model restores the last valid query after a search failure',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: const _ThrowingSearchRepository(),
+      );
+
+      await viewModel.load();
+      final previousQuery = viewModel.jql;
+      final previousResults = viewModel.searchResults
+          .map((issue) => issue.key)
+          .toList();
+
+      await viewModel.updateQuery('text = broken');
+
+      expect(viewModel.jql, previousQuery);
+      expect(
+        viewModel.searchResults.map((issue) => issue.key),
+        previousResults,
+      );
+      expect(viewModel.message?.kind, TrackerMessageKind.searchFailed);
+    },
+  );
 
   test('view model changes sections and toggles theme', () async {
     final viewModel = TrackerViewModel(
@@ -217,6 +262,19 @@ class _LocalRuntimeRepository implements TrackStateRepository {
       _demoRepository.loadSnapshot();
 
   @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => _demoRepository.searchIssuePage(
+    jql,
+    startAt: startAt,
+    maxResults: maxResults,
+    continuationToken: continuationToken,
+  );
+
+  @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
       _demoRepository.searchIssues(jql);
 
@@ -255,26 +313,29 @@ class _LocalRuntimeRepository implements TrackStateRepository {
   ) async => issue.copyWith(status: status, updatedLabel: 'just now');
 
   @override
-  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) async =>
-      issue.copyWith(
-        comments: [
-          ...issue.comments,
-          IssueComment(
-            id: (issue.comments.length + 1).toString().padLeft(4, '0'),
-            author: 'local-user',
-            body: body,
-            updatedLabel: 'just now',
-          ),
-        ],
-      );
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => issue.copyWith(
+    comments: [
+      ...issue.comments,
+      IssueComment(
+        id: (issue.comments.length + 1).toString().padLeft(4, '0'),
+        author: 'local-user',
+        body: body,
+        updatedLabel: 'just now',
+      ),
+    ],
+  );
 
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
       Uint8List(0);
 
   @override
-  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) async =>
-      const <IssueHistoryEntry>[];
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
 
   @override
   Future<TrackStateIssue> uploadIssueAttachment({
@@ -282,6 +343,28 @@ class _LocalRuntimeRepository implements TrackStateRepository {
     required String name,
     required Uint8List bytes,
   }) async => issue;
+}
+
+class _ThrowingSearchRepository extends _LocalRuntimeRepository {
+  const _ThrowingSearchRepository();
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) {
+    if (jql == 'text = broken') {
+      throw const JqlSearchException('Unsupported JQL clause "text = broken".');
+    }
+    return super.searchIssuePage(
+      jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+  }
 }
 
 class _RecordingIssueMutationService extends IssueMutationService {
@@ -305,5 +388,68 @@ class _RecordingIssueMutationService extends IssueMutationService {
     operation: 'create',
     issueKey: _created.key,
     value: _created,
+  );
+}
+
+TrackerSnapshot _searchPaginationSnapshot() {
+  final issues = [
+    for (var index = 1; index <= 8; index += 1)
+      TrackStateIssue(
+        key: 'TRACK-$index',
+        project: 'TRACK',
+        issueType: IssueType.story,
+        issueTypeId: 'story',
+        status: IssueStatus.inProgress,
+        statusId: 'in-progress',
+        priority: IssuePriority.medium,
+        priorityId: 'medium',
+        summary: 'Paged issue $index',
+        description: 'Search result $index',
+        assignee: 'user-$index',
+        reporter: 'demo-user',
+        labels: const ['paged'],
+        components: const [],
+        fixVersionIds: const [],
+        watchers: const [],
+        customFields: const {},
+        parentKey: null,
+        epicKey: null,
+        parentPath: null,
+        epicPath: null,
+        progress: 0,
+        updatedLabel: 'just now',
+        acceptanceCriteria: const ['Visible in search pagination'],
+        comments: const [],
+        links: const [],
+        attachments: const [],
+        isArchived: false,
+        storagePath: 'TRACK/TRACK-$index/main.md',
+        rawMarkdown: '',
+      ),
+  ];
+  return TrackerSnapshot(
+    project: const ProjectConfig(
+      key: 'TRACK',
+      name: 'TrackState',
+      repository: 'trackstate/trackstate',
+      branch: 'main',
+      defaultLocale: 'en',
+      issueTypeDefinitions: [TrackStateConfigEntry(id: 'story', name: 'Story')],
+      statusDefinitions: [
+        TrackStateConfigEntry(id: 'in-progress', name: 'In Progress'),
+      ],
+      fieldDefinitions: [
+        TrackStateFieldDefinition(
+          id: 'summary',
+          name: 'Summary',
+          type: 'string',
+          required: true,
+        ),
+      ],
+      priorityDefinitions: [
+        TrackStateConfigEntry(id: 'medium', name: 'Medium'),
+      ],
+    ),
+    issues: issues,
   );
 }

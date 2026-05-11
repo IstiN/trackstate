@@ -474,6 +474,33 @@ class TrackerSnapshot {
       .toList();
 }
 
+class TrackStateIssueSearchPage {
+  const TrackStateIssueSearchPage({
+    required this.issues,
+    required this.startAt,
+    required this.maxResults,
+    required this.total,
+    this.nextStartAt,
+    this.nextPageToken,
+  });
+
+  const TrackStateIssueSearchPage.empty({this.maxResults = 0})
+    : issues = const [],
+      startAt = 0,
+      total = 0,
+      nextStartAt = null,
+      nextPageToken = null;
+
+  final List<TrackStateIssue> issues;
+  final int startAt;
+  final int maxResults;
+  final int total;
+  final int? nextStartAt;
+  final String? nextPageToken;
+
+  bool get hasMore => nextStartAt != null;
+}
+
 class RepositoryConnection {
   const RepositoryConnection({
     required this.repository,

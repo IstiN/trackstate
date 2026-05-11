@@ -8,11 +8,18 @@ import 'package:http/http.dart' as http;
 import '../../domain/models/trackstate_models.dart';
 import '../providers/github/github_trackstate_provider.dart';
 import '../providers/trackstate_provider.dart';
+import '../services/jql_search_service.dart';
 
 abstract interface class TrackStateRepository {
   bool get usesLocalPersistence;
   bool get supportsGitHubAuth;
   Future<TrackerSnapshot> loadSnapshot();
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  });
   Future<List<TrackStateIssue>> searchIssues(String jql);
   Future<RepositoryUser> connect(RepositoryConnection connection);
   Future<TrackStateIssue> archiveIssue(TrackStateIssue issue);
@@ -56,7 +63,9 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     required TrackStateProviderAdapter provider,
     this.usesLocalPersistence = false,
     this.supportsGitHubAuth = true,
+    JqlSearchService searchService = const JqlSearchService(),
   }) : _provider = provider,
+       _searchService = searchService,
        _session = ProviderSession(
          providerType: provider.providerType,
          connectionState: ProviderConnectionState.disconnected,
@@ -70,6 +79,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         );
 
   final TrackStateProviderAdapter _provider;
+  final JqlSearchService _searchService;
   @override
   final bool usesLocalPersistence;
   @override
@@ -161,9 +171,27 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   }
 
   @override
-  Future<List<TrackStateIssue>> searchIssues(String jql) async {
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
     final snapshot = _snapshot ?? await loadSnapshot();
-    return _filterIssues(snapshot.issues, jql);
+    return _searchService.search(
+      issues: snapshot.issues,
+      project: snapshot.project,
+      jql: jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+  }
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) async {
+    final page = await searchIssuePage(jql, maxResults: 2147483647);
+    return page.issues;
   }
 
   @override
@@ -1888,10 +1916,14 @@ class SetupTrackStateRepository extends ProviderBackedTrackStateRepository {
 }
 
 class DemoTrackStateRepository implements TrackStateRepository {
-  const DemoTrackStateRepository({TrackerSnapshot snapshot = _snapshot})
-    : _snapshotOverride = snapshot;
+  const DemoTrackStateRepository({
+    TrackerSnapshot snapshot = _snapshot,
+    JqlSearchService searchService = const JqlSearchService(),
+  }) : _snapshotOverride = snapshot,
+       _searchService = searchService;
 
   final TrackerSnapshot _snapshotOverride;
+  final JqlSearchService _searchService;
 
   @override
   bool get usesLocalPersistence => false;
@@ -1959,8 +1991,23 @@ class DemoTrackStateRepository implements TrackStateRepository {
       issue.copyWith(description: description.trim(), updatedLabel: 'just now');
 
   @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async => _searchService.search(
+    issues: _snapshotOverride.issues,
+    project: _snapshotOverride.project,
+    jql: jql,
+    startAt: startAt,
+    maxResults: maxResults,
+    continuationToken: continuationToken,
+  );
+
+  @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
-      _filterIssues(_snapshot.issues, jql);
+      (await searchIssuePage(jql, maxResults: 2147483647)).issues;
 
   @override
   Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
@@ -2953,52 +3000,6 @@ RepositoryIndex _normalizeRepositoryIndex(
   return RepositoryIndex(entries: normalizedEntries, deleted: index.deleted);
 }
 
-List<TrackStateIssue> _filterIssues(List<TrackStateIssue> issues, String jql) {
-  final query = jql.trim().toLowerCase();
-  if (query.isEmpty) return issues;
-
-  Iterable<TrackStateIssue> results = issues;
-  if (query.contains('status != done')) {
-    results = results.where((issue) => issue.status != IssueStatus.done);
-  }
-  if (query.contains('status = done')) {
-    results = results.where((issue) => issue.status == IssueStatus.done);
-  }
-  if (query.contains('issuetype = story') ||
-      query.contains('issuetype = "story"')) {
-    results = results.where((issue) => issue.issueType == IssueType.story);
-  }
-  final keyMatch = RegExp(
-    r'(?:epic|parent)\s*=\s*([a-z]+-\d+)',
-  ).firstMatch(query);
-  if (keyMatch != null) {
-    final key = keyMatch.group(1)!.toUpperCase();
-    results = results.where(
-      (issue) => issue.epicKey == key || issue.parentKey == key,
-    );
-  }
-  final freeText = query
-      .replaceAll(RegExp(r'project\s*=\s*[a-z]+'), '')
-      .replaceAll(RegExp(r'status\s*(!=|=)\s*[a-z -]+'), '')
-      .replaceAll(RegExp(r'issuetype\s*=\s*"?[a-z -]+"?'), '')
-      .replaceAll(RegExp(r'(?:epic|parent)\s*=\s*[a-z]+-\d+'), '')
-      .replaceAll(RegExp(r'order\s+by.+$'), '')
-      .replaceAll(RegExp(r'\b(and|or)\b'), '')
-      .trim();
-  if (freeText.isNotEmpty && !freeText.contains('=')) {
-    results = results.where(
-      (issue) =>
-          issue.summary.toLowerCase().contains(freeText) ||
-          issue.key.toLowerCase().contains(freeText),
-    );
-  }
-  final sorted = results.toList()
-    ..sort(
-      (a, b) => _priorityRank(b.priority).compareTo(_priorityRank(a.priority)),
-    );
-  return sorted;
-}
-
 String _mediaTypeForPath(String path) {
   final normalized = path.toLowerCase();
   if (normalized.endsWith('.svg')) return 'image/svg+xml';
@@ -3011,13 +3012,6 @@ String _mediaTypeForPath(String path) {
   if (normalized.endsWith('.txt')) return 'text/plain';
   return 'application/octet-stream';
 }
-
-int _priorityRank(IssuePriority priority) => switch (priority) {
-  IssuePriority.highest => 4,
-  IssuePriority.high => 3,
-  IssuePriority.medium => 2,
-  IssuePriority.low => 1,
-};
 
 extension on String {
   String ifEmpty(String fallback) => isEmpty ? fallback : this;
