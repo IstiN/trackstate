@@ -3138,6 +3138,7 @@ class _IssueDetailState extends State<_IssueDetail> {
   void initState() {
     super.initState();
     _commentController = TextEditingController();
+    _ensureActiveIssueDataLoaded();
   }
 
   @override
@@ -3148,10 +3149,35 @@ class _IssueDetailState extends State<_IssueDetail> {
       _commentController.clear();
       _selectedAttachment = null;
       _attachmentUploadNotice = null;
-      if (_selectedCollaborationTab == 3) {
-        widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
-      }
     }
+    if (issueChanged || !_activeTabDataLoaded(widget.issue)) {
+      _ensureActiveIssueDataLoaded();
+    }
+  }
+
+  void _ensureActiveIssueDataLoaded() {
+    widget.viewModel.ensureIssueDetailLoaded(widget.issue);
+    switch (_selectedCollaborationTab) {
+      case 1:
+        widget.viewModel.ensureIssueCommentsLoaded(widget.issue);
+      case 2:
+        widget.viewModel.ensureIssueAttachmentsLoaded(widget.issue);
+      case 3:
+        widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
+      case 0:
+        break;
+    }
+  }
+
+  bool _activeTabDataLoaded(TrackStateIssue issue) {
+    if (!issue.hasDetailLoaded) {
+      return false;
+    }
+    return switch (_selectedCollaborationTab) {
+      1 => issue.hasCommentsLoaded,
+      2 => issue.hasAttachmentsLoaded,
+      _ => true,
+    };
   }
 
   @override
@@ -3272,6 +3298,17 @@ class _IssueDetailState extends State<_IssueDetail> {
     required AppLocalizations l10n,
     required TrackStateColors colors,
   }) {
+    if (widget.viewModel.isIssueDetailLoading(issue.key) ||
+        !issue.hasDetailLoaded) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const LinearProgressIndicator(minHeight: 2),
+          const SizedBox(height: 12),
+          Text(l10n.loading, style: TextStyle(color: colors.muted)),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3399,8 +3436,15 @@ class _IssueDetailState extends State<_IssueDetail> {
               setState(() {
                 _selectedCollaborationTab = index;
               });
-              if (index == 3) {
-                widget.viewModel.ensureIssueHistoryLoaded(issue);
+              switch (index) {
+                case 0:
+                  widget.viewModel.ensureIssueDetailLoaded(issue);
+                case 1:
+                  widget.viewModel.ensureIssueCommentsLoaded(issue);
+                case 2:
+                  widget.viewModel.ensureIssueAttachmentsLoaded(issue);
+                case 3:
+                  widget.viewModel.ensureIssueHistoryLoaded(issue);
               }
             },
           ),
@@ -3413,6 +3457,7 @@ class _IssueDetailState extends State<_IssueDetail> {
               viewModel: widget.viewModel,
               controller: _commentController,
               isSaving: widget.viewModel.isSaving,
+              isLoading: widget.viewModel.isIssueCommentsLoading(issue.key),
               writeBlocked: hasBlockedWriteAccess,
               onSave: canUseWriteActions ? _saveComment : null,
             )
@@ -3424,6 +3469,7 @@ class _IssueDetailState extends State<_IssueDetail> {
               selectedAttachment: _selectedAttachment,
               uploadNotice: _attachmentUploadNotice,
               isSaving: widget.viewModel.isSaving,
+              isLoading: widget.viewModel.isIssueAttachmentsLoading(issue.key),
               onChooseAttachment: _chooseAttachment,
               onClearSelection: () {
                 setState(() {
@@ -6159,6 +6205,7 @@ class _CommentsTab extends StatelessWidget {
     required this.viewModel,
     required this.controller,
     required this.isSaving,
+    required this.isLoading,
     required this.writeBlocked,
     required this.onSave,
   });
@@ -6167,6 +6214,7 @@ class _CommentsTab extends StatelessWidget {
   final TrackerViewModel viewModel;
   final TextEditingController controller;
   final bool isSaving;
+  final bool isLoading;
   final bool writeBlocked;
   final VoidCallback? onSave;
 
@@ -6195,7 +6243,7 @@ class _CommentsTab extends StatelessWidget {
             controller: controller,
             minLines: 3,
             maxLines: null,
-            enabled: !isSaving && !writeBlocked,
+            enabled: !isSaving && !isLoading && !writeBlocked,
             decoration: InputDecoration(
               labelText: l10n.comments,
               alignLabelWithHint: true,
@@ -6208,11 +6256,13 @@ class _CommentsTab extends StatelessWidget {
           child: _IssueDetailActionButton(
             label: l10n.postComment,
             emphasized: true,
-            onPressed: writeBlocked ? null : onSave,
+            onPressed: writeBlocked || isLoading ? null : onSave,
           ),
         ),
         const SizedBox(height: 16),
-        if (issue.comments.isEmpty)
+        if (isLoading || !issue.hasCommentsLoaded)
+          const LinearProgressIndicator(minHeight: 2)
+        else if (issue.comments.isEmpty)
           Text(l10n.noResults, style: TextStyle(color: colors.muted))
         else
           for (final comment in issue.comments)
@@ -6230,6 +6280,7 @@ class _AttachmentsTab extends StatelessWidget {
     required this.selectedAttachment,
     required this.uploadNotice,
     required this.isSaving,
+    required this.isLoading,
     required this.onChooseAttachment,
     required this.onClearSelection,
     required this.onUpload,
@@ -6241,6 +6292,7 @@ class _AttachmentsTab extends StatelessWidget {
   final PickedAttachment? selectedAttachment;
   final String? uploadNotice;
   final bool isSaving;
+  final bool isLoading;
   final VoidCallback onChooseAttachment;
   final VoidCallback onClearSelection;
   final VoidCallback onUpload;
@@ -6255,7 +6307,7 @@ class _AttachmentsTab extends StatelessWidget {
             HostedRepositoryAccessMode.attachmentRestricted &&
         !viewModel.canUploadIssueAttachments;
     final canChooseAttachment =
-        !isSaving && viewModel.canUploadIssueAttachments;
+        !isSaving && !isLoading && viewModel.canUploadIssueAttachments;
     final canUploadAttachment =
         canChooseAttachment && selectedAttachment != null;
     return Column(
@@ -6358,7 +6410,9 @@ class _AttachmentsTab extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        if (issue.attachments.isEmpty)
+        if (isLoading || !issue.hasAttachmentsLoaded)
+          const LinearProgressIndicator(minHeight: 2)
+        else if (issue.attachments.isEmpty)
           Text(l10n.noResults, style: TextStyle(color: colors.muted))
         else
           for (final attachment in issue.attachments)

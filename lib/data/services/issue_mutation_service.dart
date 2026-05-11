@@ -150,20 +150,20 @@ class IssueMutationService {
         payload: createPayload,
       );
       final updatedIssues = <_IssueIndexState>[
-        for (final issue in snapshot.issues)
-          _IssueIndexState(
-            key: issue.key,
-            storagePath: issue.storagePath,
-            parentKey: issue.parentKey,
-            epicKey: issue.epicKey,
-            isArchived: issue.isArchived,
-          ),
+        for (final issue in snapshot.issues) _IssueIndexState.fromIssue(issue),
         _IssueIndexState(
           key: key,
           storagePath: issuePath,
           parentKey: hierarchy.parentKey,
           epicKey: hierarchy.epicKey,
           isArchived: false,
+          summary: normalizedSummary,
+          issueTypeId: issueTypeDefinition.id,
+          statusId: statusDefinition.id,
+          priorityId: priorityDefinition.id,
+          assignee: normalizedAssignee,
+          labels: _stringListValue(fields['labels']),
+          updatedLabel: timestamp,
         ),
       ];
       final indexPath = '$projectRoot/.trackstate/index/issues.json';
@@ -386,6 +386,27 @@ class IssueMutationService {
           expectedRevision: file.revision,
         ),
       ];
+      final updatedIndexState = _issueIndexStateFromFrontmatter(
+        issue: issue,
+        frontmatter: frontmatter,
+        body: body,
+        project: snapshot.project,
+      );
+      final indexPath = '${snapshot.project.key}/.trackstate/index/issues.json';
+      changes.add(
+        RepositoryTextFileChange(
+          path: indexPath,
+          content:
+              '${jsonEncode(_repositoryIndexJson([for (final candidate in snapshot.issues)
+                if (candidate.key == issue.key) updatedIndexState else _IssueIndexState.fromIssue(candidate)]))}\n',
+          expectedRevision: await _existingTextRevision(
+            provider,
+            path: indexPath,
+            ref: writeBranch,
+            blobPaths: blobPaths,
+          ),
+        ),
+      );
       final acceptancePath =
           '${_issueRoot(issue.storagePath)}/acceptance_criteria.md';
       if (fields.containsKey('acceptanceCriteria')) {
@@ -581,14 +602,31 @@ class IssueMutationService {
         frontmatter: frontmatter,
         body: document.body,
       );
-      final writeResult = await provider.writeTextFile(
-        RepositoryWriteRequest(
-          path: issue.storagePath,
-          content: markdown,
-          message: 'Move $issueKey to ${targetStatus.name}',
-          branch: writeBranch,
-          expectedRevision: file.revision,
-        ),
+      final blobPaths = await _blobPaths(provider, writeBranch);
+      final indexPath = '${snapshot.project.key}/.trackstate/index/issues.json';
+      final writeResult = await _applyChanges(
+        provider: provider,
+        branch: writeBranch,
+        message: 'Move $issueKey to ${targetStatus.name}',
+        changes: [
+          RepositoryTextFileChange(
+            path: issue.storagePath,
+            content: markdown,
+            expectedRevision: file.revision,
+          ),
+          RepositoryTextFileChange(
+            path: indexPath,
+            content:
+                '${jsonEncode(_repositoryIndexJson([for (final candidate in snapshot.issues)
+                  if (candidate.key == issue.key) _issueIndexStateFromFrontmatter(issue: issue, frontmatter: frontmatter, body: document.body, project: snapshot.project) else _IssueIndexState.fromIssue(candidate)]))}\n',
+            expectedRevision: await _existingTextRevision(
+              provider,
+              path: indexPath,
+              ref: writeBranch,
+              blobPaths: blobPaths,
+            ),
+          ),
+        ],
       );
       final refreshed = await providerRepository.loadSnapshot();
       return IssueMutationResult.success(
@@ -759,6 +797,14 @@ class IssueMutationService {
                 ? null
                 : descendantEpicKey,
             isArchived: snapshotIssue.isArchived,
+            summary: snapshotIssue.summary,
+            issueTypeId: snapshotIssue.issueTypeId,
+            statusId: snapshotIssue.statusId,
+            priorityId: snapshotIssue.priorityId,
+            assignee: snapshotIssue.assignee,
+            labels: snapshotIssue.labels,
+            updatedLabel: snapshotIssue.updatedLabel,
+            resolutionId: snapshotIssue.resolutionId,
           );
         } else {
           final attachment = await provider.readAttachment(
@@ -795,13 +841,7 @@ class IssueMutationService {
       final updatedIndexStates = [
         for (final candidate in snapshot.issues)
           movedStateByKey[candidate.key] ??
-              _IssueIndexState(
-                key: candidate.key,
-                storagePath: candidate.storagePath,
-                parentKey: candidate.parentKey,
-                epicKey: candidate.epicKey,
-                isArchived: candidate.isArchived,
-              ),
+              _IssueIndexState.fromIssue(candidate),
       ];
       changes.add(
         RepositoryTextFileChange(
@@ -1198,13 +1238,45 @@ class _IssueIndexState {
     required this.parentKey,
     required this.epicKey,
     required this.isArchived,
+    required this.summary,
+    required this.issueTypeId,
+    required this.statusId,
+    required this.priorityId,
+    required this.assignee,
+    required this.labels,
+    required this.updatedLabel,
+    this.resolutionId,
   });
+
+  factory _IssueIndexState.fromIssue(TrackStateIssue issue) => _IssueIndexState(
+    key: issue.key,
+    storagePath: issue.storagePath,
+    parentKey: issue.parentKey,
+    epicKey: issue.epicKey,
+    isArchived: issue.isArchived,
+    summary: issue.summary,
+    issueTypeId: issue.issueTypeId,
+    statusId: issue.statusId,
+    priorityId: issue.priorityId,
+    assignee: issue.assignee,
+    labels: issue.labels,
+    updatedLabel: issue.updatedLabel,
+    resolutionId: issue.resolutionId,
+  );
 
   final String key;
   final String storagePath;
   final String? parentKey;
   final String? epicKey;
   final bool isArchived;
+  final String summary;
+  final String issueTypeId;
+  final String priorityId;
+  final String statusId;
+  final String assignee;
+  final List<String> labels;
+  final String updatedLabel;
+  final String? resolutionId;
 }
 
 class _CreateIssueFields {
@@ -2076,12 +2148,34 @@ String _upsertSection(String markdown, String title, String content) {
 String _issueRoot(String storagePath) =>
     storagePath.substring(0, storagePath.lastIndexOf('/'));
 
+bool? _boolValue(Object? value) {
+  if (value is bool) {
+    return value;
+  }
+  final text = value?.toString().trim().toLowerCase();
+  return switch (text) {
+    'true' => true,
+    'false' => false,
+    _ => null,
+  };
+}
+
 String? _normalizeNullableString(Object? value) {
   final text = value?.toString().trim();
   if (text == null || text.isEmpty || text == 'null') {
     return null;
   }
   return text;
+}
+
+String? _readSection(String body, String title) {
+  final pattern = RegExp(
+    '^#\\s+$title\\s*\$([\\s\\S]*?)(?=^#\\s+|\\z)',
+    multiLine: true,
+    caseSensitive: false,
+  );
+  final match = pattern.firstMatch(body);
+  return match?.group(1)?.trim();
 }
 
 String _canonicalConfigId(String? value) {
@@ -2179,6 +2273,59 @@ String? _normalizeAcceptanceCriteriaContent(Object? value) {
   return '${lines.map((line) => '- $line').join('\n')}\n';
 }
 
+_IssueIndexState _issueIndexStateFromFrontmatter({
+  required TrackStateIssue issue,
+  required Map<String, Object?> frontmatter,
+  required String body,
+  required ProjectConfig project,
+}) {
+  final issueTypeId =
+      _resolveConfigEntry(
+        frontmatter['issueType']?.toString(),
+        project.issueTypeDefinitions,
+      )?.id ??
+      issue.issueTypeId;
+  final statusId =
+      _resolveConfigEntry(
+        frontmatter['status']?.toString(),
+        project.statusDefinitions,
+      )?.id ??
+      issue.statusId;
+  final priorityId =
+      _resolveConfigEntry(
+        frontmatter['priority']?.toString(),
+        project.priorityDefinitions,
+      )?.id ??
+      issue.priorityId;
+  final resolutionId =
+      _resolveConfigEntry(
+        frontmatter['resolution']?.toString(),
+        project.resolutionDefinitions,
+      )?.id ??
+      _normalizeNullableString(frontmatter['resolution']) ??
+      issue.resolutionId;
+  final summary =
+      _normalizeNullableString(frontmatter['summary']) ??
+      _readSection(body, 'Summary') ??
+      issue.summary;
+  return _IssueIndexState(
+    key: issue.key,
+    storagePath: issue.storagePath,
+    parentKey: issue.parentKey,
+    epicKey: issue.epicKey,
+    isArchived: _boolValue(frontmatter['archived']) ?? issue.isArchived,
+    summary: summary,
+    issueTypeId: issueTypeId,
+    statusId: statusId,
+    priorityId: priorityId,
+    assignee:
+        _normalizeNullableString(frontmatter['assignee']) ?? issue.assignee,
+    labels: _stringListValue(frontmatter['labels']),
+    updatedLabel: frontmatter['updated']?.toString() ?? issue.updatedLabel,
+    resolutionId: resolutionId,
+  );
+}
+
 List<Map<String, Object?>> _repositoryIndexJson(List<_IssueIndexState> issues) {
   final pathByKey = {for (final issue in issues) issue.key: issue.storagePath};
   final childrenByKey = <String, List<String>>{};
@@ -2204,6 +2351,14 @@ List<Map<String, Object?>> _repositoryIndexJson(List<_IssueIndexState> issues) {
             ? null
             : pathByKey[issue.parentKey!],
         'epicPath': issue.epicKey == null ? null : pathByKey[issue.epicKey!],
+        'summary': issue.summary,
+        'issueType': issue.issueTypeId,
+        'status': issue.statusId,
+        'priority': issue.priorityId,
+        'assignee': issue.assignee,
+        'labels': issue.labels,
+        'updated': issue.updatedLabel,
+        'resolution': issue.resolutionId,
         'children': [...(childrenByKey[issue.key] ?? const <String>[])]..sort(),
         'archived': issue.isArchived,
       },
