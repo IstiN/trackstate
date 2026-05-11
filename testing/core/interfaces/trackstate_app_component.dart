@@ -121,6 +121,18 @@ abstract interface class TrackStateAppComponent {
 
   Future<int> countLabeledTextFields(String label);
 
+  Future<bool> isDropdownFieldVisible(String label);
+
+  Future<int> countDropdownFields(String label);
+
+  Future<void> selectDropdownOption(String label, {required String optionText});
+
+  Future<String?> readDropdownFieldValue(String label);
+
+  Future<int> countReadOnlyFields(String label);
+
+  Future<String?> readReadOnlyFieldValue(String label);
+
   Future<void> enterLabeledTextField(String label, {required String text});
 
   Future<String?> readLabeledTextFieldValue(String label);
