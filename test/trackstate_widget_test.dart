@@ -160,49 +160,83 @@ void main() {
     }
   });
 
-  testWidgets('issue detail exposes detail, comments, attachments, and history tabs', (
-    tester,
-  ) async {
-    final semantics = tester.ensureSemantics();
-    try {
-      tester.view.physicalSize = const Size(1440, 960);
-      tester.view.devicePixelRatio = 1;
-      await tester.pumpWidget(
-        const TrackStateApp(repository: DemoTrackStateRepository()),
+  testWidgets(
+    'issue detail exposes detail, comments, attachments, and history tabs',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        tester.view.physicalSize = const Size(1440, 960);
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          const TrackStateApp(repository: DemoTrackStateRepository()),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Board')).first);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.bySemanticsLabel(
+            RegExp('Open TRACK-12 Implement Git sync service'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.bySemanticsLabel(RegExp('Detail')), findsWidgets);
+        expect(find.bySemanticsLabel(RegExp('Comments')), findsWidgets);
+        expect(find.bySemanticsLabel(RegExp('Attachments')), findsWidgets);
+        expect(find.bySemanticsLabel(RegExp('History')), findsWidgets);
+        expect(find.text('Description'), findsOneWidget);
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Attachments')).first);
+        await tester.pumpAndSettle();
+        expect(find.text('sync-sequence.svg'), findsOneWidget);
+
+        await tester.tap(find.bySemanticsLabel(RegExp('History')).first);
+        await tester.pumpAndSettle();
+        expect(
+          find.textContaining('Updated description on TRACK-12'),
+          findsOneWidget,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'edit issue dialog exposes metadata, hierarchy, and workflow controls',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final screen = defaultTestingDependencies.createTrackStateAppScreen(
+        tester,
       );
-      await tester.pumpAndSettle();
+      try {
+        await screen.pump(const _EditIssueFieldsLocalRuntimeRepository());
 
-      await tester.tap(find.bySemanticsLabel(RegExp('Board')).first);
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.bySemanticsLabel(
-          RegExp('Open TRACK-12 Implement Git sync service'),
-        ),
-      );
-      await tester.pumpAndSettle();
+        await screen.openSection('Search');
+        await screen.openIssue('TRACK-12', 'Implement Git sync service');
+        await screen.tapIssueDetailAction('TRACK-12', label: 'Edit');
 
-      expect(find.bySemanticsLabel(RegExp('Detail')), findsWidgets);
-      expect(find.bySemanticsLabel(RegExp('Comments')), findsWidgets);
-      expect(find.bySemanticsLabel(RegExp('Attachments')), findsWidgets);
-      expect(find.bySemanticsLabel(RegExp('History')), findsWidgets);
-      expect(find.text('Description'), findsOneWidget);
+        expect(await screen.isTextFieldVisible('Summary'), isTrue);
+        expect(await screen.isTextFieldVisible('Description'), isTrue);
+        expect(await screen.isDropdownFieldVisible('Priority'), isTrue);
+        expect(await screen.isDropdownFieldVisible('Assignee'), isTrue);
+        expect(await screen.isDropdownFieldVisible('Epic'), isTrue);
+        expect(await screen.isDropdownFieldVisible('Status'), isTrue);
+        await screen.expectTextVisible('Components');
+        await screen.expectTextVisible('Fix versions');
 
-      await tester.tap(find.bySemanticsLabel(RegExp('Attachments')).first);
-      await tester.pumpAndSettle();
-      expect(find.text('sync-sequence.svg'), findsOneWidget);
+        await screen.selectDropdownOption('Status', optionText: 'Done');
 
-      await tester.tap(find.bySemanticsLabel(RegExp('History')).first);
-      await tester.pumpAndSettle();
-      expect(
-        find.textContaining('Updated description on TRACK-12'),
-        findsOneWidget,
-      );
-    } finally {
-      tester.view.resetPhysicalSize();
-      tester.view.resetDevicePixelRatio();
-      semantics.dispose();
-    }
-  });
+        expect(await screen.isDropdownFieldVisible('Resolution'), isTrue);
+      } finally {
+        screen.resetView();
+        semantics.dispose();
+      }
+    },
+  );
 
   testWidgets('local runtime shows repository access instead of GitHub auth', (
     tester,
@@ -842,6 +876,37 @@ class _CustomCreateFieldsLocalRuntimeRepository
     required String name,
     required Uint8List bytes,
   }) async => issue;
+}
+
+class _EditIssueFieldsLocalRuntimeRepository extends _LocalRuntimeRepository {
+  const _EditIssueFieldsLocalRuntimeRepository();
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    final snapshot = await super.loadSnapshot();
+    return TrackerSnapshot(
+      project: ProjectConfig(
+        key: snapshot.project.key,
+        name: snapshot.project.name,
+        repository: snapshot.project.repository,
+        branch: snapshot.project.branch,
+        defaultLocale: snapshot.project.defaultLocale,
+        issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+        statusDefinitions: snapshot.project.statusDefinitions,
+        fieldDefinitions: snapshot.project.fieldDefinitions,
+        priorityDefinitions: snapshot.project.priorityDefinitions,
+        versionDefinitions: snapshot.project.versionDefinitions,
+        componentDefinitions: snapshot.project.componentDefinitions,
+        resolutionDefinitions: const [
+          TrackStateConfigEntry(id: 'done', name: 'Done'),
+          TrackStateConfigEntry(id: 'wont-fix', name: "Won't Fix"),
+        ],
+      ),
+      issues: snapshot.issues,
+      repositoryIndex: snapshot.repositoryIndex,
+      loadWarnings: snapshot.loadWarnings,
+    );
+  }
 }
 
 TrackerSnapshot _searchPaginationSnapshot() {

@@ -5,6 +5,7 @@ import '../../../../data/providers/trackstate_provider.dart';
 import '../../../../data/repositories/trackstate_repository.dart';
 import '../../../../data/services/issue_mutation_service.dart';
 import '../../../../data/services/trackstate_auth_store.dart';
+import '../../../../domain/models/issue_mutation_models.dart';
 import '../../../../domain/models/trackstate_models.dart';
 
 enum TrackerSection { dashboard, board, search, hierarchy, settings }
@@ -192,6 +193,34 @@ class TrackerMessage {
       );
 }
 
+class IssueEditRequest {
+  const IssueEditRequest({
+    required this.summary,
+    required this.description,
+    required this.priorityId,
+    required this.labels,
+    required this.components,
+    required this.fixVersionIds,
+    this.assignee,
+    this.parentKey,
+    this.epicKey,
+    this.transitionStatusId,
+    this.resolutionId,
+  });
+
+  final String summary;
+  final String description;
+  final String priorityId;
+  final String? assignee;
+  final List<String> labels;
+  final List<String> components;
+  final List<String> fixVersionIds;
+  final String? parentKey;
+  final String? epicKey;
+  final String? transitionStatusId;
+  final String? resolutionId;
+}
+
 class TrackerViewModel extends ChangeNotifier {
   static const int _searchPageSize = 6;
 
@@ -277,9 +306,12 @@ class TrackerViewModel extends ChangeNotifier {
   bool get hasReadOnlySession {
     return hostedRepositoryAccessMode == HostedRepositoryAccessMode.readOnly;
   }
-  bool get hasBlockedWriteAccess => !usesLocalPersistence && switch (
-        exposesHostedAccessGates ? hostedRepositoryAccessMode : HostedRepositoryAccessMode.writable
-      ) {
+
+  bool get hasBlockedWriteAccess =>
+      !usesLocalPersistence &&
+      switch (exposesHostedAccessGates
+          ? hostedRepositoryAccessMode
+          : HostedRepositoryAccessMode.writable) {
         HostedRepositoryAccessMode.disconnected ||
         HostedRepositoryAccessMode.readOnly => true,
         HostedRepositoryAccessMode.writable ||
@@ -288,7 +320,7 @@ class TrackerViewModel extends ChangeNotifier {
   bool get hasAttachmentUploadRestriction =>
       exposesHostedAccessGates &&
       hostedRepositoryAccessMode ==
-      HostedRepositoryAccessMode.attachmentRestricted;
+          HostedRepositoryAccessMode.attachmentRestricted;
 
   RepositoryAccessState get repositoryAccessState => usesLocalPersistence
       ? RepositoryAccessState.localGit
@@ -672,29 +704,204 @@ class TrackerViewModel extends ChangeNotifier {
   Future<bool> saveIssueDescription(
     TrackStateIssue issue,
     String description,
+  ) => saveIssueEdits(
+    issue,
+    IssueEditRequest(
+      summary: issue.summary,
+      description: description,
+      priorityId: issue.priorityId,
+      assignee: issue.assignee,
+      labels: issue.labels,
+      components: issue.components,
+      fixVersionIds: issue.fixVersionIds,
+      parentKey: issue.parentKey,
+      epicKey: issue.epicKey,
+    ),
+  );
+
+  Future<List<TrackStateConfigEntry>> availableWorkflowTransitions(
+    TrackStateIssue issue,
+  ) async {
+    try {
+      final result = await _issueMutationService.availableTransitions(
+        issueKey: issue.key,
+      );
+      if (result.isSuccess &&
+          result.value != null &&
+          result.value!.isNotEmpty) {
+        return result.value!;
+      }
+    } on Object catch (_) {}
+    final project = _snapshot?.project;
+    if (project == null) {
+      return const <TrackStateConfigEntry>[];
+    }
+    return project.statusDefinitions
+        .where(
+          (status) =>
+              _canonicalConfigId(status.id) !=
+              _canonicalConfigId(issue.statusId),
+        )
+        .toList(growable: false);
+  }
+
+  Future<bool> saveIssueEdits(
+    TrackStateIssue issue,
+    IssueEditRequest request,
   ) async {
     if (_hostedWriteAccessException('edit issue details') case final error?) {
       _message = TrackerMessage.issueSaveFailed(error);
       notifyListeners();
       return false;
     }
-    final normalizedDescription = description.trim();
-    if (normalizedDescription == issue.description.trim()) {
-      return true;
+    final normalizedSummary = request.summary.trim();
+    if (normalizedSummary.isEmpty) {
+      _message = TrackerMessage.issueSaveFailed(
+        const TrackStateRepositoryException(
+          'Issue summary is required before saving.',
+        ),
+      );
+      notifyListeners();
+      return false;
     }
+    final normalizedDescription = request.description.trim();
+    final normalizedAssignee = _normalizeNullable(request.assignee);
+    final normalizedParentKey = _normalizeNullable(request.parentKey);
+    final normalizedEpicKey = _normalizeNullable(request.epicKey);
+    final normalizedTransitionStatusId = _normalizeNullable(
+      request.transitionStatusId,
+    );
+    final normalizedResolutionId = _normalizeNullable(request.resolutionId);
+    final normalizedLabels = _normalizeStringList(request.labels);
+    final normalizedComponents = _normalizeStringList(request.components);
+    final normalizedFixVersions = _normalizeStringList(request.fixVersionIds);
     final snapshot = _snapshot;
     if (snapshot == null) {
       return false;
+    }
+    final currentIssue = snapshot.issues.firstWhere(
+      (current) => current.key == issue.key,
+      orElse: () => issue,
+    );
+    final fields = <String, Object?>{};
+    if (normalizedSummary != currentIssue.summary.trim()) {
+      fields['summary'] = normalizedSummary;
+    }
+    if (normalizedDescription != currentIssue.description.trim()) {
+      fields['description'] = normalizedDescription;
+    }
+    if (_canonicalConfigId(request.priorityId) !=
+        _canonicalConfigId(currentIssue.priorityId)) {
+      fields['priority'] = request.priorityId;
+    }
+    if (normalizedAssignee != _normalizeNullable(currentIssue.assignee)) {
+      fields['assignee'] = normalizedAssignee;
+    }
+    if (!listEquals(normalizedLabels, currentIssue.labels)) {
+      fields['labels'] = normalizedLabels;
+    }
+    if (!listEquals(normalizedComponents, currentIssue.components)) {
+      fields['components'] = normalizedComponents;
+    }
+    if (!listEquals(normalizedFixVersions, currentIssue.fixVersionIds)) {
+      fields['fixVersions'] = normalizedFixVersions;
+    }
+    final hierarchyChanged =
+        normalizedParentKey != currentIssue.parentKey ||
+        normalizedEpicKey != currentIssue.epicKey;
+    final transitionChanged =
+        normalizedTransitionStatusId != null &&
+        _canonicalConfigId(normalizedTransitionStatusId) !=
+            _canonicalConfigId(currentIssue.statusId);
+    if (fields.isEmpty && !hierarchyChanged && !transitionChanged) {
+      return true;
     }
     _isSaving = true;
     _message = null;
     notifyListeners();
 
     try {
-      final saved = await _repository.updateIssueDescription(
-        issue,
-        normalizedDescription,
-      );
+      TrackStateIssue saved = currentIssue;
+      var shouldUseLegacyFallback = false;
+      if (fields.isNotEmpty) {
+        final updateResult = await _issueMutationService.updateFields(
+          issueKey: currentIssue.key,
+          fields: fields,
+        );
+        if (_isSharedMutationUnsupported(updateResult)) {
+          shouldUseLegacyFallback = true;
+        } else if (!updateResult.isSuccess || updateResult.value == null) {
+          throw TrackStateRepositoryException(
+            updateResult.failure?.message ??
+                'The issue fields could not be saved.',
+          );
+        } else {
+          saved = updateResult.value!;
+        }
+      }
+      if (hierarchyChanged && !shouldUseLegacyFallback) {
+        final reassignResult = await _issueMutationService.reassignIssue(
+          issueKey: currentIssue.key,
+          parentKey: normalizedParentKey,
+          epicKey: normalizedEpicKey,
+        );
+        if (_isSharedMutationUnsupported(reassignResult)) {
+          shouldUseLegacyFallback = true;
+        } else if (!reassignResult.isSuccess || reassignResult.value == null) {
+          throw TrackStateRepositoryException(
+            reassignResult.failure?.message ??
+                'The issue hierarchy could not be updated.',
+          );
+        } else {
+          saved = reassignResult.value!;
+        }
+      }
+      if (transitionChanged && !shouldUseLegacyFallback) {
+        final transitionResult = await _issueMutationService.transitionIssue(
+          issueKey: currentIssue.key,
+          status: normalizedTransitionStatusId,
+          resolution: normalizedResolutionId,
+        );
+        if (_isSharedMutationUnsupported(transitionResult)) {
+          shouldUseLegacyFallback = true;
+        } else if (!transitionResult.isSuccess ||
+            transitionResult.value == null) {
+          throw TrackStateRepositoryException(
+            transitionResult.failure?.message ??
+                'The issue workflow transition could not be saved.',
+          );
+        } else {
+          saved = transitionResult.value!;
+        }
+      }
+
+      if (shouldUseLegacyFallback &&
+          _canFallbackToLegacyDescriptionSave(
+            currentIssue: currentIssue,
+            fields: fields,
+            hierarchyChanged: hierarchyChanged,
+            transitionChanged: transitionChanged,
+          )) {
+        saved = await _repository.updateIssueDescription(
+          currentIssue,
+          normalizedDescription,
+        );
+      } else if (shouldUseLegacyFallback &&
+          _canFallbackToLegacyStatusSave(
+            currentIssue: currentIssue,
+            fields: fields,
+            hierarchyChanged: hierarchyChanged,
+            transitionStatusId: normalizedTransitionStatusId,
+          )) {
+        saved = await _repository.updateIssueStatus(
+          currentIssue,
+          _issueStatusFromConfigId(normalizedTransitionStatusId!),
+        );
+      } else if (shouldUseLegacyFallback) {
+        throw const TrackStateRepositoryException(
+          'This repository implementation does not expose shared mutations.',
+        );
+      }
       _snapshot = await _repository.loadSnapshot();
       _selectedIssue = _snapshot!.issues.firstWhere(
         (current) => current.key == saved.key,
@@ -713,6 +920,85 @@ class TrackerViewModel extends ChangeNotifier {
       _isSaving = false;
       notifyListeners();
     }
+  }
+
+  bool _canFallbackToLegacyDescriptionSave({
+    required TrackStateIssue currentIssue,
+    required Map<String, Object?> fields,
+    required bool hierarchyChanged,
+    required bool transitionChanged,
+  }) {
+    if (hierarchyChanged || transitionChanged) {
+      return false;
+    }
+    if (fields.isEmpty) {
+      return true;
+    }
+    if (fields.length != 1 || !fields.containsKey('description')) {
+      return false;
+    }
+    return fields['description'] != currentIssue.description.trim();
+  }
+
+  bool _canFallbackToLegacyStatusSave({
+    required TrackStateIssue currentIssue,
+    required Map<String, Object?> fields,
+    required bool hierarchyChanged,
+    required String? transitionStatusId,
+  }) {
+    if (hierarchyChanged || fields.isNotEmpty || transitionStatusId == null) {
+      return false;
+    }
+    return _canonicalConfigId(transitionStatusId) !=
+        _canonicalConfigId(currentIssue.statusId);
+  }
+
+  IssueStatus _issueStatusFromConfigId(String statusId) {
+    return switch (_canonicalConfigId(statusId)) {
+      'todo' || 'to-do' => IssueStatus.todo,
+      'in-progress' => IssueStatus.inProgress,
+      'in-review' => IssueStatus.inReview,
+      'done' => IssueStatus.done,
+      _ => throw TrackStateRepositoryException(
+        'Unknown target status $statusId.',
+      ),
+    };
+  }
+
+  List<String> _normalizeStringList(List<String> values) {
+    final normalized = <String>[];
+    for (final value in values) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty || normalized.contains(trimmed)) {
+        continue;
+      }
+      normalized.add(trimmed);
+    }
+    return normalized;
+  }
+
+  String? _normalizeNullable(String? value) {
+    final trimmed = value?.trim() ?? '';
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  String _canonicalConfigId(String? value) {
+    final normalized = (value ?? '').trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return '';
+    }
+    return normalized
+        .replaceAll('&', 'and')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'-+'), '-')
+        .replaceAll(RegExp(r'^-|-$'), '');
+  }
+
+  bool _isSharedMutationUnsupported(IssueMutationResult<Object?> result) {
+    return result.failure?.category ==
+            IssueMutationErrorCategory.providerFailure &&
+        result.failure?.message ==
+            'This repository implementation does not expose shared mutations.';
   }
 
   void _applySearchPage(TrackStateIssueSearchPage page, {bool append = false}) {

@@ -252,9 +252,15 @@ void main() {
       );
 
       expect(success, isFalse);
-      expect(viewModel.hostedRepositoryAccessMode, HostedRepositoryAccessMode.readOnly);
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.readOnly,
+      );
       expect(viewModel.message?.kind, TrackerMessageKind.issueSaveFailed);
-      expect(viewModel.message?.error, contains('This repository session is read-only'));
+      expect(
+        viewModel.message?.error,
+        contains('This repository session is read-only'),
+      );
     },
   );
 
@@ -339,6 +345,97 @@ void main() {
       expect(viewModel.section, TrackerSection.search);
       expect(viewModel.issueDetailReturnSection, TrackerSection.hierarchy);
       expect(viewModel.selectedIssue?.key, 'TRACK-99');
+    },
+  );
+
+  test(
+    'view model saves issue edits through shared field, hierarchy, and workflow mutations',
+    () async {
+      final initialSnapshot = await const DemoTrackStateRepository()
+          .loadSnapshot();
+      final repository = _MutableEditRepository(snapshot: initialSnapshot);
+      final service = _RecordingEditIssueMutationService(repository);
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        issueMutationService: service,
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        const IssueEditRequest(
+          summary: 'Refine Git sync service',
+          description: 'Syncs repository-backed tracker data safely.',
+          priorityId: 'highest',
+          assignee: 'Ana',
+          labels: ['sync', 'repo-ui'],
+          components: ['tracker-core', 'flutter-ui'],
+          fixVersionIds: ['mvp'],
+          epicKey: '',
+          transitionStatusId: 'done',
+          resolutionId: 'done',
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(service.updatedFields['summary'], 'Refine Git sync service');
+      expect(service.updatedFields['priority'], 'highest');
+      expect(service.reassignedEpicKey, isNull);
+      expect(service.transitionStatusId, 'done');
+      expect(viewModel.selectedIssue?.summary, 'Refine Git sync service');
+      expect(viewModel.selectedIssue?.epicKey, isNull);
+      expect(viewModel.selectedIssue?.statusId, 'done');
+      expect(viewModel.selectedIssue?.resolutionId, 'done');
+      expect(
+        viewModel.searchResults.where(
+          (candidate) => candidate.key == 'TRACK-12',
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'view model falls back to legacy description saves when shared mutations are unavailable',
+    () async {
+      final initialSnapshot = await const DemoTrackStateRepository()
+          .loadSnapshot();
+      final repository = _MutableEditRepository(
+        snapshot: initialSnapshot,
+        usesLocalPersistence: true,
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: issue.summary,
+          description: 'Legacy description save path.',
+          priorityId: issue.priorityId,
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: issue.parentKey,
+          epicKey: issue.epicKey,
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(repository.lastSavedDescription, 'Legacy description save path.');
+      expect(
+        viewModel.selectedIssue?.description,
+        'Legacy description save path.',
+      );
     },
   );
 }
@@ -490,6 +587,293 @@ class _RecordingIssueMutationService extends IssueMutationService {
     issueKey: _created.key,
     value: _created,
   );
+}
+
+class _MutableEditRepository implements TrackStateRepository {
+  _MutableEditRepository({
+    required TrackerSnapshot snapshot,
+    this.usesLocalPersistence = false,
+  }) : _snapshot = snapshot;
+
+  TrackerSnapshot _snapshot;
+  final JqlSearchService _searchService = const JqlSearchService();
+  String? lastSavedDescription;
+
+  @override
+  final bool usesLocalPersistence;
+
+  @override
+  bool get supportsGitHubAuth => !usesLocalPersistence;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async =>
+      const RepositoryUser(login: 'mutable-user', displayName: 'Mutable User');
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async => _searchService.search(
+    issues: _snapshot.issues,
+    project: _snapshot.project,
+    jql: jql,
+    startAt: startAt,
+    maxResults: maxResults,
+    continuationToken: continuationToken,
+  );
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) async =>
+      (await searchIssuePage(jql, maxResults: 2147483647)).issues;
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Archiving is not implemented.',
+      );
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException('Deletion is not implemented.');
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+    Map<String, String> customFields = const {},
+  }) async => throw UnimplementedError('Issue creation is not implemented.');
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async {
+    lastSavedDescription = description.trim();
+    final updated = _copyIssue(issue, description: description.trim());
+    applyIssue(updated);
+    return updated;
+  }
+
+  @override
+  Future<TrackStateIssue> updateIssueStatus(
+    TrackStateIssue issue,
+    IssueStatus status,
+  ) async {
+    final updated = _copyIssue(
+      issue,
+      status: status,
+      statusId: status.id,
+      resolutionId: status == IssueStatus.done ? 'done' : null,
+    );
+    applyIssue(updated);
+    return updated;
+  }
+
+  @override
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => issue;
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
+      Uint8List(0);
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async => issue;
+
+  TrackStateIssue issueForKey(String key) =>
+      _snapshot.issues.firstWhere((issue) => issue.key == key);
+
+  void applyIssue(TrackStateIssue issue) {
+    _snapshot = TrackerSnapshot(
+      project: _snapshot.project,
+      issues: [
+        for (final current in _snapshot.issues)
+          if (current.key == issue.key) issue else current,
+      ],
+      repositoryIndex: _snapshot.repositoryIndex,
+      loadWarnings: _snapshot.loadWarnings,
+    );
+  }
+}
+
+class _RecordingEditIssueMutationService extends IssueMutationService {
+  _RecordingEditIssueMutationService(this._repository)
+    : super(repository: const DemoTrackStateRepository());
+
+  final _MutableEditRepository _repository;
+  Map<String, Object?> updatedFields = const {};
+  String? reassignedParentKey;
+  String? reassignedEpicKey;
+  String? transitionStatusId;
+
+  @override
+  Future<IssueMutationResult<List<TrackStateConfigEntry>>>
+  availableTransitions({required String issueKey}) async =>
+      IssueMutationResult.success(
+        operation: 'available-transitions',
+        issueKey: issueKey,
+        value: const [
+          TrackStateConfigEntry(id: 'in-review', name: 'In Review'),
+          TrackStateConfigEntry(id: 'done', name: 'Done'),
+        ],
+      );
+
+  @override
+  Future<IssueMutationResult<TrackStateIssue>> updateFields({
+    required String issueKey,
+    required Map<String, Object?> fields,
+  }) async {
+    updatedFields = Map<String, Object?>.from(fields);
+    final issue = _repository.issueForKey(issueKey);
+    final updated = _copyIssue(
+      issue,
+      summary: fields['summary'] as String? ?? issue.summary,
+      description: fields['description'] as String? ?? issue.description,
+      priorityId: fields['priority'] as String? ?? issue.priorityId,
+      assignee: (fields['assignee'] as String?) ?? issue.assignee,
+      labels: (fields['labels'] as List<String>?) ?? issue.labels,
+      components: (fields['components'] as List<String>?) ?? issue.components,
+      fixVersionIds:
+          (fields['fixVersions'] as List<String>?) ?? issue.fixVersionIds,
+    );
+    _repository.applyIssue(updated);
+    return IssueMutationResult.success(
+      operation: 'update-fields',
+      issueKey: issueKey,
+      value: updated,
+    );
+  }
+
+  @override
+  Future<IssueMutationResult<TrackStateIssue>> reassignIssue({
+    required String issueKey,
+    String? parentKey,
+    String? epicKey,
+  }) async {
+    reassignedParentKey = parentKey;
+    reassignedEpicKey = epicKey;
+    final issue = _repository.issueForKey(issueKey);
+    final updated = _copyIssue(issue, parentKey: parentKey, epicKey: epicKey);
+    _repository.applyIssue(updated);
+    return IssueMutationResult.success(
+      operation: 'reassign',
+      issueKey: issueKey,
+      value: updated,
+    );
+  }
+
+  @override
+  Future<IssueMutationResult<TrackStateIssue>> transitionIssue({
+    required String issueKey,
+    required String status,
+    String? resolution,
+  }) async {
+    transitionStatusId = status;
+    final issue = _repository.issueForKey(issueKey);
+    final nextStatus = switch (status) {
+      'in-review' => IssueStatus.inReview,
+      'done' => IssueStatus.done,
+      _ => IssueStatus.inProgress,
+    };
+    final updated = _copyIssue(
+      issue,
+      status: nextStatus,
+      statusId: status,
+      resolutionId: resolution,
+    );
+    _repository.applyIssue(updated);
+    return IssueMutationResult.success(
+      operation: 'transition',
+      issueKey: issueKey,
+      value: updated,
+    );
+  }
+}
+
+TrackStateIssue _copyIssue(
+  TrackStateIssue issue, {
+  String? summary,
+  String? description,
+  String? priorityId,
+  String? assignee,
+  List<String>? labels,
+  List<String>? components,
+  List<String>? fixVersionIds,
+  Object? parentKey = _unsetEditValue,
+  Object? epicKey = _unsetEditValue,
+  IssueStatus? status,
+  String? statusId,
+  Object? resolutionId = _unsetEditValue,
+}) {
+  final nextPriorityId = priorityId ?? issue.priorityId;
+  final nextStatus = status ?? issue.status;
+  final nextStatusId = statusId ?? issue.statusId;
+  return TrackStateIssue(
+    key: issue.key,
+    project: issue.project,
+    issueType: issue.issueType,
+    issueTypeId: issue.issueTypeId,
+    status: nextStatus,
+    statusId: nextStatusId,
+    priority: _priorityForId(nextPriorityId),
+    priorityId: nextPriorityId,
+    summary: summary ?? issue.summary,
+    description: description ?? issue.description,
+    assignee: assignee ?? issue.assignee,
+    reporter: issue.reporter,
+    labels: labels ?? issue.labels,
+    components: components ?? issue.components,
+    fixVersionIds: fixVersionIds ?? issue.fixVersionIds,
+    watchers: issue.watchers,
+    customFields: issue.customFields,
+    parentKey: identical(parentKey, _unsetEditValue)
+        ? issue.parentKey
+        : parentKey as String?,
+    epicKey: identical(epicKey, _unsetEditValue)
+        ? issue.epicKey
+        : epicKey as String?,
+    parentPath: issue.parentPath,
+    epicPath: issue.epicPath,
+    progress: issue.progress,
+    updatedLabel: 'just now',
+    acceptanceCriteria: issue.acceptanceCriteria,
+    comments: issue.comments,
+    links: issue.links,
+    attachments: issue.attachments,
+    isArchived: issue.isArchived,
+    resolutionId: identical(resolutionId, _unsetEditValue)
+        ? issue.resolutionId
+        : resolutionId as String?,
+    storagePath: issue.storagePath,
+    rawMarkdown: issue.rawMarkdown,
+  );
+}
+
+const Object _unsetEditValue = Object();
+
+IssuePriority _priorityForId(String id) {
+  return switch (id) {
+    'highest' => IssuePriority.highest,
+    'high' => IssuePriority.high,
+    'low' => IssuePriority.low,
+    _ => IssuePriority.medium,
+  };
 }
 
 TrackerSnapshot _searchPaginationSnapshot() {
