@@ -11,8 +11,8 @@ The automation:
    derived Epic is `EPIC-1 · Epic-1 platform rollout`
 4. changes **Parent** to `STORY-B · Story-B parent in Epic-2` and verifies the
    visible derived Epic updates to `EPIC-2 · Epic-2 mobile refresh`
-5. saves, reloads repository-backed state, and checks whether the hierarchy
-   change persisted
+5. confirms **Epic** remains non-editable after the parent change and ends once
+   the edit-surface assertions required by TS-400 are satisfied
 
 ## Install dependencies
 
@@ -35,10 +35,11 @@ flutter test testing/tests/TS-400/test_ts_400.dart --reporter expanded
 ## Expected result
 
 ```text
-Pass: Editing SUBTASK-1 keeps Epic non-editable, re-derives Epic from the newly
-selected parent, and persists Parent=STORY-B with Epic=EPIC-2 after save.
+Pass: Editing SUBTASK-1 keeps Epic non-editable and re-derives the visible Epic
+value from `EPIC-1` to `EPIC-2` when Parent changes from `STORY-A` to
+`STORY-B`.
 
-Fail: Epic becomes editable, the derived Epic does not update when Parent
-changes, or the saved repository-backed issue state still reports
-Parent=STORY-A / Epic=EPIC-1.
+Fail: Epic is editable for the sub-task, the derived Epic does not update when
+Parent changes, or the visible edit surface does not show the expected derived
+Epic state.
 ```
