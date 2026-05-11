@@ -1962,30 +1962,43 @@ class _IssueList extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
+    final searchResults = viewModel.searchResults;
     return _SurfaceCard(
       semanticLabel: l10n.jqlSearch,
+      explicitChildNodes: true,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Semantics(
-            label: l10n.searchIssues,
-            textField: true,
-            child: TextField(
-              controller: TextEditingController(text: viewModel.jql),
-              onSubmitted: viewModel.updateQuery,
-              decoration: InputDecoration(hintText: l10n.jqlPlaceholder),
+          FocusTraversalOrder(
+            order: const NumericFocusOrder(1),
+            child: Shortcuts(
+              shortcuts: const <ShortcutActivator, Intent>{
+                SingleActivator(LogicalKeyboardKey.tab): NextFocusIntent(),
+                SingleActivator(
+                  LogicalKeyboardKey.tab,
+                  shift: true,
+                ): PreviousFocusIntent(),
+              },
+              child: TextField(
+                controller: TextEditingController(text: viewModel.jql),
+                onSubmitted: viewModel.updateQuery,
+                decoration: InputDecoration(
+                  labelText: l10n.searchIssues,
+                  hintText: l10n.jqlPlaceholder,
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 12),
-          if (viewModel.searchResults.isEmpty)
+          if (searchResults.isEmpty)
             Text(l10n.noResults)
           else ...[
-            if (viewModel.searchResults.length < viewModel.totalSearchResults)
+            if (searchResults.length < viewModel.totalSearchResults)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
                   l10n.showingResults(
-                    viewModel.searchResults.length,
+                    searchResults.length,
                     viewModel.totalSearchResults,
                   ),
                   style: Theme.of(
@@ -1993,31 +2006,30 @@ class _IssueList extends StatelessWidget {
                   ).textTheme.labelMedium?.copyWith(color: colors.muted),
                 ),
               ),
-            for (final issue in viewModel.searchResults)
-              _IssueListRow(issue: issue, onSelect: viewModel.selectIssue),
+            for (var index = 0; index < searchResults.length; index += 1)
+              FocusTraversalOrder(
+                order: NumericFocusOrder(index + 2.0),
+                child: _IssueListRow(
+                  issue: searchResults[index],
+                  onSelect: viewModel.selectIssue,
+                ),
+              ),
             if (viewModel.hasMoreSearchResults)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Semantics(
-                  button: true,
-                  label: l10n.loadMoreIssues,
-                  child: OutlinedButton(
-                    onPressed: viewModel.isLoadingMoreSearchResults
-                        ? null
-                        : viewModel.loadMoreSearchResults,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: colors.text,
-                      backgroundColor: colors.surface,
-                      side: BorderSide(color: colors.border),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
-                      ),
+              FocusTraversalOrder(
+                order: NumericFocusOrder(searchResults.length + 2.0),
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Semantics(
+                    container: true,
+                    button: true,
+                    label: l10n.loadMoreIssues,
+                    child: OutlinedButton(
+                      onPressed: viewModel.isLoadingMoreSearchResults
+                          ? null
+                          : viewModel.loadMoreSearchResults,
+                      style: _searchLoadMoreButtonStyle(colors),
+                      child: ExcludeSemantics(child: Text(l10n.loadMore)),
                     ),
-                    child: Text(l10n.loadMore),
                   ),
                 ),
               ),
@@ -2026,6 +2038,41 @@ class _IssueList extends StatelessWidget {
       ),
     );
   }
+}
+
+ButtonStyle _searchLoadMoreButtonStyle(TrackStateColors colors) {
+  return OutlinedButton.styleFrom(
+    foregroundColor: colors.primary,
+    backgroundColor: colors.surface,
+    side: BorderSide(color: colors.primary),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+  ).copyWith(
+    foregroundColor: WidgetStateProperty.resolveWith((states) {
+      if (states.contains(WidgetState.disabled)) {
+        return colors.muted;
+      }
+      return colors.primary;
+    }),
+    side: WidgetStateProperty.resolveWith((states) {
+      if (states.contains(WidgetState.disabled)) {
+        return BorderSide(color: colors.border);
+      }
+      return BorderSide(color: colors.primary);
+    }),
+    overlayColor: WidgetStateProperty.resolveWith((states) {
+      if (states.contains(WidgetState.pressed)) {
+        return colors.primarySoft;
+      }
+      if (states.contains(WidgetState.hovered)) {
+        return colors.primarySoft.withValues(alpha: .72);
+      }
+      if (states.contains(WidgetState.focused)) {
+        return colors.primarySoft.withValues(alpha: .84);
+      }
+      return Colors.transparent;
+    }),
+  );
 }
 
 class _ActiveEpics extends StatelessWidget {
@@ -2267,9 +2314,11 @@ class _IssueListRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     return Semantics(
+      container: true,
       button: true,
       label: 'Open ${issue.key} ${issue.summary}',
       child: InkWell(
+        canRequestFocus: true,
         onTap: () => onSelect(issue),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
@@ -2278,22 +2327,31 @@ class _IssueListRow extends StatelessWidget {
           ),
           child: Row(
             children: [
-              _IssueTypeGlyph(issue.issueType),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 86,
-                child: Text(
-                  issue.key,
-                  style: TextStyle(
-                    fontFamily: 'JetBrains Mono',
-                    color: colors.muted,
+              Expanded(
+                child: ExcludeSemantics(
+                  child: Row(
+                    children: [
+                      _IssueTypeGlyph(issue.issueType),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: 86,
+                        child: Text(
+                          issue.key,
+                          style: TextStyle(
+                            fontFamily: 'JetBrains Mono',
+                            color: colors.muted,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(issue.summary)),
+                      _StatusBadge(status: issue.status),
+                      const SizedBox(width: 8),
+                      _Avatar(name: issue.assignee),
+                    ],
                   ),
                 ),
               ),
-              Expanded(child: Text(issue.summary)),
-              _StatusBadge(status: issue.status),
-              const SizedBox(width: 8),
-              _Avatar(name: issue.assignee),
               if (trailingAction != null) ...[
                 const SizedBox(width: 8),
                 trailingAction!,
@@ -2597,10 +2655,15 @@ class _SettingsTextField extends StatelessWidget {
 }
 
 class _SurfaceCard extends StatelessWidget {
-  const _SurfaceCard({required this.child, required this.semanticLabel});
+  const _SurfaceCard({
+    required this.child,
+    required this.semanticLabel,
+    this.explicitChildNodes = false,
+  });
 
   final Widget child;
   final String semanticLabel;
+  final bool explicitChildNodes;
 
   @override
   Widget build(BuildContext context) {
@@ -2608,6 +2671,7 @@ class _SurfaceCard extends StatelessWidget {
     return Semantics(
       label: semanticLabel,
       container: true,
+      explicitChildNodes: explicitChildNodes,
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
