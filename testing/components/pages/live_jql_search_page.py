@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
+import time
 
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
 from testing.core.interfaces.web_app_session import WebAppTimeoutError
@@ -82,6 +83,24 @@ class LiveJqlSearchPage:
         self._wait_for_count_summary(expected_count_summaries=expected_count_summaries)
         return self._observe(query=query, field_selector=field_selector)
 
+    def search_with_verified_result_change(
+        self,
+        *,
+        query: str,
+        expected_count_summaries: tuple[str, ...] | None = None,
+    ) -> LiveJqlSearchObservation:
+        self.open()
+        field_selector = self._wait_for_search_field()
+        initial_observation = self._observe(query="", field_selector=field_selector)
+        self._session.fill(field_selector, query, timeout_ms=30_000)
+        self._session.press(field_selector, "Enter", timeout_ms=30_000)
+        return self._wait_for_result_change(
+            query=query,
+            field_selector=field_selector,
+            initial_observation=initial_observation,
+            expected_count_summaries=expected_count_summaries,
+        )
+
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
 
@@ -151,6 +170,44 @@ class LiveJqlSearchPage:
                 f"Expected summaries: {count_summaries}\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
+
+    def _wait_for_result_change(
+        self,
+        *,
+        query: str,
+        field_selector: str,
+        initial_observation: LiveJqlSearchObservation,
+        expected_count_summaries: tuple[str, ...] | None = None,
+    ) -> LiveJqlSearchObservation:
+        deadline = time.monotonic() + 60.0
+        latest_observation = self._observe(query=query, field_selector=field_selector)
+        while True:
+            if (
+                latest_observation.visible_query == query
+                and (
+                    expected_count_summaries is None
+                    or latest_observation.count_summary in expected_count_summaries
+                )
+                and (
+                    latest_observation.count_summary != initial_observation.count_summary
+                    or latest_observation.issue_labels != initial_observation.issue_labels
+                )
+            ):
+                return latest_observation
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    "Step 4 failed: the live JQL Search panel never showed a post-submit "
+                    "state that was different from the initial visible results.\n"
+                    f"Submitted query: {query}\n"
+                    f"Expected summaries after submit: {expected_count_summaries}\n"
+                    f"Initial count summary: {initial_observation.count_summary}\n"
+                    f"Initial visible issue labels: {list(initial_observation.issue_labels)}\n"
+                    f"Latest count summary: {latest_observation.count_summary}\n"
+                    f"Latest visible issue labels: {list(latest_observation.issue_labels)}\n"
+                    f"Latest body text:\n{latest_observation.body_text}",
+                )
+            time.sleep(0.25)
+            latest_observation = self._observe(query=query, field_selector=field_selector)
 
     @staticmethod
     def _count_summary(body_text: str) -> str | None:

@@ -97,6 +97,7 @@ def main() -> None:
             field_name: list(labels)
             for field_name, labels in expectation.fields_to_issue_labels.items()
         },
+        "precondition_failures": list(expectation.precondition_failures),
         "inventory": list(expectation.inventory),
         "steps": [],
     }
@@ -136,16 +137,18 @@ def main() -> None:
                     observed=panel_body_text,
                 )
 
-                observation = search_page.search_with_expected_counts(
+                observation = search_page.search_with_verified_result_change(
                     query=QUERY,
-                    expected_count_summaries=_candidate_count_summaries(
-                        expectation.expected_count_summary,
-                    ),
+                    expected_count_summaries=(expectation.expected_count_summary,),
                 )
                 result["observation"] = _observation_to_dict(observation)
                 search_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
 
+                _assert_visible_search_result(
+                    expectation=expectation,
+                    observation=observation,
+                )
                 _record_step(
                     result,
                     step=3,
@@ -153,12 +156,7 @@ def main() -> None:
                     action="Search for the term 'discovery'.",
                     observed=observation.body_text,
                 )
-
                 _assert_ticket_preconditions(expectation=expectation, observation=observation)
-                _assert_visible_search_result(
-                    expectation=expectation,
-                    observation=observation,
-                )
             except Exception:
                 search_page.screenshot(str(SCREENSHOT_PATH))
                 result["screenshot"] = str(SCREENSHOT_PATH)
@@ -228,25 +226,6 @@ def _build_discovery_expectation(
         inventory=tuple(inventory),
     )
 
-
-def _candidate_count_summaries(expected_count_summary: str) -> tuple[str, ...]:
-    ordered_candidates = (
-        expected_count_summary,
-        "No issues",
-        "1 issue",
-        "2 issues",
-        "3 issues",
-        "4 issues",
-        "5 issues",
-        "6 issues",
-    )
-    unique_candidates: list[str] = []
-    for candidate in ordered_candidates:
-        if candidate not in unique_candidates:
-            unique_candidates.append(candidate)
-    return tuple(unique_candidates)
-
-
 def _assert_ticket_preconditions(
     *,
     expectation: DiscoveryExpectation,
@@ -257,6 +236,13 @@ def _assert_ticket_preconditions(
     raise AssertionError(
         "\n\n".join(
             [
+                (
+                    "Precondition failed after verifying the visible JQL Search result "
+                    "against the current live repository audit. The hosted repository no "
+                    "longer satisfies the seeded TS-327 Discovery fixture requirements, "
+                    "so this run cannot validate the ticket's intended three-issue "
+                    "scenario."
+                ),
                 *expectation.precondition_failures,
                 "Observed JQL Search state while reproducing the ticket:",
                 f"Visible query: {observation.visible_query}",
