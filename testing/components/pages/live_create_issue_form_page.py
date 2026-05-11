@@ -19,7 +19,8 @@ class CreateIssueDialogObservation:
 @dataclass(frozen=True)
 class AssigneePickerObservation:
     query: str
-    visible_value: str
+    typed_value: str
+    selected_value: str
     option_count: int
     matching_option_count: int
     listbox_count: int
@@ -29,6 +30,7 @@ class AssigneePickerObservation:
 @dataclass(frozen=True)
 class LabelTokenObservation:
     labels_value_after_enter: str
+    labels_value_before_comma: str
     labels_value_after_comma: str
     frontend_token_count: int
     bug_token_count: int
@@ -113,13 +115,16 @@ class LiveCreateIssueFormPage:
         self._session.fill(self._assignee_selector, query, timeout_ms=15_000)
 
         matching_option_count = self._wait_for_assignee_suggestion(expected_suggestion)
+        typed_value = self._session.read_value(
+            self._assignee_selector,
+            timeout_ms=15_000,
+        )
+        selected_value = self._select_assignee_suggestion(expected_suggestion)
         body_text = self.current_body_text()
         return AssigneePickerObservation(
             query=query,
-            visible_value=self._session.read_value(
-                self._assignee_selector,
-                timeout_ms=15_000,
-            ),
+            typed_value=typed_value,
+            selected_value=selected_value,
             option_count=self._session.count(self._option_selector),
             matching_option_count=matching_option_count,
             listbox_count=self._session.count(self._listbox_selector),
@@ -137,7 +142,12 @@ class LiveCreateIssueFormPage:
         )
         self._wait_for_token("frontend")
 
-        self._session.fill(self._labels_selector, "bug,", timeout_ms=15_000)
+        self._session.fill(self._labels_selector, "bug", timeout_ms=15_000)
+        labels_value_before_comma = self._session.read_value(
+            self._labels_selector,
+            timeout_ms=15_000,
+        )
+        self._session.press(self._labels_selector, ",", timeout_ms=15_000)
         labels_value_after_comma = self._session.wait_for_input_value(
             self._labels_selector,
             "",
@@ -147,6 +157,7 @@ class LiveCreateIssueFormPage:
 
         return LabelTokenObservation(
             labels_value_after_enter=labels_value_after_enter,
+            labels_value_before_comma=labels_value_before_comma,
             labels_value_after_comma=labels_value_after_comma,
             frontend_token_count=self._token_count("frontend"),
             bug_token_count=self._token_count("bug"),
@@ -176,6 +187,52 @@ class LiveCreateIssueFormPage:
                 continue
             return self._candidate_count(selector, has_text=has_text)
         return 0
+
+    def _select_assignee_suggestion(self, expected_suggestion: str) -> str:
+        selection_errors: list[str] = []
+        for selector in (self._option_selector, self._button_selector):
+            if self._candidate_count(selector, has_text=expected_suggestion) <= 0:
+                continue
+            try:
+                self._session.click(
+                    selector,
+                    has_text=expected_suggestion,
+                    timeout_ms=15_000,
+                )
+                return self._session.wait_for_input_value(
+                    self._assignee_selector,
+                    expected_suggestion,
+                    timeout_ms=15_000,
+                )
+            except WebAppTimeoutError as error:
+                selection_errors.append(str(error))
+
+        if self._candidate_count(self._listbox_selector, has_text=None) > 0:
+            try:
+                self._session.press(
+                    self._assignee_selector,
+                    "ArrowDown",
+                    timeout_ms=15_000,
+                )
+                self._session.press(
+                    self._assignee_selector,
+                    "Enter",
+                    timeout_ms=15_000,
+                )
+                return self._session.wait_for_input_value(
+                    self._assignee_selector,
+                    expected_suggestion,
+                    timeout_ms=15_000,
+                )
+            except WebAppTimeoutError as error:
+                selection_errors.append(str(error))
+
+        raise AssertionError(
+            "Step 3 failed: the assignee picker appeared but the test could not select "
+            f"the collaborator suggestion {expected_suggestion!r}.\n"
+            f"Selection attempts: {selection_errors}\n"
+            f"Observed page text:\n{self.current_body_text()}",
+        )
 
     def _wait_for_token(self, token: str) -> None:
         try:

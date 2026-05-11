@@ -110,7 +110,8 @@ def main() -> None:
                 )
                 result["assignee_observation"] = {
                     "query": assignee_observation.query,
-                    "visible_value": assignee_observation.visible_value,
+                    "typed_value": assignee_observation.typed_value,
+                    "selected_value": assignee_observation.selected_value,
                     "option_count": assignee_observation.option_count,
                     "matching_option_count": assignee_observation.matching_option_count,
                     "listbox_count": assignee_observation.listbox_count,
@@ -136,12 +137,13 @@ def main() -> None:
                     step=3,
                     status="passed",
                     action=f"Select the {user.login!r} collaborator suggestion.",
-                    observed=assignee_observation.visible_value,
+                    observed=assignee_observation.selected_value,
                 )
 
                 labels_observation = create_issue_page.commit_labels()
                 result["labels_observation"] = {
                     "labels_value_after_enter": labels_observation.labels_value_after_enter,
+                    "labels_value_before_comma": labels_observation.labels_value_before_comma,
                     "labels_value_after_comma": labels_observation.labels_value_after_comma,
                     "frontend_token_count": labels_observation.frontend_token_count,
                     "bug_token_count": labels_observation.bug_token_count,
@@ -159,7 +161,7 @@ def main() -> None:
                     result,
                     step=5,
                     status="passed",
-                    action="Commit the bug label with a trailing comma.",
+                    action="Commit the bug label with the comma key.",
                     observed=labels_observation.body_text,
                 )
             except Exception:
@@ -218,11 +220,11 @@ def _assert_assignee_picker(
     expected_suggestion: str,
     observation,
 ) -> None:
-    if observation.visible_value != query:
+    if observation.typed_value != query:
         raise AssertionError(
             "Step 2 failed: the Assignee field did not preserve the typed query.\n"
             f"Expected query: {query}\n"
-            f"Observed value: {observation.visible_value}\n"
+            f"Observed value: {observation.typed_value}\n"
             f"Observed page text:\n{observation.body_text}",
         )
     if observation.matching_option_count <= 0 and observation.listbox_count <= 0:
@@ -231,18 +233,18 @@ def _assert_assignee_picker(
             "collaborator suggestion surface.\n"
             f"Typed query: {query}\n"
             f"Expected collaborator suggestion: {expected_suggestion}\n"
-            f"Visible field value: {observation.visible_value}\n"
+            f"Visible field value: {observation.typed_value}\n"
             f"Suggestion option count: {observation.option_count}\n"
             f"Matching suggestion count: {observation.matching_option_count}\n"
             f"Listbox count: {observation.listbox_count}\n"
             f"Observed page text:\n{observation.body_text}",
         )
-    if observation.visible_value != expected_suggestion:
+    if observation.selected_value != expected_suggestion:
         raise AssertionError(
             "Step 3 failed: selecting an assignee suggestion did not leave the chosen "
             "collaborator in the field.\n"
             f"Expected assignee: {expected_suggestion}\n"
-            f"Observed value: {observation.visible_value}\n"
+            f"Observed value: {observation.selected_value}\n"
             f"Observed page text:\n{observation.body_text}",
         )
 
@@ -261,16 +263,23 @@ def _assert_label_tokenization(observation) -> None:
             "token.\n"
             f"Observed page text:\n{observation.body_text}",
         )
+    if observation.labels_value_before_comma != "bug":
+        raise AssertionError(
+            'Step 5 failed: the Labels field did not contain the typed "bug" value '
+            "before the comma keypress.\n"
+            f"Observed value before comma: {observation.labels_value_before_comma}\n"
+            f"Observed page text:\n{observation.body_text}",
+        )
     if observation.labels_value_after_comma != "":
         raise AssertionError(
-            "Step 5 failed: typing a trailing comma did not clear the Labels field "
+            "Step 5 failed: pressing the comma key did not clear the Labels field "
             'after committing "bug".\n'
             f"Observed value after comma: {observation.labels_value_after_comma}\n"
             f"Observed page text:\n{observation.body_text}",
         )
     if observation.bug_token_count <= 0:
         raise AssertionError(
-            'Step 5 failed: typing a trailing comma did not render a visible "bug" '
+            'Step 5 failed: pressing the comma key did not render a visible "bug" '
             "label token.\n"
             f"Observed page text:\n{observation.body_text}",
         )
