@@ -26,6 +26,7 @@ enum TrackerMessageKind {
   githubMoveCommitted,
   movePendingGitHubPersistence,
   moveFailed,
+  attachmentDownloadFailed,
   localGitHubAppUnavailable,
   githubAppLoginNotConfigured,
   githubAuthorizationCodeReturned,
@@ -141,6 +142,13 @@ class TrackerMessage {
     tone: TrackerMessageTone.error,
     error: '$error',
   );
+
+  factory TrackerMessage.attachmentDownloadFailed(Object error) =>
+      TrackerMessage._(
+        TrackerMessageKind.attachmentDownloadFailed,
+        tone: TrackerMessageTone.error,
+        error: '$error',
+      );
 
   factory TrackerMessage.localGitHubAppUnavailable() => const TrackerMessage._(
     TrackerMessageKind.localGitHubAppUnavailable,
@@ -706,6 +714,30 @@ class TrackerViewModel extends ChangeNotifier {
       _message = TrackerMessage.issueSaveFailed(error);
     } finally {
       _loadingIssueHistory.remove(issue.key);
+      notifyListeners();
+    }
+  }
+
+  Future<void> downloadIssueAttachment(IssueAttachment attachment) async {
+    try {
+      final bytes = await _repository.downloadAttachment(attachment);
+      final uri = Uri.dataFromBytes(
+        bytes,
+        mimeType: attachment.mediaType,
+        parameters: {'name': attachment.name},
+      );
+      final launched = await launchUrl(uri, webOnlyWindowName: '_blank');
+      if (!launched) {
+        throw TrackStateRepositoryException(
+          'Unable to open ${attachment.name} for download.',
+        );
+      }
+      if (_message != null) {
+        _message = null;
+        notifyListeners();
+      }
+    } on Object catch (error) {
+      _message = TrackerMessage.attachmentDownloadFailed(error);
       notifyListeners();
     }
   }

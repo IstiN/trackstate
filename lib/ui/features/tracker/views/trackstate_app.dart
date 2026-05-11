@@ -887,6 +887,8 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
     TrackerMessageKind.movePendingGitHubPersistence =>
       l10n.movePendingGitHubPersistence(message.issueKey!),
     TrackerMessageKind.moveFailed => l10n.moveFailed(message.error!),
+    TrackerMessageKind.attachmentDownloadFailed =>
+      l10n.attachmentDownloadFailed(message.error!),
     TrackerMessageKind.localGitHubAppUnavailable =>
       l10n.localGitHubAppUnavailable,
     TrackerMessageKind.githubAppLoginNotConfigured =>
@@ -1683,7 +1685,7 @@ class _IssueDetailState extends State<_IssueDetail> {
     }
     if (issueChanged) {
       _commentController.clear();
-      if (_selectedCollaborationTab == 2) {
+      if (_selectedCollaborationTab == 3) {
         widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
       }
     }
@@ -1718,6 +1720,59 @@ class _IssueDetailState extends State<_IssueDetail> {
       return;
     }
     _commentController.clear();
+  }
+
+  Widget _detailTabContent(
+    BuildContext context, {
+    required TrackStateIssue issue,
+    required AppLocalizations l10n,
+    required TrackStateColors colors,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(l10n.description),
+        if (_isEditing)
+          Semantics(
+            label: l10n.description,
+            textField: true,
+            child: TextField(
+              controller: _descriptionController,
+              minLines: 4,
+              maxLines: null,
+              enabled: !widget.viewModel.isSaving,
+              decoration: InputDecoration(
+                labelText: l10n.description,
+                alignLabelWithHint: true,
+              ),
+            ),
+          )
+        else
+          Text(issue.description),
+        const SizedBox(height: 18),
+        _SectionTitle(l10n.acceptanceCriteria),
+        for (final criteria in issue.acceptanceCriteria)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TrackStateIcon(
+                  TrackStateIconGlyph.subtask,
+                  size: 16,
+                  color: colors.secondary,
+                  semanticLabel: criteria,
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: Text(criteria)),
+              ],
+            ),
+          ),
+        const SizedBox(height: 18),
+        _SectionTitle(l10n.details),
+        _DetailGrid(issue: issue),
+      ],
+    );
   }
 
   @override
@@ -1829,61 +1884,27 @@ class _IssueDetailState extends State<_IssueDetail> {
             ],
           ),
           const SizedBox(height: 18),
-          _SectionTitle(l10n.description),
-          if (_isEditing)
-            Semantics(
-              label: l10n.description,
-              textField: true,
-              child: TextField(
-                controller: _descriptionController,
-                minLines: 4,
-                maxLines: null,
-                enabled: !widget.viewModel.isSaving,
-                decoration: InputDecoration(
-                  labelText: l10n.description,
-                  alignLabelWithHint: true,
-                ),
-              ),
-            )
-          else
-            Text(issue.description),
-          const SizedBox(height: 18),
-          _SectionTitle(l10n.acceptanceCriteria),
-          for (final criteria in issue.acceptanceCriteria)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TrackStateIcon(
-                    TrackStateIconGlyph.subtask,
-                    size: 16,
-                    color: colors.secondary,
-                    semanticLabel: criteria,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(criteria)),
-                ],
-              ),
-            ),
-          const SizedBox(height: 18),
-          _SectionTitle(l10n.details),
-          _DetailGrid(issue: issue),
-          const SizedBox(height: 18),
           _IssueDetailTabs(
             selectedIndex: _selectedCollaborationTab,
-            tabs: [l10n.comments, l10n.attachments, l10n.history],
+            tabs: [l10n.detail, l10n.comments, l10n.attachments, l10n.history],
             onSelected: (index) {
               setState(() {
                 _selectedCollaborationTab = index;
               });
-              if (index == 2) {
+              if (index == 3) {
                 widget.viewModel.ensureIssueHistoryLoaded(issue);
               }
             },
           ),
           const SizedBox(height: 16),
           if (_selectedCollaborationTab == 0)
+            _detailTabContent(
+              context,
+              issue: issue,
+              l10n: l10n,
+              colors: colors,
+            )
+          else if (_selectedCollaborationTab == 1)
             _CommentsTab(
               issue: issue,
               controller: _commentController,
@@ -1891,8 +1912,11 @@ class _IssueDetailState extends State<_IssueDetail> {
               readOnly: hasReadOnlySession,
               onSave: canUseWriteActions ? _saveComment : null,
             )
-          else if (_selectedCollaborationTab == 1)
-            _AttachmentsTab(issue: issue)
+          else if (_selectedCollaborationTab == 2)
+            _AttachmentsTab(
+              issue: issue,
+              onDownload: widget.viewModel.downloadIssueAttachment,
+            )
           else
             _HistoryTab(
               entries: widget.viewModel.issueHistoryFor(issue.key),
@@ -3739,23 +3763,18 @@ class _IssueDetailTabChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: label,
-      child: TextButton(
-        onPressed: onPressed,
-        style: TextButton.styleFrom(
-          foregroundColor: selected ? colors.page : colors.text,
-          backgroundColor: selected ? colors.primary : colors.surfaceAlt,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(999),
-            side: BorderSide(color: selected ? colors.primary : colors.border),
-          ),
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        foregroundColor: selected ? colors.page : colors.text,
+        backgroundColor: selected ? colors.primary : colors.surfaceAlt,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(999),
+          side: BorderSide(color: selected ? colors.primary : colors.border),
         ),
-        child: Text(label),
       ),
+      child: Text(label),
     );
   }
 }
@@ -3819,9 +3838,10 @@ class _CommentsTab extends StatelessWidget {
 }
 
 class _AttachmentsTab extends StatelessWidget {
-  const _AttachmentsTab({required this.issue});
+  const _AttachmentsTab({required this.issue, required this.onDownload});
 
   final TrackStateIssue issue;
+  final ValueChanged<IssueAttachment> onDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -3833,20 +3853,26 @@ class _AttachmentsTab extends StatelessWidget {
     return Column(
       children: [
         for (final attachment in issue.attachments)
-          _AttachmentRow(attachment: attachment),
+          _AttachmentRow(attachment: attachment, onDownload: onDownload),
       ],
     );
   }
 }
 
 class _AttachmentRow extends StatelessWidget {
-  const _AttachmentRow({required this.attachment});
+  const _AttachmentRow({
+    required this.attachment,
+    required this.onDownload,
+  });
 
   final IssueAttachment attachment;
+  final ValueChanged<IssueAttachment> onDownload;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final l10n = AppLocalizations.of(context)!;
+    final downloadLabel = l10n.downloadAttachment(attachment.name);
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
@@ -3876,14 +3902,41 @@ class _AttachmentRow extends StatelessWidget {
                   '${attachment.author} · ${attachment.createdAt}',
                   style: Theme.of(
                     context,
-                  ).textTheme.labelSmall?.copyWith(color: colors.muted),
+                  ).textTheme.labelSmall?.copyWith(color: colors.text),
                 ),
               ],
             ),
           ),
-          Text(
-            '${attachment.sizeBytes} B',
-            style: Theme.of(context).textTheme.labelSmall,
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${attachment.sizeBytes} B',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+              const SizedBox(height: 4),
+              Semantics(
+                button: true,
+                label: downloadLabel,
+                child: ExcludeSemantics(
+                  child: IconButton(
+                    onPressed: () => onDownload(attachment),
+                    tooltip: downloadLabel,
+                    iconSize: 18,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    icon: TrackStateIcon(
+                      TrackStateIconGlyph.attachment,
+                      size: 18,
+                      color: colors.text,
+                      semanticLabel: downloadLabel,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -3950,7 +4003,7 @@ class _HistoryRow extends StatelessWidget {
                   '${entry.author} · ${entry.timestamp}',
                   style: Theme.of(
                     context,
-                  ).textTheme.labelSmall?.copyWith(color: colors.muted),
+                  ).textTheme.labelSmall?.copyWith(color: colors.text),
                 ),
                 if ((entry.before ?? '').isNotEmpty || (entry.after ?? '').isNotEmpty)
                   Padding(
