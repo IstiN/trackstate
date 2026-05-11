@@ -310,6 +310,12 @@ abstract class AppLocalizations {
   /// **'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.'**
   String get attachmentsDownloadOnlyMessage;
 
+  /// No description provided for @attachmentsLimitedUploadMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.'**
+  String get attachmentsLimitedUploadMessage;
+
   /// No description provided for @attachmentsAccessMessageDisconnected.
   ///
   /// In en, this message translates to:
@@ -321,6 +327,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This repository connection cannot push attachment changes. Existing attachments remain available for download.'**
   String get attachmentsAccessMessageReadOnly;
+
+  /// No description provided for @chooseAttachment.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose attachment'**
+  String get chooseAttachment;
+
+  /// No description provided for @uploadAttachment.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload attachment'**
+  String get uploadAttachment;
+
+  /// No description provided for @clearSelectedAttachment.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear selected attachment'**
+  String get clearSelectedAttachment;
+
+  /// No description provided for @noAttachmentSelected.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a file to review its size before upload.'**
+  String get noAttachmentSelected;
+
+  /// No description provided for @selectedAttachmentSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Selected attachment: {fileName} ({fileSize})'**
+  String selectedAttachmentSummary(String fileName, String fileSize);
+
+  /// No description provided for @attachmentRequiresLocalGitUpload.
+  ///
+  /// In en, this message translates to:
+  /// **'{fileName} follows the Git LFS attachment path and must be uploaded from a local Git runtime. Existing attachments remain available for download here.'**
+  String attachmentRequiresLocalGitUpload(String fileName);
 
   /// No description provided for @history.
   ///
@@ -339,6 +381,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Post comment'**
   String get postComment;
+
+  /// No description provided for @editedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Edited {timestamp}'**
+  String editedAt(String timestamp);
+
+  /// No description provided for @replaceAttachmentTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace attachment?'**
+  String get replaceAttachmentTitle;
+
+  /// No description provided for @replaceAttachmentMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Uploading this file will replace the existing attachment stored as {fileName}. Rename the new file first if you need to keep both versions.'**
+  String replaceAttachmentMessage(String fileName);
+
+  /// No description provided for @replaceAttachmentAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace attachment'**
+  String get replaceAttachmentAction;
+
+  /// No description provided for @keepCurrentAttachment.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep current attachment'**
+  String get keepCurrentAttachment;
 
   /// No description provided for @linkedIssues.
   ///
@@ -831,6 +903,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Issue edits and comments can continue, but attachment upload is unavailable in this browser session because Git LFS upload is not supported here yet.'**
   String get repositoryAccessAttachmentRestrictedMessage;
+
+  /// No description provided for @repositoryAccessAttachmentLimitedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Some attachment uploads still require local Git'**
+  String get repositoryAccessAttachmentLimitedTitle;
+
+  /// No description provided for @repositoryAccessAttachmentLimitedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Issue edits, comments, and browser-supported attachment uploads can continue here. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.'**
+  String get repositoryAccessAttachmentLimitedMessage;
 
   /// No description provided for @repositoryAccessSettingsHint.
   ///

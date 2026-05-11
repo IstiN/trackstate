@@ -52,6 +52,34 @@ abstract interface class ProjectSettingsRepository {
   Future<TrackerSnapshot> saveProjectSettings(ProjectSettingsCatalog settings);
 }
 
+extension TrackStateRepositoryAttachmentSupport on TrackStateRepository {
+  String resolveIssueAttachmentPath(TrackStateIssue issue, String name) {
+    final normalizedName = name.trim();
+    if (normalizedName.isEmpty) {
+      return _joinPath(
+        _issueRoot(issue.storagePath),
+        'attachments/attachment.bin',
+      );
+    }
+    return _joinPath(
+      _issueRoot(issue.storagePath),
+      'attachments/${sanitizeAttachmentName(normalizedName)}',
+    );
+  }
+
+  Future<bool> isIssueAttachmentLfsTracked(
+    TrackStateIssue issue,
+    String name,
+  ) async {
+    if (this case final ProviderBackedTrackStateRepository repository) {
+      return repository.providerAdapter.isLfsTracked(
+        resolveIssueAttachmentPath(issue, name),
+      );
+    }
+    return false;
+  }
+}
+
 class ProviderBackedTrackStateRepository
     implements TrackStateRepository, ProjectSettingsRepository {
   static const RepositoryPermission _restrictedPermission =
@@ -606,10 +634,9 @@ class ProviderBackedTrackStateRepository
       orElse: () => issue,
     );
     final writeBranch = await _provider.resolveWriteBranch();
-    final issueRoot = _issueRoot(currentIssue.storagePath);
-    final attachmentPath = _joinPath(
-      issueRoot,
-      'attachments/${_sanitizeAttachmentName(normalizedName)}',
+    final attachmentPath = resolveIssueAttachmentPath(
+      currentIssue,
+      normalizedName,
     );
     final existingRevision = _snapshotArtifactRevisions[attachmentPath];
     final lfsTracked = await _provider.isLfsTracked(attachmentPath);
@@ -642,7 +669,7 @@ class ProviderBackedTrackStateRepository
     );
     final updatedAttachment = IssueAttachment(
       id: attachmentPath,
-      name: normalizedName,
+      name: attachmentPath.split('/').last,
       mediaType: _mediaTypeForPath(attachmentPath),
       sizeBytes: bytes.length,
       author: author,
@@ -661,7 +688,7 @@ class ProviderBackedTrackStateRepository
           (candidate) => candidate.storagePath == attachmentPath,
         ))
           updatedAttachment,
-      ]..sort((left, right) => left.name.compareTo(right.name)),
+      ]..sort(_sortAttachmentsNewestFirst),
     );
     _replaceCachedIssue(updatedIssue);
     return updatedIssue;
@@ -1722,7 +1749,7 @@ class ProviderBackedTrackStateRepository
         ),
       );
     }
-    return attachments..sort((a, b) => a.name.compareTo(b.name));
+    return attachments..sort(_sortAttachmentsNewestFirst);
   }
 
   Future<List<IssueHistoryEntry>> _normalizeIssueHistory({
@@ -2323,21 +2350,32 @@ class DemoTrackStateRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
-  }) async => issue.copyWith(
-    attachments: [
-      ...issue.attachments,
-      IssueAttachment(
-        id: '${_issueRoot(issue.storagePath)}/attachments/$name',
-        name: name,
-        mediaType: _mediaTypeForPath(name),
-        sizeBytes: bytes.length,
-        author: 'demo-user',
-        createdAt: DateTime.now().toUtc().toIso8601String(),
-        storagePath: '${_issueRoot(issue.storagePath)}/attachments/$name',
-        revisionOrOid: 'demo-revision',
-      ),
-    ],
-  );
+  }) async {
+    final attachmentPath = resolveIssueAttachmentPath(issue, name);
+    final updatedAttachment = IssueAttachment(
+      id: attachmentPath,
+      name: attachmentPath.split('/').last,
+      mediaType: _mediaTypeForPath(attachmentPath),
+      sizeBytes: bytes.length,
+      author: 'demo-user',
+      createdAt: DateTime.now().toUtc().toIso8601String(),
+      storagePath: attachmentPath,
+      revisionOrOid: 'demo-revision',
+    );
+    return issue.copyWith(
+      attachments: [
+        for (final candidate in issue.attachments)
+          if (candidate.storagePath == attachmentPath)
+            updatedAttachment
+          else
+            candidate,
+        if (!issue.attachments.any(
+          (candidate) => candidate.storagePath == attachmentPath,
+        ))
+          updatedAttachment,
+      ]..sort(_sortAttachmentsNewestFirst),
+    );
+  }
 
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
@@ -3116,7 +3154,7 @@ String _nextCommentId({
   return (maxId + 1).toString().padLeft(4, '0');
 }
 
-String _sanitizeAttachmentName(String value) => value
+String sanitizeAttachmentName(String value) => value
     .replaceAll('\\', '/')
     .split('/')
     .last
@@ -3124,6 +3162,28 @@ String _sanitizeAttachmentName(String value) => value
     .replaceAll(RegExp(r'-+'), '-')
     .replaceAll(RegExp(r'^-|-$'), '')
     .ifEmpty('attachment.bin');
+
+int _sortAttachmentsNewestFirst(IssueAttachment left, IssueAttachment right) {
+  final leftCreated = DateTime.tryParse(left.createdAt);
+  final rightCreated = DateTime.tryParse(right.createdAt);
+  if (leftCreated != null && rightCreated != null) {
+    final byTimestamp = rightCreated.compareTo(leftCreated);
+    if (byTimestamp != 0) {
+      return byTimestamp;
+    }
+  }
+  if (leftCreated != null && rightCreated == null) {
+    return -1;
+  }
+  if (leftCreated == null && rightCreated != null) {
+    return 1;
+  }
+  final byCreatedLabel = right.createdAt.compareTo(left.createdAt);
+  if (byCreatedLabel != 0) {
+    return byCreatedLabel;
+  }
+  return left.name.compareTo(right.name);
+}
 
 bool _isIssueCommentPath(String path) =>
     path.contains('/comments/') && path.endsWith('.md');

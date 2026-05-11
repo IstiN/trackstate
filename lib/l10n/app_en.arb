@@ -49,8 +49,32 @@
   "comments": "Comments",
   "attachments": "Attachments",
   "attachmentsDownloadOnlyMessage": "Attachment upload is unavailable in this browser session. Existing attachments remain available for download.",
+  "attachmentsLimitedUploadMessage": "Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.",
   "attachmentsAccessMessageDisconnected": "Connect GitHub with repository write access to enable Git-backed attachment changes. Existing attachments remain available for download.",
   "attachmentsAccessMessageReadOnly": "This repository connection cannot push attachment changes. Existing attachments remain available for download.",
+  "chooseAttachment": "Choose attachment",
+  "uploadAttachment": "Upload attachment",
+  "clearSelectedAttachment": "Clear selected attachment",
+  "noAttachmentSelected": "Choose a file to review its size before upload.",
+  "selectedAttachmentSummary": "Selected attachment: {fileName} ({fileSize})",
+  "@selectedAttachmentSummary": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      },
+      "fileSize": {
+        "type": "String"
+      }
+    }
+  },
+  "attachmentRequiresLocalGitUpload": "{fileName} follows the Git LFS attachment path and must be uploaded from a local Git runtime. Existing attachments remain available for download here.",
+  "@attachmentRequiresLocalGitUpload": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
   "history": "History",
   "downloadAttachment": "Download {fileName}",
   "@downloadAttachment": {
@@ -61,6 +85,25 @@
     }
   },
   "postComment": "Post comment",
+  "editedAt": "Edited {timestamp}",
+  "@editedAt": {
+    "placeholders": {
+      "timestamp": {
+        "type": "String"
+      }
+    }
+  },
+  "replaceAttachmentTitle": "Replace attachment?",
+  "replaceAttachmentMessage": "Uploading this file will replace the existing attachment stored as {fileName}. Rename the new file first if you need to keep both versions.",
+  "@replaceAttachmentMessage": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
+  "replaceAttachmentAction": "Replace attachment",
+  "keepCurrentAttachment": "Keep current attachment",
   "linkedIssues": "Linked issues",
   "description": "Description",
   "acceptanceCriteria": "Acceptance Criteria",
@@ -143,6 +186,8 @@
   "repositoryAccessReadOnlyMessage": "This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.",
   "repositoryAccessAttachmentRestrictedTitle": "Attachments stay download-only in the browser",
   "repositoryAccessAttachmentRestrictedMessage": "Issue edits and comments can continue, but attachment upload is unavailable in this browser session because Git LFS upload is not supported here yet.",
+  "repositoryAccessAttachmentLimitedTitle": "Some attachment uploads still require local Git",
+  "repositoryAccessAttachmentLimitedMessage": "Issue edits, comments, and browser-supported attachment uploads can continue here. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.",
   "repositoryAccessSettingsHint": "Settings is the canonical place to review repository access and reconnect safely.",
   "repositoryPath": "Repository Path",
   "writeBranch": "Write Branch",
