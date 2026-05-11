@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -299,7 +301,7 @@ class _TrackerHome extends StatelessWidget {
                               onApplyLocalGitConfiguration,
                         ),
                 ),
-                bottomNavigationBar: isCompact
+                bottomNavigationBar: isCompact && !isCreateIssueVisible
                     ? _BottomNavigation(viewModel: viewModel)
                     : null,
               );
@@ -543,11 +545,12 @@ class _TopBar extends StatelessWidget {
               size: 32,
               semanticLabel: l10n.appTitle,
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: Text(
                 l10n.appTitle,
                 style: Theme.of(context).textTheme.titleMedium,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ] else ...[
@@ -575,7 +578,7 @@ class _TopBar extends StatelessWidget {
               ),
             ),
           ],
-          const SizedBox(width: 12),
+          SizedBox(width: compact ? 8 : 12),
           if (compact)
             _IconButtonSurface(
               label: l10n.createIssue,
@@ -616,7 +619,7 @@ class _TopBar extends StatelessWidget {
             onPressed: viewModel.toggleTheme,
           ),
           const SizedBox(width: 8),
-          if (_hasVisibleProfileIdentity(viewModel)) ...[
+          if (_hasVisibleProfileIdentity(viewModel) && !compact) ...[
             ConstrainedBox(
               constraints: BoxConstraints(maxWidth: compact ? 160 : 240),
               child: Column(
@@ -658,12 +661,21 @@ class _TopBar extends StatelessWidget {
             ),
             const SizedBox(width: 8),
           ],
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: colors.primarySoft,
-            child: Text(
-              _profileInitials(l10n, viewModel),
-              style: TextStyle(color: colors.text, fontWeight: FontWeight.w700),
+          Semantics(
+            label: _profileDisplayName(viewModel),
+            image: true,
+            child: ExcludeSemantics(
+              child: CircleAvatar(
+                radius: 18,
+                backgroundColor: colors.primarySoft,
+                child: Text(
+                  _profileInitials(l10n, viewModel),
+                  style: TextStyle(
+                    color: colors.text,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
             ),
           ),
         ],
@@ -887,6 +899,8 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
     TrackerMessageKind.movePendingGitHubPersistence =>
       l10n.movePendingGitHubPersistence(message.issueKey!),
     TrackerMessageKind.moveFailed => l10n.moveFailed(message.error!),
+    TrackerMessageKind.attachmentDownloadFailed =>
+      l10n.attachmentDownloadFailed(message.error!),
     TrackerMessageKind.localGitHubAppUnavailable =>
       l10n.localGitHubAppUnavailable,
     TrackerMessageKind.githubAppLoginNotConfigured =>
@@ -1683,7 +1697,7 @@ class _IssueDetailState extends State<_IssueDetail> {
     }
     if (issueChanged) {
       _commentController.clear();
-      if (_selectedCollaborationTab == 2) {
+      if (_selectedCollaborationTab == 3) {
         widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
       }
     }
@@ -1718,6 +1732,59 @@ class _IssueDetailState extends State<_IssueDetail> {
       return;
     }
     _commentController.clear();
+  }
+
+  Widget _detailTabContent(
+    BuildContext context, {
+    required TrackStateIssue issue,
+    required AppLocalizations l10n,
+    required TrackStateColors colors,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(l10n.description),
+        if (_isEditing)
+          Semantics(
+            label: l10n.description,
+            textField: true,
+            child: TextField(
+              controller: _descriptionController,
+              minLines: 4,
+              maxLines: null,
+              enabled: !widget.viewModel.isSaving,
+              decoration: InputDecoration(
+                labelText: l10n.description,
+                alignLabelWithHint: true,
+              ),
+            ),
+          )
+        else
+          Text(issue.description),
+        const SizedBox(height: 18),
+        _SectionTitle(l10n.acceptanceCriteria),
+        for (final criteria in issue.acceptanceCriteria)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TrackStateIcon(
+                  TrackStateIconGlyph.subtask,
+                  size: 16,
+                  color: colors.secondary,
+                  semanticLabel: criteria,
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: Text(criteria)),
+              ],
+            ),
+          ),
+        const SizedBox(height: 18),
+        _SectionTitle(l10n.details),
+        _DetailGrid(issue: issue),
+      ],
+    );
   }
 
   @override
@@ -1829,61 +1896,27 @@ class _IssueDetailState extends State<_IssueDetail> {
             ],
           ),
           const SizedBox(height: 18),
-          _SectionTitle(l10n.description),
-          if (_isEditing)
-            Semantics(
-              label: l10n.description,
-              textField: true,
-              child: TextField(
-                controller: _descriptionController,
-                minLines: 4,
-                maxLines: null,
-                enabled: !widget.viewModel.isSaving,
-                decoration: InputDecoration(
-                  labelText: l10n.description,
-                  alignLabelWithHint: true,
-                ),
-              ),
-            )
-          else
-            Text(issue.description),
-          const SizedBox(height: 18),
-          _SectionTitle(l10n.acceptanceCriteria),
-          for (final criteria in issue.acceptanceCriteria)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TrackStateIcon(
-                    TrackStateIconGlyph.subtask,
-                    size: 16,
-                    color: colors.secondary,
-                    semanticLabel: criteria,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(criteria)),
-                ],
-              ),
-            ),
-          const SizedBox(height: 18),
-          _SectionTitle(l10n.details),
-          _DetailGrid(issue: issue),
-          const SizedBox(height: 18),
           _IssueDetailTabs(
             selectedIndex: _selectedCollaborationTab,
-            tabs: [l10n.comments, l10n.attachments, l10n.history],
+            tabs: [l10n.detail, l10n.comments, l10n.attachments, l10n.history],
             onSelected: (index) {
               setState(() {
                 _selectedCollaborationTab = index;
               });
-              if (index == 2) {
+              if (index == 3) {
                 widget.viewModel.ensureIssueHistoryLoaded(issue);
               }
             },
           ),
           const SizedBox(height: 16),
           if (_selectedCollaborationTab == 0)
+            _detailTabContent(
+              context,
+              issue: issue,
+              l10n: l10n,
+              colors: colors,
+            )
+          else if (_selectedCollaborationTab == 1)
             _CommentsTab(
               issue: issue,
               controller: _commentController,
@@ -1891,8 +1924,12 @@ class _IssueDetailState extends State<_IssueDetail> {
               readOnly: hasReadOnlySession,
               onSave: canUseWriteActions ? _saveComment : null,
             )
-          else if (_selectedCollaborationTab == 1)
-            _AttachmentsTab(issue: issue)
+          else if (_selectedCollaborationTab == 2)
+            _AttachmentsTab(
+              issue: issue,
+              onDownload: widget.viewModel.downloadIssueAttachment,
+              readOnly: hasReadOnlySession,
+            )
           else
             _HistoryTab(
               entries: widget.viewModel.issueHistoryFor(issue.key),
@@ -1918,7 +1955,7 @@ class _IssueDetailActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    final child = Text(label);
+    final child = ExcludeSemantics(child: Text(label));
     final button = emphasized
         ? FilledButton(
             onPressed: onPressed,
@@ -1947,7 +1984,6 @@ class _IssueDetailActionButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
-      excludeSemantics: true,
       child: button,
     );
   }
@@ -1962,30 +1998,43 @@ class _IssueList extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
+    final searchResults = viewModel.searchResults;
     return _SurfaceCard(
       semanticLabel: l10n.jqlSearch,
+      explicitChildNodes: true,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Semantics(
-            label: l10n.searchIssues,
-            textField: true,
-            child: TextField(
-              controller: TextEditingController(text: viewModel.jql),
-              onSubmitted: viewModel.updateQuery,
-              decoration: InputDecoration(hintText: l10n.jqlPlaceholder),
+          FocusTraversalOrder(
+            order: const NumericFocusOrder(1),
+            child: Shortcuts(
+              shortcuts: const <ShortcutActivator, Intent>{
+                SingleActivator(LogicalKeyboardKey.tab): NextFocusIntent(),
+                SingleActivator(
+                  LogicalKeyboardKey.tab,
+                  shift: true,
+                ): PreviousFocusIntent(),
+              },
+              child: TextField(
+                controller: TextEditingController(text: viewModel.jql),
+                onSubmitted: viewModel.updateQuery,
+                decoration: InputDecoration(
+                  labelText: l10n.searchIssues,
+                  hintText: l10n.jqlPlaceholder,
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 12),
-          if (viewModel.searchResults.isEmpty)
+          if (searchResults.isEmpty)
             Text(l10n.noResults)
           else ...[
-            if (viewModel.searchResults.length < viewModel.totalSearchResults)
+            if (searchResults.length < viewModel.totalSearchResults)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
                   l10n.showingResults(
-                    viewModel.searchResults.length,
+                    searchResults.length,
                     viewModel.totalSearchResults,
                   ),
                   style: Theme.of(
@@ -1993,31 +2042,30 @@ class _IssueList extends StatelessWidget {
                   ).textTheme.labelMedium?.copyWith(color: colors.muted),
                 ),
               ),
-            for (final issue in viewModel.searchResults)
-              _IssueListRow(issue: issue, onSelect: viewModel.selectIssue),
+            for (var index = 0; index < searchResults.length; index += 1)
+              FocusTraversalOrder(
+                order: NumericFocusOrder(index + 2.0),
+                child: _IssueListRow(
+                  issue: searchResults[index],
+                  onSelect: viewModel.selectIssue,
+                ),
+              ),
             if (viewModel.hasMoreSearchResults)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Semantics(
-                  button: true,
-                  label: l10n.loadMoreIssues,
-                  child: OutlinedButton(
-                    onPressed: viewModel.isLoadingMoreSearchResults
-                        ? null
-                        : viewModel.loadMoreSearchResults,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: colors.text,
-                      backgroundColor: colors.surface,
-                      side: BorderSide(color: colors.border),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
-                      ),
+              FocusTraversalOrder(
+                order: NumericFocusOrder(searchResults.length + 2.0),
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Semantics(
+                    container: true,
+                    button: true,
+                    label: l10n.loadMoreIssues,
+                    child: OutlinedButton(
+                      onPressed: viewModel.isLoadingMoreSearchResults
+                          ? null
+                          : viewModel.loadMoreSearchResults,
+                      style: _searchLoadMoreButtonStyle(colors),
+                      child: ExcludeSemantics(child: Text(l10n.loadMore)),
                     ),
-                    child: Text(l10n.loadMore),
                   ),
                 ),
               ),
@@ -2026,6 +2074,41 @@ class _IssueList extends StatelessWidget {
       ),
     );
   }
+}
+
+ButtonStyle _searchLoadMoreButtonStyle(TrackStateColors colors) {
+  return OutlinedButton.styleFrom(
+    foregroundColor: colors.primary,
+    backgroundColor: colors.surface,
+    side: BorderSide(color: colors.primary),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+  ).copyWith(
+    foregroundColor: WidgetStateProperty.resolveWith((states) {
+      if (states.contains(WidgetState.disabled)) {
+        return colors.muted;
+      }
+      return colors.primary;
+    }),
+    side: WidgetStateProperty.resolveWith((states) {
+      if (states.contains(WidgetState.disabled)) {
+        return BorderSide(color: colors.border);
+      }
+      return BorderSide(color: colors.primary);
+    }),
+    overlayColor: WidgetStateProperty.resolveWith((states) {
+      if (states.contains(WidgetState.pressed)) {
+        return colors.primarySoft;
+      }
+      if (states.contains(WidgetState.hovered)) {
+        return colors.primarySoft.withValues(alpha: .72);
+      }
+      if (states.contains(WidgetState.focused)) {
+        return colors.primarySoft.withValues(alpha: .84);
+      }
+      return Colors.transparent;
+    }),
+  );
 }
 
 class _ActiveEpics extends StatelessWidget {
@@ -2190,49 +2273,51 @@ class _IssueCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  _IssueTypeGlyph(issue.issueType),
-                  const SizedBox(width: 8),
-                  Text(
-                    issue.key,
-                    style: TextStyle(
-                      fontFamily: 'JetBrains Mono',
-                      fontSize: 12,
-                      color: colors.muted,
+        child: ExcludeSemantics(
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    _IssueTypeGlyph(issue.issueType),
+                    const SizedBox(width: 8),
+                    Text(
+                      issue.key,
+                      style: TextStyle(
+                        fontFamily: 'JetBrains Mono',
+                        fontSize: 12,
+                        color: colors.muted,
+                      ),
                     ),
-                  ),
-                  const Spacer(),
-                  _Avatar(name: issue.assignee),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                issue.summary,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  _Chip(label: issue.issueType.label),
-                  _PriorityBadge(priority: issue.priority),
-                ],
-              ),
-            ],
+                    const Spacer(),
+                    _Avatar(name: issue.assignee),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  issue.summary,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    _Chip(label: issue.issueType.label),
+                    _PriorityBadge(priority: issue.priority),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -2267,39 +2352,68 @@ class _IssueListRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     return Semantics(
+      container: true,
       button: true,
       label: 'Open ${issue.key} ${issue.summary}',
-      child: InkWell(
-        onTap: () => onSelect(issue),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: colors.border)),
-          ),
-          child: Row(
-            children: [
-              _IssueTypeGlyph(issue.issueType),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 86,
-                child: Text(
-                  issue.key,
-                  style: TextStyle(
-                    fontFamily: 'JetBrains Mono',
-                    color: colors.muted,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: colors.border)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Stack(
+                children: [
+                  ExcludeSemantics(
+                    child: Row(
+                      children: [
+                        _IssueTypeGlyph(issue.issueType),
+                        const SizedBox(width: 10),
+                        SizedBox(
+                          width: 86,
+                          child: Text(
+                            issue.key,
+                            style: TextStyle(
+                              fontFamily: 'JetBrains Mono',
+                              color: colors.muted,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(issue.summary)),
+                        _StatusBadge(status: issue.status),
+                        const SizedBox(width: 8),
+                        _Avatar(name: issue.assignee),
+                      ],
+                    ),
                   ),
-                ),
+                  Positioned.fill(
+                    child: TextButton(
+                      onPressed: () => onSelect(issue),
+                      style: TextButton.styleFrom(
+                        foregroundColor: colors.text,
+                        backgroundColor: Colors.transparent,
+                        overlayColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        surfaceTintColor: Colors.transparent,
+                        padding: EdgeInsets.zero,
+                        alignment: Alignment.centerLeft,
+                        shape: const RoundedRectangleBorder(),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
+                ],
               ),
-              Expanded(child: Text(issue.summary)),
-              _StatusBadge(status: issue.status),
+            ),
+            if (trailingAction != null) ...[
               const SizedBox(width: 8),
-              _Avatar(name: issue.assignee),
-              if (trailingAction != null) ...[
-                const SizedBox(width: 8),
-                trailingAction!,
-              ],
+              trailingAction!,
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -2597,10 +2711,15 @@ class _SettingsTextField extends StatelessWidget {
 }
 
 class _SurfaceCard extends StatelessWidget {
-  const _SurfaceCard({required this.child, required this.semanticLabel});
+  const _SurfaceCard({
+    required this.child,
+    required this.semanticLabel,
+    this.explicitChildNodes = false,
+  });
 
   final Widget child;
   final String semanticLabel;
+  final bool explicitChildNodes;
 
   @override
   Widget build(BuildContext context) {
@@ -2608,6 +2727,7 @@ class _SurfaceCard extends StatelessWidget {
     return Semantics(
       label: semanticLabel,
       container: true,
+      explicitChildNodes: explicitChildNodes,
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -2908,8 +3028,8 @@ class _CreateIssueOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: compact ? Alignment.topCenter : Alignment.center,
+    return ColoredBox(
+      color: Colors.black.withValues(alpha: compact ? 0.18 : 0.12),
       child: child,
     );
   }
@@ -3142,232 +3262,254 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
         ? null
         : _defaultCreateStatus(project);
     final derivedEpic = _issueByKey(_derivedEpicKey());
-    return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: 620,
-          maxHeight: MediaQuery.sizeOf(context).height - 48,
-        ),
-        child: ListenableBuilder(
-          listenable: widget.viewModel,
-          builder: (context, _) {
-            final canSubmit =
-                !widget.viewModel.hasReadOnlySession &&
-                !widget.viewModel.isSaving;
-            return _SurfaceCard(
-              semanticLabel: l10n.createIssue,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _SectionTitle(l10n.createIssue),
-                    const SizedBox(height: 12),
-                    _DropdownCreateField(
-                      label: issueTypeLabel,
-                      value: _selectedIssueTypeId,
-                      enabled: !widget.viewModel.isSaving,
-                      items: [
-                        for (final option in issueTypeOptions)
-                          DropdownMenuItem<String>(
-                            value: option.id,
-                            child: Text(
-                              option.label(project?.defaultLocale),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: _applyIssueType,
-                    ),
-                    const SizedBox(height: 12),
-                    Semantics(
-                      label: summaryLabel,
-                      textField: true,
-                      child: TextField(
-                        controller: _summaryController,
-                        enabled: !widget.viewModel.isSaving,
-                        decoration: InputDecoration(labelText: summaryLabel),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Semantics(
-                      label: l10n.description,
-                      textField: true,
-                      child: TextField(
-                        controller: _descriptionController,
-                        minLines: 3,
-                        maxLines: null,
-                        enabled: !widget.viewModel.isSaving,
-                        decoration: InputDecoration(
-                          labelText: l10n.description,
-                          alignLabelWithHint: true,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _DropdownCreateField(
-                      label: priorityLabel,
-                      value: _selectedPriorityId,
-                      enabled: !widget.viewModel.isSaving,
-                      items: [
-                        for (final option in priorityOptions)
-                          DropdownMenuItem<String>(
-                            value: option.id,
-                            child: Text(
-                              option.label(project?.defaultLocale),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        setState(() {
-                          _selectedPriorityId = value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    _ReadOnlyCreateField(
-                      label: l10n.initialStatus,
-                      value:
-                          defaultStatus?.label(project?.defaultLocale) ??
-                          l10n.toDo,
-                    ),
-                    if (!_isEpicType && !_isSubtaskType) ...[
-                      const SizedBox(height: 12),
-                      _DropdownCreateField(
-                        label: epicLabel,
-                        value: _selectedEpicKey,
-                        enabled: !widget.viewModel.isSaving,
-                        hintText: l10n.optional,
-                        items: [
-                          for (final option in epicOptions)
-                            DropdownMenuItem<String>(
-                              value: option.key,
-                              child: Text(
-                                '${option.key} · ${option.summary}',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedEpicKey = value;
-                          });
-                        },
-                      ),
-                    ],
-                    if (_isSubtaskType) ...[
-                      const SizedBox(height: 12),
-                      _DropdownCreateField(
-                        label: parentLabel,
-                        value: _selectedParentKey,
-                        enabled: !widget.viewModel.isSaving,
-                        hintText: parentOptions.isEmpty
-                            ? l10n.noEligibleParents
-                            : null,
-                        errorText:
-                            _didAttemptSubmit && _selectedParentKey == null
-                            ? l10n.subTaskParentRequired
-                            : null,
-                        items: [
-                          for (final option in parentOptions)
-                            DropdownMenuItem<String>(
-                              value: option.key,
-                              child: Text(
-                                '${option.key} · ${option.summary}',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: parentOptions.isEmpty
-                            ? null
-                            : (value) {
-                                setState(() {
-                                  _selectedParentKey = value;
-                                });
-                              },
-                      ),
-                      const SizedBox(height: 12),
-                      _ReadOnlyCreateField(
-                        label: epicLabel,
-                        value: derivedEpic == null
-                            ? l10n.derivedFromParent
-                            : '${derivedEpic.key} · ${derivedEpic.summary}',
-                        helperText: l10n.epicDerivedFromParent,
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Semantics(
-                      label: assigneeLabel,
-                      textField: true,
-                      child: TextField(
-                        controller: _assigneeController,
-                        enabled: !widget.viewModel.isSaving,
-                        decoration: InputDecoration(labelText: assigneeLabel),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _LabelTokenField(
-                      label: labelsLabel,
-                      controller: _labelEntryController,
-                      labels: _labels,
-                      enabled: !widget.viewModel.isSaving,
-                      helperText: l10n.labelsTokenHelper,
-                      onChanged: (_) => _commitLabels(),
-                      onSubmitted: (_) => _commitLabels(commitRemainder: true),
-                      onRemove: (label) {
-                        setState(() {
-                          _labels.remove(label);
-                        });
-                      },
-                    ),
-                    for (final field in createFields) ...[
-                      const SizedBox(height: 12),
-                      Semantics(
-                        label: _createIssueFieldLabel(project, field),
-                        textField: true,
-                        child: TextField(
-                          key: ValueKey('create-field-${field.id}'),
-                          controller: _customFieldControllers[field.id],
-                          minLines: field.type == 'markdown' ? 3 : 1,
-                          maxLines: field.type == 'markdown' ? null : 1,
-                          enabled: !widget.viewModel.isSaving,
-                          decoration: InputDecoration(
-                            labelText: _createIssueFieldLabel(project, field),
-                            alignLabelWithHint: field.type == 'markdown',
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 980;
+        final horizontalInset = isCompact ? 16.0 : 24.0;
+        final verticalInset = isCompact ? 16.0 : 24.0;
+        final availableWidth = math.max(
+          0.0,
+          constraints.maxWidth - (horizontalInset * 2),
+        );
+        final availableHeight = math.max(
+          0.0,
+          constraints.maxHeight - (verticalInset * 2),
+        );
+        final surfaceWidth = isCompact
+            ? availableWidth
+            : math.min(620.0, availableWidth);
+
+        return Dialog(
+          alignment: isCompact ? Alignment.topCenter : Alignment.centerRight,
+          insetPadding: EdgeInsets.symmetric(
+            horizontal: horizontalInset,
+            vertical: verticalInset,
+          ),
+          child: SizedBox(
+            width: surfaceWidth,
+            height: availableHeight,
+            child: ListenableBuilder(
+              listenable: widget.viewModel,
+              builder: (context, _) {
+                final canSubmit =
+                    !widget.viewModel.hasReadOnlySession &&
+                    !widget.viewModel.isSaving;
+                return _SurfaceCard(
+                  semanticLabel: l10n.createIssue,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _IssueDetailActionButton(
-                          label: l10n.save,
-                          emphasized: true,
-                          onPressed: canSubmit ? _submitCreateIssue : null,
+                        _SectionTitle(l10n.createIssue),
+                        const SizedBox(height: 12),
+                        _DropdownCreateField(
+                          label: issueTypeLabel,
+                          value: _selectedIssueTypeId,
+                          enabled: !widget.viewModel.isSaving,
+                          items: [
+                            for (final option in issueTypeOptions)
+                              DropdownMenuItem<String>(
+                                value: option.id,
+                                child: Text(
+                                  option.label(project?.defaultLocale),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          onChanged: _applyIssueType,
                         ),
-                        _IssueDetailActionButton(
-                          label: l10n.cancel,
-                          onPressed: widget.viewModel.isSaving
-                              ? null
-                              : widget.onDismiss,
+                        const SizedBox(height: 12),
+                        Semantics(
+                          label: summaryLabel,
+                          textField: true,
+                          child: TextField(
+                            controller: _summaryController,
+                            enabled: !widget.viewModel.isSaving,
+                            decoration: InputDecoration(labelText: summaryLabel),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Semantics(
+                          label: l10n.description,
+                          textField: true,
+                          child: TextField(
+                            controller: _descriptionController,
+                            minLines: 3,
+                            maxLines: null,
+                            enabled: !widget.viewModel.isSaving,
+                            decoration: InputDecoration(
+                              labelText: l10n.description,
+                              alignLabelWithHint: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _DropdownCreateField(
+                          label: priorityLabel,
+                          value: _selectedPriorityId,
+                          enabled: !widget.viewModel.isSaving,
+                          items: [
+                            for (final option in priorityOptions)
+                              DropdownMenuItem<String>(
+                                value: option.id,
+                                child: Text(
+                                  option.label(project?.defaultLocale),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          onChanged: (value) {
+                            if (value == null) {
+                              return;
+                            }
+                            setState(() {
+                              _selectedPriorityId = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        _ReadOnlyCreateField(
+                          label: l10n.initialStatus,
+                          value:
+                              defaultStatus?.label(project?.defaultLocale) ??
+                              l10n.toDo,
+                        ),
+                        if (!_isEpicType && !_isSubtaskType) ...[
+                          const SizedBox(height: 12),
+                          _DropdownCreateField(
+                            label: epicLabel,
+                            value: _selectedEpicKey,
+                            enabled: !widget.viewModel.isSaving,
+                            hintText: l10n.optional,
+                            items: [
+                              for (final option in epicOptions)
+                                DropdownMenuItem<String>(
+                                  value: option.key,
+                                  child: Text(
+                                    '${option.key} · ${option.summary}',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: (value) {
+                              setState(() {
+                                _selectedEpicKey = value;
+                              });
+                            },
+                          ),
+                        ],
+                        if (_isSubtaskType) ...[
+                          const SizedBox(height: 12),
+                          _DropdownCreateField(
+                            label: parentLabel,
+                            value: _selectedParentKey,
+                            enabled: !widget.viewModel.isSaving,
+                            hintText: parentOptions.isEmpty
+                                ? l10n.noEligibleParents
+                                : null,
+                            errorText:
+                                _didAttemptSubmit && _selectedParentKey == null
+                                ? l10n.subTaskParentRequired
+                                : null,
+                            items: [
+                              for (final option in parentOptions)
+                                DropdownMenuItem<String>(
+                                  value: option.key,
+                                  child: Text(
+                                    '${option.key} · ${option.summary}',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: parentOptions.isEmpty
+                                ? null
+                                : (value) {
+                                    setState(() {
+                                      _selectedParentKey = value;
+                                    });
+                                  },
+                          ),
+                          const SizedBox(height: 12),
+                          _ReadOnlyCreateField(
+                            label: epicLabel,
+                            value: derivedEpic == null
+                                ? l10n.derivedFromParent
+                                : '${derivedEpic.key} · ${derivedEpic.summary}',
+                            helperText: l10n.epicDerivedFromParent,
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        Semantics(
+                          label: assigneeLabel,
+                          textField: true,
+                          child: TextField(
+                            controller: _assigneeController,
+                            enabled: !widget.viewModel.isSaving,
+                            decoration: InputDecoration(labelText: assigneeLabel),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _LabelTokenField(
+                          label: labelsLabel,
+                          controller: _labelEntryController,
+                          labels: _labels,
+                          enabled: !widget.viewModel.isSaving,
+                          helperText: l10n.labelsTokenHelper,
+                          onChanged: (_) => _commitLabels(),
+                          onSubmitted: (_) =>
+                              _commitLabels(commitRemainder: true),
+                          onRemove: (label) {
+                            setState(() {
+                              _labels.remove(label);
+                            });
+                          },
+                        ),
+                        for (final field in createFields) ...[
+                          const SizedBox(height: 12),
+                          Semantics(
+                            label: _createIssueFieldLabel(project, field),
+                            textField: true,
+                            child: TextField(
+                              key: ValueKey('create-field-${field.id}'),
+                              controller: _customFieldControllers[field.id],
+                              minLines: field.type == 'markdown' ? 3 : 1,
+                              maxLines: field.type == 'markdown' ? null : 1,
+                              enabled: !widget.viewModel.isSaving,
+                              decoration: InputDecoration(
+                                labelText: _createIssueFieldLabel(project, field),
+                                alignLabelWithHint: field.type == 'markdown',
+                              ),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _IssueDetailActionButton(
+                              label: l10n.save,
+                              emphasized: true,
+                              onPressed: canSubmit ? _submitCreateIssue : null,
+                            ),
+                            _IssueDetailActionButton(
+                              label: l10n.cancel,
+                              onPressed: widget.viewModel.isSaving
+                                  ? null
+                                  : widget.onDismiss,
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -3395,28 +3537,30 @@ class _NavButton extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           onTap: onPressed,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-            decoration: BoxDecoration(
-              color: selected ? colors.secondary : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                TrackStateIcon(
-                  item.glyph,
-                  color: selected ? colors.page : colors.muted,
-                  size: 18,
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  item.label,
-                  style: TextStyle(
-                    color: selected ? colors.page : colors.text,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          child: ExcludeSemantics(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+              decoration: BoxDecoration(
+                color: selected ? colors.secondary : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  TrackStateIcon(
+                    item.glyph,
+                    color: selected ? colors.page : colors.muted,
+                    size: 18,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  Text(
+                    item.label,
+                    style: TextStyle(
+                      color: selected ? colors.page : colors.text,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -3451,23 +3595,25 @@ class _BottomNavigation extends StatelessWidget {
                   label: item.label,
                   child: InkWell(
                     onTap: () => viewModel.selectSection(item.section),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          TrackStateIcon(
-                            item.glyph,
-                            color: viewModel.section == item.section
-                                ? colors.primary
-                                : colors.muted,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            item.label,
-                            style: Theme.of(context).textTheme.labelSmall,
-                          ),
-                        ],
+                    child: ExcludeSemantics(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TrackStateIcon(
+                              item.glyph,
+                              color: viewModel.section == item.section
+                                  ? colors.primary
+                                  : colors.muted,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              item.label,
+                              style: Theme.of(context).textTheme.labelSmall,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -3679,18 +3825,25 @@ class _IssueDetailTabChip extends StatelessWidget {
       button: true,
       selected: selected,
       label: label,
-      child: TextButton(
-        onPressed: onPressed,
-        style: TextButton.styleFrom(
-          foregroundColor: selected ? colors.page : colors.text,
-          backgroundColor: selected ? colors.primary : colors.surfaceAlt,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(999),
-            side: BorderSide(color: selected ? colors.primary : colors.border),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onPressed,
+        child: ExcludeSemantics(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: selected ? colors.primary : colors.surfaceAlt,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: selected ? colors.primary : colors.border),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Text(
+                label,
+                style: TextStyle(color: selected ? colors.page : colors.text),
+              ),
+            ),
           ),
         ),
-        child: Text(label),
       ),
     );
   }
@@ -3755,9 +3908,15 @@ class _CommentsTab extends StatelessWidget {
 }
 
 class _AttachmentsTab extends StatelessWidget {
-  const _AttachmentsTab({required this.issue});
+  const _AttachmentsTab({
+    required this.issue,
+    required this.onDownload,
+    required this.readOnly,
+  });
 
   final TrackStateIssue issue;
+  final ValueChanged<IssueAttachment> onDownload;
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -3767,22 +3926,48 @@ class _AttachmentsTab extends StatelessWidget {
       return Text(l10n.noResults, style: TextStyle(color: colors.muted));
     }
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (readOnly) ...[
+          Semantics(
+            container: true,
+            label: l10n.attachmentsDownloadOnlyMessage,
+            child: ExcludeSemantics(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  l10n.attachmentsDownloadOnlyMessage,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: colors.muted),
+                ),
+              ),
+            ),
+          ),
+        ],
         for (final attachment in issue.attachments)
-          _AttachmentRow(attachment: attachment),
+          _AttachmentRow(attachment: attachment, onDownload: onDownload),
       ],
     );
   }
 }
 
 class _AttachmentRow extends StatelessWidget {
-  const _AttachmentRow({required this.attachment});
+  const _AttachmentRow({
+    required this.attachment,
+    required this.onDownload,
+  });
 
   final IssueAttachment attachment;
+  final ValueChanged<IssueAttachment> onDownload;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final l10n = AppLocalizations.of(context)!;
+    final downloadLabel = l10n.downloadAttachment(attachment.name);
+    final summaryLabel =
+        '${attachment.name} ${attachment.author} ${attachment.createdAt}';
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
@@ -3801,25 +3986,58 @@ class _AttachmentRow extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  attachment.name,
-                  style: Theme.of(context).textTheme.labelLarge,
+            child: Semantics(
+              container: true,
+              label: summaryLabel,
+              child: ExcludeSemantics(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      attachment.name,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    Text(
+                      '${attachment.author} · ${attachment.createdAt}',
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelSmall?.copyWith(color: colors.text),
+                    ),
+                  ],
                 ),
-                Text(
-                  '${attachment.author} · ${attachment.createdAt}',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelSmall?.copyWith(color: colors.muted),
-                ),
-              ],
+              ),
             ),
           ),
-          Text(
-            '${attachment.sizeBytes} B',
-            style: Theme.of(context).textTheme.labelSmall,
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${attachment.sizeBytes} B',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+              const SizedBox(height: 4),
+              Semantics(
+                button: true,
+                label: downloadLabel,
+                child: ExcludeSemantics(
+                  child: IconButton(
+                    onPressed: () => onDownload(attachment),
+                    tooltip: downloadLabel,
+                    iconSize: 18,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    icon: TrackStateIcon(
+                      TrackStateIconGlyph.attachment,
+                      size: 18,
+                      color: colors.text,
+                      semanticLabel: downloadLabel,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -3860,46 +4078,56 @@ class _HistoryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colors.surfaceAlt,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TrackStateIcon(
-            TrackStateIconGlyph.sync,
-            color: colors.text,
-            semanticLabel: entry.summary,
+    return Semantics(
+      container: true,
+      label: '${entry.summary} ${entry.author} ${entry.timestamp}',
+      child: ExcludeSemantics(
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: colors.surfaceAlt,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colors.border),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(entry.summary, style: Theme.of(context).textTheme.labelLarge),
-                Text(
-                  '${entry.author} · ${entry.timestamp}',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelSmall?.copyWith(color: colors.muted),
-                ),
-                if ((entry.before ?? '').isNotEmpty || (entry.after ?? '').isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      '${entry.before ?? ''} -> ${entry.after ?? ''}'.trim(),
-                      style: Theme.of(context).textTheme.bodySmall,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TrackStateIcon(
+                TrackStateIconGlyph.sync,
+                color: colors.text,
+                semanticLabel: entry.summary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      entry.summary,
+                      style: Theme.of(context).textTheme.labelLarge,
                     ),
-                  ),
-              ],
-            ),
+                    Text(
+                      '${entry.author} · ${entry.timestamp}',
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelSmall?.copyWith(color: colors.text),
+                    ),
+                    if ((entry.before ?? '').isNotEmpty ||
+                        (entry.after ?? '').isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          '${entry.before ?? ''} -> ${entry.after ?? ''}'.trim(),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -3913,36 +4141,42 @@ class _CommentBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colors.surfaceAlt,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _Avatar(name: comment.author),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  comment.author,
-                  style: Theme.of(context).textTheme.labelLarge,
+    return Semantics(
+      container: true,
+      label: '${comment.author} ${comment.body} ${comment.updatedLabel}',
+      child: ExcludeSemantics(
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: colors.surfaceAlt,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colors.border),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Avatar(name: comment.author),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      comment.author,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    Text(comment.body),
+                  ],
                 ),
-                Text(comment.body),
-              ],
-            ),
+              ),
+              Text(
+                comment.updatedLabel,
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+            ],
           ),
-          Text(
-            comment.updatedLabel,
-            style: Theme.of(context).textTheme.labelSmall,
-          ),
-        ],
+        ),
       ),
     );
   }

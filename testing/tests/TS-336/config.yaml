@@ -1,0 +1,8 @@
+test_id: TS-336
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies the open Create issue form survives a gradual desktop-to-mobile resize without RenderFlex overflow exceptions.
+  - Confirms the user-visible Create issue title, key fields, and actions remain visible throughout the transition.

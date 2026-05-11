@@ -388,6 +388,29 @@ This comment demonstrates markdown-backed collaboration history.
   );
 
   test(
+    'checked-in setup template supports TS-315 text-search terms across description and acceptance criteria only',
+    () async {
+      final repository = _mockSetupRepository(
+        files: _fixtureFilesFromDisk('trackstate-setup/DEMO'),
+      );
+
+      final descriptionResults = await repository.searchIssues(
+        'project = DEMO AND ASSIGNEES',
+      );
+      final acceptanceResults = await repository.searchIssues(
+        'project = DEMO AND accessibility',
+      );
+      final commentOnlyResults = await repository.searchIssues(
+        'project = DEMO AND markdown-backed',
+      );
+
+      expect(descriptionResults.map((issue) => issue.key), ['DEMO-2']);
+      expect(acceptanceResults.map((issue) => issue.key), ['DEMO-2']);
+      expect(commentOnlyResults, isEmpty);
+    },
+  );
+
+  test(
     'setup repository keeps compatibility with legacy display labels',
     () async {
       final repository = _mockSetupRepository(

@@ -1,0 +1,9 @@
+test_id: TS-315
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Exercises the deployed JQL Search panel against the hosted DEMO repository fixture.
+  - Verifies case-insensitive free-text matches for summary, description, and acceptance criteria.
+  - Verifies comment-only text is excluded and produces the visible "No issues" state.
