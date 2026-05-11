@@ -29,6 +29,15 @@ class GitHubAuthenticatedUser:
     display_name: str
 
 
+@dataclass(frozen=True)
+class LiveHostedIssueFixture:
+    key: str
+    path: str
+    summary: str
+    attachment_paths: list[str]
+    comment_paths: list[str]
+
+
 class LiveSetupRepositoryService:
     def __init__(
         self,
@@ -64,6 +73,27 @@ class LiveSetupRepositoryService:
             display_name=str(response.get("name", "")),
         )
 
+    def fetch_issue_fixture(self, issue_path: str) -> LiveHostedIssueFixture:
+        entries = self._read_repo_directory(issue_path)
+        issue_key = issue_path.rstrip("/").split("/")[-1]
+        main_markdown = self._read_repo_text(f"{issue_path}/main.md")
+        summary = self._front_matter_value(main_markdown, key="summary")
+        return LiveHostedIssueFixture(
+            key=issue_key,
+            path=issue_path,
+            summary=summary or issue_key,
+            attachment_paths=[
+                str(entry["path"])
+                for entry in self._read_repo_directory(f"{issue_path}/attachments")
+                if entry.get("type") == "file"
+            ],
+            comment_paths=[
+                str(entry["path"])
+                for entry in self._read_repo_directory(f"{issue_path}/comments")
+                if entry.get("type") == "file"
+            ],
+        )
+
     def _read_config_names(self, path: str) -> list[str]:
         values = self._read_repo_json(path)
         return [
@@ -71,6 +101,14 @@ class LiveSetupRepositoryService:
             for entry in values
             if isinstance(entry, dict) and str(entry.get("name", "")).strip()
         ]
+
+    def _read_repo_directory(self, path: str) -> list[dict[str, object]]:
+        response = self._read_json(
+            f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
+        )
+        if not isinstance(response, list):
+            raise RuntimeError(f"GitHub response for directory {path} was not a list.")
+        return [entry for entry in response if isinstance(entry, dict)]
 
     def _read_repo_json(self, path: str):
         response = self._read_json(
@@ -80,6 +118,30 @@ class LiveSetupRepositoryService:
         if not encoded:
             raise RuntimeError(f"GitHub response for {path} did not include content.")
         return json.loads(base64.b64decode(encoded).decode("utf-8"))
+
+    def _read_repo_text(self, path: str) -> str:
+        response = self._read_json(
+            f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
+        )
+        encoded = str(response.get("content", "")).replace("\n", "")
+        if not encoded:
+            raise RuntimeError(f"GitHub response for {path} did not include content.")
+        return base64.b64decode(encoded).decode("utf-8")
+
+    @staticmethod
+    def _front_matter_value(markdown: str, *, key: str) -> str | None:
+        in_front_matter = False
+        for raw_line in markdown.splitlines():
+            line = raw_line.strip()
+            if line == "---":
+                in_front_matter = not in_front_matter
+                continue
+            if not in_front_matter:
+                continue
+            prefix = f"{key}:"
+            if line.startswith(prefix):
+                return line.removeprefix(prefix).strip()
+        return None
 
     def _read_json(self, path: str):
         request = urllib.request.Request(
