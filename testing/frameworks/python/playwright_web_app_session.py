@@ -8,6 +8,7 @@ from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playw
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from testing.core.interfaces.web_app_session import (
+    FocusedElementObservation,
     WaitMatch,
     WaitState,
     WebAppSession,
@@ -109,6 +110,20 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out pressing key "{key}" on selector "{selector}".',
             ) from error
 
+    def press_key(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        del timeout_ms
+        try:
+            self._page.keyboard.press(key)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out pressing page key "{key}".',
+            ) from error
+
     def count(
         self,
         selector: str,
@@ -116,6 +131,23 @@ class PlaywrightWebAppSession(WebAppSession):
         has_text: str | None = None,
     ) -> int:
         return self._locator(selector, has_text=has_text).count()
+
+    def focus(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            locator.evaluate("element => element.focus()")
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out focusing selector "{selector}".',
+            ) from error
 
     def wait_for_count(
         self,
@@ -157,6 +189,23 @@ class PlaywrightWebAppSession(WebAppSession):
         except PlaywrightTimeoutError as error:
             raise WebAppTimeoutError(
                 f'Timed out reading the value for selector "{selector}".',
+            ) from error
+
+    def read_text(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            return locator.inner_text(timeout=timeout_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out reading text for selector "{selector}".',
             ) from error
 
     def body_text(self) -> str:
@@ -238,6 +287,63 @@ class PlaywrightWebAppSession(WebAppSession):
             matched_text=str(payload["matchedText"]),
             body_text=str(payload["bodyText"]),
         )
+
+    def active_element(self) -> FocusedElementObservation:
+        payload = self._page.evaluate(
+            """
+            () => {
+                const active = document.activeElement;
+                if (!active) {
+                    return {
+                        tagName: "",
+                        role: null,
+                        accessibleName: null,
+                        text: "",
+                        tabindex: null,
+                        outerHtml: "",
+                    };
+                }
+                const text = (active.textContent || "").trim();
+                const ariaLabel = active.getAttribute("aria-label");
+                return {
+                    tagName: active.tagName,
+                    role: active.getAttribute("role"),
+                    accessibleName: ariaLabel || text || null,
+                    text,
+                    tabindex: active.getAttribute("tabindex"),
+                    outerHtml: active.outerHTML.slice(0, 400),
+                };
+            }
+            """,
+        )
+        return FocusedElementObservation(
+            tag_name=str(payload["tagName"]),
+            role=str(payload["role"]) if payload["role"] is not None else None,
+            accessible_name=(
+                str(payload["accessibleName"])
+                if payload["accessibleName"] is not None
+                else None
+            ),
+            text=str(payload["text"]),
+            tabindex=str(payload["tabindex"]) if payload["tabindex"] is not None else None,
+            outer_html=str(payload["outerHtml"]),
+        )
+
+    def wait_for_download_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                self._page.keyboard.press(key)
+            download = download_info.value
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a download after pressing "{key}".',
+            ) from error
+        return download.suggested_filename
 
     def screenshot(self, path: str) -> None:
         self._page.screenshot(path=path, full_page=True)
