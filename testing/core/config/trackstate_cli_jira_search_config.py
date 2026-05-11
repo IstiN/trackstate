@@ -14,6 +14,7 @@ class TrackStateCliJiraSearchConfig:
     expected_start_at: int
     expected_max_results: int
     expected_total: int
+    expected_is_last_page: bool
 
     @classmethod
     def from_defaults(cls) -> "TrackStateCliJiraSearchConfig":
@@ -47,4 +48,5 @@ class TrackStateCliJiraSearchConfig:
             expected_start_at=0,
             expected_max_results=2,
             expected_total=2,
+            expected_is_last_page=True,
         )
