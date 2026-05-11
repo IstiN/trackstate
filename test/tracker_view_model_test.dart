@@ -400,6 +400,63 @@ void main() {
   );
 
   test(
+    'view model falls back to in-memory local edits when shared mutations are unavailable',
+    () async {
+      final initialSnapshot = await const DemoTrackStateRepository()
+          .loadSnapshot();
+      final repository = _MutableEditRepository(
+        snapshot: initialSnapshot,
+        usesLocalPersistence: true,
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+      final nextEpicKey = issue.epicKey == null ? 'TRACK-1' : null;
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: 'Local fallback summary',
+          description: 'Local fallback description.',
+          priorityId: 'high',
+          assignee: 'fresh-teammate',
+          labels: const ['local-edit', 'browser'],
+          components: const ['tracker-core'],
+          fixVersionIds: const ['mvp'],
+          parentKey: issue.parentKey,
+          epicKey: nextEpicKey,
+          transitionStatusId: 'in-review',
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(viewModel.selectedIssue?.summary, 'Local fallback summary');
+      expect(
+        viewModel.selectedIssue?.description,
+        'Local fallback description.',
+      );
+      expect(viewModel.selectedIssue?.priorityId, 'high');
+      expect(viewModel.selectedIssue?.assignee, 'fresh-teammate');
+      expect(viewModel.selectedIssue?.labels, ['local-edit', 'browser']);
+      expect(viewModel.selectedIssue?.components, ['tracker-core']);
+      expect(viewModel.selectedIssue?.fixVersionIds, ['mvp']);
+      expect(viewModel.selectedIssue?.epicKey, nextEpicKey);
+      expect(viewModel.selectedIssue?.statusId, 'in-review');
+      expect(
+        viewModel.searchResults.any(
+          (candidate) =>
+              candidate.key == 'TRACK-12' &&
+              candidate.summary == 'Local fallback summary',
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test(
     'view model falls back to legacy description saves when shared mutations are unavailable',
     () async {
       final initialSnapshot = await const DemoTrackStateRepository()

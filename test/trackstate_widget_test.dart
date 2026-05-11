@@ -222,15 +222,22 @@ void main() {
         expect(await screen.isTextFieldVisible('Summary'), isTrue);
         expect(await screen.isTextFieldVisible('Description'), isTrue);
         expect(await screen.isDropdownFieldVisible('Priority'), isTrue);
-        expect(await screen.isDropdownFieldVisible('Assignee'), isTrue);
+        expect(await screen.isTextFieldVisible('Assignee'), isTrue);
+        expect(await screen.isDropdownFieldVisible('Assignee'), isFalse);
         expect(await screen.isDropdownFieldVisible('Epic'), isTrue);
         expect(await screen.isDropdownFieldVisible('Status'), isTrue);
         await screen.expectTextVisible('Components');
         await screen.expectTextVisible('Fix versions');
 
+        await screen.enterLabeledTextField('Assignee', text: 'fresh-teammate');
         await screen.selectDropdownOption('Status', optionText: 'Done');
+        await screen.selectDropdownOption(
+          'Resolution',
+          optionText: "Won't Fix",
+        );
+        await screen.tapVisibleControl('Save');
 
-        expect(await screen.isDropdownFieldVisible('Resolution'), isTrue);
+        await screen.expectIssueDetailText('TRACK-12', 'fresh-teammate');
       } finally {
         screen.resetView();
         semantics.dispose();

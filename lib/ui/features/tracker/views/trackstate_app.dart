@@ -3845,9 +3845,9 @@ class _IssueEditDialog extends StatefulWidget {
 class _IssueEditDialogState extends State<_IssueEditDialog> {
   late final TextEditingController _summaryController;
   late final TextEditingController _descriptionController;
+  late final TextEditingController _assigneeController;
   late final TextEditingController _labelEntryController;
   late String _selectedPriorityId;
-  late String _selectedAssignee;
   late final List<String> _labels;
   late final List<String> _components;
   late final List<String> _fixVersions;
@@ -3872,9 +3872,9 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     _descriptionController = TextEditingController(
       text: widget.issue.description,
     );
+    _assigneeController = TextEditingController(text: widget.issue.assignee);
     _labelEntryController = TextEditingController();
     _selectedPriorityId = widget.issue.priorityId;
-    _selectedAssignee = widget.issue.assignee;
     _labels = [...widget.issue.labels];
     _components = [...widget.issue.components];
     _fixVersions = [...widget.issue.fixVersionIds];
@@ -3887,6 +3887,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
   void dispose() {
     _summaryController.dispose();
     _descriptionController.dispose();
+    _assigneeController.dispose();
     _labelEntryController.dispose();
     super.dispose();
   }
@@ -3924,42 +3925,6 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
             !issue.storagePath.startsWith('$currentRoot/'))
           issue,
     ]..sort((left, right) => left.key.compareTo(right.key));
-  }
-
-  List<String> _assigneeOptions() {
-    final options = <String>{};
-    for (final issue in widget.viewModel.issues) {
-      if (issue.assignee.trim().isNotEmpty) {
-        options.add(issue.assignee.trim());
-      }
-      if (issue.reporter.trim().isNotEmpty) {
-        options.add(issue.reporter.trim());
-      }
-      for (final watcher in issue.watchers) {
-        if (watcher.trim().isNotEmpty) {
-          options.add(watcher.trim());
-        }
-      }
-    }
-    final connectedLogin = widget.viewModel.connectedUser?.login.trim();
-    if (connectedLogin != null && connectedLogin.isNotEmpty) {
-      options.add(connectedLogin);
-    }
-    final providerIdentity = widget
-        .viewModel
-        .providerSession
-        ?.resolvedUserIdentity
-        .trim();
-    if (providerIdentity != null && providerIdentity.isNotEmpty) {
-      options.add(providerIdentity);
-    }
-    final sorted = options.toList()..sort();
-    if (widget.issue.assignee.trim().isNotEmpty &&
-        !sorted.contains(widget.issue.assignee.trim())) {
-      sorted.add(widget.issue.assignee.trim());
-      sorted.sort();
-    }
-    return sorted;
   }
 
   void _commitLabels({bool commitRemainder = false}) {
@@ -4080,7 +4045,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
         summary: _summaryController.text,
         description: _descriptionController.text,
         priorityId: _selectedPriorityId,
-        assignee: _selectedAssignee,
+        assignee: _assigneeController.text,
         labels: _labels,
         components: _components,
         fixVersionIds: _fixVersions,
@@ -4159,7 +4124,6 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
     final epicOptions = _epicOptions(widget.viewModel);
     final priorityOptions =
         project?.priorityDefinitions ?? const <TrackStateConfigEntry>[];
-    final assigneeOptions = _assigneeOptions();
     final componentOptions =
         project?.componentDefinitions ?? const <TrackStateConfigEntry>[];
     final versionOptions =
@@ -4355,28 +4319,17 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                 },
                               ),
                               const SizedBox(height: 12),
-                              _DropdownCreateField(
+                              Semantics(
                                 label: assigneeLabel,
-                                value: _selectedAssignee.isEmpty
-                                    ? ''
-                                    : _selectedAssignee,
-                                enabled: canEditFields,
-                                items: [
-                                  DropdownMenuItem<String>(
-                                    value: '',
-                                    child: Text(l10n.unassigned),
+                                textField: true,
+                                child: TextField(
+                                  controller: _assigneeController,
+                                  enabled: canEditFields,
+                                  decoration: InputDecoration(
+                                    labelText: assigneeLabel,
+                                    hintText: l10n.unassigned,
                                   ),
-                                  for (final option in assigneeOptions)
-                                    DropdownMenuItem<String>(
-                                      value: option,
-                                      child: Text(option),
-                                    ),
-                                ],
-                                onChanged: (value) {
-                                  setState(() {
-                                    _selectedAssignee = value ?? '';
-                                  });
-                                },
+                                ),
                               ),
                               const SizedBox(height: 12),
                               _LabelTokenField(

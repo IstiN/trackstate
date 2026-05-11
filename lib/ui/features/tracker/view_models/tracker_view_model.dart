@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../../data/providers/trackstate_provider.dart';
 import '../../../../data/repositories/trackstate_repository.dart';
 import '../../../../data/services/issue_mutation_service.dart';
+import '../../../../data/services/jql_search_service.dart';
 import '../../../../data/services/trackstate_auth_store.dart';
 import '../../../../domain/models/issue_mutation_models.dart';
 import '../../../../domain/models/trackstate_models.dart';
@@ -220,6 +221,8 @@ class IssueEditRequest {
   final String? transitionStatusId;
   final String? resolutionId;
 }
+
+const Object _unsetIssueEditValue = Object();
 
 class TrackerViewModel extends ChangeNotifier {
   static const int _searchPageSize = 6;
@@ -823,6 +826,7 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       TrackStateIssue saved = currentIssue;
       var shouldUseLegacyFallback = false;
+      var usedInMemoryLocalFallback = false;
       if (fields.isNotEmpty) {
         final updateResult = await _issueMutationService.updateFields(
           issueKey: currentIssue.key,
@@ -897,17 +901,38 @@ class TrackerViewModel extends ChangeNotifier {
           currentIssue,
           _issueStatusFromConfigId(normalizedTransitionStatusId!),
         );
+      } else if (shouldUseLegacyFallback && usesLocalPersistence) {
+        saved = _applyInMemoryLocalIssueEdits(
+          snapshot: snapshot,
+          currentIssue: currentIssue,
+          summary: normalizedSummary,
+          description: normalizedDescription,
+          priorityId: request.priorityId,
+          assignee: normalizedAssignee,
+          labels: normalizedLabels,
+          components: normalizedComponents,
+          fixVersionIds: normalizedFixVersions,
+          parentKey: normalizedParentKey,
+          epicKey: normalizedEpicKey,
+          transitionStatusId: normalizedTransitionStatusId,
+          resolutionId: normalizedResolutionId,
+        );
+        usedInMemoryLocalFallback = true;
       } else if (shouldUseLegacyFallback) {
         throw const TrackStateRepositoryException(
           'This repository implementation does not expose shared mutations.',
         );
       }
-      _snapshot = await _repository.loadSnapshot();
+      if (!usedInMemoryLocalFallback) {
+        _snapshot = await _repository.loadSnapshot();
+      }
       _selectedIssue = _snapshot!.issues.firstWhere(
         (current) => current.key == saved.key,
         orElse: () => saved,
       );
-      await _refreshSearchResultsAfterMutation();
+      await _refreshSearchResultsAfterMutation(
+        preferLoadedSnapshot: usedInMemoryLocalFallback,
+      );
       return true;
     } on Object catch (error) {
       _message = TrackerMessage.issueSaveFailed(error);
@@ -951,6 +976,100 @@ class TrackerViewModel extends ChangeNotifier {
     }
     return _canonicalConfigId(transitionStatusId) !=
         _canonicalConfigId(currentIssue.statusId);
+  }
+
+  TrackStateIssue _applyInMemoryLocalIssueEdits({
+    required TrackerSnapshot snapshot,
+    required TrackStateIssue currentIssue,
+    required String summary,
+    required String description,
+    required String priorityId,
+    required String? assignee,
+    required List<String> labels,
+    required List<String> components,
+    required List<String> fixVersionIds,
+    required String? parentKey,
+    required String? epicKey,
+    required String? transitionStatusId,
+    required String? resolutionId,
+  }) {
+    final issueByKey = {
+      for (final candidate in snapshot.issues) candidate.key: candidate,
+    };
+    final movedIssueStoragePath = _localIssueStoragePath(
+      issueKey: currentIssue.key,
+      projectKey: currentIssue.project,
+      issueTypeId: currentIssue.issueTypeId,
+      parentIssue: parentKey == null ? null : issueByKey[parentKey],
+      epicIssue: epicKey == null ? null : issueByKey[epicKey],
+    );
+    final nextIssue = _copyIssueForLocalEdit(
+      currentIssue,
+      summary: summary,
+      description: description,
+      priorityId: priorityId.trim().isEmpty
+          ? currentIssue.priorityId
+          : priorityId,
+      assignee: assignee ?? '',
+      labels: labels,
+      components: components,
+      fixVersionIds: fixVersionIds,
+      parentKey: parentKey,
+      epicKey: epicKey,
+      status: transitionStatusId == null
+          ? currentIssue.status
+          : _issueStatusFromConfigId(transitionStatusId),
+      statusId: transitionStatusId ?? currentIssue.statusId,
+      resolutionId: transitionStatusId == null
+          ? currentIssue.resolutionId
+          : resolutionId,
+      storagePath: movedIssueStoragePath,
+    );
+    final previousRoot = _issueRoot(currentIssue.storagePath);
+    final nextRoot = _issueRoot(movedIssueStoragePath);
+    final descendantEpicKey = currentIssue.isEpic ? currentIssue.key : epicKey;
+    final provisionalIssues = [
+      for (final candidate in snapshot.issues)
+        if (candidate.key == currentIssue.key)
+          nextIssue
+        else if (candidate.storagePath.startsWith('$previousRoot/'))
+          _copyIssueForLocalEdit(
+            candidate,
+            epicKey: descendantEpicKey,
+            storagePath: candidate.storagePath.replaceFirst(
+              '$previousRoot/',
+              '$nextRoot/',
+            ),
+          )
+        else
+          candidate,
+    ];
+    final pathByKey = {
+      for (final candidate in provisionalIssues)
+        candidate.key: candidate.storagePath,
+    };
+    final nextIssues = [
+      for (final candidate in provisionalIssues)
+        _copyIssueForLocalEdit(
+          candidate,
+          parentPath: candidate.parentKey == null
+              ? null
+              : pathByKey[candidate.parentKey!],
+          epicPath: candidate.epicKey == null
+              ? null
+              : pathByKey[candidate.epicKey!],
+        ),
+    ];
+    _snapshot = TrackerSnapshot(
+      project: snapshot.project,
+      issues: nextIssues,
+      repositoryIndex: snapshot.repositoryIndex,
+      loadWarnings: snapshot.loadWarnings,
+    );
+    return nextIssues.firstWhere(
+      (candidate) => candidate.key == currentIssue.key,
+      orElse: () => nextIssue,
+    );
   }
 
   IssueStatus _issueStatusFromConfigId(String statusId) {
@@ -1010,7 +1129,13 @@ class TrackerViewModel extends ChangeNotifier {
     _selectedIssue ??= _searchResults.first;
   }
 
-  Future<void> _refreshSearchResultsAfterMutation() async {
+  Future<void> _refreshSearchResultsAfterMutation({
+    bool preferLoadedSnapshot = false,
+  }) async {
+    if (preferLoadedSnapshot && _snapshot != null) {
+      _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+      return;
+    }
     try {
       final searchPage = await _repository.searchIssuePage(
         _jql,
@@ -1020,8 +1145,23 @@ class TrackerViewModel extends ChangeNotifier {
       );
       _applySearchPage(searchPage);
     } on Object catch (_) {
+      if (preferLoadedSnapshot && _snapshot != null) {
+        _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+      }
       // Keep the existing search results when a background refresh fails.
     }
+  }
+
+  void _refreshSearchResultsFromLoadedSnapshot(TrackerSnapshot snapshot) {
+    final searchPage = const JqlSearchService().search(
+      issues: snapshot.issues,
+      project: snapshot.project,
+      jql: _jql,
+      maxResults: _searchResults.isEmpty
+          ? _searchPageSize
+          : _searchResults.length,
+    );
+    _applySearchPage(searchPage);
   }
 
   Future<bool> postIssueComment(TrackStateIssue issue, String body) async {
@@ -1216,3 +1356,112 @@ const _githubAppClientId = String.fromEnvironment(
 const _githubAuthProxyUrl = String.fromEnvironment(
   'TRACKSTATE_GITHUB_AUTH_PROXY_URL',
 );
+
+TrackStateIssue _copyIssueForLocalEdit(
+  TrackStateIssue issue, {
+  String? summary,
+  String? description,
+  String? priorityId,
+  String? assignee,
+  List<String>? labels,
+  List<String>? components,
+  List<String>? fixVersionIds,
+  IssueStatus? status,
+  String? statusId,
+  String? storagePath,
+  Object? parentKey = _unsetIssueEditValue,
+  Object? epicKey = _unsetIssueEditValue,
+  Object? parentPath = _unsetIssueEditValue,
+  Object? epicPath = _unsetIssueEditValue,
+  Object? resolutionId = _unsetIssueEditValue,
+}) {
+  final nextPriorityId = priorityId ?? issue.priorityId;
+  return TrackStateIssue(
+    key: issue.key,
+    project: issue.project,
+    issueType: issue.issueType,
+    issueTypeId: issue.issueTypeId,
+    status: status ?? issue.status,
+    statusId: statusId ?? issue.statusId,
+    priority: switch (_canonicalIssuePriorityId(nextPriorityId)) {
+      'highest' => IssuePriority.highest,
+      'high' => IssuePriority.high,
+      'low' => IssuePriority.low,
+      _ => IssuePriority.medium,
+    },
+    priorityId: nextPriorityId,
+    summary: summary ?? issue.summary,
+    description: description ?? issue.description,
+    assignee: assignee ?? issue.assignee,
+    reporter: issue.reporter,
+    labels: labels ?? issue.labels,
+    components: components ?? issue.components,
+    fixVersionIds: fixVersionIds ?? issue.fixVersionIds,
+    watchers: issue.watchers,
+    customFields: issue.customFields,
+    parentKey: identical(parentKey, _unsetIssueEditValue)
+        ? issue.parentKey
+        : parentKey as String?,
+    epicKey: identical(epicKey, _unsetIssueEditValue)
+        ? issue.epicKey
+        : epicKey as String?,
+    parentPath: identical(parentPath, _unsetIssueEditValue)
+        ? issue.parentPath
+        : parentPath as String?,
+    epicPath: identical(epicPath, _unsetIssueEditValue)
+        ? issue.epicPath
+        : epicPath as String?,
+    progress: issue.progress,
+    updatedLabel: 'just now',
+    acceptanceCriteria: issue.acceptanceCriteria,
+    comments: issue.comments,
+    links: issue.links,
+    attachments: issue.attachments,
+    isArchived: issue.isArchived,
+    resolutionId: identical(resolutionId, _unsetIssueEditValue)
+        ? issue.resolutionId
+        : resolutionId as String?,
+    storagePath: storagePath ?? issue.storagePath,
+    rawMarkdown: issue.rawMarkdown,
+  );
+}
+
+String _localIssueStoragePath({
+  required String issueKey,
+  required String projectKey,
+  required String issueTypeId,
+  required TrackStateIssue? parentIssue,
+  required TrackStateIssue? epicIssue,
+}) {
+  if (_canonicalIssueTypeId(issueTypeId) == 'epic') {
+    return '$projectKey/$issueKey/main.md';
+  }
+  if (parentIssue != null) {
+    return '${_issueRoot(parentIssue.storagePath)}/$issueKey/main.md';
+  }
+  if (epicIssue != null) {
+    return '${_issueRoot(epicIssue.storagePath)}/$issueKey/main.md';
+  }
+  return '$projectKey/$issueKey/main.md';
+}
+
+String _issueRoot(String storagePath) =>
+    storagePath.substring(0, storagePath.lastIndexOf('/'));
+
+String _canonicalIssueTypeId(String? value) {
+  final normalized = (value ?? '').trim().toLowerCase();
+  return normalized
+      .replaceAll('&', 'and')
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'-+'), '-')
+      .replaceAll(RegExp(r'^-|-$'), '');
+}
+
+String _canonicalIssuePriorityId(String? value) {
+  final normalized = (value ?? '').trim().toLowerCase();
+  return normalized
+      .replaceAll('&', 'and')
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'-+'), '-')
+      .replaceAll(RegExp(r'^-|-$'), '');
+}
