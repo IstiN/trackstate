@@ -9,6 +9,7 @@ import '../trackstate_provider.dart';
 class GitHubTrackStateProvider
     implements
         TrackStateProviderAdapter,
+        RepositoryUserLookup,
         RepositoryFileMutator,
         RepositoryHistoryReader {
   GitHubTrackStateProvider({
@@ -66,6 +67,24 @@ class GitHubTrackStateProvider
     return RepositoryUser(
       login: userJson['login']?.toString() ?? 'github',
       displayName: userJson['name']?.toString() ?? '',
+      accountId: userJson['id']?.toString(),
+      emailAddress: userJson['email']?.toString(),
+      active: true,
+    );
+  }
+
+  @override
+  Future<RepositoryUser> lookupUserByLogin(String login) async {
+    final connection = _requireConnection();
+    final userJson =
+        await _getGitHubJson('/users/$login', token: connection.token)
+            as Map<String, Object?>;
+    return RepositoryUser(
+      login: userJson['login']?.toString() ?? login,
+      displayName: userJson['name']?.toString() ?? '',
+      accountId: userJson['id']?.toString(),
+      emailAddress: userJson['email']?.toString(),
+      active: userJson['suspended_at'] == null,
     );
   }
 

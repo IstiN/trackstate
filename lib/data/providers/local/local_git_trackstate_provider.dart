@@ -38,7 +38,13 @@ class LocalGitTrackStateProvider
     }
     final name = await _gitConfigValue('user.name');
     final email = await _gitConfigValue('user.email');
-    return RepositoryUser(login: email, displayName: name.ifEmpty(email));
+    return RepositoryUser(
+      login: email,
+      displayName: name.ifEmpty(email),
+      accountId: email.ifEmpty(name),
+      emailAddress: email.isEmpty ? null : email,
+      active: true,
+    );
   }
 
   @override
@@ -531,7 +537,10 @@ _LfsPointerInfo? _parseLfsPointer(String content) {
     r'^oid sha256:([a-f0-9]+)$',
     multiLine: true,
   ).firstMatch(content);
-  final sizeMatch = RegExp(r'^size (\d+)$', multiLine: true).firstMatch(content);
+  final sizeMatch = RegExp(
+    r'^size (\d+)$',
+    multiLine: true,
+  ).firstMatch(content);
   return _LfsPointerInfo(
     oid: oidMatch?.group(1),
     sizeBytes: int.tryParse(sizeMatch?.group(1) ?? ''),
