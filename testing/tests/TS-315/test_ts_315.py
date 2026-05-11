@@ -184,7 +184,7 @@ def main() -> None:
             status="passed",
             action=(
                 f"Search for the uppercase comment-only term '{COMMENT_QUERY}' "
-                'and verify the panel shows "No results".'
+                'and verify the panel shows "No issues".'
             ),
             observed=comment_observation.body_text,
         )

@@ -68,9 +68,13 @@ class LiveJqlSearchPage:
         return self.search(query=query)
 
     def search(self, *, query: str) -> LiveJqlSearchObservation:
-        field_selector = self._submit_query(query)
+        field_selector, field_index = self._submit_query(query)
         self._wait_for_count_summary()
-        return self._observe(query=query, field_selector=field_selector)
+        return self._observe(
+            query=query,
+            field_selector=field_selector,
+            field_index=field_index,
+        )
 
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
@@ -78,33 +82,43 @@ class LiveJqlSearchPage:
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
 
-    def _submit_query(self, query: str) -> str:
+    def _submit_query(self, query: str) -> tuple[str, int]:
         self.open()
-        field_selector = self._wait_for_search_field()
-        self._session.fill(field_selector, query, timeout_ms=30_000)
-        self._session.press(field_selector, "Enter", timeout_ms=30_000)
-        return field_selector
+        field_selector, field_index = self._wait_for_search_field()
+        self._session.fill(field_selector, query, index=field_index, timeout_ms=30_000)
+        self._session.press(
+            field_selector,
+            "Enter",
+            index=field_index,
+            timeout_ms=30_000,
+        )
+        return field_selector, field_index
 
     def _observe(
         self,
         *,
         query: str,
         field_selector: str,
+        field_index: int,
     ) -> LiveJqlSearchObservation:
         body_text = self.current_body_text()
         return LiveJqlSearchObservation(
             query=query,
-            visible_query=self._session.read_value(field_selector, timeout_ms=30_000),
+            visible_query=self._session.read_value(
+                field_selector,
+                index=field_index,
+                timeout_ms=30_000,
+            ),
             body_text=body_text,
             count_summary=self._count_summary(body_text),
         )
 
-    def _wait_for_search_field(self) -> str:
+    def _wait_for_search_field(self) -> tuple[str, int]:
         errors: list[str] = []
         for selector in self._search_field_candidates:
             try:
                 self._session.wait_for_selector(selector, timeout_ms=10_000)
-                return selector
+                return selector, max(self._session.count(selector) - 1, 0)
             except WebAppTimeoutError as error:
                 errors.append(str(error))
         raise AssertionError(

@@ -115,7 +115,7 @@ class PlaywrightWebAppSession(WebAppSession):
         *,
         has_text: str | None = None,
     ) -> int:
-        return self._locator(selector, has_text=has_text).count()
+        return self._page.locator(selector, has_text=has_text).count()
 
     def wait_for_count(
         self,
