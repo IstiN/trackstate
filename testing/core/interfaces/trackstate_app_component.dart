@@ -1,6 +1,9 @@
+import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 
 abstract interface class TrackStateAppComponent {
+  Finder get goldenTarget;
+
   Future<void> pump(TrackStateRepository repository);
 
   Future<void> pumpLocalGitApp({

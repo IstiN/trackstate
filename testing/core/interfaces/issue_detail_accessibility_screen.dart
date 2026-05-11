@@ -10,6 +10,10 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
 
   Future<void> selectCollaborationTab(String issueKey, String label);
 
+  Future<List<String>> collectForwardCollaborationTabFocusOrder(
+    String issueKey,
+  );
+
   bool showsIssueDetail(String issueKey);
 
   List<String> visibleTextsWithinIssueDetail(String issueKey);

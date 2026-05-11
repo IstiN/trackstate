@@ -8,6 +8,7 @@ import tempfile
 
 from testing.core.config.trackstate_cli_jira_search_config import (
     TrackStateCliJiraSearchConfig,
+    TrackStateCliJiraSearchFixtureIssue,
 )
 from testing.core.interfaces.trackstate_cli_jira_search_probe import (
     TrackStateCliJiraSearchProbe,
@@ -33,7 +34,7 @@ class PythonTrackStateCliJiraSearchFramework(TrackStateCliJiraSearchProbe):
             self._compile_executable(executable_path)
             with tempfile.TemporaryDirectory(prefix="trackstate-ts-319-repo-") as temp_dir:
                 repository_path = Path(temp_dir)
-                self._seed_local_repository(repository_path)
+                self._seed_local_repository(repository_path, config=config)
                 fallback_reason = (
                     "Pinned execution to a temporary executable compiled from this "
                     "checkout so TS-319 can run the exact ticket command from the "
@@ -131,7 +132,12 @@ class PythonTrackStateCliJiraSearchFramework(TrackStateCliJiraSearchProbe):
         except json.JSONDecodeError:
             return None
 
-    def _seed_local_repository(self, repository_path: Path) -> None:
+    def _seed_local_repository(
+        self,
+        repository_path: Path,
+        *,
+        config: TrackStateCliJiraSearchConfig,
+    ) -> None:
         repository_path.mkdir(parents=True, exist_ok=True)
         self._write_file(
             repository_path / "TRACK/project.json",
@@ -149,42 +155,8 @@ class PythonTrackStateCliJiraSearchFramework(TrackStateCliJiraSearchProbe):
             repository_path / "TRACK/config/fields.json",
             '[{"id":"summary","name":"Summary","type":"string","required":true}]\n',
         )
-        self._write_file(
-            repository_path / "TRACK/TRACK-1/main.md",
-            """---
-key: TRACK-1
-project: TRACK
-issueType: story
-status: todo
-summary: "Issue 1"
-assignee: user1
-reporter: user1
-updated: 2026-05-10T00:00:00Z
----
-
-# Description
-
-Issue 1.
-""",
-        )
-        self._write_file(
-            repository_path / "TRACK/TRACK-2/main.md",
-            """---
-key: TRACK-2
-project: TRACK
-issueType: story
-status: todo
-summary: "Issue 2"
-assignee: user2
-reporter: user2
-updated: 2026-05-10T00:00:00Z
----
-
-# Description
-
-Issue 2.
-""",
-        )
+        for issue in config.fixture_issues:
+            self._seed_issue(repository_path, issue)
         self._git(repository_path, "init", "-b", "main")
         self._git(repository_path, "config", "--local", "user.name", "TS-319 Tester")
         self._git(
@@ -196,6 +168,30 @@ Issue 2.
         )
         self._git(repository_path, "add", ".")
         self._git(repository_path, "commit", "-m", "Seed TS-319 fixture")
+
+    def _seed_issue(
+        self,
+        repository_path: Path,
+        issue: TrackStateCliJiraSearchFixtureIssue,
+    ) -> None:
+        self._write_file(
+            repository_path / "TRACK" / issue.key / "main.md",
+            f"""---
+key: {issue.key}
+project: TRACK
+issueType: {issue.issue_type}
+status: {issue.status}
+summary: "{issue.summary}"
+assignee: {issue.assignee}
+reporter: {issue.reporter}
+updated: {issue.updated}
+---
+
+# Description
+
+{issue.issue_description}
+""",
+        )
 
     @staticmethod
     def _write_file(path: Path, content: str) -> None:

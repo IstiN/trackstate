@@ -4,11 +4,12 @@ from contextlib import AbstractContextManager
 import json
 from typing import Sequence
 
-from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from testing.core.interfaces.web_app_session import (
     ElementBoundingBox,
+    FocusedElementObservation,
     WaitMatch,
     WaitState,
     WebAppSession,
@@ -110,13 +111,27 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out pressing key "{key}" on selector "{selector}".',
             ) from error
 
+    def press_key(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        del timeout_ms
+        try:
+            self._page.keyboard.press(key)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out pressing page key "{key}".',
+            ) from error
+
     def count(
         self,
         selector: str,
         *,
         has_text: str | None = None,
     ) -> int:
-        return self._locator(selector, has_text=has_text).count()
+        return self._page.locator(selector, has_text=has_text).count()
 
     def wait_for_count(
         self,
@@ -158,6 +173,40 @@ class PlaywrightWebAppSession(WebAppSession):
         except PlaywrightTimeoutError as error:
             raise WebAppTimeoutError(
                 f'Timed out reading the value for selector "{selector}".',
+            ) from error
+
+    def focus(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            locator.evaluate("element => element.focus()")
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out focusing selector "{selector}".',
+            ) from error
+
+    def read_text(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            return locator.inner_text(timeout=timeout_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out reading text for selector "{selector}".',
             ) from error
 
     def body_text(self) -> str:
@@ -257,6 +306,90 @@ class PlaywrightWebAppSession(WebAppSession):
             matched_text=str(payload["matchedText"]),
             body_text=str(payload["bodyText"]),
         )
+
+    def evaluate(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+    ) -> object:
+        return self._page.evaluate(expression, arg)
+
+    def wait_for_function(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+        timeout_ms: int = 30_000,
+    ) -> object:
+        try:
+            wait_handle = self._page.wait_for_function(
+                expression,
+                arg=arg,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                "Timed out waiting for the page to satisfy a function condition.",
+            ) from error
+        return wait_handle.json_value()
+
+    def active_element(self) -> FocusedElementObservation:
+        payload = self._page.evaluate(
+            """
+            () => {
+                const active = document.activeElement;
+                if (!active) {
+                    return {
+                        tagName: "",
+                        role: null,
+                        accessibleName: null,
+                        text: "",
+                        tabindex: null,
+                        outerHtml: "",
+                    };
+                }
+                const text = (active.textContent || "").trim();
+                const ariaLabel = active.getAttribute("aria-label");
+                return {
+                    tagName: active.tagName,
+                    role: active.getAttribute("role"),
+                    accessibleName: ariaLabel || text || null,
+                    text,
+                    tabindex: active.getAttribute("tabindex"),
+                    outerHtml: active.outerHTML.slice(0, 400),
+                };
+            }
+            """,
+        )
+        return FocusedElementObservation(
+            tag_name=str(payload["tagName"]),
+            role=str(payload["role"]) if payload["role"] is not None else None,
+            accessible_name=(
+                str(payload["accessibleName"])
+                if payload["accessibleName"] is not None
+                else None
+            ),
+            text=str(payload["text"]),
+            tabindex=str(payload["tabindex"]) if payload["tabindex"] is not None else None,
+            outer_html=str(payload["outerHtml"]),
+        )
+
+    def wait_for_download_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                self._page.keyboard.press(key)
+            download = download_info.value
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a download after pressing "{key}".',
+            ) from error
+        return download.suggested_filename
 
     def screenshot(self, path: str) -> None:
         self._page.screenshot(path=path, full_page=True)
@@ -385,15 +518,7 @@ class PlaywrightStoredTokenWebAppRuntime(
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=True)
         self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
-        self._context.route(
-            "https://api.github.com/**",
-            lambda route: route.continue_(
-                headers={
-                    **route.request.headers,
-                    "Authorization": f"Bearer {self._token}",
-                },
-            ),
-        )
+        self._context.route("https://api.github.com/**", self._handle_github_api_route)
         storage_key = self._repository.replace("/", ".")
         self._context.add_init_script(
             script=(
@@ -412,6 +537,18 @@ class PlaywrightStoredTokenWebAppRuntime(
         )
         self._page = self._context.new_page()
         return PlaywrightWebAppSession(self._page)
+
+    def _handle_github_api_route(self, route: Route) -> None:
+        self._continue_github_api_route(route)
+
+    def _continue_github_api_route(self, route: Route) -> None:
+        route.continue_(headers=self._authorized_github_headers(route.request.headers))
+
+    def _authorized_github_headers(self, headers: dict[str, str]) -> dict[str, str]:
+        return {
+            **headers,
+            "Authorization": f"Bearer {self._token}",
+        }
 
     def __exit__(self, exc_type, exc, exc_tb) -> None:
         if self._context is not None:

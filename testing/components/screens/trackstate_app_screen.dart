@@ -15,8 +15,15 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     required LocalGitRepositoryPort repositoryService,
   }) : _repositoryService = repositoryService;
 
+  static const ValueKey<String> _goldenTargetKey = ValueKey<String>(
+    'trackstate-app-golden-target',
+  );
+
   final WidgetTester tester;
   final LocalGitRepositoryPort _repositoryService;
+
+  @override
+  Finder get goldenTarget => find.byKey(_goldenTargetKey);
 
   Finder get repositoryAccessButton =>
       find.bySemanticsLabel(RegExp(r'^(Local Git|Connect GitHub|Connected)$'));
@@ -151,14 +158,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     });
 
     await tester.pumpWidget(
-      TrackStateApp(
-        key: UniqueKey(),
-        repository: repository,
-        openLocalRepository:
-            ({required String repositoryPath, required String writeBranch}) =>
-                _repositoryService.openRepository(
-                  repositoryPath: repositoryPath,
-                ),
+      KeyedSubtree(
+        key: _goldenTargetKey,
+        child: TrackStateApp(
+          key: UniqueKey(),
+          repository: repository,
+          openLocalRepository:
+              ({required String repositoryPath, required String writeBranch}) =>
+                  _repositoryService.openRepository(
+                    repositoryPath: repositoryPath,
+                  ),
+        ),
       ),
     );
     await _pumpFrames();
