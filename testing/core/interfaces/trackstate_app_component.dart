@@ -122,6 +122,12 @@ abstract interface class TrackStateAppComponent {
 
   Future<bool> tapTopBarControl(String label);
 
+  Future<bool> isDialogTextVisible(String text);
+
+  List<String> visibleDialogTextsSnapshot();
+
+  Future<bool> tapDialogControl(String label);
+
   Future<bool> isTextFieldVisible(String label);
 
   Future<int> countLabeledTextFields(String label);
