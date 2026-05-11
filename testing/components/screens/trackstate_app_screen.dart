@@ -692,6 +692,51 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<List<String>> readDropdownOptions(String label) async {
+    await tester.pump();
+    final field = _labeledDropdownField(label);
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible dropdown field labeled "$label", but no matching '
+        'control was rendered.',
+      );
+    }
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    final dropdownRoute = find.byWidgetPredicate(
+      (widget) => widget.runtimeType.toString().contains('_DropdownRoutePage'),
+      description: 'open dropdown route',
+    );
+    if (dropdownRoute.evaluate().isEmpty) {
+      fail(
+        'Expected the "$label" dropdown to open its option menu, but no '
+        'dropdown route was rendered.',
+      );
+    }
+
+    final optionTexts = <String>[];
+    for (final widget in tester.widgetList<Text>(
+      find.descendant(of: dropdownRoute.first, matching: find.byType(Text)),
+    )) {
+      final optionText =
+          widget.data?.trim() ?? widget.textSpan?.toPlainText().trim();
+      if (optionText == null ||
+          optionText.isEmpty ||
+          optionTexts.contains(optionText)) {
+        continue;
+      }
+      optionTexts.add(optionText);
+    }
+
+    await tester.tapAt(const Offset(1, 1));
+    await tester.pumpAndSettle();
+
+    return optionTexts;
+  }
+
+  @override
   Future<void> selectDropdownOption(
     String label, {
     required String optionText,
