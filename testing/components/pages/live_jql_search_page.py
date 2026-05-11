@@ -92,6 +92,10 @@ class LiveJqlSearchPage:
     ) -> LiveJqlSearchObservation:
         self.open()
         field_selector = self._wait_for_search_field()
+        self._establish_distinct_pre_submit_state(
+            field_selector=field_selector,
+            expected_count_summaries=expected_count_summaries,
+        )
         self._session.fill(field_selector, query, timeout_ms=30_000)
         self._session.press(field_selector, "Enter", timeout_ms=30_000)
         return self._wait_for_submitted_result(
@@ -196,10 +200,7 @@ class LiveJqlSearchPage:
                     if (!field || !("value" in field)) {
                         return null;
                     }
-                    const activeElement = document.activeElement;
-                    const queryWasSubmitted =
-                        field.value === submittedQuery && activeElement !== field;
-                    if (!queryWasSubmitted) {
+                    if (field.value !== submittedQuery) {
                         return null;
                     }
                     const bodyText = document.body?.innerText ?? "";
@@ -245,6 +246,63 @@ class LiveJqlSearchPage:
                 f"Latest body text:\n{latest_observation.body_text}",
             ) from error
         return self._observe(query=query, field_selector=field_selector)
+
+    def _establish_distinct_pre_submit_state(
+        self,
+        *,
+        field_selector: str,
+        expected_count_summaries: tuple[str, ...] | None,
+    ) -> None:
+        if expected_count_summaries is None:
+            return
+        current_summary = self._count_summary(self.current_body_text())
+        if current_summary not in expected_count_summaries:
+            return
+
+        sync_query = self._synchronization_query(expected_count_summaries)
+        self._session.fill(field_selector, sync_query, timeout_ms=30_000)
+        self._session.press(field_selector, "Enter", timeout_ms=30_000)
+        self._wait_for_non_matching_count_summary(
+            excluded_count_summaries=expected_count_summaries,
+        )
+
+    def _wait_for_non_matching_count_summary(
+        self,
+        *,
+        excluded_count_summaries: tuple[str, ...],
+    ) -> None:
+        try:
+            self._session.wait_for_function(
+                """
+                (excludedCountSummaries) => {
+                    const bodyText = document.body?.innerText ?? "";
+                    const countMatch = bodyText.match(/\\b(?:No issues|\\d+ issues?)\\b/);
+                    if (!countMatch) {
+                        return null;
+                    }
+                    const countSummary = countMatch[0];
+                    return excludedCountSummaries.includes(countSummary)
+                        ? null
+                        : { countSummary, bodyText };
+                }
+                """,
+                arg=list(excluded_count_summaries),
+                timeout_ms=60_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 4 failed: the live JQL Search panel never reached a synchronization "
+                "state that was distinct from the target count summary before the final "
+                "query was submitted.\n"
+                f"Target summaries: {excluded_count_summaries}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+
+    @staticmethod
+    def _synchronization_query(expected_count_summaries: tuple[str, ...]) -> str:
+        if "No issues" in expected_count_summaries:
+            return ""
+        return "__ts327_sync_no_match__"
 
     @staticmethod
     def _count_summary(body_text: str) -> str | None:

@@ -39,7 +39,8 @@ and only the matching issues remain visible to the user after the submitted
 query completes.
 
 Fail: The hosted JQL Search results do not match the live Discovery audit, or
-the submitted query never reaches a post-submit state for the submitted value.
+the submitted query never reaches a verified post-submit state for the
+submitted value.
 If the seeded Discovery coverage is missing but the UI matches the live corpus,
 treat that as a precondition failure rather than a search regression.
 ```
