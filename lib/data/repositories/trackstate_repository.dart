@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -36,6 +37,14 @@ abstract interface class TrackStateRepository {
     TrackStateIssue issue,
     IssueStatus status,
   );
+  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body);
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  });
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment);
+  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue);
 }
 
 class ProviderBackedTrackStateRepository implements TrackStateRepository {
@@ -46,6 +55,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         isAdmin: false,
         canCreateBranch: false,
         canManageAttachments: false,
+        attachmentUploadMode: AttachmentUploadMode.none,
         canCheckCollaborators: false,
       );
 
@@ -61,11 +71,12 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
          connectionState: ProviderConnectionState.disconnected,
          resolvedUserIdentity: provider.repositoryLabel,
          canRead: _restrictedPermission.canRead,
-         canWrite: _restrictedPermission.canWrite,
-         canCreateBranch: _restrictedPermission.canCreateBranch,
-         canManageAttachments: _restrictedPermission.canManageAttachments,
-         canCheckCollaborators: _restrictedPermission.canCheckCollaborators,
-       );
+          canWrite: _restrictedPermission.canWrite,
+          canCreateBranch: _restrictedPermission.canCreateBranch,
+          canManageAttachments: _restrictedPermission.canManageAttachments,
+          attachmentUploadMode: _restrictedPermission.attachmentUploadMode,
+          canCheckCollaborators: _restrictedPermission.canCheckCollaborators,
+        );
 
   final TrackStateProviderAdapter _provider;
   final JqlSearchService _searchService;
@@ -370,6 +381,191 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     );
     _replaceCachedIssue(updatedIssue);
     return updatedIssue;
+  }
+
+  @override
+  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) async {
+    if (issue.storagePath.isEmpty) {
+      throw const TrackStateRepositoryException(
+        'This issue has no repository file path and cannot receive comments.',
+      );
+    }
+    final permission = await _provider.getPermission();
+    if (!permission.canWrite) {
+      throw const TrackStateRepositoryException(
+        'Connect a repository session with write access first.',
+      );
+    }
+
+    final persistedBody = body.trimRight();
+    if (persistedBody.trim().isEmpty) {
+      throw const TrackStateRepositoryException(
+        'Comment body is required before saving.',
+      );
+    }
+
+    final snapshot = _snapshot ?? await loadSnapshot();
+    final currentIssue = snapshot.issues.firstWhere(
+      (candidate) => candidate.key == issue.key,
+      orElse: () => issue,
+    );
+    final writeBranch = await _provider.resolveWriteBranch();
+    final blobPaths = (await _provider.listTree(ref: writeBranch))
+        .where((entry) => entry.type == 'blob')
+        .map((entry) => entry.path)
+        .toSet();
+    final issueRoot = _issueRoot(currentIssue.storagePath);
+    final nextCommentId = _nextCommentId(blobPaths: blobPaths, issueRoot: issueRoot);
+    final commentPath = _joinPath(issueRoot, 'comments/$nextCommentId.md');
+    final timestamp = DateTime.now().toUtc().toIso8601String();
+    final author = _defaultAuthor(_session.resolvedUserIdentity);
+    final markdown = _buildCommentMarkdown(
+      author: author,
+      createdAt: timestamp,
+      body: persistedBody,
+    );
+    final result = await _provider.writeTextFile(
+      RepositoryWriteRequest(
+        path: commentPath,
+        content: markdown,
+        message: 'Add comment to ${currentIssue.key}',
+        branch: writeBranch,
+      ),
+    );
+
+    final updatedIssue = currentIssue.copyWith(
+      comments: [
+        ...currentIssue.comments,
+        IssueComment(
+          id: nextCommentId,
+          author: author,
+          body: persistedBody,
+          updatedLabel: timestamp,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          storagePath: commentPath,
+        ),
+      ]..sort((left, right) => left.id.compareTo(right.id)),
+    );
+    _snapshotArtifactRevisions[commentPath] = result.revision;
+    _replaceCachedIssue(updatedIssue);
+    return updatedIssue;
+  }
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async {
+    if (issue.storagePath.isEmpty) {
+      throw const TrackStateRepositoryException(
+        'This issue has no repository file path and cannot receive attachments.',
+      );
+    }
+    final permission = await _provider.getPermission();
+    if (!permission.canManageAttachments) {
+      throw const TrackStateRepositoryException(
+        'This repository session does not allow attachment uploads.',
+      );
+    }
+    final normalizedName = name.trim();
+    if (normalizedName.isEmpty) {
+      throw const TrackStateRepositoryException(
+        'Attachment name is required before uploading.',
+      );
+    }
+    if (bytes.isEmpty) {
+      throw const TrackStateRepositoryException(
+        'Attachment bytes are required before uploading.',
+      );
+    }
+
+    final snapshot = _snapshot ?? await loadSnapshot();
+    final currentIssue = snapshot.issues.firstWhere(
+      (candidate) => candidate.key == issue.key,
+      orElse: () => issue,
+    );
+    final writeBranch = await _provider.resolveWriteBranch();
+    final issueRoot = _issueRoot(currentIssue.storagePath);
+    final attachmentPath = _joinPath(
+      issueRoot,
+      'attachments/${_sanitizeAttachmentName(normalizedName)}',
+    );
+    final existingRevision = _snapshotArtifactRevisions[attachmentPath];
+    final lfsTracked = await _provider.isLfsTracked(attachmentPath);
+    if (lfsTracked &&
+        permission.attachmentUploadMode == AttachmentUploadMode.noLfs) {
+      throw const TrackStateRepositoryException(
+        'This repository session is download-only for Git LFS attachments.',
+      );
+    }
+
+    final result = await _provider.writeAttachment(
+      RepositoryAttachmentWriteRequest(
+        path: attachmentPath,
+        bytes: bytes,
+        message: 'Upload attachment to ${currentIssue.key}',
+        branch: writeBranch,
+        expectedRevision: existingRevision,
+      ),
+    );
+    _snapshotArtifactRevisions[attachmentPath] = result.revision;
+    final timestamp = DateTime.now().toUtc().toIso8601String();
+    final author = _defaultAuthor(_session.resolvedUserIdentity);
+    final revisionOrOid = _attachmentRevisionOrOid(
+      attachment: RepositoryAttachment(
+        path: attachmentPath,
+        bytes: bytes,
+        revision: result.revision,
+      ),
+      isLfsTracked: lfsTracked,
+    );
+    final updatedAttachment = IssueAttachment(
+      id: attachmentPath,
+      name: normalizedName,
+      mediaType: _mediaTypeForPath(attachmentPath),
+      sizeBytes: bytes.length,
+      author: author,
+      createdAt: timestamp,
+      storagePath: attachmentPath,
+      revisionOrOid: revisionOrOid,
+    );
+    final updatedIssue = currentIssue.copyWith(
+      attachments: [
+        for (final candidate in currentIssue.attachments)
+          if (candidate.storagePath == attachmentPath) updatedAttachment else candidate,
+        if (!currentIssue.attachments.any(
+          (candidate) => candidate.storagePath == attachmentPath,
+        ))
+          updatedAttachment,
+      ]..sort((left, right) => left.name.compareTo(right.name)),
+    );
+    _replaceCachedIssue(updatedIssue);
+    return updatedIssue;
+  }
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async {
+    final artifact = await _provider.readAttachment(
+      attachment.storagePath,
+      ref: _provider.dataRef,
+    );
+    return artifact.bytes;
+  }
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) async {
+    final historyReader = switch (_provider) {
+      final RepositoryHistoryReader supported => supported,
+      _ => null,
+    };
+    if (historyReader == null) {
+      return const <IssueHistoryEntry>[];
+    }
+    final issueRoot = _issueRoot(issue.storagePath);
+    final commits = await historyReader.listHistory(ref: _provider.dataRef, path: issueRoot);
+    return _normalizeIssueHistory(issue: issue, commits: commits);
   }
 
   @override
@@ -950,6 +1146,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       canWrite: permission.canWrite,
       canCreateBranch: permission.canCreateBranch,
       canManageAttachments: permission.canManageAttachments,
+      attachmentUploadMode: permission.attachmentUploadMode,
       canCheckCollaborators: permission.canCheckCollaborators,
     );
     return _session;
@@ -1240,6 +1437,10 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   }) async {
     final attachmentPrefix = _joinPath(issueRoot, 'attachments/');
     final attachments = <IssueAttachment>[];
+    final historyReader = switch (_provider) {
+      final RepositoryHistoryReader supported => supported,
+      _ => null,
+    };
     for (final entry in tree.where(
       (candidate) =>
           candidate.type == 'blob' &&
@@ -1250,16 +1451,372 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         entry.path,
         ref: _provider.dataRef,
       );
+      List<RepositoryHistoryCommit> history = const <RepositoryHistoryCommit>[];
+      if (historyReader != null) {
+        try {
+          history = await historyReader.listHistory(
+            ref: _provider.dataRef,
+            path: entry.path,
+          );
+        } on TrackStateProviderException {
+          history = const <RepositoryHistoryCommit>[];
+        }
+      }
+      final createdCommit = history.isEmpty ? null : history.last;
       _snapshotArtifactRevisions[entry.path] = attachment.revision;
       attachments.add(
         IssueAttachment(
+          id: entry.path,
           name: entry.path.split('/').last,
-          storagePath: entry.path,
           mediaType: _mediaTypeForPath(entry.path),
+          sizeBytes: attachment.declaredSizeBytes ?? attachment.bytes.length,
+          author: createdCommit?.author ?? 'unknown',
+          createdAt: createdCommit?.timestamp ?? 'from repo',
+          storagePath: entry.path,
+          revisionOrOid: _attachmentRevisionOrOid(
+            attachment: attachment,
+            isLfsTracked: attachment.lfsOid != null,
+          ),
         ),
       );
     }
     return attachments..sort((a, b) => a.name.compareTo(b.name));
+  }
+
+  Future<List<IssueHistoryEntry>> _normalizeIssueHistory({
+    required TrackStateIssue issue,
+    required List<RepositoryHistoryCommit> commits,
+  }) async {
+    final events = <IssueHistoryEntry>[];
+    for (final commit in commits) {
+      for (final change in commit.changes) {
+        final changedPaths = [
+          if (change.previousPath != null) change.previousPath!,
+          change.path,
+        ];
+        final effectivePath = change.previousPath ?? change.path;
+        if (effectivePath.endsWith('/main.md') || change.path.endsWith('/main.md')) {
+          final currentMainPath = change.changeType == RepositoryHistoryChangeType.removed
+              ? null
+              : change.path;
+          final previousMainPath = change.changeType == RepositoryHistoryChangeType.added
+              ? null
+              : effectivePath;
+          final currentState = currentMainPath == null
+              ? null
+              : await _loadHistoryIssueState(ref: commit.sha, mainPath: currentMainPath);
+          final previousState =
+              commit.parentSha == null || previousMainPath == null
+              ? null
+              : await _loadHistoryIssueState(
+                  ref: commit.parentSha!,
+                  mainPath: previousMainPath,
+                );
+          if (previousState == null && currentState != null) {
+            events.add(
+              IssueHistoryEntry(
+                commitSha: commit.sha,
+                timestamp: commit.timestamp,
+                author: commit.author,
+                changeType: IssueHistoryChangeType.created,
+                affectedEntity: IssueHistoryEntity.issue,
+                affectedEntityId: currentState.key,
+                summary: 'Created ${currentState.key}',
+                changedPaths: changedPaths,
+              ),
+            );
+            continue;
+          }
+          if (previousState == null || currentState == null) {
+            continue;
+          }
+          if (previousState.isArchived != currentState.isArchived) {
+            events.add(
+              IssueHistoryEntry(
+                commitSha: commit.sha,
+                timestamp: commit.timestamp,
+                author: commit.author,
+                changeType: currentState.isArchived
+                    ? IssueHistoryChangeType.archived
+                    : IssueHistoryChangeType.restored,
+                affectedEntity: IssueHistoryEntity.issue,
+                affectedEntityId: currentState.key,
+                summary: currentState.isArchived
+                    ? 'Archived ${currentState.key}'
+                    : 'Restored ${currentState.key}',
+                changedPaths: changedPaths,
+                before: previousState.isArchived.toString(),
+                after: currentState.isArchived.toString(),
+              ),
+            );
+          }
+          if (previousMainPath != change.path ||
+              previousState.parentKey != currentState.parentKey ||
+              previousState.epicKey != currentState.epicKey) {
+            events.add(
+              IssueHistoryEntry(
+                commitSha: commit.sha,
+                timestamp: commit.timestamp,
+                author: commit.author,
+                changeType: IssueHistoryChangeType.moved,
+                affectedEntity: IssueHistoryEntity.hierarchy,
+                affectedEntityId: currentState.key,
+                summary: 'Moved ${currentState.key} in the hierarchy',
+                changedPaths: changedPaths,
+                before: previousState.parentKey ?? previousState.epicKey ?? previousMainPath,
+                after: currentState.parentKey ?? currentState.epicKey ?? change.path,
+              ),
+            );
+          }
+          _addHistoryFieldEvent(
+            events,
+            commit: commit,
+            changedPaths: changedPaths,
+            issueKey: currentState.key,
+            fieldName: 'summary',
+            before: previousState.summary,
+            after: currentState.summary,
+          );
+          _addHistoryFieldEvent(
+            events,
+            commit: commit,
+            changedPaths: changedPaths,
+            issueKey: currentState.key,
+            fieldName: 'description',
+            before: previousState.description,
+            after: currentState.description,
+          );
+          _addHistoryFieldEvent(
+            events,
+            commit: commit,
+            changedPaths: changedPaths,
+            issueKey: currentState.key,
+            fieldName: 'status',
+            before: previousState.statusId,
+            after: currentState.statusId,
+          );
+          _addHistoryFieldEvent(
+            events,
+            commit: commit,
+            changedPaths: changedPaths,
+            issueKey: currentState.key,
+            fieldName: 'priority',
+            before: previousState.priorityId,
+            after: currentState.priorityId,
+          );
+          _addHistoryFieldEvent(
+            events,
+            commit: commit,
+            changedPaths: changedPaths,
+            issueKey: currentState.key,
+            fieldName: 'assignee',
+            before: previousState.assignee,
+            after: currentState.assignee,
+          );
+          _addHistoryFieldEvent(
+            events,
+            commit: commit,
+            changedPaths: changedPaths,
+            issueKey: currentState.key,
+            fieldName: 'labels',
+            before: previousState.labels.join(', '),
+            after: currentState.labels.join(', '),
+          );
+          _addHistoryFieldEvent(
+            events,
+            commit: commit,
+            changedPaths: changedPaths,
+            issueKey: currentState.key,
+            fieldName: 'acceptanceCriteria',
+            before: previousState.acceptanceCriteria.join('\n'),
+            after: currentState.acceptanceCriteria.join('\n'),
+          );
+          continue;
+        }
+        if (_isIssueCommentPath(effectivePath)) {
+          final commentId = effectivePath.split('/').last.replaceAll('.md', '');
+          final currentMarkdown = change.changeType == RepositoryHistoryChangeType.removed
+              ? null
+              : await _tryReadTextAtRef(change.path, commit.sha);
+          final previousMarkdown =
+              commit.parentSha == null || change.changeType == RepositoryHistoryChangeType.added
+              ? null
+              : await _tryReadTextAtRef(effectivePath, commit.parentSha!);
+          final currentComment = currentMarkdown == null
+              ? null
+              : _parseComment(change.path, currentMarkdown);
+          final previousComment = previousMarkdown == null
+              ? null
+              : _parseComment(effectivePath, previousMarkdown);
+          if (change.changeType == RepositoryHistoryChangeType.added) {
+            events.add(
+              IssueHistoryEntry(
+                commitSha: commit.sha,
+                timestamp: commit.timestamp,
+                author: commit.author,
+                changeType: IssueHistoryChangeType.added,
+                affectedEntity: IssueHistoryEntity.comment,
+                affectedEntityId: commentId,
+                summary: 'Added comment $commentId',
+                changedPaths: changedPaths,
+                after: currentComment?.body,
+              ),
+            );
+          } else if (change.changeType == RepositoryHistoryChangeType.removed) {
+            events.add(
+              IssueHistoryEntry(
+                commitSha: commit.sha,
+                timestamp: commit.timestamp,
+                author: commit.author,
+                changeType: IssueHistoryChangeType.removed,
+                affectedEntity: IssueHistoryEntity.comment,
+                affectedEntityId: commentId,
+                summary: 'Removed comment $commentId',
+                changedPaths: changedPaths,
+                before: previousComment?.body,
+              ),
+            );
+          } else if (previousComment != null &&
+              currentComment != null &&
+              previousComment.body != currentComment.body) {
+            events.add(
+              IssueHistoryEntry(
+                commitSha: commit.sha,
+                timestamp: commit.timestamp,
+                author: commit.author,
+                changeType: IssueHistoryChangeType.updated,
+                affectedEntity: IssueHistoryEntity.comment,
+                affectedEntityId: currentComment.id,
+                summary: 'Updated comment ${currentComment.id}',
+                changedPaths: changedPaths,
+                before: previousComment.body,
+                after: currentComment.body,
+              ),
+            );
+          }
+          continue;
+        }
+        if (_isIssueAttachmentPath(effectivePath)) {
+          final currentSegments = change.path.split('/');
+          final previousSegments = effectivePath.split('/');
+          final attachmentName = currentSegments.isNotEmpty
+              ? currentSegments.last
+              : previousSegments.isNotEmpty
+              ? previousSegments.last
+              : 'attachment';
+          events.add(
+            IssueHistoryEntry(
+              commitSha: commit.sha,
+              timestamp: commit.timestamp,
+              author: commit.author,
+              changeType: switch (change.changeType) {
+                RepositoryHistoryChangeType.added => IssueHistoryChangeType.added,
+                RepositoryHistoryChangeType.removed => IssueHistoryChangeType.removed,
+                RepositoryHistoryChangeType.renamed => IssueHistoryChangeType.moved,
+                RepositoryHistoryChangeType.modified => IssueHistoryChangeType.updated,
+              },
+              affectedEntity: IssueHistoryEntity.attachment,
+              affectedEntityId: attachmentName,
+              summary: switch (change.changeType) {
+                RepositoryHistoryChangeType.added =>
+                  'Added attachment $attachmentName',
+                RepositoryHistoryChangeType.removed =>
+                  'Removed attachment $attachmentName',
+                RepositoryHistoryChangeType.renamed =>
+                  'Moved attachment $attachmentName',
+                RepositoryHistoryChangeType.modified =>
+                  'Updated attachment $attachmentName',
+              },
+              changedPaths: changedPaths,
+              before: change.previousPath,
+              after: change.path,
+            ),
+          );
+        }
+      }
+    }
+    return events
+        .where(
+          (entry) =>
+              entry.affectedEntity == IssueHistoryEntity.issue ||
+              entry.summary.contains(issue.key) ||
+              entry.changedPaths.any((path) => path.contains('/${issue.key}/')),
+        )
+        .toList(growable: false);
+  }
+
+  void _addHistoryFieldEvent(
+    List<IssueHistoryEntry> events, {
+    required RepositoryHistoryCommit commit,
+    required List<String> changedPaths,
+    required String issueKey,
+    required String fieldName,
+    required String before,
+    required String after,
+  }) {
+    if (before == after) {
+      return;
+    }
+    events.add(
+      IssueHistoryEntry(
+        commitSha: commit.sha,
+        timestamp: commit.timestamp,
+        author: commit.author,
+        changeType: IssueHistoryChangeType.updated,
+        affectedEntity: IssueHistoryEntity.issue,
+        affectedEntityId: issueKey,
+        fieldName: fieldName,
+        before: before,
+        after: after,
+        summary: 'Updated $fieldName on $issueKey',
+        changedPaths: changedPaths,
+      ),
+    );
+  }
+
+  Future<_HistoryIssueState?> _loadHistoryIssueState({
+    required String ref,
+    required String mainPath,
+  }) async {
+    final markdown = await _tryReadTextAtRef(mainPath, ref);
+    if (markdown == null) {
+      return null;
+    }
+    final acceptancePath = _joinPath(
+      mainPath.substring(0, mainPath.lastIndexOf('/')),
+      'acceptance_criteria.md',
+    );
+    final acceptanceMarkdown = await _tryReadTextAtRef(acceptancePath, ref);
+    final frontmatter = _frontmatter(markdown);
+    final body = _body(markdown);
+    return _HistoryIssueState(
+      key: frontmatter['key']?.toString() ?? 'UNKNOWN-0',
+      summary: (frontmatter['summary']?.toString() ?? '')
+          .ifEmpty(_section(body, 'Summary'))
+          .ifEmpty('Untitled issue'),
+      description: _section(body, 'Description').ifEmpty(_section(body, 'Summary')),
+      statusId: _canonicalConfigId(frontmatter['status']?.toString()),
+      priorityId: _canonicalConfigId(frontmatter['priority']?.toString()),
+      assignee: frontmatter['assignee']?.toString() ?? '',
+      labels: _stringList(frontmatter['labels']),
+      parentKey: _nullable(frontmatter['parent']?.toString()),
+      epicKey: _nullable(frontmatter['epic']?.toString()),
+      isArchived: _boolValue(frontmatter['archived']) ?? false,
+      acceptanceCriteria: acceptanceMarkdown == null
+          ? const <String>[]
+          : LineSplitter.split(acceptanceMarkdown)
+                .where((line) => line.trimLeft().startsWith('- '))
+                .map((line) => line.trimLeft().substring(2).trim())
+                .toList(growable: false),
+    );
+  }
+
+  Future<String?> _tryReadTextAtRef(String path, String ref) async {
+    try {
+      return (await _provider.readTextFile(path, ref: ref)).content;
+    } on TrackStateProviderException {
+      return null;
+    }
   }
 
   void _replaceCachedIssue(TrackStateIssue updatedIssue) {
@@ -1477,10 +2034,99 @@ class DemoTrackStateRepository implements TrackStateRepository {
     ),
     updatedLabel: 'just now',
   );
+
+  @override
+  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) async =>
+      issue.copyWith(
+        comments: [
+          ...issue.comments,
+          IssueComment(
+            id: (issue.comments.length + 1).toString().padLeft(4, '0'),
+            author: 'demo-user',
+            body: body.trimRight(),
+            updatedLabel: 'just now',
+            createdAt: DateTime.now().toUtc().toIso8601String(),
+            updatedAt: DateTime.now().toUtc().toIso8601String(),
+            storagePath:
+                '${_issueRoot(issue.storagePath)}/comments/${(issue.comments.length + 1).toString().padLeft(4, '0')}.md',
+          ),
+        ],
+      );
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async => issue.copyWith(
+    attachments: [
+      ...issue.attachments,
+      IssueAttachment(
+        id: '${_issueRoot(issue.storagePath)}/attachments/$name',
+        name: name,
+        mediaType: _mediaTypeForPath(name),
+        sizeBytes: bytes.length,
+        author: 'demo-user',
+        createdAt: DateTime.now().toUtc().toIso8601String(),
+        storagePath: '${_issueRoot(issue.storagePath)}/attachments/$name',
+        revisionOrOid: 'demo-revision',
+      ),
+    ],
+  );
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
+      Uint8List.fromList(utf8.encode('<svg />'));
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) async =>
+      [
+        IssueHistoryEntry(
+          commitSha: 'demo-commit',
+          timestamp: '2026-05-05T00:10:00Z',
+          author: 'ana',
+          changeType: IssueHistoryChangeType.updated,
+          affectedEntity: IssueHistoryEntity.issue,
+          affectedEntityId: issue.key,
+          fieldName: 'description',
+          before: 'Old description',
+          after: issue.description,
+          summary: 'Updated description on ${issue.key}',
+          changedPaths: [issue.storagePath],
+        ),
+      ];
 }
 
 class TrackStateRepositoryException extends TrackStateProviderException {
   const TrackStateRepositoryException(super.message);
+}
+
+class _HistoryIssueState {
+  const _HistoryIssueState({
+    required this.key,
+    required this.summary,
+    required this.description,
+    required this.statusId,
+    required this.priorityId,
+    required this.assignee,
+    required this.labels,
+    required this.parentKey,
+    required this.epicKey,
+    required this.isArchived,
+    required this.acceptanceCriteria,
+  });
+
+  final String key;
+  final String summary;
+  final String description;
+  final String statusId;
+  final String priorityId;
+  final String assignee;
+  final List<String> labels;
+  final String? parentKey;
+  final String? epicKey;
+  final bool isArchived;
+  final List<String> acceptanceCriteria;
 }
 
 TrackStateIssue _parseIssue({
@@ -2092,6 +2738,63 @@ String _buildIssueMarkdown({
   return '${buffer.toString().trimRight()}\n';
 }
 
+String _buildCommentMarkdown({
+  required String author,
+  required String createdAt,
+  required String body,
+}) {
+  final buffer = StringBuffer()
+    ..writeln('---')
+    ..writeln('author: ${_yamlScalar(author)}')
+    ..writeln('created: $createdAt')
+    ..writeln('updated: $createdAt')
+    ..writeln('---')
+    ..writeln()
+    ..writeln(body);
+  return '${buffer.toString().trimRight()}\n';
+}
+
+String _nextCommentId({
+  required Set<String> blobPaths,
+  required String issueRoot,
+}) {
+  final commentPrefix = _joinPath(issueRoot, 'comments/');
+  var maxId = 0;
+  for (final path in blobPaths) {
+    if (!path.startsWith(commentPrefix) || !path.endsWith('.md')) {
+      continue;
+    }
+    final value = int.tryParse(path.split('/').last.replaceAll('.md', ''));
+    if (value != null && value > maxId) {
+      maxId = value;
+    }
+  }
+  return (maxId + 1).toString().padLeft(4, '0');
+}
+
+String _sanitizeAttachmentName(String value) => value
+    .replaceAll('\\', '/')
+    .split('/')
+    .last
+    .replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '-')
+    .replaceAll(RegExp(r'-+'), '-')
+    .replaceAll(RegExp(r'^-|-$'), '')
+    .ifEmpty('attachment.bin');
+
+bool _isIssueCommentPath(String path) =>
+    path.contains('/comments/') && path.endsWith('.md');
+
+bool _isIssueAttachmentPath(String path) => path.contains('/attachments/');
+
+String _attachmentRevisionOrOid({
+  required RepositoryAttachment attachment,
+  required bool isLfsTracked,
+}) =>
+    (isLfsTracked ? attachment.lfsOid : null) ??
+    attachment.lfsOid ??
+    attachment.revision ??
+    '';
+
 String _yamlScalar(String value) {
   final escaped = value.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
   return '"$escaped"';
@@ -2588,9 +3291,14 @@ const _snapshot = TrackerSnapshot(
       links: [IssueLink(type: 'blocks', targetKey: 'TRACK-41')],
       attachments: [
         IssueAttachment(
+          id: 'TRACK/TRACK-1/TRACK-12/attachments/sync-sequence.svg',
           name: 'sync-sequence.svg',
-          storagePath: 'TRACK/TRACK-1/TRACK-12/attachments/sync-sequence.svg',
           mediaType: 'image/svg+xml',
+          sizeBytes: 5240,
+          author: 'ana',
+          createdAt: '2026-05-05T00:08:00Z',
+          storagePath: 'TRACK/TRACK-1/TRACK-12/attachments/sync-sequence.svg',
+          revisionOrOid: 'demo-sync-sequence-revision',
         ),
       ],
       isArchived: false,

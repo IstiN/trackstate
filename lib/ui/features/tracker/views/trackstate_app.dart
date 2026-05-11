@@ -1656,7 +1656,9 @@ class _IssueDetail extends StatefulWidget {
 
 class _IssueDetailState extends State<_IssueDetail> {
   late final TextEditingController _descriptionController;
+  late final TextEditingController _commentController;
   bool _isEditing = false;
+  int _selectedCollaborationTab = 0;
 
   @override
   void initState() {
@@ -1664,6 +1666,7 @@ class _IssueDetailState extends State<_IssueDetail> {
     _descriptionController = TextEditingController(
       text: widget.issue.description,
     );
+    _commentController = TextEditingController();
   }
 
   @override
@@ -1678,11 +1681,18 @@ class _IssueDetailState extends State<_IssueDetail> {
     if (issueChanged || (!_isEditing && descriptionChanged)) {
       _descriptionController.text = widget.issue.description;
     }
+    if (issueChanged) {
+      _commentController.clear();
+      if (_selectedCollaborationTab == 2) {
+        widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
+      }
+    }
   }
 
   @override
   void dispose() {
     _descriptionController.dispose();
+    _commentController.dispose();
     super.dispose();
   }
 
@@ -1697,6 +1707,17 @@ class _IssueDetailState extends State<_IssueDetail> {
     setState(() {
       _isEditing = false;
     });
+  }
+
+  Future<void> _saveComment() async {
+    final success = await widget.viewModel.postIssueComment(
+      widget.issue,
+      _commentController.text,
+    );
+    if (!mounted || !success) {
+      return;
+    }
+    _commentController.clear();
   }
 
   @override
@@ -1849,12 +1870,34 @@ class _IssueDetailState extends State<_IssueDetail> {
           _SectionTitle(l10n.details),
           _DetailGrid(issue: issue),
           const SizedBox(height: 18),
-          _SectionTitle(l10n.comments),
-          if (issue.comments.isEmpty)
-            Text(l10n.noResults, style: TextStyle(color: colors.muted))
+          _IssueDetailTabs(
+            selectedIndex: _selectedCollaborationTab,
+            tabs: [l10n.comments, l10n.attachments, l10n.history],
+            onSelected: (index) {
+              setState(() {
+                _selectedCollaborationTab = index;
+              });
+              if (index == 2) {
+                widget.viewModel.ensureIssueHistoryLoaded(issue);
+              }
+            },
+          ),
+          const SizedBox(height: 16),
+          if (_selectedCollaborationTab == 0)
+            _CommentsTab(
+              issue: issue,
+              controller: _commentController,
+              isSaving: widget.viewModel.isSaving,
+              readOnly: hasReadOnlySession,
+              onSave: canUseWriteActions ? _saveComment : null,
+            )
+          else if (_selectedCollaborationTab == 1)
+            _AttachmentsTab(issue: issue)
           else
-            for (final comment in issue.comments)
-              _CommentBubble(comment: comment),
+            _HistoryTab(
+              entries: widget.viewModel.issueHistoryFor(issue.key),
+              isLoading: widget.viewModel.isIssueHistoryLoading(issue.key),
+            ),
         ],
       ),
     );
@@ -3584,6 +3627,278 @@ class _EpicProgress extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           Text('${(issue.progress * 100).round()}%'),
+        ],
+      ),
+    );
+  }
+}
+
+class _IssueDetailTabs extends StatelessWidget {
+  const _IssueDetailTabs({
+    required this.selectedIndex,
+    required this.tabs,
+    required this.onSelected,
+  });
+
+  final int selectedIndex;
+  final List<String> tabs;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (var index = 0; index < tabs.length; index++)
+          _IssueDetailTabChip(
+            label: tabs[index],
+            selected: index == selectedIndex,
+            onPressed: () => onSelected(index),
+          ),
+      ],
+    );
+  }
+}
+
+class _IssueDetailTabChip extends StatelessWidget {
+  const _IssueDetailTabChip({
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: TextButton(
+        onPressed: onPressed,
+        style: TextButton.styleFrom(
+          foregroundColor: selected ? colors.page : colors.text,
+          backgroundColor: selected ? colors.primary : colors.surfaceAlt,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(999),
+            side: BorderSide(color: selected ? colors.primary : colors.border),
+          ),
+        ),
+        child: Text(label),
+      ),
+    );
+  }
+}
+
+class _CommentsTab extends StatelessWidget {
+  const _CommentsTab({
+    required this.issue,
+    required this.controller,
+    required this.isSaving,
+    required this.readOnly,
+    required this.onSave,
+  });
+
+  final TrackStateIssue issue;
+  final TextEditingController controller;
+  final bool isSaving;
+  final bool readOnly;
+  final VoidCallback? onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final l10n = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!readOnly) ...[
+          Semantics(
+            label: l10n.comments,
+            textField: true,
+            child: TextField(
+              controller: controller,
+              minLines: 3,
+              maxLines: null,
+              enabled: !isSaving,
+              decoration: InputDecoration(
+                labelText: l10n.comments,
+                alignLabelWithHint: true,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: _IssueDetailActionButton(
+              label: l10n.postComment,
+              emphasized: true,
+              onPressed: onSave,
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (issue.comments.isEmpty)
+          Text(l10n.noResults, style: TextStyle(color: colors.muted))
+        else
+          for (final comment in issue.comments)
+            _CommentBubble(comment: comment),
+      ],
+    );
+  }
+}
+
+class _AttachmentsTab extends StatelessWidget {
+  const _AttachmentsTab({required this.issue});
+
+  final TrackStateIssue issue;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final l10n = AppLocalizations.of(context)!;
+    if (issue.attachments.isEmpty) {
+      return Text(l10n.noResults, style: TextStyle(color: colors.muted));
+    }
+    return Column(
+      children: [
+        for (final attachment in issue.attachments)
+          _AttachmentRow(attachment: attachment),
+      ],
+    );
+  }
+}
+
+class _AttachmentRow extends StatelessWidget {
+  const _AttachmentRow({required this.attachment});
+
+  final IssueAttachment attachment;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TrackStateIcon(
+            TrackStateIconGlyph.attachment,
+            color: colors.text,
+            semanticLabel: attachment.name,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  attachment.name,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                Text(
+                  '${attachment.author} · ${attachment.createdAt}',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelSmall?.copyWith(color: colors.muted),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            '${attachment.sizeBytes} B',
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HistoryTab extends StatelessWidget {
+  const _HistoryTab({required this.entries, required this.isLoading});
+
+  final List<IssueHistoryEntry> entries;
+  final bool isLoading;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final l10n = AppLocalizations.of(context)!;
+    if (isLoading) {
+      return const LinearProgressIndicator(minHeight: 2);
+    }
+    if (entries.isEmpty) {
+      return Text(l10n.noResults, style: TextStyle(color: colors.muted));
+    }
+    return Column(
+      children: [
+        for (final entry in entries)
+          _HistoryRow(entry: entry),
+      ],
+    );
+  }
+}
+
+class _HistoryRow extends StatelessWidget {
+  const _HistoryRow({required this.entry});
+
+  final IssueHistoryEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TrackStateIcon(
+            TrackStateIconGlyph.sync,
+            color: colors.text,
+            semanticLabel: entry.summary,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(entry.summary, style: Theme.of(context).textTheme.labelLarge),
+                Text(
+                  '${entry.author} · ${entry.timestamp}',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelSmall?.copyWith(color: colors.muted),
+                ),
+                if ((entry.before ?? '').isNotEmpty || (entry.after ?? '').isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      '${entry.before ?? ''} -> ${entry.after ?? ''}'.trim(),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );

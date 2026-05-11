@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -151,6 +153,52 @@ void main() {
 
       expect(find.text('Paged issue 8'), findsOneWidget);
       expect(find.bySemanticsLabel('Load more issues'), findsNothing);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('issue detail exposes comments, attachments, and history tabs', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        const TrackStateApp(repository: DemoTrackStateRepository()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('Board')).first);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.bySemanticsLabel(
+          RegExp('Open TRACK-12 Implement Git sync service'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.bySemanticsLabel(RegExp('Comments')), findsWidgets);
+      expect(find.bySemanticsLabel(RegExp('Attachments')), findsWidgets);
+      expect(find.bySemanticsLabel(RegExp('History')), findsWidgets);
+      expect(
+        find.textContaining('Use repository indexes for key lookup'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.bySemanticsLabel(RegExp('Attachments')).first);
+      await tester.pumpAndSettle();
+      expect(find.text('sync-sequence.svg'), findsOneWidget);
+
+      await tester.tap(find.bySemanticsLabel(RegExp('History')).first);
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Updated description on TRACK-12'),
+        findsOneWidget,
+      );
     } finally {
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
@@ -503,6 +551,28 @@ class _LocalRuntimeRepository implements TrackStateRepository {
     TrackStateIssue issue,
     IssueStatus status,
   ) async => issue.copyWith(status: status, updatedLabel: 'just now');
+
+  @override
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => issue;
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
+      Uint8List(0);
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async => issue;
 }
 
 class _FailingLocalRuntimeRepository implements TrackStateRepository {
@@ -585,6 +655,38 @@ class _FailingLocalRuntimeRepository implements TrackStateRepository {
     TrackStateIssue issue,
     IssueStatus status,
   ) async => issue.copyWith(status: status, updatedLabel: 'just now');
+
+  @override
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async {
+    throw const TrackStateRepositoryException(
+      'Cannot save DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
+    );
+  }
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
+      Uint8List(0);
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async {
+    throw const TrackStateRepositoryException(
+      'Cannot save DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
+      'commit, stash, or clean those local changes before trying again.',
+    );
+  }
 }
 
 class _CustomCreateFieldsLocalRuntimeRepository
@@ -720,6 +822,28 @@ class _CustomCreateFieldsLocalRuntimeRepository
     TrackStateIssue issue,
     IssueStatus status,
   ) async => issue.copyWith(status: status, updatedLabel: 'just now');
+
+  @override
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => issue;
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
+      Uint8List(0);
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async => issue;
 }
 
 TrackerSnapshot _searchPaginationSnapshot() {

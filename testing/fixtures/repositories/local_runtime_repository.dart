@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
@@ -70,4 +72,23 @@ class LocalRuntimeRepository implements TrackStateRepository {
     TrackStateIssue issue,
     IssueStatus status,
   ) async => issue.copyWith(status: status, updatedLabel: 'just now');
+
+  @override
+  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) async =>
+      issue;
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
+      Uint8List(0);
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) async =>
+      const <IssueHistoryEntry>[];
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async => issue;
 }

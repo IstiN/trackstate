@@ -44,6 +44,14 @@ abstract interface class RepositoryAttachmentStore {
   Future<bool> isLfsTracked(String path);
 }
 
+abstract interface class RepositoryHistoryReader {
+  Future<List<RepositoryHistoryCommit>> listHistory({
+    required String ref,
+    required String path,
+    int limit = 50,
+  });
+}
+
 abstract interface class TrackStateProviderAdapter
     implements
         RepositoryFileReader,
@@ -61,6 +69,8 @@ enum ProviderType { github, local }
 
 enum ProviderConnectionState { disconnected, connecting, connected, error }
 
+enum AttachmentUploadMode { full, noLfs, none }
+
 class ProviderSession {
   ProviderSession({
     required this.providerType,
@@ -70,6 +80,7 @@ class ProviderSession {
     required this.canWrite,
     required this.canCreateBranch,
     required this.canManageAttachments,
+    required this.attachmentUploadMode,
     required this.canCheckCollaborators,
   });
 
@@ -80,6 +91,7 @@ class ProviderSession {
   bool canWrite;
   bool canCreateBranch;
   bool canManageAttachments;
+  AttachmentUploadMode attachmentUploadMode;
   bool canCheckCollaborators;
   final Set<ProviderSessionListener> _listeners = <ProviderSessionListener>{};
 
@@ -108,6 +120,7 @@ class ProviderSession {
     required bool canWrite,
     required bool canCreateBranch,
     required bool canManageAttachments,
+    required AttachmentUploadMode attachmentUploadMode,
     required bool canCheckCollaborators,
   }) {
     final changed =
@@ -118,6 +131,7 @@ class ProviderSession {
         this.canWrite != canWrite ||
         this.canCreateBranch != canCreateBranch ||
         this.canManageAttachments != canManageAttachments ||
+        this.attachmentUploadMode != attachmentUploadMode ||
         this.canCheckCollaborators != canCheckCollaborators;
     if (!changed) {
       return;
@@ -129,6 +143,7 @@ class ProviderSession {
     this.canWrite = canWrite;
     this.canCreateBranch = canCreateBranch;
     this.canManageAttachments = canManageAttachments;
+    this.attachmentUploadMode = attachmentUploadMode;
     this.canCheckCollaborators = canCheckCollaborators;
     _notifyListeners();
   }
@@ -274,16 +289,23 @@ class RepositoryPermission {
     required this.isAdmin,
     bool? canCreateBranch,
     bool? canManageAttachments,
+    AttachmentUploadMode? attachmentUploadMode,
     bool? canCheckCollaborators,
   }) : canCreateBranch = canCreateBranch ?? canWrite,
-       canManageAttachments = canManageAttachments ?? canWrite,
-       canCheckCollaborators = canCheckCollaborators ?? isAdmin;
+        canManageAttachments = canManageAttachments ?? canWrite,
+        attachmentUploadMode =
+            attachmentUploadMode ??
+            ((canManageAttachments ?? canWrite)
+                ? AttachmentUploadMode.full
+                : AttachmentUploadMode.none),
+        canCheckCollaborators = canCheckCollaborators ?? isAdmin;
 
   final bool canRead;
   final bool canWrite;
   final bool isAdmin;
   final bool canCreateBranch;
   final bool canManageAttachments;
+  final AttachmentUploadMode attachmentUploadMode;
   final bool canCheckCollaborators;
 }
 
@@ -292,11 +314,15 @@ class RepositoryAttachment {
     required this.path,
     required this.bytes,
     this.revision,
+    this.lfsOid,
+    this.declaredSizeBytes,
   });
 
   final String path;
   final Uint8List bytes;
   final String? revision;
+  final String? lfsOid;
+  final int? declaredSizeBytes;
 }
 
 class RepositoryAttachmentWriteRequest {
@@ -325,6 +351,38 @@ class RepositoryAttachmentWriteResult {
   final String path;
   final String branch;
   final String? revision;
+}
+
+enum RepositoryHistoryChangeType { added, modified, removed, renamed }
+
+class RepositoryHistoryFileChange {
+  const RepositoryHistoryFileChange({
+    required this.path,
+    required this.changeType,
+    this.previousPath,
+  });
+
+  final String path;
+  final RepositoryHistoryChangeType changeType;
+  final String? previousPath;
+}
+
+class RepositoryHistoryCommit {
+  const RepositoryHistoryCommit({
+    required this.sha,
+    required this.author,
+    required this.timestamp,
+    required this.message,
+    required this.changes,
+    this.parentSha,
+  });
+
+  final String sha;
+  final String? parentSha;
+  final String author;
+  final String timestamp;
+  final String message;
+  final List<RepositoryHistoryFileChange> changes;
 }
 
 class TrackStateProviderException implements Exception {

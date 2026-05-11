@@ -114,6 +114,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get attachments => 'Attachments';
 
   @override
+  String get history => 'History';
+
+  @override
+  String get postComment => 'Post comment';
+
+  @override
   String get linkedIssues => 'Linked issues';
 
   @override
