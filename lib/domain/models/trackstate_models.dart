@@ -522,10 +522,21 @@ class GitHubConnection extends RepositoryConnection {
 }
 
 class RepositoryUser {
-  const RepositoryUser({required this.login, required this.displayName});
+  const RepositoryUser({
+    required this.login,
+    required this.displayName,
+    this.accountId,
+    this.emailAddress,
+    this.timeZone,
+    this.active,
+  });
 
   final String login;
   final String displayName;
+  final String? accountId;
+  final String? emailAddress;
+  final String? timeZone;
+  final bool? active;
 
   String get initials {
     final source = displayName.trim().isNotEmpty ? displayName : login;

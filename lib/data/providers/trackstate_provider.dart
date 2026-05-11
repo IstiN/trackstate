@@ -15,6 +15,11 @@ abstract interface class RepositorySessionManager {
   Future<RepositoryUser> authenticate(RepositoryConnection connection);
 }
 
+abstract interface class RepositoryUserLookup {
+  Future<RepositoryUser> lookupUserByLogin(String login);
+  Future<RepositoryUser> lookupUserByEmail(String email);
+}
+
 abstract interface class RepositoryCommitManager {
   Future<String> resolveWriteBranch();
   Future<RepositoryBranch> getBranch(String name);
@@ -292,13 +297,13 @@ class RepositoryPermission {
     AttachmentUploadMode? attachmentUploadMode,
     bool? canCheckCollaborators,
   }) : canCreateBranch = canCreateBranch ?? canWrite,
-        canManageAttachments = canManageAttachments ?? canWrite,
-        attachmentUploadMode =
-            attachmentUploadMode ??
-            ((canManageAttachments ?? canWrite)
-                ? AttachmentUploadMode.full
-                : AttachmentUploadMode.none),
-        canCheckCollaborators = canCheckCollaborators ?? isAdmin;
+       canManageAttachments = canManageAttachments ?? canWrite,
+       attachmentUploadMode =
+           attachmentUploadMode ??
+           ((canManageAttachments ?? canWrite)
+               ? AttachmentUploadMode.full
+               : AttachmentUploadMode.none),
+       canCheckCollaborators = canCheckCollaborators ?? isAdmin;
 
   final bool canRead;
   final bool canWrite;
