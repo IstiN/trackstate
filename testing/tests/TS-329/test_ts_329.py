@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
-from urllib.parse import quote
 import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -18,10 +16,11 @@ from testing.components.services.live_setup_repository_service import (
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config
 from testing.core.interfaces.web_app_session import WebAppTimeoutError
-from testing.frameworks.python.playwright_web_app_session import (
-    PlaywrightStoredTokenWebAppRuntime,
-)
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app
+from testing.tests.support.restricted_attachment_metadata_runtime import (
+    AttachmentMetadataRestrictedRuntime,
+    AttachmentMetadataRestrictionObservation,
+)
 
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -29,44 +28,6 @@ SCREENSHOT_PATH = OUTPUTS_DIR / "ts329_failure.png"
 SEEDED_COMMENT_FRAGMENT = "This comment demonstrates markdown-backed collaboration history."
 ATTACHMENT_METADATA_FALLBACK = "unknown from repo"
 DOWNLOAD_BUTTON_LABEL_FRAGMENT = "Download"
-
-
-class AttachmentMetadataRestrictedRuntime(PlaywrightStoredTokenWebAppRuntime):
-    def __init__(self, *, repository: str, token: str, attachment_path: str) -> None:
-        super().__init__(repository=repository, token=token)
-        self._attachment_path = attachment_path
-        self.intercepted_urls: list[str] = []
-
-    def __enter__(self):
-        session = super().__enter__()
-        assert self._context is not None
-        encoded_path = quote(self._attachment_path, safe="")
-
-        def route_handler(route) -> None:
-            url = route.request.url
-            if "/commits?" in url and f"path={encoded_path}" in url:
-                self.intercepted_urls.append(url)
-                route.fulfill(
-                    status=403,
-                    content_type="application/json",
-                    body=json.dumps(
-                        {
-                            "message": (
-                                "TS-329 synthetic restriction: attachment metadata access denied"
-                            ),
-                        },
-                    ),
-                )
-                return
-            route.continue_(
-                headers={
-                    **route.request.headers,
-                    "Authorization": f"Bearer {self._token}",
-                },
-            )
-
-        self._context.route("https://api.github.com/**", route_handler)
-        return session
 
 
 class HostedIssueDetailMetadataRestrictionRegressionTest(unittest.TestCase):
@@ -102,10 +63,14 @@ class HostedIssueDetailMetadataRestrictionRegressionTest(unittest.TestCase):
             f"{issue_fixture.path}.",
         )
 
+        seeded_attachment_name = Path(issue_fixture.attachment_paths[0]).name
+        restriction_observation = AttachmentMetadataRestrictionObservation(
+            attachment_path=issue_fixture.attachment_paths[0],
+        )
         runtime = AttachmentMetadataRestrictedRuntime(
             repository=self.config.repository,
             token=token,
-            attachment_path=issue_fixture.attachment_paths[0],
+            observation=restriction_observation,
         )
         with create_live_tracker_app(
             self.config,
@@ -140,12 +105,6 @@ class HostedIssueDetailMetadataRestrictionRegressionTest(unittest.TestCase):
                     f"detail for {issue_fixture.key}.\n"
                     f"Observed body text:\n{issue_detail_text}",
                 )
-                self.assertGreater(
-                    len(runtime.intercepted_urls),
-                    0,
-                    "Step 2 failed: the test did not intercept the attachment metadata "
-                    "request, so the restricted-access scenario was not exercised.",
-                )
 
                 comments_tabs = live_issue_page.tab_button_count("Comments")
                 attachments_tabs = live_issue_page.tab_button_count("Attachments")
@@ -175,12 +134,8 @@ class HostedIssueDetailMetadataRestrictionRegressionTest(unittest.TestCase):
 
                 live_issue_page.open_collaboration_tab("Comments")
                 try:
-                    tracker_page.session.wait_for_selector(
-                        'flt-semantics[role="button"][aria-current="true"]',
-                        has_text="Comments",
-                        timeout_ms=30_000,
-                    )
-                    tracker_page.session.wait_for_text(
+                    live_issue_page.wait_for_selected_tab("Comments", timeout_ms=30_000)
+                    live_issue_page.wait_for_text(
                         SEEDED_COMMENT_FRAGMENT,
                         timeout_ms=30_000,
                     )
@@ -208,11 +163,7 @@ class HostedIssueDetailMetadataRestrictionRegressionTest(unittest.TestCase):
 
                 live_issue_page.open_collaboration_tab("History")
                 try:
-                    tracker_page.session.wait_for_selector(
-                        'flt-semantics[role="button"][aria-current="true"]',
-                        has_text="History",
-                        timeout_ms=30_000,
-                    )
+                    live_issue_page.wait_for_selected_tab("History", timeout_ms=30_000)
                 except WebAppTimeoutError as error:
                     raise AssertionError(
                         "Step 3 failed: the History tab was visible but did not become "
@@ -230,13 +181,13 @@ class HostedIssueDetailMetadataRestrictionRegressionTest(unittest.TestCase):
 
                 live_issue_page.open_collaboration_tab("Attachments")
                 try:
-                    tracker_page.session.wait_for_selector(
-                        'flt-semantics[role="button"][aria-current="true"]',
-                        has_text="Attachments",
+                    live_issue_page.wait_for_selected_tab("Attachments", timeout_ms=30_000)
+                    live_issue_page.wait_for_text(
+                        seeded_attachment_name,
                         timeout_ms=30_000,
                     )
-                    tracker_page.session.wait_for_text(
-                        Path(issue_fixture.attachment_paths[0]).name,
+                    live_issue_page.wait_for_text(
+                        ATTACHMENT_METADATA_FALLBACK,
                         timeout_ms=30_000,
                     )
                 except WebAppTimeoutError as error:
@@ -254,7 +205,7 @@ class HostedIssueDetailMetadataRestrictionRegressionTest(unittest.TestCase):
                     f"Observed body text:\n{attachments_text}",
                 )
                 self.assertIn(
-                    Path(issue_fixture.attachment_paths[0]).name,
+                    seeded_attachment_name,
                     attachments_text,
                     "Step 3 failed: the Attachments tab did not keep the seeded "
                     "attachment visible after metadata access was restricted.\n"
@@ -266,6 +217,12 @@ class HostedIssueDetailMetadataRestrictionRegressionTest(unittest.TestCase):
                     "Step 3 failed: restricting attachment metadata did not produce the "
                     'expected attachment-only fallback text "unknown from repo".\n'
                     f"Observed body text:\n{attachments_text}",
+                )
+                self.assertTrue(
+                    restriction_observation.was_exercised,
+                    "Step 3 failed: the attachment metadata fallback appeared without "
+                    "proving that the restricted metadata request was exercised.\n"
+                    f"Observed attachment metadata requests: {restriction_observation.intercepted_urls}",
                 )
                 self.assertGreater(
                     live_issue_page.button_label_fragment_count(

@@ -93,18 +93,31 @@ class LiveIssueDetailCollaborationPage:
         if self._session.count(selector) > 0:
             self._session.wait_for_selector(selector, timeout_ms=30_000)
             self._session.click(selector, timeout_ms=30_000)
-            return
+        else:
+            self._session.wait_for_selector(
+                self._button_selector,
+                has_text=label,
+                timeout_ms=30_000,
+            )
+            self._session.click(self._button_selector, has_text=label, timeout_ms=30_000)
+
+    def wait_for_selected_tab(self, label: str, *, timeout_ms: int = 30_000) -> None:
         self._session.wait_for_selector(
-            self._button_selector,
+            self._selected_button_selector,
             has_text=label,
-            timeout_ms=30_000,
+            timeout_ms=timeout_ms,
         )
-        self._session.click(self._button_selector, has_text=label, timeout_ms=30_000)
+
+    def wait_for_text(self, text: str, *, timeout_ms: int = 60_000) -> str:
+        return self._session.wait_for_text(text, timeout_ms=timeout_ms)
 
     def text_fragment_count(self, fragment: str) -> int:
-        return self._session.count(
+        labeled_fragment_count = self._session.count(
             f'flt-semantics[aria-label*="{self._escape(fragment)}"]',
         )
+        if labeled_fragment_count > 0:
+            return labeled_fragment_count
+        return 1 if fragment in self.current_body_text() else 0
 
     def button_label_fragment_count(self, fragment: str) -> int:
         labeled_button_count = self._session.count(
