@@ -1881,8 +1881,16 @@ class TrackStateCli {
     if (matches.isNotEmpty) {
       return matches.last;
     }
-    if (issue.attachments.isNotEmpty) {
-      return issue.attachments.last;
+    final sanitizedName = _sanitizeAttachmentName(attachmentName);
+    final storedNameMatches = issue.attachments
+        .where(
+          (attachment) =>
+              _fileNameFromPath(attachment.storagePath) == sanitizedName ||
+              _fileNameFromPath(attachment.id) == sanitizedName,
+        )
+        .toList(growable: false);
+    if (storedNameMatches.isNotEmpty) {
+      return storedNameMatches.last;
     }
     throw _TrackStateCliException(
       code: 'UNEXPECTED_ERROR',
@@ -1926,8 +1934,14 @@ class TrackStateCli {
           details: <String, Object?>{'query': rawValue},
         );
       }
-      final key = rawValue.substring(0, separatorIndex).trim();
-      final value = rawValue.substring(separatorIndex + 1).trim();
+      final key = _decodeQueryComponent(
+        rawValue.substring(0, separatorIndex).trim(),
+        rawValue: rawValue,
+      );
+      final value = _decodeQueryComponent(
+        rawValue.substring(separatorIndex + 1).trim(),
+        rawValue: rawValue,
+      );
       if (key.isEmpty) {
         throw _TrackStateCliException(
           code: 'INVALID_REQUEST',
@@ -1940,6 +1954,20 @@ class TrackStateCli {
       query[key] = value;
     }
     return query;
+  }
+
+  String _decodeQueryComponent(String value, {required String rawValue}) {
+    try {
+      return Uri.decodeQueryComponent(value);
+    } on ArgumentError {
+      throw _TrackStateCliException(
+        code: 'INVALID_REQUEST',
+        category: TrackStateCliErrorCategory.validation,
+        message: 'Query parameters must use valid percent-encoding.',
+        exitCode: 2,
+        details: <String, Object?>{'query': rawValue},
+      );
+    }
   }
 
   Map<String, Object?>? _parseJsonBody(String? rawBody) {
@@ -2043,6 +2071,15 @@ class TrackStateCli {
         .where((segment) => segment.isNotEmpty);
     return segments.isEmpty ? path : segments.last;
   }
+
+  String _sanitizeAttachmentName(String value) => value
+      .replaceAll('\\', '/')
+      .split('/')
+      .last
+      .replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '-')
+      .replaceAll(RegExp(r'-+'), '-')
+      .replaceAll(RegExp(r'^-|-$'), '')
+      .ifEmpty('attachment.bin');
 
   Future<TrackStateCliExecution> _runLocalSession(
     _ResolvedTarget target,
