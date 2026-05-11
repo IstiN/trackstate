@@ -79,7 +79,7 @@ jobs:
           path: |
             ~/.npm-global
             ~/.local/bin
-          key: ${{ runner.os }}-npm-global-copilot-${{ hashFiles('.github/workflows/ai-teammate.yml') }}
+          key: ${{ runner.os }}-npm-global-copilot-1.0.44
           restore-keys: |
             ${{ runner.os }}-npm-global-copilot-
             ${{ runner.os }}-npm-global-
@@ -87,9 +87,10 @@ jobs:
       - name: Install Copilot CLI
         if: vars.AI_AGENT_PROVIDER == 'copilot'
         run: |
-          if ! command -v github-copilot-cli >/dev/null 2>&1; then
-            npm install -g @github/copilot
+          if ! command -v copilot >/dev/null 2>&1; then
+            npm install -g @github/copilot@1.0.44
           fi
+          copilot --version
           echo "Copilot CLI ready"
 
       - name: Verify Copilot CLI installation
@@ -97,7 +98,7 @@ jobs:
         env:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN || secrets.PAT_TOKEN }}
         run: |
-          npx @github/copilot --version || echo "Copilot CLI will be available once credentials are configured"
+          copilot --version || echo "Copilot CLI will be available once credentials are configured"
 
       - name: Validate Copilot model
         if: vars.AI_AGENT_PROVIDER == 'copilot'
