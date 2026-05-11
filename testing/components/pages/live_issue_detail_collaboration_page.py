@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from testing.components.pages.live_jql_search_page import LiveJqlSearchPage
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
 
 
 class LiveIssueDetailCollaborationPage:
     _button_selector = 'flt-semantics[role="button"]'
+    _tab_button_selector = 'flt-semantics[role="button"][aria-current]'
+    _active_tab_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
     _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
-    _search_input_selector = 'input[aria-label="Search issues"]'
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
         self._tracker_page = tracker_page
@@ -88,27 +90,24 @@ class LiveIssueDetailCollaborationPage:
         issue_summary: str,
         query: str | None = None,
     ) -> None:
-        self.open_jql_search()
         search_query = query or issue_key
+        search_page = LiveJqlSearchPage(self._tracker_page)
+        search_page.open()
+        field_selector = search_page._wait_for_search_field()
         self._session.fill(
-            self._search_input_selector,
+            field_selector,
             search_query,
-            index=1,
             timeout_ms=30_000,
         )
         self._session.press(
-            self._search_input_selector,
+            field_selector,
             "Enter",
-            index=1,
             timeout_ms=30_000,
         )
-        self._session.wait_for_input_value(
-            self._search_input_selector,
-            search_query,
-            index=1,
-            timeout_ms=30_000,
+        self._session.wait_for_selector(
+            self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary),
+            timeout_ms=60_000,
         )
-        self._session.wait_for_any_text(["1 issue", "No issues"], timeout_ms=60_000)
         issue_row = self._session.bounding_box(
             self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary),
             timeout_ms=30_000,
@@ -117,20 +116,36 @@ class LiveIssueDetailCollaborationPage:
             issue_row.x + (issue_row.width / 2),
             issue_row.y + (issue_row.height / 2),
         )
+        self._session.wait_for_selector(
+            self._issue_detail_selector(issue_key),
+            timeout_ms=60_000,
+        )
 
     def issue_detail_count(self, issue_key: str) -> int:
         return self._session.count(self._issue_detail_selector(issue_key))
 
     def tab_button_count(self, label: str) -> int:
-        return self._session.count(self._button_selector, has_text=label)
+        return self._session.count(self._tab_button_selector, has_text=label)
+
+    def active_tab_count(self, label: str) -> int:
+        return self._session.count(self._active_tab_button_selector, has_text=label)
 
     def open_collaboration_tab(self, label: str) -> None:
         self._session.wait_for_selector(
-            self._button_selector,
+            self._tab_button_selector,
             has_text=label,
             timeout_ms=30_000,
         )
-        self._session.click(self._button_selector, has_text=label, timeout_ms=30_000)
+        self._session.click(
+            self._tab_button_selector,
+            has_text=label,
+            timeout_ms=30_000,
+        )
+        self._session.wait_for_selector(
+            self._active_tab_button_selector,
+            has_text=label,
+            timeout_ms=30_000,
+        )
 
     def text_fragment_count(self, fragment: str) -> int:
         return self._session.count(
@@ -171,7 +186,12 @@ class LiveIssueDetailCollaborationPage:
 
     @staticmethod
     def _issue_detail_selector(issue_key: str) -> str:
-        return f'flt-semantics[aria-label*="Issue detail {LiveIssueDetailCollaborationPage._escape(issue_key)}"]'
+        return (
+            'flt-semantics[aria-label*="Issue detail '
+            f'{LiveIssueDetailCollaborationPage._escape(issue_key)}"], '
+            'flt-semantics-img[aria-label*="Issue detail '
+            f'{LiveIssueDetailCollaborationPage._escape(issue_key)}"]'
+        )
 
     @staticmethod
     def _escape(value: str) -> str:
