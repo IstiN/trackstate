@@ -38,6 +38,8 @@ abstract interface class TrackStateAppComponent {
 
   void expectIssueSearchResultAbsent(String key, String summary);
 
+  List<String> visibleIssueSearchResultLabelsSnapshot();
+
   Future<void> dragIssueToStatusColumn({
     required String key,
     required String summary,

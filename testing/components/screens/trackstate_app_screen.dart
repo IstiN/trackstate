@@ -92,7 +92,10 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   Finder get _jqlSearchPanel => find.bySemanticsLabel(RegExp('^JQL Search\$'));
 
-  Finder get _jqlSearchField => find.byType(TextField).last;
+  Finder get _jqlSearchField => find.descendant(
+    of: _exactSemanticsLabel('Search issues'),
+    matching: find.byType(TextField),
+  );
 
   Finder _statusColumn(String label) =>
       find.bySemanticsLabel(RegExp('${RegExp.escape(label)} column'));
@@ -354,6 +357,19 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   void expectIssueSearchResultAbsent(String key, String summary) {
     expect(_issue(key, summary), findsNothing);
+  }
+
+  @override
+  List<String> visibleIssueSearchResultLabelsSnapshot() {
+    final labels = <String>[];
+    for (final widget in tester.widgetList<Semantics>(find.byType(Semantics))) {
+      final label = widget.properties.label?.trim();
+      if (label == null || label.isEmpty || !label.startsWith('Open ')) {
+        continue;
+      }
+      labels.add(label);
+    }
+    return labels;
   }
 
   @override
