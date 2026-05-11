@@ -14,18 +14,17 @@ class LiveJqlSearchObservation:
     body_text: str
     count_summary: str | None
     issue_result_count: int
+    issue_result_labels: tuple[str, ...]
 
 
 class LiveJqlSearchPage:
     _button_selector = 'flt-semantics[role="button"]'
     _active_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
-    _issue_button_selector = 'flt-semantics[role="button"][aria-label*="Open DEMO-"]'
-    _search_field_candidates = (
-        'input[data-semantics-role="text-field"]:not([disabled]):not([aria-label])',
-        'textarea[data-semantics-role="text-field"]:not([disabled]):not([aria-label])',
-        'input[aria-label="Search issues"]',
-        'textarea[aria-label="Search issues"]',
-        '[role="textbox"][aria-label="Search issues"]',
+    _panel_selector = 'flt-semantics[role="group"][aria-label="JQL Search"]'
+    _panel_search_field_container_selector = f"{_panel_selector} > flt-semantics"
+    _panel_search_field_selector = f'{_panel_selector} input[aria-label="Search issues"]'
+    _issue_button_selector = (
+        f'{_panel_selector} flt-semantics[role="button"][aria-label^="Open DEMO-"]'
     )
     _no_results_text = "No results"
 
@@ -90,8 +89,12 @@ class LiveJqlSearchPage:
     def _submit_query(self, query: str) -> str:
         self.open()
         field_selector = self._wait_for_search_field()
+        self._session.click(
+            self._panel_search_field_container_selector,
+            timeout_ms=30_000,
+        )
         self._session.fill(field_selector, query, timeout_ms=30_000)
-        self._session.press(field_selector, "Enter", timeout_ms=30_000)
+        self._session.press_key("Enter", timeout_ms=30_000)
         return field_selector
 
     def _observe(
@@ -107,22 +110,26 @@ class LiveJqlSearchPage:
             body_text=body_text,
             count_summary=self._count_summary(body_text),
             issue_result_count=self._session.count(self._issue_button_selector),
+            issue_result_labels=self._issue_result_labels(),
         )
 
     def _wait_for_search_field(self) -> str:
-        errors: list[str] = []
-        for selector in self._search_field_candidates:
-            try:
-                self._session.wait_for_selector(selector, timeout_ms=10_000)
-                return selector
-            except WebAppTimeoutError as error:
-                errors.append(str(error))
-        raise AssertionError(
-            "Step 3 failed: the live app did not expose the visible JQL Search text "
-            "field.\n"
-            f"Observed body text:\n{self.current_body_text()}\n"
-            f"Selector attempts: {errors}",
-        )
+        try:
+            self._session.wait_for_selector(
+                self._panel_search_field_container_selector,
+                timeout_ms=10_000,
+            )
+            self._session.wait_for_selector(
+                self._panel_search_field_selector,
+                timeout_ms=10_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 3 failed: the live app did not expose the visible JQL Search text "
+                "field inside the JQL Search results panel.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        return self._panel_search_field_selector
 
     def _is_active(self) -> bool:
         return self._session.count(
@@ -155,3 +162,16 @@ class LiveJqlSearchPage:
         if match is None:
             return None
         return match.group(0)
+
+    def _issue_result_labels(self) -> tuple[str, ...]:
+        payload = self._session.evaluate(
+            """
+            (selector) => Array.from(document.querySelectorAll(selector))
+              .map((element) => element.getAttribute("aria-label") ?? "")
+              .filter((label) => label.length > 0)
+            """,
+            arg=self._issue_button_selector,
+        )
+        if not isinstance(payload, list):
+            return ()
+        return tuple(str(label) for label in payload)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,23 @@ class TrackStateCliJiraSearchFixtureIssue:
         return self.description or f"{self.summary}."
 
 
+def _default_fixture_issues() -> tuple[TrackStateCliJiraSearchFixtureIssue, ...]:
+    return (
+        TrackStateCliJiraSearchFixtureIssue(
+            key="TRACK-1",
+            summary="Issue 1",
+            assignee="user1",
+            reporter="user1",
+        ),
+        TrackStateCliJiraSearchFixtureIssue(
+            key="TRACK-2",
+            summary="Issue 2",
+            assignee="user2",
+            reporter="user2",
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class TrackStateCliJiraSearchConfig:
     requested_command: tuple[str, ...]
@@ -31,7 +48,9 @@ class TrackStateCliJiraSearchConfig:
     expected_max_results: int
     expected_total: int
     expected_is_last_page: bool
-    fixture_issues: tuple[TrackStateCliJiraSearchFixtureIssue, ...]
+    fixture_issues: tuple[TrackStateCliJiraSearchFixtureIssue, ...] = field(
+        default_factory=_default_fixture_issues
+    )
 
     @classmethod
     def from_defaults(cls) -> "TrackStateCliJiraSearchConfig":
@@ -66,18 +85,4 @@ class TrackStateCliJiraSearchConfig:
             expected_max_results=2,
             expected_total=2,
             expected_is_last_page=True,
-            fixture_issues=(
-                TrackStateCliJiraSearchFixtureIssue(
-                    key="TRACK-1",
-                    summary="Issue 1",
-                    assignee="user1",
-                    reporter="user1",
-                ),
-                TrackStateCliJiraSearchFixtureIssue(
-                    key="TRACK-2",
-                    summary="Issue 2",
-                    assignee="user2",
-                    reporter="user2",
-                ),
-            ),
         )
