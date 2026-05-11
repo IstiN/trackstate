@@ -47,6 +47,34 @@ abstract interface class TrackStateRepository {
   Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue);
 }
 
+extension TrackStateRepositoryAttachmentSupport on TrackStateRepository {
+  String resolveIssueAttachmentPath(TrackStateIssue issue, String name) {
+    final normalizedName = name.trim();
+    if (normalizedName.isEmpty) {
+      return _joinPath(
+        _issueRoot(issue.storagePath),
+        'attachments/attachment.bin',
+      );
+    }
+    return _joinPath(
+      _issueRoot(issue.storagePath),
+      'attachments/${sanitizeAttachmentName(normalizedName)}',
+    );
+  }
+
+  Future<bool> isIssueAttachmentLfsTracked(
+    TrackStateIssue issue,
+    String name,
+  ) async {
+    if (this case final ProviderBackedTrackStateRepository repository) {
+      return repository.providerAdapter.isLfsTracked(
+        resolveIssueAttachmentPath(issue, name),
+      );
+    }
+    return false;
+  }
+}
+
 class ProviderBackedTrackStateRepository implements TrackStateRepository {
   static const RepositoryPermission _restrictedPermission =
       RepositoryPermission(
@@ -71,12 +99,12 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
          connectionState: ProviderConnectionState.disconnected,
          resolvedUserIdentity: provider.repositoryLabel,
          canRead: _restrictedPermission.canRead,
-          canWrite: _restrictedPermission.canWrite,
-          canCreateBranch: _restrictedPermission.canCreateBranch,
-          canManageAttachments: _restrictedPermission.canManageAttachments,
-          attachmentUploadMode: _restrictedPermission.attachmentUploadMode,
-          canCheckCollaborators: _restrictedPermission.canCheckCollaborators,
-        );
+         canWrite: _restrictedPermission.canWrite,
+         canCreateBranch: _restrictedPermission.canCreateBranch,
+         canManageAttachments: _restrictedPermission.canManageAttachments,
+         attachmentUploadMode: _restrictedPermission.attachmentUploadMode,
+         canCheckCollaborators: _restrictedPermission.canCheckCollaborators,
+       );
 
   final TrackStateProviderAdapter _provider;
   final JqlSearchService _searchService;
@@ -384,7 +412,10 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   }
 
   @override
-  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) async {
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async {
     if (issue.storagePath.isEmpty) {
       throw const TrackStateRepositoryException(
         'This issue has no repository file path and cannot receive comments.',
@@ -415,7 +446,10 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         .map((entry) => entry.path)
         .toSet();
     final issueRoot = _issueRoot(currentIssue.storagePath);
-    final nextCommentId = _nextCommentId(blobPaths: blobPaths, issueRoot: issueRoot);
+    final nextCommentId = _nextCommentId(
+      blobPaths: blobPaths,
+      issueRoot: issueRoot,
+    );
     final commentPath = _joinPath(issueRoot, 'comments/$nextCommentId.md');
     final timestamp = DateTime.now().toUtc().toIso8601String();
     final author = _defaultAuthor(_session.resolvedUserIdentity);
@@ -487,10 +521,9 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       orElse: () => issue,
     );
     final writeBranch = await _provider.resolveWriteBranch();
-    final issueRoot = _issueRoot(currentIssue.storagePath);
-    final attachmentPath = _joinPath(
-      issueRoot,
-      'attachments/${_sanitizeAttachmentName(normalizedName)}',
+    final attachmentPath = resolveIssueAttachmentPath(
+      currentIssue,
+      normalizedName,
     );
     final existingRevision = _snapshotArtifactRevisions[attachmentPath];
     final lfsTracked = await _provider.isLfsTracked(attachmentPath);
@@ -523,7 +556,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     );
     final updatedAttachment = IssueAttachment(
       id: attachmentPath,
-      name: normalizedName,
+      name: attachmentPath.split('/').last,
       mediaType: _mediaTypeForPath(attachmentPath),
       sizeBytes: bytes.length,
       author: author,
@@ -534,12 +567,15 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     final updatedIssue = currentIssue.copyWith(
       attachments: [
         for (final candidate in currentIssue.attachments)
-          if (candidate.storagePath == attachmentPath) updatedAttachment else candidate,
+          if (candidate.storagePath == attachmentPath)
+            updatedAttachment
+          else
+            candidate,
         if (!currentIssue.attachments.any(
           (candidate) => candidate.storagePath == attachmentPath,
         ))
           updatedAttachment,
-      ]..sort((left, right) => left.name.compareTo(right.name)),
+      ]..sort(_sortAttachmentsNewestFirst),
     );
     _replaceCachedIssue(updatedIssue);
     return updatedIssue;
@@ -555,7 +591,9 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
   }
 
   @override
-  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) async {
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async {
     final historyReader = switch (_provider) {
       final RepositoryHistoryReader supported => supported,
       _ => null,
@@ -564,7 +602,10 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       return const <IssueHistoryEntry>[];
     }
     final issueRoot = _issueRoot(issue.storagePath);
-    final commits = await historyReader.listHistory(ref: _provider.dataRef, path: issueRoot);
+    final commits = await historyReader.listHistory(
+      ref: _provider.dataRef,
+      path: issueRoot,
+    );
     return _normalizeIssueHistory(issue: issue, commits: commits);
   }
 
@@ -1480,7 +1521,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         ),
       );
     }
-    return attachments..sort((a, b) => a.name.compareTo(b.name));
+    return attachments..sort(_sortAttachmentsNewestFirst);
   }
 
   Future<List<IssueHistoryEntry>> _normalizeIssueHistory({
@@ -1495,16 +1536,22 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
           change.path,
         ];
         final effectivePath = change.previousPath ?? change.path;
-        if (effectivePath.endsWith('/main.md') || change.path.endsWith('/main.md')) {
-          final currentMainPath = change.changeType == RepositoryHistoryChangeType.removed
+        if (effectivePath.endsWith('/main.md') ||
+            change.path.endsWith('/main.md')) {
+          final currentMainPath =
+              change.changeType == RepositoryHistoryChangeType.removed
               ? null
               : change.path;
-          final previousMainPath = change.changeType == RepositoryHistoryChangeType.added
+          final previousMainPath =
+              change.changeType == RepositoryHistoryChangeType.added
               ? null
               : effectivePath;
           final currentState = currentMainPath == null
               ? null
-              : await _loadHistoryIssueState(ref: commit.sha, mainPath: currentMainPath);
+              : await _loadHistoryIssueState(
+                  ref: commit.sha,
+                  mainPath: currentMainPath,
+                );
           final previousState =
               commit.parentSha == null || previousMainPath == null
               ? null
@@ -1563,8 +1610,14 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
                 affectedEntityId: currentState.key,
                 summary: 'Moved ${currentState.key} in the hierarchy',
                 changedPaths: changedPaths,
-                before: previousState.parentKey ?? previousState.epicKey ?? previousMainPath,
-                after: currentState.parentKey ?? currentState.epicKey ?? change.path,
+                before:
+                    previousState.parentKey ??
+                    previousState.epicKey ??
+                    previousMainPath,
+                after:
+                    currentState.parentKey ??
+                    currentState.epicKey ??
+                    change.path,
               ),
             );
           }
@@ -1635,11 +1688,13 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         }
         if (_isIssueCommentPath(effectivePath)) {
           final commentId = effectivePath.split('/').last.replaceAll('.md', '');
-          final currentMarkdown = change.changeType == RepositoryHistoryChangeType.removed
+          final currentMarkdown =
+              change.changeType == RepositoryHistoryChangeType.removed
               ? null
               : await _tryReadTextAtRef(change.path, commit.sha);
           final previousMarkdown =
-              commit.parentSha == null || change.changeType == RepositoryHistoryChangeType.added
+              commit.parentSha == null ||
+                  change.changeType == RepositoryHistoryChangeType.added
               ? null
               : await _tryReadTextAtRef(effectivePath, commit.parentSha!);
           final currentComment = currentMarkdown == null
@@ -1710,10 +1765,14 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
               timestamp: commit.timestamp,
               author: commit.author,
               changeType: switch (change.changeType) {
-                RepositoryHistoryChangeType.added => IssueHistoryChangeType.added,
-                RepositoryHistoryChangeType.removed => IssueHistoryChangeType.removed,
-                RepositoryHistoryChangeType.renamed => IssueHistoryChangeType.moved,
-                RepositoryHistoryChangeType.modified => IssueHistoryChangeType.updated,
+                RepositoryHistoryChangeType.added =>
+                  IssueHistoryChangeType.added,
+                RepositoryHistoryChangeType.removed =>
+                  IssueHistoryChangeType.removed,
+                RepositoryHistoryChangeType.renamed =>
+                  IssueHistoryChangeType.moved,
+                RepositoryHistoryChangeType.modified =>
+                  IssueHistoryChangeType.updated,
               },
               affectedEntity: IssueHistoryEntity.attachment,
               affectedEntityId: attachmentName,
@@ -1794,7 +1853,10 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       summary: (frontmatter['summary']?.toString() ?? '')
           .ifEmpty(_section(body, 'Summary'))
           .ifEmpty('Untitled issue'),
-      description: _section(body, 'Description').ifEmpty(_section(body, 'Summary')),
+      description: _section(
+        body,
+        'Description',
+      ).ifEmpty(_section(body, 'Summary')),
       statusId: _canonicalConfigId(frontmatter['status']?.toString()),
       priorityId: _canonicalConfigId(frontmatter['priority']?.toString()),
       assignee: frontmatter['assignee']?.toString() ?? '',
@@ -2036,65 +2098,79 @@ class DemoTrackStateRepository implements TrackStateRepository {
   );
 
   @override
-  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) async =>
-      issue.copyWith(
-        comments: [
-          ...issue.comments,
-          IssueComment(
-            id: (issue.comments.length + 1).toString().padLeft(4, '0'),
-            author: 'demo-user',
-            body: body.trimRight(),
-            updatedLabel: 'just now',
-            createdAt: DateTime.now().toUtc().toIso8601String(),
-            updatedAt: DateTime.now().toUtc().toIso8601String(),
-            storagePath:
-                '${_issueRoot(issue.storagePath)}/comments/${(issue.comments.length + 1).toString().padLeft(4, '0')}.md',
-          ),
-        ],
-      );
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => issue.copyWith(
+    comments: [
+      ...issue.comments,
+      IssueComment(
+        id: (issue.comments.length + 1).toString().padLeft(4, '0'),
+        author: 'demo-user',
+        body: body.trimRight(),
+        updatedLabel: 'just now',
+        createdAt: DateTime.now().toUtc().toIso8601String(),
+        updatedAt: DateTime.now().toUtc().toIso8601String(),
+        storagePath:
+            '${_issueRoot(issue.storagePath)}/comments/${(issue.comments.length + 1).toString().padLeft(4, '0')}.md',
+      ),
+    ],
+  );
 
   @override
   Future<TrackStateIssue> uploadIssueAttachment({
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
-  }) async => issue.copyWith(
-    attachments: [
-      ...issue.attachments,
-      IssueAttachment(
-        id: '${_issueRoot(issue.storagePath)}/attachments/$name',
-        name: name,
-        mediaType: _mediaTypeForPath(name),
-        sizeBytes: bytes.length,
-        author: 'demo-user',
-        createdAt: DateTime.now().toUtc().toIso8601String(),
-        storagePath: '${_issueRoot(issue.storagePath)}/attachments/$name',
-        revisionOrOid: 'demo-revision',
-      ),
-    ],
-  );
+  }) async {
+    final attachmentPath = resolveIssueAttachmentPath(issue, name);
+    final updatedAttachment = IssueAttachment(
+      id: attachmentPath,
+      name: attachmentPath.split('/').last,
+      mediaType: _mediaTypeForPath(attachmentPath),
+      sizeBytes: bytes.length,
+      author: 'demo-user',
+      createdAt: DateTime.now().toUtc().toIso8601String(),
+      storagePath: attachmentPath,
+      revisionOrOid: 'demo-revision',
+    );
+    return issue.copyWith(
+      attachments: [
+        for (final candidate in issue.attachments)
+          if (candidate.storagePath == attachmentPath)
+            updatedAttachment
+          else
+            candidate,
+        if (!issue.attachments.any(
+          (candidate) => candidate.storagePath == attachmentPath,
+        ))
+          updatedAttachment,
+      ]..sort(_sortAttachmentsNewestFirst),
+    );
+  }
 
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
       Uint8List.fromList(utf8.encode('<svg />'));
 
   @override
-  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) async =>
-      [
-        IssueHistoryEntry(
-          commitSha: 'demo-commit',
-          timestamp: '2026-05-05T00:10:00Z',
-          author: 'ana',
-          changeType: IssueHistoryChangeType.updated,
-          affectedEntity: IssueHistoryEntity.issue,
-          affectedEntityId: issue.key,
-          fieldName: 'description',
-          before: 'Old description',
-          after: issue.description,
-          summary: 'Updated description on ${issue.key}',
-          changedPaths: [issue.storagePath],
-        ),
-      ];
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => [
+    IssueHistoryEntry(
+      commitSha: 'demo-commit',
+      timestamp: '2026-05-05T00:10:00Z',
+      author: 'ana',
+      changeType: IssueHistoryChangeType.updated,
+      affectedEntity: IssueHistoryEntity.issue,
+      affectedEntityId: issue.key,
+      fieldName: 'description',
+      before: 'Old description',
+      after: issue.description,
+      summary: 'Updated description on ${issue.key}',
+      changedPaths: [issue.storagePath],
+    ),
+  ];
 }
 
 class TrackStateRepositoryException extends TrackStateProviderException {
@@ -2772,7 +2848,7 @@ String _nextCommentId({
   return (maxId + 1).toString().padLeft(4, '0');
 }
 
-String _sanitizeAttachmentName(String value) => value
+String sanitizeAttachmentName(String value) => value
     .replaceAll('\\', '/')
     .split('/')
     .last
@@ -2780,6 +2856,28 @@ String _sanitizeAttachmentName(String value) => value
     .replaceAll(RegExp(r'-+'), '-')
     .replaceAll(RegExp(r'^-|-$'), '')
     .ifEmpty('attachment.bin');
+
+int _sortAttachmentsNewestFirst(IssueAttachment left, IssueAttachment right) {
+  final leftCreated = DateTime.tryParse(left.createdAt);
+  final rightCreated = DateTime.tryParse(right.createdAt);
+  if (leftCreated != null && rightCreated != null) {
+    final byTimestamp = rightCreated.compareTo(leftCreated);
+    if (byTimestamp != 0) {
+      return byTimestamp;
+    }
+  }
+  if (leftCreated != null && rightCreated == null) {
+    return -1;
+  }
+  if (leftCreated == null && rightCreated != null) {
+    return 1;
+  }
+  final byCreatedLabel = right.createdAt.compareTo(left.createdAt);
+  if (byCreatedLabel != 0) {
+    return byCreatedLabel;
+  }
+  return left.name.compareTo(right.name);
+}
 
 bool _isIssueCommentPath(String path) =>
     path.contains('/comments/') && path.endsWith('.md');

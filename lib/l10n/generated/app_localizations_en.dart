@@ -129,6 +129,29 @@ class AppLocalizationsEn extends AppLocalizations {
       'This repository connection cannot push attachment changes. Existing attachments remain available for download.';
 
   @override
+  String get chooseAttachment => 'Choose attachment';
+
+  @override
+  String get uploadAttachment => 'Upload attachment';
+
+  @override
+  String get clearSelectedAttachment => 'Clear selected attachment';
+
+  @override
+  String get noAttachmentSelected =>
+      'Choose a file to review its size before upload.';
+
+  @override
+  String selectedAttachmentSummary(String fileName, String fileSize) {
+    return 'Selected attachment: $fileName ($fileSize)';
+  }
+
+  @override
+  String attachmentRequiresLocalGitUpload(String fileName) {
+    return '$fileName follows the Git LFS attachment path and must be uploaded from a local Git runtime. Existing attachments remain available for download here.';
+  }
+
+  @override
   String get history => 'History';
 
   @override
@@ -138,6 +161,25 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get postComment => 'Post comment';
+
+  @override
+  String editedAt(String timestamp) {
+    return 'Edited $timestamp';
+  }
+
+  @override
+  String get replaceAttachmentTitle => 'Replace attachment?';
+
+  @override
+  String replaceAttachmentMessage(String fileName) {
+    return 'Uploading this file will replace the existing attachment stored as $fileName. Rename the new file first if you need to keep both versions.';
+  }
+
+  @override
+  String get replaceAttachmentAction => 'Replace attachment';
+
+  @override
+  String get keepCurrentAttachment => 'Keep current attachment';
 
   @override
   String get linkedIssues => 'Linked issues';

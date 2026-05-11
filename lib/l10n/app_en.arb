@@ -51,6 +51,29 @@
   "attachmentsDownloadOnlyMessage": "Attachment upload is unavailable in this browser session. Existing attachments remain available for download.",
   "attachmentsAccessMessageDisconnected": "Connect GitHub with repository write access to enable Git-backed attachment changes. Existing attachments remain available for download.",
   "attachmentsAccessMessageReadOnly": "This repository connection cannot push attachment changes. Existing attachments remain available for download.",
+  "chooseAttachment": "Choose attachment",
+  "uploadAttachment": "Upload attachment",
+  "clearSelectedAttachment": "Clear selected attachment",
+  "noAttachmentSelected": "Choose a file to review its size before upload.",
+  "selectedAttachmentSummary": "Selected attachment: {fileName} ({fileSize})",
+  "@selectedAttachmentSummary": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      },
+      "fileSize": {
+        "type": "String"
+      }
+    }
+  },
+  "attachmentRequiresLocalGitUpload": "{fileName} follows the Git LFS attachment path and must be uploaded from a local Git runtime. Existing attachments remain available for download here.",
+  "@attachmentRequiresLocalGitUpload": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
   "history": "History",
   "downloadAttachment": "Download {fileName}",
   "@downloadAttachment": {
@@ -61,6 +84,25 @@
     }
   },
   "postComment": "Post comment",
+  "editedAt": "Edited {timestamp}",
+  "@editedAt": {
+    "placeholders": {
+      "timestamp": {
+        "type": "String"
+      }
+    }
+  },
+  "replaceAttachmentTitle": "Replace attachment?",
+  "replaceAttachmentMessage": "Uploading this file will replace the existing attachment stored as {fileName}. Rename the new file first if you need to keep both versions.",
+  "@replaceAttachmentMessage": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
+  "replaceAttachmentAction": "Replace attachment",
+  "keepCurrentAttachment": "Keep current attachment",
   "linkedIssues": "Linked issues",
   "description": "Description",
   "acceptanceCriteria": "Acceptance Criteria",

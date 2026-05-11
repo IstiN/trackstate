@@ -322,6 +322,42 @@ abstract class AppLocalizations {
   /// **'This repository connection cannot push attachment changes. Existing attachments remain available for download.'**
   String get attachmentsAccessMessageReadOnly;
 
+  /// No description provided for @chooseAttachment.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose attachment'**
+  String get chooseAttachment;
+
+  /// No description provided for @uploadAttachment.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload attachment'**
+  String get uploadAttachment;
+
+  /// No description provided for @clearSelectedAttachment.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear selected attachment'**
+  String get clearSelectedAttachment;
+
+  /// No description provided for @noAttachmentSelected.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a file to review its size before upload.'**
+  String get noAttachmentSelected;
+
+  /// No description provided for @selectedAttachmentSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Selected attachment: {fileName} ({fileSize})'**
+  String selectedAttachmentSummary(String fileName, String fileSize);
+
+  /// No description provided for @attachmentRequiresLocalGitUpload.
+  ///
+  /// In en, this message translates to:
+  /// **'{fileName} follows the Git LFS attachment path and must be uploaded from a local Git runtime. Existing attachments remain available for download here.'**
+  String attachmentRequiresLocalGitUpload(String fileName);
+
   /// No description provided for @history.
   ///
   /// In en, this message translates to:
@@ -339,6 +375,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Post comment'**
   String get postComment;
+
+  /// No description provided for @editedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Edited {timestamp}'**
+  String editedAt(String timestamp);
+
+  /// No description provided for @replaceAttachmentTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace attachment?'**
+  String get replaceAttachmentTitle;
+
+  /// No description provided for @replaceAttachmentMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Uploading this file will replace the existing attachment stored as {fileName}. Rename the new file first if you need to keep both versions.'**
+  String replaceAttachmentMessage(String fileName);
+
+  /// No description provided for @replaceAttachmentAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace attachment'**
+  String get replaceAttachmentAction;
+
+  /// No description provided for @keepCurrentAttachment.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep current attachment'**
+  String get keepCurrentAttachment;
 
   /// No description provided for @linkedIssues.
   ///
