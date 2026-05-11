@@ -91,6 +91,15 @@ class WebAppSession(Protocol):
         timeout_ms: int = 30_000,
     ) -> str: ...
 
+    def wait_for_input_value(
+        self,
+        selector: str,
+        expected_value: str,
+        *,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str: ...
+
     def body_text(self) -> str: ...
 
     def wait_for_text(
