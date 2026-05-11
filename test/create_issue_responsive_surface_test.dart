@@ -96,6 +96,48 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'create issue surface scrolls instead of overflowing during desktop height reduction',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      CreateIssueAccessibilityScreenHandle? screen;
+
+      try {
+        screen = await launchCreateIssueAccessibilityFixture(tester);
+
+        await screen.resizeToViewport(width: 1440, height: 640);
+
+        expect(
+          _drainFrameworkExceptions(tester),
+          isEmpty,
+          reason:
+              'Reducing only the desktop viewport height should not trigger '
+              'RenderFlex overflow exceptions.',
+        );
+
+        await screen.resizeToViewport(width: 1440, height: 400);
+
+        final scrollState = screen.observeVerticalScroll();
+        expect(
+          scrollState.hasOverflow,
+          isTrue,
+          reason:
+              'The Create issue body should become vertically scrollable at '
+              'short desktop heights.',
+        );
+
+        await screen.scrollToBottom();
+
+        expect(screen.isTextVisibleInViewport('Save'), isTrue);
+        expect(screen.isTextVisibleInViewport('Cancel'), isTrue);
+        expect(_drainFrameworkExceptions(tester), isEmpty);
+      } finally {
+        await screen?.dispose();
+        semantics.dispose();
+      }
+    },
+  );
 }
 
 List<String> _drainFrameworkExceptions(WidgetTester tester) {
