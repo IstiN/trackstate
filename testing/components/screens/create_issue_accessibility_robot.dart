@@ -38,6 +38,47 @@ class CreateIssueAccessibilityRobot {
     matching: find.text(text, findRichText: true),
   );
 
+  Finder labeledTextFieldWithinCreateIssueSurface(String label) {
+    final decorationMatch = find.descendant(
+      of: createIssueSurface.first,
+      matching: find.byWidgetPredicate((widget) {
+        return widget is TextField && widget.decoration?.labelText == label;
+      }, description: 'text field labeled $label'),
+    );
+    if (decorationMatch.evaluate().isNotEmpty) {
+      return decorationMatch;
+    }
+
+    final semanticsMatch = find.descendant(
+      of: createIssueSurface.first,
+      matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
+    );
+    if (semanticsMatch.evaluate().isEmpty) {
+      return semanticsMatch;
+    }
+    return find.descendant(
+      of: semanticsMatch.first,
+      matching: find.byWidgetPredicate(
+        (widget) => widget is EditableText || widget is TextField,
+        description: 'editable control labeled $label',
+      ),
+    );
+  }
+
+  Finder controlWithinCreateIssueSurface(String label) {
+    final semanticsMatch = find.descendant(
+      of: createIssueSurface.first,
+      matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
+    );
+    if (semanticsMatch.evaluate().isNotEmpty) {
+      return semanticsMatch;
+    }
+    return find.descendant(
+      of: createIssueSurface.first,
+      matching: find.text(label, findRichText: true),
+    );
+  }
+
   Finder get createIssueScrollable => find.descendant(
     of: createIssueSurface.first,
     matching: find.byType(Scrollable),
@@ -124,6 +165,43 @@ class CreateIssueAccessibilityRobot {
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .toList(growable: false);
+  }
+
+  Rect? observeLabeledTextFieldRect(String label) {
+    final field = labeledTextFieldWithinCreateIssueSurface(label);
+    if (field.evaluate().isEmpty) {
+      return null;
+    }
+    return tester.getRect(field.first);
+  }
+
+  String? readLabeledTextFieldValue(String label) {
+    final field = labeledTextFieldWithinCreateIssueSurface(label);
+    if (field.evaluate().isEmpty) {
+      return null;
+    }
+
+    String? emptyCandidate;
+    final count = field.evaluate().length;
+    for (var index = 0; index < count; index++) {
+      final value = _readTextFieldValue(field.at(index));
+      if (value == null) {
+        continue;
+      }
+      if (value.isNotEmpty) {
+        return value;
+      }
+      emptyCandidate ??= value;
+    }
+    return emptyCandidate;
+  }
+
+  Rect? observeControlRect(String label) {
+    final control = controlWithinCreateIssueSurface(label);
+    if (control.evaluate().isEmpty) {
+      return null;
+    }
+    return tester.getRect(control.first);
   }
 
   List<String> semanticsTraversal() {
@@ -407,5 +485,25 @@ class CreateIssueAccessibilityRobot {
   String _rgbHex(Color color) {
     final rgb = color.toARGB32() & 0x00FFFFFF;
     return '#${rgb.toRadixString(16).padLeft(6, '0').toUpperCase()}';
+  }
+
+  String? _readTextFieldValue(Finder field) {
+    final widget = tester.widget(field);
+    if (widget is EditableText) {
+      return widget.controller.text;
+    }
+    if (widget is TextField) {
+      return widget.controller?.text;
+    }
+
+    final editableText = find.descendant(
+      of: field,
+      matching: find.byType(EditableText),
+    );
+    if (editableText.evaluate().isNotEmpty) {
+      return tester.widget<EditableText>(editableText.first).controller.text;
+    }
+
+    return null;
   }
 }
