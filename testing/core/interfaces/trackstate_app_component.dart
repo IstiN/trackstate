@@ -12,6 +12,8 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openSection(String label);
 
+  Future<bool> openHierarchyChildCreateForIssue(String issueKey);
+
   Future<void> switchToLocalGitInSettings({
     required String repositoryPath,
     required String writeBranch,
