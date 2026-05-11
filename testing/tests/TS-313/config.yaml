@@ -1,0 +1,8 @@
+test_id: TS-313
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies JQL canonical fields `status` and `issueType` accept quoted multi-word values.
+  - Confirms visible results are filtered by stable issue keys whose status and issue-type IDs map to the queried labels.
