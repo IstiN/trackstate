@@ -1,0 +1,9 @@
+test_id: TS-327
+type: web
+framework: playwright
+platform: chrome
+dependencies:
+  - TS-322
+notes:
+  - Audits the live hosted DEMO repository for discovery-term coverage across summary, description, and acceptance criteria.
+  - Verifies the deployed JQL Search UI preserves the query, shows the correct result count, and renders only the matching issue labels.
