@@ -4,7 +4,7 @@ from contextlib import AbstractContextManager
 import json
 from typing import Sequence
 
-from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from testing.core.interfaces.web_app_session import (
@@ -292,15 +292,7 @@ class PlaywrightStoredTokenWebAppRuntime(
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=True)
         self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
-        self._context.route(
-            "https://api.github.com/**",
-            lambda route: route.continue_(
-                headers={
-                    **route.request.headers,
-                    "Authorization": f"Bearer {self._token}",
-                },
-            ),
-        )
+        self._context.route("https://api.github.com/**", self._handle_github_api_route)
         storage_key = self._repository.replace("/", ".")
         self._context.add_init_script(
             script=(
@@ -319,6 +311,18 @@ class PlaywrightStoredTokenWebAppRuntime(
         )
         self._page = self._context.new_page()
         return PlaywrightWebAppSession(self._page)
+
+    def _handle_github_api_route(self, route: Route) -> None:
+        self._continue_github_api_route(route)
+
+    def _continue_github_api_route(self, route: Route) -> None:
+        route.continue_(headers=self._authorized_github_headers(route.request.headers))
+
+    def _authorized_github_headers(self, headers: dict[str, str]) -> dict[str, str]:
+        return {
+            **headers,
+            "Authorization": f"Bearer {self._token}",
+        }
 
     def __exit__(self, exc_type, exc, exc_tb) -> None:
         if self._context is not None:
