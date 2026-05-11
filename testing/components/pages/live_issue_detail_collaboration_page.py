@@ -8,6 +8,7 @@ class LiveIssueDetailCollaborationPage:
     _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
+    _selected_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
         self._tracker_page = tracker_page
@@ -79,12 +80,26 @@ class LiveIssueDetailCollaborationPage:
         return self._session.count(self._issue_detail_selector(issue_key))
 
     def tab_button_count(self, label: str) -> int:
-        return self._session.count(self._tab_selector(label))
+        labeled_tab_count = self._session.count(self._tab_selector(label))
+        if labeled_tab_count > 0:
+            return labeled_tab_count
+        return self._session.count(self._button_selector, has_text=label)
+
+    def selected_tab_count(self, label: str) -> int:
+        return self._session.count(self._selected_button_selector, has_text=label)
 
     def open_collaboration_tab(self, label: str) -> None:
         selector = self._tab_selector(label)
-        self._session.wait_for_selector(selector, timeout_ms=30_000)
-        self._session.click(selector, timeout_ms=30_000)
+        if self._session.count(selector) > 0:
+            self._session.wait_for_selector(selector, timeout_ms=30_000)
+            self._session.click(selector, timeout_ms=30_000)
+            return
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text=label,
+            timeout_ms=30_000,
+        )
+        self._session.click(self._button_selector, has_text=label, timeout_ms=30_000)
 
     def text_fragment_count(self, fragment: str) -> int:
         return self._session.count(
@@ -92,9 +107,12 @@ class LiveIssueDetailCollaborationPage:
         )
 
     def button_label_fragment_count(self, fragment: str) -> int:
-        return self._session.count(
+        labeled_button_count = self._session.count(
             f'flt-semantics[role="button"][aria-label*="{self._escape(fragment)}"]',
         )
+        if labeled_button_count > 0:
+            return labeled_button_count
+        return self._session.count(self._button_selector, has_text=fragment)
 
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
