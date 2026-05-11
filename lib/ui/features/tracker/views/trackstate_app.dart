@@ -11,6 +11,7 @@ import '../../../../../domain/models/trackstate_models.dart';
 import '../../../../../l10n/generated/app_localizations.dart';
 import '../../../core/trackstate_icons.dart';
 import '../../../core/trackstate_theme.dart';
+import '../services/attachment_picker.dart';
 import '../view_models/tracker_view_model.dart';
 
 typedef LocalRepositoryLoader =
@@ -27,10 +28,16 @@ typedef LocalRepositoryConfigurationApplier =
     });
 
 class TrackStateApp extends StatefulWidget {
-  const TrackStateApp({super.key, this.repository, this.openLocalRepository});
+  const TrackStateApp({
+    super.key,
+    this.repository,
+    this.openLocalRepository,
+    this.attachmentPicker = pickAttachmentWithFileSelector,
+  });
 
   final TrackStateRepository? repository;
   final LocalRepositoryLoader? openLocalRepository;
+  final AttachmentPicker attachmentPicker;
 
   @override
   State<TrackStateApp> createState() => _TrackStateAppState();
@@ -195,6 +202,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
             onCloseCreateIssue: _closeCreateIssue,
             createIssuePrefill: _createIssuePrefill,
             onApplyLocalGitConfiguration: _switchToLocalRepository,
+            attachmentPicker: widget.attachmentPicker,
           ),
         );
       },
@@ -210,6 +218,7 @@ class _TrackerHome extends StatelessWidget {
     required this.onCloseCreateIssue,
     required this.createIssuePrefill,
     required this.onApplyLocalGitConfiguration,
+    required this.attachmentPicker,
   });
 
   final TrackerViewModel viewModel;
@@ -218,6 +227,7 @@ class _TrackerHome extends StatelessWidget {
   final VoidCallback onCloseCreateIssue;
   final _CreateIssuePrefill? createIssuePrefill;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
+  final AttachmentPicker attachmentPicker;
 
   @override
   Widget build(BuildContext context) {
@@ -290,6 +300,7 @@ class _TrackerHome extends StatelessWidget {
                           createIssuePrefill: createIssuePrefill,
                           onApplyLocalGitConfiguration:
                               onApplyLocalGitConfiguration,
+                          attachmentPicker: attachmentPicker,
                         )
                       : _DesktopShell(
                           viewModel: viewModel,
@@ -299,6 +310,7 @@ class _TrackerHome extends StatelessWidget {
                           createIssuePrefill: createIssuePrefill,
                           onApplyLocalGitConfiguration:
                               onApplyLocalGitConfiguration,
+                          attachmentPicker: attachmentPicker,
                         ),
                 ),
                 bottomNavigationBar: isCompact && !isCreateIssueVisible
@@ -326,6 +338,7 @@ class _DesktopShell extends StatelessWidget {
     required this.onCloseCreateIssue,
     required this.createIssuePrefill,
     required this.onApplyLocalGitConfiguration,
+    required this.attachmentPicker,
   });
 
   final TrackerViewModel viewModel;
@@ -334,6 +347,7 @@ class _DesktopShell extends StatelessWidget {
   final VoidCallback onCloseCreateIssue;
   final _CreateIssuePrefill? createIssuePrefill;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
+  final AttachmentPicker attachmentPicker;
 
   @override
   Widget build(BuildContext context) {
@@ -348,6 +362,7 @@ class _DesktopShell extends StatelessWidget {
             onCloseCreateIssue: onCloseCreateIssue,
             createIssuePrefill: createIssuePrefill,
             onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+            attachmentPicker: attachmentPicker,
           ),
         ),
       ],
@@ -363,6 +378,7 @@ class _MobileShell extends StatelessWidget {
     required this.onCloseCreateIssue,
     required this.createIssuePrefill,
     required this.onApplyLocalGitConfiguration,
+    required this.attachmentPicker,
   });
 
   final TrackerViewModel viewModel;
@@ -371,6 +387,7 @@ class _MobileShell extends StatelessWidget {
   final VoidCallback onCloseCreateIssue;
   final _CreateIssuePrefill? createIssuePrefill;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
+  final AttachmentPicker attachmentPicker;
 
   @override
   Widget build(BuildContext context) {
@@ -382,6 +399,7 @@ class _MobileShell extends StatelessWidget {
       onCloseCreateIssue: onCloseCreateIssue,
       createIssuePrefill: createIssuePrefill,
       onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+      attachmentPicker: attachmentPicker,
     );
   }
 }
@@ -394,6 +412,7 @@ class _TrackerMainPane extends StatelessWidget {
     required this.onCloseCreateIssue,
     required this.createIssuePrefill,
     required this.onApplyLocalGitConfiguration,
+    required this.attachmentPicker,
     this.compact = false,
   });
 
@@ -404,6 +423,7 @@ class _TrackerMainPane extends StatelessWidget {
   final VoidCallback onCloseCreateIssue;
   final _CreateIssuePrefill? createIssuePrefill;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
+  final AttachmentPicker attachmentPicker;
 
   @override
   Widget build(BuildContext context) {
@@ -423,6 +443,7 @@ class _TrackerMainPane extends StatelessWidget {
                 compact: compact,
                 onOpenCreateIssue: onOpenCreateIssue,
                 onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+                attachmentPicker: attachmentPicker,
               ),
             ),
           ],
@@ -843,7 +864,8 @@ String _repositoryAccessLabel(
 ) {
   if (viewModel.exposesHostedAccessGates) {
     return switch (viewModel.hostedRepositoryAccessMode) {
-      HostedRepositoryAccessMode.disconnected => l10n.repositoryAccessConnectGitHub,
+      HostedRepositoryAccessMode.disconnected =>
+        l10n.repositoryAccessConnectGitHub,
       HostedRepositoryAccessMode.readOnly => l10n.repositoryAccessReadOnly,
       HostedRepositoryAccessMode.writable => l10n.repositoryAccessConnected,
       HostedRepositoryAccessMode.attachmentRestricted =>
@@ -879,7 +901,9 @@ String _repositoryAccessTitle(
     HostedRepositoryAccessMode.readOnly => l10n.repositoryAccessReadOnlyTitle,
     HostedRepositoryAccessMode.writable => l10n.repositoryAccessConnected,
     HostedRepositoryAccessMode.attachmentRestricted =>
-      l10n.repositoryAccessAttachmentRestrictedTitle,
+      viewModel.canUploadIssueAttachments
+          ? l10n.repositoryAccessAttachmentLimitedTitle
+          : l10n.repositoryAccessAttachmentRestrictedTitle,
   };
 }
 
@@ -896,7 +920,9 @@ String _repositoryAccessMessage(
       viewModel.project?.repository ?? l10n.configuredRepositoryFallback,
     ),
     HostedRepositoryAccessMode.attachmentRestricted =>
-      l10n.repositoryAccessAttachmentRestrictedMessage,
+      viewModel.canUploadIssueAttachments
+          ? l10n.repositoryAccessAttachmentLimitedMessage
+          : l10n.repositoryAccessAttachmentRestrictedMessage,
   };
 }
 
@@ -911,7 +937,9 @@ String _attachmentsAccessMessage(
       l10n.attachmentsAccessMessageReadOnly,
     HostedRepositoryAccessMode.writable => '',
     HostedRepositoryAccessMode.attachmentRestricted =>
-      l10n.attachmentsDownloadOnlyMessage,
+      viewModel.canUploadIssueAttachments
+          ? l10n.attachmentsLimitedUploadMessage
+          : l10n.attachmentsDownloadOnlyMessage,
   };
 }
 
@@ -1079,6 +1107,10 @@ class _RepositoryAccessBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final attachmentDownloadOnly =
+        viewModel.hostedRepositoryAccessMode ==
+            HostedRepositoryAccessMode.attachmentRestricted &&
+        !viewModel.canUploadIssueAttachments;
     if (!viewModel.exposesHostedAccessGates ||
         viewModel.hostedRepositoryAccessMode ==
             HostedRepositoryAccessMode.writable) {
@@ -1091,14 +1123,10 @@ class _RepositoryAccessBanner extends StatelessWidget {
         semanticLabel: _repositoryAccessTitle(l10n, viewModel),
         title: _repositoryAccessTitle(l10n, viewModel),
         message: _repositoryAccessMessage(l10n, viewModel),
-        primaryActionLabel:
-            viewModel.hostedRepositoryAccessMode ==
-                HostedRepositoryAccessMode.attachmentRestricted
+        primaryActionLabel: attachmentDownloadOnly
             ? l10n.openSettings
             : _repositoryAccessPrimaryActionLabel(l10n, viewModel),
-        onPrimaryAction:
-            viewModel.hostedRepositoryAccessMode ==
-                HostedRepositoryAccessMode.attachmentRestricted
+        onPrimaryAction: attachmentDownloadOnly
             ? () => viewModel.selectSection(TrackerSection.settings)
             : () => _showRepositoryAccessDialog(context, viewModel),
       ),
@@ -1187,12 +1215,14 @@ class _SectionBody extends StatelessWidget {
     required this.viewModel,
     required this.onOpenCreateIssue,
     required this.onApplyLocalGitConfiguration,
+    required this.attachmentPicker,
     this.compact = false,
   });
 
   final TrackerViewModel viewModel;
   final _CreateIssueLauncher onOpenCreateIssue;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
+  final AttachmentPicker attachmentPicker;
   final bool compact;
 
   @override
@@ -1203,6 +1233,7 @@ class _SectionBody extends StatelessWidget {
       TrackerSection.search => _SearchAndDetail(
         viewModel: viewModel,
         onOpenCreateIssue: onOpenCreateIssue,
+        attachmentPicker: attachmentPicker,
       ),
       TrackerSection.hierarchy => _Hierarchy(
         viewModel: viewModel,
@@ -1386,10 +1417,12 @@ class _SearchAndDetail extends StatelessWidget {
   const _SearchAndDetail({
     required this.viewModel,
     required this.onOpenCreateIssue,
+    required this.attachmentPicker,
   });
 
   final TrackerViewModel viewModel;
   final _CreateIssueLauncher onOpenCreateIssue;
+  final AttachmentPicker attachmentPicker;
 
   @override
   Widget build(BuildContext context) {
@@ -1424,6 +1457,7 @@ class _SearchAndDetail extends StatelessWidget {
                   issue: viewModel.selectedIssue!,
                 ),
               ),
+              attachmentPicker: attachmentPicker,
             );
             return compact
                 ? Column(children: [list, const SizedBox(height: 16), detail])
@@ -1868,11 +1902,13 @@ class _IssueDetail extends StatefulWidget {
     required this.issue,
     required this.viewModel,
     required this.onCreateChildIssue,
+    required this.attachmentPicker,
   });
 
   final TrackStateIssue issue;
   final TrackerViewModel viewModel;
   final VoidCallback onCreateChildIssue;
+  final AttachmentPicker attachmentPicker;
 
   @override
   State<_IssueDetail> createState() => _IssueDetailState();
@@ -1883,6 +1919,8 @@ class _IssueDetailState extends State<_IssueDetail> {
   late final TextEditingController _commentController;
   bool _isEditing = false;
   int _selectedCollaborationTab = 0;
+  PickedAttachment? _selectedAttachment;
+  String? _attachmentUploadNotice;
 
   @override
   void initState() {
@@ -1907,6 +1945,8 @@ class _IssueDetailState extends State<_IssueDetail> {
     }
     if (issueChanged) {
       _commentController.clear();
+      _selectedAttachment = null;
+      _attachmentUploadNotice = null;
       if (_selectedCollaborationTab == 3) {
         widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
       }
@@ -1942,6 +1982,87 @@ class _IssueDetailState extends State<_IssueDetail> {
       return;
     }
     _commentController.clear();
+  }
+
+  Future<void> _chooseAttachment() async {
+    if (!widget.viewModel.canUploadIssueAttachments) {
+      return;
+    }
+    final pickedAttachment = await widget.attachmentPicker();
+    if (!mounted || pickedAttachment == null) {
+      return;
+    }
+    setState(() {
+      _selectedAttachment = pickedAttachment;
+      _attachmentUploadNotice = null;
+    });
+  }
+
+  Future<void> _uploadAttachment() async {
+    if (!widget.viewModel.canUploadIssueAttachments) {
+      return;
+    }
+    final selectedAttachment = _selectedAttachment;
+    if (selectedAttachment == null) {
+      return;
+    }
+    final l10n = AppLocalizations.of(context)!;
+    final inspection = await widget.viewModel.inspectIssueAttachmentUpload(
+      widget.issue,
+      selectedAttachment.name,
+    );
+    if (!mounted) {
+      return;
+    }
+    if (widget.viewModel.hasAttachmentUploadRestriction &&
+        inspection.isLfsTracked) {
+      setState(() {
+        _attachmentUploadNotice = l10n.attachmentRequiresLocalGitUpload(
+          inspection.resolvedName,
+        );
+      });
+      return;
+    }
+    if (inspection.existingAttachment != null) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text(l10n.replaceAttachmentTitle),
+            content: Text(
+              l10n.replaceAttachmentMessage(
+                inspection.existingAttachment!.name,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(l10n.keepCurrentAttachment),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(l10n.replaceAttachmentAction),
+              ),
+            ],
+          );
+        },
+      );
+      if (!mounted || confirmed != true) {
+        return;
+      }
+    }
+    final success = await widget.viewModel.uploadIssueAttachment(
+      issue: widget.issue,
+      name: selectedAttachment.name,
+      bytes: selectedAttachment.bytes,
+    );
+    if (!mounted || !success) {
+      return;
+    }
+    setState(() {
+      _selectedAttachment = null;
+      _attachmentUploadNotice = null;
+    });
   }
 
   Widget _detailTabContent(
@@ -2139,6 +2260,17 @@ class _IssueDetailState extends State<_IssueDetail> {
               issue: issue,
               viewModel: widget.viewModel,
               onDownload: widget.viewModel.downloadIssueAttachment,
+              selectedAttachment: _selectedAttachment,
+              uploadNotice: _attachmentUploadNotice,
+              isSaving: widget.viewModel.isSaving,
+              onChooseAttachment: _chooseAttachment,
+              onClearSelection: () {
+                setState(() {
+                  _selectedAttachment = null;
+                  _attachmentUploadNotice = null;
+                });
+              },
+              onUpload: _uploadAttachment,
             )
           else
             _HistoryTab(
@@ -3779,14 +3911,14 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                     key: ValueKey('create-field-${field.id}'),
                                     controller:
                                         _customFieldControllers[field.id],
-                                     minLines: field.type == 'markdown' ? 3 : 1,
-                                     maxLines: field.type == 'markdown'
-                                         ? null
-                                         : 1,
-                                     enabled: canEditFields,
-                                     decoration: InputDecoration(
-                                       labelText: _createIssueFieldLabel(
-                                         project,
+                                    minLines: field.type == 'markdown' ? 3 : 1,
+                                    maxLines: field.type == 'markdown'
+                                        ? null
+                                        : 1,
+                                    enabled: canEditFields,
+                                    decoration: InputDecoration(
+                                      labelText: _createIssueFieldLabel(
+                                        project,
                                         field,
                                       ),
                                       alignLabelWithHint:
@@ -4240,17 +4372,37 @@ class _AttachmentsTab extends StatelessWidget {
     required this.issue,
     required this.viewModel,
     required this.onDownload,
+    required this.selectedAttachment,
+    required this.uploadNotice,
+    required this.isSaving,
+    required this.onChooseAttachment,
+    required this.onClearSelection,
+    required this.onUpload,
   });
 
   final TrackStateIssue issue;
   final TrackerViewModel viewModel;
   final ValueChanged<IssueAttachment> onDownload;
+  final PickedAttachment? selectedAttachment;
+  final String? uploadNotice;
+  final bool isSaving;
+  final VoidCallback onChooseAttachment;
+  final VoidCallback onClearSelection;
+  final VoidCallback onUpload;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
     final accessMessage = _attachmentsAccessMessage(l10n, viewModel);
+    final attachmentDownloadOnly =
+        viewModel.hostedRepositoryAccessMode ==
+            HostedRepositoryAccessMode.attachmentRestricted &&
+        !viewModel.canUploadIssueAttachments;
+    final canChooseAttachment =
+        !isSaving && viewModel.canUploadIssueAttachments;
+    final canUploadAttachment =
+        canChooseAttachment && selectedAttachment != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -4259,12 +4411,98 @@ class _AttachmentsTab extends StatelessWidget {
             semanticLabel: l10n.attachments,
             title: _repositoryAccessTitle(l10n, viewModel),
             message: accessMessage,
-            primaryActionLabel: l10n.openSettings,
-            onPrimaryAction: () =>
-                viewModel.selectSection(TrackerSection.settings),
+            primaryActionLabel: attachmentDownloadOnly
+                ? l10n.openSettings
+                : null,
+            onPrimaryAction: attachmentDownloadOnly
+                ? () => viewModel.selectSection(TrackerSection.settings)
+                : null,
           ),
           const SizedBox(height: 12),
         ],
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: colors.surfaceAlt,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                l10n.attachments,
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 8),
+              if (selectedAttachment == null)
+                Text(
+                  l10n.noAttachmentSelected,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.muted),
+                )
+              else
+                Semantics(
+                  container: true,
+                  label: l10n.selectedAttachmentSummary(
+                    selectedAttachment!.name,
+                    _formatAttachmentFileSize(selectedAttachment!.sizeBytes),
+                  ),
+                  child: ExcludeSemantics(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          selectedAttachment!.name,
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                        Text(
+                          _formatAttachmentFileSize(
+                            selectedAttachment!.sizeBytes,
+                          ),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodySmall?.copyWith(color: colors.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              if ((uploadNotice ?? '').isNotEmpty) ...[
+                const SizedBox(height: 12),
+                _AccessCallout(
+                  semanticLabel: l10n.attachments,
+                  title: l10n.attachments,
+                  message: uploadNotice!,
+                ),
+              ],
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _IssueDetailActionButton(
+                    label: l10n.chooseAttachment,
+                    onPressed: canChooseAttachment ? onChooseAttachment : null,
+                  ),
+                  _IssueDetailActionButton(
+                    label: l10n.uploadAttachment,
+                    emphasized: true,
+                    onPressed: canUploadAttachment ? onUpload : null,
+                  ),
+                  if (selectedAttachment != null)
+                    _IssueDetailActionButton(
+                      label: l10n.clearSelectedAttachment,
+                      onPressed: isSaving ? null : onClearSelection,
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
         if (issue.attachments.isEmpty)
           Text(l10n.noResults, style: TextStyle(color: colors.muted))
         else
@@ -4462,9 +4700,11 @@ class _CommentBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final l10n = AppLocalizations.of(context)!;
+    final metadata = _commentMetadata(comment, l10n);
     return Semantics(
       container: true,
-      label: '${comment.author} ${comment.body} ${comment.updatedLabel}',
+      label: '${comment.author} ${comment.body} $metadata',
       child: ExcludeSemantics(
         child: Container(
           margin: const EdgeInsets.only(bottom: 10),
@@ -4487,13 +4727,16 @@ class _CommentBubble extends StatelessWidget {
                       comment.author,
                       style: Theme.of(context).textTheme.labelLarge,
                     ),
+                    Text(
+                      metadata,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelSmall?.copyWith(color: colors.text),
+                    ),
+                    const SizedBox(height: 6),
                     Text(comment.body),
                   ],
                 ),
-              ),
-              Text(
-                comment.updatedLabel,
-                style: Theme.of(context).textTheme.labelSmall,
               ),
             ],
           ),
@@ -4501,6 +4744,25 @@ class _CommentBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+String _commentMetadata(IssueComment comment, AppLocalizations l10n) {
+  final createdAt = comment.createdAt ?? comment.updatedLabel;
+  final updatedAt = comment.updatedAt;
+  if (updatedAt != null && updatedAt.isNotEmpty && updatedAt != createdAt) {
+    return '$createdAt · ${l10n.editedAt(updatedAt)}';
+  }
+  return createdAt;
+}
+
+String _formatAttachmentFileSize(int sizeBytes) {
+  if (sizeBytes < 1024) {
+    return '$sizeBytes B';
+  }
+  if (sizeBytes < 1024 * 1024) {
+    return '${(sizeBytes / 1024).toStringAsFixed(1)} KB';
+  }
+  return '${(sizeBytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
 class _StatusBadge extends StatelessWidget {

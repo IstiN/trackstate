@@ -18,10 +18,13 @@ class ReactiveIssueDetailTrackStateRepository
       canManageAttachments: true,
       canCheckCollaborators: false,
     ),
-  }) =>
-      ReactiveIssueDetailTrackStateRepository._(
-        MutableIssueDetailTrackStateProvider(permission: permission),
-      );
+    Set<String> lfsTrackedPaths = const <String>{},
+  }) => ReactiveIssueDetailTrackStateRepository._(
+    MutableIssueDetailTrackStateProvider(
+      permission: permission,
+      lfsTrackedPaths: lfsTrackedPaths,
+    ),
+  );
 
   final MutableIssueDetailTrackStateProvider _provider;
 
@@ -101,13 +104,16 @@ class MutableIssueDetailTrackStateProvider
       canManageAttachments: true,
       canCheckCollaborators: false,
     ),
-  }) : _permission = permission;
+    Set<String> lfsTrackedPaths = const <String>{},
+  }) : _permission = permission,
+       _lfsTrackedPaths = lfsTrackedPaths;
 
   RepositoryPermission _permission;
+  final Set<String> _lfsTrackedPaths;
 
   static const String _revision = 'reactive-read-only-test-revision';
 
-  static const Map<String, String> _files = {
+  static const Map<String, String> _textFixtures = {
     'project.json': '''
 {
   "key": "TRACK",
@@ -193,6 +199,15 @@ Read and write tracker files through GitHub Contents API.
 ''',
   };
 
+  final Map<String, String> _textFiles = Map<String, String>.from(
+    _textFixtures,
+  );
+  final Map<String, Uint8List> _binaryFiles = <String, Uint8List>{
+    'TRACK-12/attachments/sync-sequence.svg': Uint8List.fromList(
+      '<svg />'.codeUnits,
+    ),
+  };
+
   void updatePermission(RepositoryPermission permission) {
     _permission = permission;
   }
@@ -221,11 +236,12 @@ Read and write tracker files through GitHub Contents API.
   Future<RepositoryPermission> getPermission() async => _permission;
 
   @override
-  Future<bool> isLfsTracked(String path) async => false;
+  Future<bool> isLfsTracked(String path) async =>
+      _lfsTrackedPaths.contains(path);
 
   @override
   Future<List<RepositoryTreeEntry>> listTree({required String ref}) async => [
-    for (final path in _files.keys)
+    for (final path in [..._textFiles.keys, ..._binaryFiles.keys])
       RepositoryTreeEntry(path: path, type: 'blob'),
   ];
 
@@ -234,8 +250,18 @@ Read and write tracker files through GitHub Contents API.
     String path, {
     required String ref,
   }) async {
-    throw const TrackStateProviderException(
-      'Attachment access is not required for the TS-104 widget test.',
+    final binary = _binaryFiles[path];
+    if (binary == null) {
+      throw TrackStateProviderException(
+        'Missing attachment fixture for $path.',
+      );
+    }
+    return RepositoryAttachment(
+      path: path,
+      bytes: binary,
+      revision: _revision,
+      declaredSizeBytes: binary.length,
+      lfsOid: _lfsTrackedPaths.contains(path) ? 'reactive-lfs-oid' : null,
     );
   }
 
@@ -244,7 +270,7 @@ Read and write tracker files through GitHub Contents API.
     String path, {
     required String ref,
   }) async {
-    final content = _files[path];
+    final content = _textFiles[path];
     if (content == null) {
       throw TrackStateProviderException('Missing fixture for $path.');
     }
@@ -281,9 +307,12 @@ Read and write tracker files through GitHub Contents API.
   Future<RepositoryAttachmentWriteResult> writeAttachment(
     RepositoryAttachmentWriteRequest request,
   ) async {
-    throw const TrackStateProviderException(
-      'TS-104 should not attempt to write attachments while verifying capability sync.',
-    );
+    _binaryFiles[request.path] = Uint8List.fromList(request.bytes);
+    return const RepositoryAttachmentWriteResult(
+      path: '',
+      branch: '',
+      revision: _revision,
+    ).copyWith(path: request.path, branch: request.branch);
   }
 }
 
@@ -296,6 +325,20 @@ extension on RepositoryTextFile {
     return RepositoryTextFile(
       path: path ?? this.path,
       content: content ?? this.content,
+      revision: revision ?? this.revision,
+    );
+  }
+}
+
+extension on RepositoryAttachmentWriteResult {
+  RepositoryAttachmentWriteResult copyWith({
+    String? path,
+    String? branch,
+    String? revision,
+  }) {
+    return RepositoryAttachmentWriteResult(
+      path: path ?? this.path,
+      branch: branch ?? this.branch,
       revision: revision ?? this.revision,
     );
   }
