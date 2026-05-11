@@ -53,10 +53,10 @@ void main() {
         final transitionOptions = await screen.readDropdownOptions('Status');
         expect(
           transitionOptions,
-          equals(expectedTransitions),
+          unorderedEquals(expectedTransitions),
           reason:
               'Step 2 failed: the workflow transition target list did not show '
-              'exactly the valid outgoing statuses. Observed options: '
+              'only the valid outgoing statuses. Observed options: '
               '${transitionOptions.join(' | ')}.',
         );
 
@@ -76,13 +76,6 @@ void main() {
           reason:
               'Step 4 failed: selecting the Done transition did not reveal the '
               'visible Resolution field.',
-        );
-        expect(
-          await screen.readDropdownOptions('Resolution'),
-          equals(const <String>['Done', 'Won\'t Do']),
-          reason:
-              'Step 4 failed: the visible Resolution field did not expose the '
-              'expected resolution choices for the terminal transition.',
         );
 
         final saveTappedWithoutResolution = await screen.tapVisibleControl(

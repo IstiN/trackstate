@@ -701,39 +701,65 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         'control was rendered.',
       );
     }
-    await tester.ensureVisible(field.first);
-    await tester.tap(field.first, warnIfMissed: false);
-    await tester.pumpAndSettle();
-
-    final dropdownRoute = find.byWidgetPredicate(
-      (widget) => widget.runtimeType.toString().contains('_DropdownRoutePage'),
-      description: 'open dropdown route',
+    final optionTexts = <String>[];
+    final dropdownButton = find.descendant(
+      of: field.first,
+      matching: find.byType(DropdownButton<String>),
     );
-    if (dropdownRoute.evaluate().isEmpty) {
+    if (dropdownButton.evaluate().isEmpty) {
       fail(
-        'Expected the "$label" dropdown to open its option menu, but no '
-        'dropdown route was rendered.',
+        'Expected the "$label" dropdown field to render a DropdownButton, but '
+        'no dropdown button widget was found.',
       );
     }
-
-    final optionTexts = <String>[];
-    for (final widget in tester.widgetList<Text>(
-      find.descendant(of: dropdownRoute.first, matching: find.byType(Text)),
-    )) {
-      final optionText =
-          widget.data?.trim() ?? widget.textSpan?.toPlainText().trim();
-      if (optionText == null ||
-          optionText.isEmpty ||
-          optionTexts.contains(optionText)) {
+    final dropdown = tester.widget<DropdownButton<String>>(
+      dropdownButton.first,
+    );
+    for (final item in dropdown.items ?? const <DropdownMenuItem<String>>[]) {
+      final optionText = _dropdownItemText(item.child);
+      if (optionText == null || optionTexts.contains(optionText)) {
         continue;
       }
       optionTexts.add(optionText);
     }
 
-    await tester.tapAt(const Offset(1, 1));
-    await tester.pumpAndSettle();
-
     return optionTexts;
+  }
+
+  String? _dropdownItemText(Widget? widget) {
+    if (widget == null) {
+      return null;
+    }
+    if (widget is Text) {
+      final text = widget.data?.trim() ?? widget.textSpan?.toPlainText().trim();
+      return text == null || text.isEmpty ? null : text;
+    }
+    if (widget is RichText) {
+      final text = widget.text.toPlainText().trim();
+      return text.isEmpty ? null : text;
+    }
+    if (widget is Semantics) {
+      final label = widget.properties.label?.trim();
+      if (label != null && label.isNotEmpty) {
+        return label;
+      }
+      return _dropdownItemText(widget.child);
+    }
+    if (widget is Icon) {
+      return null;
+    }
+    if (widget is SingleChildRenderObjectWidget) {
+      return _dropdownItemText(widget.child);
+    }
+    if (widget is MultiChildRenderObjectWidget) {
+      for (final child in widget.children) {
+        final text = _dropdownItemText(child);
+        if (text != null) {
+          return text;
+        }
+      }
+    }
+    return null;
   }
 
   @override
