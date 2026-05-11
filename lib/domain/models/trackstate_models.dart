@@ -4,6 +4,33 @@ enum IssueStatus { todo, inProgress, inReview, done }
 
 enum IssuePriority { highest, high, medium, low }
 
+enum TrackerLoadState { loading, partial, ready, error }
+
+enum TrackerDataDomain {
+  projectMeta,
+  issueSummaries,
+  repositoryIndex,
+  issueDetails,
+}
+
+enum TrackerSectionKey { dashboard, board, search, hierarchy, settings }
+
+class TrackerBootstrapReadiness {
+  const TrackerBootstrapReadiness({
+    this.sectionStates = const {},
+    this.domainStates = const {},
+  });
+
+  final Map<TrackerSectionKey, TrackerLoadState> sectionStates;
+  final Map<TrackerDataDomain, TrackerLoadState> domainStates;
+
+  TrackerLoadState sectionState(TrackerSectionKey section) =>
+      sectionStates[section] ?? TrackerLoadState.loading;
+
+  TrackerLoadState domainState(TrackerDataDomain domain) =>
+      domainStates[domain] ?? TrackerLoadState.loading;
+}
+
 class TrackStateIssue {
   const TrackStateIssue({
     required this.key,
@@ -34,6 +61,9 @@ class TrackStateIssue {
     required this.links,
     required this.attachments,
     required this.isArchived,
+    this.hasDetailLoaded = true,
+    this.hasCommentsLoaded = true,
+    this.hasAttachmentsLoaded = true,
     this.resolutionId,
     this.storagePath = '',
     this.rawMarkdown = '',
@@ -67,6 +97,9 @@ class TrackStateIssue {
   final List<IssueLink> links;
   final List<IssueAttachment> attachments;
   final bool isArchived;
+  final bool hasDetailLoaded;
+  final bool hasCommentsLoaded;
+  final bool hasAttachmentsLoaded;
   final String? resolutionId;
   final String storagePath;
   final String rawMarkdown;
@@ -81,6 +114,9 @@ class TrackStateIssue {
     String? updatedLabel,
     bool? isArchived,
     String? storagePath,
+    bool? hasDetailLoaded,
+    bool? hasCommentsLoaded,
+    bool? hasAttachmentsLoaded,
     List<IssueComment>? comments,
     List<IssueAttachment>? attachments,
   }) {
@@ -113,6 +149,9 @@ class TrackStateIssue {
       links: links,
       attachments: attachments ?? this.attachments,
       isArchived: isArchived ?? this.isArchived,
+      hasDetailLoaded: hasDetailLoaded ?? this.hasDetailLoaded,
+      hasCommentsLoaded: hasCommentsLoaded ?? this.hasCommentsLoaded,
+      hasAttachmentsLoaded: hasAttachmentsLoaded ?? this.hasAttachmentsLoaded,
       resolutionId: resolutionId,
       storagePath: storagePath ?? this.storagePath,
       rawMarkdown: rawMarkdown ?? this.rawMarkdown,
@@ -150,6 +189,9 @@ class TrackStateIssue {
       links: links,
       attachments: attachments,
       isArchived: indexEntry.isArchived || isArchived,
+      hasDetailLoaded: hasDetailLoaded,
+      hasCommentsLoaded: hasCommentsLoaded,
+      hasAttachmentsLoaded: hasAttachmentsLoaded,
       resolutionId: resolutionId,
       storagePath: storagePath,
       rawMarkdown: rawMarkdown,
@@ -478,6 +520,16 @@ class RepositoryIssueIndexEntry {
     this.parentPath,
     this.epicPath,
     this.isArchived = false,
+    this.summary,
+    this.issueTypeId,
+    this.statusId,
+    this.priorityId,
+    this.assignee,
+    this.labels = const [],
+    this.updatedLabel,
+    this.progress,
+    this.resolutionId,
+    this.revision,
   });
 
   final String key;
@@ -488,12 +540,32 @@ class RepositoryIssueIndexEntry {
   final String? epicPath;
   final List<String> childKeys;
   final bool isArchived;
+  final String? summary;
+  final String? issueTypeId;
+  final String? statusId;
+  final String? priorityId;
+  final String? assignee;
+  final List<String> labels;
+  final String? updatedLabel;
+  final double? progress;
+  final String? resolutionId;
+  final String? revision;
 
   RepositoryIssueIndexEntry copyWith({
     String? parentPath,
     String? epicPath,
     List<String>? childKeys,
     bool? isArchived,
+    String? summary,
+    String? issueTypeId,
+    String? statusId,
+    String? priorityId,
+    String? assignee,
+    List<String>? labels,
+    String? updatedLabel,
+    double? progress,
+    String? resolutionId,
+    String? revision,
   }) {
     return RepositoryIssueIndexEntry(
       key: key,
@@ -504,6 +576,16 @@ class RepositoryIssueIndexEntry {
       epicPath: epicPath ?? this.epicPath,
       childKeys: childKeys ?? this.childKeys,
       isArchived: isArchived ?? this.isArchived,
+      summary: summary ?? this.summary,
+      issueTypeId: issueTypeId ?? this.issueTypeId,
+      statusId: statusId ?? this.statusId,
+      priorityId: priorityId ?? this.priorityId,
+      assignee: assignee ?? this.assignee,
+      labels: labels ?? this.labels,
+      updatedLabel: updatedLabel ?? this.updatedLabel,
+      progress: progress ?? this.progress,
+      resolutionId: resolutionId ?? this.resolutionId,
+      revision: revision ?? this.revision,
     );
   }
 }
@@ -628,12 +710,14 @@ class TrackerSnapshot {
     required this.issues,
     this.repositoryIndex = const RepositoryIndex(),
     this.loadWarnings = const [],
+    this.readiness = const TrackerBootstrapReadiness(),
   });
 
   final ProjectConfig project;
   final List<TrackStateIssue> issues;
   final RepositoryIndex repositoryIndex;
   final List<String> loadWarnings;
+  final TrackerBootstrapReadiness readiness;
 
   List<TrackStateIssue> get epics =>
       issues.where((issue) => issue.issueType == IssueType.epic).toList();

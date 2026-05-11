@@ -587,67 +587,47 @@ Future<Directory> _createMutationRepository() async {
   return directory;
 }
 
-Map<String, String> _mutationFixtureFiles() => {
-  'DEMO/project.json': '{"key":"DEMO","name":"Mutation Demo"}\n',
-  'DEMO/config/statuses.json':
-      '${jsonEncode([
-        {'id': 'todo', 'name': 'To Do'},
-        {'id': 'in-progress', 'name': 'In Progress'},
-        {'id': 'in-review', 'name': 'In Review'},
-        {'id': 'done', 'name': 'Done'},
-      ])}\n',
-  'DEMO/config/issue-types.json':
-      '${jsonEncode([
-        {'id': 'epic', 'name': 'Epic'},
-        {'id': 'story', 'name': 'Story'},
-        {'id': 'subtask', 'name': 'Sub-task'},
-      ])}\n',
-  'DEMO/config/fields.json':
-      '${jsonEncode([
-        {'id': 'summary', 'name': 'Summary', 'type': 'string', 'required': true},
-        {'id': 'description', 'name': 'Description', 'type': 'markdown', 'required': false},
-      ])}\n',
-  'DEMO/config/priorities.json':
-      '${jsonEncode([
-        {'id': 'medium', 'name': 'Medium'},
-        {'id': 'high', 'name': 'High'},
-      ])}\n',
-  'DEMO/config/resolutions.json': '[{"id":"done","name":"Done"}]\n',
-  'DEMO/config/workflows.json':
-      '${jsonEncode({
-        'default': {
-          'statuses': ['To Do', 'In Progress', 'In Review', 'Done'],
-          'transitions': [
-            {'id': 'start', 'name': 'Start work', 'from': 'To Do', 'to': 'In Progress'},
-            {'id': 'review', 'name': 'Request review', 'from': 'In Progress', 'to': 'In Review'},
-            {'id': 'complete', 'name': 'Complete', 'from': 'In Review', 'to': 'Done'},
-            {'id': 'reopen', 'name': 'Reopen', 'from': 'Done', 'to': 'To Do'},
-          ],
-        },
-      })}\n',
-  'DEMO/.trackstate/index/issues.json':
-      '${jsonEncode([
-        {
-          'key': 'DEMO-1',
-          'path': 'DEMO/DEMO-1/main.md',
-          'parent': null,
-          'epic': null,
-          'children': ['DEMO-2'],
-          'archived': false,
-        },
-        {
-          'key': 'DEMO-2',
-          'path': 'DEMO/DEMO-1/DEMO-2/main.md',
-          'parent': null,
-          'epic': 'DEMO-1',
-          'children': ['DEMO-3'],
-          'archived': false,
-        },
-        {'key': 'DEMO-3', 'path': 'DEMO/DEMO-1/DEMO-2/DEMO-3/main.md', 'parent': 'DEMO-2', 'epic': 'DEMO-1', 'children': [], 'archived': false},
-        {'key': 'DEMO-10', 'path': 'DEMO/DEMO-10/main.md', 'parent': null, 'epic': null, 'children': [], 'archived': false},
-      ])}\n',
-  'DEMO/.trackstate/index/tombstones.json': '[]\n',
-  'DEMO/DEMO-1/main.md': '''
+Map<String, String> _mutationFixtureFiles() {
+  final files = <String, String>{
+    'DEMO/project.json': '{"key":"DEMO","name":"Mutation Demo"}\n',
+    'DEMO/config/statuses.json':
+        '${jsonEncode([
+          {'id': 'todo', 'name': 'To Do'},
+          {'id': 'in-progress', 'name': 'In Progress'},
+          {'id': 'in-review', 'name': 'In Review'},
+          {'id': 'done', 'name': 'Done'},
+        ])}\n',
+    'DEMO/config/issue-types.json':
+        '${jsonEncode([
+          {'id': 'epic', 'name': 'Epic'},
+          {'id': 'story', 'name': 'Story'},
+          {'id': 'subtask', 'name': 'Sub-task'},
+        ])}\n',
+    'DEMO/config/fields.json':
+        '${jsonEncode([
+          {'id': 'summary', 'name': 'Summary', 'type': 'string', 'required': true},
+          {'id': 'description', 'name': 'Description', 'type': 'markdown', 'required': false},
+        ])}\n',
+    'DEMO/config/priorities.json':
+        '${jsonEncode([
+          {'id': 'medium', 'name': 'Medium'},
+          {'id': 'high', 'name': 'High'},
+        ])}\n',
+    'DEMO/config/resolutions.json': '[{"id":"done","name":"Done"}]\n',
+    'DEMO/config/workflows.json':
+        '${jsonEncode({
+          'default': {
+            'statuses': ['To Do', 'In Progress', 'In Review', 'Done'],
+            'transitions': [
+              {'id': 'start', 'name': 'Start work', 'from': 'To Do', 'to': 'In Progress'},
+              {'id': 'review', 'name': 'Request review', 'from': 'In Progress', 'to': 'In Review'},
+              {'id': 'complete', 'name': 'Complete', 'from': 'In Review', 'to': 'Done'},
+              {'id': 'reopen', 'name': 'Reopen', 'from': 'Done', 'to': 'To Do'},
+            ],
+          },
+        })}\n',
+    'DEMO/.trackstate/index/tombstones.json': '[]\n',
+    'DEMO/DEMO-1/main.md': '''
 ---
 key: DEMO-1
 project: DEMO
@@ -668,7 +648,7 @@ Platform epic
 
 Root epic for lifecycle tests.
 ''',
-  'DEMO/DEMO-1/DEMO-2/main.md': '''
+    'DEMO/DEMO-1/DEMO-2/main.md': '''
 ---
 key: DEMO-2
 project: DEMO
@@ -690,7 +670,7 @@ Nested story
 
 Story ready for workflow and hierarchy tests.
 ''',
-  'DEMO/DEMO-1/DEMO-2/DEMO-3/main.md': '''
+    'DEMO/DEMO-1/DEMO-2/DEMO-3/main.md': '''
 ---
 key: DEMO-3
 project: DEMO
@@ -713,7 +693,7 @@ Nested sub-task
 
 Sub-task used to verify subtree moves.
 ''',
-  'DEMO/DEMO-10/main.md': '''
+    'DEMO/DEMO-10/main.md': '''
 ---
 key: DEMO-10
 project: DEMO
@@ -734,8 +714,92 @@ Alternative epic
 
 Second epic used as a move target.
 ''',
-  '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n',
-};
+    '.gitattributes': '*.png filter=lfs diff=lfs merge=lfs -text\n',
+  };
+  files['DEMO/.trackstate/index/issues.json'] =
+      '${jsonEncode(_mutationIndexEntries(files))}\n';
+  return files;
+}
+
+List<Map<String, Object?>> _mutationIndexEntries(Map<String, String> files) => [
+  {
+    'key': 'DEMO-1',
+    'path': 'DEMO/DEMO-1/main.md',
+    'parent': null,
+    'epic': null,
+    'summary': 'Platform epic',
+    'issueType': 'epic',
+    'status': 'in-progress',
+    'priority': 'high',
+    'assignee': 'demo-admin',
+    'labels': [],
+    'updated': '2026-05-05T00:00:00Z',
+    'revision': _blobRevisionForText(files['DEMO/DEMO-1/main.md']!),
+    'children': ['DEMO-2'],
+    'archived': false,
+  },
+  {
+    'key': 'DEMO-2',
+    'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+    'parent': null,
+    'epic': 'DEMO-1',
+    'summary': 'Nested story',
+    'issueType': 'story',
+    'status': 'in-review',
+    'priority': 'medium',
+    'assignee': 'demo-user',
+    'labels': [],
+    'updated': '2026-05-05T00:05:00Z',
+    'revision': _blobRevisionForText(files['DEMO/DEMO-1/DEMO-2/main.md']!),
+    'children': ['DEMO-3'],
+    'archived': false,
+  },
+  {
+    'key': 'DEMO-3',
+    'path': 'DEMO/DEMO-1/DEMO-2/DEMO-3/main.md',
+    'parent': 'DEMO-2',
+    'epic': 'DEMO-1',
+    'summary': 'Nested sub-task',
+    'issueType': 'subtask',
+    'status': 'todo',
+    'priority': 'medium',
+    'assignee': 'demo-user',
+    'labels': [],
+    'updated': '2026-05-05T00:10:00Z',
+    'revision': _blobRevisionForText(
+      files['DEMO/DEMO-1/DEMO-2/DEMO-3/main.md']!,
+    ),
+    'children': [],
+    'archived': false,
+  },
+  {
+    'key': 'DEMO-10',
+    'path': 'DEMO/DEMO-10/main.md',
+    'parent': null,
+    'epic': null,
+    'summary': 'Alternative epic',
+    'issueType': 'epic',
+    'status': 'todo',
+    'priority': 'medium',
+    'assignee': 'demo-admin',
+    'labels': [],
+    'updated': '2026-05-05T00:15:00Z',
+    'revision': _blobRevisionForText(files['DEMO/DEMO-10/main.md']!),
+    'children': [],
+    'archived': false,
+  },
+];
+
+String _blobRevisionForText(String content) {
+  final bytes = Uint8List.fromList(utf8.encode(content));
+  var value = 2166136261;
+  for (final byte in bytes) {
+    value ^= byte;
+    value = (value * 16777619) & 0xffffffff;
+  }
+  final chunk = value.toRadixString(16).padLeft(8, '0');
+  return List.filled(5, chunk).join().substring(0, 40);
+}
 
 Future<_HostedMutationHarness> _createHostedMutationHarness() async {
   final backend = _HostedRepositoryBackend(files: _mutationFixtureFiles());
