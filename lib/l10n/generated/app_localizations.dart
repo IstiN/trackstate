@@ -496,6 +496,18 @@ abstract class AppLocalizations {
   /// **'Labels'**
   String get labels;
 
+  /// No description provided for @name.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get name;
+
+  /// No description provided for @delete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get delete;
+
   /// No description provided for @parent.
   ///
   /// In en, this message translates to:
@@ -532,11 +544,35 @@ abstract class AppLocalizations {
   /// **'Project Settings'**
   String get projectSettings;
 
+  /// No description provided for @projectSettingsAdmin.
+  ///
+  /// In en, this message translates to:
+  /// **'Project settings administration'**
+  String get projectSettingsAdmin;
+
+  /// No description provided for @projectSettingsDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage repository-backed statuses, workflows, issue types, and fields with validation before Git writes.'**
+  String get projectSettingsDescription;
+
   /// No description provided for @issueTypes.
   ///
   /// In en, this message translates to:
   /// **'Issue Types'**
   String get issueTypes;
+
+  /// No description provided for @statuses.
+  ///
+  /// In en, this message translates to:
+  /// **'Statuses'**
+  String get statuses;
+
+  /// No description provided for @workflows.
+  ///
+  /// In en, this message translates to:
+  /// **'Workflows'**
+  String get workflows;
 
   /// No description provided for @workflow.
   ///
@@ -555,6 +591,222 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Language'**
   String get language;
+
+  /// No description provided for @resetSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset'**
+  String get resetSettings;
+
+  /// No description provided for @saveSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Save settings'**
+  String get saveSettings;
+
+  /// No description provided for @addStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Add status'**
+  String get addStatus;
+
+  /// No description provided for @editStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit status'**
+  String get editStatus;
+
+  /// No description provided for @deleteStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete status'**
+  String get deleteStatus;
+
+  /// No description provided for @addWorkflow.
+  ///
+  /// In en, this message translates to:
+  /// **'Add workflow'**
+  String get addWorkflow;
+
+  /// No description provided for @editWorkflow.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit workflow'**
+  String get editWorkflow;
+
+  /// No description provided for @deleteWorkflow.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete workflow'**
+  String get deleteWorkflow;
+
+  /// No description provided for @addIssueType.
+  ///
+  /// In en, this message translates to:
+  /// **'Add issue type'**
+  String get addIssueType;
+
+  /// No description provided for @editIssueType.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit issue type'**
+  String get editIssueType;
+
+  /// No description provided for @deleteIssueType.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete issue type'**
+  String get deleteIssueType;
+
+  /// No description provided for @addField.
+  ///
+  /// In en, this message translates to:
+  /// **'Add field'**
+  String get addField;
+
+  /// No description provided for @editField.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit field'**
+  String get editField;
+
+  /// No description provided for @deleteField.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete field'**
+  String get deleteField;
+
+  /// No description provided for @catalogId.
+  ///
+  /// In en, this message translates to:
+  /// **'ID'**
+  String get catalogId;
+
+  /// No description provided for @catalogCategory.
+  ///
+  /// In en, this message translates to:
+  /// **'Category'**
+  String get catalogCategory;
+
+  /// No description provided for @catalogWorkflow.
+  ///
+  /// In en, this message translates to:
+  /// **'Workflow'**
+  String get catalogWorkflow;
+
+  /// No description provided for @catalogTransitions.
+  ///
+  /// In en, this message translates to:
+  /// **'Transitions'**
+  String get catalogTransitions;
+
+  /// No description provided for @catalogStatuses.
+  ///
+  /// In en, this message translates to:
+  /// **'Statuses'**
+  String get catalogStatuses;
+
+  /// No description provided for @catalogType.
+  ///
+  /// In en, this message translates to:
+  /// **'Type'**
+  String get catalogType;
+
+  /// No description provided for @catalogRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Required'**
+  String get catalogRequired;
+
+  /// No description provided for @catalogReserved.
+  ///
+  /// In en, this message translates to:
+  /// **'Reserved'**
+  String get catalogReserved;
+
+  /// No description provided for @catalogHierarchyLevel.
+  ///
+  /// In en, this message translates to:
+  /// **'Hierarchy level'**
+  String get catalogHierarchyLevel;
+
+  /// No description provided for @catalogIcon.
+  ///
+  /// In en, this message translates to:
+  /// **'Icon'**
+  String get catalogIcon;
+
+  /// No description provided for @catalogDefaultValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Default value'**
+  String get catalogDefaultValue;
+
+  /// No description provided for @catalogOptions.
+  ///
+  /// In en, this message translates to:
+  /// **'Options'**
+  String get catalogOptions;
+
+  /// No description provided for @applicableIssueTypes.
+  ///
+  /// In en, this message translates to:
+  /// **'Applicable issue types'**
+  String get applicableIssueTypes;
+
+  /// No description provided for @allowedStatuses.
+  ///
+  /// In en, this message translates to:
+  /// **'Allowed statuses'**
+  String get allowedStatuses;
+
+  /// No description provided for @transitionName.
+  ///
+  /// In en, this message translates to:
+  /// **'Transition name'**
+  String get transitionName;
+
+  /// No description provided for @transitionFrom.
+  ///
+  /// In en, this message translates to:
+  /// **'From status'**
+  String get transitionFrom;
+
+  /// No description provided for @transitionTo.
+  ///
+  /// In en, this message translates to:
+  /// **'To status'**
+  String get transitionTo;
+
+  /// No description provided for @addTransition.
+  ///
+  /// In en, this message translates to:
+  /// **'Add transition'**
+  String get addTransition;
+
+  /// No description provided for @removeTransition.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove transition'**
+  String get removeTransition;
+
+  /// No description provided for @statusCategoryNew.
+  ///
+  /// In en, this message translates to:
+  /// **'New'**
+  String get statusCategoryNew;
+
+  /// No description provided for @statusCategoryIndeterminate.
+  ///
+  /// In en, this message translates to:
+  /// **'In progress'**
+  String get statusCategoryIndeterminate;
+
+  /// No description provided for @statusCategoryDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get statusCategoryDone;
 
   /// No description provided for @theme.
   ///

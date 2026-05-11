@@ -6,6 +6,7 @@ import 'package:trackstate/data/providers/local/local_git_trackstate_provider.da
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/project_settings_validation_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 import '../testing/fixtures/repositories/ts163_archive_provider_failure_fixture.dart';
@@ -41,7 +42,10 @@ void main() {
       expect(user.displayName, 'Local Tester');
       expect(snapshot.issues.single.attachments.single.name, 'design.png');
       expect(snapshot.issues.single.attachments.single.author, 'Local Tester');
-      expect(snapshot.issues.single.attachments.single.sizeBytes, greaterThan(0));
+      expect(
+        snapshot.issues.single.attachments.single.sizeBytes,
+        greaterThan(0),
+      );
       expect(updated.status, IssueStatus.done);
       expect(refreshed.issues.single.status, IssueStatus.done);
       expect(log.stdout.toString().trim(), 'Move DEMO-1 to Done');
@@ -85,7 +89,10 @@ void main() {
 
       expect(updated.comments.single.id, '0001');
       expect(await commentFile.exists(), isTrue);
-      expect(await commentFile.readAsString(), contains('Persisted from a local repository test.'));
+      expect(
+        await commentFile.readAsString(),
+        contains('Persisted from a local repository test.'),
+      );
       expect(log.stdout.toString().trim(), 'Add comment to DEMO-1');
     },
   );
@@ -105,7 +112,9 @@ void main() {
       final issue = snapshot.issues.single;
       await repository.addIssueComment(issue, 'History comment');
       final refreshed = await repository.loadSnapshot();
-      final history = await repository.loadIssueHistory(refreshed.issues.single);
+      final history = await repository.loadIssueHistory(
+        refreshed.issues.single,
+      );
 
       expect(history, isNotEmpty);
       expect(
@@ -506,6 +515,398 @@ void main() {
     expect(markdown, contains(diagrams));
   });
 
+  test('local repository saves project settings catalogs atomically', () async {
+    final repo = await _createLocalRepository();
+    addTearDown(() => repo.delete(recursive: true));
+
+    await _writeFile(
+      repo,
+      'DEMO/config/statuses.json',
+      '[{"id":"todo","name":"To Do","category":"new"},'
+          '{"id":"in-progress","name":"In Progress","category":"indeterminate"},'
+          '{"id":"done","name":"Done","category":"done"}]\n',
+    );
+    await _writeFile(
+      repo,
+      'DEMO/config/issue-types.json',
+      '[{"id":"story","name":"Story","workflow":"delivery-workflow"},'
+          '{"id":"epic","name":"Epic","workflow":"epic-workflow"}]\n',
+    );
+    await _writeFile(
+      repo,
+      'DEMO/config/fields.json',
+      '[{"id":"summary","name":"Summary","type":"string","required":true},'
+          '{"id":"description","name":"Description","type":"markdown","required":false},'
+          '{"id":"acceptanceCriteria","name":"Acceptance Criteria","type":"markdown","required":false},'
+          '{"id":"priority","name":"Priority","type":"option","required":false,"options":[{"id":"medium","name":"Medium"}]},'
+          '{"id":"assignee","name":"Assignee","type":"user","required":false},'
+          '{"id":"labels","name":"Labels","type":"array","required":false},'
+          '{"id":"storyPoints","name":"Story Points","type":"number","required":false}]\n',
+    );
+    await _writeFile(
+      repo,
+      'DEMO/config/workflows.json',
+      '{"epic-workflow":{"name":"Epic Workflow","statuses":["todo","in-progress","done"],"transitions":[{"id":"epic-start","name":"Start epic","from":"todo","to":"in-progress"}]},'
+          '"delivery-workflow":{"name":"Delivery Workflow","statuses":["todo","in-progress","done"],"transitions":[{"id":"start","name":"Start work","from":"todo","to":"in-progress"},{"id":"finish","name":"Finish","from":"in-progress","to":"done"}]}}\n',
+    );
+    await _git(repo.path, ['add', 'DEMO/config']);
+    await _git(repo.path, ['commit', '-m', 'Upgrade local settings fixture']);
+
+    final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+    final snapshot = await repository.loadSnapshot();
+
+    final updatedSnapshot = await repository.saveProjectSettings(
+      snapshot.project.settingsCatalog.copyWith(
+        statusDefinitions: [
+          ...snapshot.project.statusDefinitions,
+          const TrackStateConfigEntry(
+            id: 'blocked',
+            name: 'Blocked',
+            category: 'indeterminate',
+          ),
+        ],
+        workflowDefinitions: [
+          ...snapshot.project.workflowDefinitions,
+          const TrackStateWorkflowDefinition(
+            id: 'bug-workflow',
+            name: 'Bug Workflow',
+            statusIds: ['todo', 'blocked', 'done'],
+            transitions: [
+              TrackStateWorkflowTransition(
+                id: 'block',
+                name: 'Block work',
+                fromStatusId: 'todo',
+                toStatusId: 'blocked',
+              ),
+              TrackStateWorkflowTransition(
+                id: 'unblock',
+                name: 'Unblock work',
+                fromStatusId: 'blocked',
+                toStatusId: 'todo',
+              ),
+            ],
+          ),
+        ],
+        issueTypeDefinitions: [
+          ...snapshot.project.issueTypeDefinitions,
+          const TrackStateConfigEntry(
+            id: 'bug',
+            name: 'Bug',
+            workflowId: 'bug-workflow',
+          ),
+        ],
+        fieldDefinitions: [
+          ...snapshot.project.fieldDefinitions,
+          const TrackStateFieldDefinition(
+            id: 'environment',
+            name: 'Environment',
+            type: 'string',
+            required: false,
+            applicableIssueTypeIds: ['bug'],
+          ),
+        ],
+      ),
+    );
+
+    expect(
+      updatedSnapshot.project.statusDefinitions.map((status) => status.id),
+      contains('blocked'),
+    );
+    expect(
+      updatedSnapshot.project.workflowDefinitions.map(
+        (workflow) => workflow.id,
+      ),
+      contains('bug-workflow'),
+    );
+    expect(
+      updatedSnapshot.project.issueTypeDefinitions
+          .firstWhere((issueType) => issueType.id == 'bug')
+          .workflowId,
+      'bug-workflow',
+    );
+    expect(
+      updatedSnapshot.project.fieldDefinitions.map((field) => field.id),
+      contains('environment'),
+    );
+    expect(
+      File('${repo.path}/DEMO/config/workflows.json').readAsStringSync(),
+      contains('"bug-workflow"'),
+    );
+  });
+
+  test(
+    'local repository migrates legacy settings without workflows during save',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      await _writeFile(
+        repo,
+        'DEMO/config/statuses.json',
+        '[{"id":"todo","name":"To Do","category":"new"},'
+            '{"id":"done","name":"Done","category":"done"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/issue-types.json',
+        '[{"id":"story","name":"Story"},{"id":"bug","name":"Bug"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/fields.json',
+        '[{"id":"summary","name":"Summary","type":"string","required":true},'
+            '{"id":"description","name":"Description","type":"markdown","required":false},'
+            '{"id":"acceptanceCriteria","name":"Acceptance Criteria","type":"markdown","required":false},'
+            '{"id":"priority","name":"Priority","type":"option","required":false,"options":[{"id":"medium","name":"Medium"}]},'
+            '{"id":"assignee","name":"Assignee","type":"user","required":false},'
+            '{"id":"labels","name":"Labels","type":"array","required":false},'
+            '{"id":"storyPoints","name":"Story Points","type":"number","required":false}]\n',
+      );
+      await _git(repo.path, ['add', 'DEMO/config']);
+      await _git(repo.path, ['commit', '-m', 'Seed legacy settings fixture']);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+
+      expect(snapshot.project.workflowDefinitions, isEmpty);
+      expect(
+        snapshot.project.issueTypeDefinitions.every(
+          (issueType) => issueType.workflowId == null,
+        ),
+        isTrue,
+      );
+
+      final updatedSnapshot = await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog.copyWith(
+          statusDefinitions: [
+            ...snapshot.project.statusDefinitions,
+            const TrackStateConfigEntry(
+              id: 'blocked',
+              name: 'Blocked',
+              category: 'indeterminate',
+            ),
+          ],
+        ),
+      );
+
+      expect(
+        updatedSnapshot.project.workflowDefinitions.single.id,
+        ProjectSettingsValidationService.legacyDefaultWorkflowId,
+      );
+      expect(updatedSnapshot.project.workflowDefinitions.single.statusIds, [
+        'todo',
+        'done',
+        'blocked',
+      ]);
+      expect(
+        updatedSnapshot.project.issueTypeDefinitions
+            .map((issueType) => issueType.workflowId)
+            .toSet(),
+        {ProjectSettingsValidationService.legacyDefaultWorkflowId},
+      );
+      expect(
+        File('${repo.path}/DEMO/config/issue-types.json').readAsStringSync(),
+        contains('"workflow":"default"'),
+      );
+      expect(
+        File('${repo.path}/DEMO/config/workflows.json').readAsStringSync(),
+        contains('"default"'),
+      );
+    },
+  );
+
+  test(
+    'local repository assigns legacy issue types to the persisted default workflow',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      await _writeFile(
+        repo,
+        'DEMO/config/statuses.json',
+        '[{"id":"todo","name":"To Do","category":"new"},'
+            '{"id":"done","name":"Done","category":"done"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/issue-types.json',
+        '[{"id":"story","name":"Story"},{"id":"bug","name":"Bug"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/fields.json',
+        '[{"id":"summary","name":"Summary","type":"string","required":true},'
+            '{"id":"description","name":"Description","type":"markdown","required":false},'
+            '{"id":"acceptanceCriteria","name":"Acceptance Criteria","type":"markdown","required":false},'
+            '{"id":"priority","name":"Priority","type":"option","required":false,"options":[{"id":"medium","name":"Medium"}]},'
+            '{"id":"assignee","name":"Assignee","type":"user","required":false},'
+            '{"id":"labels","name":"Labels","type":"array","required":false},'
+            '{"id":"storyPoints","name":"Story Points","type":"number","required":false}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/workflows.json',
+        '{"default":{"name":"Default Workflow","statuses":["todo","done"],"transitions":[{"id":"finish","name":"Finish","from":"todo","to":"done"}]}}\n',
+      );
+      await _git(repo.path, ['add', 'DEMO/config']);
+      await _git(repo.path, [
+        'commit',
+        '-m',
+        'Seed partial workflow migration fixture',
+      ]);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+
+      expect(
+        snapshot.project.workflowDefinitions.map((workflow) => workflow.id),
+        ['default'],
+      );
+      expect(
+        snapshot.project.issueTypeDefinitions.every(
+          (issueType) => issueType.workflowId == null,
+        ),
+        isTrue,
+      );
+
+      final updatedSnapshot = await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog,
+      );
+
+      expect(
+        updatedSnapshot.project.issueTypeDefinitions
+            .map((issueType) => issueType.workflowId)
+            .toSet(),
+        {ProjectSettingsValidationService.legacyDefaultWorkflowId},
+      );
+      expect(
+        File('${repo.path}/DEMO/config/issue-types.json').readAsStringSync(),
+        contains('"workflow":"default"'),
+      );
+    },
+  );
+
+  test('local repository rejects invalid project settings writes', () async {
+    final repo = await _createLocalRepository();
+    addTearDown(() => repo.delete(recursive: true));
+
+    await _writeFile(
+      repo,
+      'DEMO/config/statuses.json',
+      '[{"id":"todo","name":"To Do","category":"new"},{"id":"done","name":"Done","category":"done"}]\n',
+    );
+    await _writeFile(
+      repo,
+      'DEMO/config/issue-types.json',
+      '[{"id":"story","name":"Story","workflow":"delivery-workflow"}]\n',
+    );
+    await _writeFile(
+      repo,
+      'DEMO/config/fields.json',
+      '[{"id":"summary","name":"Summary","type":"string","required":true},'
+          '{"id":"description","name":"Description","type":"markdown","required":false},'
+          '{"id":"acceptanceCriteria","name":"Acceptance Criteria","type":"markdown","required":false},'
+          '{"id":"priority","name":"Priority","type":"option","required":false,"options":[{"id":"medium","name":"Medium"}]},'
+          '{"id":"assignee","name":"Assignee","type":"user","required":false},'
+          '{"id":"labels","name":"Labels","type":"array","required":false},'
+          '{"id":"storyPoints","name":"Story Points","type":"number","required":false}]\n',
+    );
+    await _writeFile(
+      repo,
+      'DEMO/config/workflows.json',
+      '{"delivery-workflow":{"name":"Delivery Workflow","statuses":["todo","done"],"transitions":[{"id":"finish","name":"Finish","from":"todo","to":"done"}]}}\n',
+    );
+    await _git(repo.path, ['add', 'DEMO/config']);
+    await _git(repo.path, ['commit', '-m', 'Seed validated settings fixture']);
+
+    final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+
+    await expectLater(
+      () => repository.saveProjectSettings(
+        const ProjectSettingsCatalog(
+          statusDefinitions: [
+            TrackStateConfigEntry(id: 'todo', name: 'To Do', category: 'new'),
+            TrackStateConfigEntry(id: 'done', name: 'Done', category: 'done'),
+          ],
+          workflowDefinitions: [
+            TrackStateWorkflowDefinition(
+              id: 'delivery-workflow',
+              name: 'Delivery Workflow',
+              statusIds: ['todo'],
+              transitions: [
+                TrackStateWorkflowTransition(
+                  id: 'finish',
+                  name: 'Finish',
+                  fromStatusId: 'todo',
+                  toStatusId: 'missing-status',
+                ),
+              ],
+            ),
+          ],
+          issueTypeDefinitions: [
+            TrackStateConfigEntry(
+              id: 'story',
+              name: 'Story',
+              workflowId: 'delivery-workflow',
+            ),
+          ],
+          fieldDefinitions: [
+            TrackStateFieldDefinition(
+              id: 'summary',
+              name: 'Summary',
+              type: 'string',
+              required: true,
+            ),
+            TrackStateFieldDefinition(
+              id: 'description',
+              name: 'Description',
+              type: 'markdown',
+              required: false,
+            ),
+            TrackStateFieldDefinition(
+              id: 'acceptanceCriteria',
+              name: 'Acceptance Criteria',
+              type: 'markdown',
+              required: false,
+            ),
+            TrackStateFieldDefinition(
+              id: 'priority',
+              name: 'Priority',
+              type: 'option',
+              required: false,
+              options: [TrackStateFieldOption(id: 'medium', name: 'Medium')],
+            ),
+            TrackStateFieldDefinition(
+              id: 'assignee',
+              name: 'Assignee',
+              type: 'user',
+              required: false,
+            ),
+            TrackStateFieldDefinition(
+              id: 'labels',
+              name: 'Labels',
+              type: 'array',
+              required: false,
+            ),
+            TrackStateFieldDefinition(
+              id: 'storyPoints',
+              name: 'Story Points',
+              type: 'number',
+              required: false,
+            ),
+          ],
+        ),
+      ),
+      throwsA(
+        isA<TrackStateProviderException>().having(
+          (error) => error.message,
+          'message',
+          contains('references a status outside the workflow'),
+        ),
+      ),
+    );
+  });
+
   test(
     'local repository falls back to built-in fields when fields.json is malformed',
     () async {
@@ -555,7 +956,9 @@ void main() {
       expect(
         snapshot.loadWarnings,
         contains(
-          contains('Falling back to built-in fields because DEMO/config/fields.json is missing'),
+          contains(
+            'Falling back to built-in fields because DEMO/config/fields.json is missing',
+          ),
         ),
       );
       expect(snapshot.issues, isNotEmpty);
@@ -574,8 +977,14 @@ void main() {
       final repository = LocalTrackStateRepository(repositoryPath: repo.path);
       final snapshot = await repository.loadSnapshot();
 
-      expect(snapshot.project.issueTypeDefinitions.map((type) => type.id), contains('story'));
-      expect(snapshot.project.statusDefinitions.map((status) => status.id), contains('todo'));
+      expect(
+        snapshot.project.issueTypeDefinitions.map((type) => type.id),
+        contains('story'),
+      );
+      expect(
+        snapshot.project.statusDefinitions.map((status) => status.id),
+        contains('todo'),
+      );
       expect(snapshot.project.fieldLabel('summary'), 'Summary');
       expect(snapshot.project.fieldLabel('description'), 'Description');
       expect(
@@ -597,7 +1006,9 @@ void main() {
       expect(
         snapshot.loadWarnings,
         contains(
-          contains('Falling back to built-in fields because DEMO/config/fields.json is missing'),
+          contains(
+            'Falling back to built-in fields because DEMO/config/fields.json is missing',
+          ),
         ),
       );
       expect(snapshot.issues, isNotEmpty);
@@ -748,7 +1159,11 @@ Loaded from local git.
     'DEMO/DEMO-1/acceptance_criteria.md',
     '- Can be loaded from local Git\n',
   );
-  await _writeFile(directory, 'DEMO/DEMO-1/attachments/design.png', 'issue-binary');
+  await _writeFile(
+    directory,
+    'DEMO/DEMO-1/attachments/design.png',
+    'issue-binary',
+  );
   await _writeFile(directory, 'attachments/screenshot.png', 'binary-content');
 
   await _git(directory.path, ['init', '-b', 'main']);

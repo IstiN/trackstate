@@ -257,14 +257,53 @@ class TrackStateConfigEntry {
     required this.id,
     required this.name,
     this.localizedLabels = const {},
+    this.category,
+    this.hierarchyLevel,
+    this.icon,
+    this.workflowId,
   });
 
   final String id;
   final String name;
   final Map<String, String> localizedLabels;
+  final String? category;
+  final int? hierarchyLevel;
+  final String? icon;
+  final String? workflowId;
 
   String label([String? locale]) =>
       locale == null ? name : localizedLabels[locale] ?? name;
+
+  TrackStateConfigEntry copyWith({
+    String? id,
+    String? name,
+    Map<String, String>? localizedLabels,
+    String? category,
+    int? hierarchyLevel,
+    String? icon,
+    String? workflowId,
+  }) {
+    return TrackStateConfigEntry(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      localizedLabels: localizedLabels ?? this.localizedLabels,
+      category: category ?? this.category,
+      hierarchyLevel: hierarchyLevel ?? this.hierarchyLevel,
+      icon: icon ?? this.icon,
+      workflowId: workflowId ?? this.workflowId,
+    );
+  }
+}
+
+class TrackStateFieldOption {
+  const TrackStateFieldOption({required this.id, required this.name});
+
+  final String id;
+  final String name;
+
+  TrackStateFieldOption copyWith({String? id, String? name}) {
+    return TrackStateFieldOption(id: id ?? this.id, name: name ?? this.name);
+  }
 }
 
 class TrackStateFieldDefinition {
@@ -274,6 +313,10 @@ class TrackStateFieldDefinition {
     required this.type,
     required this.required,
     this.localizedLabels = const {},
+    this.options = const [],
+    this.defaultValue,
+    this.applicableIssueTypeIds = const [],
+    this.reserved = false,
   });
 
   final String id;
@@ -281,9 +324,126 @@ class TrackStateFieldDefinition {
   final String type;
   final bool required;
   final Map<String, String> localizedLabels;
+  final List<TrackStateFieldOption> options;
+  final Object? defaultValue;
+  final List<String> applicableIssueTypeIds;
+  final bool reserved;
 
   String label([String? locale]) =>
       locale == null ? name : localizedLabels[locale] ?? name;
+
+  TrackStateFieldDefinition copyWith({
+    String? id,
+    String? name,
+    String? type,
+    bool? required,
+    Map<String, String>? localizedLabels,
+    List<TrackStateFieldOption>? options,
+    Object? defaultValue = _trackStateFieldDefinitionNoop,
+    List<String>? applicableIssueTypeIds,
+    bool? reserved,
+  }) {
+    return TrackStateFieldDefinition(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      type: type ?? this.type,
+      required: required ?? this.required,
+      localizedLabels: localizedLabels ?? this.localizedLabels,
+      options: options ?? this.options,
+      defaultValue: identical(defaultValue, _trackStateFieldDefinitionNoop)
+          ? this.defaultValue
+          : defaultValue,
+      applicableIssueTypeIds:
+          applicableIssueTypeIds ?? this.applicableIssueTypeIds,
+      reserved: reserved ?? this.reserved,
+    );
+  }
+}
+
+const Object _trackStateFieldDefinitionNoop = Object();
+
+class TrackStateWorkflowTransition {
+  const TrackStateWorkflowTransition({
+    required this.id,
+    required this.name,
+    required this.fromStatusId,
+    required this.toStatusId,
+  });
+
+  final String id;
+  final String name;
+  final String fromStatusId;
+  final String toStatusId;
+
+  TrackStateWorkflowTransition copyWith({
+    String? id,
+    String? name,
+    String? fromStatusId,
+    String? toStatusId,
+  }) {
+    return TrackStateWorkflowTransition(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      fromStatusId: fromStatusId ?? this.fromStatusId,
+      toStatusId: toStatusId ?? this.toStatusId,
+    );
+  }
+}
+
+class TrackStateWorkflowDefinition {
+  const TrackStateWorkflowDefinition({
+    required this.id,
+    required this.name,
+    this.statusIds = const [],
+    this.transitions = const [],
+  });
+
+  final String id;
+  final String name;
+  final List<String> statusIds;
+  final List<TrackStateWorkflowTransition> transitions;
+
+  TrackStateWorkflowDefinition copyWith({
+    String? id,
+    String? name,
+    List<String>? statusIds,
+    List<TrackStateWorkflowTransition>? transitions,
+  }) {
+    return TrackStateWorkflowDefinition(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      statusIds: statusIds ?? this.statusIds,
+      transitions: transitions ?? this.transitions,
+    );
+  }
+}
+
+class ProjectSettingsCatalog {
+  const ProjectSettingsCatalog({
+    this.statusDefinitions = const [],
+    this.workflowDefinitions = const [],
+    this.issueTypeDefinitions = const [],
+    this.fieldDefinitions = const [],
+  });
+
+  final List<TrackStateConfigEntry> statusDefinitions;
+  final List<TrackStateWorkflowDefinition> workflowDefinitions;
+  final List<TrackStateConfigEntry> issueTypeDefinitions;
+  final List<TrackStateFieldDefinition> fieldDefinitions;
+
+  ProjectSettingsCatalog copyWith({
+    List<TrackStateConfigEntry>? statusDefinitions,
+    List<TrackStateWorkflowDefinition>? workflowDefinitions,
+    List<TrackStateConfigEntry>? issueTypeDefinitions,
+    List<TrackStateFieldDefinition>? fieldDefinitions,
+  }) {
+    return ProjectSettingsCatalog(
+      statusDefinitions: statusDefinitions ?? this.statusDefinitions,
+      workflowDefinitions: workflowDefinitions ?? this.workflowDefinitions,
+      issueTypeDefinitions: issueTypeDefinitions ?? this.issueTypeDefinitions,
+      fieldDefinitions: fieldDefinitions ?? this.fieldDefinitions,
+    );
+  }
 }
 
 class DeletedIssueTombstone {
@@ -379,6 +539,7 @@ class ProjectConfig {
     required this.issueTypeDefinitions,
     required this.statusDefinitions,
     required this.fieldDefinitions,
+    this.workflowDefinitions = const [],
     this.priorityDefinitions = const [],
     this.versionDefinitions = const [],
     this.componentDefinitions = const [],
@@ -393,6 +554,7 @@ class ProjectConfig {
   final List<TrackStateConfigEntry> issueTypeDefinitions;
   final List<TrackStateConfigEntry> statusDefinitions;
   final List<TrackStateFieldDefinition> fieldDefinitions;
+  final List<TrackStateWorkflowDefinition> workflowDefinitions;
   final List<TrackStateConfigEntry> priorityDefinitions;
   final List<TrackStateConfigEntry> versionDefinitions;
   final List<TrackStateConfigEntry> componentDefinitions;
@@ -409,6 +571,13 @@ class ProjectConfig {
   List<String> get fields => [
     for (final definition in fieldDefinitions) definition.name,
   ];
+
+  ProjectSettingsCatalog get settingsCatalog => ProjectSettingsCatalog(
+    statusDefinitions: statusDefinitions,
+    workflowDefinitions: workflowDefinitions,
+    issueTypeDefinitions: issueTypeDefinitions,
+    fieldDefinitions: fieldDefinitions,
+  );
 
   String issueTypeLabel(String id, {String? locale}) =>
       _resolveLabel(issueTypeDefinitions, id, locale);

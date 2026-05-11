@@ -296,6 +296,8 @@ class TrackerViewModel extends ChangeNotifier {
   RepositoryUser? get connectedUser => _connectedUser;
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
   bool get supportsGitHubAuth => _repository.supportsGitHubAuth;
+  bool get supportsProjectSettingsAdmin =>
+      _repository is ProjectSettingsRepository;
   ProviderSession? get providerSession => switch (_repository) {
     ProviderBackedTrackStateRepository repository => repository.session,
     _ => null,
@@ -366,6 +368,8 @@ class TrackerViewModel extends ChangeNotifier {
   List<TrackStateIssue> get issues => _snapshot?.issues ?? const [];
   List<TrackStateIssue> get epics => _snapshot?.epics ?? const [];
   ProjectConfig? get project => _snapshot?.project;
+  ProjectSettingsCatalog? get settingsCatalog =>
+      _snapshot?.project.settingsCatalog;
 
   Map<IssueStatus, List<TrackStateIssue>> get issuesByStatus {
     final grouped = {
@@ -982,6 +986,46 @@ class TrackerViewModel extends ChangeNotifier {
         (current) => current.key == issue.key,
         orElse: () => issue,
       );
+      return false;
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> saveProjectSettings(ProjectSettingsCatalog settings) async {
+    if (_hostedWriteAccessException('update project settings')
+        case final error?) {
+      _message = TrackerMessage.issueSaveFailed(error);
+      notifyListeners();
+      return false;
+    }
+    final repository = _repository;
+    if (repository is! ProjectSettingsRepository) {
+      _message = TrackerMessage.issueSaveFailed(
+        const TrackStateRepositoryException(
+          'This repository implementation does not expose project settings mutations.',
+        ),
+      );
+      notifyListeners();
+      return false;
+    }
+    _isSaving = true;
+    _message = null;
+    notifyListeners();
+    try {
+      _snapshot = await (repository as ProjectSettingsRepository)
+          .saveProjectSettings(settings);
+      if (_selectedIssue case final selectedIssue?) {
+        _selectedIssue = _snapshot!.issues.firstWhere(
+          (issue) => issue.key == selectedIssue.key,
+          orElse: () => selectedIssue,
+        );
+      }
+      await _refreshSearchResultsAfterMutation();
+      return true;
+    } on Object catch (error) {
+      _message = TrackerMessage.issueSaveFailed(error);
       return false;
     } finally {
       _isSaving = false;

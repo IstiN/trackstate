@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import '../../domain/models/trackstate_models.dart';
 import '../providers/github/github_trackstate_provider.dart';
 import '../providers/trackstate_provider.dart';
+import '../services/project_settings_validation_service.dart';
 import '../services/jql_search_service.dart';
 
 abstract interface class TrackStateRepository {
@@ -47,6 +48,10 @@ abstract interface class TrackStateRepository {
   Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue);
 }
 
+abstract interface class ProjectSettingsRepository {
+  Future<TrackerSnapshot> saveProjectSettings(ProjectSettingsCatalog settings);
+}
+
 extension TrackStateRepositoryAttachmentSupport on TrackStateRepository {
   String resolveIssueAttachmentPath(TrackStateIssue issue, String name) {
     final normalizedName = name.trim();
@@ -75,7 +80,8 @@ extension TrackStateRepositoryAttachmentSupport on TrackStateRepository {
   }
 }
 
-class ProviderBackedTrackStateRepository implements TrackStateRepository {
+class ProviderBackedTrackStateRepository
+    implements TrackStateRepository, ProjectSettingsRepository {
   static const RepositoryPermission _restrictedPermission =
       RepositoryPermission(
         canRead: false,
@@ -108,6 +114,8 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
 
   final TrackStateProviderAdapter _provider;
   final JqlSearchService _searchService;
+  final ProjectSettingsValidationService _projectSettingsValidationService =
+      const ProjectSettingsValidationService();
   @override
   final bool usesLocalPersistence;
   @override
@@ -196,6 +204,111 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
     final snapshot = await _loadSetupSnapshot();
     _snapshot = snapshot;
     return snapshot;
+  }
+
+  @override
+  Future<TrackerSnapshot> saveProjectSettings(
+    ProjectSettingsCatalog settings,
+  ) async {
+    final permission = await _provider.getPermission();
+    if (!permission.canWrite) {
+      throw const TrackStateRepositoryException(
+        'Connect a repository session with write access first.',
+      );
+    }
+    final normalizedSettings = _projectSettingsValidationService
+        .normalizeForPersistence(settings);
+    _projectSettingsValidationService.validate(normalizedSettings);
+    await _provider.ensureCleanWorktree();
+
+    final writeBranch = await _provider.resolveWriteBranch();
+    final blobPaths = (await _provider.listTree(ref: writeBranch))
+        .where((entry) => entry.type == 'blob')
+        .map((entry) => entry.path)
+        .toSet();
+    final projectPath = blobPaths.firstWhere(
+      (path) => path.endsWith('/project.json') || path == 'project.json',
+      orElse: () => throw const TrackStateRepositoryException(
+        'project.json was not found in the repository.',
+      ),
+    );
+    final dataRoot = projectPath.contains('/')
+        ? projectPath.substring(0, projectPath.lastIndexOf('/'))
+        : '';
+    final projectJson =
+        jsonDecode(
+              (await _provider.readTextFile(
+                projectPath,
+                ref: writeBranch,
+              )).content,
+            )
+            as Map<String, Object?>;
+    final configRoot = _resolveConfigRoot(projectJson, dataRoot);
+    final changes = [
+      RepositoryTextFileChange(
+        path: _joinPath(configRoot, 'statuses.json'),
+        content:
+            '${jsonEncode(_settingsStatusesJson(normalizedSettings.statusDefinitions))}\n',
+        expectedRevision: await _existingRevision(
+          path: _joinPath(configRoot, 'statuses.json'),
+          ref: writeBranch,
+          blobPaths: blobPaths,
+        ),
+      ),
+      RepositoryTextFileChange(
+        path: _joinPath(configRoot, 'issue-types.json'),
+        content:
+            '${jsonEncode(_settingsIssueTypesJson(normalizedSettings.issueTypeDefinitions))}\n',
+        expectedRevision: await _existingRevision(
+          path: _joinPath(configRoot, 'issue-types.json'),
+          ref: writeBranch,
+          blobPaths: blobPaths,
+        ),
+      ),
+      RepositoryTextFileChange(
+        path: _joinPath(configRoot, 'fields.json'),
+        content:
+            '${jsonEncode(_settingsFieldsJson(normalizedSettings.fieldDefinitions))}\n',
+        expectedRevision: await _existingRevision(
+          path: _joinPath(configRoot, 'fields.json'),
+          ref: writeBranch,
+          blobPaths: blobPaths,
+        ),
+      ),
+      RepositoryTextFileChange(
+        path: _joinPath(configRoot, 'workflows.json'),
+        content:
+            '${jsonEncode(_settingsWorkflowsJson(normalizedSettings.workflowDefinitions))}\n',
+        expectedRevision: await _existingRevision(
+          path: _joinPath(configRoot, 'workflows.json'),
+          ref: writeBranch,
+          blobPaths: blobPaths,
+        ),
+      ),
+    ];
+    final mutator = _provider as RepositoryFileMutator?;
+    if (mutator == null) {
+      for (final change in changes) {
+        await _provider.writeTextFile(
+          RepositoryWriteRequest(
+            path: change.path,
+            content: change.content,
+            message: 'Update project settings',
+            branch: writeBranch,
+            expectedRevision: change.expectedRevision,
+          ),
+        );
+      }
+    } else {
+      await mutator.applyFileChanges(
+        RepositoryFileChangeRequest(
+          branch: writeBranch,
+          message: 'Update project settings',
+          changes: changes,
+        ),
+      );
+    }
+    return loadSnapshot();
   }
 
   @override
@@ -1050,6 +1163,11 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       locale: defaultLocale,
       loadWarnings: loadWarnings,
     );
+    final workflows = await _loadWorkflowDefinitions(
+      blobPaths: blobPaths,
+      path: _joinPath(configRoot, 'workflows.json'),
+      statusDefinitions: statuses,
+    );
     final priorities = await _loadOptionalConfigEntries(
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'priorities.json'),
@@ -1161,6 +1279,7 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
       issueTypeDefinitions: issueTypes,
       statusDefinitions: statuses,
       fieldDefinitions: fields,
+      workflowDefinitions: workflows,
       priorityDefinitions: priorities,
       versionDefinitions: versions,
       componentDefinitions: components,
@@ -1323,11 +1442,42 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
                 : rawId;
             final fallbackName = entry['name']?.toString() ?? id;
             final localizedLabel = localizedLabels[id];
+            final optionsJson = entry['options'];
+            final applicableIssueTypes = entry['issueTypes'];
             return TrackStateFieldDefinition(
               id: id,
               name: fallbackName,
               type: entry['type']?.toString() ?? 'string',
               required: entry['required'] == true,
+              options: optionsJson is List
+                  ? optionsJson
+                        .whereType<Map>()
+                        .map(
+                          (option) => TrackStateFieldOption(
+                            id:
+                                option['id']?.toString() ??
+                                _canonicalConfigId(option['name']?.toString()),
+                            name:
+                                option['name']?.toString() ??
+                                option['id']?.toString() ??
+                                '',
+                          ),
+                        )
+                        .where(
+                          (option) =>
+                              option.id.isNotEmpty && option.name.isNotEmpty,
+                        )
+                        .toList(growable: false)
+                  : const [],
+              defaultValue: entry['defaultValue'],
+              applicableIssueTypeIds: applicableIssueTypes is List
+                  ? applicableIssueTypes
+                        .map((value) => value.toString().trim())
+                        .where((value) => value.isNotEmpty)
+                        .toList(growable: false)
+                  : const [],
+              reserved: ProjectSettingsValidationService.reservedFieldIds
+                  .contains(id),
               localizedLabels: localizedLabel == null
                   ? const {}
                   : {locale: localizedLabel},
@@ -1343,6 +1493,84 @@ class ProviderBackedTrackStateRepository implements TrackStateRepository {
         growable: false,
       );
     }
+  }
+
+  Future<List<TrackStateWorkflowDefinition>> _loadWorkflowDefinitions({
+    required Set<String> blobPaths,
+    required String path,
+    required List<TrackStateConfigEntry> statusDefinitions,
+  }) async {
+    if (!blobPaths.contains(path)) {
+      return const [];
+    }
+    final json = await _getRepositoryJson(path);
+    if (json is! Map) {
+      return const [];
+    }
+    return json.entries
+        .where((entry) => entry.value is Map)
+        .map((entry) {
+          final workflowJson = entry.value as Map;
+          final statuses = workflowJson['statuses'];
+          final transitions = workflowJson['transitions'];
+          final workflowId = entry.key.toString();
+          return TrackStateWorkflowDefinition(
+            id: workflowId,
+            name: workflowJson['name']?.toString() ?? workflowId,
+            statusIds: statuses is List
+                ? statuses
+                      .map(
+                        (value) =>
+                            _matchingConfigEntry(
+                              value?.toString() ?? '',
+                              statusDefinitions,
+                            )?.id ??
+                            _canonicalConfigId(value?.toString()),
+                      )
+                      .where((value) => value.isNotEmpty)
+                      .toList(growable: false)
+                : const [],
+            transitions: transitions is List
+                ? transitions
+                      .whereType<Map>()
+                      .map(
+                        (transition) => TrackStateWorkflowTransition(
+                          id:
+                              transition['id']?.toString() ??
+                              _canonicalConfigId(
+                                transition['name']?.toString(),
+                              ),
+                          name:
+                              transition['name']?.toString() ??
+                              transition['id']?.toString() ??
+                              'Transition',
+                          fromStatusId:
+                              _matchingConfigEntry(
+                                transition['from']?.toString() ?? '',
+                                statusDefinitions,
+                              )?.id ??
+                              _canonicalConfigId(
+                                transition['from']?.toString(),
+                              ),
+                          toStatusId:
+                              _matchingConfigEntry(
+                                transition['to']?.toString() ?? '',
+                                statusDefinitions,
+                              )?.id ??
+                              _canonicalConfigId(transition['to']?.toString()),
+                        ),
+                      )
+                      .where(
+                        (transition) =>
+                            transition.id.isNotEmpty &&
+                            transition.fromStatusId.isNotEmpty &&
+                            transition.toStatusId.isNotEmpty,
+                      )
+                      .toList(growable: false)
+                : const [],
+          );
+        })
+        .toList(growable: false);
   }
 
   Future<RepositoryIndex> _loadRepositoryIndex({
@@ -2558,6 +2786,77 @@ String _replaceSection(String markdown, String title, String content) {
   return '$trimmed$separator# $title\n\n$normalizedContent\n';
 }
 
+List<Map<String, Object?>> _settingsStatusesJson(
+  List<TrackStateConfigEntry> statuses,
+) => [
+  for (final status in statuses)
+    {
+      'id': status.id.trim(),
+      'name': status.name.trim(),
+      if (status.category case final category? when category.trim().isNotEmpty)
+        'category': category.trim(),
+    },
+];
+
+List<Map<String, Object?>> _settingsIssueTypesJson(
+  List<TrackStateConfigEntry> issueTypes,
+) => [
+  for (final issueType in issueTypes)
+    {
+      'id': issueType.id.trim(),
+      'name': issueType.name.trim(),
+      if (issueType.hierarchyLevel case final hierarchyLevel?)
+        'hierarchyLevel': hierarchyLevel,
+      if (issueType.icon case final icon? when icon.trim().isNotEmpty)
+        'icon': icon.trim(),
+      if (issueType.workflowId case final workflowId?
+          when workflowId.trim().isNotEmpty)
+        'workflow': workflowId.trim(),
+    },
+];
+
+List<Map<String, Object?>> _settingsFieldsJson(
+  List<TrackStateFieldDefinition> fields,
+) => [
+  for (final field in fields)
+    {
+      'id': field.id.trim(),
+      'name': field.name.trim(),
+      'type': field.type.trim(),
+      'required': field.required,
+      if (field.options.isNotEmpty)
+        'options': [
+          for (final option in field.options)
+            {'id': option.id.trim(), 'name': option.name.trim()},
+        ],
+      if (field.defaultValue != null) 'defaultValue': field.defaultValue,
+      if (field.applicableIssueTypeIds.isNotEmpty)
+        'issueTypes': [
+          for (final issueTypeId in field.applicableIssueTypeIds)
+            issueTypeId.trim(),
+        ],
+    },
+];
+
+Map<String, Object?> _settingsWorkflowsJson(
+  List<TrackStateWorkflowDefinition> workflows,
+) => {
+  for (final workflow in workflows)
+    workflow.id.trim(): {
+      'name': workflow.name.trim(),
+      'statuses': [for (final statusId in workflow.statusIds) statusId.trim()],
+      'transitions': [
+        for (final transition in workflow.transitions)
+          {
+            'id': transition.id.trim(),
+            'name': transition.name.trim(),
+            'from': transition.fromStatusId.trim(),
+            'to': transition.toStatusId.trim(),
+          },
+      ],
+    },
+};
+
 List<TrackStateConfigEntry> _configEntriesFromJson(
   Object? json, {
   required Map<String, String> localizedLabels,
@@ -2576,6 +2875,13 @@ List<TrackStateConfigEntry> _configEntriesFromJson(
         return TrackStateConfigEntry(
           id: id,
           name: fallbackName,
+          category: entry['category']?.toString(),
+          hierarchyLevel: entry['hierarchyLevel'] is num
+              ? (entry['hierarchyLevel'] as num).toInt()
+              : int.tryParse(entry['hierarchyLevel']?.toString() ?? ''),
+          icon: entry['icon']?.toString(),
+          workflowId:
+              entry['workflow']?.toString() ?? entry['workflowId']?.toString(),
           localizedLabels: localizedLabel == null
               ? const {}
               : {locale: localizedLabel},
@@ -3119,45 +3425,68 @@ const _issueTypeDefinitions = [
   TrackStateConfigEntry(
     id: 'epic',
     name: 'Epic',
+    hierarchyLevel: 1,
+    icon: 'epic',
+    workflowId: 'epic-workflow',
     localizedLabels: {'en': 'Epic'},
   ),
   TrackStateConfigEntry(
     id: 'story',
     name: 'Story',
+    hierarchyLevel: 0,
+    icon: 'story',
+    workflowId: 'delivery-workflow',
     localizedLabels: {'en': 'Story'},
   ),
   TrackStateConfigEntry(
     id: 'task',
     name: 'Task',
+    hierarchyLevel: 0,
+    icon: 'task',
+    workflowId: 'delivery-workflow',
     localizedLabels: {'en': 'Task'},
   ),
   TrackStateConfigEntry(
     id: 'subtask',
     name: 'Sub-task',
+    hierarchyLevel: -1,
+    icon: 'subtask',
+    workflowId: 'delivery-workflow',
     localizedLabels: {'en': 'Sub-task'},
   ),
-  TrackStateConfigEntry(id: 'bug', name: 'Bug', localizedLabels: {'en': 'Bug'}),
+  TrackStateConfigEntry(
+    id: 'bug',
+    name: 'Bug',
+    hierarchyLevel: 0,
+    icon: 'bug',
+    workflowId: 'delivery-workflow',
+    localizedLabels: {'en': 'Bug'},
+  ),
 ];
 
 const _statusDefinitions = [
   TrackStateConfigEntry(
     id: 'todo',
     name: 'To Do',
+    category: 'new',
     localizedLabels: {'en': 'To Do'},
   ),
   TrackStateConfigEntry(
     id: 'in-progress',
     name: 'In Progress',
+    category: 'indeterminate',
     localizedLabels: {'en': 'In Progress'},
   ),
   TrackStateConfigEntry(
     id: 'in-review',
     name: 'In Review',
+    category: 'indeterminate',
     localizedLabels: {'en': 'In Review'},
   ),
   TrackStateConfigEntry(
     id: 'done',
     name: 'Done',
+    category: 'done',
     localizedLabels: {'en': 'Done'},
   ),
 ];
@@ -3168,6 +3497,7 @@ const _fieldDefinitions = [
     name: 'Summary',
     type: 'string',
     required: true,
+    reserved: true,
     localizedLabels: {'en': 'Summary'},
   ),
   TrackStateFieldDefinition(
@@ -3175,6 +3505,7 @@ const _fieldDefinitions = [
     name: 'Description',
     type: 'markdown',
     required: false,
+    reserved: true,
     localizedLabels: {'en': 'Description'},
   ),
   TrackStateFieldDefinition(
@@ -3182,6 +3513,7 @@ const _fieldDefinitions = [
     name: 'Acceptance Criteria',
     type: 'markdown',
     required: false,
+    reserved: true,
     localizedLabels: {'en': 'Acceptance Criteria'},
   ),
   TrackStateFieldDefinition(
@@ -3189,6 +3521,8 @@ const _fieldDefinitions = [
     name: 'Priority',
     type: 'option',
     required: false,
+    options: _priorityFieldOptions,
+    reserved: true,
     localizedLabels: {'en': 'Priority'},
   ),
   TrackStateFieldDefinition(
@@ -3196,6 +3530,7 @@ const _fieldDefinitions = [
     name: 'Assignee',
     type: 'user',
     required: false,
+    reserved: true,
     localizedLabels: {'en': 'Assignee'},
   ),
   TrackStateFieldDefinition(
@@ -3203,6 +3538,7 @@ const _fieldDefinitions = [
     name: 'Labels',
     type: 'array',
     required: false,
+    reserved: true,
     localizedLabels: {'en': 'Labels'},
   ),
   TrackStateFieldDefinition(
@@ -3210,7 +3546,68 @@ const _fieldDefinitions = [
     name: 'Story Points',
     type: 'number',
     required: false,
+    reserved: true,
     localizedLabels: {'en': 'Story Points'},
+  ),
+];
+
+const _priorityFieldOptions = [
+  TrackStateFieldOption(id: 'highest', name: 'Highest'),
+  TrackStateFieldOption(id: 'high', name: 'High'),
+  TrackStateFieldOption(id: 'medium', name: 'Medium'),
+  TrackStateFieldOption(id: 'low', name: 'Low'),
+];
+
+const _workflowDefinitions = [
+  TrackStateWorkflowDefinition(
+    id: 'epic-workflow',
+    name: 'Epic Workflow',
+    statusIds: ['todo', 'in-progress', 'done'],
+    transitions: [
+      TrackStateWorkflowTransition(
+        id: 'epic-start',
+        name: 'Start epic',
+        fromStatusId: 'todo',
+        toStatusId: 'in-progress',
+      ),
+      TrackStateWorkflowTransition(
+        id: 'epic-complete',
+        name: 'Complete epic',
+        fromStatusId: 'in-progress',
+        toStatusId: 'done',
+      ),
+    ],
+  ),
+  TrackStateWorkflowDefinition(
+    id: 'delivery-workflow',
+    name: 'Delivery Workflow',
+    statusIds: ['todo', 'in-progress', 'in-review', 'done'],
+    transitions: [
+      TrackStateWorkflowTransition(
+        id: 'start',
+        name: 'Start work',
+        fromStatusId: 'todo',
+        toStatusId: 'in-progress',
+      ),
+      TrackStateWorkflowTransition(
+        id: 'review',
+        name: 'Request review',
+        fromStatusId: 'in-progress',
+        toStatusId: 'in-review',
+      ),
+      TrackStateWorkflowTransition(
+        id: 'complete',
+        name: 'Complete',
+        fromStatusId: 'in-review',
+        toStatusId: 'done',
+      ),
+      TrackStateWorkflowTransition(
+        id: 'reopen',
+        name: 'Reopen',
+        fromStatusId: 'done',
+        toStatusId: 'todo',
+      ),
+    ],
   ),
 ];
 
@@ -3272,6 +3669,7 @@ const _project = ProjectConfig(
   issueTypeDefinitions: _issueTypeDefinitions,
   statusDefinitions: _statusDefinitions,
   fieldDefinitions: _fieldDefinitions,
+  workflowDefinitions: _workflowDefinitions,
   priorityDefinitions: _priorityDefinitions,
   versionDefinitions: _versionDefinitions,
   componentDefinitions: _componentDefinitions,
