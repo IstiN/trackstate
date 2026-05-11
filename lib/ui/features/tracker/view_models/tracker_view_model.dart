@@ -292,6 +292,17 @@ class TrackerViewModel extends ChangeNotifier {
     return hostedRepositoryAccessMode == HostedRepositoryAccessMode.readOnly;
   }
 
+  bool get canUploadIssueAttachments {
+    if (usesLocalPersistence || !exposesHostedAccessGates) {
+      return true;
+    }
+    final session = providerSession;
+    return session != null &&
+        session.connectionState == ProviderConnectionState.connected &&
+        session.canWrite &&
+        session.canManageAttachments;
+  }
+
   bool get hasBlockedWriteAccess =>
       !usesLocalPersistence &&
       switch (exposesHostedAccessGates
@@ -861,6 +872,15 @@ class TrackerViewModel extends ChangeNotifier {
   }) async {
     if (_hostedWriteAccessException('upload attachments') case final error?) {
       _message = TrackerMessage.issueSaveFailed(error);
+      notifyListeners();
+      return false;
+    }
+    if (!canUploadIssueAttachments) {
+      _message = TrackerMessage.issueSaveFailed(
+        const TrackStateRepositoryException(
+          'Attachment upload is unavailable in this repository session. Existing attachments remain available for download.',
+        ),
+      );
       notifyListeners();
       return false;
     }

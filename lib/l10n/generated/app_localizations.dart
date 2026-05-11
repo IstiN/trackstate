@@ -310,6 +310,12 @@ abstract class AppLocalizations {
   /// **'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.'**
   String get attachmentsDownloadOnlyMessage;
 
+  /// No description provided for @attachmentsLimitedUploadMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.'**
+  String get attachmentsLimitedUploadMessage;
+
   /// No description provided for @attachmentsAccessMessageDisconnected.
   ///
   /// In en, this message translates to:
@@ -645,6 +651,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Issue edits and comments can continue, but attachment upload is unavailable in this browser session because Git LFS upload is not supported here yet.'**
   String get repositoryAccessAttachmentRestrictedMessage;
+
+  /// No description provided for @repositoryAccessAttachmentLimitedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Some attachment uploads still require local Git'**
+  String get repositoryAccessAttachmentLimitedTitle;
+
+  /// No description provided for @repositoryAccessAttachmentLimitedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Issue edits, comments, and browser-supported attachment uploads can continue here. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.'**
+  String get repositoryAccessAttachmentLimitedMessage;
 
   /// No description provided for @repositoryAccessSettingsHint.
   ///

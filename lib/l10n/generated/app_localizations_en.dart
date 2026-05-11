@@ -121,6 +121,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.';
 
   @override
+  String get attachmentsLimitedUploadMessage =>
+      'Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.';
+
+  @override
   String get attachmentsAccessMessageDisconnected =>
       'Connect GitHub with repository write access to enable Git-backed attachment changes. Existing attachments remain available for download.';
 
@@ -307,6 +311,14 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get repositoryAccessAttachmentRestrictedMessage =>
       'Issue edits and comments can continue, but attachment upload is unavailable in this browser session because Git LFS upload is not supported here yet.';
+
+  @override
+  String get repositoryAccessAttachmentLimitedTitle =>
+      'Some attachment uploads still require local Git';
+
+  @override
+  String get repositoryAccessAttachmentLimitedMessage =>
+      'Issue edits, comments, and browser-supported attachment uploads can continue here. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.';
 
   @override
   String get repositoryAccessSettingsHint =>

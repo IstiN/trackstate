@@ -202,6 +202,7 @@ void main() {
         viewModel.hostedRepositoryAccessMode,
         HostedRepositoryAccessMode.attachmentRestricted,
       );
+      expect(viewModel.canUploadIssueAttachments, isFalse);
       expect(viewModel.hasBlockedWriteAccess, isFalse);
       expect(viewModel.hasAttachmentUploadRestriction, isTrue);
     },
@@ -287,6 +288,47 @@ void main() {
   );
 
   test(
+    'view model blocks attachment uploads when the session cannot manage attachments',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'limited-attachments',
+      });
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: false,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(
+          permission: attachmentRestrictedPermission,
+        ),
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+      final success = await viewModel.uploadIssueAttachment(
+        issue: issue,
+        name: 'release notes.pdf',
+        bytes: Uint8List.fromList(<int>[1, 2, 3, 4]),
+      );
+
+      expect(viewModel.canUploadIssueAttachments, isFalse);
+      expect(success, isFalse);
+      expect(viewModel.message?.kind, TrackerMessageKind.issueSaveFailed);
+      expect(
+        viewModel.message?.error,
+        contains('Attachment upload is unavailable in this repository session'),
+      );
+    },
+  );
+
+  test(
     'view model refreshes selected issue after uploading an attachment',
     () async {
       SharedPreferences.setMockInitialValues({
@@ -348,6 +390,7 @@ void main() {
         'release notes.pdf',
       );
 
+      expect(viewModel.canUploadIssueAttachments, isTrue);
       expect(viewModel.hasAttachmentUploadRestriction, isTrue);
       expect(inspection.isLfsTracked, isTrue);
       expect(inspection.resolvedName, 'release-notes.pdf');

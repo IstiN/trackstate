@@ -901,7 +901,9 @@ String _repositoryAccessTitle(
     HostedRepositoryAccessMode.readOnly => l10n.repositoryAccessReadOnlyTitle,
     HostedRepositoryAccessMode.writable => l10n.repositoryAccessConnected,
     HostedRepositoryAccessMode.attachmentRestricted =>
-      l10n.repositoryAccessAttachmentRestrictedTitle,
+      viewModel.canUploadIssueAttachments
+          ? l10n.repositoryAccessAttachmentLimitedTitle
+          : l10n.repositoryAccessAttachmentRestrictedTitle,
   };
 }
 
@@ -918,7 +920,9 @@ String _repositoryAccessMessage(
       viewModel.project?.repository ?? l10n.configuredRepositoryFallback,
     ),
     HostedRepositoryAccessMode.attachmentRestricted =>
-      l10n.repositoryAccessAttachmentRestrictedMessage,
+      viewModel.canUploadIssueAttachments
+          ? l10n.repositoryAccessAttachmentLimitedMessage
+          : l10n.repositoryAccessAttachmentRestrictedMessage,
   };
 }
 
@@ -933,7 +937,9 @@ String _attachmentsAccessMessage(
       l10n.attachmentsAccessMessageReadOnly,
     HostedRepositoryAccessMode.writable => '',
     HostedRepositoryAccessMode.attachmentRestricted =>
-      l10n.attachmentsDownloadOnlyMessage,
+      viewModel.canUploadIssueAttachments
+          ? l10n.attachmentsLimitedUploadMessage
+          : l10n.attachmentsDownloadOnlyMessage,
   };
 }
 
@@ -1101,6 +1107,10 @@ class _RepositoryAccessBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final attachmentDownloadOnly =
+        viewModel.hostedRepositoryAccessMode ==
+            HostedRepositoryAccessMode.attachmentRestricted &&
+        !viewModel.canUploadIssueAttachments;
     if (!viewModel.exposesHostedAccessGates ||
         viewModel.hostedRepositoryAccessMode ==
             HostedRepositoryAccessMode.writable) {
@@ -1113,14 +1123,10 @@ class _RepositoryAccessBanner extends StatelessWidget {
         semanticLabel: _repositoryAccessTitle(l10n, viewModel),
         title: _repositoryAccessTitle(l10n, viewModel),
         message: _repositoryAccessMessage(l10n, viewModel),
-        primaryActionLabel:
-            viewModel.hostedRepositoryAccessMode ==
-                HostedRepositoryAccessMode.attachmentRestricted
+        primaryActionLabel: attachmentDownloadOnly
             ? l10n.openSettings
             : _repositoryAccessPrimaryActionLabel(l10n, viewModel),
-        onPrimaryAction:
-            viewModel.hostedRepositoryAccessMode ==
-                HostedRepositoryAccessMode.attachmentRestricted
+        onPrimaryAction: attachmentDownloadOnly
             ? () => viewModel.selectSection(TrackerSection.settings)
             : () => _showRepositoryAccessDialog(context, viewModel),
       ),
@@ -1979,6 +1985,9 @@ class _IssueDetailState extends State<_IssueDetail> {
   }
 
   Future<void> _chooseAttachment() async {
+    if (!widget.viewModel.canUploadIssueAttachments) {
+      return;
+    }
     final pickedAttachment = await widget.attachmentPicker();
     if (!mounted || pickedAttachment == null) {
       return;
@@ -1990,6 +1999,9 @@ class _IssueDetailState extends State<_IssueDetail> {
   }
 
   Future<void> _uploadAttachment() async {
+    if (!widget.viewModel.canUploadIssueAttachments) {
+      return;
+    }
     final selectedAttachment = _selectedAttachment;
     if (selectedAttachment == null) {
       return;
@@ -4383,11 +4395,12 @@ class _AttachmentsTab extends StatelessWidget {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
     final accessMessage = _attachmentsAccessMessage(l10n, viewModel);
+    final attachmentDownloadOnly =
+        viewModel.hostedRepositoryAccessMode ==
+            HostedRepositoryAccessMode.attachmentRestricted &&
+        !viewModel.canUploadIssueAttachments;
     final canChooseAttachment =
-        !isSaving &&
-        !viewModel.hasReadOnlySession &&
-        viewModel.hostedRepositoryAccessMode !=
-            HostedRepositoryAccessMode.disconnected;
+        !isSaving && viewModel.canUploadIssueAttachments;
     final canUploadAttachment =
         canChooseAttachment && selectedAttachment != null;
     return Column(
@@ -4398,9 +4411,12 @@ class _AttachmentsTab extends StatelessWidget {
             semanticLabel: l10n.attachments,
             title: _repositoryAccessTitle(l10n, viewModel),
             message: accessMessage,
-            primaryActionLabel: l10n.openSettings,
-            onPrimaryAction: () =>
-                viewModel.selectSection(TrackerSection.settings),
+            primaryActionLabel: attachmentDownloadOnly
+                ? l10n.openSettings
+                : null,
+            onPrimaryAction: attachmentDownloadOnly
+                ? () => viewModel.selectSection(TrackerSection.settings)
+                : null,
           ),
           const SizedBox(height: 12),
         ],
