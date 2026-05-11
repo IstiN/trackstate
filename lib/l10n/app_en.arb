@@ -12,12 +12,27 @@
   "settings": "Settings",
   "issueDetail": "Issue detail",
   "createIssue": "Create issue",
+  "createChildIssue": "Create child issue",
+  "back": "Back to",
   "edit": "Edit",
   "save": "Save",
   "transition": "Transition",
   "issueDetailReadOnlyMessage": "Write access is required to edit this issue or change its status.",
   "syncStatus": "Synced with Git",
   "searchIssues": "Search issues",
+  "loadMore": "Load more",
+  "loadMoreIssues": "Load more issues",
+  "showingResults": "Showing {shown} of {total} issues",
+  "@showingResults": {
+    "placeholders": {
+      "shown": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
   "quickActions": "Quick actions",
   "activeEpics": "Active Epics",
   "recentActivity": "Recent Activity",
@@ -32,13 +47,20 @@
   "done": "Done",
   "comments": "Comments",
   "attachments": "Attachments",
+  "history": "History",
+  "postComment": "Post comment",
   "linkedIssues": "Linked issues",
   "description": "Description",
   "acceptanceCriteria": "Acceptance Criteria",
   "details": "Details",
+  "issueType": "Issue Type",
   "status": "Status",
+  "initialStatus": "Initial status",
   "priority": "Priority",
   "assignee": "Assignee",
+  "labels": "Labels",
+  "parent": "Parent",
+  "epic": "Epic",
   "reporter": "Reporter",
   "repository": "Repository",
   "branch": "Branch",
@@ -64,6 +86,14 @@
   "trackerDataNotFound": "TrackState data was not found.",
   "trackerDataLoadFailed": "TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. {error}",
   "@trackerDataLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "searchFailed": "Search failed: {error}",
+  "@searchFailed": {
     "placeholders": {
       "error": {
         "type": "String"
@@ -176,6 +206,12 @@
   "localGitRuntimeDescription": "Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.",
   "close": "Close",
   "connectGitHub": "Connect GitHub",
+  "optional": "Optional",
+  "derivedFromParent": "Derived from parent",
+  "epicDerivedFromParent": "Epic is derived from the selected parent issue.",
+  "subTaskParentRequired": "Sub-tasks require a parent issue.",
+  "noEligibleParents": "No eligible parent issues available.",
+  "labelsTokenHelper": "Press comma or Enter to add a label.",
   "fineGrainedToken": "Fine-grained token",
   "fineGrainedTokenHelper": "Needs Contents: read/write. Stored only on this device if remembered.",
   "rememberOnThisBrowser": "Remember on this browser",

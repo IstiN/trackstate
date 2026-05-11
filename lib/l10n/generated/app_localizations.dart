@@ -148,6 +148,18 @@ abstract class AppLocalizations {
   /// **'Create issue'**
   String get createIssue;
 
+  /// No description provided for @createChildIssue.
+  ///
+  /// In en, this message translates to:
+  /// **'Create child issue'**
+  String get createChildIssue;
+
+  /// No description provided for @back.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to'**
+  String get back;
+
   /// No description provided for @edit.
   ///
   /// In en, this message translates to:
@@ -183,6 +195,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Search issues'**
   String get searchIssues;
+
+  /// No description provided for @loadMore.
+  ///
+  /// In en, this message translates to:
+  /// **'Load more'**
+  String get loadMore;
+
+  /// No description provided for @loadMoreIssues.
+  ///
+  /// In en, this message translates to:
+  /// **'Load more issues'**
+  String get loadMoreIssues;
+
+  /// No description provided for @showingResults.
+  ///
+  /// In en, this message translates to:
+  /// **'Showing {shown} of {total} issues'**
+  String showingResults(int shown, int total);
 
   /// No description provided for @quickActions.
   ///
@@ -268,6 +298,18 @@ abstract class AppLocalizations {
   /// **'Attachments'**
   String get attachments;
 
+  /// No description provided for @history.
+  ///
+  /// In en, this message translates to:
+  /// **'History'**
+  String get history;
+
+  /// No description provided for @postComment.
+  ///
+  /// In en, this message translates to:
+  /// **'Post comment'**
+  String get postComment;
+
   /// No description provided for @linkedIssues.
   ///
   /// In en, this message translates to:
@@ -292,11 +334,23 @@ abstract class AppLocalizations {
   /// **'Details'**
   String get details;
 
+  /// No description provided for @issueType.
+  ///
+  /// In en, this message translates to:
+  /// **'Issue Type'**
+  String get issueType;
+
   /// No description provided for @status.
   ///
   /// In en, this message translates to:
   /// **'Status'**
   String get status;
+
+  /// No description provided for @initialStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Initial status'**
+  String get initialStatus;
 
   /// No description provided for @priority.
   ///
@@ -309,6 +363,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Assignee'**
   String get assignee;
+
+  /// No description provided for @labels.
+  ///
+  /// In en, this message translates to:
+  /// **'Labels'**
+  String get labels;
+
+  /// No description provided for @parent.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent'**
+  String get parent;
+
+  /// No description provided for @epic.
+  ///
+  /// In en, this message translates to:
+  /// **'Epic'**
+  String get epic;
 
   /// No description provided for @reporter.
   ///
@@ -454,6 +526,12 @@ abstract class AppLocalizations {
   /// **'TrackState data was not found in the configured repository runtime. Check the configured repository source, branch, and DEMO/project.json. {error}'**
   String trackerDataLoadFailed(String error);
 
+  /// No description provided for @searchFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Search failed: {error}'**
+  String searchFailed(String error);
+
   /// No description provided for @repositoryConfigFallback.
   ///
   /// In en, this message translates to:
@@ -583,6 +661,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Connect GitHub'**
   String get connectGitHub;
+
+  /// No description provided for @optional.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional'**
+  String get optional;
+
+  /// No description provided for @derivedFromParent.
+  ///
+  /// In en, this message translates to:
+  /// **'Derived from parent'**
+  String get derivedFromParent;
+
+  /// No description provided for @epicDerivedFromParent.
+  ///
+  /// In en, this message translates to:
+  /// **'Epic is derived from the selected parent issue.'**
+  String get epicDerivedFromParent;
+
+  /// No description provided for @subTaskParentRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Sub-tasks require a parent issue.'**
+  String get subTaskParentRequired;
+
+  /// No description provided for @noEligibleParents.
+  ///
+  /// In en, this message translates to:
+  /// **'No eligible parent issues available.'**
+  String get noEligibleParents;
+
+  /// No description provided for @labelsTokenHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Press comma or Enter to add a label.'**
+  String get labelsTokenHelper;
 
   /// No description provided for @fineGrainedToken.
   ///

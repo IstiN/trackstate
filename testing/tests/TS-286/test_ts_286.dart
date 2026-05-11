@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -94,6 +96,19 @@ class _Ts286MoveValidationFailureRepository implements TrackStateRepository {
   Future<TrackerSnapshot> loadSnapshot() => _delegate.loadSnapshot();
 
   @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => _delegate.searchIssuePage(
+    jql,
+    startAt: startAt,
+    maxResults: maxResults,
+    continuationToken: continuationToken,
+  );
+
+  @override
   Future<List<TrackStateIssue>> searchIssues(String jql) =>
       _delegate.searchIssues(jql);
 
@@ -129,6 +144,29 @@ class _Ts286MoveValidationFailureRepository implements TrackStateRepository {
   ) async {
     throw const TrackStateRepositoryException(_validationFailure);
   }
+
+  @override
+  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) =>
+      _delegate.addIssueComment(issue, body);
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) =>
+      _delegate.downloadAttachment(attachment);
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) =>
+      _delegate.loadIssueHistory(issue);
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) => _delegate.uploadIssueAttachment(
+    issue: issue,
+    name: name,
+    bytes: bytes,
+  );
 }
 
 String _formatSnapshot(List<String> values, {int limit = 20}) {

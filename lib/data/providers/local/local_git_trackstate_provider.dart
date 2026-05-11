@@ -6,7 +6,10 @@ import '../../../domain/models/trackstate_models.dart';
 import '../trackstate_provider.dart';
 
 class LocalGitTrackStateProvider
-    implements TrackStateProviderAdapter, RepositoryFileMutator {
+    implements
+        TrackStateProviderAdapter,
+        RepositoryFileMutator,
+        RepositoryHistoryReader {
   LocalGitTrackStateProvider({
     required this.repositoryPath,
     this.dataRef = 'HEAD',
@@ -232,10 +235,18 @@ class LocalGitTrackStateProvider
   }) async {
     final result = await _runGit(['show', '$ref:$path'], binaryOutput: true);
     final revision = await _tryGit(['rev-parse', '$ref:$path']);
+    final pointerInfo = _parseLfsPointer(result.stdout);
+    final currentBranch = await resolveWriteBranch();
+    final useWorktreeBytes =
+        pointerInfo != null && (ref == 'HEAD' || ref == currentBranch);
     return RepositoryAttachment(
       path: path,
-      bytes: result.stdoutBytes,
+      bytes: useWorktreeBytes
+          ? await File(_absolutePath(path)).readAsBytes()
+          : result.stdoutBytes,
       revision: revision?.stdout.trim(),
+      lfsOid: pointerInfo?.oid,
+      declaredSizeBytes: pointerInfo?.sizeBytes,
     );
   }
 
@@ -273,6 +284,26 @@ class LocalGitTrackStateProvider
   Future<bool> isLfsTracked(String path) async {
     final result = await _tryGit(['check-attr', 'filter', '--', path]);
     return result?.stdout.trim().endsWith(': lfs') ?? false;
+  }
+
+  @override
+  Future<List<RepositoryHistoryCommit>> listHistory({
+    required String ref,
+    required String path,
+    int limit = 50,
+  }) async {
+    final result = await _runGit([
+      'log',
+      '--format=%x1e%H%x1f%P%x1f%aI%x1f%an%x1f%s',
+      '--name-status',
+      '--find-renames',
+      '-n',
+      '$limit',
+      ref,
+      '--',
+      path,
+    ]);
+    return _parseGitHistory(result.stdout);
   }
 
   Future<void> _ensureOnBranch(String branch) async {
@@ -428,6 +459,90 @@ class LocalGitTrackStateProvider
 
   String _absolutePath(String path) =>
       '$repositoryPath/${path.replaceAll('\\', '/')}';
+
+  List<RepositoryHistoryCommit> _parseGitHistory(String output) {
+    final commits = <RepositoryHistoryCommit>[];
+    for (final block in output.split('\x1e')) {
+      final trimmed = block.trim();
+      if (trimmed.isEmpty) {
+        continue;
+      }
+      final lines = LineSplitter.split(trimmed).toList(growable: false);
+      if (lines.isEmpty) {
+        continue;
+      }
+      final metadata = lines.first.split('\x1f');
+      if (metadata.length < 5) {
+        continue;
+      }
+      final changes = <RepositoryHistoryFileChange>[];
+      for (final line in lines.skip(1)) {
+        if (line.trim().isEmpty) {
+          continue;
+        }
+        final columns = line.split('\t');
+        final status = columns.first.trim();
+        if (status.startsWith('R') && columns.length >= 3) {
+          changes.add(
+            RepositoryHistoryFileChange(
+              path: columns[2],
+              previousPath: columns[1],
+              changeType: RepositoryHistoryChangeType.renamed,
+            ),
+          );
+          continue;
+        }
+        if (columns.length < 2) {
+          continue;
+        }
+        changes.add(
+          RepositoryHistoryFileChange(
+            path: columns[1],
+            changeType: switch (status) {
+              'A' => RepositoryHistoryChangeType.added,
+              'D' => RepositoryHistoryChangeType.removed,
+              _ => RepositoryHistoryChangeType.modified,
+            },
+          ),
+        );
+      }
+      commits.add(
+        RepositoryHistoryCommit(
+          sha: metadata[0],
+          parentSha: metadata[1].trim().isEmpty
+              ? null
+              : metadata[1].trim().split(' ').first,
+          timestamp: metadata[2],
+          author: metadata[3],
+          message: metadata[4],
+          changes: changes,
+        ),
+      );
+    }
+    return commits;
+  }
+}
+
+_LfsPointerInfo? _parseLfsPointer(String content) {
+  if (!content.contains('version https://git-lfs.github.com/spec/v1')) {
+    return null;
+  }
+  final oidMatch = RegExp(
+    r'^oid sha256:([a-f0-9]+)$',
+    multiLine: true,
+  ).firstMatch(content);
+  final sizeMatch = RegExp(r'^size (\d+)$', multiLine: true).firstMatch(content);
+  return _LfsPointerInfo(
+    oid: oidMatch?.group(1),
+    sizeBytes: int.tryParse(sizeMatch?.group(1) ?? ''),
+  );
+}
+
+class _LfsPointerInfo {
+  const _LfsPointerInfo({this.oid, this.sizeBytes});
+
+  final String? oid;
+  final int? sizeBytes;
 }
 
 abstract interface class GitProcessRunner {

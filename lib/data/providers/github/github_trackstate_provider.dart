@@ -7,7 +7,10 @@ import '../../../domain/models/trackstate_models.dart';
 import '../trackstate_provider.dart';
 
 class GitHubTrackStateProvider
-    implements TrackStateProviderAdapter, RepositoryFileMutator {
+    implements
+        TrackStateProviderAdapter,
+        RepositoryFileMutator,
+        RepositoryHistoryReader {
   GitHubTrackStateProvider({
     http.Client? client,
     this.repositoryName = defaultRepositoryName,
@@ -323,10 +326,26 @@ class GitHubTrackStateProvider
         'GitHub content response for $path did not contain file content.',
       );
     }
+    var bytes = Uint8List.fromList(base64Decode(encoded));
+    final pointerInfo = _parseLfsPointerBytes(bytes);
+    if (pointerInfo != null) {
+      final downloadUrl = json['download_url']?.toString();
+      if (downloadUrl != null && downloadUrl.isNotEmpty) {
+        final response = await _http.get(
+          Uri.parse(downloadUrl),
+          headers: _githubHeaders(_connection?.token),
+        );
+        if (response.statusCode == 200) {
+          bytes = response.bodyBytes;
+        }
+      }
+    }
     return RepositoryAttachment(
       path: path,
-      bytes: Uint8List.fromList(base64Decode(encoded)),
+      bytes: bytes,
       revision: json['sha']?.toString(),
+      lfsOid: pointerInfo?.oid,
+      declaredSizeBytes: pointerInfo?.sizeBytes,
     );
   }
 
@@ -373,6 +392,60 @@ class GitHubTrackStateProvider
 
   @override
   Future<bool> isLfsTracked(String path) => _isLfsTracked(path, ref: dataRef);
+
+  @override
+  Future<List<RepositoryHistoryCommit>> listHistory({
+    required String ref,
+    required String path,
+    int limit = 50,
+  }) async {
+    final commitsJson =
+        await _getGitHubJson(
+              '/repos/$repositoryName/commits',
+              queryParameters: {'sha': ref, 'path': path, 'per_page': '$limit'},
+            )
+            as List<Object?>;
+    final commits = <RepositoryHistoryCommit>[];
+    for (final entry in commitsJson.whereType<Map<String, Object?>>()) {
+      final sha = entry['sha']?.toString();
+      if (sha == null || sha.isEmpty) {
+        continue;
+      }
+      final detail =
+          await _getGitHubJson('/repos/$repositoryName/commits/$sha')
+              as Map<String, Object?>;
+      final commitJson = detail['commit'] as Map<String, Object?>? ?? const {};
+      final authorJson =
+          commitJson['author'] as Map<String, Object?>? ?? const {};
+      final files = detail['files'] as List<Object?>? ?? const [];
+      commits.add(
+        RepositoryHistoryCommit(
+          sha: sha,
+          parentSha: (detail['parents'] as List<Object?>?)
+              ?.whereType<Map<String, Object?>>()
+              .firstOrNull?['sha']
+              ?.toString(),
+          author: authorJson['name']?.toString() ?? 'github',
+          timestamp: authorJson['date']?.toString() ?? '',
+          message: commitJson['message']?.toString() ?? '',
+          changes: [
+            for (final file in files.whereType<Map<String, Object?>>())
+              RepositoryHistoryFileChange(
+                path: file['filename']?.toString() ?? '',
+                previousPath: file['previous_filename']?.toString(),
+                changeType: switch (file['status']?.toString()) {
+                  'added' => RepositoryHistoryChangeType.added,
+                  'removed' => RepositoryHistoryChangeType.removed,
+                  'renamed' => RepositoryHistoryChangeType.renamed,
+                  _ => RepositoryHistoryChangeType.modified,
+                },
+              ),
+          ],
+        ),
+      );
+    }
+    return commits;
+  }
 
   Future<bool> _isLfsTracked(String path, {required String ref}) async {
     try {
@@ -614,6 +687,9 @@ RepositoryPermission _permissionFromRepoJson(Map<String, Object?> json) {
     canRead: canRead,
     canWrite: canWrite,
     isAdmin: permissions['admin'] == true,
+    attachmentUploadMode: canWrite
+        ? AttachmentUploadMode.noLfs
+        : AttachmentUploadMode.none,
   );
 }
 
@@ -686,4 +762,49 @@ bool _attributePatternMatches(String pattern, String path) {
   }
   expression.write(r'$');
   return RegExp(expression.toString()).hasMatch(path);
+}
+
+_LfsPointerInfo? _parseLfsPointerBytes(Uint8List bytes) {
+  const pointerPrefix = 'version https://git-lfs.github.com/spec/v1';
+  if (bytes.length < pointerPrefix.length || bytes.length > 512) {
+    return null;
+  }
+  for (var index = 0; index < pointerPrefix.length; index++) {
+    if (bytes[index] != pointerPrefix.codeUnitAt(index)) {
+      return null;
+    }
+  }
+  for (final byte in bytes) {
+    final isWhitespace = byte == 0x09 || byte == 0x0A || byte == 0x0D;
+    final isPrintableAscii = byte >= 0x20 && byte <= 0x7E;
+    if (!isWhitespace && !isPrintableAscii) {
+      return null;
+    }
+  }
+  return _parseLfsPointer(ascii.decode(bytes));
+}
+
+_LfsPointerInfo? _parseLfsPointer(String content) {
+  if (!content.contains('version https://git-lfs.github.com/spec/v1')) {
+    return null;
+  }
+  final oidMatch = RegExp(
+    r'^oid sha256:([a-f0-9]+)$',
+    multiLine: true,
+  ).firstMatch(content);
+  final sizeMatch = RegExp(
+    r'^size (\d+)$',
+    multiLine: true,
+  ).firstMatch(content);
+  return _LfsPointerInfo(
+    oid: oidMatch?.group(1),
+    sizeBytes: int.tryParse(sizeMatch?.group(1) ?? ''),
+  );
+}
+
+class _LfsPointerInfo {
+  const _LfsPointerInfo({this.oid, this.sizeBytes});
+
+  final String? oid;
+  final int? sizeBytes;
 }

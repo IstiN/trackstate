@@ -12,6 +12,8 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openSection(String label);
 
+  Future<bool> openHierarchyChildCreateForIssue(String issueKey);
+
   Future<void> switchToLocalGitInSettings({
     required String repositoryPath,
     required String writeBranch,
@@ -34,9 +36,13 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> searchIssues(String query);
 
+  Future<String?> readJqlSearchFieldValue();
+
   Future<void> expectIssueSearchResultVisible(String key, String summary);
 
   void expectIssueSearchResultAbsent(String key, String summary);
+
+  List<String> visibleIssueSearchResultLabelsSnapshot();
 
   Future<void> dragIssueToStatusColumn({
     required String key,
@@ -116,6 +122,18 @@ abstract interface class TrackStateAppComponent {
   Future<bool> isTextFieldVisible(String label);
 
   Future<int> countLabeledTextFields(String label);
+
+  Future<bool> isDropdownFieldVisible(String label);
+
+  Future<int> countDropdownFields(String label);
+
+  Future<void> selectDropdownOption(String label, {required String optionText});
+
+  Future<String?> readDropdownFieldValue(String label);
+
+  Future<int> countReadOnlyFields(String label);
+
+  Future<String?> readReadOnlyFieldValue(String label);
 
   Future<void> enterLabeledTextField(String label, {required String text});
 
