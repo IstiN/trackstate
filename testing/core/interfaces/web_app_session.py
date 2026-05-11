@@ -17,6 +17,16 @@ class WaitMatch:
     body_text: str
 
 
+@dataclass(frozen=True)
+class FocusedElementObservation:
+    tag_name: str
+    role: str | None
+    accessible_name: str | None
+    text: str
+    tabindex: str | None
+    outer_html: str
+
+
 class WebAppSession(Protocol):
     def goto(
         self,
@@ -67,12 +77,28 @@ class WebAppSession(Protocol):
         timeout_ms: int = 30_000,
     ) -> None: ...
 
+    def press_key(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None: ...
+
     def count(
         self,
         selector: str,
         *,
         has_text: str | None = None,
     ) -> int: ...
+
+    def focus(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None: ...
 
     def wait_for_count(
         self,
@@ -87,6 +113,24 @@ class WebAppSession(Protocol):
         selector: str,
         *,
         has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str: ...
+
+    def read_text(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str: ...
+
+    def wait_for_input_value(
+        self,
+        selector: str,
+        expected_value: str,
+        *,
         index: int = 0,
         timeout_ms: int = 30_000,
     ) -> str: ...
@@ -106,5 +150,21 @@ class WebAppSession(Protocol):
         *,
         timeout_ms: int = 90_000,
     ) -> WaitMatch: ...
+
+    def evaluate(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+    ) -> object: ...
+
+    def active_element(self) -> FocusedElementObservation: ...
+
+    def wait_for_download_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str: ...
 
     def screenshot(self, path: str) -> None: ...

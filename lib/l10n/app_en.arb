@@ -45,9 +45,19 @@
   "inProgress": "In Progress",
   "inReview": "In Review",
   "done": "Done",
+  "detail": "Detail",
   "comments": "Comments",
   "attachments": "Attachments",
+  "attachmentsDownloadOnlyMessage": "This repository session is download-only for Git LFS attachments.",
   "history": "History",
+  "downloadAttachment": "Download {fileName}",
+  "@downloadAttachment": {
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
   "postComment": "Post comment",
   "linkedIssues": "Linked issues",
   "description": "Description",
@@ -130,6 +140,14 @@
     }
   },
   "saveFailed": "Save failed: {error}",
+  "attachmentDownloadFailed": "Attachment download failed: {error}",
+  "@attachmentDownloadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "@saveFailed": {
     "placeholders": {
       "error": {

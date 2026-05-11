@@ -1,6 +1,9 @@
+import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 
 abstract interface class TrackStateAppComponent {
+  Finder get goldenTarget;
+
   Future<void> pump(TrackStateRepository repository);
 
   Future<void> pumpLocalGitApp({
@@ -11,6 +14,8 @@ abstract interface class TrackStateAppComponent {
   void resetView();
 
   Future<void> openSection(String label);
+
+  Future<bool> openHierarchyChildCreateForIssue(String issueKey);
 
   Future<void> switchToLocalGitInSettings({
     required String repositoryPath,
@@ -120,6 +125,18 @@ abstract interface class TrackStateAppComponent {
   Future<bool> isTextFieldVisible(String label);
 
   Future<int> countLabeledTextFields(String label);
+
+  Future<bool> isDropdownFieldVisible(String label);
+
+  Future<int> countDropdownFields(String label);
+
+  Future<void> selectDropdownOption(String label, {required String optionText});
+
+  Future<String?> readDropdownFieldValue(String label);
+
+  Future<int> countReadOnlyFields(String label);
+
+  Future<String?> readReadOnlyFieldValue(String label);
 
   Future<void> enterLabeledTextField(String label, {required String text});
 

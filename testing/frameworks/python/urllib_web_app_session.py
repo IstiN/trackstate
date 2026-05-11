@@ -9,6 +9,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from testing.core.interfaces.web_app_session import (
+    FocusedElementObservation,
     WaitMatch,
     WaitState,
     WebAppSession,
@@ -129,8 +130,97 @@ class UrllibWebAppSession(WebAppSession):
             "Selector counts are not supported by the urllib web session fallback."
         )
 
+    def press(
+        self,
+        selector: str,
+        key: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        del selector, key, has_text, index, timeout_ms
+        raise NotImplementedError(
+            "Keyboard interactions are not supported by the urllib web session fallback."
+        )
+
+    def press_key(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        del key, timeout_ms
+        raise NotImplementedError(
+            "Keyboard interactions are not supported by the urllib web session fallback."
+        )
+
+    def focus(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        del selector, has_text, index, timeout_ms
+        raise NotImplementedError(
+            "Focus interactions are not supported by the urllib web session fallback."
+        )
+
     def body_text(self) -> str:
         return self._body_text
+
+    def read_value(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        del selector, has_text, index, timeout_ms
+        raise NotImplementedError(
+            "Reading input values is not supported by the urllib web session fallback."
+        )
+
+    def read_text(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        del selector, has_text, index, timeout_ms
+        raise NotImplementedError(
+            "Reading element text is not supported by the urllib web session fallback."
+        )
+
+    def wait_for_input_value(
+        self,
+        selector: str,
+        expected_value: str,
+        *,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        del selector, expected_value, index, timeout_ms
+        raise NotImplementedError(
+            "Input polling is not supported by the urllib web session fallback."
+        )
+
+    def wait_for_count(
+        self,
+        selector: str,
+        expected_count: int,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        del selector, expected_count, timeout_ms
+        raise NotImplementedError(
+            "Selector counts are not supported by the urllib web session fallback."
+        )
 
     def wait_for_text(
         self,
@@ -155,6 +245,33 @@ class UrllibWebAppSession(WebAppSession):
                 return WaitMatch(matched_text=text, body_text=self._body_text)
         raise WebAppTimeoutError(
             f"Timed out waiting for any expected text: {list(texts)}."
+        )
+
+    def evaluate(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+    ) -> object:
+        del expression, arg
+        raise NotImplementedError(
+            "DOM evaluation is not supported by the urllib web session fallback."
+        )
+
+    def active_element(self) -> FocusedElementObservation:
+        raise NotImplementedError(
+            "Active-element inspection is not supported by the urllib web session fallback."
+        )
+
+    def wait_for_download_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        del key, timeout_ms
+        raise NotImplementedError(
+            "Download capture is not supported by the urllib web session fallback."
         )
 
     def screenshot(self, path: str) -> None:

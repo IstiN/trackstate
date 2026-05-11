@@ -15,8 +15,15 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     required LocalGitRepositoryPort repositoryService,
   }) : _repositoryService = repositoryService;
 
+  static const ValueKey<String> _goldenTargetKey = ValueKey<String>(
+    'trackstate-app-golden-target',
+  );
+
   final WidgetTester tester;
   final LocalGitRepositoryPort _repositoryService;
+
+  @override
+  Finder get goldenTarget => find.byKey(_goldenTargetKey);
 
   Finder get repositoryAccessButton =>
       find.bySemanticsLabel(RegExp(r'^(Local Git|Connect GitHub|Connected)$'));
@@ -90,6 +97,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     );
   }
 
+  Finder _labeledDropdownField(String label) =>
+      find.byWidgetPredicate((widget) {
+        return widget is DropdownButtonFormField<String> &&
+            widget.decoration.labelText == label;
+      }, description: 'dropdown field labeled $label');
+
+  Finder _readOnlyFieldScope(String label) => find.byWidgetPredicate((widget) {
+    return widget is Semantics &&
+        widget.properties.label == label &&
+        widget.properties.readOnly == true;
+  }, description: 'read-only field labeled $label');
+
   Finder get _jqlSearchPanel => find.byWidgetPredicate(
     (widget) => widget is Semantics && widget.properties.label == 'JQL Search',
     description: 'JQL Search panel',
@@ -139,14 +158,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     });
 
     await tester.pumpWidget(
-      TrackStateApp(
-        key: UniqueKey(),
-        repository: repository,
-        openLocalRepository:
-            ({required String repositoryPath, required String writeBranch}) =>
-                _repositoryService.openRepository(
-                  repositoryPath: repositoryPath,
-                ),
+      KeyedSubtree(
+        key: _goldenTargetKey,
+        child: TrackStateApp(
+          key: UniqueKey(),
+          repository: repository,
+          openLocalRepository:
+              ({required String repositoryPath, required String writeBranch}) =>
+                  _repositoryService.openRepository(
+                    repositoryPath: repositoryPath,
+                  ),
+        ),
       ),
     );
     await _pumpFrames();
@@ -203,6 +225,20 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await tester.ensureVisible(section);
     await tester.tap(section, warnIfMissed: false);
     await _pumpFrames();
+  }
+
+  @override
+  Future<bool> openHierarchyChildCreateForIssue(String issueKey) {
+    return _tapControl(
+      label: 'Create child issue for $issueKey',
+      semanticsMatch: find.bySemanticsLabel(
+        RegExp('^Create child issue for ${RegExp.escape(issueKey)}\$'),
+      ),
+      textMatch: find.byWidgetPredicate(
+        (_) => false,
+        description: 'no text fallback for hierarchy child-create action',
+      ),
+    );
   }
 
   @override
@@ -631,6 +667,117 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> isDropdownFieldVisible(String label) async {
+    await tester.pump();
+    return _labeledDropdownField(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<int> countDropdownFields(String label) async {
+    await tester.pump();
+    return _labeledDropdownField(label).evaluate().length;
+  }
+
+  @override
+  Future<void> selectDropdownOption(
+    String label, {
+    required String optionText,
+  }) async {
+    await tester.pump();
+    final field = _labeledDropdownField(label);
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible dropdown field labeled "$label", but no matching '
+        'control was rendered.',
+      );
+    }
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    final option = find.text(optionText, findRichText: true);
+    if (option.evaluate().isEmpty) {
+      fail(
+        'Expected the "$label" dropdown to expose the option "$optionText", '
+        'but it was not visible after opening the menu.',
+      );
+    }
+    await tester.ensureVisible(option.last);
+    await tester.tap(option.last, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<String?> readDropdownFieldValue(String label) async {
+    await tester.pump();
+    final field = _labeledDropdownField(label);
+    if (field.evaluate().isEmpty) {
+      return null;
+    }
+    final dropdown = tester.widget<DropdownButtonFormField<String>>(
+      field.first,
+    );
+    final helperText = dropdown.decoration.helperText?.trim();
+    final hintText = dropdown.decoration.hintText?.trim();
+    for (final widget in tester.widgetList<Text>(
+      find.descendant(of: field.first, matching: find.byType(Text)),
+    )) {
+      final value = widget.data?.trim();
+      if (value == null ||
+          value.isEmpty ||
+          value == label ||
+          value == helperText ||
+          value == hintText) {
+        continue;
+      }
+      return value;
+    }
+    return null;
+  }
+
+  @override
+  Future<int> countReadOnlyFields(String label) async {
+    await tester.pump();
+    return _readOnlyFieldScope(label).evaluate().length;
+  }
+
+  @override
+  Future<String?> readReadOnlyFieldValue(String label) async {
+    await tester.pump();
+    final scope = _readOnlyFieldScope(label);
+    if (scope.evaluate().isEmpty) {
+      return null;
+    }
+
+    final decorator = find.descendant(
+      of: scope.first,
+      matching: find.byType(InputDecorator),
+    );
+    if (decorator.evaluate().isEmpty) {
+      fail(
+        'Expected the visible read-only field labeled "$label" to contain an '
+        'InputDecorator.',
+      );
+    }
+
+    final inputDecorator = tester.widget<InputDecorator>(decorator.first);
+    final helperText = inputDecorator.decoration.helperText?.trim();
+    for (final widget in tester.widgetList<Text>(
+      find.descendant(of: scope.first, matching: find.byType(Text)),
+    )) {
+      final value = widget.data?.trim();
+      if (value == null ||
+          value.isEmpty ||
+          value == label ||
+          value == helperText) {
+        continue;
+      }
+      return value;
+    }
+    return null;
+  }
+
+  @override
   Future<void> enterLabeledTextField(
     String label, {
     required String text,
@@ -869,6 +1016,11 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         await Future<void>.delayed(const Duration(milliseconds: 500));
       });
       await tester.pumpAndSettle();
+      return true;
+    }
+    if (label == 'History') {
+      await tester.tap(target.first, warnIfMissed: false);
+      await _pumpFrames();
       return true;
     }
     await tester.tap(target.first, warnIfMissed: false);

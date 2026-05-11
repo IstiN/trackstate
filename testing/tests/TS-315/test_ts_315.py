@@ -49,6 +49,7 @@ def main() -> None:
 
     issue_fixture = service.fetch_issue_fixture(ISSUE_PATH)
     _assert_fixture_preconditions(issue_fixture)
+    expected_result_label = f"Open {issue_fixture.key} {issue_fixture.summary}"
 
     result: dict[str, object] = {
         "status": "failed",
@@ -61,6 +62,7 @@ def main() -> None:
         "issue_description": issue_fixture.description,
         "issue_acceptance_criteria": issue_fixture.acceptance_criteria,
         "issue_comment_bodies": issue_fixture.comment_bodies,
+        "expected_result_label": expected_result_label,
         "queries": {
             "summary": SUMMARY_QUERY,
             "description": DESCRIPTION_QUERY,
@@ -104,6 +106,9 @@ def main() -> None:
         _assert_positive_search(
             label="summary",
             query=SUMMARY_QUERY,
+            expected_issue_key=issue_fixture.key,
+            expected_issue_summary=issue_fixture.summary,
+            expected_result_label=expected_result_label,
             observation=summary_observation,
         )
         result["summary_search"] = _observation_to_dict(summary_observation)
@@ -128,6 +133,9 @@ def main() -> None:
         _assert_positive_search(
             label="description",
             query=DESCRIPTION_QUERY,
+            expected_issue_key=issue_fixture.key,
+            expected_issue_summary=issue_fixture.summary,
+            expected_result_label=expected_result_label,
             observation=description_observation,
         )
         result["description_search"] = _observation_to_dict(description_observation)
@@ -152,6 +160,9 @@ def main() -> None:
         _assert_positive_search(
             label="acceptance criteria",
             query=ACCEPTANCE_QUERY,
+            expected_issue_key=issue_fixture.key,
+            expected_issue_summary=issue_fixture.summary,
+            expected_result_label=expected_result_label,
             observation=acceptance_observation,
         )
         result["acceptance_search"] = _observation_to_dict(acceptance_observation)
@@ -295,6 +306,9 @@ def _assert_positive_search(
     *,
     label: str,
     query: str,
+    expected_issue_key: str,
+    expected_issue_summary: str,
+    expected_result_label: str,
     observation,
 ) -> None:
     if observation.visible_query != query:
@@ -312,6 +326,20 @@ def _assert_positive_search(
             f"Observed count summary: {observation.count_summary}\n"
             f"Observed body text:\n{observation.body_text}",
         )
+    if observation.issue_result_count != 1:
+        raise AssertionError(
+            f"Step failed: searching for the {label} term {query!r} did not leave exactly "
+            "one live issue result visible.\n"
+            f"Observed visible result count: {observation.issue_result_count}\n"
+            f"Observed result labels: {list(observation.issue_result_labels)}",
+        )
+    if expected_result_label not in observation.issue_result_labels:
+        raise AssertionError(
+            f"Step failed: searching for the {label} term {query!r} did not leave the "
+            "expected DEMO-2 result visible.\n"
+            f"Expected result label: {expected_result_label}\n"
+            f"Observed result labels: {list(observation.issue_result_labels)}",
+        )
     if "No issues" in observation.body_text:
         raise AssertionError(
             f"Step failed: searching for the {label} term {query!r} rendered the empty "
@@ -323,6 +351,15 @@ def _assert_positive_search(
             f"Human-style verification failed: the visible JQL Search surface did not "
             f"show the user-facing \"1 issue\" summary after searching for {query!r}.\n"
             f"Observed body text:\n{observation.body_text}",
+        )
+    if (
+        expected_issue_key not in expected_result_label
+        or expected_issue_summary not in expected_result_label
+    ):
+        raise AssertionError(
+            "Precondition failed: the expected JQL result label did not retain the issue "
+            "key and summary needed for human-style verification.\n"
+            f"Expected result label: {expected_result_label}",
         )
 
 
@@ -353,6 +390,8 @@ def _observation_to_dict(observation) -> dict[str, object]:
         "query": observation.query,
         "visible_query": observation.visible_query,
         "count_summary": observation.count_summary,
+        "issue_result_count": observation.issue_result_count,
+        "issue_result_labels": list(observation.issue_result_labels),
         "body_text": observation.body_text,
     }
 

@@ -160,7 +160,7 @@ void main() {
     }
   });
 
-  testWidgets('issue detail exposes comments, attachments, and history tabs', (
+  testWidgets('issue detail exposes detail, comments, attachments, and history tabs', (
     tester,
   ) async {
     final semantics = tester.ensureSemantics();
@@ -181,13 +181,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      expect(find.bySemanticsLabel(RegExp('Detail')), findsWidgets);
       expect(find.bySemanticsLabel(RegExp('Comments')), findsWidgets);
       expect(find.bySemanticsLabel(RegExp('Attachments')), findsWidgets);
       expect(find.bySemanticsLabel(RegExp('History')), findsWidgets);
-      expect(
-        find.textContaining('Use repository indexes for key lookup'),
-        findsOneWidget,
-      );
+      expect(find.text('Description'), findsOneWidget);
 
       await tester.tap(find.bySemanticsLabel(RegExp('Attachments')).first);
       await tester.pumpAndSettle();

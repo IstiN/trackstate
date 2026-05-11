@@ -13,19 +13,24 @@ class LiveJqlSearchObservation:
     visible_query: str
     body_text: str
     count_summary: str | None
+    issue_result_count: int
+    issue_result_labels: tuple[str, ...]
 
 
 class LiveJqlSearchPage:
     _button_selector = 'flt-semantics[role="button"]'
     _active_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
-    _issue_button_selector = 'flt-semantics[role="button"][aria-label*="Open DEMO-"]'
+    _panel_selector = 'flt-semantics[role="group"][aria-label="JQL Search"]'
+    _panel_search_field_selector = f'{_panel_selector} input[aria-label="Search issues"]'
     _search_field_candidates = (
+        _panel_search_field_selector,
         'input[data-semantics-role="text-field"]:not([disabled]):not([aria-label])',
         'textarea[data-semantics-role="text-field"]:not([disabled]):not([aria-label])',
         'input[aria-label="Search issues"]',
         'textarea[aria-label="Search issues"]',
         '[role="textbox"][aria-label="Search issues"]',
     )
+    _issue_button_selector = 'flt-semantics[role="button"][aria-label^="Open DEMO-"]'
     _no_results_text = "No results"
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
@@ -68,8 +73,16 @@ class LiveJqlSearchPage:
         return self.search(query=query)
 
     def search(self, *, query: str) -> LiveJqlSearchObservation:
+        return self.search_with_expected_counts(query=query)
+
+    def search_with_expected_counts(
+        self,
+        *,
+        query: str,
+        expected_count_summaries: tuple[str, ...] | None = None,
+    ) -> LiveJqlSearchObservation:
         field_selector, field_index = self._submit_query(query)
-        self._wait_for_count_summary()
+        self._wait_for_count_summary(expected_count_summaries=expected_count_summaries)
         return self._observe(
             query=query,
             field_selector=field_selector,
@@ -85,7 +98,23 @@ class LiveJqlSearchPage:
     def _submit_query(self, query: str) -> tuple[str, int]:
         self.open()
         field_selector, field_index = self._wait_for_search_field()
-        self._session.fill(field_selector, query, index=field_index, timeout_ms=30_000)
+        self._session.focus(
+            field_selector,
+            index=field_index,
+            timeout_ms=30_000,
+        )
+        self._session.fill(
+            field_selector,
+            query,
+            index=field_index,
+            timeout_ms=30_000,
+        )
+        self._session.wait_for_input_value(
+            field_selector,
+            query,
+            index=field_index,
+            timeout_ms=30_000,
+        )
         self._session.press(
             field_selector,
             "Enter",
@@ -111,6 +140,8 @@ class LiveJqlSearchPage:
             ),
             body_text=body_text,
             count_summary=self._count_summary(body_text),
+            issue_result_count=self._session.count(self._issue_button_selector),
+            issue_result_labels=self._issue_result_labels(),
         )
 
     def _wait_for_search_field(self) -> tuple[str, int]:
@@ -134,16 +165,22 @@ class LiveJqlSearchPage:
             has_text="JQL Search",
         ) > 0
 
-    def _wait_for_count_summary(self) -> None:
+    def _wait_for_count_summary(
+        self,
+        *,
+        expected_count_summaries: tuple[str, ...] | None = None,
+    ) -> None:
+        count_summaries = expected_count_summaries or ("1 issue", "No issues")
         try:
             self._session.wait_for_any_text(
-                ["1 issue", "No issues"],
+                list(count_summaries),
                 timeout_ms=60_000,
             )
         except WebAppTimeoutError as error:
             raise AssertionError(
                 "Step 4 failed: the live JQL Search panel never rendered an updated "
                 'issue-count summary after the query was submitted.\n'
+                f"Expected summaries: {count_summaries}\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
 
@@ -153,3 +190,16 @@ class LiveJqlSearchPage:
         if match is None:
             return None
         return match.group(0)
+
+    def _issue_result_labels(self) -> tuple[str, ...]:
+        payload = self._session.evaluate(
+            """
+            (selector) => Array.from(document.querySelectorAll(selector))
+              .map((element) => element.getAttribute("aria-label") ?? "")
+              .filter((label) => label.length > 0)
+            """,
+            arg=self._issue_button_selector,
+        )
+        if not isinstance(payload, list):
+            return ()
+        return tuple(str(label) for label in payload)
