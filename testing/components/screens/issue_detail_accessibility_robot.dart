@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/ui/core/trackstate_icons.dart';
+import 'package:trackstate/ui/core/trackstate_theme.dart';
 
 import '../../core/interfaces/issue_detail_accessibility_screen.dart';
+import '../../core/models/issue_detail_icon_observation.dart';
+import '../../core/models/issue_detail_row_style_observation.dart';
+import '../../core/models/issue_detail_text_contrast_observation.dart';
 import '../../core/models/status_badge_contrast_observation.dart';
 import '../../core/utils/color_contrast.dart';
 
@@ -25,6 +30,14 @@ class IssueDetailAccessibilityRobot
     );
     await tester.ensureVisible(issueLink.first);
     await tester.tap(issueLink.first);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> selectCollaborationTab(String issueKey, String label) async {
+    final tab = _collaborationTab(issueKey, label);
+    await tester.ensureVisible(tab.first);
+    await tester.tap(tab.first, warnIfMissed: false);
     await tester.pumpAndSettle();
   }
 
@@ -78,6 +91,15 @@ class IssueDetailAccessibilityRobot
   }
 
   @override
+  List<String> buttonLabelsInIssueDetail(String issueKey) {
+    final rootLabel = 'Issue detail $issueKey';
+    return _screenReaderTargets(
+      issueKey,
+      rootLabel,
+    ).where((target) => target.isButton).map((target) => target.label).toList();
+  }
+
+  @override
   List<String> commentActionLabels(String issueKey) {
     final rootLabel = 'Issue detail $issueKey';
     final targets = _screenReaderTargets(issueKey, rootLabel);
@@ -105,6 +127,64 @@ class IssueDetailAccessibilityRobot
     return StatusBadgeContrastObservation(
       label: label,
       foregroundHex: _rgbHex(foreground),
+      backgroundHex: _rgbHex(background),
+      contrastRatio: contrastRatio(foreground, background),
+    );
+  }
+
+  @override
+  IssueDetailTextContrastObservation observeDecoratedRowTextContrast(
+    String issueKey, {
+    required String rowAnchorText,
+    required String text,
+  }) {
+    final row = _decoratedRow(issueKey, rowAnchorText);
+    final foreground = _renderedTextColorWithin(row, text);
+    final background = _renderedContainerBackground(row);
+    return IssueDetailTextContrastObservation(
+      text: text,
+      foregroundHex: _rgbHex(foreground),
+      backgroundHex: _rgbHex(background),
+      contrastRatio: contrastRatio(foreground, background),
+    );
+  }
+
+  @override
+  IssueDetailRowStyleObservation observeDecoratedRowStyle(
+    String issueKey, {
+    required String rowAnchorText,
+  }) {
+    final row = _decoratedRow(issueKey, rowAnchorText);
+    final background = _renderedContainerBackground(row);
+    final border = _renderedContainerBorder(row);
+    final colors = _trackStateColors(issueKey);
+    return IssueDetailRowStyleObservation(
+      anchorText: rowAnchorText,
+      backgroundHex: _rgbHex(background),
+      expectedBackgroundHex: _rgbHex(colors.surfaceAlt),
+      borderHex: _rgbHex(border),
+      expectedBorderHex: _rgbHex(colors.border),
+    );
+  }
+
+  @override
+  IssueDetailIconObservation observeDecoratedRowIcon(
+    String issueKey, {
+    required String rowAnchorText,
+    required String semanticLabel,
+  }) {
+    final row = _decoratedRow(issueKey, rowAnchorText);
+    final icon = _trackStateIconWithin(row, semanticLabel);
+    final widget = tester.widget<TrackStateIcon>(icon);
+    final colors = _trackStateColors(issueKey);
+    final foreground = widget.color ?? colors.text;
+    final background = _renderedContainerBackground(row);
+    return IssueDetailIconObservation(
+      semanticLabel: semanticLabel,
+      glyphName: widget.glyph.name,
+      filled: widget.filled,
+      foregroundHex: _rgbHex(foreground),
+      expectedForegroundHex: _rgbHex(colors.text),
       backgroundHex: _rgbHex(background),
       contrastRatio: contrastRatio(foreground, background),
     );
@@ -154,6 +234,77 @@ class IssueDetailAccessibilityRobot
     return bestMatch;
   }
 
+  Finder _collaborationTab(String issueKey, String label) {
+    final semantics = find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! Semantics) {
+          return false;
+        }
+        return widget.properties.label == label &&
+            widget.properties.button == true;
+      }, description: 'collaboration tab $label'),
+    );
+    if (semantics.evaluate().isNotEmpty) {
+      return semantics;
+    }
+
+    return find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.ancestor(
+        of: find.text(label, findRichText: true),
+        matching: find.byType(TextButton),
+      ),
+    );
+  }
+
+  Finder _decoratedRow(String issueKey, String anchorText) {
+    final decoratedContainers = find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! Container) {
+          return false;
+        }
+        final decoration = widget.decoration;
+        return decoration is BoxDecoration &&
+            decoration.color != null &&
+            decoration.borderRadius != null;
+      }, description: 'decorated issue detail row'),
+    );
+
+    Finder? bestMatch;
+    double? smallestArea;
+    final anchorTexts = find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.text(anchorText, findRichText: true),
+    );
+    final anchorCount = anchorTexts.evaluate().length;
+    for (var anchorIndex = 0; anchorIndex < anchorCount; anchorIndex++) {
+      final anchor = anchorTexts.at(anchorIndex);
+      final ancestors = find.ancestor(
+        of: anchor,
+        matching: decoratedContainers,
+      );
+      final ancestorCount = ancestors.evaluate().length;
+      for (var index = 0; index < ancestorCount; index++) {
+        final candidate = ancestors.at(index);
+        final rect = tester.getRect(candidate);
+        final area = rect.width * rect.height;
+        if (smallestArea == null || area < smallestArea) {
+          smallestArea = area;
+          bestMatch = candidate;
+        }
+      }
+    }
+
+    if (bestMatch == null) {
+      throw StateError(
+        'No decorated issue-detail row found for "$anchorText" in issue detail $issueKey.',
+      );
+    }
+    return bestMatch;
+  }
+
   Color _renderedTextColorWithin(Finder scope, String text) {
     final richTextFinder = find.descendant(
       of: scope,
@@ -191,6 +342,10 @@ class IssueDetailAccessibilityRobot
   }
 
   Color _renderedBadgeBackground(Finder scope) {
+    return _renderedContainerBackground(scope);
+  }
+
+  Color _renderedContainerBackground(Finder scope) {
     for (final element in scope.evaluate()) {
       final widget = element.widget;
       if (widget is! Container) {
@@ -202,6 +357,49 @@ class IssueDetailAccessibilityRobot
       }
     }
     throw StateError('No rendered badge background found within $scope.');
+  }
+
+  Color _renderedContainerBorder(Finder scope) {
+    for (final element in scope.evaluate()) {
+      final widget = element.widget;
+      if (widget is! Container) {
+        continue;
+      }
+      final decoration = widget.decoration;
+      if (decoration is! BoxDecoration) {
+        continue;
+      }
+      final border = decoration.border;
+      if (border is Border) {
+        return border.top.color;
+      }
+    }
+    throw StateError('No rendered container border found within $scope.');
+  }
+
+  Finder _trackStateIconWithin(Finder scope, String semanticLabel) {
+    final icon = find.descendant(
+      of: scope,
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! TrackStateIcon) {
+          return false;
+        }
+        return widget.semanticLabel == semanticLabel;
+      }, description: 'TrackStateIcon labeled $semanticLabel'),
+    );
+
+    if (icon.evaluate().isEmpty) {
+      throw StateError(
+        'No icon semantics labeled "$semanticLabel" found within $scope.',
+      );
+    }
+    return icon.first;
+  }
+
+  TrackStateColors _trackStateColors(String issueKey) {
+    final element = _issueDetail(issueKey).first.evaluate().single;
+    return Theme.of(element).extension<TrackStateColors>() ??
+        TrackStateColors.light;
   }
 
   String _rgbHex(Color color) {
