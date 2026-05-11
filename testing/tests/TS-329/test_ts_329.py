@@ -233,6 +233,53 @@ class HostedIssueDetailMetadataRestrictionRegressionTest(unittest.TestCase):
                     "download action instead of isolating the degradation to metadata.\n"
                     f"Observed body text:\n{attachments_text}",
                 )
+
+                live_issue_page.open_collaboration_tab("Comments")
+                try:
+                    live_issue_page.wait_for_selected_tab("Comments", timeout_ms=30_000)
+                    live_issue_page.wait_for_text(
+                        SEEDED_COMMENT_FRAGMENT,
+                        timeout_ms=30_000,
+                    )
+                except WebAppTimeoutError as error:
+                    raise AssertionError(
+                        "Step 3 failed: after restricted attachment metadata was exercised, "
+                        "the Comments tab no longer became the active collaboration view.\n"
+                        f"Observed body text:\n{live_issue_page.current_body_text()}",
+                    ) from error
+                comments_after_restriction = live_issue_page.current_body_text()
+                self.assertGreater(
+                    live_issue_page.selected_tab_count("Comments"),
+                    0,
+                    "Step 3 failed: after restricted attachment metadata was exercised, "
+                    "the Comments tab no longer remained selectable.\n"
+                    f"Observed body text:\n{comments_after_restriction}",
+                )
+                self.assertIn(
+                    SEEDED_COMMENT_FRAGMENT,
+                    comments_after_restriction,
+                    "Step 3 failed: after restricted attachment metadata was exercised, "
+                    "the Comments tab no longer remained interactive.\n"
+                    f"Observed body text:\n{comments_after_restriction}",
+                )
+
+                live_issue_page.open_collaboration_tab("History")
+                try:
+                    live_issue_page.wait_for_selected_tab("History", timeout_ms=30_000)
+                except WebAppTimeoutError as error:
+                    raise AssertionError(
+                        "Step 3 failed: after restricted attachment metadata was exercised, "
+                        "the History tab no longer became the active collaboration view.\n"
+                        f"Observed body text:\n{live_issue_page.current_body_text()}",
+                    ) from error
+                history_after_restriction = live_issue_page.current_body_text()
+                self.assertGreater(
+                    live_issue_page.selected_tab_count("History"),
+                    0,
+                    "Step 3 failed: after restricted attachment metadata was exercised, "
+                    "the History tab no longer remained selectable.\n"
+                    f"Observed body text:\n{history_after_restriction}",
+                )
             except Exception:
                 live_issue_page.screenshot(str(SCREENSHOT_PATH))
                 raise
