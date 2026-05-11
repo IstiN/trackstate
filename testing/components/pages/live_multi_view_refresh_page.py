@@ -22,6 +22,17 @@ class EditControlObservation:
         )
 
 
+@dataclass(frozen=True)
+class ConstrainedChipFieldObservation:
+    label: str
+    semantics_label: str | None
+    field_text: str
+    option_labels: tuple[str, ...]
+    input_count: int
+    listbox_count: int
+    menu_item_count: int
+
+
 class LiveMultiViewRefreshPage:
     _button_selector = 'flt-semantics[role="button"]'
     _edit_button_selector = 'flt-semantics[role="button"][aria-label="Edit"]'
@@ -148,6 +159,76 @@ class LiveMultiViewRefreshPage:
                 f"Observed dialog text:\n{self.current_body_text()}",
             )
         return observation
+
+    def constrained_chip_field(self, label: str) -> ConstrainedChipFieldObservation:
+        payload = self._session.evaluate(
+            """
+            ({ label }) => {
+              const groups = Array.from(
+                document.querySelectorAll('flt-semantics[role="group"]'),
+              );
+              const group = groups.find((element) => {
+                const aria = element.getAttribute('aria-label') ?? '';
+                const text = (element.innerText || element.textContent || '').trim();
+                return (
+                  aria === label ||
+                  aria.startsWith(`${label}\n`) ||
+                  text === label ||
+                  text.startsWith(`${label}\n`)
+                );
+              });
+              if (!group) {
+                return null;
+              }
+
+              const optionLabels = Array.from(
+                group.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .map((button) => {
+                  const aria = button.getAttribute('aria-label');
+                  const text = (button.innerText || button.textContent || '').trim();
+                  return (aria || text || '').trim();
+                })
+                .filter((value) => value.length > 0);
+
+              return {
+                semanticsLabel: group.getAttribute('aria-label'),
+                fieldText: (group.innerText || group.textContent || '').trim(),
+                optionLabels,
+                inputCount: group.querySelectorAll(
+                  'input, textarea, [contenteditable="true"]',
+                ).length,
+                listboxCount: group.querySelectorAll('[role="listbox"]').length,
+                menuItemCount: group.querySelectorAll(
+                  '[role="option"], flt-semantics[role="menuitem"]',
+                ).length,
+              };
+            }
+            """,
+            arg={"label": label},
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Human-style verification failed: the Edit issue surface did not show "
+                f"the visible {label!r} field.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        option_labels = payload.get("optionLabels")
+        if not isinstance(option_labels, list):
+            option_labels = []
+        return ConstrainedChipFieldObservation(
+            label=label,
+            semantics_label=(
+                str(payload["semanticsLabel"])
+                if payload.get("semanticsLabel") is not None
+                else None
+            ),
+            field_text=str(payload.get("fieldText", "")),
+            option_labels=tuple(str(value) for value in option_labels),
+            input_count=int(payload.get("inputCount", 0)),
+            listbox_count=int(payload.get("listboxCount", 0)),
+            menu_item_count=int(payload.get("menuItemCount", 0)),
+        )
 
     def change_priority(self, target_label: str) -> EditControlObservation:
         control = self.priority_control()
