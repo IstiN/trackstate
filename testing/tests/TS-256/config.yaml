@@ -1,0 +1,24 @@
+test_id: TS-256
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate-setup
+  - network access to GitHub REST APIs and GitHub Actions logs
+runtime_inputs:
+  repository: IstiN/trackstate-setup
+  base_branch: main
+  target_workflow_name: Release on main
+  target_workflow_path: .github/workflows/release-on-main.yml
+  branch_prefix: ts256-actionlint-valid-workflow
+  commit_message: "TS-256 probe: push valid workflow change"
+  mutation_search_text: "name: Release on main"
+  mutation_replacement_text: |
+    name: Release on main
+    # TS-256 probe: valid workflow comment to preserve YAML syntax
+  expected_actionlint_marker: actionlint
+  poll_interval_seconds: 5
+  run_timeout_seconds: 120
+notes:
+  - Creates a disposable branch in IstiN/trackstate-setup and applies a harmless comment-only workflow edit.
+  - Expects the live actionlint pipeline to succeed and the visible actionlint job/step to show success.

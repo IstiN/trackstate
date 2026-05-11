@@ -42,6 +42,7 @@ class ReactiveIssueDetailTrackStateRepository
       canWrite: readOnlyPermission.canWrite,
       canCreateBranch: readOnlyPermission.canCreateBranch,
       canManageAttachments: readOnlyPermission.canManageAttachments,
+      attachmentUploadMode: readOnlyPermission.attachmentUploadMode,
       canCheckCollaborators: readOnlyPermission.canCheckCollaborators,
     );
   }

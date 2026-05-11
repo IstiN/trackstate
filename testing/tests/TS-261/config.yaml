@@ -1,0 +1,15 @@
+test_id: TS-261
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI authenticated with read access to IstiN/trackstate-setup rulesets and branches
+  - network access to GitHub repository ruleset APIs
+runtime_inputs:
+  repository: IstiN/trackstate-setup
+  base_branch: main
+  expected_actionlint_context: actionlint
+  minimum_protected_branch_count: 1
+notes:
+  - Verifies the live IstiN/trackstate-setup repository exposes an active branch ruleset that requires the actionlint status check.
+  - Confirms every currently protected branch resolves to an effective required_status_checks rule containing actionlint from a ruleset source.

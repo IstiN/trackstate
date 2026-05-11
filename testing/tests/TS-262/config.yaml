@@ -1,0 +1,25 @@
+test_id: TS-262
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate-setup
+  - network access to GitHub pull request, ruleset, and Actions metadata
+runtime_inputs:
+  repository: IstiN/trackstate-setup
+  base_branch: main
+  probe_file_path: README.md
+  actionlint_workflow_path: .github/workflows/actionlint.yml
+  expected_paths_filter: .github/workflows/**
+  branch_prefix: ts262-non-workflow-pr
+  commit_message: "TS-262 probe: non-workflow PR should not be blocked by actionlint"
+  pull_request_title: "TS-262 disposable probe: non-workflow PR stays mergeable"
+  pull_request_body: "Disposable PR created by TS-262 automation to verify that a README-only pull request does not surface a failing actionlint gate or lose mergeability."
+  probe_marker_template: "<!-- TS-262 probe {marker} -->"
+  expected_actionlint_marker: actionlint
+  poll_interval_seconds: 5
+  actionlint_run_timeout_seconds: 45
+  pull_request_timeout_seconds: 120
+notes:
+  - Creates a disposable README-only pull request in IstiN/trackstate-setup.
+  - Expects the live PR surface to remain mergeable without a failing actionlint gate.

@@ -1,0 +1,12 @@
+name: ts268_hosted_target_selection_probe
+publish_to: none
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  args: ^2.7.0
+  flutter:
+    path: packages/flutter
+  http:
+    path: packages/http

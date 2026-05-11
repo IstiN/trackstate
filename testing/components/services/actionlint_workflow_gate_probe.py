@@ -264,7 +264,6 @@ class ActionlintWorkflowGateProbeService:
         return [self._config.target_workflow_path], self._preview_text(
             self._config.mutation_replacement_text
         )
-
     def _wait_for_branch_runs(
         self,
         branch_name: str,

@@ -1,0 +1,10 @@
+test_id: TS-271
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Python 3 standard library
+  - Hosted GitHub access via TRACKSTATE_TOKEN, TS271_VALID_TRACKSTATE_TOKEN, or gh auth token
+notes:
+  - Verifies the hosted session command uses the explicit --token value before a valid TRACKSTATE_TOKEN environment variable.
+  - Falls back to `dart run trackstate session ...` when the `trackstate` executable is not installed on PATH.

@@ -12,11 +12,10 @@ visible `actionlint` run fails and mentions the new file in its log output.
 ```bash
 python3 -m pip install -r testing/requirements.txt
 ```
-
 ## Run this test
 
 ```bash
-TS258_RESULT_PATH=outputs/ts258_observation.json \
+PYTHONPATH=. TS258_RESULT_PATH=outputs/ts258_observation.json \
 python3 -m unittest discover -s testing/tests/TS-258 -p 'test_*.py' -v
 ```
 
