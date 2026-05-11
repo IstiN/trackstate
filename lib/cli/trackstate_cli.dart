@@ -718,14 +718,9 @@ class TrackStateCli {
     'startAt': page.startAt,
     'maxResults': page.maxResults,
     'total': page.total,
+    'nextStartAt': page.nextStartAt,
+    'nextPageToken': page.nextPageToken,
     'isLastPage': !page.hasMore,
-    'page': <String, Object?>{
-      'startAt': page.startAt,
-      'maxResults': page.maxResults,
-      'total': page.total,
-      'nextStartAt': page.nextStartAt,
-      'nextPageToken': page.nextPageToken,
-    },
     'issues': [
       for (final issue in page.issues)
         <String, Object?>{
@@ -911,11 +906,10 @@ class TrackStateCli {
     required TrackStateCliTargetType targetType,
     required String targetValue,
     required String provider,
-    required Map<String, Object?> data,
+  required Map<String, Object?> data,
   }) {
     final command = data['command'];
     if (command == 'search') {
-      final page = data['page']! as Map<String, Object?>;
       final issues = data['issues']! as List<Object?>;
       final lines = <String>[
         'Search results',
@@ -923,11 +917,11 @@ class TrackStateCli {
         'Provider: $provider',
         'Auth source: ${data['authSource']}',
         'JQL: ${data['jql']}',
-        'Page: startAt=${page['startAt']} maxResults=${page['maxResults']} total=${page['total']}',
+        'Page: startAt=${data['startAt']} maxResults=${data['maxResults']} total=${data['total']}',
       ];
-      if (page['nextPageToken'] != null) {
+      if (data['nextPageToken'] != null) {
         lines.add(
-          'Next page: startAt=${page['nextStartAt']} token=${page['nextPageToken']}',
+          'Next page: startAt=${data['nextStartAt']} token=${data['nextPageToken']}',
         );
       }
       if (issues.isEmpty) {

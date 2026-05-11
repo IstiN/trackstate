@@ -152,6 +152,13 @@ class WebAppSession(Protocol):
         timeout_ms: int = 60_000,
     ) -> str: ...
 
+    def wait_for_text_absence(
+        self,
+        text: str,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> str: ...
+
     def wait_for_any_text(
         self,
         texts: Sequence[str],
@@ -185,13 +192,6 @@ class WebAppSession(Protocol):
 
     def screenshot(self, path: str) -> None: ...
 
-    def wait_for_text_absent(
-        self,
-        text: str,
-        *,
-        timeout_ms: int = 60_000,
-    ) -> str: ...
-
     def bounding_box(
         self,
         selector: str,
@@ -202,3 +202,10 @@ class WebAppSession(Protocol):
     ) -> ElementBoundingBox: ...
 
     def mouse_click(self, x: float, y: float, *, delay_ms: int = 0) -> None: ...
+
+    def wait_for_text_absent(
+        self,
+        text: str,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> str: ...

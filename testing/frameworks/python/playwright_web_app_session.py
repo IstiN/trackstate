@@ -261,7 +261,7 @@ class PlaywrightWebAppSession(WebAppSession):
             ) from error
         return self.body_text()
 
-    def wait_for_text_absent(
+    def wait_for_text_absence(
         self,
         text: str,
         *,
@@ -278,6 +278,14 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out waiting for text "{text}" to disappear.',
             ) from error
         return self.body_text()
+
+    def wait_for_text_absent(
+        self,
+        text: str,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> str:
+        return self.wait_for_text_absence(text, timeout_ms=timeout_ms)
 
     def wait_for_any_text(
         self,

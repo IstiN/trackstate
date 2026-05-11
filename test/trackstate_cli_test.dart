@@ -370,7 +370,9 @@ void main() {
       expect(result.stdout, contains('Provider: local-git'));
     });
 
-    test('returns paged search metadata for CLI consumers', () async {
+    test(
+      'returns flattened paged search metadata for CLI consumers',
+      () async {
       final cli = TrackStateCli(
         environment: const TrackStateCliEnvironment(
           workingDirectory: '/workspace/repo',
@@ -431,7 +433,6 @@ void main() {
       ]);
       final json = jsonDecode(result.stdout) as Map<String, Object?>;
       final data = json['data']! as Map<String, Object?>;
-      final page = data['page']! as Map<String, Object?>;
       final issues = data['issues']! as List<Object?>;
 
       expect(result.exitCode, 0);
@@ -441,11 +442,9 @@ void main() {
       expect(data['maxResults'], 1);
       expect(data['total'], 3);
       expect(data['isLastPage'], isFalse);
-      expect(page['startAt'], 0);
-      expect(page['maxResults'], 1);
-      expect(page['total'], 3);
-      expect(page['nextStartAt'], 1);
-      expect(page['nextPageToken'], 'offset:1');
+      expect(data['nextStartAt'], 1);
+      expect(data['nextPageToken'], 'offset:1');
+      expect(data.containsKey('page'), isFalse);
       expect(issues, hasLength(1));
       expect((issues.single as Map<String, Object?>)['key'], 'TRACK-2');
     });

@@ -177,6 +177,24 @@ class LiveIssueDetailCollaborationPage:
     def wait_for_text_absent(self, text: str, *, timeout_ms: int = 60_000) -> str:
         return self._session.wait_for_text_absent(text, timeout_ms=timeout_ms)
 
+    def wait_for_text_fragment(
+        self,
+        fragment: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> int:
+        self.wait_for_text(fragment, timeout_ms=timeout_ms)
+        return self.text_fragment_count(fragment)
+
+    def wait_for_text_fragment_to_disappear(
+        self,
+        fragment: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> int:
+        self._session.wait_for_text_absence(fragment, timeout_ms=timeout_ms)
+        return self.text_fragment_count(fragment)
+
     def text_fragment_count(self, fragment: str) -> int:
         labeled_fragment_count = self._session.count(
             f'flt-semantics[aria-label*="{self._escape(fragment)}"]',
