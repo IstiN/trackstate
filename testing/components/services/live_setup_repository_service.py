@@ -123,6 +123,26 @@ class LiveSetupRepositoryService:
             ],
         )
 
+    def list_issue_paths(self, root_path: str = "DEMO") -> list[str]:
+        issue_paths: list[str] = []
+        pending_paths = [root_path]
+
+        while pending_paths:
+            path = pending_paths.pop()
+            entries = self._read_repo_directory(path)
+            entry_names = {
+                str(entry.get("name", ""))
+                for entry in entries
+                if str(entry.get("name", "")).strip()
+            }
+            if "main.md" in entry_names:
+                issue_paths.append(path)
+            for entry in entries:
+                if entry.get("type") == "dir":
+                    pending_paths.append(str(entry["path"]))
+
+        return sorted(issue_paths)
+
     def _read_config_names(self, path: str) -> list[str]:
         values = self._read_repo_json(path)
         return [
