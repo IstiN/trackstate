@@ -19,13 +19,13 @@ void main() {
 
       try {
         await tester.pumpWidget(
-          TrackStateApp(
-            repository: ReactiveIssueDetailTrackStateRepository(),
-          ),
+          TrackStateApp(repository: ReactiveIssueDetailTrackStateRepository()),
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.bySemanticsLabel(RegExp('^Create issue\$')).first);
+        await tester.tap(
+          find.bySemanticsLabel(RegExp('^Create issue\$')).first,
+        );
         await tester.pumpAndSettle();
 
         expect(
@@ -38,7 +38,10 @@ void main() {
           ),
           findsAtLeastNWidgets(1),
         );
-        expect(find.widgetWithText(OutlinedButton, 'Open settings'), findsOneWidget);
+        expect(
+          find.widgetWithText(OutlinedButton, 'Open settings'),
+          findsOneWidget,
+        );
 
         await tester.tap(find.widgetWithText(OutlinedButton, 'Open settings'));
         await tester.pumpAndSettle();
@@ -81,7 +84,9 @@ void main() {
 
         await tester.tap(find.bySemanticsLabel(RegExp('^JQL Search\$')).first);
         await tester.pumpAndSettle();
-        await tester.ensureVisible(find.bySemanticsLabel(RegExp('^Comments\$')).first);
+        await tester.ensureVisible(
+          find.bySemanticsLabel(RegExp('^Comments\$')).first,
+        );
         await tester.tap(find.bySemanticsLabel(RegExp('^Comments\$')).first);
         await tester.pumpAndSettle();
 
@@ -148,11 +153,85 @@ void main() {
           ),
           findsOneWidget,
         );
+        final chooseAttachment = tester.widget<OutlinedButton>(
+          find.widgetWithText(OutlinedButton, 'Choose attachment'),
+        );
+        final uploadAttachment = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Upload attachment'),
+        );
+        expect(chooseAttachment.onPressed, isNull);
+        expect(uploadAttachment.onPressed, isNull);
 
         final editButton = tester.widget<OutlinedButton>(
           find.widgetWithText(OutlinedButton, 'Edit').first,
         );
         expect(editButton.onPressed, isNotNull);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'attachment-restricted hosted flow keeps browser-supported uploads enabled when attachment permission is available',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'attachment-token',
+      });
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: attachmentRestrictedPermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('^JQL Search\$')).first);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(
+          find.bySemanticsLabel(RegExp('^Attachments\$')).first,
+        );
+        await tester.tap(find.bySemanticsLabel(RegExp('^Attachments\$')).first);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Some attachment uploads still require local Git'),
+          findsAtLeastNWidgets(1),
+        );
+        expect(
+          find.textContaining(
+            'browser-supported attachment uploads can continue here',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.text('Attachments stay download-only in the browser'),
+          findsNothing,
+        );
+
+        final chooseAttachment = tester.widget<OutlinedButton>(
+          find.widgetWithText(OutlinedButton, 'Choose attachment'),
+        );
+        final uploadAttachment = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Upload attachment'),
+        );
+        expect(chooseAttachment.onPressed, isNotNull);
+        expect(uploadAttachment.onPressed, isNull);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();

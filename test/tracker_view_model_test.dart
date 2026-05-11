@@ -202,6 +202,7 @@ void main() {
         viewModel.hostedRepositoryAccessMode,
         HostedRepositoryAccessMode.attachmentRestricted,
       );
+      expect(viewModel.canUploadIssueAttachments, isFalse);
       expect(viewModel.hasBlockedWriteAccess, isFalse);
       expect(viewModel.hasAttachmentUploadRestriction, isTrue);
     },
@@ -261,6 +262,138 @@ void main() {
         viewModel.message?.error,
         contains('This repository session is read-only'),
       );
+    },
+  );
+
+  test(
+    'view model inspects sanitized attachment collisions against existing files',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: const DemoTrackStateRepository(),
+      );
+
+      await viewModel.load();
+      final inspection = await viewModel.inspectIssueAttachmentUpload(
+        viewModel.selectedIssue!,
+        'sync sequence.svg',
+      );
+
+      expect(inspection.resolvedName, 'sync-sequence.svg');
+      expect(
+        inspection.existingAttachment?.storagePath,
+        endsWith('sync-sequence.svg'),
+      );
+      expect(inspection.isLfsTracked, isFalse);
+    },
+  );
+
+  test(
+    'view model blocks attachment uploads when the session cannot manage attachments',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'limited-attachments',
+      });
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: false,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(
+          permission: attachmentRestrictedPermission,
+        ),
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+      final success = await viewModel.uploadIssueAttachment(
+        issue: issue,
+        name: 'release notes.pdf',
+        bytes: Uint8List.fromList(<int>[1, 2, 3, 4]),
+      );
+
+      expect(viewModel.canUploadIssueAttachments, isFalse);
+      expect(success, isFalse);
+      expect(viewModel.message?.kind, TrackerMessageKind.issueSaveFailed);
+      expect(
+        viewModel.message?.error,
+        contains('Attachment upload is unavailable in this repository session'),
+      );
+    },
+  );
+
+  test(
+    'view model refreshes selected issue after uploading an attachment',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(),
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.uploadIssueAttachment(
+        issue: issue,
+        name: 'release notes.pdf',
+        bytes: Uint8List.fromList(<int>[1, 2, 3, 4]),
+      );
+
+      expect(success, isTrue);
+      expect(viewModel.selectedIssue?.attachments, isNotEmpty);
+      expect(
+        viewModel.selectedIssue?.attachments.first.name,
+        'release-notes.pdf',
+      );
+      expect(viewModel.selectedIssue?.attachments.first.sizeBytes, 4);
+    },
+  );
+
+  test(
+    'view model marks LFS-tracked attachment uploads for browser restriction checks',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'limited-attachments',
+      });
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(
+          permission: attachmentRestrictedPermission,
+          lfsTrackedPaths: {'TRACK-12/attachments/release-notes.pdf'},
+        ),
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+      final inspection = await viewModel.inspectIssueAttachmentUpload(
+        issue,
+        'release notes.pdf',
+      );
+
+      expect(viewModel.canUploadIssueAttachments, isTrue);
+      expect(viewModel.hasAttachmentUploadRestriction, isTrue);
+      expect(inspection.isLfsTracked, isTrue);
+      expect(inspection.resolvedName, 'release-notes.pdf');
     },
   );
 

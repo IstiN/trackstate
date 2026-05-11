@@ -5,9 +5,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
+import 'package:trackstate/ui/features/tracker/services/attachment_picker.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../testing/components/factories/testing_dependencies.dart';
+import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
 
 void main() {
   setUp(() {
@@ -369,6 +371,129 @@ void main() {
             await expectCreateIssueFlowForSection(section);
           }
         }
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'attachments tab lets users choose and upload files from issue detail',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final semantics = tester.ensureSemantics();
+
+      Future<PickedAttachment?> pickAttachment() async => PickedAttachment(
+        name: 'release notes.pdf',
+        bytes: Uint8List.fromList(<int>[1, 2, 3, 4]),
+      );
+
+      try {
+        tester.view.physicalSize = const Size(1440, 960);
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(),
+            attachmentPicker: pickAttachment,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find
+              .bySemanticsLabel(
+                RegExp('Open TRACK-12 Implement Git sync service'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.bySemanticsLabel(RegExp('Attachments')).first);
+        await tester.pumpAndSettle();
+
+        expect(find.bySemanticsLabel('Choose attachment'), findsOneWidget);
+        expect(find.bySemanticsLabel('Upload attachment'), findsOneWidget);
+
+        await tester.tap(find.bySemanticsLabel('Choose attachment'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('release notes.pdf'), findsOneWidget);
+        expect(find.text('4 B'), findsOneWidget);
+
+        await tester.tap(find.bySemanticsLabel('Upload attachment'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('release-notes.pdf'), findsOneWidget);
+        expect(
+          find.text('Choose a file to review its size before upload.'),
+          findsOneWidget,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'attachments tab confirms before replacing a sanitized name collision',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final semantics = tester.ensureSemantics();
+
+      Future<PickedAttachment?> pickAttachment() async => PickedAttachment(
+        name: 'sync sequence.svg',
+        bytes: Uint8List.fromList('<svg updated />'.codeUnits),
+      );
+
+      try {
+        tester.view.physicalSize = const Size(1440, 960);
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(),
+            attachmentPicker: pickAttachment,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find
+              .bySemanticsLabel(
+                RegExp('Open TRACK-12 Implement Git sync service'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.bySemanticsLabel(RegExp('Attachments')).first);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Choose attachment'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Upload attachment'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Replace attachment?'), findsOneWidget);
+        expect(
+          find.textContaining('stored as sync-sequence.svg'),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.text('Replace attachment'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Replace attachment?'), findsNothing);
+        expect(find.text('sync-sequence.svg'), findsOneWidget);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();

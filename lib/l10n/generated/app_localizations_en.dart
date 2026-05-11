@@ -124,12 +124,39 @@ class AppLocalizationsEn extends AppLocalizations {
       'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.';
 
   @override
+  String get attachmentsLimitedUploadMessage =>
+      'Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.';
+
+  @override
   String get attachmentsAccessMessageDisconnected =>
       'Connect GitHub with repository write access to enable Git-backed attachment changes. Existing attachments remain available for download.';
 
   @override
   String get attachmentsAccessMessageReadOnly =>
       'This repository connection cannot push attachment changes. Existing attachments remain available for download.';
+
+  @override
+  String get chooseAttachment => 'Choose attachment';
+
+  @override
+  String get uploadAttachment => 'Upload attachment';
+
+  @override
+  String get clearSelectedAttachment => 'Clear selected attachment';
+
+  @override
+  String get noAttachmentSelected =>
+      'Choose a file to review its size before upload.';
+
+  @override
+  String selectedAttachmentSummary(String fileName, String fileSize) {
+    return 'Selected attachment: $fileName ($fileSize)';
+  }
+
+  @override
+  String attachmentRequiresLocalGitUpload(String fileName) {
+    return '$fileName follows the Git LFS attachment path and must be uploaded from a local Git runtime. Existing attachments remain available for download here.';
+  }
 
   @override
   String get history => 'History';
@@ -141,6 +168,25 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get postComment => 'Post comment';
+
+  @override
+  String editedAt(String timestamp) {
+    return 'Edited $timestamp';
+  }
+
+  @override
+  String get replaceAttachmentTitle => 'Replace attachment?';
+
+  @override
+  String replaceAttachmentMessage(String fileName) {
+    return 'Uploading this file will replace the existing attachment stored as $fileName. Rename the new file first if you need to keep both versions.';
+  }
+
+  @override
+  String get replaceAttachmentAction => 'Replace attachment';
+
+  @override
+  String get keepCurrentAttachment => 'Keep current attachment';
 
   @override
   String get linkedIssues => 'Linked issues';
@@ -277,6 +323,14 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get repositoryAccessAttachmentRestrictedMessage =>
       'Issue edits and comments can continue, but attachment upload is unavailable in this browser session because Git LFS upload is not supported here yet.';
+
+  @override
+  String get repositoryAccessAttachmentLimitedTitle =>
+      'Some attachment uploads still require local Git';
+
+  @override
+  String get repositoryAccessAttachmentLimitedMessage =>
+      'Issue edits, comments, and browser-supported attachment uploads can continue here. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.';
 
   @override
   String get repositoryAccessSettingsHint =>
