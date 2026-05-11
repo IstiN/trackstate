@@ -36,6 +36,8 @@ class FocusedElementObservation:
 
 
 class WebAppSession(Protocol):
+    def set_viewport_size(self, *, width: int, height: int) -> None: ...
+
     def goto(
         self,
         url: str,
@@ -200,6 +202,8 @@ class WebAppSession(Protocol):
         index: int = 0,
         timeout_ms: int = 30_000,
     ) -> ElementBoundingBox: ...
+
+    def mouse_move(self, x: float, y: float) -> None: ...
 
     def mouse_click(self, x: float, y: float, *, delay_ms: int = 0) -> None: ...
 
