@@ -881,6 +881,57 @@ class IssueMutationService {
     }
   }
 
+  Future<IssueMutationResult<TrackStateIssue>> addComment({
+    required String issueKey,
+    required String body,
+  }) async {
+    const operation = 'comment';
+    if (body.trim().isEmpty) {
+      return _failure(
+        operation: operation,
+        issueKey: issueKey,
+        category: IssueMutationErrorCategory.validation,
+        message: 'Comment body is required before posting.',
+      );
+    }
+
+    final providerRepository = _providerRepository;
+    if (providerRepository == null) {
+      return _unsupported(operation: operation, issueKey: issueKey);
+    }
+
+    try {
+      final resolution = await _resolveIssue(
+        providerRepository,
+        issueKey,
+        operation,
+      );
+      if (resolution.failure != null) {
+        return IssueMutationResult.failure(
+          operation: operation,
+          issueKey: issueKey,
+          failure: resolution.failure!,
+        );
+      }
+
+      final updatedIssue = await providerRepository.addIssueComment(
+        resolution.issue!,
+        body,
+      );
+      return IssueMutationResult.success(
+        operation: operation,
+        issueKey: issueKey,
+        value: updatedIssue,
+      );
+    } catch (error) {
+      return _mapError<TrackStateIssue>(
+        operation: operation,
+        issueKey: issueKey,
+        error: error,
+      );
+    }
+  }
+
   Future<IssueMutationResult<TrackStateIssue>> createLink({
     required String issueKey,
     required String targetKey,
