@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 void main() {
@@ -247,4 +249,185 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'settings admin tabs can add a status and keep reserved fields undeletable',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      final repository = _EditableSettingsWidgetRepository();
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Project settings administration'), findsOneWidget);
+        expect(find.widgetWithText(Tab, 'Statuses'), findsOneWidget);
+        expect(find.widgetWithText(Tab, 'Workflows'), findsOneWidget);
+        expect(find.widgetWithText(Tab, 'Issue Types'), findsOneWidget);
+        expect(find.widgetWithText(Tab, 'Fields'), findsOneWidget);
+
+        await tester.tap(find.widgetWithText(Tab, 'Fields'));
+        await tester.pumpAndSettle();
+        expect(find.bySemanticsLabel('Delete field Summary'), findsNothing);
+
+        await tester.tap(find.widgetWithText(Tab, 'Statuses'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Add status'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'ID'),
+          'blocked',
+        );
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Name'),
+          'Blocked',
+        );
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Blocked'), findsOneWidget);
+
+        await tester.tap(find.text('Save settings'));
+        await tester.pumpAndSettle();
+
+        expect(
+          repository.savedSettings?.statusDefinitions.map(
+            (status) => status.id,
+          ),
+          contains('blocked'),
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+}
+
+class _EditableSettingsWidgetRepository
+    implements TrackStateRepository, ProjectSettingsRepository {
+  _EditableSettingsWidgetRepository()
+    : _snapshot = const DemoTrackStateRepository().loadSnapshot();
+
+  Future<TrackerSnapshot> _snapshot;
+  ProjectSettingsCatalog? savedSettings;
+
+  @override
+  bool get supportsGitHubAuth => false;
+
+  @override
+  bool get usesLocalPersistence => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async =>
+      const RepositoryUser(login: 'local-user', displayName: 'Local User');
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() => _snapshot;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async => const DemoTrackStateRepository().searchIssuePage(
+    jql,
+    startAt: startAt,
+    maxResults: maxResults,
+    continuationToken: continuationToken,
+  );
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) async =>
+      const DemoTrackStateRepository().searchIssues(jql);
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Not implemented in test repository.',
+      );
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Not implemented in test repository.',
+      );
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+    Map<String, String> customFields = const {},
+  }) async => throw const TrackStateRepositoryException(
+    'Not implemented in test repository.',
+  );
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async => issue;
+
+  @override
+  Future<TrackStateIssue> updateIssueStatus(
+    TrackStateIssue issue,
+    IssueStatus status,
+  ) async => issue;
+
+  @override
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => issue;
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async => issue;
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
+      Uint8List(0);
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
+
+  @override
+  Future<TrackerSnapshot> saveProjectSettings(
+    ProjectSettingsCatalog settings,
+  ) async {
+    savedSettings = settings;
+    final current = await _snapshot;
+    final updated = TrackerSnapshot(
+      project: ProjectConfig(
+        key: current.project.key,
+        name: current.project.name,
+        repository: current.project.repository,
+        branch: current.project.branch,
+        defaultLocale: current.project.defaultLocale,
+        issueTypeDefinitions: settings.issueTypeDefinitions,
+        statusDefinitions: settings.statusDefinitions,
+        fieldDefinitions: settings.fieldDefinitions,
+        workflowDefinitions: settings.workflowDefinitions,
+        priorityDefinitions: current.project.priorityDefinitions,
+        versionDefinitions: current.project.versionDefinitions,
+        componentDefinitions: current.project.componentDefinitions,
+        resolutionDefinitions: current.project.resolutionDefinitions,
+      ),
+      issues: current.issues,
+      repositoryIndex: current.repositoryIndex,
+      loadWarnings: current.loadWarnings,
+    );
+    _snapshot = Future<TrackerSnapshot>.value(updated);
+    return updated;
+  }
 }

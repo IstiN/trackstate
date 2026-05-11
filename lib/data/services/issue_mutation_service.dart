@@ -1593,6 +1593,33 @@ Future<_WorkflowDefinition> _loadWorkflow({
   required ProjectConfig project,
   required String ref,
 }) async {
+  if (project.workflowDefinitions.isNotEmpty) {
+    final issueTypeDefinition = project.issueTypeDefinitions.where(
+      (definition) => definition.id == issue.issueTypeId,
+    );
+    final workflowId = issueTypeDefinition.isNotEmpty
+        ? issueTypeDefinition.first.workflowId
+        : null;
+    final selectedWorkflow = project.workflowDefinitions
+        .where(
+          (workflow) =>
+              workflow.id == workflowId ||
+              (workflowId == null && workflow.id == 'default'),
+        )
+        .toList();
+    final workflow = selectedWorkflow.isNotEmpty
+        ? selectedWorkflow.first
+        : project.workflowDefinitions.first;
+    return _WorkflowDefinition(
+      transitions: [
+        for (final transition in workflow.transitions)
+          _WorkflowTransition(
+            fromId: transition.fromStatusId,
+            toId: transition.toStatusId,
+          ),
+      ],
+    );
+  }
   final path = '${issue.project}/config/workflows.json';
   try {
     final file = await provider.readTextFile(path, ref: ref);

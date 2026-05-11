@@ -170,6 +170,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get labels => 'Labels';
 
   @override
+  String get name => 'Name';
+
+  @override
+  String get delete => 'Delete';
+
+  @override
   String get parent => 'Parent';
 
   @override
@@ -188,7 +194,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectSettings => 'Project Settings';
 
   @override
+  String get projectSettingsAdmin => 'Project settings administration';
+
+  @override
+  String get projectSettingsDescription =>
+      'Manage repository-backed statuses, workflows, issue types, and fields with validation before Git writes.';
+
+  @override
   String get issueTypes => 'Issue Types';
+
+  @override
+  String get statuses => 'Statuses';
+
+  @override
+  String get workflows => 'Workflows';
 
   @override
   String get workflow => 'Workflow';
@@ -198,6 +217,114 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get language => 'Language';
+
+  @override
+  String get resetSettings => 'Reset';
+
+  @override
+  String get saveSettings => 'Save settings';
+
+  @override
+  String get addStatus => 'Add status';
+
+  @override
+  String get editStatus => 'Edit status';
+
+  @override
+  String get deleteStatus => 'Delete status';
+
+  @override
+  String get addWorkflow => 'Add workflow';
+
+  @override
+  String get editWorkflow => 'Edit workflow';
+
+  @override
+  String get deleteWorkflow => 'Delete workflow';
+
+  @override
+  String get addIssueType => 'Add issue type';
+
+  @override
+  String get editIssueType => 'Edit issue type';
+
+  @override
+  String get deleteIssueType => 'Delete issue type';
+
+  @override
+  String get addField => 'Add field';
+
+  @override
+  String get editField => 'Edit field';
+
+  @override
+  String get deleteField => 'Delete field';
+
+  @override
+  String get catalogId => 'ID';
+
+  @override
+  String get catalogCategory => 'Category';
+
+  @override
+  String get catalogWorkflow => 'Workflow';
+
+  @override
+  String get catalogTransitions => 'Transitions';
+
+  @override
+  String get catalogStatuses => 'Statuses';
+
+  @override
+  String get catalogType => 'Type';
+
+  @override
+  String get catalogRequired => 'Required';
+
+  @override
+  String get catalogReserved => 'Reserved';
+
+  @override
+  String get catalogHierarchyLevel => 'Hierarchy level';
+
+  @override
+  String get catalogIcon => 'Icon';
+
+  @override
+  String get catalogDefaultValue => 'Default value';
+
+  @override
+  String get catalogOptions => 'Options';
+
+  @override
+  String get applicableIssueTypes => 'Applicable issue types';
+
+  @override
+  String get allowedStatuses => 'Allowed statuses';
+
+  @override
+  String get transitionName => 'Transition name';
+
+  @override
+  String get transitionFrom => 'From status';
+
+  @override
+  String get transitionTo => 'To status';
+
+  @override
+  String get addTransition => 'Add transition';
+
+  @override
+  String get removeTransition => 'Remove transition';
+
+  @override
+  String get statusCategoryNew => 'New';
+
+  @override
+  String get statusCategoryIndeterminate => 'In progress';
+
+  @override
+  String get statusCategoryDone => 'Done';
 
   @override
   String get theme => 'Theme';

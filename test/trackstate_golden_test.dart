@@ -94,6 +94,25 @@ void main() {
       matchesGoldenFile('goldens/search_pagination_desktop.png'),
     );
   });
+
+  testWidgets('desktop settings admin golden', (tester) async {
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      const TrackStateApp(repository: DemoTrackStateRepository()),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings').first);
+    await tester.pumpAndSettle();
+
+    await expectLater(
+      find.byType(TrackStateApp),
+      matchesGoldenFile('goldens/settings_admin_desktop.png'),
+    );
+  });
 }
 
 class _TolerantGoldenFileComparator extends LocalFileComparator {

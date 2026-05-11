@@ -252,9 +252,15 @@ void main() {
       );
 
       expect(success, isFalse);
-      expect(viewModel.hostedRepositoryAccessMode, HostedRepositoryAccessMode.readOnly);
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.readOnly,
+      );
       expect(viewModel.message?.kind, TrackerMessageKind.issueSaveFailed);
-      expect(viewModel.message?.error, contains('This repository session is read-only'));
+      expect(
+        viewModel.message?.error,
+        contains('This repository session is read-only'),
+      );
     },
   );
 
@@ -339,6 +345,40 @@ void main() {
       expect(viewModel.section, TrackerSection.search);
       expect(viewModel.issueDetailReturnSection, TrackerSection.hierarchy);
       expect(viewModel.selectedIssue?.key, 'TRACK-99');
+    },
+  );
+
+  test(
+    'view model saves project settings through the repository mutation',
+    () async {
+      final repository = _EditableSettingsRepository();
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final initialSettings = viewModel.settingsCatalog!;
+
+      final success = await viewModel.saveProjectSettings(
+        initialSettings.copyWith(
+          statusDefinitions: [
+            ...initialSettings.statusDefinitions,
+            const TrackStateConfigEntry(
+              id: 'blocked',
+              name: 'Blocked',
+              category: 'indeterminate',
+            ),
+          ],
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(
+        viewModel.project?.statusDefinitions.map((status) => status.id),
+        contains('blocked'),
+      );
+      expect(
+        repository.savedSettings?.statusDefinitions.map((status) => status.id),
+        contains('blocked'),
+      );
     },
   );
 }
@@ -465,6 +505,48 @@ class _ThrowingSearchRepository extends _LocalRuntimeRepository {
       maxResults: maxResults,
       continuationToken: continuationToken,
     );
+  }
+}
+
+class _EditableSettingsRepository extends _LocalRuntimeRepository
+    implements ProjectSettingsRepository {
+  _EditableSettingsRepository()
+    : _snapshot = const DemoTrackStateRepository().loadSnapshot();
+
+  Future<TrackerSnapshot> _snapshot;
+  ProjectSettingsCatalog? savedSettings;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() => _snapshot;
+
+  @override
+  Future<TrackerSnapshot> saveProjectSettings(
+    ProjectSettingsCatalog settings,
+  ) async {
+    savedSettings = settings;
+    final current = await _snapshot;
+    final updated = TrackerSnapshot(
+      project: ProjectConfig(
+        key: current.project.key,
+        name: current.project.name,
+        repository: current.project.repository,
+        branch: current.project.branch,
+        defaultLocale: current.project.defaultLocale,
+        issueTypeDefinitions: settings.issueTypeDefinitions,
+        statusDefinitions: settings.statusDefinitions,
+        fieldDefinitions: settings.fieldDefinitions,
+        workflowDefinitions: settings.workflowDefinitions,
+        priorityDefinitions: current.project.priorityDefinitions,
+        versionDefinitions: current.project.versionDefinitions,
+        componentDefinitions: current.project.componentDefinitions,
+        resolutionDefinitions: current.project.resolutionDefinitions,
+      ),
+      issues: current.issues,
+      repositoryIndex: current.repositoryIndex,
+      loadWarnings: current.loadWarnings,
+    );
+    _snapshot = Future<TrackerSnapshot>.value(updated);
+    return updated;
   }
 }
 

@@ -843,7 +843,8 @@ String _repositoryAccessLabel(
 ) {
   if (viewModel.exposesHostedAccessGates) {
     return switch (viewModel.hostedRepositoryAccessMode) {
-      HostedRepositoryAccessMode.disconnected => l10n.repositoryAccessConnectGitHub,
+      HostedRepositoryAccessMode.disconnected =>
+        l10n.repositoryAccessConnectGitHub,
       HostedRepositoryAccessMode.readOnly => l10n.repositoryAccessReadOnly,
       HostedRepositoryAccessMode.writable => l10n.repositoryAccessConnected,
       HostedRepositoryAccessMode.attachmentRestricted =>
@@ -1830,29 +1831,639 @@ class _SettingsState extends State<_Settings> {
           ),
         ),
         const SizedBox(height: 16),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final compact = constraints.maxWidth < 860;
-            final cards = [
-              _ConfigCard(title: l10n.issueTypes, items: project.issueTypes),
-              _ConfigCard(title: l10n.workflow, items: project.statuses),
-              _ConfigCard(title: l10n.fields, items: project.fields),
-              _ConfigCard(
-                title: l10n.language,
-                items: const [
-                  'English',
-                  'Fallback language packs in config/i18n',
+        _ProjectSettingsAdmin(viewModel: widget.viewModel),
+      ],
+    );
+  }
+}
+
+enum _SettingsProviderSelection { hosted, localGit }
+
+enum _SettingsCatalogTab { statuses, workflows, issueTypes, fields }
+
+class _ProjectSettingsAdmin extends StatefulWidget {
+  const _ProjectSettingsAdmin({required this.viewModel});
+
+  final TrackerViewModel viewModel;
+
+  @override
+  State<_ProjectSettingsAdmin> createState() => _ProjectSettingsAdminState();
+}
+
+class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+  ProjectSettingsCatalog? _draftSettings;
+  String? _projectSignature;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController =
+        TabController(length: _SettingsCatalogTab.values.length, vsync: this)
+          ..addListener(() {
+            if (_tabController.indexIsChanging) {
+              return;
+            }
+            setState(() {});
+          });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  void _syncDraft(ProjectConfig project) {
+    final signature = _projectSettingsSignature(project.settingsCatalog);
+    if (_projectSignature == signature && _draftSettings != null) {
+      return;
+    }
+    _projectSignature = signature;
+    _draftSettings = _cloneProjectSettings(project.settingsCatalog);
+  }
+
+  void _replaceDraft(ProjectSettingsCatalog settings) {
+    setState(() {
+      _draftSettings = settings;
+    });
+  }
+
+  void _resetDraft(ProjectConfig project) {
+    setState(() {
+      _projectSignature = _projectSettingsSignature(project.settingsCatalog);
+      _draftSettings = _cloneProjectSettings(project.settingsCatalog);
+    });
+  }
+
+  Future<T?> _showSettingsEditor<T>({
+    required String title,
+    required Widget child,
+  }) async {
+    final width = MediaQuery.of(context).size.width;
+    final colors = context.ts;
+    if (width >= 960) {
+      return showGeneralDialog<T>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: title,
+        barrierColor: Colors.black54,
+        pageBuilder: (dialogContext, _, _) {
+          return SafeArea(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Material(
+                color: colors.surface,
+                child: SizedBox(
+                  width: math.min(width * 0.42, 520),
+                  child: _SettingsEditorShell(title: title, child: child),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    }
+    return showDialog<T>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: _SettingsEditorShell(title: title, child: child),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editStatus({
+    required AppLocalizations l10n,
+    TrackStateConfigEntry? initial,
+  }) async {
+    final edited = await _showSettingsEditor<TrackStateConfigEntry>(
+      title: initial == null ? l10n.addStatus : l10n.editStatus,
+      child: _StatusEditor(initial: initial),
+    );
+    if (edited == null || _draftSettings == null) {
+      return;
+    }
+    final current = _draftSettings!;
+    final statuses = [...current.statusDefinitions];
+    if (initial == null) {
+      statuses.add(edited);
+    } else {
+      final index = statuses.indexWhere((entry) => entry.id == initial.id);
+      if (index != -1) {
+        statuses[index] = edited;
+      }
+    }
+    _replaceDraft(current.copyWith(statusDefinitions: statuses));
+  }
+
+  Future<void> _editWorkflow({
+    required AppLocalizations l10n,
+    TrackStateWorkflowDefinition? initial,
+  }) async {
+    final statuses = _draftSettings?.statusDefinitions ?? const [];
+    final edited = await _showSettingsEditor<TrackStateWorkflowDefinition>(
+      title: initial == null ? l10n.addWorkflow : l10n.editWorkflow,
+      child: _WorkflowEditor(initial: initial, statuses: statuses),
+    );
+    if (edited == null || _draftSettings == null) {
+      return;
+    }
+    final current = _draftSettings!;
+    final workflows = [...current.workflowDefinitions];
+    if (initial == null) {
+      workflows.add(edited);
+    } else {
+      final index = workflows.indexWhere((entry) => entry.id == initial.id);
+      if (index != -1) {
+        workflows[index] = edited;
+      }
+    }
+    _replaceDraft(current.copyWith(workflowDefinitions: workflows));
+  }
+
+  Future<void> _editIssueType({
+    required AppLocalizations l10n,
+    TrackStateConfigEntry? initial,
+  }) async {
+    final workflows = _draftSettings?.workflowDefinitions ?? const [];
+    final edited = await _showSettingsEditor<TrackStateConfigEntry>(
+      title: initial == null ? l10n.addIssueType : l10n.editIssueType,
+      child: _IssueTypeEditor(initial: initial, workflows: workflows),
+    );
+    if (edited == null || _draftSettings == null) {
+      return;
+    }
+    final current = _draftSettings!;
+    final issueTypes = [...current.issueTypeDefinitions];
+    if (initial == null) {
+      issueTypes.add(edited);
+    } else {
+      final index = issueTypes.indexWhere((entry) => entry.id == initial.id);
+      if (index != -1) {
+        issueTypes[index] = edited;
+      }
+    }
+    _replaceDraft(current.copyWith(issueTypeDefinitions: issueTypes));
+  }
+
+  Future<void> _editField({
+    required AppLocalizations l10n,
+    TrackStateFieldDefinition? initial,
+  }) async {
+    final issueTypes = _draftSettings?.issueTypeDefinitions ?? const [];
+    final edited = await _showSettingsEditor<TrackStateFieldDefinition>(
+      title: initial == null ? l10n.addField : l10n.editField,
+      child: _FieldEditor(initial: initial, issueTypes: issueTypes),
+    );
+    if (edited == null || _draftSettings == null) {
+      return;
+    }
+    final current = _draftSettings!;
+    final fields = [...current.fieldDefinitions];
+    if (initial == null) {
+      fields.add(edited);
+    } else {
+      final index = fields.indexWhere((entry) => entry.id == initial.id);
+      if (index != -1) {
+        fields[index] = edited;
+      }
+    }
+    _replaceDraft(current.copyWith(fieldDefinitions: fields));
+  }
+
+  Future<void> _saveSettings() async {
+    final settings = _draftSettings;
+    if (settings == null) {
+      return;
+    }
+    await widget.viewModel.saveProjectSettings(settings);
+  }
+
+  Widget _buildCatalogHeader({
+    required AppLocalizations l10n,
+    required String title,
+    required String addLabel,
+    required VoidCallback? onAdd,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+          ),
+          Semantics(
+            button: true,
+            label: addLabel,
+            child: FilledButton(
+              onPressed: onAdd,
+              child: ExcludeSemantics(child: Text(addLabel)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusTab(
+    AppLocalizations l10n,
+    ProjectSettingsCatalog settings,
+    bool canEdit,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildCatalogHeader(
+          l10n: l10n,
+          title: l10n.statuses,
+          addLabel: l10n.addStatus,
+          onAdd: canEdit ? () => _editStatus(l10n: l10n) : null,
+        ),
+        for (final status in settings.statusDefinitions)
+          _SettingsCatalogListTile(
+            title: status.name,
+            subtitle:
+                '${l10n.catalogId}: ${status.id}'
+                '${status.category == null ? '' : ' • ${l10n.catalogCategory}: ${status.category}'}',
+            onEdit: canEdit
+                ? () => _editStatus(l10n: l10n, initial: status)
+                : null,
+            onDelete: canEdit
+                ? () => _replaceDraft(
+                    settings.copyWith(
+                      statusDefinitions: [
+                        for (final entry in settings.statusDefinitions)
+                          if (entry.id != status.id) entry,
+                      ],
+                    ),
+                  )
+                : null,
+            editLabel: '${l10n.editStatus} ${status.name}',
+            deleteLabel: '${l10n.deleteStatus} ${status.name}',
+          ),
+      ],
+    );
+  }
+
+  Widget _buildWorkflowTab(
+    AppLocalizations l10n,
+    ProjectSettingsCatalog settings,
+    bool canEdit,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildCatalogHeader(
+          l10n: l10n,
+          title: l10n.workflows,
+          addLabel: l10n.addWorkflow,
+          onAdd: canEdit ? () => _editWorkflow(l10n: l10n) : null,
+        ),
+        for (final workflow in settings.workflowDefinitions)
+          _SettingsCatalogListTile(
+            title: workflow.name,
+            subtitle:
+                '${l10n.catalogId}: ${workflow.id} • '
+                '${l10n.catalogStatuses}: ${workflow.statusIds.join(', ')} • '
+                '${l10n.catalogTransitions}: ${workflow.transitions.length}',
+            onEdit: canEdit
+                ? () => _editWorkflow(l10n: l10n, initial: workflow)
+                : null,
+            onDelete: canEdit
+                ? () => _replaceDraft(
+                    settings.copyWith(
+                      workflowDefinitions: [
+                        for (final entry in settings.workflowDefinitions)
+                          if (entry.id != workflow.id) entry,
+                      ],
+                    ),
+                  )
+                : null,
+            editLabel: '${l10n.editWorkflow} ${workflow.name}',
+            deleteLabel: '${l10n.deleteWorkflow} ${workflow.name}',
+          ),
+      ],
+    );
+  }
+
+  Widget _buildIssueTypeTab(
+    AppLocalizations l10n,
+    ProjectSettingsCatalog settings,
+    bool canEdit,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildCatalogHeader(
+          l10n: l10n,
+          title: l10n.issueTypes,
+          addLabel: l10n.addIssueType,
+          onAdd: canEdit ? () => _editIssueType(l10n: l10n) : null,
+        ),
+        for (final issueType in settings.issueTypeDefinitions)
+          _SettingsCatalogListTile(
+            title: issueType.name,
+            subtitle:
+                '${l10n.catalogId}: ${issueType.id}'
+                '${issueType.workflowId == null ? '' : ' • ${l10n.catalogWorkflow}: ${issueType.workflowId}'}'
+                '${issueType.hierarchyLevel == null ? '' : ' • ${l10n.catalogHierarchyLevel}: ${issueType.hierarchyLevel}'}',
+            onEdit: canEdit
+                ? () => _editIssueType(l10n: l10n, initial: issueType)
+                : null,
+            onDelete: canEdit
+                ? () => _replaceDraft(
+                    settings.copyWith(
+                      issueTypeDefinitions: [
+                        for (final entry in settings.issueTypeDefinitions)
+                          if (entry.id != issueType.id) entry,
+                      ],
+                    ),
+                  )
+                : null,
+            editLabel: '${l10n.editIssueType} ${issueType.name}',
+            deleteLabel: '${l10n.deleteIssueType} ${issueType.name}',
+          ),
+      ],
+    );
+  }
+
+  Widget _buildFieldTab(
+    AppLocalizations l10n,
+    ProjectSettingsCatalog settings,
+    bool canEdit,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildCatalogHeader(
+          l10n: l10n,
+          title: l10n.fields,
+          addLabel: l10n.addField,
+          onAdd: canEdit ? () => _editField(l10n: l10n) : null,
+        ),
+        for (final field in settings.fieldDefinitions)
+          _SettingsCatalogListTile(
+            title: field.name,
+            subtitle:
+                '${l10n.catalogId}: ${field.id} • '
+                '${l10n.catalogType}: ${field.type} • '
+                '${field.required ? l10n.catalogRequired : l10n.optional}'
+                '${field.reserved ? ' • ${l10n.catalogReserved}' : ''}',
+            onEdit: canEdit
+                ? () => _editField(l10n: l10n, initial: field)
+                : null,
+            onDelete: canEdit && !field.reserved
+                ? () => _replaceDraft(
+                    settings.copyWith(
+                      fieldDefinitions: [
+                        for (final entry in settings.fieldDefinitions)
+                          if (entry.id != field.id) entry,
+                      ],
+                    ),
+                  )
+                : null,
+            editLabel: '${l10n.editField} ${field.name}',
+            deleteLabel: '${l10n.deleteField} ${field.name}',
+          ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final project = widget.viewModel.project!;
+    _syncDraft(project);
+    final l10n = AppLocalizations.of(context)!;
+    final settings = _draftSettings!;
+    final canEdit =
+        widget.viewModel.supportsProjectSettingsAdmin &&
+        !widget.viewModel.hasBlockedWriteAccess &&
+        !widget.viewModel.isSaving;
+    final tabBar = TabBar(
+      controller: _tabController,
+      isScrollable: true,
+      tabs: [
+        Tab(text: l10n.statuses),
+        Tab(text: l10n.workflows),
+        Tab(text: l10n.issueTypes),
+        Tab(text: l10n.fields),
+      ],
+    );
+    final content = switch (_SettingsCatalogTab.values[_tabController.index]) {
+      _SettingsCatalogTab.statuses => _buildStatusTab(l10n, settings, canEdit),
+      _SettingsCatalogTab.workflows => _buildWorkflowTab(
+        l10n,
+        settings,
+        canEdit,
+      ),
+      _SettingsCatalogTab.issueTypes => _buildIssueTypeTab(
+        l10n,
+        settings,
+        canEdit,
+      ),
+      _SettingsCatalogTab.fields => _buildFieldTab(l10n, settings, canEdit),
+    };
+    return _SurfaceCard(
+      semanticLabel: l10n.projectSettingsAdmin,
+      explicitChildNodes: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _SectionTitle(l10n.projectSettingsAdmin),
+                    const SizedBox(height: 4),
+                    Text(l10n.projectSettingsDescription),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _IssueDetailActionButton(
+                    label: l10n.resetSettings,
+                    onPressed: widget.viewModel.isSaving
+                        ? null
+                        : () => _resetDraft(project),
+                  ),
+                  _IssueDetailActionButton(
+                    label: l10n.saveSettings,
+                    emphasized: true,
+                    onPressed: canEdit ? _saveSettings : null,
+                  ),
                 ],
               ),
-            ];
-            return GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: compact ? 1 : 2,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              childAspectRatio: compact ? 2.2 : 1.7,
-              children: cards,
+            ],
+          ),
+          const SizedBox(height: 16),
+          tabBar,
+          const SizedBox(height: 16),
+          content,
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsCatalogListTile extends StatelessWidget {
+  const _SettingsCatalogListTile({
+    required this.title,
+    required this.subtitle,
+    required this.editLabel,
+    required this.deleteLabel,
+    this.onEdit,
+    this.onDelete,
+  });
+
+  final String title;
+  final String subtitle;
+  final String editLabel;
+  final String deleteLabel;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(title),
+      subtitle: Text(subtitle),
+      trailing: Wrap(
+        spacing: 4,
+        children: [
+          if (onEdit != null)
+            Semantics(
+              button: true,
+              label: editLabel,
+              child: TextButton(
+                onPressed: onEdit,
+                child: ExcludeSemantics(child: Text(l10n.edit)),
+              ),
+            ),
+          if (onDelete != null)
+            Semantics(
+              button: true,
+              label: deleteLabel,
+              child: TextButton(
+                onPressed: onDelete,
+                child: ExcludeSemantics(child: Text(l10n.delete)),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsEditorShell extends StatelessWidget {
+  const _SettingsEditorShell({required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: Theme.of(context).textTheme.headlineSmall),
+          const SizedBox(height: 16),
+          Flexible(child: SingleChildScrollView(child: child)),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusEditor extends StatefulWidget {
+  const _StatusEditor({this.initial});
+
+  final TrackStateConfigEntry? initial;
+
+  @override
+  State<_StatusEditor> createState() => _StatusEditorState();
+}
+
+class _StatusEditorState extends State<_StatusEditor> {
+  late final TextEditingController _idController;
+  late final TextEditingController _nameController;
+  String _category = 'indeterminate';
+
+  @override
+  void initState() {
+    super.initState();
+    _idController = TextEditingController(text: widget.initial?.id ?? '');
+    _nameController = TextEditingController(text: widget.initial?.name ?? '');
+    _category = widget.initial?.category ?? 'indeterminate';
+  }
+
+  @override
+  void dispose() {
+    _idController.dispose();
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SettingsTextField(label: l10n.catalogId, controller: _idController),
+        const SizedBox(height: 12),
+        _SettingsTextField(label: l10n.name, controller: _nameController),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          initialValue: _category,
+          decoration: InputDecoration(labelText: l10n.catalogCategory),
+          items: [
+            DropdownMenuItem(value: 'new', child: Text(l10n.statusCategoryNew)),
+            DropdownMenuItem(
+              value: 'indeterminate',
+              child: Text(l10n.statusCategoryIndeterminate),
+            ),
+            DropdownMenuItem(
+              value: 'done',
+              child: Text(l10n.statusCategoryDone),
+            ),
+          ],
+          onChanged: (value) {
+            setState(() {
+              _category = value ?? 'indeterminate';
+            });
+          },
+        ),
+        const SizedBox(height: 16),
+        _SettingsEditorActions(
+          onSave: () {
+            Navigator.of(context).pop(
+              TrackStateConfigEntry(
+                id: _normalizedEditorId(
+                  _idController.text,
+                  _nameController.text,
+                ),
+                name: _nameController.text.trim(),
+                category: _category,
+              ),
             );
           },
         ),
@@ -1861,7 +2472,611 @@ class _SettingsState extends State<_Settings> {
   }
 }
 
-enum _SettingsProviderSelection { hosted, localGit }
+class _IssueTypeEditor extends StatefulWidget {
+  const _IssueTypeEditor({required this.workflows, this.initial});
+
+  final TrackStateConfigEntry? initial;
+  final List<TrackStateWorkflowDefinition> workflows;
+
+  @override
+  State<_IssueTypeEditor> createState() => _IssueTypeEditorState();
+}
+
+class _IssueTypeEditorState extends State<_IssueTypeEditor> {
+  late final TextEditingController _idController;
+  late final TextEditingController _nameController;
+  late final TextEditingController _hierarchyLevelController;
+  late final TextEditingController _iconController;
+  String? _workflowId;
+
+  @override
+  void initState() {
+    super.initState();
+    _idController = TextEditingController(text: widget.initial?.id ?? '');
+    _nameController = TextEditingController(text: widget.initial?.name ?? '');
+    _hierarchyLevelController = TextEditingController(
+      text: widget.initial?.hierarchyLevel?.toString() ?? '0',
+    );
+    _iconController = TextEditingController(text: widget.initial?.icon ?? '');
+    _workflowId =
+        widget.initial?.workflowId ??
+        (widget.workflows.isNotEmpty ? widget.workflows.first.id : null);
+  }
+
+  @override
+  void dispose() {
+    _idController.dispose();
+    _nameController.dispose();
+    _hierarchyLevelController.dispose();
+    _iconController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SettingsTextField(label: l10n.catalogId, controller: _idController),
+        const SizedBox(height: 12),
+        _SettingsTextField(label: l10n.name, controller: _nameController),
+        const SizedBox(height: 12),
+        _SettingsTextField(
+          label: l10n.catalogHierarchyLevel,
+          controller: _hierarchyLevelController,
+        ),
+        const SizedBox(height: 12),
+        _SettingsTextField(
+          label: l10n.catalogIcon,
+          controller: _iconController,
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          initialValue: _workflowId,
+          decoration: InputDecoration(labelText: l10n.catalogWorkflow),
+          items: [
+            for (final workflow in widget.workflows)
+              DropdownMenuItem(value: workflow.id, child: Text(workflow.name)),
+          ],
+          onChanged: (value) {
+            setState(() {
+              _workflowId = value;
+            });
+          },
+        ),
+        const SizedBox(height: 16),
+        _SettingsEditorActions(
+          onSave: () {
+            Navigator.of(context).pop(
+              TrackStateConfigEntry(
+                id: _normalizedEditorId(
+                  _idController.text,
+                  _nameController.text,
+                ),
+                name: _nameController.text.trim(),
+                hierarchyLevel:
+                    int.tryParse(_hierarchyLevelController.text.trim()) ?? 0,
+                icon: _iconController.text.trim(),
+                workflowId: _workflowId,
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _FieldEditor extends StatefulWidget {
+  const _FieldEditor({required this.issueTypes, this.initial});
+
+  final TrackStateFieldDefinition? initial;
+  final List<TrackStateConfigEntry> issueTypes;
+
+  @override
+  State<_FieldEditor> createState() => _FieldEditorState();
+}
+
+class _FieldEditorState extends State<_FieldEditor> {
+  late final TextEditingController _idController;
+  late final TextEditingController _nameController;
+  late final TextEditingController _defaultValueController;
+  late final TextEditingController _optionsController;
+  late final Set<String> _applicableIssueTypeIds;
+  String _type = 'string';
+  bool _required = false;
+
+  bool get _isReserved => widget.initial?.reserved ?? false;
+
+  @override
+  void initState() {
+    super.initState();
+    _idController = TextEditingController(text: widget.initial?.id ?? '');
+    _nameController = TextEditingController(text: widget.initial?.name ?? '');
+    _defaultValueController = TextEditingController(
+      text: widget.initial?.defaultValue?.toString() ?? '',
+    );
+    _optionsController = TextEditingController(
+      text: widget.initial == null
+          ? ''
+          : widget.initial!.options.map((option) => option.name).join(', '),
+    );
+    _applicableIssueTypeIds = {...?widget.initial?.applicableIssueTypeIds};
+    _type = widget.initial?.type ?? 'string';
+    _required = widget.initial?.required ?? false;
+  }
+
+  @override
+  void dispose() {
+    _idController.dispose();
+    _nameController.dispose();
+    _defaultValueController.dispose();
+    _optionsController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SettingsTextField(label: l10n.catalogId, controller: _idController),
+        const SizedBox(height: 12),
+        _SettingsTextField(label: l10n.name, controller: _nameController),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          initialValue: _type,
+          decoration: InputDecoration(labelText: l10n.catalogType),
+          items: const [
+            DropdownMenuItem(value: 'string', child: Text('string')),
+            DropdownMenuItem(value: 'markdown', child: Text('markdown')),
+            DropdownMenuItem(value: 'option', child: Text('option')),
+            DropdownMenuItem(value: 'user', child: Text('user')),
+            DropdownMenuItem(value: 'array', child: Text('array')),
+            DropdownMenuItem(value: 'number', child: Text('number')),
+          ],
+          onChanged: _isReserved
+              ? null
+              : (value) {
+                  setState(() {
+                    _type = value ?? 'string';
+                  });
+                },
+        ),
+        const SizedBox(height: 12),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _required,
+          title: Text(l10n.catalogRequired),
+          onChanged: (value) {
+            setState(() {
+              _required = value ?? false;
+            });
+          },
+        ),
+        const SizedBox(height: 12),
+        _SettingsTextField(
+          label: l10n.catalogDefaultValue,
+          controller: _defaultValueController,
+        ),
+        const SizedBox(height: 12),
+        _SettingsTextField(
+          label: l10n.catalogOptions,
+          controller: _optionsController,
+        ),
+        const SizedBox(height: 12),
+        Text(
+          l10n.applicableIssueTypes,
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final issueType in widget.issueTypes)
+              FilterChip(
+                label: Text(issueType.name),
+                selected: _applicableIssueTypeIds.contains(issueType.id),
+                onSelected: (selected) {
+                  setState(() {
+                    if (selected) {
+                      _applicableIssueTypeIds.add(issueType.id);
+                    } else {
+                      _applicableIssueTypeIds.remove(issueType.id);
+                    }
+                  });
+                },
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _SettingsEditorActions(
+          onSave: () {
+            final normalizedId = _normalizedEditorId(
+              _idController.text,
+              _nameController.text,
+            );
+            Navigator.of(context).pop(
+              TrackStateFieldDefinition(
+                id: normalizedId,
+                name: _nameController.text.trim(),
+                type: _type,
+                required: _required,
+                options: _type == 'option'
+                    ? _optionsController.text
+                          .split(',')
+                          .map((entry) => entry.trim())
+                          .where((entry) => entry.isNotEmpty)
+                          .map(
+                            (entry) => TrackStateFieldOption(
+                              id: _normalizedEditorId('', entry),
+                              name: entry,
+                            ),
+                          )
+                          .toList(growable: false)
+                    : const [],
+                defaultValue: _defaultValueController.text.trim().isEmpty
+                    ? null
+                    : _defaultValueController.text.trim(),
+                applicableIssueTypeIds: _applicableIssueTypeIds.toList()
+                  ..sort(),
+                reserved:
+                    _isReserved || _reservedFieldIds.contains(normalizedId),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _WorkflowEditor extends StatefulWidget {
+  const _WorkflowEditor({required this.statuses, this.initial});
+
+  final TrackStateWorkflowDefinition? initial;
+  final List<TrackStateConfigEntry> statuses;
+
+  @override
+  State<_WorkflowEditor> createState() => _WorkflowEditorState();
+}
+
+class _WorkflowEditorState extends State<_WorkflowEditor> {
+  late final TextEditingController _idController;
+  late final TextEditingController _nameController;
+  late final Set<String> _statusIds;
+  late final List<TrackStateWorkflowTransition> _transitions;
+
+  @override
+  void initState() {
+    super.initState();
+    _idController = TextEditingController(text: widget.initial?.id ?? '');
+    _nameController = TextEditingController(text: widget.initial?.name ?? '');
+    _statusIds = {...?widget.initial?.statusIds};
+    _transitions = [...?widget.initial?.transitions];
+  }
+
+  @override
+  void dispose() {
+    _idController.dispose();
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SettingsTextField(label: l10n.catalogId, controller: _idController),
+        const SizedBox(height: 12),
+        _SettingsTextField(label: l10n.name, controller: _nameController),
+        const SizedBox(height: 12),
+        Text(
+          l10n.allowedStatuses,
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final status in widget.statuses)
+              FilterChip(
+                label: Text(status.name),
+                selected: _statusIds.contains(status.id),
+                onSelected: (selected) {
+                  setState(() {
+                    if (selected) {
+                      _statusIds.add(status.id);
+                    } else {
+                      _statusIds.remove(status.id);
+                    }
+                  });
+                },
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                l10n.catalogTransitions,
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                final fallbackStatusId = _statusIds.isNotEmpty
+                    ? _statusIds.first
+                    : 'todo';
+                setState(() {
+                  _transitions.add(
+                    TrackStateWorkflowTransition(
+                      id: 'transition-${_transitions.length + 1}',
+                      name: '',
+                      fromStatusId: fallbackStatusId,
+                      toStatusId: fallbackStatusId,
+                    ),
+                  );
+                });
+              },
+              child: Text(l10n.addTransition),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        for (var index = 0; index < _transitions.length; index += 1)
+          _WorkflowTransitionEditorRow(
+            transition: _transitions[index],
+            statuses: widget.statuses
+                .where((status) => _statusIds.contains(status.id))
+                .toList(growable: false),
+            onChanged: (transition) {
+              setState(() {
+                _transitions[index] = transition;
+              });
+            },
+            onDelete: () {
+              setState(() {
+                _transitions.removeAt(index);
+              });
+            },
+          ),
+        const SizedBox(height: 16),
+        _SettingsEditorActions(
+          onSave: () {
+            Navigator.of(context).pop(
+              TrackStateWorkflowDefinition(
+                id: _normalizedEditorId(
+                  _idController.text,
+                  _nameController.text,
+                ),
+                name: _nameController.text.trim(),
+                statusIds: _statusIds.toList()..sort(),
+                transitions: _transitions,
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _WorkflowTransitionEditorRow extends StatefulWidget {
+  const _WorkflowTransitionEditorRow({
+    required this.transition,
+    required this.statuses,
+    required this.onChanged,
+    required this.onDelete,
+  });
+
+  final TrackStateWorkflowTransition transition;
+  final List<TrackStateConfigEntry> statuses;
+  final ValueChanged<TrackStateWorkflowTransition> onChanged;
+  final VoidCallback onDelete;
+
+  @override
+  State<_WorkflowTransitionEditorRow> createState() =>
+      _WorkflowTransitionEditorRowState();
+}
+
+class _WorkflowTransitionEditorRowState
+    extends State<_WorkflowTransitionEditorRow> {
+  late final TextEditingController _idController;
+  late final TextEditingController _nameController;
+  late String _fromStatusId;
+  late String _toStatusId;
+
+  @override
+  void initState() {
+    super.initState();
+    _idController = TextEditingController(text: widget.transition.id);
+    _nameController = TextEditingController(text: widget.transition.name);
+    _fromStatusId = widget.transition.fromStatusId;
+    _toStatusId = widget.transition.toStatusId;
+  }
+
+  @override
+  void dispose() {
+    _idController.dispose();
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  void _emit() {
+    widget.onChanged(
+      TrackStateWorkflowTransition(
+        id: _normalizedEditorId(_idController.text, _nameController.text),
+        name: _nameController.text.trim(),
+        fromStatusId: _fromStatusId,
+        toStatusId: _toStatusId,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final statusItems = widget.statuses.isEmpty
+        ? const [DropdownMenuItem(value: 'todo', child: Text('todo'))]
+        : [
+            for (final status in widget.statuses)
+              DropdownMenuItem(value: status.id, child: Text(status.name)),
+          ];
+    if (!statusItems.any((item) => item.value == _fromStatusId)) {
+      _fromStatusId = statusItems.first.value!;
+    }
+    if (!statusItems.any((item) => item.value == _toStatusId)) {
+      _toStatusId = statusItems.first.value!;
+    }
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          children: [
+            TextField(
+              controller: _idController,
+              decoration: InputDecoration(labelText: l10n.catalogId),
+              onChanged: (_) => _emit(),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(labelText: l10n.transitionName),
+              onChanged: (_) => _emit(),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              initialValue: _fromStatusId,
+              decoration: InputDecoration(labelText: l10n.transitionFrom),
+              items: statusItems,
+              onChanged: (value) {
+                setState(() {
+                  _fromStatusId = value ?? _fromStatusId;
+                });
+                _emit();
+              },
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              initialValue: _toStatusId,
+              decoration: InputDecoration(labelText: l10n.transitionTo),
+              items: statusItems,
+              onChanged: (value) {
+                setState(() {
+                  _toStatusId = value ?? _toStatusId;
+                });
+                _emit();
+              },
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: widget.onDelete,
+                child: Text(l10n.removeTransition),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsEditorActions extends StatelessWidget {
+  const _SettingsEditorActions({required this.onSave});
+
+  final VoidCallback onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.cancel),
+        ),
+        const SizedBox(width: 8),
+        FilledButton(onPressed: onSave, child: Text(l10n.save)),
+      ],
+    );
+  }
+}
+
+ProjectSettingsCatalog _cloneProjectSettings(ProjectSettingsCatalog settings) {
+  return ProjectSettingsCatalog(
+    statusDefinitions: [
+      for (final status in settings.statusDefinitions) status.copyWith(),
+    ],
+    workflowDefinitions: [
+      for (final workflow in settings.workflowDefinitions)
+        workflow.copyWith(
+          statusIds: [...workflow.statusIds],
+          transitions: [
+            for (final transition in workflow.transitions)
+              transition.copyWith(),
+          ],
+        ),
+    ],
+    issueTypeDefinitions: [
+      for (final issueType in settings.issueTypeDefinitions)
+        issueType.copyWith(),
+    ],
+    fieldDefinitions: [
+      for (final field in settings.fieldDefinitions)
+        field.copyWith(
+          options: [for (final option in field.options) option.copyWith()],
+          applicableIssueTypeIds: [...field.applicableIssueTypeIds],
+        ),
+    ],
+  );
+}
+
+String _projectSettingsSignature(ProjectSettingsCatalog settings) {
+  return [
+    for (final status in settings.statusDefinitions)
+      'status:${status.id}:${status.name}:${status.category ?? ''}',
+    for (final workflow in settings.workflowDefinitions)
+      'workflow:${workflow.id}:${workflow.name}:${workflow.statusIds.join(',')}:${workflow.transitions.map((transition) => '${transition.id}:${transition.name}:${transition.fromStatusId}:${transition.toStatusId}').join('|')}',
+    for (final issueType in settings.issueTypeDefinitions)
+      'issueType:${issueType.id}:${issueType.name}:${issueType.workflowId ?? ''}:${issueType.hierarchyLevel ?? ''}:${issueType.icon ?? ''}',
+    for (final field in settings.fieldDefinitions)
+      'field:${field.id}:${field.name}:${field.type}:${field.required}:${field.reserved}:${field.options.map((option) => '${option.id}:${option.name}').join('|')}:${field.defaultValue ?? ''}:${field.applicableIssueTypeIds.join(',')}',
+  ].join('\n');
+}
+
+const _reservedFieldIds = {
+  'summary',
+  'description',
+  'acceptanceCriteria',
+  'priority',
+  'assignee',
+  'labels',
+  'storyPoints',
+};
+
+String _normalizedEditorId(String rawId, String fallbackName) {
+  final trimmedId = rawId.trim();
+  if (trimmedId.isNotEmpty) {
+    return trimmedId;
+  }
+  final normalized = fallbackName
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
+  return normalized;
+}
 
 class _IssueDetail extends StatefulWidget {
   const _IssueDetail({
@@ -2695,32 +3910,6 @@ class _MetricCard extends StatelessWidget {
 
 enum MetricTone { primary, secondary, accent }
 
-class _ConfigCard extends StatelessWidget {
-  const _ConfigCard({required this.title, required this.items});
-
-  final String title;
-  final List<String> items;
-
-  @override
-  Widget build(BuildContext context) {
-    return _SurfaceCard(
-      semanticLabel: title,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _SectionTitle(title),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [for (final item in items) _Chip(label: item)],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _SettingsProviderButton extends StatelessWidget {
   const _SettingsProviderButton({
     required this.label,
@@ -2963,12 +4152,12 @@ class _SettingsTextField extends StatelessWidget {
   const _SettingsTextField({
     required this.label,
     required this.controller,
-    required this.focusNode,
+    this.focusNode,
   });
 
   final String label;
   final TextEditingController controller;
-  final FocusNode focusNode;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -3779,14 +4968,14 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                     key: ValueKey('create-field-${field.id}'),
                                     controller:
                                         _customFieldControllers[field.id],
-                                     minLines: field.type == 'markdown' ? 3 : 1,
-                                     maxLines: field.type == 'markdown'
-                                         ? null
-                                         : 1,
-                                     enabled: canEditFields,
-                                     decoration: InputDecoration(
-                                       labelText: _createIssueFieldLabel(
-                                         project,
+                                    minLines: field.type == 'markdown' ? 3 : 1,
+                                    maxLines: field.type == 'markdown'
+                                        ? null
+                                        : 1,
+                                    enabled: canEditFields,
+                                    decoration: InputDecoration(
+                                      labelText: _createIssueFieldLabel(
+                                        project,
                                         field,
                                       ),
                                       alignLabelWithHint:

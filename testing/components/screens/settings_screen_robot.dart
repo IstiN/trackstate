@@ -25,12 +25,16 @@ class SettingsScreenRobot {
 
   Finder get settingsNavigation => find.text('Settings').first;
   Finder get projectSettingsHeading => find.text('Project Settings');
-  Finder get issueTypesCard => find.text('Issue Types');
-  Finder get workflowCard => find.text('Workflow');
-  Finder get fieldsCard => find.text('Fields');
-  Finder get languageCard => find.text('Language');
+  Finder get projectSettingsAdmin =>
+      find.text('Project settings administration');
+  Finder get statusesTab => find.widgetWithText(Tab, 'Statuses');
+  Finder get issueTypesCard => find.widgetWithText(Tab, 'Issue Types');
+  Finder get workflowCard => find.widgetWithText(Tab, 'Workflows');
+  Finder get fieldsCard => find.widgetWithText(Tab, 'Fields');
   Finder get repositoryAccessSection =>
       find.bySemanticsLabel(RegExp('Repository access'));
+  Finder get settingsAdminSection =>
+      find.bySemanticsLabel(RegExp('Project settings administration'));
   Finder get topBar => find
       .ancestor(of: _currentTopBarControl(), matching: find.byType(Row))
       .first;
@@ -107,11 +111,11 @@ class SettingsScreenRobot {
   );
 
   Finder configCard(String title) => _smallestByArea(
-    find.ancestor(of: find.text(title), matching: find.byType(Column)),
+    find.ancestor(of: find.text(title), matching: find.byType(Tab)),
   );
 
   Finder configCardItem(String title, String item) =>
-      find.descendant(of: configCard(title), matching: find.text(item));
+      find.descendant(of: settingsAdminSection, matching: find.text(item));
 
   Future<void> clearFocus() async {
     FocusManager.instance.primaryFocus?.unfocus();
@@ -120,10 +124,11 @@ class SettingsScreenRobot {
 
   void expectVisibleSettingsContent() {
     expect(projectSettingsHeading, findsOneWidget);
+    expect(projectSettingsAdmin, findsOneWidget);
+    expect(statusesTab, findsOneWidget);
     expect(issueTypesCard, findsOneWidget);
     expect(workflowCard, findsOneWidget);
     expect(fieldsCard, findsOneWidget);
-    expect(languageCard, findsOneWidget);
   }
 
   TrackStateColors colors() {
@@ -421,14 +426,21 @@ class SettingsScreenRobot {
 
   List<String> visibleConfigItems(String title) {
     final texts = find.descendant(
-      of: configCard(title),
+      of: settingsAdminSection,
       matching: find.byType(Text),
     );
     final values = <String>[];
     for (final element in texts.evaluate()) {
       final widget = element.widget as Text;
       final value = widget.data?.trim();
-      if (value == null || value.isEmpty || value == title) {
+      if (value == null ||
+          value.isEmpty ||
+          value == title ||
+          value == 'Project settings administration' ||
+          value ==
+              'Manage repository-backed statuses, workflows, issue types, and fields with validation before Git writes.' ||
+          value == 'Reset' ||
+          value == 'Save settings') {
         continue;
       }
       values.add(value);
