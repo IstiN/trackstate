@@ -25,8 +25,17 @@ class LiveJqlSearchPage:
     _button_selector = 'flt-semantics[role="button"]'
     _active_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
     _panel_selector = 'flt-semantics[role="group"][aria-label="JQL Search"]'
-    _panel_search_field_container_selector = f"{_panel_selector} > flt-semantics"
-    _panel_search_field_selector = f'{_panel_selector} input[aria-label="Search issues"]'
+    _panel_search_field_selector = (
+        f'{_panel_selector} input[data-semantics-role="text-field"]:not([disabled])'
+    )
+    _search_field_candidates = (
+        _panel_search_field_selector,
+        f'{_panel_selector} textarea[data-semantics-role="text-field"]:not([disabled])',
+        f'{_panel_selector} [data-semantics-role="text-field"]:not([disabled])',
+        f'{_panel_selector} input[aria-label^="Search issues"]',
+        f'{_panel_selector} textarea[aria-label="Search issues"]',
+        f'{_panel_selector} [role="textbox"][aria-label="Search issues"]',
+    )
     _issue_button_selector = (
         f'{_panel_selector} flt-semantics[role="button"][aria-label^="Open DEMO-"]'
     )
@@ -80,9 +89,13 @@ class LiveJqlSearchPage:
         query: str,
         expected_count_summaries: tuple[str, ...] | None = None,
     ) -> LiveJqlSearchObservation:
-        field_selector = self._submit_query(query)
+        field_selector, field_index = self._submit_query(query)
         self._wait_for_count_summary(expected_count_summaries=expected_count_summaries)
-        return self._observe(query=query, field_selector=field_selector)
+        return self._observe(
+            query=query,
+            field_selector=field_selector,
+            field_index=field_index,
+        )
 
     def search_with_verified_result_change(
         self,
@@ -110,50 +123,69 @@ class LiveJqlSearchPage:
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
 
-    def _submit_query(self, query: str) -> str:
+    def _submit_query(self, query: str) -> tuple[str, int]:
         self.open()
-        field_selector = self._wait_for_search_field()
-        self._session.click(
-            self._panel_search_field_container_selector,
+        field_selector, field_index = self._wait_for_search_field()
+        self._session.focus(
+            field_selector,
+            index=field_index,
             timeout_ms=30_000,
         )
-        self._session.fill(field_selector, query, timeout_ms=30_000)
-        self._session.press_key("Enter", timeout_ms=30_000)
-        return field_selector
+        self._session.fill(
+            field_selector,
+            query,
+            index=field_index,
+            timeout_ms=30_000,
+        )
+        self._session.wait_for_input_value(
+            field_selector,
+            query,
+            index=field_index,
+            timeout_ms=30_000,
+        )
+        self._session.press(
+            field_selector,
+            "Enter",
+            index=field_index,
+            timeout_ms=30_000,
+        )
+        return field_selector, field_index
 
     def _observe(
         self,
         *,
         query: str,
         field_selector: str,
+        field_index: int,
     ) -> LiveJqlSearchObservation:
         body_text = self.current_body_text()
         return LiveJqlSearchObservation(
             query=query,
-            visible_query=self._session.read_value(field_selector, timeout_ms=30_000),
+            visible_query=self._session.read_value(
+                field_selector,
+                index=field_index,
+                timeout_ms=30_000,
+            ),
             body_text=body_text,
             count_summary=self._count_summary(body_text),
             issue_result_count=self._session.count(self._issue_button_selector),
             issue_result_labels=self._issue_result_labels(),
         )
 
-    def _wait_for_search_field(self) -> str:
-        try:
-            self._session.wait_for_selector(
-                self._panel_search_field_container_selector,
-                timeout_ms=10_000,
-            )
-            self._session.wait_for_selector(
-                self._panel_search_field_selector,
-                timeout_ms=10_000,
-            )
-        except WebAppTimeoutError as error:
-            raise AssertionError(
-                "Step 3 failed: the live app did not expose the visible JQL Search text "
-                "field inside the JQL Search results panel.\n"
-                f"Observed body text:\n{self.current_body_text()}",
-            ) from error
-        return self._panel_search_field_selector
+    def _wait_for_search_field(self) -> tuple[str, int]:
+        errors: list[str] = []
+        for selector in self._search_field_candidates:
+            try:
+                self._session.wait_for_selector(selector, timeout_ms=10_000)
+                return selector, 0
+            except WebAppTimeoutError as error:
+                errors.append(str(error))
+        raise AssertionError(
+            "Step 3 failed: the live app did not expose the visible JQL Search text "
+            "field inside the JQL Search panel.\n"
+            f"Observed body text:\n{self.current_body_text()}\n"
+            f"Selector attempts: {errors}",
+        )
 
     def _is_active(self) -> bool:
         return self._session.count(

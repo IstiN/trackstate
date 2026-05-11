@@ -130,24 +130,7 @@ class PlaywrightWebAppSession(WebAppSession):
         *,
         has_text: str | None = None,
     ) -> int:
-        return self._locator(selector, has_text=has_text).count()
-
-    def focus(
-        self,
-        selector: str,
-        *,
-        has_text: str | None = None,
-        index: int = 0,
-        timeout_ms: int = 30_000,
-    ) -> None:
-        try:
-            locator = self._locator(selector, has_text=has_text, index=index)
-            locator.wait_for(state="visible", timeout=timeout_ms)
-            locator.evaluate("element => element.focus()")
-        except PlaywrightTimeoutError as error:
-            raise WebAppTimeoutError(
-                f'Timed out focusing selector "{selector}".',
-            ) from error
+        return self._page.locator(selector, has_text=has_text).count()
 
     def wait_for_count(
         self,
@@ -189,6 +172,23 @@ class PlaywrightWebAppSession(WebAppSession):
         except PlaywrightTimeoutError as error:
             raise WebAppTimeoutError(
                 f'Timed out reading the value for selector "{selector}".',
+            ) from error
+
+    def focus(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            locator.evaluate("element => element.focus()")
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out focusing selector "{selector}".',
             ) from error
 
     def read_text(
