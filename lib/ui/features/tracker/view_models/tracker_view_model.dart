@@ -45,6 +45,8 @@ enum TrackerMessageKind {
   storedGitHubTokenInvalid,
 }
 
+enum IssueDeferredSection { detail, comments, attachments, history }
+
 class TrackerMessage {
   const TrackerMessage._(
     this.kind, {
@@ -270,6 +272,8 @@ class TrackerViewModel extends ChangeNotifier {
   );
   TrackStateIssue? _selectedIssue;
   final Map<String, List<IssueHistoryEntry>> _issueHistoryByKey = {};
+  final Map<String, Map<IssueDeferredSection, String>>
+  _issueDeferredErrorsByKey = {};
   final Set<String> _loadingIssueHistory = <String>{};
   final Set<String> _loadingIssueDetails = <String>{};
   final Set<String> _loadingIssueComments = <String>{};
@@ -544,6 +548,10 @@ class TrackerViewModel extends ChangeNotifier {
 
   List<IssueHistoryEntry> issueHistoryFor(String issueKey) =>
       _issueHistoryByKey[issueKey] ?? const <IssueHistoryEntry>[];
+  String? issueDeferredError(String issueKey, IssueDeferredSection section) =>
+      _issueDeferredErrorsByKey[issueKey]?[section];
+  bool hasIssueDeferredError(String issueKey, IssueDeferredSection section) =>
+      issueDeferredError(issueKey, section) != null;
 
   void toggleTheme() {
     _themePreference = _themePreference == ThemePreference.light
@@ -660,12 +668,7 @@ class TrackerViewModel extends ChangeNotifier {
 
     try {
       final saved = await _repository.updateIssueStatus(issue, status);
-      _snapshot = await _repository.loadSnapshot();
-      _mergeIssueIntoSnapshot(saved);
-      _selectedIssue = _snapshot!.issues.firstWhere(
-        (current) => current.key == saved.key,
-        orElse: () => saved,
-      );
+      _applyTargetedIssueRefresh(saved);
       await _refreshSearchResultsAfterMutation();
       _message = usesLocalPersistence
           ? TrackerMessage.localGitMoveCommitted(
@@ -756,11 +759,7 @@ class TrackerViewModel extends ChangeNotifier {
                   'The issue could not be created with the current repository session.',
             );
       _snapshot = await _repository.loadSnapshot();
-      _mergeIssueIntoSnapshot(created);
-      _selectedIssue = _snapshot!.issues.firstWhere(
-        (issue) => issue.key == created.key,
-        orElse: () => created,
-      );
+      _selectIssueFromSnapshot(created);
       await _refreshSearchResultsAfterMutation();
       _section = TrackerSection.search;
       _issueDetailReturnSection =
@@ -1014,13 +1013,9 @@ class TrackerViewModel extends ChangeNotifier {
         );
       }
       if (!usedInMemoryLocalFallback) {
-        _snapshot = await _repository.loadSnapshot();
-        _mergeIssueIntoSnapshot(saved);
+        _applyTargetedIssueRefresh(saved);
       }
-      _selectedIssue = _snapshot!.issues.firstWhere(
-        (current) => current.key == saved.key,
-        orElse: () => saved,
-      );
+      _selectIssueFromSnapshot(saved);
       await _refreshSearchResultsAfterMutation(
         preferLoadedSnapshot: usedInMemoryLocalFallback,
       );
@@ -1316,12 +1311,7 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
     try {
       final saved = await _repository.addIssueComment(issue, normalizedBody);
-      _snapshot = await _repository.loadSnapshot();
-      _mergeIssueIntoSnapshot(saved);
-      _selectedIssue = _snapshot!.issues.firstWhere(
-        (current) => current.key == saved.key,
-        orElse: () => saved,
-      );
+      _applyTargetedIssueRefresh(saved);
       await _refreshSearchResultsAfterMutation();
       _issueHistoryByKey.remove(issue.key);
       return true;
@@ -1340,11 +1330,13 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     _loadingIssueHistory.add(issue.key);
+    _clearIssueDeferredError(issue.key, IssueDeferredSection.history);
     notifyListeners();
     try {
       _issueHistoryByKey[issue.key] = await _repository.loadIssueHistory(issue);
+      _clearIssueDeferredError(issue.key, IssueDeferredSection.history);
     } on Object catch (error) {
-      _message = TrackerMessage.issueSaveFailed(error);
+      _setIssueDeferredError(issue.key, IssueDeferredSection.history, '$error');
     } finally {
       _loadingIssueHistory.remove(issue.key);
       notifyListeners();
@@ -1465,12 +1457,7 @@ class TrackerViewModel extends ChangeNotifier {
         name: name,
         bytes: bytes,
       );
-      _snapshot = await _repository.loadSnapshot();
-      _mergeIssueIntoSnapshot(saved);
-      _selectedIssue = _snapshot!.issues.firstWhere(
-        (current) => current.key == saved.key,
-        orElse: () => saved,
-      );
+      _applyTargetedIssueRefresh(saved);
       await _refreshSearchResultsAfterMutation();
       _issueHistoryByKey.remove(issue.key);
       return true;
@@ -1588,33 +1575,22 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     loadingSet.add(issue.key);
+    _clearIssueDeferredError(issue.key, _deferredSectionForScope(scope));
     notifyListeners();
     try {
       final hydrated = await repository.hydrateIssue(
         currentIssue,
         scopes: {scope},
       );
-      final activeSnapshot = _snapshot;
-      if (activeSnapshot == null) {
-        return;
-      }
-      final updatedIssues = [
-        for (final candidate in activeSnapshot.issues)
-          if (candidate.key == hydrated.key) hydrated else candidate,
-      ]..sort((left, right) => left.key.compareTo(right.key));
-      _snapshot = TrackerSnapshot(
-        project: activeSnapshot.project,
-        issues: updatedIssues,
-        repositoryIndex: activeSnapshot.repositoryIndex,
-        loadWarnings: activeSnapshot.loadWarnings,
-        readiness: activeSnapshot.readiness,
-      );
-      if (_selectedIssue?.key == hydrated.key) {
-        _selectedIssue = hydrated;
-      }
+      _applyTargetedIssueRefresh(hydrated);
+      _clearIssueDeferredError(issue.key, _deferredSectionForScope(scope));
       _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
     } on Object catch (error) {
-      _message = TrackerMessage.issueSaveFailed(error);
+      _setIssueDeferredError(
+        issue.key,
+        _deferredSectionForScope(scope),
+        '$error',
+      );
     } finally {
       loadingSet.remove(issue.key);
       notifyListeners();
@@ -1721,12 +1697,61 @@ class TrackerViewModel extends ChangeNotifier {
     );
   }
 
+  void _applyTargetedIssueRefresh(TrackStateIssue issue) {
+    _mergeIssueIntoSnapshot(issue);
+    _selectIssueFromSnapshot(issue);
+  }
+
+  void _selectIssueFromSnapshot(TrackStateIssue issue) {
+    final snapshot = _snapshot;
+    if (snapshot == null) {
+      _selectedIssue = issue;
+      return;
+    }
+    _selectedIssue = snapshot.issues.firstWhere(
+      (current) => current.key == issue.key,
+      orElse: () => issue,
+    );
+  }
+
   bool _isScopeLoaded(TrackStateIssue issue, IssueHydrationScope scope) =>
       switch (scope) {
         IssueHydrationScope.detail => issue.hasDetailLoaded,
         IssueHydrationScope.comments => issue.hasCommentsLoaded,
         IssueHydrationScope.attachments => issue.hasAttachmentsLoaded,
       };
+
+  IssueDeferredSection _deferredSectionForScope(IssueHydrationScope scope) =>
+      switch (scope) {
+        IssueHydrationScope.detail => IssueDeferredSection.detail,
+        IssueHydrationScope.comments => IssueDeferredSection.comments,
+        IssueHydrationScope.attachments => IssueDeferredSection.attachments,
+      };
+
+  void _setIssueDeferredError(
+    String issueKey,
+    IssueDeferredSection section,
+    String error,
+  ) {
+    final errors = {
+      ...(_issueDeferredErrorsByKey[issueKey] ?? const {}),
+      section: error,
+    };
+    _issueDeferredErrorsByKey[issueKey] = errors;
+  }
+
+  void _clearIssueDeferredError(String issueKey, IssueDeferredSection section) {
+    final current = _issueDeferredErrorsByKey[issueKey];
+    if (current == null || !current.containsKey(section)) {
+      return;
+    }
+    final updated = {...current}..remove(section);
+    if (updated.isEmpty) {
+      _issueDeferredErrorsByKey.remove(issueKey);
+      return;
+    }
+    _issueDeferredErrorsByKey[issueKey] = updated;
+  }
 
   void _bindProviderSession() {
     final session = providerSession;

@@ -19,10 +19,12 @@ class ReactiveIssueDetailTrackStateRepository
       canCheckCollaborators: false,
     ),
     Set<String> lfsTrackedPaths = const <String>{},
+    Set<String> failingTextPaths = const <String>{},
   }) => ReactiveIssueDetailTrackStateRepository._(
     MutableIssueDetailTrackStateProvider(
       permission: permission,
       lfsTrackedPaths: lfsTrackedPaths,
+      failingTextPaths: failingTextPaths,
     ),
   );
 
@@ -105,11 +107,14 @@ class MutableIssueDetailTrackStateProvider
       canCheckCollaborators: false,
     ),
     Set<String> lfsTrackedPaths = const <String>{},
+    Set<String> failingTextPaths = const <String>{},
   }) : _permission = permission,
-       _lfsTrackedPaths = lfsTrackedPaths;
+       _lfsTrackedPaths = lfsTrackedPaths,
+       _failingTextPaths = failingTextPaths;
 
   RepositoryPermission _permission;
   final Set<String> _lfsTrackedPaths;
+  final Set<String> _failingTextPaths;
 
   static const String _revision = 'reactive-read-only-test-revision';
 
@@ -308,6 +313,9 @@ Read and write tracker files through GitHub Contents API.
     String path, {
     required String ref,
   }) async {
+    if (_failingTextPaths.contains(path)) {
+      throw TrackStateProviderException('Deferred read failed for $path.');
+    }
     final content = _textFiles[path];
     if (content == null) {
       throw TrackStateProviderException('Missing fixture for $path.');

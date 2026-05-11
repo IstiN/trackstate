@@ -447,13 +447,15 @@ class IssueMutationService {
         message: 'Update $issueKey fields',
         changes: changes,
       );
-      final refreshed = await providerRepository.loadSnapshot();
+      final refreshed = await providerRepository.hydrateIssue(
+        issue,
+        scopes: const {IssueHydrationScope.detail},
+        force: true,
+      );
       return IssueMutationResult.success(
         operation: operation,
         issueKey: issueKey,
-        value: refreshed.issues.firstWhere(
-          (candidate) => candidate.key == issueKey,
-        ),
+        value: refreshed,
         revision: commitResult.revision,
       );
     } catch (error) {
@@ -628,13 +630,15 @@ class IssueMutationService {
           ),
         ],
       );
-      final refreshed = await providerRepository.loadSnapshot();
+      final refreshed = await providerRepository.hydrateIssue(
+        issue,
+        scopes: const {IssueHydrationScope.detail},
+        force: true,
+      );
       return IssueMutationResult.success(
         operation: operation,
         issueKey: issueKey,
-        value: refreshed.issues.firstWhere(
-          (candidate) => candidate.key == issueKey,
-        ),
+        value: refreshed,
         revision: writeResult.revision,
       );
     } catch (error) {

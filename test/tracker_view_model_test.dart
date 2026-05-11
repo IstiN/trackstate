@@ -181,6 +181,41 @@ void main() {
   );
 
   test(
+    'view model keeps deferred detail failures scoped to the issue instead of failing the whole app',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(
+          failingTextPaths: {'TRACK-12/main.md'},
+        ),
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      await viewModel.ensureIssueDetailLoaded(issue);
+
+      expect(
+        viewModel.issueDeferredError(issue.key, IssueDeferredSection.detail),
+        contains('Deferred read failed for TRACK-12/main.md'),
+      );
+      expect(
+        viewModel.hasIssueDeferredError(issue.key, IssueDeferredSection.detail),
+        isTrue,
+      );
+      expect(
+        viewModel.message?.kind,
+        isNot(TrackerMessageKind.issueSaveFailed),
+      );
+      expect(viewModel.snapshot, isNotNull);
+    },
+  );
+
+  test(
     'view model reports local persistence after a successful move',
     () async {
       final viewModel = TrackerViewModel(
@@ -191,6 +226,79 @@ void main() {
       await viewModel.moveIssue(viewModel.selectedIssue!, IssueStatus.done);
 
       expect(viewModel.message?.kind, TrackerMessageKind.localGitMoveCommitted);
+    },
+  );
+
+  test(
+    'view model updates issue status without reloading the full snapshot',
+    () async {
+      final repository = _MutableEditRepository(
+        snapshot: await const DemoTrackStateRepository().loadSnapshot(),
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.selectedIssue!;
+
+      await viewModel.moveIssue(issue, IssueStatus.done);
+
+      expect(repository.loadSnapshotCount, 1);
+      expect(viewModel.selectedIssue?.statusId, 'done');
+    },
+  );
+
+  test(
+    'view model posts comments without reloading the full snapshot',
+    () async {
+      final repository = _MutableEditRepository(
+        snapshot: await const DemoTrackStateRepository().loadSnapshot(),
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.selectedIssue!;
+
+      final success = await viewModel.postIssueComment(
+        issue,
+        'Scoped comment refresh.',
+      );
+
+      expect(success, isTrue);
+      expect(repository.loadSnapshotCount, 1);
+      expect(
+        viewModel.selectedIssue?.comments.any(
+          (comment) => comment.body == 'Scoped comment refresh.',
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test(
+    'view model uploads attachments without reloading the full snapshot',
+    () async {
+      final repository = _MutableEditRepository(
+        snapshot: await const DemoTrackStateRepository().loadSnapshot(),
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.selectedIssue!;
+
+      final success = await viewModel.uploadIssueAttachment(
+        issue: issue,
+        name: 'design spec.pdf',
+        bytes: Uint8List.fromList(<int>[1, 2, 3]),
+      );
+
+      expect(success, isTrue);
+      expect(repository.loadSnapshotCount, 1);
+      expect(
+        viewModel.selectedIssue?.attachments.any(
+          (attachment) => attachment.name == 'design-spec.pdf',
+        ),
+        isTrue,
+      );
     },
   );
 
@@ -1098,6 +1206,7 @@ class _MutableEditRepository implements TrackStateRepository {
   TrackerSnapshot _snapshot;
   final JqlSearchService _searchService = const JqlSearchService();
   String? lastSavedDescription;
+  int loadSnapshotCount = 0;
 
   final bool reloadReturnsSummaryOnly;
 
@@ -1113,6 +1222,7 @@ class _MutableEditRepository implements TrackStateRepository {
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async {
+    loadSnapshotCount += 1;
     if (!reloadReturnsSummaryOnly) {
       return _snapshot;
     }
@@ -1191,7 +1301,27 @@ class _MutableEditRepository implements TrackStateRepository {
   Future<TrackStateIssue> addIssueComment(
     TrackStateIssue issue,
     String body,
-  ) async => issue;
+  ) async {
+    final timestamp = DateTime.now().toUtc().toIso8601String();
+    final updated = issue.copyWith(
+      hasCommentsLoaded: true,
+      comments: [
+        ...issue.comments,
+        IssueComment(
+          id: (issue.comments.length + 1).toString().padLeft(4, '0'),
+          author: 'mutable-user',
+          body: body,
+          updatedLabel: timestamp,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          storagePath:
+              '${issue.storagePath.substring(0, issue.storagePath.lastIndexOf('/'))}/comments/${(issue.comments.length + 1).toString().padLeft(4, '0')}.md',
+        ),
+      ],
+    );
+    applyIssue(updated);
+    return updated;
+  }
 
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
@@ -1207,7 +1337,28 @@ class _MutableEditRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
-  }) async => issue;
+  }) async {
+    final sanitizedName = sanitizeAttachmentName(name);
+    final updated = issue.copyWith(
+      hasAttachmentsLoaded: true,
+      attachments: [
+        ...issue.attachments,
+        IssueAttachment(
+          id: '${issue.storagePath}/$sanitizedName',
+          name: sanitizedName,
+          mediaType: 'application/pdf',
+          sizeBytes: bytes.length,
+          author: 'mutable-user',
+          createdAt: 'just now',
+          storagePath:
+              '${issue.storagePath.substring(0, issue.storagePath.lastIndexOf('/'))}/attachments/$sanitizedName',
+          revisionOrOid: 'mutable-revision',
+        ),
+      ],
+    );
+    applyIssue(updated);
+    return updated;
+  }
 
   TrackStateIssue issueForKey(String key) =>
       _snapshot.issues.firstWhere((issue) => issue.key == key);

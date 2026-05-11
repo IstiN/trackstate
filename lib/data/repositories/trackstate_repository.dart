@@ -215,8 +215,9 @@ class ProviderBackedTrackStateRepository
   Future<TrackStateIssue> hydrateIssue(
     TrackStateIssue issue, {
     Set<IssueHydrationScope> scopes = const {IssueHydrationScope.detail},
+    bool force = false,
   }) async {
-    if (usesLocalPersistence) {
+    if (usesLocalPersistence && !force) {
       final snapshot = _snapshot ?? await loadSnapshot();
       return snapshot.issues.firstWhere(
         (candidate) => candidate.key == issue.key,
@@ -224,11 +225,13 @@ class ProviderBackedTrackStateRepository
       );
     }
     final currentSnapshot = _snapshot ?? await loadSnapshot();
-    final currentIssue = currentSnapshot.issues.firstWhere(
-      (candidate) => candidate.key == issue.key,
-      orElse: () => issue,
-    );
-    if (_hasHydratedScopes(currentIssue, scopes)) {
+    final currentIssue = force
+        ? issue
+        : currentSnapshot.issues.firstWhere(
+            (candidate) => candidate.key == issue.key,
+            orElse: () => issue,
+          );
+    if (!force && _hasHydratedScopes(currentIssue, scopes)) {
       return currentIssue;
     }
     if (currentIssue.storagePath.isEmpty) {
@@ -257,7 +260,7 @@ class ProviderBackedTrackStateRepository
         scopes.contains(IssueHydrationScope.attachments) ||
         currentIssue.hasAttachmentsLoaded;
 
-    final markdown = currentIssue.rawMarkdown.isNotEmpty
+    final markdown = !force && currentIssue.rawMarkdown.isNotEmpty
         ? currentIssue.rawMarkdown
         : await _getRepositoryText(currentIssue.storagePath);
     final acceptanceMarkdown = shouldLoadDetail
