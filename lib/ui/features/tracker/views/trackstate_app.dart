@@ -3129,9 +3129,7 @@ class _IssueDetail extends StatefulWidget {
 }
 
 class _IssueDetailState extends State<_IssueDetail> {
-  late final TextEditingController _descriptionController;
   late final TextEditingController _commentController;
-  bool _isEditing = false;
   int _selectedCollaborationTab = 0;
   PickedAttachment? _selectedAttachment;
   String? _attachmentUploadNotice;
@@ -3139,9 +3137,6 @@ class _IssueDetailState extends State<_IssueDetail> {
   @override
   void initState() {
     super.initState();
-    _descriptionController = TextEditingController(
-      text: widget.issue.description,
-    );
     _commentController = TextEditingController();
   }
 
@@ -3149,14 +3144,6 @@ class _IssueDetailState extends State<_IssueDetail> {
   void didUpdateWidget(covariant _IssueDetail oldWidget) {
     super.didUpdateWidget(oldWidget);
     final issueChanged = oldWidget.issue.key != widget.issue.key;
-    final descriptionChanged =
-        oldWidget.issue.description != widget.issue.description;
-    if (issueChanged) {
-      _isEditing = false;
-    }
-    if (issueChanged || (!_isEditing && descriptionChanged)) {
-      _descriptionController.text = widget.issue.description;
-    }
     if (issueChanged) {
       _commentController.clear();
       _selectedAttachment = null;
@@ -3169,22 +3156,22 @@ class _IssueDetailState extends State<_IssueDetail> {
 
   @override
   void dispose() {
-    _descriptionController.dispose();
     _commentController.dispose();
     super.dispose();
   }
 
-  Future<void> _saveDescription() async {
-    final success = await widget.viewModel.saveIssueDescription(
-      widget.issue,
-      _descriptionController.text,
+  Future<void> _openEditDialog({required bool workflowOnly}) async {
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.12),
+      builder: (dialogContext) {
+        return _IssueEditDialog(
+          issue: widget.issue,
+          viewModel: widget.viewModel,
+          workflowOnly: workflowOnly,
+        );
+      },
     );
-    if (!mounted || !success) {
-      return;
-    }
-    setState(() {
-      _isEditing = false;
-    });
   }
 
   Future<void> _saveComment() async {
@@ -3289,25 +3276,7 @@ class _IssueDetailState extends State<_IssueDetail> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SectionTitle(l10n.description),
-        if (_isEditing)
-          Semantics(
-            label: l10n.description,
-            textField: true,
-            child: TextField(
-              controller: _descriptionController,
-              minLines: 4,
-              maxLines: null,
-              enabled:
-                  !widget.viewModel.isSaving &&
-                  !widget.viewModel.hasBlockedWriteAccess,
-              decoration: InputDecoration(
-                labelText: l10n.description,
-                alignLabelWithHint: true,
-              ),
-            ),
-          )
-        else
-          Text(issue.description),
+        Text(issue.description),
         const SizedBox(height: 18),
         _SectionTitle(l10n.acceptanceCriteria),
         for (final criteria in issue.acceptanceCriteria)
@@ -3351,42 +3320,20 @@ class _IssueDetailState extends State<_IssueDetail> {
       _PrimaryButton(
         label: l10n.transition,
         icon: TrackStateIconGlyph.gitBranch,
-        onPressed: canUseWriteActions ? () {} : null,
+        onPressed: canUseWriteActions
+            ? () => _openEditDialog(workflowOnly: true)
+            : null,
       ),
       _IssueDetailActionButton(
         label: l10n.createChildIssue,
         onPressed: widget.viewModel.isSaving ? null : widget.onCreateChildIssue,
       ),
-      if (_isEditing)
-        _IssueDetailActionButton(
-          label: l10n.save,
-          emphasized: true,
-          onPressed: canUseWriteActions ? _saveDescription : null,
-        )
-      else
-        _IssueDetailActionButton(
-          label: l10n.edit,
-          onPressed: canUseWriteActions
-              ? () {
-                  setState(() {
-                    _isEditing = true;
-                    _descriptionController.text = issue.description;
-                  });
-                }
-              : null,
-        ),
-      if (_isEditing)
-        _IssueDetailActionButton(
-          label: l10n.cancel,
-          onPressed: widget.viewModel.isSaving
-              ? null
-              : () {
-                  setState(() {
-                    _isEditing = false;
-                    _descriptionController.text = issue.description;
-                  });
-                },
-        ),
+      _IssueDetailActionButton(
+        label: l10n.edit,
+        onPressed: canUseWriteActions
+            ? () => _openEditDialog(workflowOnly: false)
+            : null,
+      ),
     ];
     return _SurfaceCard(
       semanticLabel: '${l10n.issueDetail} ${issue.key}',
@@ -4481,6 +4428,7 @@ class _DropdownCreateField extends StatelessWidget {
     this.value,
     this.enabled = true,
     this.hintText,
+    this.helperText,
     this.errorText,
   });
 
@@ -4488,6 +4436,7 @@ class _DropdownCreateField extends StatelessWidget {
   final String? value;
   final bool enabled;
   final String? hintText;
+  final String? helperText;
   final String? errorText;
   final List<DropdownMenuItem<String>> items;
   final ValueChanged<String?>? onChanged;
@@ -4505,6 +4454,7 @@ class _DropdownCreateField extends StatelessWidget {
         decoration: InputDecoration(
           labelText: label,
           hintText: hintText,
+          helperText: helperText,
           errorText: errorText,
         ),
       ),
@@ -4531,6 +4481,53 @@ class _ReadOnlyCreateField extends StatelessWidget {
       child: InputDecorator(
         decoration: InputDecoration(labelText: label, helperText: helperText),
         child: Text(value),
+      ),
+    );
+  }
+}
+
+class _SelectableChipField extends StatelessWidget {
+  const _SelectableChipField({
+    required this.label,
+    required this.options,
+    required this.selectedValues,
+    required this.onToggle,
+    this.enabled = true,
+  });
+
+  final String label;
+  final List<TrackStateConfigEntry> options;
+  final List<String> selectedValues;
+  final ValueChanged<String> onToggle;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: label,
+      container: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: Theme.of(context).textTheme.labelMedium),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final option in options)
+                FilterChip(
+                  label: Text(option.label()),
+                  selected: selectedValues.any(
+                    (value) =>
+                        _canonicalConfigId(value) ==
+                        _canonicalConfigId(option.id),
+                  ),
+                  onSelected: enabled ? (_) => onToggle(option.id) : null,
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -5147,6 +5144,676 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
       },
     );
   }
+}
+
+class _IssueEditDialog extends StatefulWidget {
+  const _IssueEditDialog({
+    required this.issue,
+    required this.viewModel,
+    required this.workflowOnly,
+  });
+
+  final TrackStateIssue issue;
+  final TrackerViewModel viewModel;
+  final bool workflowOnly;
+
+  @override
+  State<_IssueEditDialog> createState() => _IssueEditDialogState();
+}
+
+class _IssueEditDialogState extends State<_IssueEditDialog> {
+  late final TextEditingController _summaryController;
+  late final TextEditingController _descriptionController;
+  late final TextEditingController _assigneeController;
+  late final TextEditingController _labelEntryController;
+  late String _selectedPriorityId;
+  late final List<String> _labels;
+  late final List<String> _components;
+  late final List<String> _fixVersions;
+  String? _selectedParentKey;
+  String? _selectedEpicKey;
+  String? _selectedTransitionStatusId;
+  String? _selectedResolutionId;
+  List<TrackStateConfigEntry> _transitionOptions = const [];
+  bool _loadingTransitions = true;
+  bool _didAttemptSubmit = false;
+
+  bool get _isEpicType =>
+      _canonicalConfigId(widget.issue.issueTypeId) == 'epic';
+
+  bool get _isSubtaskType =>
+      _canonicalConfigId(widget.issue.issueTypeId) == 'subtask';
+
+  @override
+  void initState() {
+    super.initState();
+    _summaryController = TextEditingController(text: widget.issue.summary);
+    _descriptionController = TextEditingController(
+      text: widget.issue.description,
+    );
+    _assigneeController = TextEditingController(text: widget.issue.assignee);
+    _labelEntryController = TextEditingController();
+    _selectedPriorityId = widget.issue.priorityId;
+    _labels = [...widget.issue.labels];
+    _components = [...widget.issue.components];
+    _fixVersions = [...widget.issue.fixVersionIds];
+    _selectedParentKey = widget.issue.parentKey;
+    _selectedEpicKey = widget.issue.epicKey;
+    _loadTransitions();
+  }
+
+  @override
+  void dispose() {
+    _summaryController.dispose();
+    _descriptionController.dispose();
+    _assigneeController.dispose();
+    _labelEntryController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadTransitions() async {
+    final transitions = await widget.viewModel.availableWorkflowTransitions(
+      widget.issue,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _transitionOptions = transitions;
+      _loadingTransitions = false;
+    });
+  }
+
+  TrackStateIssue? _issueByKey(String? key) =>
+      widget.viewModel.issues.where((issue) => issue.key == key).firstOrNull;
+
+  String? _derivedEpicKey() {
+    if (!_isSubtaskType) {
+      return null;
+    }
+    return _issueByKey(_selectedParentKey)?.epicKey;
+  }
+
+  List<TrackStateIssue> _availableParentOptions() {
+    final currentRoot = _issueRoot(widget.issue.storagePath);
+    return [
+      for (final issue in widget.viewModel.issues)
+        if (!issue.isEpic &&
+            !issue.isArchived &&
+            issue.key != widget.issue.key &&
+            !issue.storagePath.startsWith('$currentRoot/'))
+          issue,
+    ]..sort((left, right) => left.key.compareTo(right.key));
+  }
+
+  void _commitLabels({bool commitRemainder = false}) {
+    final currentValue = _labelEntryController.text;
+    if (currentValue.trim().isEmpty) {
+      return;
+    }
+    final fragments = currentValue.split(',');
+    final remainder = commitRemainder ? '' : fragments.removeLast().trim();
+    final newLabels = [
+      for (final fragment in fragments)
+        if (fragment.trim().isNotEmpty) fragment.trim(),
+      if (commitRemainder && remainder.isNotEmpty) remainder,
+    ];
+    if (newLabels.isEmpty && remainder == _labelEntryController.text) {
+      return;
+    }
+    setState(() {
+      for (final label in newLabels) {
+        if (!_labels.contains(label)) {
+          _labels.add(label);
+        }
+      }
+      _labelEntryController.value = TextEditingValue(
+        text: commitRemainder ? '' : remainder,
+        selection: TextSelection.collapsed(
+          offset: commitRemainder ? 0 : remainder.length,
+        ),
+      );
+    });
+  }
+
+  void _toggleConfigSelection(List<String> values, String value) {
+    setState(() {
+      final index = values.indexWhere(
+        (existing) => _canonicalConfigId(existing) == _canonicalConfigId(value),
+      );
+      if (index == -1) {
+        values.add(value);
+      } else {
+        values.removeAt(index);
+      }
+    });
+  }
+
+  bool _requiresHierarchyConfirmation() {
+    if (_selectedParentKey == widget.issue.parentKey &&
+        _selectedEpicKey == widget.issue.epicKey) {
+      return false;
+    }
+    final currentRoot = _issueRoot(widget.issue.storagePath);
+    return widget.viewModel.issues.any(
+      (issue) =>
+          issue.key != widget.issue.key &&
+          issue.storagePath.startsWith('$currentRoot/'),
+    );
+  }
+
+  int _descendantCount() {
+    final currentRoot = _issueRoot(widget.issue.storagePath);
+    return widget.viewModel.issues
+        .where(
+          (issue) =>
+              issue.key != widget.issue.key &&
+              issue.storagePath.startsWith('$currentRoot/'),
+        )
+        .length;
+  }
+
+  Future<bool> _confirmHierarchyMove(AppLocalizations l10n) async {
+    if (!_requiresHierarchyConfirmation()) {
+      return true;
+    }
+    final descendantCount = _descendantCount();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(l10n.hierarchyChangeConfirmationTitle),
+          content: Text(
+            l10n.hierarchyChangeConfirmationMessage(descendantCount),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(l10n.confirmMove),
+            ),
+          ],
+        );
+      },
+    );
+    return confirmed ?? false;
+  }
+
+  Future<void> _submit() async {
+    setState(() {
+      _didAttemptSubmit = true;
+    });
+    _commitLabels(commitRemainder: true);
+    if (_summaryController.text.trim().isEmpty) {
+      return;
+    }
+    if (_isSubtaskType && _selectedParentKey == null) {
+      return;
+    }
+    final l10n = AppLocalizations.of(context)!;
+    final project = widget.viewModel.project;
+    final resolutionOptions =
+        project?.resolutionDefinitions ?? const <TrackStateConfigEntry>[];
+    final targetStatusIsDone =
+        _selectedTransitionStatusId != null &&
+        _canonicalConfigId(_selectedTransitionStatusId) == 'done';
+    final resolutionId = !targetStatusIsDone
+        ? null
+        : (_selectedResolutionId ??
+              (resolutionOptions.length == 1
+                  ? resolutionOptions.single.id
+                  : null));
+    if (targetStatusIsDone && resolutionId == null) {
+      return;
+    }
+    final confirmed = await _confirmHierarchyMove(l10n);
+    if (!confirmed) {
+      return;
+    }
+    final success = await widget.viewModel.saveIssueEdits(
+      widget.issue,
+      IssueEditRequest(
+        summary: _summaryController.text,
+        description: _descriptionController.text,
+        priorityId: _selectedPriorityId,
+        assignee: _assigneeController.text,
+        labels: _labels,
+        components: _components,
+        fixVersionIds: _fixVersions,
+        parentKey: _isSubtaskType ? _selectedParentKey : null,
+        epicKey: _isEpicType
+            ? null
+            : (_isSubtaskType
+                  ? _derivedEpicKey()
+                  : _emptyToNull(_selectedEpicKey)),
+        transitionStatusId: _selectedTransitionStatusId,
+        resolutionId: resolutionId,
+      ),
+    );
+    if (!mounted || !success) {
+      return;
+    }
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final project = widget.viewModel.project;
+    final issueTypeLabel =
+        project?.issueTypeLabel(
+          widget.issue.issueTypeId,
+          locale: project.defaultLocale,
+        ) ??
+        widget.issue.issueType.label;
+    final summaryLabel = _projectFieldLabel(
+      project,
+      'summary',
+      fallback: 'Summary',
+    );
+    final priorityLabel = _projectFieldLabel(
+      project,
+      'priority',
+      fallback: l10n.priority,
+    );
+    final assigneeLabel = _projectFieldLabel(
+      project,
+      'assignee',
+      fallback: l10n.assignee,
+    );
+    final labelsLabel = _projectFieldLabel(
+      project,
+      'labels',
+      fallback: l10n.labels,
+    );
+    final parentLabel = _projectFieldLabel(
+      project,
+      'parent',
+      fallback: l10n.parent,
+    );
+    final epicLabel = _projectFieldLabel(project, 'epic', fallback: l10n.epic);
+    final componentsLabel = _projectFieldLabel(
+      project,
+      'components',
+      fallback: l10n.components,
+    );
+    final fixVersionsLabel = _projectFieldLabel(
+      project,
+      'fixVersions',
+      fallback: l10n.fixVersions,
+    );
+    final resolutionLabel = _projectFieldLabel(
+      project,
+      'resolution',
+      fallback: l10n.resolution,
+    );
+    final parentOptions = _availableParentOptions();
+    final epicOptions = _epicOptions(widget.viewModel);
+    final priorityOptions =
+        project?.priorityDefinitions ?? const <TrackStateConfigEntry>[];
+    final componentOptions =
+        project?.componentDefinitions ?? const <TrackStateConfigEntry>[];
+    final versionOptions =
+        project?.versionDefinitions ?? const <TrackStateConfigEntry>[];
+    final resolutionOptions =
+        project?.resolutionDefinitions ?? const <TrackStateConfigEntry>[];
+    final derivedEpic = _issueByKey(_derivedEpicKey());
+    final showResolution =
+        _selectedTransitionStatusId != null &&
+        _canonicalConfigId(_selectedTransitionStatusId) == 'done' &&
+        resolutionOptions.length > 1;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 980;
+        final horizontalInset = isCompact ? 16.0 : 24.0;
+        final verticalInset = isCompact ? 16.0 : 24.0;
+        final availableWidth = math.max(
+          0.0,
+          constraints.maxWidth - (horizontalInset * 2),
+        );
+        final availableHeight = math.max(
+          0.0,
+          constraints.maxHeight - (verticalInset * 2),
+        );
+        final surfaceWidth = isCompact
+            ? availableWidth
+            : math.min(620.0, availableWidth);
+
+        return Dialog(
+          alignment: isCompact ? Alignment.topCenter : Alignment.centerRight,
+          insetPadding: EdgeInsets.symmetric(
+            horizontal: horizontalInset,
+            vertical: verticalInset,
+          ),
+          child: SizedBox(
+            width: surfaceWidth,
+            height: availableHeight,
+            child: ListenableBuilder(
+              listenable: widget.viewModel,
+              builder: (context, _) {
+                final canEditFields =
+                    !widget.viewModel.hasBlockedWriteAccess &&
+                    !widget.viewModel.isSaving;
+                return _SurfaceCard(
+                  semanticLabel: widget.workflowOnly
+                      ? l10n.transitionIssue
+                      : l10n.editIssue,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (widget.viewModel.message != null) ...[
+                                _MessageBanner(
+                                  message: widget.viewModel.message!,
+                                  onDismiss: widget.viewModel.dismissMessage,
+                                ),
+                                const SizedBox(height: 12),
+                              ],
+                              _SectionTitle(
+                                widget.workflowOnly
+                                    ? l10n.transitionIssue
+                                    : l10n.editIssue,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                '${widget.issue.key} · $issueTypeLabel',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              const SizedBox(height: 12),
+                              _ReadOnlyCreateField(
+                                label: l10n.currentStatus,
+                                value:
+                                    project?.statusLabel(
+                                      widget.issue.statusId,
+                                      locale: project.defaultLocale,
+                                    ) ??
+                                    widget.issue.status.label,
+                              ),
+                              const SizedBox(height: 12),
+                              _DropdownCreateField(
+                                label: l10n.status,
+                                value: _selectedTransitionStatusId,
+                                enabled: canEditFields && !_loadingTransitions,
+                                hintText: _transitionOptions.isEmpty
+                                    ? l10n.noTransitionsAvailable
+                                    : l10n.optional,
+                                helperText: l10n.statusTransitionHelper,
+                                items: [
+                                  for (final option in _transitionOptions)
+                                    DropdownMenuItem<String>(
+                                      value: option.id,
+                                      child: Text(
+                                        option.label(project?.defaultLocale),
+                                      ),
+                                    ),
+                                ],
+                                onChanged: (value) {
+                                  setState(() {
+                                    _selectedTransitionStatusId = value;
+                                    _selectedResolutionId =
+                                        _canonicalConfigId(value) != 'done'
+                                        ? null
+                                        : (resolutionOptions.length == 1
+                                              ? resolutionOptions.single.id
+                                              : _selectedResolutionId);
+                                  });
+                                },
+                              ),
+                              if (showResolution) ...[
+                                const SizedBox(height: 12),
+                                _DropdownCreateField(
+                                  label: resolutionLabel,
+                                  value: _selectedResolutionId,
+                                  enabled: canEditFields,
+                                  errorText:
+                                      _didAttemptSubmit &&
+                                          _selectedResolutionId == null
+                                      ? l10n.resolutionRequired
+                                      : null,
+                                  items: [
+                                    for (final option in resolutionOptions)
+                                      DropdownMenuItem<String>(
+                                        value: option.id,
+                                        child: Text(
+                                          option.label(project?.defaultLocale),
+                                        ),
+                                      ),
+                                  ],
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _selectedResolutionId = value;
+                                    });
+                                  },
+                                ),
+                              ],
+                              const SizedBox(height: 20),
+                              Semantics(
+                                label: summaryLabel,
+                                textField: true,
+                                child: TextField(
+                                  controller: _summaryController,
+                                  enabled: canEditFields,
+                                  decoration: InputDecoration(
+                                    labelText: summaryLabel,
+                                    errorText:
+                                        _didAttemptSubmit &&
+                                            _summaryController.text
+                                                .trim()
+                                                .isEmpty
+                                        ? l10n.summaryRequired
+                                        : null,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Semantics(
+                                label: l10n.description,
+                                textField: true,
+                                child: TextField(
+                                  controller: _descriptionController,
+                                  minLines: 4,
+                                  maxLines: null,
+                                  enabled: canEditFields,
+                                  decoration: InputDecoration(
+                                    labelText: l10n.description,
+                                    alignLabelWithHint: true,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              _DropdownCreateField(
+                                label: priorityLabel,
+                                value: _selectedPriorityId,
+                                enabled: canEditFields,
+                                items: [
+                                  for (final option in priorityOptions)
+                                    DropdownMenuItem<String>(
+                                      value: option.id,
+                                      child: Text(
+                                        option.label(project?.defaultLocale),
+                                      ),
+                                    ),
+                                ],
+                                onChanged: (value) {
+                                  if (value == null) {
+                                    return;
+                                  }
+                                  setState(() {
+                                    _selectedPriorityId = value;
+                                  });
+                                },
+                              ),
+                              const SizedBox(height: 12),
+                              Semantics(
+                                label: assigneeLabel,
+                                textField: true,
+                                child: TextField(
+                                  controller: _assigneeController,
+                                  enabled: canEditFields,
+                                  decoration: InputDecoration(
+                                    labelText: assigneeLabel,
+                                    hintText: l10n.unassigned,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              _LabelTokenField(
+                                label: labelsLabel,
+                                controller: _labelEntryController,
+                                labels: _labels,
+                                enabled: canEditFields,
+                                helperText: l10n.labelsTokenHelper,
+                                onChanged: (_) => _commitLabels(),
+                                onSubmitted: (_) =>
+                                    _commitLabels(commitRemainder: true),
+                                onRemove: (label) {
+                                  setState(() {
+                                    _labels.remove(label);
+                                  });
+                                },
+                              ),
+                              const SizedBox(height: 16),
+                              _SelectableChipField(
+                                label: componentsLabel,
+                                options: componentOptions,
+                                selectedValues: _components,
+                                enabled: canEditFields,
+                                onToggle: (value) =>
+                                    _toggleConfigSelection(_components, value),
+                              ),
+                              const SizedBox(height: 16),
+                              _SelectableChipField(
+                                label: fixVersionsLabel,
+                                options: versionOptions,
+                                selectedValues: _fixVersions,
+                                enabled: canEditFields,
+                                onToggle: (value) =>
+                                    _toggleConfigSelection(_fixVersions, value),
+                              ),
+                              if (!_isEpicType && !_isSubtaskType) ...[
+                                const SizedBox(height: 16),
+                                _DropdownCreateField(
+                                  label: epicLabel,
+                                  value: _selectedEpicKey ?? '',
+                                  enabled: canEditFields,
+                                  items: [
+                                    DropdownMenuItem<String>(
+                                      value: '',
+                                      child: Text(l10n.noEpic),
+                                    ),
+                                    for (final option in epicOptions)
+                                      DropdownMenuItem<String>(
+                                        value: option.key,
+                                        child: Text(
+                                          '${option.key} · ${option.summary}',
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                  ],
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _selectedEpicKey = _emptyToNull(value);
+                                    });
+                                  },
+                                ),
+                              ],
+                              if (_isSubtaskType) ...[
+                                const SizedBox(height: 16),
+                                _DropdownCreateField(
+                                  label: parentLabel,
+                                  value: _selectedParentKey,
+                                  enabled: canEditFields,
+                                  hintText: parentOptions.isEmpty
+                                      ? l10n.noEligibleParents
+                                      : null,
+                                  errorText:
+                                      _didAttemptSubmit &&
+                                          _selectedParentKey == null
+                                      ? l10n.subTaskParentRequired
+                                      : null,
+                                  items: [
+                                    for (final option in parentOptions)
+                                      DropdownMenuItem<String>(
+                                        value: option.key,
+                                        child: Text(
+                                          '${option.key} · ${option.summary}',
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                  ],
+                                  onChanged: parentOptions.isEmpty
+                                      ? null
+                                      : (value) {
+                                          setState(() {
+                                            _selectedParentKey = value;
+                                          });
+                                        },
+                                ),
+                                const SizedBox(height: 12),
+                                _ReadOnlyCreateField(
+                                  label: epicLabel,
+                                  value: derivedEpic == null
+                                      ? l10n.derivedFromParent
+                                      : '${derivedEpic.key} · ${derivedEpic.summary}',
+                                  helperText: l10n.epicDerivedFromParent,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _IssueDetailActionButton(
+                            label: l10n.save,
+                            emphasized: true,
+                            onPressed: canEditFields ? _submit : null,
+                          ),
+                          _IssueDetailActionButton(
+                            label: l10n.cancel,
+                            onPressed: widget.viewModel.isSaving
+                                ? null
+                                : () => Navigator.of(context).pop(),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+String _issueRoot(String storagePath) {
+  if (storagePath.endsWith('/main.md')) {
+    return storagePath.substring(0, storagePath.length - '/main.md'.length);
+  }
+  final lastSeparator = storagePath.lastIndexOf('/');
+  if (lastSeparator == -1) {
+    return storagePath;
+  }
+  return storagePath.substring(0, lastSeparator);
+}
+
+String? _emptyToNull(String? value) {
+  final trimmed = value?.trim() ?? '';
+  return trimmed.isEmpty ? null : trimmed;
 }
 
 class _NavButton extends StatelessWidget {

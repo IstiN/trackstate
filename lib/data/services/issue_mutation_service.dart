@@ -444,6 +444,58 @@ class IssueMutationService {
     }
   }
 
+  Future<IssueMutationResult<List<TrackStateConfigEntry>>>
+  availableTransitions({required String issueKey}) async {
+    const operation = 'available-transitions';
+    final providerRepository = _providerRepository;
+    if (providerRepository == null) {
+      return _unsupported(operation: operation, issueKey: issueKey);
+    }
+
+    try {
+      final resolution = await _resolveIssue(
+        providerRepository,
+        issueKey,
+        operation,
+      );
+      if (resolution.failure != null) {
+        return IssueMutationResult.failure(
+          operation: operation,
+          issueKey: issueKey,
+          failure: resolution.failure!,
+        );
+      }
+
+      final snapshot = resolution.snapshot!;
+      final issue = resolution.issue!;
+      final provider = providerRepository.providerAdapter;
+      final writeBranch = await provider.resolveWriteBranch();
+      final workflow = await _loadWorkflow(
+        provider: provider,
+        issue: issue,
+        project: snapshot.project,
+        ref: writeBranch,
+      );
+      final transitions = snapshot.project.statusDefinitions
+          .where(
+            (status) =>
+                _isTransitionAllowed(workflow, issue.statusId, status.id),
+          )
+          .toList(growable: false);
+      return IssueMutationResult.success(
+        operation: operation,
+        issueKey: issueKey,
+        value: transitions,
+      );
+    } catch (error) {
+      return _mapError<List<TrackStateConfigEntry>>(
+        operation: operation,
+        issueKey: issueKey,
+        error: error,
+      );
+    }
+  }
+
   Future<IssueMutationResult<TrackStateIssue>> transitionIssue({
     required String issueKey,
     required String status,
