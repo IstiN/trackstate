@@ -1,13 +1,16 @@
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
+import '../../core/interfaces/issue_attachment_metadata_loader.dart';
 import '../../core/models/issue_attachment_metadata_observation.dart';
 
-class IssueAttachmentMetadataRepositoryService {
+class IssueAttachmentMetadataRepositoryService
+    implements IssueAttachmentMetadataLoader {
   const IssueAttachmentMetadataRepositoryService({required this.repository});
 
   final TrackStateRepository repository;
 
+  @override
   Future<List<IssueAttachmentMetadataObservation>> loadAttachmentMetadata(
     String issueKey,
   ) async {

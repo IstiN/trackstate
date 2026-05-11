@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../components/services/issue_attachment_metadata_repository_service.dart';
+import '../../core/interfaces/issue_attachment_metadata_loader.dart';
 import '../../core/models/issue_attachment_metadata_observation.dart';
 import 'support/ts310_attachment_metadata_fixture.dart';
 
@@ -13,9 +13,8 @@ void main() {
       Ts310AttachmentMetadataFixture? fixture;
       try {
         fixture = await Ts310AttachmentMetadataFixture.create();
-        final service = IssueAttachmentMetadataRepositoryService(
-          repository: fixture.repository,
-        );
+        final IssueAttachmentMetadataLoader service =
+            fixture.attachmentMetadataLoader;
 
         final attachments = await service.loadAttachmentMetadata(
           Ts310AttachmentMetadataFixture.issueKey,
@@ -127,6 +126,16 @@ void main() {
               'Actual: ${standardAttachment.sizeBytes}\n'
               'Observed contract: $standardContract',
         );
+        expect(
+          standardAttachment.storagePath,
+          Ts310AttachmentMetadataFixture.standardAttachmentPath,
+          reason:
+              'Step 1 failed: the standard attachment storagePath did not match '
+              'the seeded attachment path.\nExpected: '
+              '${Ts310AttachmentMetadataFixture.standardAttachmentPath}\nActual: '
+              '${standardAttachment.storagePath}\nObserved contract: '
+              '$standardContract',
+        );
 
         expect(
           lfsAttachment.revisionOrOid,
@@ -154,30 +163,40 @@ void main() {
               '${Ts310AttachmentMetadataFixture.expectedLfsSizeBytes}\nActual: '
               '${lfsAttachment.sizeBytes}\nObserved contract: $lfsContract',
         );
+        expect(
+          lfsAttachment.storagePath,
+          Ts310AttachmentMetadataFixture.lfsAttachmentPath,
+          reason:
+              'Step 1 failed: the LFS-tracked attachment storagePath did not '
+              'match the seeded attachment path.\nExpected: '
+              '${Ts310AttachmentMetadataFixture.lfsAttachmentPath}\nActual: '
+              '${lfsAttachment.storagePath}\nObserved contract: $lfsContract',
+        );
 
         final visibleContract = jsonEncode(
           attachments
               .map((attachment) => attachment.toMap())
               .toList(growable: false),
         );
-        expect(
-          visibleContract,
-          allOf(
-            contains(Ts310AttachmentMetadataFixture.standardAttachmentName),
-            contains(expectedStandardBlobSha),
-            contains('"sizeBytes":${fixture.expectedStandardSizeBytes}'),
-            contains(Ts310AttachmentMetadataFixture.lfsAttachmentName),
-            contains(Ts310AttachmentMetadataFixture.expectedLfsOid),
-            contains(
-              '"sizeBytes":${Ts310AttachmentMetadataFixture.expectedLfsSizeBytes}',
-            ),
-          ),
-          reason:
-              'Human-style verification failed: the observable attachment metadata '
-              'contract a client would read did not visibly show the expected names, '
-              'revisionOrOid values, and file sizes.\nObserved payload: '
-              '$visibleContract',
-        );
+        for (final expectedVisibleValue in <String>[
+          Ts310AttachmentMetadataFixture.standardAttachmentName,
+          expectedStandardBlobSha,
+          '"sizeBytes":${fixture.expectedStandardSizeBytes}',
+          Ts310AttachmentMetadataFixture.standardAttachmentPath,
+          Ts310AttachmentMetadataFixture.lfsAttachmentName,
+          Ts310AttachmentMetadataFixture.expectedLfsOid,
+          '"sizeBytes":${Ts310AttachmentMetadataFixture.expectedLfsSizeBytes}',
+          Ts310AttachmentMetadataFixture.lfsAttachmentPath,
+        ]) {
+          expect(
+            visibleContract,
+            contains(expectedVisibleValue),
+            reason:
+                'Human-style verification failed: the observable attachment '
+                'metadata contract a client would read did not visibly show '
+                '$expectedVisibleValue.\nObserved payload: $visibleContract',
+          );
+        }
       } finally {
         await fixture?.dispose();
       }

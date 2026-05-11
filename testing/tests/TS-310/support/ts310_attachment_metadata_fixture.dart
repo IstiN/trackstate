@@ -3,6 +3,9 @@ import 'dart:io';
 
 import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 
+import '../../../components/services/issue_attachment_metadata_repository_service.dart';
+import '../../../core/interfaces/issue_attachment_metadata_loader.dart';
+
 class Ts310AttachmentMetadataFixture {
   Ts310AttachmentMetadataFixture._(this.repositoryDirectory);
 
@@ -42,6 +45,9 @@ size $expectedLfsSizeBytes
 
   LocalTrackStateRepository get repository =>
       LocalTrackStateRepository(repositoryPath: repositoryPath);
+
+  IssueAttachmentMetadataLoader get attachmentMetadataLoader =>
+      IssueAttachmentMetadataRepositoryService(repository: repository);
 
   int get expectedStandardSizeBytes =>
       utf8.encode(_standardAttachmentSvg).length;
