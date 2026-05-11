@@ -192,6 +192,20 @@ class TrackerMessage {
       );
 }
 
+class AttachmentUploadInspection {
+  const AttachmentUploadInspection({
+    required this.storagePath,
+    required this.resolvedName,
+    required this.isLfsTracked,
+    this.existingAttachment,
+  });
+
+  final String storagePath;
+  final String resolvedName;
+  final bool isLfsTracked;
+  final IssueAttachment? existingAttachment;
+}
+
 class TrackerViewModel extends ChangeNotifier {
   static const int _searchPageSize = 6;
 
@@ -277,9 +291,23 @@ class TrackerViewModel extends ChangeNotifier {
   bool get hasReadOnlySession {
     return hostedRepositoryAccessMode == HostedRepositoryAccessMode.readOnly;
   }
-  bool get hasBlockedWriteAccess => !usesLocalPersistence && switch (
-        exposesHostedAccessGates ? hostedRepositoryAccessMode : HostedRepositoryAccessMode.writable
-      ) {
+
+  bool get canUploadIssueAttachments {
+    if (usesLocalPersistence || !exposesHostedAccessGates) {
+      return true;
+    }
+    final session = providerSession;
+    return session != null &&
+        session.connectionState == ProviderConnectionState.connected &&
+        session.canWrite &&
+        session.canManageAttachments;
+  }
+
+  bool get hasBlockedWriteAccess =>
+      !usesLocalPersistence &&
+      switch (exposesHostedAccessGates
+          ? hostedRepositoryAccessMode
+          : HostedRepositoryAccessMode.writable) {
         HostedRepositoryAccessMode.disconnected ||
         HostedRepositoryAccessMode.readOnly => true,
         HostedRepositoryAccessMode.writable ||
@@ -288,7 +316,7 @@ class TrackerViewModel extends ChangeNotifier {
   bool get hasAttachmentUploadRestriction =>
       exposesHostedAccessGates &&
       hostedRepositoryAccessMode ==
-      HostedRepositoryAccessMode.attachmentRestricted;
+          HostedRepositoryAccessMode.attachmentRestricted;
 
   RepositoryAccessState get repositoryAccessState => usesLocalPersistence
       ? RepositoryAccessState.localGit
@@ -813,6 +841,89 @@ class TrackerViewModel extends ChangeNotifier {
       }
     } on Object catch (error) {
       _message = TrackerMessage.attachmentDownloadFailed(error);
+      notifyListeners();
+    }
+  }
+
+  Future<AttachmentUploadInspection> inspectIssueAttachmentUpload(
+    TrackStateIssue issue,
+    String name,
+  ) async {
+    final storagePath = _repository.resolveIssueAttachmentPath(issue, name);
+    IssueAttachment? existingAttachment;
+    for (final candidate in issue.attachments) {
+      if (candidate.storagePath == storagePath) {
+        existingAttachment = candidate;
+        break;
+      }
+    }
+    return AttachmentUploadInspection(
+      storagePath: storagePath,
+      resolvedName: storagePath.split('/').last,
+      isLfsTracked: await _repository.isIssueAttachmentLfsTracked(issue, name),
+      existingAttachment: existingAttachment,
+    );
+  }
+
+  Future<bool> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async {
+    if (_hostedWriteAccessException('upload attachments') case final error?) {
+      _message = TrackerMessage.issueSaveFailed(error);
+      notifyListeners();
+      return false;
+    }
+    if (!canUploadIssueAttachments) {
+      _message = TrackerMessage.issueSaveFailed(
+        const TrackStateRepositoryException(
+          'Attachment upload is unavailable in this repository session. Existing attachments remain available for download.',
+        ),
+      );
+      notifyListeners();
+      return false;
+    }
+    if (name.trim().isEmpty) {
+      _message = TrackerMessage.issueSaveFailed(
+        const TrackStateRepositoryException(
+          'Attachment name is required before uploading.',
+        ),
+      );
+      notifyListeners();
+      return false;
+    }
+    if (bytes.isEmpty) {
+      _message = TrackerMessage.issueSaveFailed(
+        const TrackStateRepositoryException(
+          'Attachment bytes are required before uploading.',
+        ),
+      );
+      notifyListeners();
+      return false;
+    }
+    _isSaving = true;
+    _message = null;
+    notifyListeners();
+    try {
+      final saved = await _repository.uploadIssueAttachment(
+        issue: issue,
+        name: name,
+        bytes: bytes,
+      );
+      _snapshot = await _repository.loadSnapshot();
+      _selectedIssue = _snapshot!.issues.firstWhere(
+        (current) => current.key == saved.key,
+        orElse: () => saved,
+      );
+      await _refreshSearchResultsAfterMutation();
+      _issueHistoryByKey.remove(issue.key);
+      return true;
+    } on Object catch (error) {
+      _message = TrackerMessage.issueSaveFailed(error);
+      return false;
+    } finally {
+      _isSaving = false;
       notifyListeners();
     }
   }
