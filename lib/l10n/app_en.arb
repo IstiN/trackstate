@@ -48,6 +48,7 @@
   "detail": "Detail",
   "comments": "Comments",
   "attachments": "Attachments",
+  "attachmentsDownloadOnlyMessage": "This repository session is download-only for Git LFS attachments.",
   "history": "History",
   "downloadAttachment": "Download {fileName}",
   "@downloadAttachment": {

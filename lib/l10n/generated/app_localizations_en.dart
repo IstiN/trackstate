@@ -117,6 +117,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get attachments => 'Attachments';
 
   @override
+  String get attachmentsDownloadOnlyMessage =>
+      'This repository session is download-only for Git LFS attachments.';
+
+  @override
   String get history => 'History';
 
   @override

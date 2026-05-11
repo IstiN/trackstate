@@ -304,6 +304,12 @@ abstract class AppLocalizations {
   /// **'Attachments'**
   String get attachments;
 
+  /// No description provided for @attachmentsDownloadOnlyMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This repository session is download-only for Git LFS attachments.'**
+  String get attachmentsDownloadOnlyMessage;
+
   /// No description provided for @history.
   ///
   /// In en, this message translates to:
