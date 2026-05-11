@@ -871,6 +871,11 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       await tester.pumpAndSettle();
       return true;
     }
+    if (label == 'History') {
+      await tester.tap(target.first, warnIfMissed: false);
+      await _pumpFrames();
+      return true;
+    }
     await tester.tap(target.first, warnIfMissed: false);
     await tester.pumpAndSettle();
     return true;
