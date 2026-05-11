@@ -90,6 +90,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     );
   }
 
+  Finder _labeledDropdownField(String label) =>
+      find.byWidgetPredicate((widget) {
+        return widget is DropdownButtonFormField<String> &&
+            widget.decoration.labelText == label;
+      }, description: 'dropdown field labeled $label');
+
+  Finder _readOnlyFieldScope(String label) => find.byWidgetPredicate((widget) {
+    return widget is Semantics &&
+        widget.properties.label == label &&
+        widget.properties.readOnly == true;
+  }, description: 'read-only field labeled $label');
+
   Finder get _jqlSearchPanel => find.byWidgetPredicate(
     (widget) => widget is Semantics && widget.properties.label == 'JQL Search',
     description: 'JQL Search panel',
@@ -628,6 +640,117 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Future<int> countLabeledTextFields(String label) async {
     await tester.pump();
     return _labeledTextField(label).evaluate().length;
+  }
+
+  @override
+  Future<bool> isDropdownFieldVisible(String label) async {
+    await tester.pump();
+    return _labeledDropdownField(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<int> countDropdownFields(String label) async {
+    await tester.pump();
+    return _labeledDropdownField(label).evaluate().length;
+  }
+
+  @override
+  Future<void> selectDropdownOption(
+    String label, {
+    required String optionText,
+  }) async {
+    await tester.pump();
+    final field = _labeledDropdownField(label);
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible dropdown field labeled "$label", but no matching '
+        'control was rendered.',
+      );
+    }
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    final option = find.text(optionText, findRichText: true);
+    if (option.evaluate().isEmpty) {
+      fail(
+        'Expected the "$label" dropdown to expose the option "$optionText", '
+        'but it was not visible after opening the menu.',
+      );
+    }
+    await tester.ensureVisible(option.last);
+    await tester.tap(option.last, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<String?> readDropdownFieldValue(String label) async {
+    await tester.pump();
+    final field = _labeledDropdownField(label);
+    if (field.evaluate().isEmpty) {
+      return null;
+    }
+    final dropdown = tester.widget<DropdownButtonFormField<String>>(
+      field.first,
+    );
+    final helperText = dropdown.decoration.helperText?.trim();
+    final hintText = dropdown.decoration.hintText?.trim();
+    for (final widget in tester.widgetList<Text>(
+      find.descendant(of: field.first, matching: find.byType(Text)),
+    )) {
+      final value = widget.data?.trim();
+      if (value == null ||
+          value.isEmpty ||
+          value == label ||
+          value == helperText ||
+          value == hintText) {
+        continue;
+      }
+      return value;
+    }
+    return null;
+  }
+
+  @override
+  Future<int> countReadOnlyFields(String label) async {
+    await tester.pump();
+    return _readOnlyFieldScope(label).evaluate().length;
+  }
+
+  @override
+  Future<String?> readReadOnlyFieldValue(String label) async {
+    await tester.pump();
+    final scope = _readOnlyFieldScope(label);
+    if (scope.evaluate().isEmpty) {
+      return null;
+    }
+
+    final decorator = find.descendant(
+      of: scope.first,
+      matching: find.byType(InputDecorator),
+    );
+    if (decorator.evaluate().isEmpty) {
+      fail(
+        'Expected the visible read-only field labeled "$label" to contain an '
+        'InputDecorator.',
+      );
+    }
+
+    final inputDecorator = tester.widget<InputDecorator>(decorator.first);
+    final helperText = inputDecorator.decoration.helperText?.trim();
+    for (final widget in tester.widgetList<Text>(
+      find.descendant(of: scope.first, matching: find.byType(Text)),
+    )) {
+      final value = widget.data?.trim();
+      if (value == null ||
+          value.isEmpty ||
+          value == label ||
+          value == helperText) {
+        continue;
+      }
+      return value;
+    }
+    return null;
   }
 
   @override
