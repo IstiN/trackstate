@@ -244,7 +244,6 @@ class LiveSetupRepositoryService:
         while collected and not collected[0].strip():
             collected.pop(0)
         return collected
-
     def _read_json(self, path: str):
         request = urllib.request.Request(
             f"https://api.github.com{path}",
