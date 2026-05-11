@@ -152,7 +152,14 @@ class LiveMultiViewRefreshPage:
     def change_priority(self, target_label: str) -> EditControlObservation:
         control = self.priority_control()
         if control.contains(target_label):
-            return control
+            raise AssertionError(
+                "Step 4 failed: the Edit issue surface already showed Priority = "
+                f"{target_label} before any mutation, so TS-401 cannot prove that a "
+                "fresh edit triggered the downstream refresh.\n"
+                f"Observed control label: {control.label}\n"
+                f"Observed control text: {control.text}\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
         options = self._open_focusable_dropdown(
             selector=self._button_selector,
             has_text="Priority",
@@ -176,6 +183,15 @@ class LiveMultiViewRefreshPage:
 
     def change_status_transition(self, target_label: str) -> EditControlObservation:
         control = self.status_control()
+        if control.contains(target_label):
+            raise AssertionError(
+                "Step 5 failed: the Edit issue surface already showed Status = "
+                f"{target_label} before any mutation, so TS-401 cannot prove that a "
+                "fresh workflow transition triggered the downstream refresh.\n"
+                f"Observed status control label: {control.label}\n"
+                f"Observed status helper text: {control.text}\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
         if control.contains("No workflow transitions available."):
             raise AssertionError(
                 "Step 5 failed: the Edit issue surface for DEMO-3 did not expose any "
@@ -194,8 +210,6 @@ class LiveMultiViewRefreshPage:
                 f"Observed status helper text: {control.text}\n"
                 f"Observed dialog text:\n{self.current_body_text()}",
             )
-        if control.contains(target_label):
-            return control
         options = self._open_focusable_dropdown(
             selector='flt-semantics[role="button"][aria-label*="Status"]',
             has_text=None,

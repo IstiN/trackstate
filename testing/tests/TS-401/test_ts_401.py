@@ -111,6 +111,11 @@ def main() -> None:
                 result["priority_control_before_edit"] = _control_payload(
                     initial_priority_control,
                 )
+                _assert_issue_starts_outside_target_state(
+                    issue_key=issue_fixture.key,
+                    initial_status_control=initial_status_control,
+                    initial_priority_control=initial_priority_control,
+                )
                 _record_step(
                     result,
                     step=3,
@@ -314,6 +319,35 @@ def _control_payload(control: EditControlObservation) -> dict[str, object]:
         "tabindex": control.tabindex,
         "expanded": control.expanded,
     }
+
+
+def _assert_issue_starts_outside_target_state(
+    *,
+    issue_key: str,
+    initial_status_control: EditControlObservation,
+    initial_priority_control: EditControlObservation,
+) -> None:
+    already_target_fields: list[str] = []
+    if initial_priority_control.contains(TARGET_PRIORITY_LABEL):
+        already_target_fields.append(
+            f"Priority = {TARGET_PRIORITY_LABEL} ({initial_priority_control.text})",
+        )
+    if initial_status_control.contains(TARGET_STATUS_LABEL):
+        already_target_fields.append(
+            f"Status = {TARGET_STATUS_LABEL} ({initial_status_control.text})",
+        )
+    if not already_target_fields:
+        return
+    raise AssertionError(
+        "Step 3 failed: the live edit dialog already opened with "
+        f"{issue_key} in the target state, so TS-401 cannot prove that a fresh edit "
+        "caused the downstream refresh.\n"
+        f"Already-target fields: {', '.join(already_target_fields)}\n"
+        f"Observed initial status label: {initial_status_control.label}\n"
+        f"Observed initial status text: {initial_status_control.text}\n"
+        f"Observed initial priority label: {initial_priority_control.label}\n"
+        f"Observed initial priority text: {initial_priority_control.text}",
+    )
 
 
 def _write_result_if_requested(payload: dict[str, object]) -> None:
