@@ -397,6 +397,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get mobilePreview => 'Mobile issue preview';
 
   @override
+  String get loading => 'Loading...';
+
+  @override
   String get noResults => 'No issues match this query';
 
   @override
