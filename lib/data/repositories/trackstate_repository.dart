@@ -137,6 +137,23 @@ class ProviderBackedTrackStateRepository
 
   TrackStateProviderAdapter get providerAdapter => _provider;
   ProviderSession? get session => _session;
+  TrackerSnapshot? get cachedSnapshot => _snapshot;
+
+  void replaceCachedState({
+    TrackerSnapshot? snapshot,
+    List<RepositoryTreeEntry>? tree,
+  }) {
+    if (snapshot != null) {
+      _snapshot = snapshot;
+    }
+    if (tree != null) {
+      _snapshotTree = tree;
+      _snapshotBlobPaths = tree
+          .where((entry) => entry.type == 'blob')
+          .map((entry) => entry.path)
+          .toSet();
+    }
+  }
 
   Future<void> _acquireDeleteMutationLock() async {
     if (!_deleteMutationInProgress) {

@@ -96,7 +96,7 @@ class ReactiveIssueDetailTrackStateRepository
 }
 
 class MutableIssueDetailTrackStateProvider
-    implements TrackStateProviderAdapter {
+    implements TrackStateProviderAdapter, RepositoryFileMutator {
   MutableIssueDetailTrackStateProvider({
     RepositoryPermission permission = const RepositoryPermission(
       canRead: true,
@@ -155,6 +155,46 @@ class MutableIssueDetailTrackStateProvider
   {"id": "assignee", "name": "Assignee", "type": "user", "required": false},
   {"id": "labels", "name": "Labels", "type": "array", "required": false}
 ]
+''',
+    'config/priorities.json': '''
+[
+  {"id": "highest", "name": "Highest"},
+  {"id": "high", "name": "High"},
+  {"id": "medium", "name": "Medium"}
+]
+''',
+    'TRACK/config/priorities.json': '''
+[
+  {"id": "highest", "name": "Highest"},
+  {"id": "high", "name": "High"},
+  {"id": "medium", "name": "Medium"}
+]
+''',
+    'config/workflows.json': '''
+{
+  "default": {
+    "name": "Default Workflow",
+    "statuses": ["todo", "in-progress", "in-review", "done"],
+    "transitions": [
+      {"id": "start", "name": "Start", "from": "todo", "to": "in-progress"},
+      {"id": "review", "name": "Review", "from": "in-progress", "to": "in-review"},
+      {"id": "finish", "name": "Finish", "from": "in-review", "to": "done"}
+    ]
+  }
+}
+''',
+    'TRACK/config/workflows.json': '''
+{
+  "default": {
+    "name": "Default Workflow",
+    "statuses": ["todo", "in-progress", "in-review", "done"],
+    "transitions": [
+      {"id": "start", "name": "Start", "from": "todo", "to": "in-progress"},
+      {"id": "review", "name": "Review", "from": "in-progress", "to": "in-review"},
+      {"id": "finish", "name": "Finish", "from": "in-review", "to": "done"}
+    ]
+  }
+}
 ''',
     '.trackstate/index/issues.json': '''
 [
@@ -294,18 +334,26 @@ Read and write tracker files through GitHub Contents API.
     required String ref,
   }) async {
     final binary = _binaryFiles[path];
-    if (binary == null) {
-      throw TrackStateProviderException(
-        'Missing attachment fixture for $path.',
+    if (binary != null) {
+      return RepositoryAttachment(
+        path: path,
+        bytes: binary,
+        revision: _revision,
+        declaredSizeBytes: binary.length,
+        lfsOid: _lfsTrackedPaths.contains(path) ? 'reactive-lfs-oid' : null,
       );
     }
-    return RepositoryAttachment(
-      path: path,
-      bytes: binary,
-      revision: _revision,
-      declaredSizeBytes: binary.length,
-      lfsOid: _lfsTrackedPaths.contains(path) ? 'reactive-lfs-oid' : null,
-    );
+    final text = _textFiles[path];
+    if (text != null) {
+      final bytes = Uint8List.fromList(text.codeUnits);
+      return RepositoryAttachment(
+        path: path,
+        bytes: bytes,
+        revision: _revision,
+        declaredSizeBytes: bytes.length,
+      );
+    }
+    throw TrackStateProviderException('Missing attachment fixture for $path.');
   }
 
   @override
@@ -341,12 +389,39 @@ Read and write tracker files through GitHub Contents API.
 
   @override
   Future<void> ensureCleanWorktree() async {}
+
+  @override
   Future<RepositoryWriteResult> writeTextFile(
     RepositoryWriteRequest request,
   ) async {
-    throw const TrackStateProviderException(
-      'TS-104 should not attempt to write issue files while verifying capability sync.',
-    );
+    _textFiles[request.path] = request.content;
+    return const RepositoryWriteResult(
+      path: '',
+      branch: '',
+      revision: _revision,
+    ).copyWith(path: request.path, branch: request.branch);
+  }
+
+  @override
+  Future<RepositoryCommitResult> applyFileChanges(
+    RepositoryFileChangeRequest request,
+  ) async {
+    for (final change in request.changes) {
+      switch (change) {
+        case RepositoryTextFileChange():
+          _textFiles[change.path] = change.content;
+        case RepositoryBinaryFileChange():
+          _binaryFiles[change.path] = Uint8List.fromList(change.bytes);
+        case RepositoryDeleteFileChange():
+          _textFiles.remove(change.path);
+          _binaryFiles.remove(change.path);
+      }
+    }
+    return const RepositoryCommitResult(
+      branch: '',
+      message: '',
+      revision: _revision,
+    ).copyWith(branch: request.branch, message: request.message);
   }
 
   @override
@@ -385,6 +460,34 @@ extension on RepositoryAttachmentWriteResult {
     return RepositoryAttachmentWriteResult(
       path: path ?? this.path,
       branch: branch ?? this.branch,
+      revision: revision ?? this.revision,
+    );
+  }
+}
+
+extension on RepositoryWriteResult {
+  RepositoryWriteResult copyWith({
+    String? path,
+    String? branch,
+    String? revision,
+  }) {
+    return RepositoryWriteResult(
+      path: path ?? this.path,
+      branch: branch ?? this.branch,
+      revision: revision ?? this.revision,
+    );
+  }
+}
+
+extension on RepositoryCommitResult {
+  RepositoryCommitResult copyWith({
+    String? branch,
+    String? message,
+    String? revision,
+  }) {
+    return RepositoryCommitResult(
+      branch: branch ?? this.branch,
+      message: message ?? this.message,
       revision: revision ?? this.revision,
     );
   }

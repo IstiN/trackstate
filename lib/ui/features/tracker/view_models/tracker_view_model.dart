@@ -287,6 +287,7 @@ class TrackerViewModel extends ChangeNotifier {
   RepositoryUser? _connectedUser;
   bool _isLoadingMoreSearchResults = false;
   bool _didAutoResumeStartupRecoveryAfterAuthentication = false;
+  bool _hasLoadedInitialSearchResults = false;
 
   TrackerSnapshot? get snapshot => _snapshot;
   TrackerSection get section => _section;
@@ -299,6 +300,14 @@ class TrackerViewModel extends ChangeNotifier {
   TrackStateIssue? get selectedIssue => _selectedIssue;
   TrackerSection? get issueDetailReturnSection => _issueDetailReturnSection;
   bool get isLoading => _isLoading;
+  bool get hasLoadedInitialSearchResults => _hasLoadedInitialSearchResults;
+  bool get hasPublishedBootstrapSnapshot => _snapshot != null;
+  bool get isInitialSearchLoading =>
+      _isLoading && !_hasLoadedInitialSearchResults;
+  bool get showsInitialBootstrapPlaceholders =>
+      hasPublishedBootstrapSnapshot && isInitialSearchLoading;
+  bool get shouldUseBootstrapSearchFallback =>
+      hasPublishedBootstrapSnapshot && !_hasLoadedInitialSearchResults;
   bool get isSaving => _isSaving;
   TrackerLoadState loadStateForDomain(TrackerDataDomain domain) =>
       _snapshot?.readiness.domainState(domain) ?? TrackerLoadState.loading;
@@ -417,6 +426,11 @@ class TrackerViewModel extends ChangeNotifier {
 
   Future<void> load() async {
     _isLoading = true;
+    _searchPage = const TrackStateIssueSearchPage.empty(
+      maxResults: _searchPageSize,
+    );
+    _searchResults = const [];
+    _hasLoadedInitialSearchResults = false;
     _message = null;
     _startupRecovery = null;
     _didAutoResumeStartupRecoveryAfterAuthentication = false;
@@ -1249,6 +1263,7 @@ class TrackerViewModel extends ChangeNotifier {
   void _applySearchPage(TrackStateIssueSearchPage page, {bool append = false}) {
     _searchPage = page;
     _searchResults = append ? [..._searchResults, ...page.issues] : page.issues;
+    _hasLoadedInitialSearchResults = true;
     if (_searchResults.isEmpty) {
       return;
     }
@@ -1609,6 +1624,7 @@ class TrackerViewModel extends ChangeNotifier {
       previousSelectedKey,
       snapshot.issues,
     );
+    notifyListeners();
     final searchPage = await _repository.searchIssuePage(
       _jql,
       maxResults: _searchPageSize,
