@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -299,7 +301,7 @@ class _TrackerHome extends StatelessWidget {
                               onApplyLocalGitConfiguration,
                         ),
                 ),
-                bottomNavigationBar: isCompact
+                bottomNavigationBar: isCompact && !isCreateIssueVisible
                     ? _BottomNavigation(viewModel: viewModel)
                     : null,
               );
@@ -543,11 +545,12 @@ class _TopBar extends StatelessWidget {
               size: 32,
               semanticLabel: l10n.appTitle,
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: Text(
                 l10n.appTitle,
                 style: Theme.of(context).textTheme.titleMedium,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ] else ...[
@@ -575,7 +578,7 @@ class _TopBar extends StatelessWidget {
               ),
             ),
           ],
-          const SizedBox(width: 12),
+          SizedBox(width: compact ? 8 : 12),
           if (compact)
             _IconButtonSurface(
               label: l10n.createIssue,
@@ -616,7 +619,7 @@ class _TopBar extends StatelessWidget {
             onPressed: viewModel.toggleTheme,
           ),
           const SizedBox(width: 8),
-          if (_hasVisibleProfileIdentity(viewModel)) ...[
+          if (_hasVisibleProfileIdentity(viewModel) && !compact) ...[
             ConstrainedBox(
               constraints: BoxConstraints(maxWidth: compact ? 160 : 240),
               child: Column(
@@ -658,12 +661,21 @@ class _TopBar extends StatelessWidget {
             ),
             const SizedBox(width: 8),
           ],
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: colors.primarySoft,
-            child: Text(
-              _profileInitials(l10n, viewModel),
-              style: TextStyle(color: colors.text, fontWeight: FontWeight.w700),
+          Semantics(
+            label: _profileDisplayName(viewModel),
+            image: true,
+            child: ExcludeSemantics(
+              child: CircleAvatar(
+                radius: 18,
+                backgroundColor: colors.primarySoft,
+                child: Text(
+                  _profileInitials(l10n, viewModel),
+                  style: TextStyle(
+                    color: colors.text,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
             ),
           ),
         ],
@@ -3016,8 +3028,8 @@ class _CreateIssueOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: compact ? Alignment.topCenter : Alignment.center,
+    return ColoredBox(
+      color: Colors.black.withValues(alpha: compact ? 0.18 : 0.12),
       child: child,
     );
   }
@@ -3250,232 +3262,254 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
         ? null
         : _defaultCreateStatus(project);
     final derivedEpic = _issueByKey(_derivedEpicKey());
-    return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: 620,
-          maxHeight: MediaQuery.sizeOf(context).height - 48,
-        ),
-        child: ListenableBuilder(
-          listenable: widget.viewModel,
-          builder: (context, _) {
-            final canSubmit =
-                !widget.viewModel.hasReadOnlySession &&
-                !widget.viewModel.isSaving;
-            return _SurfaceCard(
-              semanticLabel: l10n.createIssue,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _SectionTitle(l10n.createIssue),
-                    const SizedBox(height: 12),
-                    _DropdownCreateField(
-                      label: issueTypeLabel,
-                      value: _selectedIssueTypeId,
-                      enabled: !widget.viewModel.isSaving,
-                      items: [
-                        for (final option in issueTypeOptions)
-                          DropdownMenuItem<String>(
-                            value: option.id,
-                            child: Text(
-                              option.label(project?.defaultLocale),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: _applyIssueType,
-                    ),
-                    const SizedBox(height: 12),
-                    Semantics(
-                      label: summaryLabel,
-                      textField: true,
-                      child: TextField(
-                        controller: _summaryController,
-                        enabled: !widget.viewModel.isSaving,
-                        decoration: InputDecoration(labelText: summaryLabel),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Semantics(
-                      label: l10n.description,
-                      textField: true,
-                      child: TextField(
-                        controller: _descriptionController,
-                        minLines: 3,
-                        maxLines: null,
-                        enabled: !widget.viewModel.isSaving,
-                        decoration: InputDecoration(
-                          labelText: l10n.description,
-                          alignLabelWithHint: true,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _DropdownCreateField(
-                      label: priorityLabel,
-                      value: _selectedPriorityId,
-                      enabled: !widget.viewModel.isSaving,
-                      items: [
-                        for (final option in priorityOptions)
-                          DropdownMenuItem<String>(
-                            value: option.id,
-                            child: Text(
-                              option.label(project?.defaultLocale),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        setState(() {
-                          _selectedPriorityId = value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    _ReadOnlyCreateField(
-                      label: l10n.initialStatus,
-                      value:
-                          defaultStatus?.label(project?.defaultLocale) ??
-                          l10n.toDo,
-                    ),
-                    if (!_isEpicType && !_isSubtaskType) ...[
-                      const SizedBox(height: 12),
-                      _DropdownCreateField(
-                        label: epicLabel,
-                        value: _selectedEpicKey,
-                        enabled: !widget.viewModel.isSaving,
-                        hintText: l10n.optional,
-                        items: [
-                          for (final option in epicOptions)
-                            DropdownMenuItem<String>(
-                              value: option.key,
-                              child: Text(
-                                '${option.key} · ${option.summary}',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedEpicKey = value;
-                          });
-                        },
-                      ),
-                    ],
-                    if (_isSubtaskType) ...[
-                      const SizedBox(height: 12),
-                      _DropdownCreateField(
-                        label: parentLabel,
-                        value: _selectedParentKey,
-                        enabled: !widget.viewModel.isSaving,
-                        hintText: parentOptions.isEmpty
-                            ? l10n.noEligibleParents
-                            : null,
-                        errorText:
-                            _didAttemptSubmit && _selectedParentKey == null
-                            ? l10n.subTaskParentRequired
-                            : null,
-                        items: [
-                          for (final option in parentOptions)
-                            DropdownMenuItem<String>(
-                              value: option.key,
-                              child: Text(
-                                '${option.key} · ${option.summary}',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: parentOptions.isEmpty
-                            ? null
-                            : (value) {
-                                setState(() {
-                                  _selectedParentKey = value;
-                                });
-                              },
-                      ),
-                      const SizedBox(height: 12),
-                      _ReadOnlyCreateField(
-                        label: epicLabel,
-                        value: derivedEpic == null
-                            ? l10n.derivedFromParent
-                            : '${derivedEpic.key} · ${derivedEpic.summary}',
-                        helperText: l10n.epicDerivedFromParent,
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Semantics(
-                      label: assigneeLabel,
-                      textField: true,
-                      child: TextField(
-                        controller: _assigneeController,
-                        enabled: !widget.viewModel.isSaving,
-                        decoration: InputDecoration(labelText: assigneeLabel),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _LabelTokenField(
-                      label: labelsLabel,
-                      controller: _labelEntryController,
-                      labels: _labels,
-                      enabled: !widget.viewModel.isSaving,
-                      helperText: l10n.labelsTokenHelper,
-                      onChanged: (_) => _commitLabels(),
-                      onSubmitted: (_) => _commitLabels(commitRemainder: true),
-                      onRemove: (label) {
-                        setState(() {
-                          _labels.remove(label);
-                        });
-                      },
-                    ),
-                    for (final field in createFields) ...[
-                      const SizedBox(height: 12),
-                      Semantics(
-                        label: _createIssueFieldLabel(project, field),
-                        textField: true,
-                        child: TextField(
-                          key: ValueKey('create-field-${field.id}'),
-                          controller: _customFieldControllers[field.id],
-                          minLines: field.type == 'markdown' ? 3 : 1,
-                          maxLines: field.type == 'markdown' ? null : 1,
-                          enabled: !widget.viewModel.isSaving,
-                          decoration: InputDecoration(
-                            labelText: _createIssueFieldLabel(project, field),
-                            alignLabelWithHint: field.type == 'markdown',
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 980;
+        final horizontalInset = isCompact ? 16.0 : 24.0;
+        final verticalInset = isCompact ? 16.0 : 24.0;
+        final availableWidth = math.max(
+          0.0,
+          constraints.maxWidth - (horizontalInset * 2),
+        );
+        final availableHeight = math.max(
+          0.0,
+          constraints.maxHeight - (verticalInset * 2),
+        );
+        final surfaceWidth = isCompact
+            ? availableWidth
+            : math.min(620.0, availableWidth);
+
+        return Dialog(
+          alignment: isCompact ? Alignment.topCenter : Alignment.centerRight,
+          insetPadding: EdgeInsets.symmetric(
+            horizontal: horizontalInset,
+            vertical: verticalInset,
+          ),
+          child: SizedBox(
+            width: surfaceWidth,
+            height: availableHeight,
+            child: ListenableBuilder(
+              listenable: widget.viewModel,
+              builder: (context, _) {
+                final canSubmit =
+                    !widget.viewModel.hasReadOnlySession &&
+                    !widget.viewModel.isSaving;
+                return _SurfaceCard(
+                  semanticLabel: l10n.createIssue,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _IssueDetailActionButton(
-                          label: l10n.save,
-                          emphasized: true,
-                          onPressed: canSubmit ? _submitCreateIssue : null,
+                        _SectionTitle(l10n.createIssue),
+                        const SizedBox(height: 12),
+                        _DropdownCreateField(
+                          label: issueTypeLabel,
+                          value: _selectedIssueTypeId,
+                          enabled: !widget.viewModel.isSaving,
+                          items: [
+                            for (final option in issueTypeOptions)
+                              DropdownMenuItem<String>(
+                                value: option.id,
+                                child: Text(
+                                  option.label(project?.defaultLocale),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          onChanged: _applyIssueType,
                         ),
-                        _IssueDetailActionButton(
-                          label: l10n.cancel,
-                          onPressed: widget.viewModel.isSaving
-                              ? null
-                              : widget.onDismiss,
+                        const SizedBox(height: 12),
+                        Semantics(
+                          label: summaryLabel,
+                          textField: true,
+                          child: TextField(
+                            controller: _summaryController,
+                            enabled: !widget.viewModel.isSaving,
+                            decoration: InputDecoration(labelText: summaryLabel),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Semantics(
+                          label: l10n.description,
+                          textField: true,
+                          child: TextField(
+                            controller: _descriptionController,
+                            minLines: 3,
+                            maxLines: null,
+                            enabled: !widget.viewModel.isSaving,
+                            decoration: InputDecoration(
+                              labelText: l10n.description,
+                              alignLabelWithHint: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _DropdownCreateField(
+                          label: priorityLabel,
+                          value: _selectedPriorityId,
+                          enabled: !widget.viewModel.isSaving,
+                          items: [
+                            for (final option in priorityOptions)
+                              DropdownMenuItem<String>(
+                                value: option.id,
+                                child: Text(
+                                  option.label(project?.defaultLocale),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          onChanged: (value) {
+                            if (value == null) {
+                              return;
+                            }
+                            setState(() {
+                              _selectedPriorityId = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        _ReadOnlyCreateField(
+                          label: l10n.initialStatus,
+                          value:
+                              defaultStatus?.label(project?.defaultLocale) ??
+                              l10n.toDo,
+                        ),
+                        if (!_isEpicType && !_isSubtaskType) ...[
+                          const SizedBox(height: 12),
+                          _DropdownCreateField(
+                            label: epicLabel,
+                            value: _selectedEpicKey,
+                            enabled: !widget.viewModel.isSaving,
+                            hintText: l10n.optional,
+                            items: [
+                              for (final option in epicOptions)
+                                DropdownMenuItem<String>(
+                                  value: option.key,
+                                  child: Text(
+                                    '${option.key} · ${option.summary}',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: (value) {
+                              setState(() {
+                                _selectedEpicKey = value;
+                              });
+                            },
+                          ),
+                        ],
+                        if (_isSubtaskType) ...[
+                          const SizedBox(height: 12),
+                          _DropdownCreateField(
+                            label: parentLabel,
+                            value: _selectedParentKey,
+                            enabled: !widget.viewModel.isSaving,
+                            hintText: parentOptions.isEmpty
+                                ? l10n.noEligibleParents
+                                : null,
+                            errorText:
+                                _didAttemptSubmit && _selectedParentKey == null
+                                ? l10n.subTaskParentRequired
+                                : null,
+                            items: [
+                              for (final option in parentOptions)
+                                DropdownMenuItem<String>(
+                                  value: option.key,
+                                  child: Text(
+                                    '${option.key} · ${option.summary}',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: parentOptions.isEmpty
+                                ? null
+                                : (value) {
+                                    setState(() {
+                                      _selectedParentKey = value;
+                                    });
+                                  },
+                          ),
+                          const SizedBox(height: 12),
+                          _ReadOnlyCreateField(
+                            label: epicLabel,
+                            value: derivedEpic == null
+                                ? l10n.derivedFromParent
+                                : '${derivedEpic.key} · ${derivedEpic.summary}',
+                            helperText: l10n.epicDerivedFromParent,
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        Semantics(
+                          label: assigneeLabel,
+                          textField: true,
+                          child: TextField(
+                            controller: _assigneeController,
+                            enabled: !widget.viewModel.isSaving,
+                            decoration: InputDecoration(labelText: assigneeLabel),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _LabelTokenField(
+                          label: labelsLabel,
+                          controller: _labelEntryController,
+                          labels: _labels,
+                          enabled: !widget.viewModel.isSaving,
+                          helperText: l10n.labelsTokenHelper,
+                          onChanged: (_) => _commitLabels(),
+                          onSubmitted: (_) =>
+                              _commitLabels(commitRemainder: true),
+                          onRemove: (label) {
+                            setState(() {
+                              _labels.remove(label);
+                            });
+                          },
+                        ),
+                        for (final field in createFields) ...[
+                          const SizedBox(height: 12),
+                          Semantics(
+                            label: _createIssueFieldLabel(project, field),
+                            textField: true,
+                            child: TextField(
+                              key: ValueKey('create-field-${field.id}'),
+                              controller: _customFieldControllers[field.id],
+                              minLines: field.type == 'markdown' ? 3 : 1,
+                              maxLines: field.type == 'markdown' ? null : 1,
+                              enabled: !widget.viewModel.isSaving,
+                              decoration: InputDecoration(
+                                labelText: _createIssueFieldLabel(project, field),
+                                alignLabelWithHint: field.type == 'markdown',
+                              ),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _IssueDetailActionButton(
+                              label: l10n.save,
+                              emphasized: true,
+                              onPressed: canSubmit ? _submitCreateIssue : null,
+                            ),
+                            _IssueDetailActionButton(
+                              label: l10n.cancel,
+                              onPressed: widget.viewModel.isSaving
+                                  ? null
+                                  : widget.onDismiss,
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 }
