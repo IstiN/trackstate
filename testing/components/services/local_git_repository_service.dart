@@ -37,7 +37,8 @@ class LocalGitRepositoryService implements LocalGitRepositoryPort {
   }
 }
 
-class _InitialLoadDelayedTrackStateRepository implements TrackStateRepository {
+class _InitialLoadDelayedTrackStateRepository
+    implements TrackStateRepository, ProjectSettingsRepository {
   _InitialLoadDelayedTrackStateRepository(
     this._delegate, {
     required this.initialLoadDelay,
@@ -131,9 +132,15 @@ class _InitialLoadDelayedTrackStateRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
-  }) => _delegate.uploadIssueAttachment(
-    issue: issue,
-    name: name,
-    bytes: bytes,
-  );
+  }) => _delegate.uploadIssueAttachment(issue: issue, name: name, bytes: bytes);
+
+  @override
+  Future<TrackerSnapshot> saveProjectSettings(ProjectSettingsCatalog settings) {
+    if (_delegate case final ProjectSettingsRepository settingsRepository) {
+      return settingsRepository.saveProjectSettings(settings);
+    }
+    throw StateError(
+      'Delayed repository does not support project settings admin.',
+    );
+  }
 }
