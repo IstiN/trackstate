@@ -23,7 +23,10 @@ class CreateIssueAccessibilityScreen
   LocalTrackStateFixture? _fixture;
   String? _createIssueSection;
 
-  Future<void> launch() async {
+  Future<void> launch({
+    double? initialViewportWidth,
+    double? initialViewportHeight,
+  }) async {
     _fixture = await tester.runAsync(LocalTrackStateFixture.create);
     if (_fixture == null) {
       throw StateError('TS-307 fixture creation did not complete.');
@@ -31,6 +34,17 @@ class CreateIssueAccessibilityScreen
 
     await _app.pumpLocalGitApp(repositoryPath: _fixture!.repositoryPath);
     _app.expectLocalRuntimeChrome();
+    if (initialViewportWidth != null || initialViewportHeight != null) {
+      if (initialViewportWidth == null || initialViewportHeight == null) {
+        throw ArgumentError(
+          'Both initialViewportWidth and initialViewportHeight are required together.',
+        );
+      }
+      await _robot.resizeToViewport(
+        width: initialViewportWidth,
+        height: initialViewportHeight,
+      );
+    }
     _createIssueSection = await _app.openCreateIssueFlow();
     await _expectCreateIssueFormVisible();
     _robot.expectCreateIssueSurfaceVisible();
