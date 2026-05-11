@@ -288,6 +288,14 @@ class PlaywrightWebAppSession(WebAppSession):
             body_text=str(payload["bodyText"]),
         )
 
+    def evaluate(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+    ) -> object:
+        return self._page.evaluate(expression, arg)
+
     def active_element(self) -> FocusedElementObservation:
         payload = self._page.evaluate(
             """

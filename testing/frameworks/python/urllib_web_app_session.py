@@ -197,6 +197,19 @@ class UrllibWebAppSession(WebAppSession):
             "Reading element text is not supported by the urllib web session fallback."
         )
 
+    def wait_for_input_value(
+        self,
+        selector: str,
+        expected_value: str,
+        *,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        del selector, expected_value, index, timeout_ms
+        raise NotImplementedError(
+            "Input polling is not supported by the urllib web session fallback."
+        )
+
     def wait_for_count(
         self,
         selector: str,
@@ -234,17 +247,15 @@ class UrllibWebAppSession(WebAppSession):
             f"Timed out waiting for any expected text: {list(texts)}."
         )
 
-    def wait_for_input_value(
+    def evaluate(
         self,
-        selector: str,
-        expected_value: str,
+        expression: str,
         *,
-        index: int = 0,
-        timeout_ms: int = 30_000,
-    ) -> str:
-        del selector, expected_value, index, timeout_ms
+        arg: object | None = None,
+    ) -> object:
+        del expression, arg
         raise NotImplementedError(
-            "Input polling is not supported by the urllib web session fallback."
+            "DOM evaluation is not supported by the urllib web session fallback."
         )
 
     def active_element(self) -> FocusedElementObservation:
