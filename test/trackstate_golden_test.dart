@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -92,6 +93,31 @@ void main() {
     await expectLater(
       find.byType(TrackStateApp),
       matchesGoldenFile('goldens/search_pagination_desktop.png'),
+    );
+  });
+
+  testWidgets('hosted search loading desktop golden', (tester) async {
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+    await tester.pumpWidget(
+      TrackStateApp(
+        repository: _BootstrapLoadingRepository(
+          snapshot: _hostedBootstrapSnapshot(snapshot),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('JQL Search').first);
+    await tester.pump();
+
+    await expectLater(
+      find.byType(TrackStateApp),
+      matchesGoldenFile('goldens/hosted_search_loading_desktop.png'),
     );
   });
 
@@ -207,3 +233,84 @@ TrackerSnapshot _searchPaginationSnapshot() {
     issues: issues,
   );
 }
+
+class _BootstrapLoadingRepository extends DemoTrackStateRepository {
+  _BootstrapLoadingRepository({required TrackerSnapshot snapshot})
+    : _snapshot = snapshot;
+
+  final TrackerSnapshot _snapshot;
+  final Completer<TrackStateIssueSearchPage> _searchCompleter =
+      Completer<TrackStateIssueSearchPage>();
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => _searchCompleter.future;
+}
+
+TrackerSnapshot _hostedBootstrapSnapshot(TrackerSnapshot snapshot) {
+  return TrackerSnapshot(
+    project: snapshot.project,
+    issues: [for (final issue in snapshot.issues) _summaryOnlyIssue(issue)],
+    repositoryIndex: snapshot.repositoryIndex,
+    loadWarnings: snapshot.loadWarnings,
+    readiness: const TrackerBootstrapReadiness(
+      domainStates: {
+        TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+        TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
+        TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+        TrackerDataDomain.issueDetails: TrackerLoadState.partial,
+      },
+      sectionStates: {
+        TrackerSectionKey.dashboard: TrackerLoadState.ready,
+        TrackerSectionKey.board: TrackerLoadState.ready,
+        TrackerSectionKey.search: TrackerLoadState.partial,
+        TrackerSectionKey.hierarchy: TrackerLoadState.ready,
+        TrackerSectionKey.settings: TrackerLoadState.ready,
+      },
+    ),
+  );
+}
+
+TrackStateIssue _summaryOnlyIssue(TrackStateIssue issue) => TrackStateIssue(
+  key: issue.key,
+  project: issue.project,
+  issueType: issue.issueType,
+  issueTypeId: issue.issueTypeId,
+  status: issue.status,
+  statusId: issue.statusId,
+  priority: issue.priority,
+  priorityId: issue.priorityId,
+  summary: issue.summary,
+  description: '',
+  assignee: issue.assignee,
+  reporter: issue.reporter,
+  labels: issue.labels,
+  components: const [],
+  fixVersionIds: const [],
+  watchers: const [],
+  customFields: const {},
+  parentKey: issue.parentKey,
+  epicKey: issue.epicKey,
+  parentPath: issue.parentPath,
+  epicPath: issue.epicPath,
+  progress: issue.progress,
+  updatedLabel: issue.updatedLabel,
+  acceptanceCriteria: const [],
+  comments: const [],
+  links: const [],
+  attachments: const [],
+  isArchived: issue.isArchived,
+  hasDetailLoaded: false,
+  hasCommentsLoaded: false,
+  hasAttachmentsLoaded: false,
+  resolutionId: issue.resolutionId,
+  storagePath: issue.storagePath,
+  rawMarkdown: issue.rawMarkdown,
+);
