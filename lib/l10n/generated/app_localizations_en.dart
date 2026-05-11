@@ -118,7 +118,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get attachmentsDownloadOnlyMessage =>
-      'This repository session is download-only for Git LFS attachments.';
+      'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.';
+
+  @override
+  String get attachmentsAccessMessageDisconnected =>
+      'Connect GitHub with repository write access to enable Git-backed attachment changes. Existing attachments remain available for download.';
+
+  @override
+  String get attachmentsAccessMessageReadOnly =>
+      'This repository connection cannot push attachment changes. Existing attachments remain available for download.';
 
   @override
   String get history => 'History';
@@ -226,7 +234,41 @@ class AppLocalizationsEn extends AppLocalizations {
   String get repositoryAccessConnectGitHub => 'Connect GitHub';
 
   @override
+  String get repositoryAccessReadOnly => 'Read-only';
+
+  @override
+  String get repositoryAccessAttachmentsRestricted => 'Attachments limited';
+
+  @override
   String get repositoryAccessSettings => 'Repository access';
+
+  @override
+  String get repositoryAccessDisconnectedTitle =>
+      'GitHub write access is not connected';
+
+  @override
+  String get repositoryAccessDisconnectedMessage =>
+      'Create, edit, comment, and status changes stay read-only until you connect GitHub with a fine-grained token that has repository Contents write access. PAT is the default browser path.';
+
+  @override
+  String get repositoryAccessReadOnlyTitle =>
+      'This repository session is read-only';
+
+  @override
+  String get repositoryAccessReadOnlyMessage =>
+      'This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.';
+
+  @override
+  String get repositoryAccessAttachmentRestrictedTitle =>
+      'Attachments stay download-only in the browser';
+
+  @override
+  String get repositoryAccessAttachmentRestrictedMessage =>
+      'Issue edits and comments can continue, but attachment upload is unavailable in this browser session because Git LFS upload is not supported here yet.';
+
+  @override
+  String get repositoryAccessSettingsHint =>
+      'Settings is the canonical place to review repository access and reconnect safely.';
 
   @override
   String get repositoryPath => 'Repository Path';
@@ -385,6 +427,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get connectToken => 'Connect token';
+
+  @override
+  String get manageGitHubAccess => 'Manage GitHub access';
+
+  @override
+  String get openSettings => 'Open settings';
+
+  @override
+  String get reconnectWriteAccess => 'Reconnect for write access';
 
   @override
   String issueCount(int count) {

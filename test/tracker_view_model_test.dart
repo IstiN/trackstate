@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/data/services/issue_mutation_service.dart';
@@ -154,6 +155,106 @@ void main() {
             'Expected the view model to notify listeners when the active provider session becomes read-only.',
       );
       viewModel.dispose();
+    },
+  );
+
+  test(
+    'view model treats hosted browser mode as disconnected until GitHub auth is connected',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(),
+      );
+
+      await viewModel.load();
+
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.disconnected,
+      );
+      expect(viewModel.hasBlockedWriteAccess, isTrue);
+    },
+  );
+
+  test(
+    'view model reports attachment restrictions without blocking issue edits',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'limited-attachments',
+      });
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: false,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(
+          permission: attachmentRestrictedPermission,
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.attachmentRestricted,
+      );
+      expect(viewModel.hasBlockedWriteAccess, isFalse);
+      expect(viewModel.hasAttachmentUploadRestriction, isTrue);
+    },
+  );
+
+  test(
+    'view model blocks hosted create mutations until GitHub write access is available',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(),
+      );
+
+      await viewModel.load();
+      final success = await viewModel.createIssue(summary: 'Blocked write');
+
+      expect(success, isFalse);
+      expect(viewModel.message?.kind, TrackerMessageKind.issueSaveFailed);
+      expect(
+        viewModel.message?.error,
+        contains('Connect GitHub with repository Contents write access'),
+      );
+    },
+  );
+
+  test(
+    'view model blocks hosted comments when the repository session is read-only',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'read-only-token',
+      });
+      const readOnlyPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: false,
+        isAdmin: false,
+        canCreateBranch: false,
+        canManageAttachments: false,
+        canCheckCollaborators: false,
+      );
+      final repository = ReactiveIssueDetailTrackStateRepository(
+        permission: readOnlyPermission,
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final success = await viewModel.postIssueComment(
+        viewModel.selectedIssue!,
+        'Blocked comment',
+      );
+
+      expect(success, isFalse);
+      expect(viewModel.hostedRepositoryAccessMode, HostedRepositoryAccessMode.readOnly);
+      expect(viewModel.message?.kind, TrackerMessageKind.issueSaveFailed);
+      expect(viewModel.message?.error, contains('This repository session is read-only'));
     },
   );
 
