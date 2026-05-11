@@ -864,6 +864,7 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
     TrackerMessageKind.dataLoadFailed => l10n.trackerDataLoadFailed(
       message.error!,
     ),
+    TrackerMessageKind.searchFailed => l10n.searchFailed(message.error!),
     TrackerMessageKind.repositoryConfigFallback =>
       l10n.repositoryConfigFallback(message.error!),
     TrackerMessageKind.localGitTokensNotNeeded => l10n.localGitTokensNotNeeded,
@@ -1176,7 +1177,7 @@ class _SearchAndDetail extends StatelessWidget {
             Expanded(
               child: _ScreenHeading(
                 title: l10n.jqlSearch,
-                subtitle: l10n.issueCount(viewModel.searchResults.length),
+                subtitle: l10n.issueCount(viewModel.totalSearchResults),
               ),
             ),
           ],
@@ -1960,6 +1961,7 @@ class _IssueList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final colors = context.ts;
     return _SurfaceCard(
       semanticLabel: l10n.jqlSearch,
       child: Column(
@@ -1977,9 +1979,49 @@ class _IssueList extends StatelessWidget {
           const SizedBox(height: 12),
           if (viewModel.searchResults.isEmpty)
             Text(l10n.noResults)
-          else
+          else ...[
+            if (viewModel.searchResults.length < viewModel.totalSearchResults)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  l10n.showingResults(
+                    viewModel.searchResults.length,
+                    viewModel.totalSearchResults,
+                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelMedium?.copyWith(color: colors.muted),
+                ),
+              ),
             for (final issue in viewModel.searchResults)
               _IssueListRow(issue: issue, onSelect: viewModel.selectIssue),
+            if (viewModel.hasMoreSearchResults)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Semantics(
+                  button: true,
+                  label: l10n.loadMoreIssues,
+                  child: OutlinedButton(
+                    onPressed: viewModel.isLoadingMoreSearchResults
+                        ? null
+                        : viewModel.loadMoreSearchResults,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: colors.text,
+                      backgroundColor: colors.surface,
+                      side: BorderSide(color: colors.border),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                    ),
+                    child: Text(l10n.loadMore),
+                  ),
+                ),
+              ),
+          ],
         ],
       ),
     );
