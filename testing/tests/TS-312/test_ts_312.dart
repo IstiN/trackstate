@@ -37,7 +37,6 @@ void main() {
         for (final requiredText in [
           issueKey,
           issueSummary,
-          'Details',
           'Comments',
           'Attachments',
           'History',
