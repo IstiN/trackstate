@@ -296,6 +296,25 @@ class PlaywrightWebAppSession(WebAppSession):
     ) -> object:
         return self._page.evaluate(expression, arg)
 
+    def wait_for_function(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+        timeout_ms: int = 30_000,
+    ) -> object:
+        try:
+            wait_handle = self._page.wait_for_function(
+                expression,
+                arg=arg,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                "Timed out waiting for the page to satisfy a function condition.",
+            ) from error
+        return wait_handle.json_value()
+
     def active_element(self) -> FocusedElementObservation:
         payload = self._page.evaluate(
             """

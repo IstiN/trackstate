@@ -258,6 +258,18 @@ class UrllibWebAppSession(WebAppSession):
             "DOM evaluation is not supported by the urllib web session fallback."
         )
 
+    def wait_for_function(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+        timeout_ms: int = 30_000,
+    ) -> object:
+        del expression, arg, timeout_ms
+        raise NotImplementedError(
+            "Function-based DOM waits are not supported by the urllib web session fallback."
+        )
+
     def active_element(self) -> FocusedElementObservation:
         raise NotImplementedError(
             "Active-element inspection is not supported by the urllib web session fallback."
