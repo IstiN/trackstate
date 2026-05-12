@@ -148,6 +148,12 @@ def main() -> None:
                 result["comments_error_label"] = comments_error_label
                 result["comments_tab_after_failure"] = _tab_payload(failed_comments_tab)
                 result["blocked_comment_urls"] = list(outage_observation.blocked_urls)
+                result["failed_comment_path"] = outage_observation.failed_comment_path
+                blocked_comment_paths = _tracked_paths_for_urls(
+                    outage_observation,
+                    outage_observation.blocked_urls,
+                )
+                result["blocked_comment_paths"] = blocked_comment_paths
 
                 if not outage_observation.blocked_was_exercised:
                     raise AssertionError(
@@ -163,6 +169,14 @@ def main() -> None:
                             f"Missing fragment: {expected_fragment}\n"
                             f"Observed accessible label:\n{comments_error_label}",
                         )
+                if blocked_comment_paths != [outage_observation.failed_comment_path]:
+                    raise AssertionError(
+                        "Step 4 failed: the synthetic outage blocked more than the intended "
+                        "single Comments artifact.\n"
+                        f"Expected blocked paths: {[outage_observation.failed_comment_path]}\n"
+                        f"Observed blocked paths: {blocked_comment_paths}\n"
+                        f"Blocked URLs: {outage_observation.blocked_urls}",
+                    )
                 width_delta = failed_comments_tab.width - initial_comments_tab.width
                 result["comments_failure_width_delta"] = width_delta
                 if width_delta <= MIN_FAILURE_WIDTH_DELTA:
@@ -257,6 +271,11 @@ def main() -> None:
                 result["comments_tab_after_retry"] = _tab_payload(recovered_comments_tab)
                 result["comments_text_after_retry"] = recovered_comments_text
                 result["allowed_comment_urls"] = list(outage_observation.allowed_urls)
+                allowed_comment_paths = _tracked_paths_for_urls(
+                    outage_observation,
+                    outage_observation.allowed_urls,
+                )
+                result["allowed_comment_paths"] = allowed_comment_paths
                 result["remaining_comments_error_cards"] = remaining_error_cards
 
                 if remaining_error_cards != 0:
@@ -272,6 +291,14 @@ def main() -> None:
                         "seeded visible comment body.\n"
                         f"Expected visible comment: {EXPECTED_COMMENT_BODY}\n"
                         f"Observed body text:\n{recovered_comments_text}",
+                    )
+                if allowed_comment_paths != [outage_observation.failed_comment_path]:
+                    raise AssertionError(
+                        "Step 6 failed: Retry refetched more than the failed Comments "
+                        "artifact, so AC4 is not satisfied.\n"
+                        f"Expected retried paths: {[outage_observation.failed_comment_path]}\n"
+                        f"Observed retried paths: {allowed_comment_paths}\n"
+                        f"Allowed retry URLs: {outage_observation.allowed_urls}",
                     )
                 if recovered_comments_tab.width >= failed_comments_tab.width - MIN_FAILURE_WIDTH_DELTA:
                     raise AssertionError(
@@ -343,12 +370,31 @@ def _assert_preconditions(issue_fixture: LiveHostedIssueFixture) -> None:
             "Precondition failed: DEMO-2 does not contain any seeded comments in "
             f"{issue_fixture.path}.",
         )
+    if len(issue_fixture.comment_paths) < 2:
+        raise AssertionError(
+            "Precondition failed: TS-455 requires at least two seeded comment "
+            "artifacts so AC4 can prove Retry does not reload unaffected comments.\n"
+            f"Observed comment paths: {issue_fixture.comment_paths}",
+        )
     if EXPECTED_COMMENT_BODY not in issue_fixture.comment_bodies:
         raise AssertionError(
             "Precondition failed: DEMO-2 no longer exposes the expected seeded comment "
             "content needed for the Retry recovery check.\n"
             f"Observed comment bodies: {issue_fixture.comment_bodies}",
         )
+
+
+def _tracked_paths_for_urls(
+    observation: CommentsArtifactOutageObservation,
+    urls: list[str],
+) -> list[str]:
+    ordered_paths: list[str] = []
+    for url in urls:
+        tracked_path = observation.tracked_path_for_url(url)
+        if tracked_path is None or tracked_path in ordered_paths:
+            continue
+        ordered_paths.append(tracked_path)
+    return ordered_paths
 
 
 def _tab_payload(observation: TabChipObservation) -> dict[str, object]:
