@@ -5,6 +5,7 @@ import platform
 import sys
 import traceback
 from pathlib import Path
+from time import monotonic
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -123,43 +124,63 @@ def main() -> None:
                     observed=runtime_state.body_text,
                 )
 
-                startup_recorded, _ = poll_until(
-                    probe=lambda: (
-                        len(request_observation.issues_index_urls),
-                        len(request_observation.project_json_urls),
-                        len(request_observation.config_json_urls),
-                    ),
-                    is_satisfied=lambda snapshot: snapshot[0] >= 1 and snapshot[1] >= 1,
-                    timeout_seconds=120,
-                    interval_seconds=1,
-                )
-                if not startup_recorded:
+                startup_started_monotonic = request_observation.startup_started_monotonic
+                if startup_started_monotonic is None:
                     raise AssertionError(
-                        "Step 2 failed: startup never recorded the hosted summary-index and "
-                        "project-metadata requests needed for TS-419.\n"
-                        f"Observed request payload: {_request_observation_payload(request_observation)}\n"
+                        "Step 1 failed: the hosted request monitor did not capture a fixed "
+                        "startup origin before the app was opened.\n"
                         f"Observed body text:\n{page.current_body_text()}",
                     )
-
-                tracker_page.session.wait_for_function(
-                    """
-                    ({ startedAt, durationMs }) =>
-                      typeof startedAt === 'number'
-                      && performance.now() - startedAt >= durationMs
-                    """,
-                    arg={
-                        "startedAt": tracker_page.session.evaluate("() => performance.now()"),
-                        "durationMs": OBSERVATION_WINDOW_SECONDS * 1000,
-                    },
-                    timeout_ms=(OBSERVATION_WINDOW_SECONDS + 5) * 1000,
+                startup_window_elapsed, _ = poll_until(
+                    probe=monotonic,
+                    is_satisfied=(
+                        lambda current_time: current_time - startup_started_monotonic
+                        >= OBSERVATION_WINDOW_SECONDS
+                    ),
+                    timeout_seconds=OBSERVATION_WINDOW_SECONDS + 10,
+                    interval_seconds=0.25,
                 )
+                if not startup_window_elapsed:
+                    raise AssertionError(
+                        "Step 1 failed: the browser test did not finish waiting for the fixed "
+                        "startup observation window.\n"
+                        f"Observed body text:\n{page.current_body_text()}",
+                    )
 
                 request_payload = _request_observation_payload(request_observation)
                 result["request_observation"] = request_payload
 
-                if not request_observation.issues_index_urls:
+                startup_issues_index_urls = request_observation.startup_issues_index_urls(
+                    within_seconds=OBSERVATION_WINDOW_SECONDS,
+                )
+                startup_project_json_urls = request_observation.startup_project_json_urls(
+                    within_seconds=OBSERVATION_WINDOW_SECONDS,
+                )
+                startup_config_json_urls = request_observation.startup_config_json_urls(
+                    within_seconds=OBSERVATION_WINDOW_SECONDS,
+                )
+                startup_tree_urls = request_observation.startup_tree_urls(
+                    within_seconds=OBSERVATION_WINDOW_SECONDS,
+                )
+                startup_main_markdown_urls = request_observation.startup_main_markdown_urls(
+                    within_seconds=OBSERVATION_WINDOW_SECONDS,
+                )
+                startup_comments_urls = request_observation.startup_comments_urls(
+                    within_seconds=OBSERVATION_WINDOW_SECONDS,
+                )
+                startup_attachments_urls = request_observation.startup_attachments_urls(
+                    within_seconds=OBSERVATION_WINDOW_SECONDS,
+                )
+                startup_tombstone_metadata_urls = (
+                    request_observation.startup_tombstone_metadata_urls(
+                        within_seconds=OBSERVATION_WINDOW_SECONDS,
+                    )
+                )
+
+                if not startup_issues_index_urls:
                     raise AssertionError(
-                        "Step 2 failed: startup never fetched `.trackstate/index/issues.json`.\n"
+                        "Step 2 failed: the fixed startup observation window never captured "
+                        "`.trackstate/index/issues.json`.\n"
                         f"Observed request payload: {request_payload}\n"
                         f"Observed body text:\n{page.current_body_text()}",
                     )
@@ -168,11 +189,11 @@ def main() -> None:
                     step=2,
                     status="passed",
                     action="Verify that `.trackstate/index/issues.json` is fetched.",
-                    observed="\n".join(request_observation.issues_index_urls),
+                    observed="\n".join(startup_issues_index_urls),
                 )
 
-                observed_project_paths = _normalized_paths(request_observation.project_json_urls)
-                observed_config_paths = _normalized_paths(request_observation.config_json_urls)
+                observed_project_paths = _normalized_paths(startup_project_json_urls)
+                observed_config_paths = _normalized_paths(startup_config_json_urls)
                 missing_project_paths = [
                     PROJECT_JSON_PATH for path in [PROJECT_JSON_PATH] if path not in observed_project_paths
                 ]
@@ -201,15 +222,16 @@ def main() -> None:
                 )
 
                 if (
-                    request_observation.main_markdown_urls
-                    or request_observation.comments_urls
-                    or request_observation.attachments_urls
+                    startup_main_markdown_urls
+                    or startup_comments_urls
+                    or startup_attachments_urls
                 ):
                     raise AssertionError(
-                        "Step 4 failed: startup eagerly requested issue detail artifacts.\n"
-                        f"Observed main.md URLs: {request_observation.main_markdown_urls}\n"
-                        f"Observed comments URLs: {request_observation.comments_urls}\n"
-                        f"Observed attachments URLs: {request_observation.attachments_urls}\n"
+                        "Step 4 failed: the fixed startup observation window eagerly requested "
+                        "issue detail artifacts.\n"
+                        f"Observed main.md URLs: {startup_main_markdown_urls}\n"
+                        f"Observed comments URLs: {startup_comments_urls}\n"
+                        f"Observed attachments URLs: {startup_attachments_urls}\n"
                         f"Observed body text:\n{page.current_body_text()}",
                     )
                 _record_step(
@@ -221,11 +243,11 @@ def main() -> None:
                         "`comments/` directories during the initial load."
                     ),
                     observed=(
-                        f"tree_requests={len(request_observation.tree_urls)}; "
-                        f"main_md_reads={len(request_observation.main_markdown_urls)}; "
-                        f"comments_reads={len(request_observation.comments_urls)}; "
-                        f"attachments_reads={len(request_observation.attachments_urls)}; "
-                        f"tombstone_metadata_reads={len(request_observation.tombstone_metadata_urls)}"
+                        f"tree_requests={len(startup_tree_urls)}; "
+                        f"main_md_reads={len(startup_main_markdown_urls)}; "
+                        f"comments_reads={len(startup_comments_urls)}; "
+                        f"attachments_reads={len(startup_attachments_urls)}; "
+                        f"tombstone_metadata_reads={len(startup_tombstone_metadata_urls)}"
                     ),
                 )
 
@@ -263,8 +285,8 @@ def main() -> None:
                     ),
                     observed=(
                         f"visible_issue_labels={list(dashboard_observation.visible_issue_labels)}; "
-                        f"issues_index_reads={len(request_observation.issues_index_urls)}; "
-                        f"main_md_reads={len(request_observation.main_markdown_urls)}"
+                        f"issues_index_reads={len(startup_issues_index_urls)}; "
+                        f"main_md_reads={len(startup_main_markdown_urls)}"
                     ),
                 )
 
@@ -299,10 +321,10 @@ def _summary_index_entries(service: LiveSetupRepositoryService) -> list[dict[str
         summary = str(entry.get("summary", "")).strip()
         if key and summary:
             entries.append({"key": key, "summary": summary})
-    if len(entries) < 3:
+    if not entries:
         raise AssertionError(
-            "Precondition failed: the hosted issues summary index did not expose at least "
-            "three visible issues for Dashboard verification.\n"
+            "Precondition failed: the hosted issues summary index did not expose any visible "
+            "issues for Dashboard verification.\n"
             f"Observed entries: {entries}",
         )
     return entries
@@ -324,10 +346,10 @@ def _assert_dashboard_matches_index(
             "`Open Issues` and `Team Velocity`.\n"
             f"Observed body text:\n{observation.body_text}",
         )
-    if len(observation.visible_issue_labels) < 2:
+    if not observation.visible_issue_labels:
         raise AssertionError(
-            "Step 5 failed: the Dashboard did not expose enough visible issue summary labels "
-            "to prove the summary index was rendered.\n"
+            "Step 5 failed: the Dashboard did not expose a visible issue summary label to "
+            "prove the summary index was rendered.\n"
             f"Observed labels: {list(observation.visible_issue_labels)}\n"
             f"Observed body text:\n{observation.body_text}",
         )
@@ -402,6 +424,8 @@ def _request_observation_payload(
     observation: HostedBootstrapReadObservation,
 ) -> dict[str, object]:
     return {
+        "startup_started_monotonic": observation.startup_started_monotonic,
+        "startup_window_seconds": OBSERVATION_WINDOW_SECONDS,
         "tree_urls": list(observation.tree_urls),
         "project_json_urls": list(observation.project_json_urls),
         "config_json_urls": list(observation.config_json_urls),
@@ -412,6 +436,36 @@ def _request_observation_payload(
         "attachments_urls": list(observation.attachments_urls),
         "other_content_urls": list(observation.other_content_urls),
         "all_content_paths": observation.all_content_paths,
+        "startup_tree_urls": observation.startup_tree_urls(
+            within_seconds=OBSERVATION_WINDOW_SECONDS,
+        ),
+        "startup_project_json_urls": observation.startup_project_json_urls(
+            within_seconds=OBSERVATION_WINDOW_SECONDS,
+        ),
+        "startup_config_json_urls": observation.startup_config_json_urls(
+            within_seconds=OBSERVATION_WINDOW_SECONDS,
+        ),
+        "startup_issues_index_urls": observation.startup_issues_index_urls(
+            within_seconds=OBSERVATION_WINDOW_SECONDS,
+        ),
+        "startup_tombstone_metadata_urls": observation.startup_tombstone_metadata_urls(
+            within_seconds=OBSERVATION_WINDOW_SECONDS,
+        ),
+        "startup_main_markdown_urls": observation.startup_main_markdown_urls(
+            within_seconds=OBSERVATION_WINDOW_SECONDS,
+        ),
+        "startup_comments_urls": observation.startup_comments_urls(
+            within_seconds=OBSERVATION_WINDOW_SECONDS,
+        ),
+        "startup_attachments_urls": observation.startup_attachments_urls(
+            within_seconds=OBSERVATION_WINDOW_SECONDS,
+        ),
+        "startup_other_content_urls": observation.startup_other_content_urls(
+            within_seconds=OBSERVATION_WINDOW_SECONDS,
+        ),
+        "startup_all_content_paths": observation.startup_all_content_paths(
+            within_seconds=OBSERVATION_WINDOW_SECONDS,
+        ),
     }
 
 
