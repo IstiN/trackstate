@@ -1,0 +1,35 @@
+test_id: TS-381
+type: cli
+framework: python
+platform: local
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+notes:
+  - Executes the exact TS-381 local attachment upload command from a disposable TrackState repository.
+  - Verifies the JSON response exposes the expected canonical attachment metadata and that the uploaded file is physically stored under the issue attachments directory.
+runtime_inputs:
+  ticket_command: trackstate attachment upload --issue TS-22 --file sample.pdf --name "Spec Document" --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - upload
+    - --issue
+    - TS-22
+    - --file
+    - sample.pdf
+    - --name
+    - Spec Document
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-381 Project
+  issue_key: TS-22
+  issue_summary: CLI attachment upload fixture
+  source_file_name: sample.pdf
+  source_file_text: |
+    %PDF-1.4
+    TS-381 sample pdf
+  expected_issue_key: TS-22
+  expected_attachment_name: Spec Document
+  expected_media_type: application/pdf
