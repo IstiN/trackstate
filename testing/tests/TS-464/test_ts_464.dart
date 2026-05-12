@@ -87,24 +87,46 @@ void main() {
           );
         }
 
+        final localeCodeSelectorVisible = await screen.isDropdownFieldVisible(
+          'Locale code',
+        );
         final localeCodeFieldVisible = await screen.isTextFieldVisible(
           'Locale code',
         );
-        if (!localeCodeFieldVisible) {
+        if (!localeCodeSelectorVisible && !localeCodeFieldVisible) {
           failures.add(
-            'Step 2 failed: the Add locale flow did not expose a visible Locale code field after tapping Add locale. '
+            'Step 2 failed: the Add locale flow did not expose a visible Locale code selector after tapping Add locale. '
             'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}.',
           );
         }
 
-        await screen.enterLabeledTextField('Locale code', text: 'fr');
-        final enteredLocaleCode = await screen.readLabeledTextFieldValue(
+        if (!localeCodeSelectorVisible) {
+          fail(
+            'Step 3 failed: the Add locale flow does not expose a validated Locale code list. '
+            'The ticket requires selecting "fr" from a validated locale-code list before confirmation, '
+            'but the production-visible dialog exposed only a free-text Locale code field. '
+            'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}.',
+          );
+        }
+
+        final localeCodeOptions = await screen.readDropdownOptions(
           'Locale code',
         );
-        if (enteredLocaleCode != 'fr') {
+        if (!localeCodeOptions.contains('fr')) {
+          fail(
+            'Step 3 failed: the validated Locale code list did not offer "fr". '
+            'Observed options: ${_formatSnapshot(localeCodeOptions)}.',
+          );
+        }
+
+        await screen.selectDropdownOption('Locale code', optionText: 'fr');
+        final selectedLocaleCode = await screen.readDropdownFieldValue(
+          'Locale code',
+        );
+        if (selectedLocaleCode != 'fr') {
           failures.add(
-            'Step 3 failed: the Add locale dialog did not keep the visible Locale code field value as "fr" before confirmation. '
-            'Observed value: "${enteredLocaleCode ?? '<missing>'}". Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}.',
+            'Step 3 failed: the Add locale dialog did not keep the validated Locale code selection as "fr" before confirmation. '
+            'Observed value: "${selectedLocaleCode ?? '<missing>'}". Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}.',
           );
         }
 
