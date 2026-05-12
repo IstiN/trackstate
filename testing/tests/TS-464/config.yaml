@@ -1,0 +1,8 @@
+test_id: TS-464
+type: ui
+framework: flutter_test
+platform: linux
+dependencies: []
+notes:
+  - Seeds a Local Git repository fixture with only the en locale configured.
+  - Verifies Settings > Locales can add fr through the visible dialog and immediately scaffold config/i18n/fr.json plus project.json supportedLocales without any extra hidden setup.
