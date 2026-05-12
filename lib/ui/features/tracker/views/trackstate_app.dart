@@ -2181,6 +2181,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
   ProjectSettingsCatalog? _draftSettings;
   String? _projectSignature;
   String? _selectedLocale;
+  final Map<String, FocusNode> _localeFocusNodes = {};
 
   @override
   void initState() {
@@ -2197,6 +2198,9 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
 
   @override
   void dispose() {
+    for (final focusNode in _localeFocusNodes.values) {
+      focusNode.dispose();
+    }
     _tabController.dispose();
     super.dispose();
   }
@@ -2231,6 +2235,9 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       _selectedLocale = locales.isEmpty ? null : locales.first;
     });
   }
+
+  FocusNode _localeFocusNode(String key) =>
+      _localeFocusNodes.putIfAbsent(key, FocusNode.new);
 
   Future<T?> _showSettingsEditor<T>({
     required String title,
@@ -2870,6 +2877,51 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     final canRemoveSelectedLocale =
         settings.effectiveSupportedLocales.length > 1 &&
         selectedLocale != settings.defaultLocale;
+    final statusFocusStart = 0;
+    final issueTypeFocusStart =
+        statusFocusStart + settings.statusDefinitions.length;
+    final fieldFocusStart =
+        issueTypeFocusStart + settings.issueTypeDefinitions.length;
+    final priorityFocusStart =
+        fieldFocusStart + settings.fieldDefinitions.length;
+    final componentFocusStart =
+        priorityFocusStart + settings.priorityDefinitions.length;
+    final versionFocusStart =
+        componentFocusStart + settings.componentDefinitions.length;
+    final resolutionFocusStart =
+        versionFocusStart + settings.versionDefinitions.length;
+    final orderedLocaleFieldKeys = <String>[
+      for (final entry in settings.statusDefinitions) 'status:${entry.id}',
+      for (final entry in settings.issueTypeDefinitions)
+        'issueType:${entry.id}',
+      for (final field in settings.fieldDefinitions) 'field:${field.id}',
+      for (final entry in settings.priorityDefinitions) 'priority:${entry.id}',
+      for (final entry in settings.componentDefinitions)
+        'component:${entry.id}',
+      for (final entry in settings.versionDefinitions) 'version:${entry.id}',
+      for (final entry in settings.resolutionDefinitions)
+        'resolution:${entry.id}',
+    ];
+
+    FocusNode focusNodeForEntry(String entryKey) =>
+        _localeFocusNode('$selectedLocale:$entryKey');
+
+    FocusNode? previousFocusNodeForEntry(String entryKey) {
+      final index = orderedLocaleFieldKeys.indexOf(entryKey);
+      if (index <= 0) {
+        return null;
+      }
+      return focusNodeForEntry(orderedLocaleFieldKeys[index - 1]);
+    }
+
+    FocusNode? nextFocusNodeForEntry(String entryKey) {
+      final index = orderedLocaleFieldKeys.indexOf(entryKey);
+      if (index == -1 || index + 1 >= orderedLocaleFieldKeys.length) {
+        return null;
+      }
+      return focusNodeForEntry(orderedLocaleFieldKeys[index + 1]);
+    }
+
     final localeCatalogTitles = <String>[
       l10n.statuses,
       l10n.issueTypes,
@@ -2882,10 +2934,15 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     final localeSections = <Widget>[
       _LocaleCatalogSection(
         title: l10n.statuses,
+        scopeKey: 'status',
         locale: selectedLocale,
         defaultLocale: settings.defaultLocale,
         entries: settings.statusDefinitions,
         canEdit: canEdit,
+        focusStartOrder: statusFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('status:$id'),
+        previousFocusNodeForId: (id) => previousFocusNodeForEntry('status:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('status:$id'),
         onChanged: (id, value) {
           _updateConfigEntryTranslation(
             entries: settings.statusDefinitions,
@@ -2898,80 +2955,17 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         },
       ),
       _LocaleCatalogSection(
-        title: l10n.priorities,
-        locale: selectedLocale,
-        defaultLocale: settings.defaultLocale,
-        entries: settings.priorityDefinitions,
-        canEdit: canEdit,
-        onChanged: (id, value) {
-          _updateConfigEntryTranslation(
-            entries: settings.priorityDefinitions,
-            onChanged: (entries) =>
-                _replaceDraft(settings.copyWith(priorityDefinitions: entries)),
-            id: id,
-            locale: selectedLocale,
-            value: value,
-          );
-        },
-      ),
-      _LocaleCatalogSection(
-        title: l10n.versions,
-        locale: selectedLocale,
-        defaultLocale: settings.defaultLocale,
-        entries: settings.versionDefinitions,
-        canEdit: canEdit,
-        onChanged: (id, value) {
-          _updateConfigEntryTranslation(
-            entries: settings.versionDefinitions,
-            onChanged: (entries) =>
-                _replaceDraft(settings.copyWith(versionDefinitions: entries)),
-            id: id,
-            locale: selectedLocale,
-            value: value,
-          );
-        },
-      ),
-      _LocaleCatalogSection(
-        title: l10n.resolutions,
-        locale: selectedLocale,
-        defaultLocale: settings.defaultLocale,
-        entries: settings.resolutionDefinitions,
-        canEdit: canEdit,
-        onChanged: (id, value) {
-          _updateConfigEntryTranslation(
-            entries: settings.resolutionDefinitions,
-            onChanged: (entries) => _replaceDraft(
-              settings.copyWith(resolutionDefinitions: entries),
-            ),
-            id: id,
-            locale: selectedLocale,
-            value: value,
-          );
-        },
-      ),
-      _LocaleCatalogSection(
-        title: l10n.components,
-        locale: selectedLocale,
-        defaultLocale: settings.defaultLocale,
-        entries: settings.componentDefinitions,
-        canEdit: canEdit,
-        onChanged: (id, value) {
-          _updateConfigEntryTranslation(
-            entries: settings.componentDefinitions,
-            onChanged: (entries) =>
-                _replaceDraft(settings.copyWith(componentDefinitions: entries)),
-            id: id,
-            locale: selectedLocale,
-            value: value,
-          );
-        },
-      ),
-      _LocaleCatalogSection(
         title: l10n.issueTypes,
+        scopeKey: 'issueType',
         locale: selectedLocale,
         defaultLocale: settings.defaultLocale,
         entries: settings.issueTypeDefinitions,
         canEdit: canEdit,
+        focusStartOrder: issueTypeFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('issueType:$id'),
+        previousFocusNodeForId: (id) =>
+            previousFocusNodeForEntry('issueType:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('issueType:$id'),
         onChanged: (id, value) {
           _updateConfigEntryTranslation(
             entries: settings.issueTypeDefinitions,
@@ -2985,15 +2979,113 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       ),
       _LocaleFieldCatalogSection(
         title: l10n.fields,
+        scopeKey: 'field',
         locale: selectedLocale,
         defaultLocale: settings.defaultLocale,
         fields: settings.fieldDefinitions,
         canEdit: canEdit,
+        focusStartOrder: fieldFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('field:$id'),
+        previousFocusNodeForId: (id) => previousFocusNodeForEntry('field:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('field:$id'),
         onChanged: (id, value) => _updateFieldTranslation(
           id: id,
           locale: selectedLocale,
           value: value,
         ),
+      ),
+      _LocaleCatalogSection(
+        title: l10n.priorities,
+        scopeKey: 'priority',
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.priorityDefinitions,
+        canEdit: canEdit,
+        focusStartOrder: priorityFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('priority:$id'),
+        previousFocusNodeForId: (id) =>
+            previousFocusNodeForEntry('priority:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('priority:$id'),
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.priorityDefinitions,
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(priorityDefinitions: entries)),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
+      ),
+      _LocaleCatalogSection(
+        title: l10n.components,
+        scopeKey: 'component',
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.componentDefinitions,
+        canEdit: canEdit,
+        focusStartOrder: componentFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('component:$id'),
+        previousFocusNodeForId: (id) =>
+            previousFocusNodeForEntry('component:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('component:$id'),
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.componentDefinitions,
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(componentDefinitions: entries)),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
+      ),
+      _LocaleCatalogSection(
+        title: l10n.versions,
+        scopeKey: 'version',
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.versionDefinitions,
+        canEdit: canEdit,
+        focusStartOrder: versionFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('version:$id'),
+        previousFocusNodeForId: (id) =>
+            previousFocusNodeForEntry('version:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('version:$id'),
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.versionDefinitions,
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(versionDefinitions: entries)),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
+      ),
+      _LocaleCatalogSection(
+        title: l10n.resolutions,
+        scopeKey: 'resolution',
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.resolutionDefinitions,
+        canEdit: canEdit,
+        focusStartOrder: resolutionFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('resolution:$id'),
+        previousFocusNodeForId: (id) =>
+            previousFocusNodeForEntry('resolution:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('resolution:$id'),
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.resolutionDefinitions,
+            onChanged: (entries) => _replaceDraft(
+              settings.copyWith(resolutionDefinitions: entries),
+            ),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
       ),
     ];
     return LayoutBuilder(
@@ -3081,13 +3173,16 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
               ],
             ),
             const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                for (final section in localeSections)
-                  SizedBox(width: sectionWidth, child: section),
-              ],
+            FocusTraversalGroup(
+              policy: OrderedTraversalPolicy(),
+              child: Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  for (final section in localeSections)
+                    SizedBox(width: sectionWidth, child: section),
+                ],
+              ),
             ),
           ],
         );
@@ -3415,18 +3510,28 @@ class _LocaleCodeEditorState extends State<_LocaleCodeEditor> {
 class _LocaleCatalogSection extends StatelessWidget {
   const _LocaleCatalogSection({
     required this.title,
+    required this.scopeKey,
     required this.locale,
     required this.defaultLocale,
     required this.entries,
     required this.canEdit,
+    required this.focusStartOrder,
+    required this.focusNodeForId,
+    required this.previousFocusNodeForId,
+    required this.nextFocusNodeForId,
     required this.onChanged,
   });
 
   final String title;
+  final String scopeKey;
   final String locale;
   final String defaultLocale;
   final List<TrackStateConfigEntry> entries;
   final bool canEdit;
+  final int focusStartOrder;
+  final FocusNode Function(String id) focusNodeForId;
+  final FocusNode? Function(String id) previousFocusNodeForId;
+  final FocusNode? Function(String id) nextFocusNodeForId;
   final void Function(String id, String value) onChanged;
 
   @override
@@ -3438,18 +3543,23 @@ class _LocaleCatalogSection extends StatelessWidget {
         children: [
           _SectionTitle(title),
           const SizedBox(height: 8),
-          for (final entry in entries) ...[
+          for (var index = 0; index < entries.length; index++) ...[
             _LocaleEntryRow(
-              label: entry.name,
-              id: entry.id,
+              label: entries[index].name,
+              scopeKey: scopeKey,
+              id: entries[index].id,
               locale: locale,
-              translation: entry.localizedLabels[locale] ?? '',
-              resolution: entry.resolveLabel(
+              translation: entries[index].localizedLabels[locale] ?? '',
+              resolution: entries[index].resolveLabel(
                 locale: locale,
                 defaultLocale: defaultLocale,
               ),
               canEdit: canEdit,
-              onChanged: (value) => onChanged(entry.id, value),
+              focusOrder: (focusStartOrder + index).toDouble(),
+              focusNode: focusNodeForId(entries[index].id),
+              previousFocusNode: previousFocusNodeForId(entries[index].id),
+              nextFocusNode: nextFocusNodeForId(entries[index].id),
+              onChanged: (value) => onChanged(entries[index].id, value),
             ),
             const SizedBox(height: 12),
           ],
@@ -3462,18 +3572,28 @@ class _LocaleCatalogSection extends StatelessWidget {
 class _LocaleFieldCatalogSection extends StatelessWidget {
   const _LocaleFieldCatalogSection({
     required this.title,
+    required this.scopeKey,
     required this.locale,
     required this.defaultLocale,
     required this.fields,
     required this.canEdit,
+    required this.focusStartOrder,
+    required this.focusNodeForId,
+    required this.previousFocusNodeForId,
+    required this.nextFocusNodeForId,
     required this.onChanged,
   });
 
   final String title;
+  final String scopeKey;
   final String locale;
   final String defaultLocale;
   final List<TrackStateFieldDefinition> fields;
   final bool canEdit;
+  final int focusStartOrder;
+  final FocusNode Function(String id) focusNodeForId;
+  final FocusNode? Function(String id) previousFocusNodeForId;
+  final FocusNode? Function(String id) nextFocusNodeForId;
   final void Function(String id, String value) onChanged;
 
   @override
@@ -3485,18 +3605,23 @@ class _LocaleFieldCatalogSection extends StatelessWidget {
         children: [
           _SectionTitle(title),
           const SizedBox(height: 8),
-          for (final field in fields) ...[
+          for (var index = 0; index < fields.length; index++) ...[
             _LocaleEntryRow(
-              label: field.name,
-              id: field.id,
+              label: fields[index].name,
+              scopeKey: scopeKey,
+              id: fields[index].id,
               locale: locale,
-              translation: field.localizedLabels[locale] ?? '',
-              resolution: field.resolveLabel(
+              translation: fields[index].localizedLabels[locale] ?? '',
+              resolution: fields[index].resolveLabel(
                 locale: locale,
                 defaultLocale: defaultLocale,
               ),
               canEdit: canEdit,
-              onChanged: (value) => onChanged(field.id, value),
+              focusOrder: (focusStartOrder + index).toDouble(),
+              focusNode: focusNodeForId(fields[index].id),
+              previousFocusNode: previousFocusNodeForId(fields[index].id),
+              nextFocusNode: nextFocusNodeForId(fields[index].id),
+              onChanged: (value) => onChanged(fields[index].id, value),
             ),
             const SizedBox(height: 12),
           ],
@@ -3509,38 +3634,66 @@ class _LocaleFieldCatalogSection extends StatelessWidget {
 class _LocaleEntryRow extends StatelessWidget {
   const _LocaleEntryRow({
     required this.label,
+    required this.scopeKey,
     required this.id,
     required this.locale,
     required this.translation,
     required this.resolution,
     required this.canEdit,
+    required this.focusOrder,
+    required this.focusNode,
+    required this.previousFocusNode,
+    required this.nextFocusNode,
     required this.onChanged,
   });
 
   final String label;
+  final String scopeKey;
   final String id;
   final String locale;
   final String translation;
   final LocalizedLabelResolution resolution;
   final bool canEdit;
+  final double focusOrder;
+  final FocusNode focusNode;
+  final FocusNode? previousFocusNode;
+  final FocusNode? nextFocusNode;
   final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
+    final warningMessage = l10n.translationFallbackWarning(
+      resolution.displayName,
+      resolution.fallbackLocale ?? l10n.canonicalNameFallback,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('$label · $id', style: Theme.of(context).textTheme.labelLarge),
         const SizedBox(height: 8),
-        KeyedSubtree(
-          key: ValueKey('locale-$locale-$id'),
-          child: _SettingsTextField(
-            label: l10n.translationField(locale),
-            initialValue: translation,
-            enabled: canEdit,
-            onChanged: onChanged,
+        CallbackShortcuts(
+          bindings: <ShortcutActivator, VoidCallback>{
+            if (nextFocusNode != null)
+              const SingleActivator(LogicalKeyboardKey.tab): () =>
+                  nextFocusNode!.requestFocus(),
+            if (previousFocusNode != null)
+              const SingleActivator(LogicalKeyboardKey.tab, shift: true): () =>
+                  previousFocusNode!.requestFocus(),
+          },
+          child: FocusTraversalOrder(
+            order: NumericFocusOrder(focusOrder),
+            child: KeyedSubtree(
+              key: ValueKey('locale-$locale-$scopeKey-$id'),
+              child: _SettingsTextField(
+                label: l10n.translationField(locale),
+                initialValue: translation,
+                focusNode: focusNode,
+                enabled: canEdit,
+                onChanged: onChanged,
+              ),
+            ),
           ),
         ),
         if (resolution.usedFallback) ...[
@@ -3552,14 +3705,25 @@ class _LocaleEntryRow extends StatelessWidget {
               borderRadius: BorderRadius.circular(999),
               border: Border.all(color: colors.warning),
             ),
-            child: Text(
-              l10n.translationFallbackWarning(
-                resolution.displayName,
-                resolution.fallbackLocale ?? l10n.canonicalNameFallback,
-              ),
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: colors.warning),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.warning_amber_rounded,
+                  size: 16,
+                  color: colors.warning,
+                  semanticLabel: warningMessage,
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    warningMessage,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: colors.warning),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
