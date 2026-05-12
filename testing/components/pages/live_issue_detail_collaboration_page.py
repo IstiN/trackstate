@@ -28,6 +28,16 @@ class TabChipObservation:
     height: float
 
 
+@dataclass(frozen=True)
+class AttachmentSelectionSummaryObservation:
+    summary_text: str
+    file_name_visible: bool
+    size_label: str
+    upload_enabled: bool
+    summary_top: float
+    first_attachment_top: float | None
+
+
 class LiveIssueDetailCollaborationPage:
     _button_selector = 'flt-semantics[role="button"]'
     _tab_button_selector = 'flt-semantics[role="button"][aria-current]'
@@ -607,6 +617,160 @@ class LiveIssueDetailCollaborationPage:
         return self._session.wait_for_download_after_keypress(
             "Enter",
             timeout_ms=60_000,
+        )
+
+    def wait_for_attachment_picker_ready(self, *, timeout_ms: int = 60_000) -> None:
+        self._session.wait_for_function(
+            """
+            () => {
+              const trigger = document.querySelector(
+                'flt-semantics[aria-label="Choose attachment"] flt-semantics'
+              );
+              return !!trigger && trigger.getAttribute('aria-disabled') !== 'true';
+            }
+            """,
+            timeout_ms=timeout_ms,
+        )
+
+    def choose_attachment(self, file_path: str, *, timeout_ms: int = 30_000) -> None:
+        self.wait_for_attachment_picker_ready(timeout_ms=timeout_ms)
+        self._session.select_files_after_click(
+            'flt-semantics[aria-label="Choose attachment"]',
+            [file_path],
+            timeout_ms=timeout_ms,
+        )
+
+    def wait_for_attachment_selection_summary(
+        self,
+        *,
+        file_name: str,
+        timeout_ms: int = 60_000,
+    ) -> AttachmentSelectionSummaryObservation:
+        payload = self._session.wait_for_function(
+            """
+            ({ fileName }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const collectText = (element) => normalize(
+                [
+                  element?.getAttribute?.('aria-label') ?? '',
+                  element?.innerText ?? '',
+                  element?.textContent ?? '',
+                ].join(' ')
+              );
+              const visibleCandidates = Array.from(
+                document.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label]')
+              )
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    element,
+                    text: collectText(element),
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                  };
+                })
+                .filter((candidate) =>
+                  candidate.text.includes(fileName) &&
+                  candidate.width > 0 &&
+                  candidate.height > 0
+                );
+              if (visibleCandidates.length === 0) {
+                return null;
+              }
+
+              const scoreCandidate = (candidate) => {
+                const lowered = candidate.text.toLowerCase();
+                let score = 0;
+                if (lowered.includes('selected attachment:')) {
+                  score += 100;
+                }
+                if (lowered.includes('selected file')) {
+                  score += 80;
+                }
+                if (lowered.includes('choose a file to review its size before upload')) {
+                  score += 40;
+                }
+                if (/\\b\\d+(?:\\.\\d+)?\\s*(?:kb|mb|bytes?)\\b/i.test(candidate.text)) {
+                  score += 20;
+                }
+                return score;
+              };
+
+              const summaryCandidate = visibleCandidates
+                .map((candidate) => ({
+                  ...candidate,
+                  score: scoreCandidate(candidate),
+                  textLength: candidate.text.length,
+                  area: candidate.width * candidate.height,
+                }))
+                .sort((left, right) => {
+                  if (right.score !== left.score) {
+                    return right.score - left.score;
+                  }
+                  if (left.textLength !== right.textLength) {
+                    return left.textLength - right.textLength;
+                  }
+                  if (left.area !== right.area) {
+                    return left.area - right.area;
+                  }
+                  return left.top - right.top;
+                })[0];
+
+              const sizeMatch = summaryCandidate.text.match(
+                /\\b\\d+(?:\\.\\d+)?\\s*(?:KB|MB|bytes?)\\b/i
+              );
+              const uploadTrigger = document.querySelector(
+                'flt-semantics[aria-label="Upload attachment"] flt-semantics'
+              );
+              const firstDownload = Array.from(
+                document.querySelectorAll('flt-semantics, [aria-label]')
+              )
+                .map((element) => ({
+                  text: collectText(element),
+                  top: element.getBoundingClientRect().top,
+                  width: element.getBoundingClientRect().width,
+                  height: element.getBoundingClientRect().height,
+                }))
+                .filter((candidate) =>
+                  candidate.text.startsWith('Download ') &&
+                  candidate.width > 0 &&
+                  candidate.height > 0
+                )
+                .map((candidate) => candidate.top)
+                .filter((top) => Number.isFinite(top))
+                .sort((left, right) => left - right)[0];
+              return {
+                summaryText: summaryCandidate.text,
+                fileNameVisible: summaryCandidate.text.includes(fileName),
+                sizeLabel: sizeMatch ? sizeMatch[0] : '',
+                uploadEnabled: uploadTrigger?.getAttribute('aria-disabled') !== 'true',
+                summaryTop: summaryCandidate.top,
+                firstAttachmentTop:
+                  typeof firstDownload === 'number' ? firstDownload : null,
+              };
+            }
+            """,
+            arg={"fileName": file_name},
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 3 failed: the Attachments action area never showed a visible selected "
+                f"file summary for {file_name!r} before upload.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return AttachmentSelectionSummaryObservation(
+            summary_text=str(payload["summaryText"]),
+            file_name_visible=bool(payload["fileNameVisible"]),
+            size_label=str(payload["sizeLabel"]),
+            upload_enabled=bool(payload["uploadEnabled"]),
+            summary_top=float(payload["summaryTop"]),
+            first_attachment_top=(
+                float(payload["firstAttachmentTop"])
+                if payload["firstAttachmentTop"] is not None
+                else None
+            ),
         )
 
     def _is_connected(self, connected_banner: str) -> bool:
