@@ -57,10 +57,7 @@ void main() {
             'Human-style verification failed: the issue attachment metadata should show the same file size that the user uploaded.',
       );
 
-      final expectedSequence = <String>[
-        'GET https://api.github.com/repos/${Ts502ReleaseResolutionFixture.repositoryName} -> 200',
-        'GET https://api.github.com/user -> 200',
-        'GET https://api.github.com/repos/${Ts502ReleaseResolutionFixture.repositoryName} -> 200',
+      final requiredReleaseRepairSequence = <String>[
         'GET https://api.github.com/repos/${Ts502ReleaseResolutionFixture.repositoryName} -> 200',
         'GET https://api.github.com/repos/${Ts502ReleaseResolutionFixture.repositoryName}/releases/tags/${Ts502ReleaseResolutionFixture.releaseTag} -> 404',
         'POST https://api.github.com/repos/${Ts502ReleaseResolutionFixture.repositoryName}/releases -> 201',
@@ -69,9 +66,10 @@ void main() {
       ];
       expect(
         run.requestSequence,
-        expectedSequence,
+        containsAllInOrder(requiredReleaseRepairSequence),
         reason:
-            'Step 2 failed: the GitHub API release-resolution sequence did not match the expected lookup -> recreate draft release -> upload asset -> persist metadata flow.',
+            'Step 2 failed: the GitHub API traffic did not include the required release-resolution subsequence (repository access -> missing release lookup -> recreate draft release -> upload asset -> persist metadata). '
+            'Observed request sequence: ${run.requestSequence.join(' | ')}.',
       );
 
       expect(

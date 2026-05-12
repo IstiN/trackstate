@@ -6,6 +6,7 @@ import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 import '../../../components/services/issue_attachment_upload_service.dart';
+import '../../../core/config/issue_attachment_upload_test_config.dart';
 import '../../../core/interfaces/issue_attachment_upload_port.dart';
 import '../../../frameworks/api/github/github_issue_attachment_upload_framework.dart';
 
@@ -16,8 +17,10 @@ class Ts502ReleaseResolutionFixture {
     required List<RecordedGitHubExchange> exchanges,
   }) : _exchanges = exchanges;
 
-  static const String repositoryName = 'IstiN/trackstate';
-  static const String branch = 'main';
+  static const IssueAttachmentUploadTestConfig config =
+      IssueAttachmentUploadTestConfig.ts502;
+  static const String repositoryName = ts502IssueAttachmentRepository;
+  static const String branch = ts502IssueAttachmentBranch;
   static const String issueKey = 'TS-200';
   static const String issueStoragePath = 'TRACK/TS-200/main.md';
   static const String attachmentName = 'release-repair evidence.png';
@@ -37,9 +40,7 @@ class Ts502ReleaseResolutionFixture {
     final exchanges = <RecordedGitHubExchange>[];
     final attachmentUploadPort = IssueAttachmentUploadService(
       attachmentDriver: await GitHubIssueAttachmentUploadFramework.create(
-        repositoryName: repositoryName,
-        branch: branch,
-        token: 'test-token',
+        config: config,
         responder: (request) async {
           final recorded = await RecordedGitHubExchange.fromRequest(request);
           final response = _responseFor(recorded);

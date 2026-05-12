@@ -7,6 +7,7 @@ import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
+import '../../../core/config/issue_attachment_upload_test_config.dart';
 import '../../../core/interfaces/issue_attachment_upload_driver.dart';
 
 typedef GitHubIssueAttachmentResponder =
@@ -19,25 +20,17 @@ class GitHubIssueAttachmentUploadFramework
   final ProviderBackedTrackStateRepository _repository;
 
   static Future<GitHubIssueAttachmentUploadFramework> create({
-    required String repositoryName,
-    required String branch,
-    required String token,
+    required IssueAttachmentUploadTestConfig config,
     required GitHubIssueAttachmentResponder responder,
   }) async {
     final repository = ProviderBackedTrackStateRepository(
       provider: GitHubTrackStateProvider(
-        repositoryName: repositoryName,
-        dataRef: branch,
+        repositoryName: config.repository,
+        dataRef: config.branch,
         client: MockClient(responder),
       ),
     );
-    await repository.connect(
-      RepositoryConnection(
-        repository: repositoryName,
-        branch: branch,
-        token: token,
-      ),
-    );
+    await repository.connect(config.connection);
     return GitHubIssueAttachmentUploadFramework._(repository);
   }
 
