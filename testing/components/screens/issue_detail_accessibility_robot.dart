@@ -331,6 +331,18 @@ class IssueDetailAccessibilityRobot
       _attachmentRow(issueKey, attachmentName).evaluate().isNotEmpty;
 
   @override
+  bool attachmentRowIsVisibleInViewport(
+    String issueKey,
+    String attachmentName,
+  ) {
+    final row = _attachmentRow(issueKey, attachmentName);
+    if (row.evaluate().isEmpty) {
+      return false;
+    }
+    return _isFinderVisibleInViewport(row.first);
+  }
+
+  @override
   bool attachmentRowIsBelowAttachmentsRestrictionCallout(
     String issueKey, {
     required String title,
@@ -387,6 +399,29 @@ class IssueDetailAccessibilityRobot
     }
     await tester.ensureVisible(action.first);
     await tester.tap(action.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  bool issueDetailIsVerticallyScrollable(String issueKey) {
+    final scrollable = _issueDetailScrollable(issueKey);
+    final state = tester.state<ScrollableState>(scrollable.first);
+    return state.position.maxScrollExtent > 0;
+  }
+
+  @override
+  Future<void> scrollIssueDetailToBottom(String issueKey) async {
+    final scrollable = _issueDetailScrollable(issueKey);
+    final state = tester.state<ScrollableState>(scrollable.first);
+    state.position.jumpTo(state.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> scrollIssueDetailToTop(String issueKey) async {
+    final scrollable = _issueDetailScrollable(issueKey);
+    final state = tester.state<ScrollableState>(scrollable.first);
+    state.position.jumpTo(0);
     await tester.pumpAndSettle();
   }
 
@@ -700,6 +735,54 @@ class IssueDetailAccessibilityRobot
           return label.contains(attachmentName);
         }, description: 'attachment row for $attachmentName'),
       );
+
+  Finder _issueDetailScrollable(String issueKey) {
+    final scrollables = find.ancestor(
+      of: _issueDetail(issueKey),
+      matching: find.byType(Scrollable),
+    );
+    if (scrollables.evaluate().isEmpty) {
+      throw StateError(
+        'No Scrollable ancestor was rendered for issue detail $issueKey.',
+      );
+    }
+
+    Finder? bestMatch;
+    double? smallestArea;
+    final matchCount = scrollables.evaluate().length;
+    for (var index = 0; index < matchCount; index += 1) {
+      final candidate = scrollables.at(index);
+      final state = tester.state<ScrollableState>(candidate);
+      if (axisDirectionToAxis(state.widget.axisDirection) != Axis.vertical) {
+        continue;
+      }
+      final area =
+          tester.getRect(candidate).size.longestSide *
+          tester.getRect(candidate).size.shortestSide;
+      if (smallestArea == null || area < smallestArea) {
+        smallestArea = area;
+        bestMatch = candidate;
+      }
+    }
+
+    if (bestMatch == null) {
+      throw StateError(
+        'No vertical Scrollable ancestor was rendered for issue detail $issueKey.',
+      );
+    }
+    return bestMatch;
+  }
+
+  bool _isFinderVisibleInViewport(Finder finder) {
+    final rect = tester.getRect(finder);
+    final viewport = Rect.fromLTWH(
+      0,
+      0,
+      tester.view.physicalSize.width / tester.view.devicePixelRatio,
+      tester.view.physicalSize.height / tester.view.devicePixelRatio,
+    );
+    return rect.overlaps(viewport);
+  }
 
   InputDecoration _commentComposerDecoration(String issueKey) {
     final field = tester.widget<TextField>(_commentComposerField(issueKey));
