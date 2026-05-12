@@ -73,6 +73,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Finder _globalAction(String label) =>
       find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
 
+  Finder _navigationControl(String label) => find.byWidgetPredicate(
+    (widget) =>
+        widget is Semantics &&
+        widget.properties.button == true &&
+        widget.properties.label == label,
+    description: 'navigation control labeled $label',
+  );
+
+  Finder get _navigationChrome =>
+      find.bySemanticsLabel(RegExp('^TrackState\\.AI navigation\$'));
+
   Finder _issueDetailEditor(String key) => find.descendant(
     of: _issueDetail(key),
     matching: find.byWidgetPredicate(
@@ -755,6 +766,74 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> isNavigationControlVisible(String label) async {
+    await tester.pump();
+    return _navigationControl(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<bool> isNavigationChromeVisible() async {
+    await tester.pump();
+    return _navigationChrome.evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<List<String>> collectDisabledNavigationViolations({
+    required String label,
+    required String retainedText,
+    required List<String> disallowedTexts,
+  }) async {
+    final violations = <String>[];
+    final target = _navigationControl(label);
+    await tester.pump();
+
+    if (target.evaluate().isEmpty) {
+      violations.add(
+        'no visible navigation control labeled "$label" was rendered in the recovery shell.',
+      );
+      return violations;
+    }
+
+    final semanticsData = tester.getSemantics(target.last).getSemanticsData();
+    final hasTapAction = semanticsData.hasAction(SemanticsAction.tap);
+    final isEnabled = semanticsData.hasFlag(SemanticsFlag.isEnabled);
+
+    if (hasTapAction || isEnabled) {
+      violations.add(
+        'the "$label" navigation control remained enabled during mandatory bootstrap recovery. '
+        'Semantics label="${semanticsData.label}", hasTapAction=$hasTapAction, isEnabled=$isEnabled.',
+      );
+    }
+
+    await tester.tap(target.last, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    final visibleTexts = visibleTextsSnapshot();
+    final visibleSemantics = visibleSemanticsLabelsSnapshot();
+    if (!_snapshotContains(visibleTexts, retainedText) &&
+        !_snapshotContains(visibleSemantics, retainedText)) {
+      violations.add(
+        'tapping "$label" navigated away from Settings while recovery was active. '
+        'Visible texts: ${_formatSnapshot(visibleTexts)}. '
+        'Visible semantics: ${_formatSnapshot(visibleSemantics)}.',
+      );
+    }
+
+    for (final disallowedText in disallowedTexts) {
+      if (_snapshotContains(visibleTexts, disallowedText) ||
+          _snapshotContains(visibleSemantics, disallowedText)) {
+        violations.add(
+          'tapping "$label" surfaced "$disallowedText" while the recovery container was still active. '
+          'Visible texts: ${_formatSnapshot(visibleTexts)}. '
+          'Visible semantics: ${_formatSnapshot(visibleSemantics)}.',
+        );
+      }
+    }
+
+    return violations;
+  }
+
+  @override
   Future<bool> isDialogTextVisible(String text) async {
     await tester.pump();
     final dialogScope = _dialogScope;
@@ -1113,6 +1192,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       return '<none>';
     }
     return snapshot.join(' | ');
+  }
+
+  bool _snapshotContains(List<String> values, String expected) {
+    for (final value in values) {
+      final trimmed = value.trim();
+      if (trimmed == expected ||
+          trimmed.startsWith(expected) ||
+          trimmed.contains(expected)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @override
