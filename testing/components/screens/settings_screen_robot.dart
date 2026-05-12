@@ -69,6 +69,17 @@ class SettingsScreenRobot {
   Finder get saveSettingsButton => actionButton('Save settings');
   Finder get resetSettingsButton => actionButton('Reset');
   Finder get settingsEditorDialog => find.byType(Dialog);
+  Finder get startupRecoveryCalloutTitle =>
+      find.text('GitHub startup limit reached');
+  Finder get startupRecoveryCallout => _smallestByArea(
+    find.ancestor(
+      of: startupRecoveryCalloutTitle,
+      matching: find.byWidgetPredicate(
+        (widget) => widget is Container && widget.decoration is BoxDecoration,
+        description: 'startup recovery callout container',
+      ),
+    ),
+  );
 
   Future<void> pumpApp({
     required TrackStateRepository repository,
@@ -309,6 +320,11 @@ class SettingsScreenRobot {
     await tester.pumpAndSettle();
   }
 
+  Future<bool> isTextFieldVisible(String label) async {
+    await tester.pump();
+    return _labeledTextField(label).evaluate().isNotEmpty;
+  }
+
   Finder editorTitle(String title) => find.text(title);
 
   Rect editorSurfaceRect(String title) {
@@ -340,6 +356,14 @@ class SettingsScreenRobot {
     ),
   );
 
+  Finder startupRecoveryActionButton(String label) => find.descendant(
+    of: startupRecoveryCallout,
+    matching: find.ancestor(
+      of: find.text(label),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    ),
+  );
+
   Finder configCard(String title) => _smallestByArea(
     find.ancestor(of: find.text(title), matching: find.byType(Tab)),
   );
@@ -364,6 +388,46 @@ class SettingsScreenRobot {
   TrackStateColors colors() {
     final context = tester.element(find.byType(Scaffold).first);
     return context.ts;
+  }
+
+  Color? decoratedContainerBackgroundColor(Finder scope) {
+    final container = _decoratedContainerWithin(scope);
+    if (container == null) {
+      return null;
+    }
+    final decoration = container.decoration;
+    if (decoration is! BoxDecoration) {
+      return null;
+    }
+    return decoration.color;
+  }
+
+  Color? decoratedContainerBorderColor(Finder scope) {
+    final container = _decoratedContainerWithin(scope);
+    if (container == null) {
+      return null;
+    }
+    final decoration = container.decoration;
+    if (decoration is! BoxDecoration) {
+      return null;
+    }
+    final border = decoration.border;
+    if (border is Border) {
+      return border.top.color;
+    }
+    return null;
+  }
+
+  Color? trackStateIconColorWithin(Finder scope) {
+    final icons = find.descendant(
+      of: scope,
+      matching: find.byType(TrackStateIcon),
+    );
+    if (icons.evaluate().isEmpty) {
+      return null;
+    }
+    final widget = tester.widget<TrackStateIcon>(icons.first);
+    return widget.color;
   }
 
   Offset centerOf(Finder finder) => tester.getCenter(finder);
@@ -595,6 +659,42 @@ class SettingsScreenRobot {
     return rows.map((row) => row.label).toList();
   }
 
+  List<String> buttonLabelsWithin(Finder scope) {
+    final buttons = find.descendant(
+      of: scope,
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    final labels = <({String label, double top, double left})>[];
+    for (final element in buttons.evaluate()) {
+      final buttonFinder = find.byElementPredicate(
+        (candidate) => candidate == element,
+        description: 'button within $scope',
+      );
+      final texts = find.descendant(of: buttonFinder, matching: find.byType(Text));
+      String? label;
+      for (final textElement in texts.evaluate()) {
+        final widget = textElement.widget;
+        if (widget is Text && (widget.data?.trim().isNotEmpty ?? false)) {
+          label = widget.data!.trim();
+          break;
+        }
+      }
+      if (label == null) {
+        continue;
+      }
+      final rect = tester.getRect(buttonFinder);
+      labels.add((label: label, top: rect.top, left: rect.left));
+    }
+    labels.sort((left, right) {
+      final vertical = left.top.compareTo(right.top);
+      if (vertical != 0) {
+        return vertical;
+      }
+      return left.left.compareTo(right.left);
+    });
+    return labels.map((entry) => entry.label).toList();
+  }
+
   Finder topBarProviderControl(String label) =>
       _buttonControlWithText(label, requiresTrackStateIcon: true);
 
@@ -611,6 +711,42 @@ class SettingsScreenRobot {
 
   Finder _filledSettingsProviderButton(String label) {
     return _lowestButton(find.widgetWithText(FilledButton, label));
+  }
+
+  Finder _labeledTextField(String label) {
+    final decorationMatch = find.byWidgetPredicate((widget) {
+      if (widget is TextField) {
+        return widget.decoration?.labelText == label;
+      }
+      return false;
+    }, description: 'text field labeled $label');
+    if (decorationMatch.evaluate().isNotEmpty) {
+      return decorationMatch;
+    }
+    return find.descendant(
+      of: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is EditableText || widget is TextField,
+        description: 'editable control labeled $label',
+      ),
+    );
+  }
+
+  Container? _decoratedContainerWithin(Finder scope) {
+    for (final element in scope.evaluate()) {
+      final widget = element.widget;
+      if (widget is Container && widget.decoration is BoxDecoration) {
+        return widget;
+      }
+    }
+    final containers = find.descendant(of: scope, matching: find.byType(Container));
+    for (final element in containers.evaluate()) {
+      final widget = element.widget;
+      if (widget is Container && widget.decoration is BoxDecoration) {
+        return widget;
+      }
+    }
+    return null;
   }
 
   Finder _lowestButton(Finder buttons) {
