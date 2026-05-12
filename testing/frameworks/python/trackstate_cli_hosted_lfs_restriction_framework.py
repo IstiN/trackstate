@@ -10,17 +10,15 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from testing.components.services.live_setup_repository_service import (
-    LiveHostedRepositoryFile,
-    LiveSetupRepositoryService,
-)
 from testing.core.config.trackstate_cli_hosted_lfs_restriction_config import (
     TrackStateCliHostedLfsRestrictionConfig,
 )
+from testing.core.interfaces.hosted_repository_client import HostedRepositoryClient
 from testing.core.interfaces.trackstate_cli_hosted_lfs_restriction_probe import (
     TrackStateCliHostedLfsRestrictionProbe,
 )
 from testing.core.models.cli_command_result import CliCommandResult
+from testing.core.models.hosted_repository_file import HostedRepositoryFile
 from testing.core.models.trackstate_cli_command_observation import (
     TrackStateCliCommandObservation,
 )
@@ -36,23 +34,27 @@ from testing.frameworks.python.trackstate_cli_compiled_local_framework import (
 @dataclass(frozen=True)
 class _RemoteFileSnapshot:
     path: str
-    original_file: LiveHostedRepositoryFile | None
+    original_file: HostedRepositoryFile | None
 
 
 class PythonTrackStateCliHostedLfsRestrictionFramework(
     PythonTrackStateCliCompiledLocalFramework,
     TrackStateCliHostedLfsRestrictionProbe,
 ):
-    def __init__(self, repository_root: Path) -> None:
+    def __init__(
+        self,
+        repository_root: Path,
+        repository_client: HostedRepositoryClient,
+    ) -> None:
         super().__init__(repository_root)
+        self._repository_client = repository_client
 
     def observe(
         self,
         *,
         config: TrackStateCliHostedLfsRestrictionConfig,
     ) -> TrackStateCliHostedLfsRestrictionValidationResult:
-        service = LiveSetupRepositoryService()
-        if not service.token:
+        if not self._repository_client.token:
             raise AssertionError(
                 "TS-383 requires GH_TOKEN or GITHUB_TOKEN so the hosted GitHub target "
                 "can be exercised against the live repository."
@@ -61,7 +63,7 @@ class PythonTrackStateCliHostedLfsRestrictionFramework(
         snapshots = tuple(
             _RemoteFileSnapshot(
                 path=path,
-                original_file=self._fetch_repo_file_if_exists(service, path),
+                original_file=self._fetch_repo_file_if_exists(self._repository_client, path),
             )
             for path in config.cleanup_repo_paths
         )
@@ -70,7 +72,7 @@ class PythonTrackStateCliHostedLfsRestrictionFramework(
         cleanup_error: str | None = None
 
         self._seed_fixture(
-            service=service,
+            service=self._repository_client,
             config=config,
             setup_actions=setup_actions,
         )
@@ -80,7 +82,10 @@ class PythonTrackStateCliHostedLfsRestrictionFramework(
         observation: TrackStateCliCommandObservation | None = None
         local_attachment_path = ""
         try:
-            initial_state = self._capture_remote_state(service=service, config=config)
+            initial_state = self._capture_remote_state(
+                service=self._repository_client,
+                config=config,
+            )
             with tempfile.TemporaryDirectory(prefix="trackstate-ts-383-bin-") as bin_dir:
                 executable_path = Path(bin_dir) / "trackstate"
                 self._compile_executable(executable_path)
@@ -98,13 +103,16 @@ class PythonTrackStateCliHostedLfsRestrictionFramework(
                         config=config,
                         repository_path=working_directory,
                         executable_path=executable_path,
-                        access_token=service.token,
+                        access_token=self._repository_client.token,
                     )
-            final_state = self._capture_remote_state(service=service, config=config)
+            final_state = self._capture_remote_state(
+                service=self._repository_client,
+                config=config,
+            )
         finally:
             try:
                 self._restore_fixture(
-                    service=service,
+                    service=self._repository_client,
                     snapshots=snapshots,
                     cleanup_actions=cleanup_actions,
                 )
@@ -130,7 +138,7 @@ class PythonTrackStateCliHostedLfsRestrictionFramework(
     def _seed_fixture(
         self,
         *,
-        service: LiveSetupRepositoryService,
+        service: HostedRepositoryClient,
         config: TrackStateCliHostedLfsRestrictionConfig,
         setup_actions: list[str],
     ) -> None:
@@ -197,7 +205,7 @@ class PythonTrackStateCliHostedLfsRestrictionFramework(
     def _restore_fixture(
         self,
         *,
-        service: LiveSetupRepositoryService,
+        service: HostedRepositoryClient,
         snapshots: tuple[_RemoteFileSnapshot, ...],
         cleanup_actions: list[str],
     ) -> None:
@@ -223,7 +231,7 @@ class PythonTrackStateCliHostedLfsRestrictionFramework(
     def _capture_remote_state(
         self,
         *,
-        service: LiveSetupRepositoryService,
+        service: HostedRepositoryClient,
         config: TrackStateCliHostedLfsRestrictionConfig,
     ) -> TrackStateCliHostedLfsRestrictionRemoteState:
         gitattributes_text = service.fetch_repo_text(".gitattributes")
@@ -317,9 +325,9 @@ class PythonTrackStateCliHostedLfsRestrictionFramework(
 
     @staticmethod
     def _fetch_repo_file_if_exists(
-        service: LiveSetupRepositoryService,
+        service: HostedRepositoryClient,
         path: str,
-    ) -> LiveHostedRepositoryFile | None:
+    ) -> HostedRepositoryFile | None:
         try:
             return service.fetch_repo_file(path)
         except urllib.error.HTTPError as error:
