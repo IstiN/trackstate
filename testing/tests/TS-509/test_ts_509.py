@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from testing.components.pages.live_issue_detail_collaboration_page import (  # noqa: E402
     AttachmentSelectionSummaryObservation,
+    AttachmentUploadControlsObservation,
     LiveIssueDetailCollaborationPage,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
@@ -162,10 +163,19 @@ def main() -> None:
                         body_text=attachments_text,
                         step_number=1,
                     )
-                    choose_button_count = page.visible_button_count("Choose attachment")
-                    upload_button_count = page.visible_button_count("Upload attachment")
-                    result["choose_button_count"] = choose_button_count
-                    result["upload_button_count"] = upload_button_count
+                    upload_controls = page.observe_attachment_upload_controls()
+                    _assert_attachment_upload_controls(
+                        upload_controls,
+                        attachments_text,
+                    )
+                    result["choose_button_count"] = upload_controls.choose_button_count
+                    result["choose_button_enabled"] = (
+                        upload_controls.choose_button_enabled
+                    )
+                    result["upload_button_count"] = upload_controls.upload_button_count
+                    result["upload_button_enabled"] = (
+                        upload_controls.upload_button_enabled
+                    )
                     _record_step(
                         result,
                         step=1,
@@ -173,8 +183,10 @@ def main() -> None:
                         action="Open the Issue Detail Attachments tab for the hosted issue.",
                         observed=(
                             "attachment_picker_ready=true; "
-                            f"choose_button_count={choose_button_count}; "
-                            f"upload_button_count={upload_button_count}; "
+                            f"choose_button_count={upload_controls.choose_button_count}; "
+                            f"choose_button_enabled={upload_controls.choose_button_enabled}; "
+                            f"upload_button_count={upload_controls.upload_button_count}; "
+                            f"upload_button_enabled={upload_controls.upload_button_enabled}; "
                             "no_local_git_warning=true"
                         ),
                     )
@@ -598,6 +610,33 @@ def _assert_selection_summary(
             "Step 2 failed: the Upload attachment action stayed disabled after choosing "
             "the LFS-tracked file.\n"
             f"Observed summary text: {summary.summary_text}",
+        )
+
+
+def _assert_attachment_upload_controls(
+    controls: AttachmentUploadControlsObservation,
+    attachments_text: str,
+) -> None:
+    if controls.choose_button_count != 1 or controls.upload_button_count != 1:
+        raise AssertionError(
+            "Step 1 failed: the hosted Attachments tab did not expose exactly one visible "
+            "`Choose attachment` control and one visible `Upload attachment` control "
+            "before file selection.\n"
+            f"Observed choose button count: {controls.choose_button_count}\n"
+            f"Observed upload button count: {controls.upload_button_count}\n"
+            f"Observed choose button enabled: {controls.choose_button_enabled}\n"
+            f"Observed upload button enabled: {controls.upload_button_enabled}\n"
+            f"Observed body text:\n{attachments_text}",
+        )
+    if not controls.choose_button_enabled:
+        raise AssertionError(
+            "Step 1 failed: the hosted Attachments tab did not keep the visible "
+            "`Choose attachment` browser-upload affordance enabled before file selection.\n"
+            f"Observed choose button count: {controls.choose_button_count}\n"
+            f"Observed upload button count: {controls.upload_button_count}\n"
+            f"Observed choose button enabled: {controls.choose_button_enabled}\n"
+            f"Observed upload button enabled: {controls.upload_button_enabled}\n"
+            f"Observed body text:\n{attachments_text}",
         )
 
 
