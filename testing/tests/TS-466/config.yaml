@@ -1,0 +1,8 @@
+test_id: TS-466
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Exercises the hosted tracker Locales settings workflow against https://istin.github.io/trackstate-setup/.
+  - Adds a temporary secondary locale when needed, verifies the inline fallback warning, and restores the repository state afterward.
