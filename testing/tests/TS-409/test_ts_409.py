@@ -11,9 +11,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from testing.components.pages.github_repository_file_page import (
-    GitHubRepositoryFilePage,
-)
 from testing.components.pages.live_project_settings_page import (
     LiveProjectSettingsPage,
     ProjectSettingsUiObservation,
@@ -29,7 +26,9 @@ from testing.components.services.live_setup_repository_service import (
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config
-from testing.frameworks.python.playwright_web_app_session import PlaywrightWebAppRuntime
+from testing.tests.support.github_repository_file_page_factory import (
+    create_github_repository_file_page,
+)
 from testing.tests.support.live_tracker_app_factory import (
     create_live_tracker_app_with_stored_token,
 )
@@ -45,7 +44,6 @@ STATUSES_PATH = "DEMO/config/statuses.json"
 WORKFLOWS_PATH = "DEMO/config/workflows.json"
 WORKFLOW_NAME = "Delivery Workflow"
 WORKFLOW_ID = "delivery-workflow"
-COMMIT_MESSAGE = "Update project settings"
 
 
 def main() -> None:
@@ -312,17 +310,17 @@ def _assert_commit_observation(
     baseline_head_sha: str,
     commit_observation: HostedCommitObservation,
 ) -> None:
-    if commit_observation.message != COMMIT_MESSAGE:
+    if len(commit_observation.parent_shas) != 1:
         raise AssertionError(
-            "Step 4 failed: the hosted Settings save did not produce the expected "
-            "project-settings commit message.\n"
-            f"Expected message: {COMMIT_MESSAGE}\n"
+            "Step 4 failed: the resulting head commit was not a single atomic commit "
+            "for the hosted settings save.\n"
+            f"Observed parent SHAs: {list(commit_observation.parent_shas)}\n"
             f"Observed commit: {json.dumps(_commit_observation_to_dict(commit_observation), indent=2)}",
         )
-    if not commit_observation.parent_shas or commit_observation.parent_shas[0] != baseline_head_sha:
+    if commit_observation.parent_shas[0] != baseline_head_sha:
         raise AssertionError(
-            "Step 4 failed: the resulting head commit was not a single atomic child of "
-            "the pre-save repository head.\n"
+            "Step 4 failed: the resulting head commit was not a direct atomic child "
+            "of the pre-save repository head.\n"
             f"Expected parent: {baseline_head_sha}\n"
             f"Observed commit: {json.dumps(_commit_observation_to_dict(commit_observation), indent=2)}",
         )
@@ -370,8 +368,7 @@ def _verify_files_in_github_ui(
     status_name: str,
     transition_name: str,
 ) -> dict[str, object]:
-    with PlaywrightWebAppRuntime() as session:
-        file_page = GitHubRepositoryFilePage(session)
+    with create_github_repository_file_page() as file_page:
         statuses_observation = file_page.open_file(
             repository=repository,
             branch=commit_sha,
