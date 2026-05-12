@@ -123,6 +123,17 @@ class _PreloadedLocalGitRepository
   }
 
   @override
+  Future<TrackerSnapshot> saveProjectSettings(ProjectSettingsCatalog settings) {
+    if (repository
+        case final ProjectSettingsRepository projectSettingsRepository) {
+      return projectSettingsRepository.saveProjectSettings(settings);
+    }
+    throw StateError(
+      'Local Git preloaded repository does not expose project settings mutations.',
+    );
+  }
+
+  @override
   Future<TrackStateIssueSearchPage> searchIssuePage(
     String jql, {
     int startAt = 0,
@@ -189,14 +200,4 @@ class _PreloadedLocalGitRepository
     required Uint8List bytes,
   }) =>
       repository.uploadIssueAttachment(issue: issue, name: name, bytes: bytes);
-
-  @override
-  Future<TrackerSnapshot> saveProjectSettings(ProjectSettingsCatalog settings) {
-    if (repository case final ProjectSettingsRepository settingsRepository) {
-      return settingsRepository.saveProjectSettings(settings);
-    }
-    throw StateError(
-      'Preloaded repository does not support project settings admin.',
-    );
-  }
 }
