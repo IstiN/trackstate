@@ -135,7 +135,13 @@ class LiveProjectSettingsPage:
         self._session.fill(self._status_name_selector, status_name, timeout_ms=30_000)
         status_dialog_text = self.body_text()
         self._session.click(self._button_selector, has_text="Save", timeout_ms=30_000)
-        status_list_text = self._wait_for_semantics_text(status_name, timeout_seconds=60)
+        self._session.wait_for_selector(
+            self._status_id_selector,
+            state="hidden",
+            timeout_ms=60_000,
+        )
+        self._session.wait_for_selector(self._save_settings_selector, timeout_ms=30_000)
+        status_list_text = self.body_text()
         return status_dialog_text, status_list_text
 
     def open_workflows_tab(self) -> str:

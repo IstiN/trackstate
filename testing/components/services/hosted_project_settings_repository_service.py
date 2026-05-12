@@ -4,10 +4,11 @@ import base64
 from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 from typing import Any
 import urllib.error
 import urllib.request
+
+from testing.core.utils.polling import poll_until
 
 
 @dataclass(frozen=True)
@@ -63,15 +64,26 @@ class HostedProjectSettingsRepositoryService:
         )
         return str(((response.get("object") or {}).get("sha") or "")).strip()
 
-    def wait_for_head_change(self, previous_sha: str, *, attempts: int = 20) -> str:
-        for _ in range(attempts):
-            current_sha = self.branch_head_sha()
-            if current_sha and current_sha != previous_sha:
-                return current_sha
+    def wait_for_head_change(
+        self,
+        previous_sha: str,
+        *,
+        attempts: int = 20,
+        interval_seconds: float = 3.0,
+    ) -> str:
+        matched, current_sha = poll_until(
+            probe=self.branch_head_sha,
+            is_satisfied=lambda observed_sha: bool(observed_sha and observed_sha != previous_sha),
+            timeout_seconds=attempts * interval_seconds,
+            interval_seconds=interval_seconds,
+        )
+        if matched:
+            return current_sha
         raise AssertionError(
             "Step 4 failed: saving the Settings changes never produced a new branch "
             "head commit within the polling window.\n"
-            f"Previous head: {previous_sha}",
+            f"Previous head: {previous_sha}\n"
+            f"Last observed head: {current_sha}",
         )
 
     def fetch_commit(self, sha: str) -> HostedCommitObservation:
