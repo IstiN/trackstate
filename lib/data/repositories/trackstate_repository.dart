@@ -137,6 +137,30 @@ class ProviderBackedTrackStateRepository
 
   TrackStateProviderAdapter get providerAdapter => _provider;
   ProviderSession? get session => _session;
+  TrackerSnapshot? get cachedSnapshot => _snapshot;
+
+  void replaceCachedState({
+    TrackerSnapshot? snapshot,
+    List<RepositoryTreeEntry>? tree,
+  }) {
+    final previousSnapshot = _snapshot;
+    final nextSnapshot = snapshot ?? previousSnapshot;
+    if (snapshot != null) {
+      _snapshot = snapshot;
+    }
+    if (tree != null) {
+      _snapshotTree = tree;
+      _snapshotBlobPaths = tree
+          .where((entry) => entry.type == 'blob')
+          .map((entry) => entry.path)
+          .toSet();
+      _rebuildCachedArtifactRevisions(
+        previousSnapshot: previousSnapshot,
+        nextSnapshot: nextSnapshot,
+        blobPaths: _snapshotBlobPaths,
+      );
+    }
+  }
 
   Future<void> _acquireDeleteMutationLock() async {
     if (!_deleteMutationInProgress) {
@@ -215,8 +239,9 @@ class ProviderBackedTrackStateRepository
   Future<TrackStateIssue> hydrateIssue(
     TrackStateIssue issue, {
     Set<IssueHydrationScope> scopes = const {IssueHydrationScope.detail},
+    bool force = false,
   }) async {
-    if (usesLocalPersistence) {
+    if (usesLocalPersistence && !force) {
       final snapshot = _snapshot ?? await loadSnapshot();
       return snapshot.issues.firstWhere(
         (candidate) => candidate.key == issue.key,
@@ -224,11 +249,13 @@ class ProviderBackedTrackStateRepository
       );
     }
     final currentSnapshot = _snapshot ?? await loadSnapshot();
-    final currentIssue = currentSnapshot.issues.firstWhere(
-      (candidate) => candidate.key == issue.key,
-      orElse: () => issue,
-    );
-    if (_hasHydratedScopes(currentIssue, scopes)) {
+    final currentIssue = force
+        ? issue
+        : currentSnapshot.issues.firstWhere(
+            (candidate) => candidate.key == issue.key,
+            orElse: () => issue,
+          );
+    if (!force && _hasHydratedScopes(currentIssue, scopes)) {
       return currentIssue;
     }
     if (currentIssue.storagePath.isEmpty) {
@@ -257,7 +284,7 @@ class ProviderBackedTrackStateRepository
         scopes.contains(IssueHydrationScope.attachments) ||
         currentIssue.hasAttachmentsLoaded;
 
-    final markdown = currentIssue.rawMarkdown.isNotEmpty
+    final markdown = !force && currentIssue.rawMarkdown.isNotEmpty
         ? currentIssue.rawMarkdown
         : await _getRepositoryText(currentIssue.storagePath);
     final acceptanceMarkdown = shouldLoadDetail
@@ -2620,6 +2647,85 @@ class ProviderBackedTrackStateRepository
     }
     final artifact = await _provider.readAttachment(path, ref: ref);
     return artifact.revision;
+  }
+
+  void _rebuildCachedArtifactRevisions({
+    required TrackerSnapshot? previousSnapshot,
+    required TrackerSnapshot? nextSnapshot,
+    required Set<String> blobPaths,
+  }) {
+    final previousRevisions = Map<String, String?>.from(
+      _snapshotArtifactRevisions,
+    );
+    _snapshotArtifactRevisions
+      ..clear()
+      ..addEntries(
+        previousRevisions.entries.where(
+          (entry) => blobPaths.contains(entry.key),
+        ),
+      );
+
+    if (nextSnapshot != null) {
+      for (final entry in nextSnapshot.repositoryIndex.entries) {
+        if (entry.revision != null && blobPaths.contains(entry.path)) {
+          _snapshotArtifactRevisions[entry.path] = entry.revision;
+        }
+      }
+    }
+    if (previousSnapshot == null || nextSnapshot == null) {
+      return;
+    }
+
+    TrackStateIssue? issueForArtifactPath(
+      Map<String, TrackStateIssue> issuesByKey,
+      String path,
+    ) {
+      TrackStateIssue? bestMatch;
+      for (final issue in issuesByKey.values) {
+        if (issue.storagePath.isEmpty) {
+          continue;
+        }
+        final issueRoot = _issueRoot(issue.storagePath);
+        if (path == issue.storagePath || path.startsWith('$issueRoot/')) {
+          if (bestMatch == null ||
+              issueRoot.length > _issueRoot(bestMatch.storagePath).length) {
+            bestMatch = issue;
+          }
+        }
+      }
+      return bestMatch;
+    }
+
+    final previousIssuesByKey = {
+      for (final issue in previousSnapshot.issues)
+        if (issue.storagePath.isNotEmpty) issue.key: issue,
+    };
+    final nextIssuesByKey = {
+      for (final issue in nextSnapshot.issues)
+        if (issue.storagePath.isNotEmpty) issue.key: issue,
+    };
+    for (final entry in previousRevisions.entries) {
+      final previousIssue = issueForArtifactPath(
+        previousIssuesByKey,
+        entry.key,
+      );
+      if (previousIssue == null) {
+        continue;
+      }
+      final nextIssue = nextIssuesByKey[previousIssue.key];
+      if (nextIssue == null) {
+        continue;
+      }
+      final previousRoot = _issueRoot(previousIssue.storagePath);
+      final nextRoot = _issueRoot(nextIssue.storagePath);
+      final rebasedPath = entry.key == previousIssue.storagePath
+          ? nextIssue.storagePath
+          : '$nextRoot${entry.key.substring(previousRoot.length)}';
+      if (!blobPaths.contains(rebasedPath)) {
+        continue;
+      }
+      _snapshotArtifactRevisions[rebasedPath] = entry.value;
+    }
   }
 }
 
