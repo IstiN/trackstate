@@ -1,3 +1,4 @@
+import '../models/action_availability.dart';
 import '../models/issue_detail_icon_observation.dart';
 import '../models/issue_detail_row_style_observation.dart';
 import '../models/issue_detail_theme_tokens.dart';
@@ -27,7 +28,33 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
 
   List<String> buttonLabelsInIssueDetail(String issueKey);
 
+  ActionAvailability attachmentAction(String issueKey, String label);
+
   List<String> commentActionLabels(String issueKey);
+
+  bool showsAttachmentUploadRestrictionNotice(
+    String issueKey, {
+    required String storageLabel,
+    required String actionLabel,
+  });
+
+  bool attachmentUploadRestrictionNoticeIsInline(
+    String issueKey, {
+    required String tabLabel,
+    required String storageLabel,
+  });
+
+  bool attachmentRowIsBelowAttachmentUploadRestrictionNotice(
+    String issueKey, {
+    required String storageLabel,
+    required String attachmentName,
+  });
+
+  Future<void> tapAttachmentUploadRestrictionAction(
+    String issueKey, {
+    required String storageLabel,
+    required String actionLabel,
+  });
 
   bool showsAttachmentsRestrictionCallout(
     String issueKey, {
