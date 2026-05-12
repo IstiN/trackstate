@@ -257,6 +257,34 @@ void main() {
         await robot.enterAttachmentReleaseTagPrefix(releasePrefixValue);
 
         await robot.clearFocus();
+        final attachmentFocusOrder = _dedupeConsecutive(
+          await robot.collectFocusOrder(
+            candidates: {
+              'Attachment storage mode': find.bySemanticsLabel(
+                RegExp('Attachment storage mode'),
+              ),
+              'Release tag prefix': find.bySemanticsLabel(
+                RegExp('Release tag prefix'),
+              ),
+              'Reset': robot.actionButton('Reset'),
+              'Save settings': robot.saveSettingsButton,
+            },
+            tabs: 64,
+          ),
+        );
+        if (!containsAllInOrder([
+          'Attachment storage mode',
+          'Release tag prefix',
+          'Reset',
+          'Save settings',
+        ]).matches(attachmentFocusOrder, <dynamic, dynamic>{})) {
+          failures.add(
+            'Step 6 failed: keyboard Tab traversal did not preserve the logical Attachments focus order [Attachment storage mode, Release tag prefix, Reset, Save settings]. '
+            'Observed candidate focus order: $attachmentFocusOrder.',
+          );
+        }
+
+        await robot.clearFocus();
         final keyboardReachedStorageSelector = await _focusByTab(
           tester,
           robot: robot,
@@ -297,34 +325,14 @@ void main() {
           }
         }
 
-        await robot.clearFocus();
-        final keyboardReachedReleasePrefix = await _focusByTab(
-          tester,
+        await _verifyDropdownInteractiveStateTreatment(
+          failures: failures,
+          stepLabel: 'Step 7',
+          tester: tester,
           robot: robot,
-          label: 'Release tag prefix',
-          finder: find.bySemanticsLabel(RegExp('Release tag prefix')),
-          maxTabs: 32,
+          label: 'Attachment storage mode',
+          field: _labeledDropdownField('Attachment storage mode'),
         );
-        if (!keyboardReachedReleasePrefix) {
-          failures.add(
-            'Step 6 failed: continuing keyboard Tab navigation from the Attachments selector did not reach the Release tag prefix field.',
-          );
-        }
-
-        await robot.clearFocus();
-        final keyboardReachedSaveSettings = await _focusByTab(
-          tester,
-          robot: robot,
-          label: 'Save settings',
-          finder: robot.saveSettingsButton,
-          maxTabs: 48,
-        );
-        if (!keyboardReachedSaveSettings) {
-          failures.add(
-            'Step 6 failed: repeated keyboard Tab navigation never reached the visible Save settings action from the Attachments workspace.',
-          );
-        }
-
         _verifyInteractiveStateTreatment(
           failures: failures,
           stepLabel: 'Step 7',
@@ -477,6 +485,142 @@ void _verifyInteractiveStateTreatment({
       'Idle=${_rgbHex(idleSurface)}, focused=${_rgbHex(focusedSurface)}.',
     );
   }
+}
+
+Future<void> _verifyDropdownInteractiveStateTreatment({
+  required List<String> failures,
+  required String stepLabel,
+  required WidgetTester tester,
+  required SettingsScreenRobot robot,
+  required String label,
+  required Finder field,
+}) async {
+  if (field.evaluate().isEmpty) {
+    failures.add(
+      '$stepLabel failed: the "$label" selector was not visible, so its hover/focus treatment could not be verified.',
+    );
+    return;
+  }
+
+  final decorator = _inputDecoratorWithin(field);
+  if (decorator.evaluate().isEmpty) {
+    failures.add(
+      '$stepLabel failed: the "$label" selector did not render an InputDecorator, so its hover/focus treatment could not be verified.',
+    );
+    return;
+  }
+
+  await robot.clearFocus();
+  await tester.pumpAndSettle();
+  final idleState = _dropdownInteractionState(tester, decorator.first);
+
+  final hoverGesture = await robot.hover(decorator.first);
+  await tester.pumpAndSettle();
+  final hoveredState = _dropdownInteractionState(tester, decorator.first);
+  await hoverGesture.moveTo(const Offset(-1, -1));
+  await tester.pumpAndSettle();
+
+  await robot.clearFocus();
+  final focusedByKeyboard = await _focusByTab(
+    tester,
+    robot: robot,
+    label: label,
+    finder: find.bySemanticsLabel(RegExp(label)),
+    maxTabs: 24,
+  );
+  if (!focusedByKeyboard) {
+    failures.add(
+      '$stepLabel failed: keyboard Tab traversal did not focus the "$label" selector before checking its focused treatment.',
+    );
+    return;
+  }
+
+  await tester.pumpAndSettle();
+  final focusedState = _dropdownInteractionState(tester, decorator.first);
+
+  if (!hoveredState.isHovering) {
+    failures.add(
+      '$stepLabel failed: hovering the "$label" selector did not put the field into a hovered state.',
+    );
+  } else if (hoveredState.surface == idleState.surface) {
+    failures.add(
+      '$stepLabel failed: the "$label" selector did not expose a distinct hovered surface. '
+      'Idle=${_rgbHex(idleState.surface)}, hovered=${_rgbHex(hoveredState.surface)}.',
+    );
+  }
+
+  if (!focusedState.isFocused) {
+    failures.add(
+      '$stepLabel failed: tabbing to the "$label" selector did not put the field into a focused state.',
+    );
+  } else if (focusedState.borderColor == idleState.borderColor &&
+      focusedState.borderWidth == idleState.borderWidth) {
+    failures.add(
+      '$stepLabel failed: the "$label" selector did not expose a distinct focused border. '
+      'Idle=${_rgbHex(idleState.borderColor)} ${idleState.borderWidth}, focused=${_rgbHex(focusedState.borderColor)} ${focusedState.borderWidth}.',
+    );
+  }
+}
+
+Finder _labeledDropdownField(String label) => find.byWidgetPredicate((widget) {
+  if (widget is DropdownButtonFormField) {
+    return widget.decoration?.labelText == label;
+  }
+  return false;
+}, description: 'dropdown field labeled $label');
+
+Finder _inputDecoratorWithin(Finder field) =>
+    find.descendant(of: field, matching: find.byType(InputDecorator));
+
+({
+  bool isFocused,
+  bool isHovering,
+  Color surface,
+  Color borderColor,
+  double borderWidth,
+})
+_dropdownInteractionState(WidgetTester tester, Finder decorator) {
+  final element = decorator.evaluate().single;
+  final inputDecorator = tester.widget<InputDecorator>(decorator);
+  final theme = Theme.of(element);
+  final decoration = inputDecorator.decoration.applyDefaults(
+    theme.inputDecorationTheme,
+  );
+  final fillColor = decoration.filled == true
+      ? (decoration.fillColor ??
+            theme.inputDecorationTheme.fillColor ??
+            Colors.transparent)
+      : Colors.transparent;
+  final hoverColor =
+      decoration.hoverColor ??
+      theme.inputDecorationTheme.hoverColor ??
+      theme.hoverColor;
+  final surface = inputDecorator.isHovering
+      ? Color.alphaBlend(hoverColor.withOpacity(0.12), fillColor)
+      : fillColor;
+  final border = inputDecorator.isFocused
+      ? (decoration.focusedBorder ??
+            decoration.enabledBorder ??
+            decoration.border)
+      : (decoration.enabledBorder ?? decoration.border);
+  final borderSide = _borderSideOf(border);
+  return (
+    isFocused: inputDecorator.isFocused,
+    isHovering: inputDecorator.isHovering,
+    surface: surface,
+    borderColor: borderSide.color,
+    borderWidth: borderSide.width,
+  );
+}
+
+BorderSide _borderSideOf(InputBorder? border) {
+  if (border is OutlineInputBorder) {
+    return border.borderSide;
+  }
+  if (border is UnderlineInputBorder) {
+    return border.borderSide;
+  }
+  return BorderSide.none;
 }
 
 Color _resolvedActionSurface(
