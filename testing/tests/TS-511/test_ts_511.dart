@@ -3,9 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 
-import '../../components/screens/issue_detail_accessibility_robot.dart';
 import '../../components/screens/settings_screen_robot.dart';
+import '../../core/interfaces/issue_detail_accessibility_screen.dart';
 import '../../core/fakes/reactive_issue_detail_trackstate_repository.dart';
+import '../../fixtures/issue_detail_accessibility_screen_fixture.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -19,10 +20,11 @@ void main() {
     (tester) async {
       final failures = <String>[];
       final settingsRobot = SettingsScreenRobot(tester);
-      final issueRobot = IssueDetailAccessibilityRobot(tester);
+      late final IssueDetailAccessibilityScreenHandle screen;
 
       try {
-        await settingsRobot.pumpApp(
+        screen = await launchIssueDetailAccessibilityFixture(
+          tester,
           repository: ReactiveIssueDetailTrackStateRepository(
             permission: _releaseRestrictedPermission,
             textFixtures: _githubReleasesProjectTextFixtures(),
@@ -32,10 +34,10 @@ void main() {
           },
         );
 
-        await issueRobot.openSearch();
-        await issueRobot.selectIssue(_issueKey, _issueSummary);
+        await screen.openSearch();
+        await screen.selectIssue(_issueKey, _issueSummary);
 
-        if (!issueRobot.showsIssueDetail(_issueKey)) {
+        if (!screen.showsIssueDetail(_issueKey)) {
           failures.add(
             'Step 1 failed: opening JQL Search did not show the $_issueKey issue detail surface. '
             'Visible texts: ${_formatSnapshot(settingsRobot.visibleTexts())}. '
@@ -43,21 +45,22 @@ void main() {
           );
         }
 
-        final attachmentsTab = _collaborationTab(_issueKey, 'Attachments');
-        if (attachmentsTab.evaluate().isEmpty) {
+        if (!screen
+            .buttonLabelsInIssueDetail(_issueKey)
+            .contains('Attachments')) {
           failures.add(
             'Step 1 failed: the issue detail did not expose the visible "Attachments" tab. '
             'Visible texts: ${_formatSnapshot(settingsRobot.visibleTexts())}.',
           );
         } else {
-          await tester.ensureVisible(attachmentsTab.first);
-          await tester.tap(attachmentsTab.first, warnIfMissed: false);
-          await tester.pumpAndSettle();
+          await screen.selectCollaborationTab(_issueKey, 'Attachments');
         }
 
-        final issueDetail = _issueDetail(_issueKey);
-        final inlineCallout = _attachmentsRestrictionCallout(issueDetail);
-        if (inlineCallout.evaluate().isEmpty) {
+        if (!screen.showsAttachmentsRestrictionCallout(
+          _issueKey,
+          title: _releaseRestrictionTitle,
+          message: _releaseRestrictionMessage,
+        )) {
           failures.add(
             'Step 2 failed: the Attachments tab did not render the release-storage restriction notice inline in the issue detail surface. '
             'Visible texts: ${_formatSnapshot(settingsRobot.visibleTexts())}. '
@@ -76,69 +79,59 @@ void main() {
             _releaseRestrictionMessage,
             _openSettingsLabel,
           ]) {
-            final visibleMatch = find.descendant(
-              of: inlineCallout,
-              matching: find.text(text, findRichText: true),
-            );
-            if (visibleMatch.evaluate().isEmpty) {
+            if (!screen.attachmentsRestrictionCalloutShowsText(
+              _issueKey,
+              title: _releaseRestrictionTitle,
+              message: _releaseRestrictionMessage,
+              text: text,
+            )) {
               failures.add(
                 'Step 2 failed: the inline Attachments notice did not render "$text" in the visible callout surface.',
               );
             }
           }
 
-          final attachmentRow = _attachmentRow(
-            issueDetail,
-            _existingAttachmentName,
-          );
-          if (attachmentRow.evaluate().isEmpty) {
+          if (!screen.showsAttachmentRow(_issueKey, _existingAttachmentName)) {
             failures.add(
               'Step 2 failed: the existing attachment list was not visible below the restriction notice. '
               'Visible texts: ${_formatSnapshot(settingsRobot.visibleTexts())}.',
             );
-          } else if (attachmentsTab.evaluate().isNotEmpty) {
-            final tabBottom = tester.getBottomLeft(attachmentsTab.first).dy;
-            final calloutTop = tester.getTopLeft(inlineCallout.first).dy;
-            final rowTop = tester.getTopLeft(attachmentRow.first).dy;
-
-            if (calloutTop <= tabBottom) {
-              failures.add(
-                'Step 2 failed: the restriction notice rendered in the issue header area instead of below the Attachments tab controls. '
-                'tabBottom=$tabBottom, calloutTop=$calloutTop.',
-              );
-            }
-            if (rowTop <= calloutTop) {
-              failures.add(
-                'Step 2 failed: the existing attachment row did not stay below the inline restriction notice. '
-                'calloutTop=$calloutTop, attachmentTop=$rowTop.',
-              );
-            }
+          } else if (!screen.attachmentsRestrictionCalloutIsInline(
+            _issueKey,
+            tabLabel: 'Attachments',
+            title: _releaseRestrictionTitle,
+            message: _releaseRestrictionMessage,
+          )) {
+            failures.add(
+              'Step 2 failed: the restriction notice rendered in the issue header area instead of below the Attachments tab controls.',
+            );
+          } else if (!screen.attachmentRowIsBelowAttachmentsRestrictionCallout(
+            _issueKey,
+            title: _releaseRestrictionTitle,
+            message: _releaseRestrictionMessage,
+            attachmentName: _existingAttachmentName,
+          )) {
+            failures.add(
+              'Step 2 failed: the existing attachment row did not stay below the inline restriction notice.',
+            );
           }
 
-          final openSettingsAction = _calloutAction(
-            inlineCallout,
-            _openSettingsLabel,
-          );
-          if (openSettingsAction.evaluate().isEmpty) {
+          if (!screen.showsAttachmentsRestrictionAction(
+            _issueKey,
+            title: _releaseRestrictionTitle,
+            message: _releaseRestrictionMessage,
+            actionLabel: _openSettingsLabel,
+          )) {
             failures.add(
               'Step 3 failed: the inline Attachments notice did not expose the "$_openSettingsLabel" recovery action.',
             );
           } else {
-            await tester.ensureVisible(openSettingsAction.first);
-            await tester.tap(openSettingsAction.first, warnIfMissed: false);
-            await tester.pumpAndSettle();
-
-            final attachmentStorageMode = find.text(
-              'Attachment storage mode',
-              findRichText: true,
+            await screen.tapAttachmentsRestrictionAction(
+              _issueKey,
+              title: _releaseRestrictionTitle,
+              message: _releaseRestrictionMessage,
+              actionLabel: _openSettingsLabel,
             );
-            final attachmentsSettingsTab = settingsRobot.tabByLabel(
-              'Attachments',
-            );
-            final projectSettingsVisible = find
-                .text('Project Settings', findRichText: true)
-                .evaluate()
-                .isNotEmpty;
 
             if (find.byType(Dialog).evaluate().isNotEmpty) {
               failures.add(
@@ -146,14 +139,14 @@ void main() {
                 'Visible texts: ${_formatSnapshot(settingsRobot.visibleTexts())}.',
               );
             }
-            if (!projectSettingsVisible ||
-                attachmentsSettingsTab.evaluate().isEmpty) {
+            if (!settingsRobot.isVisibleText('Project Settings') ||
+                settingsRobot.tabByLabel('Attachments').evaluate().isEmpty) {
               failures.add(
                 'Step 3 failed: tapping "$_openSettingsLabel" did not navigate to Project Settings. '
                 'Visible texts: ${_formatSnapshot(settingsRobot.visibleTexts())}.',
               );
             }
-            if (attachmentStorageMode.evaluate().isEmpty) {
+            if (!settingsRobot.isVisibleText('Attachment storage mode')) {
               failures.add(
                 'Step 3 failed: tapping "$_openSettingsLabel" did not land on the Project Settings > Attachments tab. '
                 'The settings surface opened without the Attachment storage configuration. '
@@ -195,63 +188,6 @@ const RepositoryPermission _releaseRestrictedPermission = RepositoryPermission(
   supportsReleaseAttachmentWrites: false,
   canCheckCollaborators: false,
 );
-
-Finder _issueDetail(String issueKey) => find.byWidgetPredicate(
-  (widget) =>
-      widget is Semantics &&
-      widget.properties.label == 'Issue detail $issueKey',
-  description: 'issue detail "$issueKey"',
-);
-
-Finder _collaborationTab(String issueKey, String label) => find.descendant(
-  of: _issueDetail(issueKey),
-  matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
-);
-
-Finder _attachmentsRestrictionCallout(Finder issueDetail) => find.ancestor(
-  of: find.descendant(
-    of: issueDetail,
-    matching: find.text(_releaseRestrictionTitle, findRichText: true),
-  ),
-  matching: find.byWidgetPredicate((widget) {
-    if (widget is! Semantics) {
-      return false;
-    }
-    final label = widget.properties.label ?? '';
-    return label.contains(_releaseRestrictionTitle) &&
-        label.contains(_releaseRestrictionMessage);
-  }, description: 'inline release restriction callout'),
-);
-
-Finder _calloutAction(Finder callout, String label) {
-  final outlinedButton = find.descendant(
-    of: callout,
-    matching: find.widgetWithText(OutlinedButton, label),
-  );
-  if (outlinedButton.evaluate().isNotEmpty) {
-    return outlinedButton.first;
-  }
-  final filledButton = find.descendant(
-    of: callout,
-    matching: find.widgetWithText(FilledButton, label),
-  );
-  if (filledButton.evaluate().isNotEmpty) {
-    return filledButton.first;
-  }
-  return outlinedButton;
-}
-
-Finder _attachmentRow(Finder issueDetail, String attachmentName) =>
-    find.descendant(
-      of: issueDetail,
-      matching: find.byWidgetPredicate((widget) {
-        if (widget is! Semantics) {
-          return false;
-        }
-        final label = widget.properties.label ?? '';
-        return label.contains(attachmentName);
-      }, description: 'attachment row for $attachmentName'),
-    );
 
 String _formatSnapshot(List<String> values) {
   if (values.isEmpty) {
