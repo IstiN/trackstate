@@ -58,6 +58,7 @@ void main() {
             await app.isDialogTextVisible('Connect GitHub') &&
             await app.isTextFieldVisible('Fine-grained token') &&
             await app.isTextVisible('Connect token');
+        var readOnlyTransitionVerified = false;
         if (!connectDialogVisible) {
           failures.add(
             'Step 3 failed: activating the disconnected global banner CTA did not '
@@ -70,72 +71,100 @@ void main() {
             'Fine-grained token',
             text: Ts370RepositoryAccessBannerFixture.readOnlyToken,
           );
-          await app.tapVisibleControl('Connect token');
-
-          await _waitForCondition(
-            tester,
-            condition: () async =>
-                await _isTopBarLabelVisible(
-                  app,
-                  Ts370RepositoryAccessBannerFixture.readOnlyLabel,
-                ) &&
-                _globalBanner(
-                  Ts370RepositoryAccessBannerFixture.readOnlyTitle,
-                  Ts370RepositoryAccessBannerFixture.readOnlyMessage,
-                ).evaluate().isNotEmpty,
-            failureMessage:
-                'Step 4 failed: submitting a read-only PAT did not update the global repository-access banner to the read-only state. '
-                'Top bar texts: ${_formatSnapshot(app.topBarVisibleTextsSnapshot())}. '
-                'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}. '
-                'Visible semantics: ${_formatSnapshot(app.visibleSemanticsLabelsSnapshot())}.',
+          final connectToken = find.widgetWithText(
+            FilledButton,
+            'Connect token',
           );
-        }
-
-        await _verifyBannerAcrossIssueFlows(
-          tester,
-          app: app,
-          failures: failures,
-          topBarLabel: Ts370RepositoryAccessBannerFixture.readOnlyLabel,
-          title: Ts370RepositoryAccessBannerFixture.readOnlyTitle,
-          message: Ts370RepositoryAccessBannerFixture.readOnlyMessage,
-          actionLabel: Ts370RepositoryAccessBannerFixture.readOnlyAction,
-          phaseLabel: 'read-only',
-        );
-
-        final readOnlyBanner = _globalBanner(
-          Ts370RepositoryAccessBannerFixture.readOnlyTitle,
-          Ts370RepositoryAccessBannerFixture.readOnlyMessage,
-        );
-        final reconnectAction = _calloutAction(
-          readOnlyBanner,
-          Ts370RepositoryAccessBannerFixture.readOnlyAction,
-        );
-        if (reconnectAction.evaluate().isEmpty) {
-          failures.add(
-            'Step 5 failed: the read-only global banner did not expose the '
-            '"${Ts370RepositoryAccessBannerFixture.readOnlyAction}" recovery CTA. '
-            'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
-          );
-        } else {
-          await tester.tap(reconnectAction.first, warnIfMissed: false);
-          await tester.pumpAndSettle();
-
-          final authDialogVisible =
-              await app.isDialogTextVisible('Manage GitHub access') &&
-              await app.isTextFieldVisible('Fine-grained token');
-          final settingsVisible =
-              await app.isTextVisible('Project Settings') &&
-              await app.isTextVisible('Repository access');
-
-          if (!authDialogVisible && !settingsVisible) {
+          if (connectToken.evaluate().isEmpty) {
             failures.add(
-              'Step 6 failed: activating the read-only recovery CTA did not route the user '
-              'to the canonical recovery surface (Manage GitHub access dialog or Settings). '
+              'Step 4 failed: the PAT recovery dialog did not keep a visible '
+              '"Connect token" submit action after the user typed a read-only token. '
               'Visible dialog texts: ${_formatSnapshot(app.visibleDialogTextsSnapshot())}. '
               'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
             );
-          } else if (authDialogVisible) {
-            await app.closeDialog('Cancel');
+          } else {
+            await tester.tap(connectToken.first, warnIfMissed: false);
+            await tester.pump();
+
+            final submitErrors = _drainFrameworkErrors(tester);
+            if (submitErrors.isNotEmpty) {
+              failures.add(
+                'Step 4 failed: submitting a read-only PAT crashed the repository-access recovery flow '
+                'before the banner could update to the read-only state. '
+                'Observed framework errors: ${submitErrors.join(' || ')}. '
+                'Visible dialog texts: ${_formatSnapshot(app.visibleDialogTextsSnapshot())}. '
+                'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
+              );
+            } else {
+              await _waitForCondition(
+                tester,
+                condition: () async =>
+                    await _isTopBarLabelVisible(
+                      app,
+                      Ts370RepositoryAccessBannerFixture.readOnlyLabel,
+                    ) &&
+                    _globalBanner(
+                      Ts370RepositoryAccessBannerFixture.readOnlyTitle,
+                      Ts370RepositoryAccessBannerFixture.readOnlyMessage,
+                    ).evaluate().isNotEmpty,
+                failureMessage:
+                    'Step 4 failed: submitting a read-only PAT did not update the global repository-access banner to the read-only state. '
+                    'Top bar texts: ${_formatSnapshot(app.topBarVisibleTextsSnapshot())}. '
+                    'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}. '
+                    'Visible semantics: ${_formatSnapshot(app.visibleSemanticsLabelsSnapshot())}.',
+              );
+              readOnlyTransitionVerified = true;
+            }
+          }
+        }
+
+        if (readOnlyTransitionVerified) {
+          await _verifyBannerAcrossIssueFlows(
+            tester,
+            app: app,
+            failures: failures,
+            topBarLabel: Ts370RepositoryAccessBannerFixture.readOnlyLabel,
+            title: Ts370RepositoryAccessBannerFixture.readOnlyTitle,
+            message: Ts370RepositoryAccessBannerFixture.readOnlyMessage,
+            actionLabel: Ts370RepositoryAccessBannerFixture.readOnlyAction,
+            phaseLabel: 'read-only',
+          );
+
+          final readOnlyBanner = _globalBanner(
+            Ts370RepositoryAccessBannerFixture.readOnlyTitle,
+            Ts370RepositoryAccessBannerFixture.readOnlyMessage,
+          );
+          final reconnectAction = _calloutAction(
+            readOnlyBanner,
+            Ts370RepositoryAccessBannerFixture.readOnlyAction,
+          );
+          if (reconnectAction.evaluate().isEmpty) {
+            failures.add(
+              'Step 5 failed: the read-only global banner did not expose the '
+              '"${Ts370RepositoryAccessBannerFixture.readOnlyAction}" recovery CTA. '
+              'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
+            );
+          } else {
+            await tester.tap(reconnectAction.first, warnIfMissed: false);
+            await tester.pumpAndSettle();
+
+            final authDialogVisible =
+                await app.isDialogTextVisible('Manage GitHub access') &&
+                await app.isTextFieldVisible('Fine-grained token');
+            final settingsVisible =
+                await app.isTextVisible('Project Settings') &&
+                await app.isTextVisible('Repository access');
+
+            if (!authDialogVisible && !settingsVisible) {
+              failures.add(
+                'Step 6 failed: activating the read-only recovery CTA did not route the user '
+                'to the canonical recovery surface (Manage GitHub access dialog or Settings). '
+                'Visible dialog texts: ${_formatSnapshot(app.visibleDialogTextsSnapshot())}. '
+                'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
+              );
+            } else if (authDialogVisible) {
+              await app.closeDialog('Cancel');
+            }
           }
         }
 
@@ -315,4 +344,16 @@ String _formatSnapshot(List<String> values, {int limit = 24}) {
     return '<none>';
   }
   return snapshot.join(' | ');
+}
+
+List<String> _drainFrameworkErrors(WidgetTester tester, {int limit = 5}) {
+  final errors = <String>[];
+  while (errors.length < limit) {
+    final exception = tester.takeException();
+    if (exception == null) {
+      break;
+    }
+    errors.add(exception.toString());
+  }
+  return errors;
 }
