@@ -20,8 +20,10 @@ class TrackStateCliMultiFieldUpdateConfig:
     updated_labels: tuple[str, ...]
     requested_command_prefix: tuple[str, ...]
     fallback_command_prefix: tuple[str, ...]
+    field_assignments: tuple[str, ...]
     required_top_level_keys: tuple[str, ...]
     required_data_keys: tuple[str, ...]
+    expected_command_name: str
     expected_commit_subject: str
 
     @classmethod
@@ -43,7 +45,8 @@ class TrackStateCliMultiFieldUpdateConfig:
             updated_labels=("bug", "ai"),
             requested_command_prefix=(
                 "trackstate",
-                "jira_update_ticket",
+                "ticket",
+                "update",
                 "--target",
                 "local",
             ),
@@ -51,9 +54,16 @@ class TrackStateCliMultiFieldUpdateConfig:
                 dart_bin,
                 "run",
                 "trackstate",
-                "jira_update_ticket",
+                "ticket",
+                "update",
                 "--target",
                 "local",
+            ),
+            field_assignments=(
+                'summary=New Title',
+                'priority=High',
+                'labels=["bug","ai"]',
+                'assignee=user1',
             ),
             required_top_level_keys=(
                 "schemaVersion",
@@ -70,5 +80,6 @@ class TrackStateCliMultiFieldUpdateConfig:
                 "revision",
                 "issue",
             ),
+            expected_command_name="ticket-update",
             expected_commit_subject=f"Update {issue_key} fields",
         )

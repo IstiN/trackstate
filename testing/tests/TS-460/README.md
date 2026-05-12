@@ -6,9 +6,10 @@ mutation request against a disposable Local Git repository.
 The automation:
 
 1. seeds `TS/TS-1/main.md` with an original summary, priority, assignee, and
-   label,
-2. runs the live `trackstate jira_update_ticket --target local --issueKey TS-1
-   --json '{"fields":{...}}'` command through the repository checkout,
+   label plus the local repository indexes used by the public mutation flow,
+2. runs the live `trackstate ticket update --target local --key TS-1 --field
+   summary=... --field priority=... --field labels=[...] --field assignee=...`
+   command through the repository checkout,
 3. verifies the returned JSON success envelope reports one `update-fields`
    operation and the updated issue metadata,
 4. checks `TS/TS-1/main.md` visibly shows the new summary, priority, assignee,

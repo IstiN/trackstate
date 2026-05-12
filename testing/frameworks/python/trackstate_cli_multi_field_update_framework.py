@@ -34,23 +34,22 @@ class PythonTrackStateCliMultiFieldUpdateFramework(
             self._seed_local_repository(repository_path, config=config)
 
             issue_path = repository_path / config.project_key / config.issue_key / "main.md"
+            field_arguments = self._field_arguments(config)
             requested_command = (
                 *config.requested_command_prefix,
                 "--path",
                 str(repository_path),
-                "--issueKey",
+                "--key",
                 config.issue_key,
-                "--json",
-                self._update_payload(config),
+                *field_arguments,
             )
             executed_command = (
                 *config.fallback_command_prefix,
                 "--path",
                 str(repository_path),
-                "--issueKey",
+                "--key",
                 config.issue_key,
-                "--json",
-                self._update_payload(config),
+                *field_arguments,
             )
             fallback_reason = (
                 "Pinned execution to the repository-local CLI via `dart run trackstate` "
@@ -130,18 +129,13 @@ class PythonTrackStateCliMultiFieldUpdateFramework(
             return None
 
     @staticmethod
-    def _update_payload(config: TrackStateCliMultiFieldUpdateConfig) -> str:
-        return json.dumps(
-            {
-                "fields": {
-                    "summary": config.updated_summary,
-                    "priority": {"name": config.updated_priority_name},
-                    "labels": list(config.updated_labels),
-                    "assignee": {"name": config.updated_assignee},
-                }
-            },
-            separators=(",", ":"),
-        )
+    def _field_arguments(
+        config: TrackStateCliMultiFieldUpdateConfig,
+    ) -> tuple[str, ...]:
+        arguments: list[str] = []
+        for assignment in config.field_assignments:
+            arguments.extend(("--field", assignment))
+        return tuple(arguments)
 
     def _seed_local_repository(
         self,
@@ -168,11 +162,24 @@ class PythonTrackStateCliMultiFieldUpdateFramework(
         )
         self._write_file(
             repository_path / f"{config.project_key}/config/fields.json",
-            '[]\n',
+            (
+                '[{"id":"summary","name":"Summary","type":"string","required":true},'
+                '{"id":"description","name":"Description","type":"markdown","required":false}]\n'
+            ),
         )
         self._write_file(
-            repository_path / config.project_key / config.issue_key / "main.md",
-            f"""---
+            repository_path / f"{config.project_key}/config/resolutions.json",
+            '[{"id":"done","name":"Done"}]\n',
+        )
+        self._write_file(
+            repository_path / f"{config.project_key}/config/workflows.json",
+            (
+                '{"default":{"statuses":["To Do","Done"],"transitions":'
+                '[{"id":"complete","name":"Complete","from":"To Do","to":"Done"},'
+                '{"id":"reopen","name":"Reopen","from":"Done","to":"To Do"}]}}\n'
+            ),
+        )
+        main_file_content = f"""---
 key: {config.issue_key}
 project: {config.project_key}
 issueType: story
@@ -181,15 +188,49 @@ priority: {config.initial_priority_id}
 summary: "{config.initial_summary}"
 assignee: {config.initial_assignee}
 reporter: seed-user
-labels:
-  - {config.initial_labels[0]}
+labels: ["{config.initial_labels[0]}"]
 updated: 2026-05-12T00:00:00Z
 ---
+
+# Summary
+
+{config.initial_summary}
 
 # Description
 
 Seeded issue for TS-460.
-""",
+"""
+        self._write_file(
+            repository_path / config.project_key / config.issue_key / "main.md",
+            main_file_content,
+        )
+        self._write_file(
+            repository_path / f"{config.project_key}/.trackstate/index/tombstones.json",
+            '[]\n',
+        )
+        self._write_file(
+            repository_path / f"{config.project_key}/.trackstate/index/issues.json",
+            json.dumps(
+                [
+                    {
+                        "key": config.issue_key,
+                        "path": f"{config.project_key}/{config.issue_key}/main.md",
+                        "parent": None,
+                        "epic": None,
+                        "summary": config.initial_summary,
+                        "issueType": "story",
+                        "status": "todo",
+                        "priority": config.initial_priority_id,
+                        "assignee": config.initial_assignee,
+                        "labels": list(config.initial_labels),
+                        "updated": "2026-05-12T00:00:00Z",
+                        "revision": self._blob_revision_for_text(main_file_content),
+                        "children": [],
+                        "archived": False,
+                    }
+                ]
+            )
+            + "\n",
         )
         self._git(repository_path, "init", "-b", "main")
         self._git(repository_path, "config", "--local", "user.name", "TS-460 Tester")
@@ -238,3 +279,12 @@ Seeded issue for TS-460.
                 f"stderr:\n{completed.stderr}"
             )
         return completed.stdout
+
+    @staticmethod
+    def _blob_revision_for_text(content: str) -> str:
+        value = 2166136261
+        for byte in content.encode("utf-8"):
+            value ^= byte
+            value = (value * 16777619) & 0xFFFFFFFF
+        chunk = f"{value:08x}"
+        return (chunk * 5)[:40]

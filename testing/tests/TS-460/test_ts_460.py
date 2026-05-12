@@ -32,13 +32,16 @@ class TrackStateCliMultiFieldUpdateTest(unittest.TestCase):
                 *self.config.requested_command_prefix,
                 "--path",
                 observation.repository_path,
-                "--issueKey",
+                "--key",
                 self.config.issue_key,
-                "--json",
-                (
-                    '{"fields":{"summary":"New Title","priority":{"name":"High"},'
-                    '"labels":["bug","ai"],"assignee":{"name":"user1"}}}'
-                ),
+                "--field",
+                self.config.field_assignments[0],
+                "--field",
+                self.config.field_assignments[1],
+                "--field",
+                self.config.field_assignments[2],
+                "--field",
+                self.config.field_assignments[3],
             ),
             "Precondition failed: TS-460 did not execute the expected multi-field "
             "update command against the disposable Local Git repository.\n"
@@ -63,7 +66,7 @@ class TrackStateCliMultiFieldUpdateTest(unittest.TestCase):
 
         self.assertEqual(
             data["command"],
-            "jira-update-ticket",
+            self.config.expected_command_name,
             "Step 1 failed: the success envelope did not identify the canonical "
             "multi-field update command.\n"
             f"Observed payload: {payload}",
@@ -206,7 +209,7 @@ class TrackStateCliMultiFieldUpdateTest(unittest.TestCase):
         )
 
         for fragment in (
-            '"command": "jira-update-ticket"',
+            f'"command": "{self.config.expected_command_name}"',
             '"summary": "New Title"',
             '"priority": "high"',
             '"assignee": "user1"',
