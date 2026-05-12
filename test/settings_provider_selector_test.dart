@@ -8,6 +8,9 @@ import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../testing/components/screens/settings_screen_robot.dart';
+import '../testing/core/utils/color_contrast.dart';
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -353,6 +356,135 @@ void main() {
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'settings locale warnings stay accessible and focus in catalog order',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      final repository = _EditableSettingsWidgetRepository();
+      final robot = SettingsScreenRobot(tester);
+
+      const locale = 'fr';
+      const warningText =
+          'Missing translation. Using fallback "Description" from en.';
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        await robot.openSettings();
+        await robot.openLocalesTab();
+        await tester.tap(find.text('Add locale'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Locale code'),
+          locale,
+        );
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+
+        final warningIcon = robot.localeWarningIcon(warningText);
+        expect(warningIcon, findsOneWidget);
+        expect(tester.getSemantics(warningIcon).label.trim(), isNotEmpty);
+
+        final warningBackground = robot.localeWarningBackgroundColor(
+          warningText,
+        );
+        expect(warningBackground, isNotNull);
+        expect(
+          contrastRatio(
+            robot.localeWarningTextColor(warningText),
+            warningBackground!,
+          ),
+          greaterThanOrEqualTo(4.5),
+        );
+
+        final focusCandidates = <String, Finder>{
+          'Status To Do': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'todo',
+            section: 'status',
+          ),
+          'Status Done': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'done',
+            section: 'status',
+          ),
+          'Issue type Story': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'story',
+            section: 'issueType',
+          ),
+          'Field Summary': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'summary',
+            section: 'field',
+          ),
+          'Field Description': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'description',
+            section: 'field',
+          ),
+          'Priority High': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'high',
+            section: 'priority',
+          ),
+          'Component Tracker Core': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'tracker-core',
+            section: 'component',
+          ),
+          'Version MVP': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'mvp',
+            section: 'version',
+          ),
+          'Resolution Done': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'done',
+            section: 'resolution',
+          ),
+        };
+
+        await robot.clearFocus();
+        await robot.focusLocaleTranslationField(
+          locale: locale,
+          id: 'todo',
+          section: 'status',
+        );
+        final focusedOrder = <String>[];
+        final firstFocused = robot.focusedLabel(focusCandidates);
+        if (firstFocused != null) {
+          focusedOrder.add(firstFocused);
+        }
+        focusedOrder.addAll(
+          await robot.collectFocusOrder(candidates: focusCandidates, tabs: 24),
+        );
+
+        expect(
+          focusedOrder,
+          containsAllInOrder([
+            'Status To Do',
+            'Status Done',
+            'Issue type Story',
+            'Field Summary',
+            'Field Description',
+            'Priority High',
+            'Component Tracker Core',
+            'Version MVP',
+            'Resolution Done',
+          ]),
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
       }
     },
   );

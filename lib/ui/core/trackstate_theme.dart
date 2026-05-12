@@ -53,7 +53,7 @@ class TrackStateColors extends ThemeExtension<TrackStateColors> {
     muted: Color(0xFF6B6D63),
     border: Color(0xFFE5D3B8),
     success: Color(0xFF3BBE60),
-    warning: Color(0xFFC1B341),
+    warning: Color(0xFF7A6511),
     error: Color(0xFFC25742),
     info: Color(0xFF5A5F18),
     shadow: Color(0x1F2D2A26),
@@ -150,10 +150,9 @@ class TrackStateTheme {
   static ThemeData dark() => _theme(Brightness.dark, TrackStateColors.dark);
 
   static ThemeData _theme(Brightness brightness, TrackStateColors colors) {
-    final onPrimary =
-        brightness == Brightness.light
-            ? const Color(0xFFFAF8F4)
-            : const Color(0xFF2D2A26);
+    final onPrimary = brightness == Brightness.light
+        ? const Color(0xFFFAF8F4)
+        : const Color(0xFF2D2A26);
     final scheme = ColorScheme(
       brightness: brightness,
       primary: colors.primary,
