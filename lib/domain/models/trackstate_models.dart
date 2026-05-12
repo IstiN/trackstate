@@ -308,6 +308,20 @@ class IssueHistoryEntry {
   final String? after;
 }
 
+class LocalizedLabelResolution {
+  const LocalizedLabelResolution({
+    required this.displayName,
+    required this.usedFallback,
+    this.requestedLocale,
+    this.fallbackLocale,
+  });
+
+  final String displayName;
+  final bool usedFallback;
+  final String? requestedLocale;
+  final String? fallbackLocale;
+}
+
 class TrackStateConfigEntry {
   const TrackStateConfigEntry({
     required this.id,
@@ -329,6 +343,57 @@ class TrackStateConfigEntry {
 
   String label([String? locale]) =>
       locale == null ? name : localizedLabels[locale] ?? name;
+
+  LocalizedLabelResolution resolveLabel({
+    String? locale,
+    String? defaultLocale,
+  }) {
+    final requestedLocale = locale?.trim();
+    if (requestedLocale != null && requestedLocale.isNotEmpty) {
+      final requestedLabel = localizedLabels[requestedLocale]?.trim();
+      if (requestedLabel != null && requestedLabel.isNotEmpty) {
+        return LocalizedLabelResolution(
+          displayName: requestedLabel,
+          usedFallback: false,
+          requestedLocale: requestedLocale,
+        );
+      }
+      final fallbackLocale = defaultLocale?.trim();
+      final fallbackLabel = fallbackLocale == null || fallbackLocale.isEmpty
+          ? null
+          : localizedLabels[fallbackLocale]?.trim();
+      if (fallbackLocale != null &&
+          fallbackLocale.isNotEmpty &&
+          fallbackLocale != requestedLocale &&
+          fallbackLabel != null &&
+          fallbackLabel.isNotEmpty) {
+        return LocalizedLabelResolution(
+          displayName: fallbackLabel,
+          usedFallback: true,
+          requestedLocale: requestedLocale,
+          fallbackLocale: fallbackLocale,
+        );
+      }
+      return LocalizedLabelResolution(
+        displayName: name,
+        usedFallback: true,
+        requestedLocale: requestedLocale,
+        fallbackLocale: fallbackLocale,
+      );
+    }
+
+    final fallbackLocale = defaultLocale?.trim();
+    final defaultLabel = fallbackLocale == null || fallbackLocale.isEmpty
+        ? null
+        : localizedLabels[fallbackLocale]?.trim();
+    return LocalizedLabelResolution(
+      displayName: defaultLabel == null || defaultLabel.isEmpty
+          ? name
+          : defaultLabel,
+      usedFallback: false,
+      requestedLocale: fallbackLocale,
+    );
+  }
 
   TrackStateConfigEntry copyWith({
     String? id,
@@ -387,6 +452,57 @@ class TrackStateFieldDefinition {
 
   String label([String? locale]) =>
       locale == null ? name : localizedLabels[locale] ?? name;
+
+  LocalizedLabelResolution resolveLabel({
+    String? locale,
+    String? defaultLocale,
+  }) {
+    final requestedLocale = locale?.trim();
+    if (requestedLocale != null && requestedLocale.isNotEmpty) {
+      final requestedLabel = localizedLabels[requestedLocale]?.trim();
+      if (requestedLabel != null && requestedLabel.isNotEmpty) {
+        return LocalizedLabelResolution(
+          displayName: requestedLabel,
+          usedFallback: false,
+          requestedLocale: requestedLocale,
+        );
+      }
+      final fallbackLocale = defaultLocale?.trim();
+      final fallbackLabel = fallbackLocale == null || fallbackLocale.isEmpty
+          ? null
+          : localizedLabels[fallbackLocale]?.trim();
+      if (fallbackLocale != null &&
+          fallbackLocale.isNotEmpty &&
+          fallbackLocale != requestedLocale &&
+          fallbackLabel != null &&
+          fallbackLabel.isNotEmpty) {
+        return LocalizedLabelResolution(
+          displayName: fallbackLabel,
+          usedFallback: true,
+          requestedLocale: requestedLocale,
+          fallbackLocale: fallbackLocale,
+        );
+      }
+      return LocalizedLabelResolution(
+        displayName: name,
+        usedFallback: true,
+        requestedLocale: requestedLocale,
+        fallbackLocale: fallbackLocale,
+      );
+    }
+
+    final fallbackLocale = defaultLocale?.trim();
+    final defaultLabel = fallbackLocale == null || fallbackLocale.isEmpty
+        ? null
+        : localizedLabels[fallbackLocale]?.trim();
+    return LocalizedLabelResolution(
+      displayName: defaultLabel == null || defaultLabel.isEmpty
+          ? name
+          : defaultLabel,
+      usedFallback: false,
+      requestedLocale: fallbackLocale,
+    );
+  }
 
   TrackStateFieldDefinition copyWith({
     String? id,
@@ -476,28 +592,69 @@ class TrackStateWorkflowDefinition {
 
 class ProjectSettingsCatalog {
   const ProjectSettingsCatalog({
+    this.defaultLocale = 'en',
+    this.supportedLocales = const [],
     this.statusDefinitions = const [],
     this.workflowDefinitions = const [],
     this.issueTypeDefinitions = const [],
     this.fieldDefinitions = const [],
+    this.priorityDefinitions = const [],
+    this.versionDefinitions = const [],
+    this.componentDefinitions = const [],
+    this.resolutionDefinitions = const [],
   });
 
+  final String defaultLocale;
+  final List<String> supportedLocales;
   final List<TrackStateConfigEntry> statusDefinitions;
   final List<TrackStateWorkflowDefinition> workflowDefinitions;
   final List<TrackStateConfigEntry> issueTypeDefinitions;
   final List<TrackStateFieldDefinition> fieldDefinitions;
+  final List<TrackStateConfigEntry> priorityDefinitions;
+  final List<TrackStateConfigEntry> versionDefinitions;
+  final List<TrackStateConfigEntry> componentDefinitions;
+  final List<TrackStateConfigEntry> resolutionDefinitions;
+
+  List<String> get effectiveSupportedLocales {
+    final locales = <String>[];
+    final normalizedDefaultLocale = defaultLocale.trim();
+    if (normalizedDefaultLocale.isNotEmpty) {
+      locales.add(normalizedDefaultLocale);
+    }
+    for (final locale in supportedLocales) {
+      final normalized = locale.trim();
+      if (normalized.isEmpty || locales.contains(normalized)) {
+        continue;
+      }
+      locales.add(normalized);
+    }
+    return locales;
+  }
 
   ProjectSettingsCatalog copyWith({
+    String? defaultLocale,
+    List<String>? supportedLocales,
     List<TrackStateConfigEntry>? statusDefinitions,
     List<TrackStateWorkflowDefinition>? workflowDefinitions,
     List<TrackStateConfigEntry>? issueTypeDefinitions,
     List<TrackStateFieldDefinition>? fieldDefinitions,
+    List<TrackStateConfigEntry>? priorityDefinitions,
+    List<TrackStateConfigEntry>? versionDefinitions,
+    List<TrackStateConfigEntry>? componentDefinitions,
+    List<TrackStateConfigEntry>? resolutionDefinitions,
   }) {
     return ProjectSettingsCatalog(
+      defaultLocale: defaultLocale ?? this.defaultLocale,
+      supportedLocales: supportedLocales ?? this.supportedLocales,
       statusDefinitions: statusDefinitions ?? this.statusDefinitions,
       workflowDefinitions: workflowDefinitions ?? this.workflowDefinitions,
       issueTypeDefinitions: issueTypeDefinitions ?? this.issueTypeDefinitions,
       fieldDefinitions: fieldDefinitions ?? this.fieldDefinitions,
+      priorityDefinitions: priorityDefinitions ?? this.priorityDefinitions,
+      versionDefinitions: versionDefinitions ?? this.versionDefinitions,
+      componentDefinitions: componentDefinitions ?? this.componentDefinitions,
+      resolutionDefinitions:
+          resolutionDefinitions ?? this.resolutionDefinitions,
     );
   }
 }
@@ -635,6 +792,7 @@ class ProjectConfig {
     required this.issueTypeDefinitions,
     required this.statusDefinitions,
     required this.fieldDefinitions,
+    this.supportedLocales = const [],
     this.workflowDefinitions = const [],
     this.priorityDefinitions = const [],
     this.versionDefinitions = const [],
@@ -647,6 +805,7 @@ class ProjectConfig {
   final String repository;
   final String branch;
   final String defaultLocale;
+  final List<String> supportedLocales;
   final List<TrackStateConfigEntry> issueTypeDefinitions;
   final List<TrackStateConfigEntry> statusDefinitions;
   final List<TrackStateFieldDefinition> fieldDefinitions;
@@ -668,53 +827,131 @@ class ProjectConfig {
     for (final definition in fieldDefinitions) definition.name,
   ];
 
+  List<String> get effectiveSupportedLocales {
+    final locales = <String>[];
+    final normalizedDefaultLocale = defaultLocale.trim();
+    if (normalizedDefaultLocale.isNotEmpty) {
+      locales.add(normalizedDefaultLocale);
+    }
+    for (final locale in supportedLocales) {
+      final normalized = locale.trim();
+      if (normalized.isEmpty || locales.contains(normalized)) {
+        continue;
+      }
+      locales.add(normalized);
+    }
+    return locales;
+  }
+
   ProjectSettingsCatalog get settingsCatalog => ProjectSettingsCatalog(
+    defaultLocale: defaultLocale,
+    supportedLocales: effectiveSupportedLocales,
     statusDefinitions: statusDefinitions,
     workflowDefinitions: workflowDefinitions,
     issueTypeDefinitions: issueTypeDefinitions,
     fieldDefinitions: fieldDefinitions,
+    priorityDefinitions: priorityDefinitions,
+    versionDefinitions: versionDefinitions,
+    componentDefinitions: componentDefinitions,
+    resolutionDefinitions: resolutionDefinitions,
   );
 
   String issueTypeLabel(String id, {String? locale}) =>
-      _resolveLabel(issueTypeDefinitions, id, locale);
+      issueTypeLabelResolution(id, locale: locale).displayName;
 
   String statusLabel(String id, {String? locale}) =>
-      _resolveLabel(statusDefinitions, id, locale);
+      statusLabelResolution(id, locale: locale).displayName;
 
   String priorityLabel(String id, {String? locale}) =>
-      _resolveLabel(priorityDefinitions, id, locale);
+      priorityLabelResolution(id, locale: locale).displayName;
 
   String versionLabel(String id, {String? locale}) =>
-      _resolveLabel(versionDefinitions, id, locale);
+      versionLabelResolution(id, locale: locale).displayName;
 
   String componentLabel(String id, {String? locale}) =>
-      _resolveLabel(componentDefinitions, id, locale);
+      componentLabelResolution(id, locale: locale).displayName;
 
   String resolutionLabel(String id, {String? locale}) =>
-      _resolveLabel(resolutionDefinitions, id, locale);
+      resolutionLabelResolution(id, locale: locale).displayName;
 
   String fieldLabel(String id, {String? locale}) {
-    final language = locale ?? defaultLocale;
     for (final definition in fieldDefinitions) {
       if (definition.id == id) {
-        return definition.label(language);
+        return definition
+            .resolveLabel(
+              locale: locale ?? defaultLocale,
+              defaultLocale: defaultLocale,
+            )
+            .displayName;
       }
     }
     return id;
   }
 
-  String _resolveLabel(
+  LocalizedLabelResolution issueTypeLabelResolution(
+    String id, {
+    String? locale,
+  }) => _resolveLabel(issueTypeDefinitions, id, locale);
+
+  LocalizedLabelResolution statusLabelResolution(String id, {String? locale}) =>
+      _resolveLabel(statusDefinitions, id, locale);
+
+  LocalizedLabelResolution priorityLabelResolution(
+    String id, {
+    String? locale,
+  }) => _resolveLabel(priorityDefinitions, id, locale);
+
+  LocalizedLabelResolution versionLabelResolution(
+    String id, {
+    String? locale,
+  }) => _resolveLabel(versionDefinitions, id, locale);
+
+  LocalizedLabelResolution componentLabelResolution(
+    String id, {
+    String? locale,
+  }) => _resolveLabel(componentDefinitions, id, locale);
+
+  LocalizedLabelResolution resolutionLabelResolution(
+    String id, {
+    String? locale,
+  }) => _resolveLabel(resolutionDefinitions, id, locale);
+
+  LocalizedLabelResolution fieldLabelResolution(String id, {String? locale}) {
+    for (final definition in fieldDefinitions) {
+      if (definition.id == id) {
+        return definition.resolveLabel(
+          locale: locale ?? defaultLocale,
+          defaultLocale: defaultLocale,
+        );
+      }
+    }
+    return LocalizedLabelResolution(
+      displayName: id,
+      usedFallback: locale != null && locale.trim().isNotEmpty,
+      requestedLocale: locale?.trim(),
+      fallbackLocale: defaultLocale,
+    );
+  }
+
+  LocalizedLabelResolution _resolveLabel(
     List<TrackStateConfigEntry> entries,
     String id,
     String? locale,
   ) {
-    final language = locale ?? defaultLocale;
     for (final entry in entries) {
       if (entry.id == id) {
-        return entry.label(language);
+        return entry.resolveLabel(
+          locale: locale ?? defaultLocale,
+          defaultLocale: defaultLocale,
+        );
       }
     }
-    return id;
+    return LocalizedLabelResolution(
+      displayName: id,
+      usedFallback: locale != null && locale.trim().isNotEmpty,
+      requestedLocale: locale?.trim(),
+      fallbackLocale: defaultLocale,
+    );
   }
 }
 

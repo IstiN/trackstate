@@ -127,13 +127,26 @@
   "branch": "Branch",
   "projectSettings": "Project Settings",
   "projectSettingsAdmin": "Project settings administration",
-  "projectSettingsDescription": "Manage repository-backed statuses, workflows, issue types, and fields with validation before Git writes.",
+  "projectSettingsDescription": "Manage repository-backed metadata catalogs, supported locales, and localized display labels before Git writes.",
   "issueTypes": "Issue Types",
   "statuses": "Statuses",
   "workflows": "Workflows",
   "workflow": "Workflow",
   "fields": "Fields",
+  "priorities": "Priorities",
+  "versions": "Versions",
+  "resolutions": "Resolutions",
+  "locales": "Locales",
   "language": "Language",
+  "defaultLocale": "Default locale",
+  "defaultLocaleChip": "{locale} (default)",
+  "@defaultLocaleChip": {
+    "placeholders": {
+      "locale": {
+        "type": "String"
+      }
+    }
+  },
   "resetSettings": "Reset",
   "saveSettings": "Save settings",
   "addStatus": "Add status",
@@ -148,6 +161,47 @@
   "addField": "Add field",
   "editField": "Edit field",
   "deleteField": "Delete field",
+  "addPriority": "Add priority",
+  "editPriority": "Edit priority",
+  "deletePriority": "Delete priority",
+  "addComponent": "Add component",
+  "editComponent": "Edit component",
+  "deleteComponent": "Delete component",
+  "addVersion": "Add version",
+  "editVersion": "Edit version",
+  "deleteVersion": "Delete version",
+  "addLocale": "Add locale",
+  "localeCode": "Locale code",
+  "localeCodeHelper": "Use stable locale identifiers such as en, fr, or pt-BR.",
+  "removeLocaleAction": "Remove locale",
+  "removeLocale": "Remove locale {locale}",
+  "@removeLocale": {
+    "placeholders": {
+      "locale": {
+        "type": "String"
+      }
+    }
+  },
+  "translationField": "Translation ({locale})",
+  "@translationField": {
+    "placeholders": {
+      "locale": {
+        "type": "String"
+      }
+    }
+  },
+  "translationFallbackWarning": "Missing translation. Using fallback \"{value}\" from {source}.",
+  "@translationFallbackWarning": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      },
+      "source": {
+        "type": "String"
+      }
+    }
+  },
+  "canonicalNameFallback": "canonical name",
   "catalogId": "ID",
   "catalogCategory": "Category",
   "catalogWorkflow": "Workflow",

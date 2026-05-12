@@ -379,6 +379,18 @@ class TrackStateCli {
     if (resource == 'ticket') {
       parser.addOption('key', help: 'Issue key to resolve.');
     }
+    if (resource == 'ticket' ||
+        resource == 'fields' ||
+        resource == 'statuses' ||
+        resource == 'issue-types' ||
+        resource == 'components' ||
+        resource == 'versions') {
+      parser.addOption(
+        'locale',
+        help:
+            'Optional locale code for displayName metadata fields. Canonical id/name values remain unchanged.',
+      );
+    }
     if (resource == 'statuses' ||
         resource == 'issue-types' ||
         resource == 'components' ||
@@ -1006,6 +1018,7 @@ class TrackStateCli {
       case 'ticket':
         final snapshot = await repository.loadSnapshot();
         final key = _requiredTrimmedOption(results, 'key');
+        final locale = _optionalLocale(results);
         TrackStateIssue? issue;
         for (final item in snapshot.issues) {
           if (item.key == key) {
@@ -1027,10 +1040,12 @@ class TrackStateCli {
           jsonPayload: _jiraTicketPayload(
             issue: issue,
             project: snapshot.project,
+            locale: locale,
           ),
         );
       case 'fields':
         final snapshot = await repository.loadSnapshot();
+        final locale = _optionalLocale(results);
         return _ReadResponse(
           text: _listText(
             title: 'Fields',
@@ -1040,11 +1055,16 @@ class TrackStateCli {
           ),
           jsonPayload: [
             for (final field in snapshot.project.fieldDefinitions)
-              _jiraFieldPayload(field),
+              _jiraFieldPayload(
+                field,
+                project: snapshot.project,
+                locale: locale,
+              ),
           ],
         );
       case 'statuses':
         final snapshot = await repository.loadSnapshot();
+        final locale = _optionalLocale(results);
         _validateProjectOption(results, snapshot.project);
         return _ReadResponse(
           text: _listText(
@@ -1058,16 +1078,28 @@ class TrackStateCli {
               <String, Object?>{
                 'id': issueType.id,
                 'name': issueType.name,
+                ..._localizedMetadataFields(
+                  snapshot.project.issueTypeLabelResolution(
+                    issueType.id,
+                    locale: locale,
+                  ),
+                  locale: locale,
+                ),
                 'subtask': _isSubtaskIssueType(issueType.id),
                 'statuses': [
                   for (final status in snapshot.project.statusDefinitions)
-                    _jiraStatusPayload(status),
+                    _jiraStatusPayload(
+                      status,
+                      project: snapshot.project,
+                      locale: locale,
+                    ),
                 ],
               },
           ],
         );
       case 'issue-types':
         final snapshot = await repository.loadSnapshot();
+        final locale = _optionalLocale(results);
         _validateProjectOption(results, snapshot.project);
         return _ReadResponse(
           text: _listText(
@@ -1078,11 +1110,16 @@ class TrackStateCli {
           ),
           jsonPayload: [
             for (final issueType in snapshot.project.issueTypeDefinitions)
-              _jiraIssueTypePayload(issueType),
+              _jiraIssueTypePayload(
+                issueType,
+                project: snapshot.project,
+                locale: locale,
+              ),
           ],
         );
       case 'components':
         final snapshot = await repository.loadSnapshot();
+        final locale = _optionalLocale(results);
         _validateProjectOption(results, snapshot.project);
         return _ReadResponse(
           text: _listText(
@@ -1093,11 +1130,16 @@ class TrackStateCli {
           ),
           jsonPayload: [
             for (final component in snapshot.project.componentDefinitions)
-              _jiraComponentPayload(component),
+              _jiraComponentPayload(
+                component,
+                project: snapshot.project,
+                locale: locale,
+              ),
           ],
         );
       case 'versions':
         final snapshot = await repository.loadSnapshot();
+        final locale = _optionalLocale(results);
         _validateProjectOption(results, snapshot.project);
         return _ReadResponse(
           text: _listText(
@@ -1108,7 +1150,11 @@ class TrackStateCli {
           ),
           jsonPayload: [
             for (final version in snapshot.project.versionDefinitions)
-              _jiraVersionPayload(version),
+              _jiraVersionPayload(
+                version,
+                project: snapshot.project,
+                locale: locale,
+              ),
           ],
         );
       case 'link-types':
@@ -1291,6 +1337,11 @@ class TrackStateCli {
       exitCode: 2,
       details: <String, Object?>{'option': option},
     );
+  }
+
+  String? _optionalLocale(ArgResults results) {
+    final locale = results['locale']?.toString().trim() ?? '';
+    return locale.isEmpty ? null : locale;
   }
 
   TrackStateCliExecution _renderReadResponse({
@@ -2462,6 +2513,7 @@ class TrackStateCli {
   Map<String, Object?> _jiraTicketPayload({
     required TrackStateIssue issue,
     required ProjectConfig project,
+    String? locale,
   }) => <String, Object?>{
     'id': _jiraEntityId(issue.key),
     'key': issue.key,
@@ -2470,12 +2522,18 @@ class TrackStateCli {
       'description': issue.description,
       'issuetype': _jiraIssueTypePayload(
         _findConfigEntry(project.issueTypeDefinitions, issue.issueTypeId),
+        project: project,
+        locale: locale,
       ),
       'status': _jiraStatusPayload(
         _findConfigEntry(project.statusDefinitions, issue.statusId),
+        project: project,
+        locale: locale,
       ),
       'priority': _jiraPriorityPayload(
         _findConfigEntry(project.priorityDefinitions, issue.priorityId),
+        project: project,
+        locale: locale,
       ),
       'project': <String, Object?>{
         'id': project.key,
@@ -2507,12 +2565,16 @@ class TrackStateCli {
         for (final componentId in issue.components)
           _jiraComponentPayload(
             _findConfigEntry(project.componentDefinitions, componentId),
+            project: project,
+            locale: locale,
           ),
       ],
       'fixVersions': [
         for (final versionId in issue.fixVersionIds)
           _jiraVersionPayload(
             _findConfigEntry(project.versionDefinitions, versionId),
+            project: project,
+            locale: locale,
           ),
       ],
       'parent': issue.parentKey == null
@@ -2525,10 +2587,16 @@ class TrackStateCli {
   };
 
   Map<String, Object?> _jiraIssueTypePayload(
-    TrackStateConfigEntry definition,
-  ) => <String, Object?>{
+    TrackStateConfigEntry definition, {
+    required ProjectConfig project,
+    String? locale,
+  }) => <String, Object?>{
     'id': definition.id,
     'name': definition.name,
+    ..._localizedMetadataFields(
+      project.issueTypeLabelResolution(definition.id, locale: locale),
+      locale: locale,
+    ),
     'subtask': _isSubtaskIssueType(definition.id),
     'description': '',
     'hierarchyLevel': _hierarchyLevelForIssueType(definition.id),
@@ -2544,12 +2612,19 @@ class TrackStateCli {
         _ => 0,
       };
 
-  Map<String, Object?> _jiraStatusPayload(TrackStateConfigEntry definition) =>
-      <String, Object?>{
-        'id': definition.id,
-        'name': definition.name,
-        'statusCategory': _jiraStatusCategoryPayload(definition.id),
-      };
+  Map<String, Object?> _jiraStatusPayload(
+    TrackStateConfigEntry definition, {
+    required ProjectConfig project,
+    String? locale,
+  }) => <String, Object?>{
+    'id': definition.id,
+    'name': definition.name,
+    ..._localizedMetadataFields(
+      project.statusLabelResolution(definition.id, locale: locale),
+      locale: locale,
+    ),
+    'statusCategory': _jiraStatusCategoryPayload(definition.id),
+  };
 
   Map<String, Object?> _jiraStatusCategoryPayload(
     String statusId,
@@ -2563,29 +2638,56 @@ class TrackStateCli {
     },
   };
 
-  Map<String, Object?> _jiraPriorityPayload(TrackStateConfigEntry definition) =>
-      <String, Object?>{'id': definition.id, 'name': definition.name};
-
-  Map<String, Object?> _jiraComponentPayload(
-    TrackStateConfigEntry definition,
-  ) => <String, Object?>{
+  Map<String, Object?> _jiraPriorityPayload(
+    TrackStateConfigEntry definition, {
+    required ProjectConfig project,
+    String? locale,
+  }) => <String, Object?>{
     'id': definition.id,
     'name': definition.name,
+    ..._localizedMetadataFields(
+      project.priorityLabelResolution(definition.id, locale: locale),
+      locale: locale,
+    ),
+  };
+
+  Map<String, Object?> _jiraComponentPayload(
+    TrackStateConfigEntry definition, {
+    required ProjectConfig project,
+    String? locale,
+  }) => <String, Object?>{
+    'id': definition.id,
+    'name': definition.name,
+    ..._localizedMetadataFields(
+      project.componentLabelResolution(definition.id, locale: locale),
+      locale: locale,
+    ),
     'description': '',
     'assigneeType': 'PROJECT_DEFAULT',
     'isAssigneeTypeValid': true,
   };
 
-  Map<String, Object?> _jiraVersionPayload(TrackStateConfigEntry definition) =>
-      <String, Object?>{
-        'id': definition.id,
-        'name': definition.name,
-        'archived': false,
-        'released': false,
-        'releaseDate': null,
-      };
+  Map<String, Object?> _jiraVersionPayload(
+    TrackStateConfigEntry definition, {
+    required ProjectConfig project,
+    String? locale,
+  }) => <String, Object?>{
+    'id': definition.id,
+    'name': definition.name,
+    ..._localizedMetadataFields(
+      project.versionLabelResolution(definition.id, locale: locale),
+      locale: locale,
+    ),
+    'archived': false,
+    'released': false,
+    'releaseDate': null,
+  };
 
-  Map<String, Object?> _jiraFieldPayload(TrackStateFieldDefinition definition) {
+  Map<String, Object?> _jiraFieldPayload(
+    TrackStateFieldDefinition definition, {
+    required ProjectConfig project,
+    String? locale,
+  }) {
     final custom = !_jiraSystemFieldIds.contains(definition.id);
     final schema = <String, Object?>{'type': _jiraFieldType(definition.type)};
     if (custom) {
@@ -2597,11 +2699,29 @@ class TrackStateCli {
       'id': definition.id,
       'key': definition.id,
       'name': definition.name,
+      ..._localizedMetadataFields(
+        project.fieldLabelResolution(definition.id, locale: locale),
+        locale: locale,
+      ),
       'custom': custom,
       'orderable': true,
       'navigable': true,
       'searchable': true,
       'schema': schema,
+    };
+  }
+
+  Map<String, Object?> _localizedMetadataFields(
+    LocalizedLabelResolution resolution, {
+    required String? locale,
+  }) {
+    final normalizedLocale = locale?.trim() ?? '';
+    if (normalizedLocale.isEmpty) {
+      return const <String, Object?>{};
+    }
+    return <String, Object?>{
+      'displayName': resolution.displayName,
+      'usedFallback': resolution.usedFallback,
     };
   }
 
@@ -3017,17 +3137,17 @@ class TrackStateCli {
 
     final usage = switch (resource) {
       'ticket' =>
-        '  trackstate read ticket --key TRACK-1 [--path /repo] [--output json|text]',
+        '  trackstate read ticket --key TRACK-1 [--locale fr] [--path /repo] [--output json|text]',
       'fields' =>
-        '  trackstate read fields [--path /repo] [--output json|text]',
+        '  trackstate read fields [--locale fr] [--path /repo] [--output json|text]',
       'statuses' =>
-        '  trackstate read statuses [--project TRACK] [--path /repo] [--output json|text]',
+        '  trackstate read statuses [--project TRACK] [--locale fr] [--path /repo] [--output json|text]',
       'issue-types' =>
-        '  trackstate read issue-types [--project TRACK] [--path /repo] [--output json|text]',
+        '  trackstate read issue-types [--project TRACK] [--locale fr] [--path /repo] [--output json|text]',
       'components' =>
-        '  trackstate read components [--project TRACK] [--path /repo] [--output json|text]',
+        '  trackstate read components [--project TRACK] [--locale fr] [--path /repo] [--output json|text]',
       'versions' =>
-        '  trackstate read versions [--project TRACK] [--path /repo] [--output json|text]',
+        '  trackstate read versions [--project TRACK] [--locale fr] [--path /repo] [--output json|text]',
       'link-types' => '  trackstate read link-types [--output json|text]',
       'profile' =>
         '  trackstate read profile [--path /repo|--target hosted --provider github --repository owner/name] [--output json|text]',

@@ -637,6 +637,60 @@ void main() {
       },
     );
 
+    test(
+      'adds localized display names and fallback flags for metadata reads',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+              page: const TrackStateIssueSearchPage.empty(),
+            ),
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'read',
+          'fields',
+          '--locale',
+          'fr',
+        ]);
+        final json = jsonDecode(result.stdout) as List<Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json.first, <String, Object?>{
+          'id': 'summary',
+          'key': 'summary',
+          'name': 'Summary',
+          'displayName': 'Resume',
+          'usedFallback': false,
+          'custom': false,
+          'orderable': true,
+          'navigable': true,
+          'searchable': true,
+          'schema': <String, Object?>{'type': 'string', 'system': 'summary'},
+        });
+        expect(json[1], <String, Object?>{
+          'id': 'description',
+          'key': 'description',
+          'name': 'Description',
+          'displayName': 'Description',
+          'usedFallback': true,
+          'custom': false,
+          'orderable': true,
+          'navigable': true,
+          'searchable': true,
+          'schema': <String, Object?>{
+            'type': 'string',
+            'system': 'description',
+          },
+        });
+      },
+    );
+
     test('returns Jira project statuses grouped by issue type', () async {
       final cli = TrackStateCli(
         environment: const TrackStateCliEnvironment(
@@ -1475,13 +1529,22 @@ TrackerSnapshot _sampleSnapshot() => TrackerSnapshot(
     repository: 'trackstate/trackstate',
     branch: 'main',
     defaultLocale: 'en',
+    supportedLocales: <String>['en', 'fr'],
     issueTypeDefinitions: <TrackStateConfigEntry>[
       TrackStateConfigEntry(id: 'epic', name: 'Epic'),
-      TrackStateConfigEntry(id: 'story', name: 'Story'),
+      TrackStateConfigEntry(
+        id: 'story',
+        name: 'Story',
+        localizedLabels: <String, String>{'fr': 'Recit'},
+      ),
       TrackStateConfigEntry(id: 'subtask', name: 'Sub-task'),
     ],
     statusDefinitions: <TrackStateConfigEntry>[
-      TrackStateConfigEntry(id: 'todo', name: 'To Do'),
+      TrackStateConfigEntry(
+        id: 'todo',
+        name: 'To Do',
+        localizedLabels: <String, String>{'fr': 'A faire'},
+      ),
       TrackStateConfigEntry(id: 'in-progress', name: 'In Progress'),
       TrackStateConfigEntry(id: 'done', name: 'Done'),
     ],
@@ -1491,6 +1554,7 @@ TrackerSnapshot _sampleSnapshot() => TrackerSnapshot(
         name: 'Summary',
         type: 'string',
         required: true,
+        localizedLabels: <String, String>{'fr': 'Resume'},
       ),
       TrackStateFieldDefinition(
         id: 'description',
@@ -1651,8 +1715,8 @@ class _FakeSearchRepository implements TrackStateRepository {
     this.uploadedAttachmentNameBuilder,
     this.sortUploadedAttachmentsByName = false,
   }) : user =
-            user ??
-            connectedUser ??
+           user ??
+           connectedUser ??
            const RepositoryUser(login: 'searcher', displayName: 'Search User'),
        connectedUser =
            connectedUser ??
@@ -1769,9 +1833,7 @@ class _FakeSearchRepository implements TrackStateRepository {
     if (sortUploadedAttachmentsByName) {
       updatedAttachments.sort((left, right) => left.name.compareTo(right.name));
     }
-    final updatedIssue = issue.copyWith(
-      attachments: updatedAttachments,
-    );
+    final updatedIssue = issue.copyWith(attachments: updatedAttachments);
     final currentSnapshot = snapshot;
     snapshot = TrackerSnapshot(
       project: currentSnapshot.project,
