@@ -202,6 +202,16 @@ class WebAppSession(Protocol):
         timeout_ms: int = 30_000,
     ) -> str: ...
 
+    def select_files_after_click(
+        self,
+        trigger_selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None: ...
+
     def screenshot(self, path: str) -> None: ...
 
     def bounding_box(
