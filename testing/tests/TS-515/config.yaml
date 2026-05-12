@@ -1,0 +1,8 @@
+test_id: TS-515
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Exercises the production issue-detail Attachments restriction flow with a hosted github-releases configuration and a connected session that cannot complete release-backed uploads.
+  - Seeds Project Settings on the Statuses tab first, then verifies the Attachments notice recovery action explicitly overrides that stale tab state and lands on Project Settings > Attachments.
