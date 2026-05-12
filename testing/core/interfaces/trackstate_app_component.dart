@@ -132,6 +132,16 @@ abstract interface class TrackStateAppComponent {
 
   Future<bool> tapTopBarControl(String label);
 
+  Future<bool> isNavigationControlVisible(String label);
+
+  Future<bool> isNavigationChromeVisible();
+
+  Future<List<String>> collectDisabledNavigationViolations({
+    required String label,
+    required String retainedText,
+    required List<String> disallowedTexts,
+  });
+
   Future<bool> isDialogTextVisible(String text);
 
   List<String> visibleDialogTextsSnapshot();
