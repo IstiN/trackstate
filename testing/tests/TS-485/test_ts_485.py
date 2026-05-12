@@ -250,8 +250,6 @@ class Ts485MixedAttachmentResolutionScenario:
         failures: list[str] = []
         observation = validation.upload_observation
         payload = observation.result.json_payload
-        manifest_entries = _parse_manifest_entries(validation.post_upload_state.manifest_text)
-        new_entry = _find_manifest_entry(manifest_entries, self.config.new_attachment_name)
 
         if observation.result.exit_code != 0:
             failures.append(
@@ -265,6 +263,7 @@ class Ts485MixedAttachmentResolutionScenario:
                 f"Observed manifest after upload:\n"
                 f"{validation.post_upload_state.manifest_text or '<missing>'}"
             )
+            return failures
         elif not isinstance(payload, dict):
             failures.append(
                 "Step 3 failed: the upload command did not return a machine-readable "
@@ -272,94 +271,99 @@ class Ts485MixedAttachmentResolutionScenario:
                 f"Observed stdout:\n{observation.result.stdout}\n"
                 f"Observed stderr:\n{observation.result.stderr}"
             )
+            return failures
+
+        data = payload.get("data")
+        attachment = data.get("attachment") if isinstance(data, dict) else None
+        if payload.get("ok") is not True:
+            failures.append(
+                "Step 3 failed: the upload command returned a non-success JSON "
+                "envelope.\n"
+                f"Observed payload: {json.dumps(payload, indent=2, sort_keys=True)}"
+            )
+        if not isinstance(data, dict):
+            failures.append(
+                "Step 3 failed: the upload success envelope did not include a `data` "
+                "object.\n"
+                f"Observed payload: {json.dumps(payload, indent=2, sort_keys=True)}"
+            )
+        elif data.get("command") != self.config.expected_upload_command_name:
+            failures.append(
+                "Expected result failed: the upload success envelope did not identify "
+                "the canonical attachment-upload command.\n"
+                f"Observed data: {json.dumps(data, indent=2, sort_keys=True)}"
+            )
+        if not isinstance(attachment, dict):
+            failures.append(
+                "Step 3 failed: the upload success envelope did not include attachment "
+                "metadata.\n"
+                f"Observed payload: {json.dumps(payload, indent=2, sort_keys=True)}"
+            )
         else:
-            data = payload.get("data")
-            attachment = data.get("attachment") if isinstance(data, dict) else None
-            if payload.get("ok") is not True:
+            result["observed_uploaded_attachment"] = attachment
+            if attachment.get("name") != self.config.new_attachment_name:
                 failures.append(
-                    "Step 3 failed: the upload command returned a non-success JSON "
-                    "envelope.\n"
-                    f"Observed payload: {json.dumps(payload, indent=2, sort_keys=True)}"
+                    "Step 3 failed: the upload response did not report the new "
+                    "attachment as `new.png`.\n"
+                    f"Observed attachment payload: {json.dumps(attachment, sort_keys=True)}"
                 )
-            if not isinstance(data, dict):
+
+        if failures:
+            return failures
+
+        manifest_entries = _parse_manifest_entries(validation.post_upload_state.manifest_text)
+        new_entry = _find_manifest_entry(manifest_entries, self.config.new_attachment_name)
+        if new_entry is None:
+            failures.append(
+                "Step 4 failed: `attachments.json` was not updated with a manifest "
+                "entry for `new.png` after upload.\n"
+                f"Observed manifest text:\n"
+                f"{validation.post_upload_state.manifest_text or '<missing>'}"
+            )
+        elif new_entry.get("storageBackend") != self.config.expected_new_backend:
+            failures.append(
+                "Step 4 failed: the new attachment manifest entry did not record the "
+                "current github-releases backend marker.\n"
+                f"Expected backend: {self.config.expected_new_backend}\n"
+                f"Observed entry: {json.dumps(new_entry, sort_keys=True)}"
+            )
+        else:
+            if new_entry.get("githubReleaseTag") != self.config.expected_github_release_tag:
                 failures.append(
-                    "Step 3 failed: the upload success envelope did not include a `data` "
-                    "object.\n"
-                    f"Observed payload: {json.dumps(payload, indent=2, sort_keys=True)}"
-                )
-            elif data.get("command") != self.config.expected_upload_command_name:
-                failures.append(
-                    "Expected result failed: the upload success envelope did not identify "
-                    "the canonical attachment-upload command.\n"
-                    f"Observed data: {json.dumps(data, indent=2, sort_keys=True)}"
-                )
-            if not isinstance(attachment, dict):
-                failures.append(
-                    "Step 3 failed: the upload success envelope did not include attachment "
-                    "metadata.\n"
-                    f"Observed payload: {json.dumps(payload, indent=2, sort_keys=True)}"
-                )
-            else:
-                result["observed_uploaded_attachment"] = attachment
-                if attachment.get("name") != self.config.new_attachment_name:
-                    failures.append(
-                        "Step 3 failed: the upload response did not report the new "
-                        "attachment as `new.png`.\n"
-                        f"Observed attachment payload: {json.dumps(attachment, sort_keys=True)}"
-                    )
-            if new_entry is None:
-                failures.append(
-                    "Step 4 failed: `attachments.json` was not updated with a manifest "
-                    "entry for `new.png` after upload.\n"
-                    f"Observed manifest text:\n"
-                    f"{validation.post_upload_state.manifest_text or '<missing>'}"
-                )
-            elif new_entry.get("storageBackend") != self.config.expected_new_backend:
-                failures.append(
-                    "Step 4 failed: the new attachment manifest entry did not record the "
-                    "current github-releases backend marker.\n"
-                    f"Expected backend: {self.config.expected_new_backend}\n"
+                    "Expected result failed: the new manifest entry did not preserve "
+                    "the expected GitHub release tag.\n"
+                    f"Expected tag: {self.config.expected_github_release_tag}\n"
                     f"Observed entry: {json.dumps(new_entry, sort_keys=True)}"
                 )
-            else:
-                if new_entry.get("githubReleaseTag") != self.config.expected_github_release_tag:
-                    failures.append(
-                        "Expected result failed: the new manifest entry did not preserve "
-                        "the expected GitHub release tag.\n"
-                        f"Expected tag: {self.config.expected_github_release_tag}\n"
-                        f"Observed entry: {json.dumps(new_entry, sort_keys=True)}"
-                    )
-                _record_step(
-                    result,
-                    step=3,
-                    status="passed",
-                    action="Upload a new attachment `new.png` to issue `TS-10`.",
-                    observed=(
-                        f"exit_code=0; payload={json.dumps(payload, sort_keys=True)}"
-                    ),
-                )
-                _record_step(
-                    result,
-                    step=4,
-                    status="passed",
-                    action=(
-                        "Verify `new.png` is recorded in the issue attachment manifest "
-                        "with the github-releases backend marker."
-                    ),
-                    observed=json.dumps(new_entry, sort_keys=True),
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Verified the visible CLI upload response and the manifest JSON "
-                        "both showed the newly uploaded `new.png` entry rather than only "
-                        "changing background repository files."
-                    ),
-                    observed=(
-                        f"stdout:\n{observation.result.stdout}\n\n"
-                        f"manifest:\n{validation.post_upload_state.manifest_text}"
-                    ),
-                )
+            _record_step(
+                result,
+                step=3,
+                status="passed",
+                action="Upload a new attachment `new.png` to issue `TS-10`.",
+                observed=(f"exit_code=0; payload={json.dumps(payload, sort_keys=True)}"),
+            )
+            _record_step(
+                result,
+                step=4,
+                status="passed",
+                action=(
+                    "Verify `new.png` is recorded in the issue attachment manifest "
+                    "with the github-releases backend marker."
+                ),
+                observed=json.dumps(new_entry, sort_keys=True),
+            )
+            _record_human_verification(
+                result,
+                check=(
+                    "Verified the visible CLI upload response and the manifest JSON "
+                    "both showed the newly uploaded `new.png` entry rather than only "
+                    "changing background repository files."
+                ),
+                observed=(
+                    f"stdout:\n{observation.result.stdout}\n\n"
+                    f"manifest:\n{validation.post_upload_state.manifest_text}"
+                ),
+            )
         return failures
 
     def _validate_download_step(self, validation, result: dict[str, object]) -> list[str]:
