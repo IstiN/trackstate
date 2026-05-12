@@ -175,12 +175,16 @@ class LiveMultiViewRefreshPage:
 
     def close_edit_dialog(self) -> None:
         self._session.wait_for_selector(self._dialog_group_selector, timeout_ms=30_000)
-        self._session.click(self._button_selector, has_text="Cancel", timeout_ms=30_000)
+        if self._session.count(self._button_selector, has_text="Cancel") > 0:
+            self._session.click(self._button_selector, has_text="Cancel", timeout_ms=30_000)
+        else:
+            self._session.press_key("Escape", timeout_ms=30_000)
         try:
             self._session.wait_for_count(self._dialog_group_selector, 0, timeout_ms=30_000)
         except WebAppTimeoutError as error:
             raise AssertionError(
-                "Step failed: clicking Cancel did not close the hosted Edit issue surface.\n"
+                "Step failed: dismissing the hosted Edit issue surface did not close the "
+                "dialog.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
 
