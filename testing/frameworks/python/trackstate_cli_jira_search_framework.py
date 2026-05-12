@@ -28,16 +28,20 @@ class PythonTrackStateCliJiraSearchFramework(TrackStateCliJiraSearchProbe):
         *,
         config: TrackStateCliJiraSearchConfig,
     ) -> TrackStateCliJiraSearchValidationResult:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-319-bin-") as bin_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-cli-jira-search-bin-"
+        ) as bin_dir:
             executable_path = Path(bin_dir) / "trackstate"
             self._compile_executable(executable_path)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-319-repo-") as temp_dir:
+            with tempfile.TemporaryDirectory(
+                prefix="trackstate-cli-jira-search-repo-"
+            ) as temp_dir:
                 repository_path = Path(temp_dir)
                 self._seed_local_repository(repository_path)
                 fallback_reason = (
                     "Pinned execution to a temporary executable compiled from this "
-                    "checkout so TS-319 can run the exact ticket command from the "
-                    "seeded repository as the current working directory."
+                    "checkout so the ticket scenario can run the exact command from "
+                    "the seeded repository as the current working directory."
                 )
                 return TrackStateCliJiraSearchValidationResult(
                     ticket_command=self._observe_command(
@@ -94,7 +98,8 @@ class PythonTrackStateCliJiraSearchFramework(TrackStateCliJiraSearchProbe):
         )
         if completed.returncode != 0:
             raise AssertionError(
-                "Failed to compile a temporary TrackState CLI executable for TS-319.\n"
+                "Failed to compile a temporary TrackState CLI executable for the "
+                "ticket scenario.\n"
                 f"Command: {dart_bin} compile exe bin/trackstate.dart -o {destination}\n"
                 f"Exit code: {completed.returncode}\n"
                 f"stdout:\n{completed.stdout}\n"
@@ -186,16 +191,22 @@ Issue 2.
 """,
         )
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-319 Tester")
+        self._git(
+            repository_path,
+            "config",
+            "--local",
+            "user.name",
+            "TrackState Search Tester",
+        )
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "ts319@example.com",
+            "search-tester@example.com",
         )
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-319 fixture")
+        self._git(repository_path, "commit", "-m", "Seed CLI search fixture")
 
     @staticmethod
     def _write_file(path: Path, content: str) -> None:
