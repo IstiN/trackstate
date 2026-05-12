@@ -175,6 +175,123 @@ class IssueDetailAccessibilityRobot
   }
 
   @override
+  bool showsAttachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+  }) => _attachmentsRestrictionCallout(
+    issueKey,
+    title: title,
+    message: message,
+  ).evaluate().isNotEmpty;
+
+  @override
+  bool attachmentsRestrictionCalloutShowsText(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String text,
+  }) {
+    final callout = _attachmentsRestrictionCallout(
+      issueKey,
+      title: title,
+      message: message,
+    );
+    if (callout.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(of: callout, matching: find.text(text, findRichText: true))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  bool attachmentsRestrictionCalloutIsInline(
+    String issueKey, {
+    required String tabLabel,
+    required String title,
+    required String message,
+  }) {
+    final callout = _attachmentsRestrictionCallout(
+      issueKey,
+      title: title,
+      message: message,
+    );
+    final tab = _collaborationTab(issueKey, tabLabel);
+    if (callout.evaluate().isEmpty || tab.evaluate().isEmpty) {
+      return false;
+    }
+    final tabBottom = tester.getBottomLeft(tab.first).dy;
+    final calloutTop = tester.getTopLeft(callout.first).dy;
+    return calloutTop > tabBottom;
+  }
+
+  @override
+  bool showsAttachmentRow(String issueKey, String attachmentName) =>
+      _attachmentRow(issueKey, attachmentName).evaluate().isNotEmpty;
+
+  @override
+  bool attachmentRowIsBelowAttachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String attachmentName,
+  }) {
+    final callout = _attachmentsRestrictionCallout(
+      issueKey,
+      title: title,
+      message: message,
+    );
+    final attachmentRow = _attachmentRow(issueKey, attachmentName);
+    if (callout.evaluate().isEmpty || attachmentRow.evaluate().isEmpty) {
+      return false;
+    }
+    final calloutBottom = tester.getBottomLeft(callout.first).dy;
+    final rowTop = tester.getTopLeft(attachmentRow.first).dy;
+    return rowTop > calloutBottom;
+  }
+
+  @override
+  bool showsAttachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) {
+    final action = _attachmentsRestrictionAction(
+      issueKey,
+      title: title,
+      message: message,
+      actionLabel: actionLabel,
+    );
+    return action.evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<void> tapAttachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) async {
+    final action = _attachmentsRestrictionAction(
+      issueKey,
+      title: title,
+      message: message,
+      actionLabel: actionLabel,
+    );
+    if (action.evaluate().isEmpty) {
+      throw StateError(
+        'No "$actionLabel" action was rendered inside the "$title" restriction callout for issue detail $issueKey.',
+      );
+    }
+    await tester.ensureVisible(action.first);
+    await tester.tap(action.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
   String? commentComposerPlaceholderText(String issueKey) {
     final decoration = _commentComposerDecoration(issueKey);
     final placeholder = decoration.hintText?.trim();
@@ -385,6 +502,73 @@ class IssueDetailAccessibilityRobot
     }
     return field.first;
   }
+
+  Finder _attachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+  }) => find.ancestor(
+    of: find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.text(title, findRichText: true),
+    ),
+    matching: find.byWidgetPredicate((widget) {
+      if (widget is! Semantics) {
+        return false;
+      }
+      final label = widget.properties.label ?? '';
+      return label.contains(title) && label.contains(message);
+    }, description: 'attachments restriction callout "$title"'),
+  );
+
+  Finder _attachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) {
+    final callout = _attachmentsRestrictionCallout(
+      issueKey,
+      title: title,
+      message: message,
+    );
+    if (callout.evaluate().isEmpty) {
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing attachments restriction action "$actionLabel"',
+      );
+    }
+    final outlinedButton = find.descendant(
+      of: callout,
+      matching: find.widgetWithText(OutlinedButton, actionLabel),
+    );
+    if (outlinedButton.evaluate().isNotEmpty) {
+      return outlinedButton.first;
+    }
+    final filledButton = find.descendant(
+      of: callout,
+      matching: find.widgetWithText(FilledButton, actionLabel),
+    );
+    if (filledButton.evaluate().isNotEmpty) {
+      return filledButton.first;
+    }
+    return find.descendant(
+      of: callout,
+      matching: find.text(actionLabel, findRichText: true),
+    );
+  }
+
+  Finder _attachmentRow(String issueKey, String attachmentName) =>
+      find.descendant(
+        of: _issueDetail(issueKey),
+        matching: find.byWidgetPredicate((widget) {
+          if (widget is! Semantics) {
+            return false;
+          }
+          final label = widget.properties.label ?? '';
+          return label.contains(attachmentName);
+        }, description: 'attachment row for $attachmentName'),
+      );
 
   InputDecoration _commentComposerDecoration(String issueKey) {
     final field = tester.widget<TextField>(_commentComposerField(issueKey));
