@@ -1,35 +1,110 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
-import '../../../core/utils/local_trackstate_fixture.dart';
-
 class Ts449InitialShellFixture {
-  Ts449InitialShellFixture._({
-    required this.localFixture,
-    required this.repository,
-  });
+  Ts449InitialShellFixture._({required this.repository});
 
   static const Duration initialSearchDelay = Duration(seconds: 4);
+  static const String hydratedIssueSummary = 'Hosted shell issue stays visible';
 
-  final LocalTrackStateFixture localFixture;
   final Ts449DelayedInitialSearchRepository repository;
 
   static Future<Ts449InitialShellFixture> create() async {
-    final localFixture = await LocalTrackStateFixture.create();
     final repository = Ts449DelayedInitialSearchRepository(
-      localFixture.repository,
+      _createHostedRepository(),
       initialSearchDelay: initialSearchDelay,
     );
-    return Ts449InitialShellFixture._(
-      localFixture: localFixture,
-      repository: repository,
-    );
+    return Ts449InitialShellFixture._(repository: repository);
   }
 
-  Future<void> dispose() => localFixture.dispose();
+  Future<void> dispose() async {}
 }
+
+TrackStateRepository _createHostedRepository() {
+  return SetupTrackStateRepository(
+    client: MockClient(_handleHostedRequest),
+    repositoryName: _repositoryName,
+    sourceRef: _branch,
+    dataRef: _branch,
+  );
+}
+
+Future<http.Response> _handleHostedRequest(http.Request request) async {
+  final path = request.url.path;
+  if (path == '/repos/$_repositoryName/git/trees/$_branch') {
+    return http.Response(jsonEncode(_treeResponse), 200);
+  }
+  final content = _contentResponses[path];
+  if (content != null) {
+    return http.Response(
+      jsonEncode({
+        'content': base64Encode(utf8.encode(content)),
+        'sha': _shaFor(path),
+      }),
+      200,
+    );
+  }
+  return http.Response('not found: $path', 404);
+}
+
+String _shaFor(String path) {
+  return switch (path) {
+    '/repos/$_repositoryName/contents/TRACK/project.json' => 'project-sha',
+    '/repos/$_repositoryName/contents/TRACK/config/statuses.json' =>
+      'statuses-sha',
+    '/repos/$_repositoryName/contents/TRACK/config/issue-types.json' =>
+      'issue-types-sha',
+    '/repos/$_repositoryName/contents/TRACK/config/fields.json' => 'fields-sha',
+    '/repos/$_repositoryName/contents/TRACK/config/priorities.json' =>
+      'priorities-sha',
+    '/repos/$_repositoryName/contents/TRACK/config/workflows.json' =>
+      'workflows-sha',
+    '/repos/$_repositoryName/contents/TRACK/.trackstate/index/issues.json' =>
+      'index-sha',
+    '/repos/$_repositoryName/contents/TRACK/TRACK-449/main.md' => 'issue-sha',
+    _ => 'sha',
+  };
+}
+
+const String _repositoryName = 'octo/ts449-hosted-shell';
+const String _branch = 'main';
+
+const _treeResponse = {
+  'tree': [
+    {'path': 'TRACK/project.json', 'type': 'blob'},
+    {'path': 'TRACK/config/statuses.json', 'type': 'blob'},
+    {'path': 'TRACK/config/issue-types.json', 'type': 'blob'},
+    {'path': 'TRACK/config/fields.json', 'type': 'blob'},
+    {'path': 'TRACK/config/priorities.json', 'type': 'blob'},
+    {'path': 'TRACK/config/workflows.json', 'type': 'blob'},
+    {'path': 'TRACK/.trackstate/index/issues.json', 'type': 'blob'},
+    {'path': 'TRACK/TRACK-449/main.md', 'type': 'blob'},
+  ],
+};
+
+const _contentResponses = {
+  '/repos/octo/ts449-hosted-shell/contents/TRACK/project.json':
+      '{"key":"TRACK","name":"Hosted Shell Demo","defaultLocale":"en"}',
+  '/repos/octo/ts449-hosted-shell/contents/TRACK/config/statuses.json':
+      '[{"id":"todo","name":"To Do"},{"id":"in-progress","name":"In Progress"},{"id":"done","name":"Done"}]',
+  '/repos/octo/ts449-hosted-shell/contents/TRACK/config/issue-types.json':
+      '[{"id":"story","name":"Story"}]',
+  '/repos/octo/ts449-hosted-shell/contents/TRACK/config/fields.json':
+      '[{"id":"summary","name":"Summary"},{"id":"priority","name":"Priority"},{"id":"description","name":"Description","type":"markdown","reserved":true}]',
+  '/repos/octo/ts449-hosted-shell/contents/TRACK/config/priorities.json':
+      '[{"id":"high","name":"High"}]',
+  '/repos/octo/ts449-hosted-shell/contents/TRACK/config/workflows.json':
+      '{"default":{"name":"Default Workflow","statuses":["todo","in-progress","done"],"transitions":[{"id":"start","name":"Start progress","from":"todo","to":"in-progress"},{"id":"finish","name":"Complete","from":"in-progress","to":"done"}]}}',
+  '/repos/octo/ts449-hosted-shell/contents/TRACK/.trackstate/index/issues.json':
+      '[{"key":"TRACK-449","path":"TRACK/TRACK-449/main.md","parent":null,"epic":null,"parentPath":null,"epicPath":null,"summary":"Hosted shell issue stays visible","issueType":"story","status":"in-progress","priority":"high","assignee":"qa-user","labels":["hosted-shell"],"updated":"2026-05-12T06:00:00Z","children":[],"archived":false}]',
+  '/repos/octo/ts449-hosted-shell/contents/TRACK/TRACK-449/main.md':
+      '---\nkey: TRACK-449\nproject: TRACK\nissueType: story\nstatus: in-progress\npriority: high\nsummary: Hosted shell issue stays visible\nassignee: qa-user\nreporter: qa-user\nlabels:\n  - hosted-shell\nupdated: 2026-05-12T06:00:00Z\n---\n\n# Description\n\nHosted shell hydration should keep this issue visible after the delayed search completes.\n',
+};
 
 class Ts449DelayedInitialSearchRepository
     implements TrackStateRepository, ProjectSettingsRepository {
@@ -44,6 +119,7 @@ class Ts449DelayedInitialSearchRepository
   int searchPageCalls = 0;
   bool initialSearchStarted = false;
   bool initialSearchCompleted = false;
+  Object? lastSearchError;
 
   @override
   bool get supportsGitHubAuth => _delegate.supportsGitHubAuth;
@@ -66,14 +142,19 @@ class Ts449DelayedInitialSearchRepository
       initialSearchStarted = true;
       await Future<void>.delayed(initialSearchDelay);
     }
-    final page = await _delegate.searchIssuePage(
-      jql,
-      startAt: startAt,
-      maxResults: maxResults,
-      continuationToken: continuationToken,
-    );
-    initialSearchCompleted = true;
-    return page;
+    try {
+      final page = await _delegate.searchIssuePage(
+        jql,
+        startAt: startAt,
+        maxResults: maxResults,
+        continuationToken: continuationToken,
+      );
+      initialSearchCompleted = true;
+      return page;
+    } on Object catch (error) {
+      lastSearchError = error;
+      rethrow;
+    }
   }
 
   @override

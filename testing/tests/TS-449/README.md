@@ -6,10 +6,10 @@ navigation interactive while the first background search hydration is still
 loading.
 
 The automation:
-1. launches the local-repository-backed app with a ticket-specific delayed
+1. launches the hosted GitHub setup runtime with a ticket-specific delayed
    initial `searchIssuePage()` wrapper
 2. verifies the desktop shell shows the visible branding, sidebar navigation,
-   top-bar controls, and loading state instead of a centered spinner
+   hosted top-bar controls, and loading state instead of a centered spinner
 3. resizes to a compact/mobile viewport and confirms the shell still shows the
    visible branded top bar plus compact navigation while loading remains active
 4. taps **Board** during the loading window and verifies the selected section
@@ -33,15 +33,15 @@ flutter test testing/tests/TS-449/test_ts_449.dart --reporter expanded
 
 - Flutter SDK available on `PATH`
 - No extra environment variables are required
-- The test creates and disposes its own Local Git repository fixture
+- The test uses a hosted mock GitHub repository fixture with delayed hydration
 
 ## Expected result
 
 ```text
 Pass: the app shell renders immediately after snapshot load without falling back
 to a centered spinner, the compact shell remains branded and interactive while
-loading banners are visible, and the user can switch to Board before hydration
-finishes.
+loading banners are visible, the hosted `Connect GitHub` control remains
+available, and the user can switch to Board before hydration finishes.
 
 Fail: the shell does not render until hydration completes, required branded or
 navigation text is missing during loading, compact navigation is not interactive,

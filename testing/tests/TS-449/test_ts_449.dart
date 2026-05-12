@@ -18,14 +18,29 @@ void main() {
           throw StateError('TS-449 fixture creation did not complete.');
         }
 
-        final TrackStateAppComponent app =
-            defaultTestingDependencies.createTrackStateAppScreen(tester);
+        final TrackStateAppComponent app = defaultTestingDependencies
+            .createTrackStateAppScreen(tester);
         await app.pump(fixture.repository);
 
         final failures = <String>[];
         final initialVisibleTexts = app.visibleTextsSnapshot();
         final initialSemantics = app.visibleSemanticsLabelsSnapshot();
         final initialExceptions = _drainFrameworkExceptions(tester);
+        final connectGitHubVisible =
+            await app.isSemanticsLabelVisible('Connect GitHub') ||
+            await app.isTextVisible('Connect GitHub');
+        final localGitVisible =
+            await app.isSemanticsLabelVisible('Local Git') ||
+            await app.isTextVisible('Local Git');
+
+        if (fixture.repository.usesLocalPersistence ||
+            !fixture.repository.supportsGitHubAuth) {
+          failures.add(
+            'Step 1 failed: the test did not exercise the hosted runtime requested by the ticket precondition. '
+            'Observed repository flags: usesLocalPersistence=${fixture.repository.usesLocalPersistence}, '
+            'supportsGitHubAuth=${fixture.repository.supportsGitHubAuth}.',
+          );
+        }
 
         if (!fixture.repository.initialSearchStarted ||
             fixture.repository.initialSearchCompleted) {
@@ -54,7 +69,6 @@ void main() {
           'Settings',
           'Synced with Git',
           'Create issue',
-          'Local Git',
         ]) {
           if (!_snapshotContains(initialVisibleTexts, requiredText)) {
             failures.add(
@@ -62,6 +76,14 @@ void main() {
               'Visible texts: ${_formatSnapshot(initialVisibleTexts)}.',
             );
           }
+        }
+
+        if (!connectGitHubVisible || localGitVisible) {
+          failures.add(
+            'Step 3 failed: the hosted shell did not expose the expected repository access state during hydration. '
+            'Expected visible Connect GitHub=yes and Local Git=no, but observed Connect GitHub=${connectGitHubVisible ? 'yes' : 'no'} and Local Git=${localGitVisible ? 'yes' : 'no'}. '
+            'Visible texts: ${_formatSnapshot(initialVisibleTexts)}. Visible semantics: ${_formatSnapshot(initialSemantics)}.',
+          );
         }
 
         if (!_snapshotContains(initialVisibleTexts, 'Loading')) {
@@ -174,17 +196,27 @@ void main() {
           );
         }
 
-        await tester.pump(const Duration(seconds: 3));
-        await tester.pump();
+        await _pumpUntil(
+          tester,
+          condition: () => fixture!.repository.initialSearchCompleted,
+          timeout: const Duration(seconds: 10),
+          failureMessage: () {
+            final hydrationError = fixture!.repository.lastSearchError;
+            final errorDetails = hydrationError == null
+                ? 'No repository error was captured.'
+                : 'Repository error: $hydrationError.';
+            return 'Expected Result failed: the delayed initial search never completed, so the test could not confirm that the selected section stays usable after hydration finishes. '
+                'Observed search state: started=${fixture.repository.initialSearchStarted}, '
+                'completed=${fixture.repository.initialSearchCompleted}, '
+                'calls=${fixture.repository.searchPageCalls}. '
+                '$errorDetails '
+                'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}. '
+                'Visible semantics: ${_formatSnapshot(app.visibleSemanticsLabelsSnapshot())}.';
+          },
+        );
 
         final hydratedBoardTexts = app.visibleTextsSnapshot();
         final hydratedBoardExceptions = _drainFrameworkExceptions(tester);
-
-        if (!fixture.repository.initialSearchCompleted) {
-          failures.add(
-            'Expected Result failed: the delayed initial search never completed, so the test could not confirm that the selected section stays usable after hydration finishes.',
-          );
-        }
 
         final hydratedBoardSemantics = app.visibleSemanticsLabelsSnapshot();
         if (_snapshotContains(hydratedBoardSemantics, 'Board Loading')) {
@@ -194,7 +226,9 @@ void main() {
           );
         }
 
-        if (!hydratedBoardTexts.contains('Local issue')) {
+        if (!hydratedBoardTexts.contains(
+          Ts449InitialShellFixture.hydratedIssueSummary,
+        )) {
           failures.add(
             'Expected Result failed: once hydration finished, the selected Board section did not continue rendering the visible issue content. '
             'Visible texts: ${_formatSnapshot(hydratedBoardTexts)}.',
@@ -226,9 +260,6 @@ void main() {
   );
 }
 
-Finder _exactSemanticsLabel(String label) =>
-    find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
-
 Finder _exactNavigationButton(String label) => find.byWidgetPredicate(
   (widget) =>
       widget is Semantics &&
@@ -242,6 +273,24 @@ Future<void> _resizeViewport(WidgetTester tester, Size size) async {
   tester.view.devicePixelRatio = 1;
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 250));
+}
+
+Future<void> _pumpUntil(
+  WidgetTester tester, {
+  required bool Function() condition,
+  required Duration timeout,
+  required String Function() failureMessage,
+  Duration step = const Duration(milliseconds: 100),
+}) async {
+  final end = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(end)) {
+    if (condition()) {
+      await tester.pump();
+      return;
+    }
+    await tester.pump(step);
+  }
+  throw TestFailure(failureMessage());
 }
 
 List<String> _drainFrameworkExceptions(WidgetTester tester) {
