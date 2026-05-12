@@ -18,12 +18,14 @@ class Ts454TargetedIssueRefreshFixture {
       'Issue A description stays scoped to the mutated issue.';
   static const String issueAComment =
       'Issue A comment stays visible after the scoped refresh.';
+  static const String issueACommentPath = 'TRACK/TRACK-454A/comments/0001.md';
   static const String issueBKey = 'TRACK-454B';
   static const String issueBSummary = 'Issue B preserved hydration coverage';
   static const String issueBDescription =
       'Issue B detail must remain loaded and interactive.';
   static const String issueBComment =
       'Issue B comment proves unrelated detail stays hydrated.';
+  static const String issueBCommentPath = 'TRACK/TRACK-454B/comments/0001.md';
   static const String initialStatusLabel = 'To Do';
   static const String updatedStatusLabel = 'In Progress';
 
@@ -50,6 +52,11 @@ class Ts454TargetedIssueRefreshFixture {
 
   List<Ts454HydrationCall> get hydrateCalls =>
       List<Ts454HydrationCall>.unmodifiable(repository.hydrateCalls);
+
+  int get textFileReadCount => _provider.textFileReadCount;
+
+  List<String> textFileReadsSince(int count) =>
+      _provider.textFileReadsSince(count);
 
   TrackStateIssue requireCachedIssue(String key) {
     final snapshot = repository.cachedSnapshot;
@@ -258,6 +265,7 @@ Issue B comment proves unrelated detail stays hydrated.
 
   final Map<String, String> _textFiles;
   final Map<String, String> _revisionsByPath;
+  final List<String> _textFileReads = <String>[];
   int _revisionCounter = 1;
   int _commitCounter = 0;
 
@@ -285,6 +293,11 @@ Issue B comment proves unrelated detail stays hydrated.
     );
     return '${entry['status'] ?? ''}';
   }
+
+  int get textFileReadCount => _textFileReads.length;
+
+  List<String> textFileReadsSince(int count) =>
+      List<String>.unmodifiable(_textFileReads.skip(count));
 
   @override
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async =>
@@ -386,6 +399,7 @@ Issue B comment proves unrelated detail stays hydrated.
     if (content == null) {
       throw TrackStateProviderException('Missing TS-454 fixture for $path.');
     }
+    _textFileReads.add(path);
     return RepositoryTextFile(
       path: path,
       content: content,

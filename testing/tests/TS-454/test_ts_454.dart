@@ -105,6 +105,7 @@ void main() {
 
         final baselineSnapshotLoadCount = fixture.snapshotLoadCount;
         final baselineHydrationCount = fixture.hydrateCalls.length;
+        final baselineTextReadCount = fixture.textFileReadCount;
 
         await screen.openIssue(
           Ts454TargetedIssueRefreshFixture.issueAKey,
@@ -149,6 +150,22 @@ void main() {
           Ts454TargetedIssueRefreshFixture.issueAKey,
           Ts454TargetedIssueRefreshFixture.updatedStatusLabel,
         );
+
+        final postMutationTextReads = fixture.textFileReadsSince(
+          baselineTextReadCount,
+        );
+        final issueACommentReloads = postMutationTextReads
+            .where(
+              (path) =>
+                  path == Ts454TargetedIssueRefreshFixture.issueACommentPath,
+            )
+            .length;
+        final issueBCommentReloads = postMutationTextReads
+            .where(
+              (path) =>
+                  path == Ts454TargetedIssueRefreshFixture.issueBCommentPath,
+            )
+            .length;
         expect(
           await screen.tapVisibleControl('Comments'),
           isTrue,
@@ -200,11 +217,25 @@ void main() {
               'Observed post-mutation hydration calls: ${_formatHydrationCalls(mutationHydrationCalls)}.',
         );
         expect(
+          issueACommentReloads,
+          greaterThan(0),
+          reason:
+              'Step 4 failed: mutating Issue-A did not reread the already-hydrated Issue-A comments artifact. '
+              'Observed post-mutation text reads: ${_formatReadPaths(postMutationTextReads)}.',
+        );
+        expect(
           unrelatedIssueRefreshes,
           isEmpty,
           reason:
               'Step 5 failed: mutating Issue-A also rehydrated Issue-B, which indicates the hosted refresh was not scoped. '
               'Observed post-mutation hydration calls: ${_formatHydrationCalls(mutationHydrationCalls)}.',
+        );
+        expect(
+          issueBCommentReloads,
+          0,
+          reason:
+              'Step 5 failed: mutating Issue-A reread Issue-B comments, which indicates the hosted refresh was not scoped. '
+              'Observed post-mutation text reads: ${_formatReadPaths(postMutationTextReads)}.',
         );
 
         final issueBAfterMutation = fixture.requireCachedIssue(
@@ -308,4 +339,21 @@ String _formatHydrationCalls(List<Ts454HydrationCall> calls) {
             '${call.issueKey}[force=${call.force};scopes=${call.scopes.map((scope) => scope.name).join(',')}]',
       )
       .join(' | ');
+}
+
+String _formatReadPaths(List<String> paths, {int limit = 20}) {
+  final uniquePaths = <String>[];
+  for (final path in paths) {
+    if (uniquePaths.contains(path)) {
+      continue;
+    }
+    uniquePaths.add(path);
+    if (uniquePaths.length == limit) {
+      break;
+    }
+  }
+  if (uniquePaths.isEmpty) {
+    return '<none>';
+  }
+  return uniquePaths.join(' | ');
 }
