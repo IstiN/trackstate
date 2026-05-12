@@ -18,6 +18,7 @@ class Ts456DeferredAttachmentErrorFixture {
   static const issueSummary = 'Attachment hydration should stay accessible';
   static const deferredErrorMessage =
       'deferred-attachment-read: Unable to load the seeded attachment metadata.';
+  static const deferredErrorIconSemanticLabel = 'Attachments error';
 
   final ProviderBackedTrackStateRepository repository;
   final _Ts456DeferredAttachmentErrorProvider _provider;

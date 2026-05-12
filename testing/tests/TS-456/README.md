@@ -9,12 +9,13 @@ The automation:
    whose attachment hydration fails on every retry
 2. opens the seeded issue detail and switches to the visible `Attachments` tab
 3. waits for the production deferred-load error card to render
-4. verifies the visible error copy and exact `Retry` semantics label
+4. verifies the visible error copy, exact `Retry` semantics label, and
+   deferred error icon semantics label
 5. tabs through the rendered issue detail until `Retry` receives keyboard focus,
    then activates it with `Enter`
 6. verifies the retry action re-attempts the deferred attachment read
-7. measures the rendered error-card text contrast against the visible
-   `surfaceAlt` background
+7. measures the rendered error-card text and error-icon contrast against the
+   visible `surfaceAlt` background
 
 ## Install dependencies
 
@@ -38,10 +39,12 @@ flutter pub get
 
 ```text
 Pass: the Attachments deferred error state renders visible retry copy, exposes a
-meaningful Retry semantics label, is reachable and activatable by keyboard, and
-keeps its rendered error treatment at WCAG AA contrast.
+meaningful Retry semantics label and deferred error icon semantics label, is
+reachable and activatable by keyboard, and keeps its rendered error treatment at
+WCAG AA contrast.
 
 Fail: the error state is missing, Retry is not exposed with an accessible label
-or keyboard activation path, or the rendered error treatment misses the required
+or keyboard activation path, the deferred error icon is missing or not labeled
+for assistive technology, or the rendered error treatment misses the required
 contrast threshold.
 ```

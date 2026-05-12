@@ -3,6 +3,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../core/interfaces/issue_detail_accessibility_screen.dart';
+import '../../core/models/issue_detail_icon_observation.dart';
 import 'support/ts456_deferred_attachment_error_fixture.dart';
 
 void main() {
@@ -86,6 +87,18 @@ void main() {
           failures.add(
             'Step 4 failed: the deferred Attachments error state must expose exactly one "Retry" semantics label, '
             'but found $retryCount. Observed button labels: ${_formatSnapshot(buttonLabels)}.',
+          );
+        }
+
+        final errorIcon = _observeDeferredErrorIcon(
+          screen,
+          failures,
+          issueKey: Ts456DeferredAttachmentErrorFixture.issueKey,
+        );
+        if (errorIcon != null && errorIcon.contrastRatio < 3.0) {
+          failures.add(
+            'Step 5 failed: the deferred Attachments error icon contrast was ${errorIcon.describe()}, '
+            'below the required WCAG AA 3.0:1 threshold for non-text icons.',
           );
         }
 
@@ -235,6 +248,28 @@ Future<void> _waitForRetryAttempt(
       return;
     }
     await tester.pump(const Duration(milliseconds: 100));
+  }
+}
+
+IssueDetailIconObservation? _observeDeferredErrorIcon(
+  IssueDetailAccessibilityScreenHandle screen,
+  List<String> failures, {
+  required String issueKey,
+}) {
+  try {
+    return screen.observeDecoratedRowIcon(
+      issueKey,
+      rowAnchorText: 'Retry',
+      semanticLabel:
+          Ts456DeferredAttachmentErrorFixture.deferredErrorIconSemanticLabel,
+    );
+  } on StateError {
+    failures.add(
+      'Step 4 failed: the deferred Attachments error state must expose a separate error icon with semantics label '
+      '"${Ts456DeferredAttachmentErrorFixture.deferredErrorIconSemanticLabel}" so screen-reader users can identify the error treatment. '
+      'Observed result: no matching icon was rendered in the deferred error card.',
+    );
+    return null;
   }
 }
 
