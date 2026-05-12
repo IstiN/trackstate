@@ -143,6 +143,32 @@ class SettingsScreenRobot {
         matching: find.byType(EditableText),
       );
 
+  Future<void> enterLocaleTranslation({
+    required String locale,
+    required String id,
+    required String text,
+  }) async {
+    final field = localeEntryTextField(locale: locale, id: id);
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(field.first, text);
+    await tester.pumpAndSettle();
+  }
+
+  String localeTranslationFieldValue({
+    required String locale,
+    required String id,
+  }) {
+    final field = localeEntryTextField(locale: locale, id: id);
+    if (field.evaluate().isEmpty) {
+      throw StateError(
+        'No locale translation field found for locale "$locale" and id "$id".',
+      );
+    }
+    return tester.widget<EditableText>(field.first).controller.text;
+  }
+
   Future<void> focusLocaleTranslationField({
     required String locale,
     required String id,
