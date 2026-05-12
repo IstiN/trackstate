@@ -1,0 +1,27 @@
+test_id: TS-385
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+notes:
+  - Verifies jira_execute_request rejects the unsafe fallback paths from TS-385 before local repository access.
+  - Executes the packaged CLI from this repository checkout via `dart run trackstate` and passes an empty temporary directory with `--path` so Dart package resolution succeeds while local repository access remains observable.
+runtime_inputs:
+  expected_exit_code: 5
+  expected_error_code: UNSUPPORTED_REQUEST
+  expected_error_category: unsupported
+  scenarios:
+    - name: binary_attachment_delete
+      ticket_command: trackstate jira_execute_request --method DELETE --path "rest/api/2/issue/TS-22/attachments"
+      method: DELETE
+      request_path: /rest/api/2/issue/TS-22/attachments
+      expected_message_fragments:
+        - attachment
+    - name: admin_permission_post
+      ticket_command: trackstate jira_execute_request --method POST --path "rest/api/2/user/permission"
+      method: POST
+      request_path: /rest/api/2/user/permission
+      expected_message_fragments:
+        - does not support
+        - /rest/api/2/user/permission
