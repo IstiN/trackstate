@@ -11,7 +11,9 @@ import '../data/providers/local/local_git_trackstate_provider.dart';
 import '../data/providers/trackstate_provider.dart';
 import '../data/repositories/trackstate_repository.dart';
 import '../data/services/jql_search_service.dart';
+import '../data/services/issue_mutation_service.dart';
 import '../data/repositories/trackstate_runtime.dart';
+import '../domain/models/issue_mutation_models.dart';
 import '../domain/models/trackstate_models.dart';
 
 const String trackStateCliSchemaVersion = '1';
@@ -60,7 +62,58 @@ class TrackStateCli {
         'session' => await _runSession(arguments.skip(1).toList()),
         'search' => await _runSearch(normalizedArguments.skip(1).toList()),
         'read' => await _runRead(normalizedArguments.skip(1).toList()),
+        'ticket' => await _runTicket(normalizedArguments.skip(1).toList()),
         'attachment' => await _runAttachment(arguments.skip(1).toList()),
+        'jira_create_ticket_basic' => await _runJiraCreateTicketBasic(
+          arguments.skip(1).toList(),
+        ),
+        'jira_create_ticket_with_json' => await _runJiraCreateTicketWithJson(
+          arguments.skip(1).toList(),
+        ),
+        'jira_create_ticket_with_parent' =>
+          await _runJiraCreateTicketWithParent(arguments.skip(1).toList()),
+        'jira_update_ticket' => await _runJiraUpdateTicket(
+          arguments.skip(1).toList(),
+        ),
+        'jira_update_description' => await _runJiraUpdateDescription(
+          arguments.skip(1).toList(),
+        ),
+        'jira_update_field' => await _runJiraUpdateField(
+          arguments.skip(1).toList(),
+        ),
+        'jira_update_all_fields_with_name' => await _runJiraUpdateField(
+          arguments.skip(1).toList(),
+        ),
+        'jira_clear_field' => await _runJiraClearField(
+          arguments.skip(1).toList(),
+        ),
+        'jira_update_ticket_parent' => await _runJiraUpdateTicketParent(
+          arguments.skip(1).toList(),
+        ),
+        'jira_move_to_status' => await _runJiraMoveToStatus(
+          arguments.skip(1).toList(),
+        ),
+        'jira_move_to_status_with_resolution' =>
+          await _runJiraMoveToStatusWithResolution(arguments.skip(1).toList()),
+        'jira_set_priority' => await _runJiraSetPriority(
+          arguments.skip(1).toList(),
+        ),
+        'jira_assign_ticket_to' => await _runJiraAssignTicket(
+          arguments.skip(1).toList(),
+        ),
+        'jira_add_label' => await _runJiraAddLabel(arguments.skip(1).toList()),
+        'jira_remove_label' => await _runJiraRemoveLabel(
+          arguments.skip(1).toList(),
+        ),
+        'jira_post_comment' => await _runJiraPostComment(
+          arguments.skip(1).toList(),
+        ),
+        'jira_link_issues' => await _runJiraLinkIssues(
+          arguments.skip(1).toList(),
+        ),
+        'jira_delete_ticket' => await _runJiraDeleteTicket(
+          arguments.skip(1).toList(),
+        ),
         'jira_attach_file_to_ticket' => await _runAttachmentUpload(
           _normalizeAttachmentUploadArguments(arguments.skip(1).toList()),
         ),
@@ -833,6 +886,1473 @@ class TrackStateCli {
     }
   }
 
+  Future<TrackStateCliExecution> _runTicket(List<String> arguments) async {
+    if (arguments.isEmpty || _isHelpInvocation(arguments)) {
+      return TrackStateCliExecution.success(
+        output: TrackStateCliOutput.text,
+        content: _ticketHelpText,
+      );
+    }
+
+    return switch (arguments.first.toLowerCase()) {
+      'create' => _runTicketCreate(arguments.skip(1).toList()),
+      'update' => _runTicketUpdate(arguments.skip(1).toList()),
+      'update-description' => _runTicketUpdateDescription(
+        arguments.skip(1).toList(),
+      ),
+      'update-field' => _runTicketUpdateField(arguments.skip(1).toList()),
+      'clear-field' => _runTicketClearField(arguments.skip(1).toList()),
+      'update-parent' => _runTicketUpdateParent(arguments.skip(1).toList()),
+      'move-status' => _runTicketMoveStatus(arguments.skip(1).toList()),
+      'set-priority' => _runTicketSetPriority(arguments.skip(1).toList()),
+      'assign' => _runTicketAssign(arguments.skip(1).toList()),
+      'add-label' => _runTicketAddLabel(arguments.skip(1).toList()),
+      'remove-label' => _runTicketRemoveLabel(arguments.skip(1).toList()),
+      'comment' => _runTicketComment(arguments.skip(1).toList()),
+      'link' => _runTicketLink(arguments.skip(1).toList()),
+      'archive' => _runTicketArchive(arguments.skip(1).toList()),
+      'delete' => _runTicketDelete(arguments.skip(1).toList()),
+      _ => throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message:
+            'Unknown ticket action "${arguments.first}". Use "trackstate ticket --help" to view available actions.',
+        exitCode: 2,
+        details: <String, Object?>{'action': arguments.first},
+      ),
+    };
+  }
+
+  Future<TrackStateCliExecution> _runTicketCreate(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('project', help: 'Project key. Must match the repository.')
+      ..addOption('summary', help: 'Issue summary.')
+      ..addOption('description', help: 'Issue description.')
+      ..addOption('issue-type', help: 'Issue type id or label.')
+      ..addOption('priority', help: 'Priority id or label.')
+      ..addOption('assignee', help: 'Assignee login.')
+      ..addOption('reporter', help: 'Reporter login.')
+      ..addOption('parent', help: 'Parent issue key for sub-tasks.')
+      ..addOption('epic', help: 'Epic issue key for stories/tasks/bugs.')
+      ..addMultiOption(
+        'field',
+        help:
+            'Additional field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
+      );
+    return _runMutationCommand(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketCreateHelpText(parser),
+      commandName: 'ticket-create',
+      execute: (context, results) async {
+        _validateProjectSelection(
+          results,
+          context.snapshot.project,
+          optionNames: const ['project'],
+        );
+        final resolvedFields = _parseResolvedFieldAssignments(
+          _multiOption(results, 'field'),
+          context.snapshot.project,
+        );
+        final hierarchy = _resolveHierarchyOptions(
+          results,
+          fields: resolvedFields,
+          context: context,
+        );
+        final result = await context.service.createIssue(
+          summary: _requiredTrimmedOption(results, 'summary'),
+          description: _trimmedOption(results, 'description') ?? '',
+          issueTypeId: _trimmedOption(results, 'issue-type'),
+          priorityId: _trimmedOption(results, 'priority'),
+          assignee: _trimmedOption(results, 'assignee'),
+          reporter: _trimmedOption(results, 'reporter'),
+          parentKey: hierarchy.parentKey,
+          epicKey: hierarchy.epicKey,
+          fields: _fieldMapFromResolved(resolvedFields),
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'ticket-create',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketUpdate(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to update.')
+      ..addMultiOption(
+        'field',
+        help:
+            'Field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
+      )
+      ..addMultiOption(
+        'clear-field',
+        help: 'Field identifiers to clear during the update.',
+      );
+    return _runMutationCommand(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketUpdateHelpText(parser),
+      commandName: 'ticket-update',
+      execute: (context, results) async {
+        final issueKey = _requiredTrimmedOption(results, 'key');
+        final fields = _mergeFieldMutations(
+          project: context.snapshot.project,
+          assignments: _multiOption(results, 'field'),
+          clearedFields: _multiOption(results, 'clear-field'),
+        );
+        final result = await context.service.updateFields(
+          issueKey: issueKey,
+          fields: fields,
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'ticket-update',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketUpdateDescription(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to update.')
+      ..addOption('description', help: 'New description markdown.');
+    return _runMutationCommand(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketUpdateDescriptionHelpText(parser),
+      commandName: 'ticket-update-description',
+      execute: (context, results) async {
+        final issueKey = _requiredTrimmedOption(results, 'key');
+        final result = await context.service.updateFields(
+          issueKey: issueKey,
+          fields: <String, Object?>{
+            'description': _trimmedOption(results, 'description') ?? '',
+          },
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'ticket-update-description',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketUpdateField(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to update.')
+      ..addOption('field', help: 'Field id, display name, or customfield code.')
+      ..addOption(
+        'value',
+        help:
+            'Field value. Accepts JSON scalars, arrays, objects, or plain text.',
+      );
+    return _runMutationCommand(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketUpdateFieldHelpText(parser),
+      commandName: 'ticket-update-field',
+      execute: (context, results) async {
+        final issueKey = _requiredTrimmedOption(results, 'key');
+        final resolvedField = _resolveMutationField(
+          context.snapshot.project,
+          _requiredTrimmedOption(results, 'field'),
+        );
+        final rawValue = results['value']?.toString();
+        if (rawValue == null) {
+          throw _TrackStateCliException(
+            code: 'INVALID_ARGUMENT',
+            category: TrackStateCliErrorCategory.validation,
+            message: 'Missing required option "--value".',
+            exitCode: 2,
+            details: const <String, Object?>{'option': 'value'},
+          );
+        }
+        final result = await context.service.updateFields(
+          issueKey: issueKey,
+          fields: <String, Object?>{
+            resolvedField.canonicalKey: _parseInlineValue(rawValue),
+          },
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'ticket-update-field',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'field': <String, Object?>{
+            'requested': results['field']!.toString(),
+            'resolved': resolvedField.canonicalKey,
+          },
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketClearField(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to update.')
+      ..addOption(
+        'field',
+        help: 'Field id, display name, or customfield code.',
+      );
+    return _runMutationCommand(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketClearFieldHelpText(parser),
+      commandName: 'ticket-clear-field',
+      execute: (context, results) async {
+        final issueKey = _requiredTrimmedOption(results, 'key');
+        final resolvedField = _resolveMutationField(
+          context.snapshot.project,
+          _requiredTrimmedOption(results, 'field'),
+        );
+        final result = await context.service.updateFields(
+          issueKey: issueKey,
+          fields: <String, Object?>{resolvedField.canonicalKey: null},
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'ticket-clear-field',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'field': <String, Object?>{
+            'requested': results['field']!.toString(),
+            'resolved': resolvedField.canonicalKey,
+          },
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketUpdateParent(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to move.')
+      ..addOption('parent', help: 'Parent issue key for sub-tasks.')
+      ..addOption('epic', help: 'Epic issue key for stories/tasks/bugs.');
+    return _runMutationCommand(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketUpdateParentHelpText(parser),
+      commandName: 'ticket-update-parent',
+      execute: (context, results) async {
+        final issueKey = _requiredTrimmedOption(results, 'key');
+        final parentKey = _trimmedOption(results, 'parent');
+        final epicKey = _trimmedOption(results, 'epic');
+        if (parentKey == null && epicKey == null) {
+          throw _TrackStateCliException(
+            code: 'INVALID_ARGUMENT',
+            category: TrackStateCliErrorCategory.validation,
+            message: 'Provide at least one of "--parent" or "--epic".',
+            exitCode: 2,
+            details: const <String, Object?>{
+              'options': <String>['parent', 'epic'],
+            },
+          );
+        }
+        final result = await context.service.reassignIssue(
+          issueKey: issueKey,
+          parentKey: parentKey,
+          epicKey: epicKey,
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'ticket-update-parent',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketMoveStatus(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to move.')
+      ..addOption('status', help: 'Target status id or label.')
+      ..addOption('resolution', help: 'Resolution id or label.');
+    return _runMutationCommand(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketMoveStatusHelpText(parser),
+      commandName: 'ticket-move-status',
+      execute: (context, results) async {
+        final issueKey = _requiredTrimmedOption(results, 'key');
+        final result = await context.service.transitionIssue(
+          issueKey: issueKey,
+          status: _requiredTrimmedOption(results, 'status'),
+          resolution: _trimmedOption(results, 'resolution'),
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'ticket-move-status',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketSetPriority(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to update.')
+      ..addOption('priority', help: 'Priority id or label.');
+    return _runMutationCommand(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketSetPriorityHelpText(parser),
+      commandName: 'ticket-set-priority',
+      execute: (context, results) async {
+        final issueKey = _requiredTrimmedOption(results, 'key');
+        final result = await context.service.updateFields(
+          issueKey: issueKey,
+          fields: <String, Object?>{
+            'priority': _requiredTrimmedOption(results, 'priority'),
+          },
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'ticket-set-priority',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketAssign(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to update.')
+      ..addOption('assignee', help: 'Assignee login.');
+    return _runMutationCommand(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketAssignHelpText(parser),
+      commandName: 'ticket-assign',
+      execute: (context, results) async {
+        final issueKey = _requiredTrimmedOption(results, 'key');
+        final result = await context.service.updateFields(
+          issueKey: issueKey,
+          fields: <String, Object?>{
+            'assignee': _requiredTrimmedOption(results, 'assignee'),
+          },
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'ticket-assign',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketAddLabel(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to update.')
+      ..addOption('label', help: 'Label to add.');
+    return _runLabelMutation(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketAddLabelHelpText(parser),
+      commandName: 'ticket-add-label',
+      mutateLabels: (labels, label) {
+        final updated = <String>[...labels];
+        if (!updated.contains(label)) {
+          updated.add(label);
+        }
+        return updated;
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketRemoveLabel(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to update.')
+      ..addOption('label', help: 'Label to remove.');
+    return _runLabelMutation(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketRemoveLabelHelpText(parser),
+      commandName: 'ticket-remove-label',
+      mutateLabels: (labels, label) =>
+          labels.where((candidate) => candidate != label).toList(),
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketComment(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to update.')
+      ..addOption('body', help: 'Comment markdown body.');
+    return _runMutationCommand(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketCommentHelpText(parser),
+      commandName: 'ticket-comment',
+      execute: (context, results) async {
+        final issueKey = _requiredTrimmedOption(results, 'key');
+        final previous = _issueFromSnapshot(context.snapshot, issueKey);
+        final result = await context.service.addComment(
+          issueKey: issueKey,
+          body: _requiredTrimmedOption(results, 'body'),
+        );
+        final issue = _requireMutationSuccess(result);
+        final comment = _newestComment(
+          issue,
+          previousCommentCount: previous.comments.length,
+        );
+        return <String, Object?>{
+          'command': 'ticket-comment',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'comment': _commentPayload(comment),
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketLink(List<String> arguments) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Source issue key.')
+      ..addOption('target-key', help: 'Target issue key.')
+      ..addOption('type', help: 'Link type label or canonical id.');
+    return _runMutationCommand(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketLinkHelpText(parser),
+      commandName: 'ticket-link',
+      execute: (context, results) async {
+        final issueKey = _requiredTrimmedOption(results, 'key');
+        final targetKey = _requiredTrimmedOption(results, 'target-key');
+        final requestedType = _requiredTrimmedOption(results, 'type');
+        final normalizedLink = _normalizeCliLinkType(requestedType);
+        final result = await context.service.createLink(
+          issueKey: issueKey,
+          targetKey: targetKey,
+          type: requestedType,
+        );
+        final issue = _requireMutationSuccess(result);
+        final storedLink = issue.links
+            .where(
+              (candidate) =>
+                  candidate.targetKey == targetKey &&
+                  (normalizedLink == null ||
+                      (candidate.type == normalizedLink.canonicalKey &&
+                          candidate.direction == normalizedLink.direction)),
+            )
+            .toList(growable: false)
+            .lastOrNull;
+        return <String, Object?>{
+          'command': 'ticket-link',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'link': _linkPayload(
+            storedLink ??
+                IssueLink(
+                  type: normalizedLink?.canonicalKey ?? requestedType,
+                  targetKey: targetKey,
+                  direction: normalizedLink?.direction ?? 'outward',
+                ),
+          ),
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketArchive(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to archive.');
+    return _runMutationCommand(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketArchiveHelpText(parser),
+      commandName: 'ticket-archive',
+      execute: (context, results) async {
+        final issueKey = _requiredTrimmedOption(results, 'key');
+        final result = await context.service.archiveIssue(issueKey);
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'ticket-archive',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runTicketDelete(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to delete.');
+    return _runMutationCommand(
+      arguments: arguments,
+      parser: parser,
+      helpText: _ticketDeleteHelpText(parser),
+      commandName: 'ticket-delete',
+      execute: (context, results) async {
+        final issueKey = _requiredTrimmedOption(results, 'key');
+        final result = await context.service.deleteIssue(issueKey);
+        final tombstone = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'ticket-delete',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'deletedIssue': _deletedIssuePayload(tombstone),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraCreateTicketBasic(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('project', help: 'Project key. Must match the repository.')
+      ..addOption('summary', help: 'Issue summary.')
+      ..addOption('description', help: 'Issue description.')
+      ..addOption('issueType', help: 'Issue type id or label.')
+      ..addOption('priority', help: 'Priority id or label.')
+      ..addOption('assignee', help: 'Assignee login.')
+      ..addOption('reporter', help: 'Reporter login.')
+      ..addMultiOption(
+        'field',
+        help:
+            'Additional field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
+      );
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--projectKey': '--project',
+      }),
+      parser: parser,
+      helpText: _jiraCreateTicketBasicHelpText(parser),
+      commandName: 'jira-create-ticket-basic',
+      execute: (context, results) async {
+        final positionalArguments = results.rest;
+        final projectKey = _firstTrimmedOptionOrPositional(
+          results,
+          const ['project'],
+          positionalArguments,
+          0,
+        );
+        if (projectKey != null) {
+          _validateProjectSelectionValue(projectKey, context.snapshot.project);
+        }
+        final resolvedFields = _parseResolvedFieldAssignments(
+          _multiOption(results, 'field'),
+          context.snapshot.project,
+        );
+        final result = await context.service.createIssue(
+          summary: _firstRequiredTrimmedOptionOrPositional(
+            results,
+            const ['summary'],
+            positionalArguments,
+            2,
+          ),
+          description:
+              _firstTrimmedOptionOrPositional(
+                results,
+                const ['description'],
+                positionalArguments,
+                3,
+              ) ??
+              '',
+          issueTypeId: _firstTrimmedOptionOrPositional(
+            results,
+            const ['issueType'],
+            positionalArguments,
+            1,
+          ),
+          priorityId: _trimmedOption(results, 'priority'),
+          assignee: _trimmedOption(results, 'assignee'),
+          reporter: _trimmedOption(results, 'reporter'),
+          fields: _fieldMapFromResolved(resolvedFields),
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'jira-create-ticket-basic',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraCreateTicketWithJson(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('project', help: 'Project key. Must match the repository.')
+      ..addOption(
+        'fieldsJson',
+        help:
+            'Legacy Jira fields payload used by deployed automation. Accepts a JSON object with field assignments.',
+      )
+      ..addOption(
+        'json',
+        help:
+            'JSON issue payload. Accepts native field maps or Jira fields envelopes.',
+      );
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--projectKey': '--project',
+      }),
+      parser: parser,
+      helpText: _jiraCreateTicketWithJsonHelpText(parser),
+      commandName: 'jira-create-ticket-with-json',
+      execute: (context, results) async {
+        final payload = _resolveJiraCreateTicketWithJsonPayload(results);
+        final createRequest = _parseJiraCreatePayload(
+          payload,
+          context.snapshot,
+          explicitParentKey: null,
+        );
+        final result = await context.service.createIssue(
+          summary: createRequest.summary,
+          description: createRequest.description,
+          issueTypeId: createRequest.issueTypeId,
+          priorityId: createRequest.priorityId,
+          assignee: createRequest.assignee,
+          reporter: createRequest.reporter,
+          parentKey: createRequest.parentKey,
+          epicKey: createRequest.epicKey,
+          fields: createRequest.fields,
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'jira-create-ticket-with-json',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraCreateTicketWithParent(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('project', help: 'Project key. Must match the repository.')
+      ..addOption('summary', help: 'Issue summary.')
+      ..addOption('description', help: 'Issue description.')
+      ..addOption('issueType', help: 'Issue type id or label.')
+      ..addOption('priority', help: 'Priority id or label.')
+      ..addOption('assignee', help: 'Assignee login.')
+      ..addOption('reporter', help: 'Reporter login.')
+      ..addOption('parent', help: 'Jira-compatible parent issue key.')
+      ..addMultiOption(
+        'field',
+        help:
+            'Additional field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
+      );
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--projectKey': '--project',
+        '--parentKey': '--parent',
+      }),
+      parser: parser,
+      helpText: _jiraCreateTicketWithParentHelpText(parser),
+      commandName: 'jira-create-ticket-with-parent',
+      execute: (context, results) async {
+        _validateProjectSelection(
+          results,
+          context.snapshot.project,
+          optionNames: const ['project'],
+        );
+        final resolvedFields = _parseResolvedFieldAssignments(
+          _multiOption(results, 'field'),
+          context.snapshot.project,
+        );
+        final explicitParentKey = _requiredTrimmedOption(results, 'parent');
+        final hierarchy = _resolveJiraParentReference(
+          context.snapshot,
+          explicitParentKey,
+        );
+        final result = await context.service.createIssue(
+          summary: _requiredTrimmedOption(results, 'summary'),
+          description: _trimmedOption(results, 'description') ?? '',
+          issueTypeId: _trimmedOption(results, 'issueType'),
+          priorityId: _trimmedOption(results, 'priority'),
+          assignee: _trimmedOption(results, 'assignee'),
+          reporter: _trimmedOption(results, 'reporter'),
+          parentKey: hierarchy.parentKey,
+          epicKey: hierarchy.epicKey,
+          fields: _fieldMapFromResolved(resolvedFields),
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'jira-create-ticket-with-parent',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraUpdateTicket(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Issue key to update.')
+      ..addOption(
+        'json',
+        help:
+            'JSON update payload. Accepts native field maps or Jira fields envelopes.',
+      );
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
+      parser: parser,
+      helpText: _jiraUpdateTicketHelpText(parser),
+      commandName: 'jira-update-ticket',
+      execute: (context, results) async {
+        final positionalArguments = results.rest;
+        final issueKey = _firstRequiredTrimmedOptionOrPositional(
+          results,
+          const ['issueKey'],
+          positionalArguments,
+          0,
+        );
+        final payload = _requiredJsonObjectOrPositional(
+          results,
+          'json',
+          positionalArguments,
+          1,
+        );
+        final updateFields = _parseJiraUpdatePayload(payload, context.snapshot);
+        final result = await context.service.updateFields(
+          issueKey: issueKey,
+          fields: updateFields,
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'jira-update-ticket',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraUpdateDescription(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Issue key to update.')
+      ..addOption('description', help: 'New description markdown.');
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
+      parser: parser,
+      helpText: _jiraUpdateDescriptionHelpText(parser),
+      commandName: 'jira-update-description',
+      execute: (context, results) async {
+        final issueKey = _firstRequiredTrimmedOption(results, const [
+          'issueKey',
+        ]);
+        final result = await context.service.updateFields(
+          issueKey: issueKey,
+          fields: <String, Object?>{
+            'description': _trimmedOption(results, 'description') ?? '',
+          },
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'jira-update-description',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraUpdateField(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Issue key to update.')
+      ..addOption('field', help: 'Field id, display name, or customfield code.')
+      ..addOption(
+        'value',
+        help:
+            'Field value. Accepts JSON scalars, arrays, objects, or plain text.',
+      );
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
+      parser: parser,
+      helpText: _jiraUpdateFieldHelpText(parser),
+      commandName: 'jira-update-field',
+      execute: (context, results) async {
+        final issueKey = _firstRequiredTrimmedOption(results, const [
+          'issueKey',
+        ]);
+        final resolvedField = _resolveMutationField(
+          context.snapshot.project,
+          _requiredTrimmedOption(results, 'field'),
+        );
+        final rawValue = results['value']?.toString();
+        if (rawValue == null) {
+          throw _TrackStateCliException(
+            code: 'INVALID_ARGUMENT',
+            category: TrackStateCliErrorCategory.validation,
+            message: 'Missing required option "--value".',
+            exitCode: 2,
+            details: const <String, Object?>{'option': 'value'},
+          );
+        }
+        final result = await context.service.updateFields(
+          issueKey: issueKey,
+          fields: <String, Object?>{
+            resolvedField.canonicalKey: _parseInlineValue(rawValue),
+          },
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'jira-update-field',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'field': <String, Object?>{
+            'requested': results['field']!.toString(),
+            'resolved': resolvedField.canonicalKey,
+          },
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraClearField(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Issue key to update.')
+      ..addOption(
+        'field',
+        help: 'Field id, display name, or customfield code.',
+      );
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
+      parser: parser,
+      helpText: _jiraClearFieldHelpText(parser),
+      commandName: 'jira-clear-field',
+      execute: (context, results) async {
+        final issueKey = _firstRequiredTrimmedOption(results, const [
+          'issueKey',
+        ]);
+        final resolvedField = _resolveMutationField(
+          context.snapshot.project,
+          _requiredTrimmedOption(results, 'field'),
+        );
+        final result = await context.service.updateFields(
+          issueKey: issueKey,
+          fields: <String, Object?>{resolvedField.canonicalKey: null},
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'jira-clear-field',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'field': <String, Object?>{
+            'requested': results['field']!.toString(),
+            'resolved': resolvedField.canonicalKey,
+          },
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraUpdateTicketParent(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Issue key to move.')
+      ..addOption('parent', help: 'Jira-compatible parent issue key.');
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+        '--parentKey': '--parent',
+      }),
+      parser: parser,
+      helpText: _jiraUpdateTicketParentHelpText(parser),
+      commandName: 'jira-update-ticket-parent',
+      execute: (context, results) async {
+        final issueKey = _firstRequiredTrimmedOption(results, const [
+          'issueKey',
+        ]);
+        final hierarchy = _resolveJiraParentReference(
+          context.snapshot,
+          _requiredTrimmedOption(results, 'parent'),
+        );
+        final result = await context.service.reassignIssue(
+          issueKey: issueKey,
+          parentKey: hierarchy.parentKey,
+          epicKey: hierarchy.epicKey,
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'jira-update-ticket-parent',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraMoveToStatus(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Issue key to move.')
+      ..addOption('status', help: 'Target status id or label.');
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+        '--statusName': '--status',
+      }),
+      parser: parser,
+      helpText: _jiraMoveToStatusHelpText(parser),
+      commandName: 'jira-move-to-status',
+      execute: (context, results) async {
+        final issueKey = _firstRequiredTrimmedOption(results, const [
+          'issueKey',
+        ]);
+        final result = await context.service.transitionIssue(
+          issueKey: issueKey,
+          status: _requiredTrimmedOption(results, 'status'),
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'jira-move-to-status',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraMoveToStatusWithResolution(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Issue key to move.')
+      ..addOption('status', help: 'Target status id or label.')
+      ..addOption('resolution', help: 'Resolution id or label.');
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+        '--statusName': '--status',
+        '--resolutionName': '--resolution',
+      }),
+      parser: parser,
+      helpText: _jiraMoveToStatusWithResolutionHelpText(parser),
+      commandName: 'jira-move-to-status-with-resolution',
+      execute: (context, results) async {
+        final issueKey = _firstRequiredTrimmedOption(results, const [
+          'issueKey',
+        ]);
+        final result = await context.service.transitionIssue(
+          issueKey: issueKey,
+          status: _requiredTrimmedOption(results, 'status'),
+          resolution: _requiredTrimmedOption(results, 'resolution'),
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'jira-move-to-status-with-resolution',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraSetPriority(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Issue key to update.')
+      ..addOption('priority', help: 'Priority id or label.');
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
+      parser: parser,
+      helpText: _jiraSetPriorityHelpText(parser),
+      commandName: 'jira-set-priority',
+      execute: (context, results) async {
+        final issueKey = _firstRequiredTrimmedOption(results, const [
+          'issueKey',
+        ]);
+        final result = await context.service.updateFields(
+          issueKey: issueKey,
+          fields: <String, Object?>{
+            'priority': _requiredTrimmedOption(results, 'priority'),
+          },
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'jira-set-priority',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraAssignTicket(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Issue key to update.')
+      ..addOption('assignee', help: 'Assignee login.');
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+        '--accountId': '--assignee',
+      }),
+      parser: parser,
+      helpText: _jiraAssignTicketHelpText(parser),
+      commandName: 'jira-assign-ticket',
+      execute: (context, results) async {
+        final issueKey = _firstRequiredTrimmedOption(results, const [
+          'issueKey',
+        ]);
+        final result = await context.service.updateFields(
+          issueKey: issueKey,
+          fields: <String, Object?>{
+            'assignee': _requiredTrimmedOption(results, 'assignee'),
+          },
+        );
+        final issue = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'jira-assign-ticket',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraAddLabel(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Issue key to update.')
+      ..addOption('label', help: 'Label to add.');
+    return _runLabelMutation(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
+      parser: parser,
+      helpText: _jiraAddLabelHelpText(parser),
+      commandName: 'jira-add-label',
+      keyOptions: const ['issueKey'],
+      labelOption: 'label',
+      mutateLabels: (labels, label) {
+        final updated = <String>[...labels];
+        if (!updated.contains(label)) {
+          updated.add(label);
+        }
+        return updated;
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraRemoveLabel(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Issue key to update.')
+      ..addOption('label', help: 'Label to remove.');
+    return _runLabelMutation(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
+      parser: parser,
+      helpText: _jiraRemoveLabelHelpText(parser),
+      commandName: 'jira-remove-label',
+      keyOptions: const ['issueKey'],
+      labelOption: 'label',
+      mutateLabels: (labels, label) =>
+          labels.where((candidate) => candidate != label).toList(),
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraPostComment(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Issue key to update.')
+      ..addOption('body', help: 'Comment markdown body.');
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+        '--comment': '--body',
+      }),
+      parser: parser,
+      helpText: _jiraPostCommentHelpText(parser),
+      commandName: 'jira-post-comment',
+      execute: (context, results) async {
+        final issueKey = _firstRequiredTrimmedOption(results, const [
+          'issueKey',
+        ]);
+        final previous = _issueFromSnapshot(context.snapshot, issueKey);
+        final result = await context.service.addComment(
+          issueKey: issueKey,
+          body: _requiredTrimmedOption(results, 'body'),
+        );
+        final issue = _requireMutationSuccess(result);
+        final comment = _newestComment(
+          issue,
+          previousCommentCount: previous.comments.length,
+        );
+        return <String, Object?>{
+          'command': 'jira-post-comment',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'comment': _commentPayload(comment),
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraLinkIssues(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Source issue key.')
+      ..addOption('targetIssueKey', help: 'Target issue key.')
+      ..addOption('type', help: 'Link type label or canonical id.');
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--sourceKey': '--issueKey',
+        '--anotherKey': '--targetIssueKey',
+        '--relationship': '--type',
+      }),
+      parser: parser,
+      helpText: _jiraLinkIssuesHelpText(parser),
+      commandName: 'jira-link-issues',
+      execute: (context, results) async {
+        final issueKey = _firstRequiredTrimmedOption(results, const [
+          'issueKey',
+        ]);
+        final targetKey = _requiredTrimmedOption(results, 'targetIssueKey');
+        final requestedType = _requiredTrimmedOption(results, 'type');
+        final normalizedLink = _normalizeCliLinkType(requestedType);
+        final result = await context.service.createLink(
+          issueKey: issueKey,
+          targetKey: targetKey,
+          type: requestedType,
+        );
+        final issue = _requireMutationSuccess(result);
+        final storedLink = issue.links
+            .where(
+              (candidate) =>
+                  candidate.targetKey == targetKey &&
+                  (normalizedLink == null ||
+                      (candidate.type == normalizedLink.canonicalKey &&
+                          candidate.direction == normalizedLink.direction)),
+            )
+            .toList(growable: false)
+            .lastOrNull;
+        return <String, Object?>{
+          'command': 'jira-link-issues',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'link': _linkPayload(
+            storedLink ??
+                IssueLink(
+                  type: normalizedLink?.canonicalKey ?? requestedType,
+                  targetKey: targetKey,
+                  direction: normalizedLink?.direction ?? 'outward',
+                ),
+          ),
+          'issue': _issueMutationPayload(issue),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runJiraDeleteTicket(
+    List<String> arguments,
+  ) async {
+    final parser = _mutationParser()
+      ..addOption('issueKey', help: 'Issue key to delete permanently.');
+    return _runMutationCommand(
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
+      parser: parser,
+      helpText: _jiraDeleteTicketHelpText(parser),
+      commandName: 'jira-delete-ticket',
+      execute: (context, results) async {
+        final issueKey = _firstRequiredTrimmedOption(results, const [
+          'issueKey',
+        ]);
+        final result = await context.service.deleteIssue(issueKey);
+        final tombstone = _requireMutationSuccess(result);
+        return <String, Object?>{
+          'command': 'jira-delete-ticket',
+          'operation': result.operation,
+          'authSource': context.authSource,
+          'revision': result.revision,
+          'deletedIssue': _deletedIssuePayload(tombstone),
+        };
+      },
+    );
+  }
+
+  Future<TrackStateCliExecution> _runLabelMutation({
+    required List<String> arguments,
+    required ArgParser parser,
+    required String helpText,
+    required String commandName,
+    required List<String> Function(List<String> labels, String label)
+    mutateLabels,
+    List<String> keyOptions = const ['key'],
+    String labelOption = 'label',
+  }) => _runMutationCommand(
+    arguments: arguments,
+    parser: parser,
+    helpText: helpText,
+    commandName: commandName,
+    execute: (context, results) async {
+      final issueKey = _firstRequiredTrimmedOption(results, keyOptions);
+      final label = _requiredTrimmedOption(results, labelOption);
+      final issue = _issueFromSnapshot(context.snapshot, issueKey);
+      final result = await context.service.updateFields(
+        issueKey: issueKey,
+        fields: <String, Object?>{'labels': mutateLabels(issue.labels, label)},
+      );
+      final updatedIssue = _requireMutationSuccess(result);
+      return <String, Object?>{
+        'command': commandName,
+        'operation': result.operation,
+        'authSource': context.authSource,
+        'revision': result.revision,
+        'issue': _issueMutationPayload(updatedIssue),
+      };
+    },
+  );
+
+  Future<TrackStateCliExecution> _runMutationCommand({
+    required List<String> arguments,
+    required ArgParser parser,
+    required String helpText,
+    required String commandName,
+    required Future<Map<String, Object?>> Function(
+      _PreparedMutationContext context,
+      ArgResults results,
+    )
+    execute,
+  }) async {
+    late final ArgResults results;
+    try {
+      results = parser.parse(arguments);
+    } on FormatException catch (error) {
+      throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message: error.message,
+        exitCode: 2,
+        details: <String, Object?>{'arguments': arguments},
+      );
+    }
+
+    if (results['help'] == true) {
+      return TrackStateCliExecution.success(
+        output: TrackStateCliOutput.text,
+        content: helpText,
+      );
+    }
+
+    final output = TrackStateCliOutput.values.byName(
+      results['output']!.toString(),
+    );
+    final target = await _resolveTarget(results);
+
+    try {
+      final context = await _prepareMutationContext(target);
+      final data = await execute(context, results);
+      return _success(
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: output,
+        data: data,
+      );
+    } on _TrackStateCliException catch (error) {
+      return _error(
+        error,
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: output,
+      );
+    } catch (error) {
+      return _error(
+        _mapMutationError(error, target, commandName: commandName),
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: output,
+      );
+    }
+  }
+
+  Future<_PreparedMutationContext> _prepareMutationContext(
+    _ResolvedTarget target,
+  ) async {
+    if (target.type == TrackStateCliTargetType.local) {
+      final branch = await _resolveLocalBranch(target);
+      final repository = _repositoryFactory.createLocal(
+        repositoryPath: target.value,
+        dataRef: branch,
+      );
+      await repository.connect(
+        RepositoryConnection(
+          repository: target.value,
+          branch: branch,
+          token: '',
+        ),
+      );
+      return _PreparedMutationContext(
+        repository: repository,
+        service: IssueMutationService(repository: repository),
+        snapshot: await repository.loadSnapshot(),
+        authSource: 'none',
+      );
+    }
+
+    final branch = target.branch.ifEmpty(
+      GitHubTrackStateProvider.defaultSourceRef,
+    );
+    final credential = await _credentialResolver.resolve(
+      explicitToken: target.token,
+      environment: _environment.environment,
+      readGhToken: _environment.readGhAuthToken,
+    );
+    if (credential == null) {
+      throw _TrackStateCliException(
+        code: 'AUTHENTICATION_FAILED',
+        category: TrackStateCliErrorCategory.auth,
+        message:
+            'Authentication is required for the selected provider. Pass --token, set TRACKSTATE_TOKEN, or authenticate with gh.',
+        exitCode: 3,
+        details: <String, Object?>{
+          'provider': target.provider,
+          'repository': target.value,
+        },
+      );
+    }
+    final repository = _repositoryFactory.createHosted(
+      provider: target.provider,
+      repository: target.value,
+      branch: branch,
+      client: _httpClient,
+    );
+    await repository.connect(
+      RepositoryConnection(
+        repository: target.value,
+        branch: branch,
+        token: credential.token,
+      ),
+    );
+    return _PreparedMutationContext(
+      repository: repository,
+      service: IssueMutationService(repository: repository),
+      snapshot: await repository.loadSnapshot(),
+      authSource: credential.source,
+    );
+  }
+
   String? _normalizeReadResource(String value) => switch (value.toLowerCase()) {
     'ticket' => 'ticket',
     'fields' => 'fields',
@@ -876,6 +2396,32 @@ class TrackStateCli {
             _ => argument,
           },
       ];
+
+  List<String> _normalizeLegacyJiraArguments(
+    List<String> arguments,
+    Map<String, String> optionAliases,
+  ) => [
+    for (final argument in arguments)
+      _rewriteLegacyJiraOption(argument, optionAliases),
+  ];
+
+  String _rewriteLegacyJiraOption(
+    String argument,
+    Map<String, String> optionAliases,
+  ) {
+    for (final entry in optionAliases.entries) {
+      final legacyName = entry.key;
+      final canonicalName = entry.value;
+      if (argument == legacyName) {
+        return canonicalName;
+      }
+      if (argument.startsWith('$legacyName=')) {
+        return '$canonicalName${argument.substring(legacyName.length)}';
+      }
+    }
+    return argument;
+  }
+
   List<String> _normalizeSearchArguments(List<String> arguments) => [
     for (final argument in arguments)
       switch (argument) {
@@ -2510,6 +4056,888 @@ class TrackStateCli {
     );
   }
 
+  ArgParser _mutationParser() => ArgParser(allowTrailingOptions: false)
+    ..addFlag('help', abbr: 'h', negatable: false)
+    ..addOption('target', help: 'Target type: local or hosted.')
+    ..addOption(
+      'provider',
+      help: 'Provider name. Supported values: local-git, github.',
+    )
+    ..addOption('repository', help: 'Hosted repository in owner/name form.')
+    ..addOption(
+      'path',
+      help: 'Local repository path. Defaults to the current working directory.',
+    )
+    ..addOption('branch', help: 'Branch to use for the mutation session.')
+    ..addOption('token', help: 'Hosted access token.')
+    ..addOption(
+      'output',
+      defaultsTo: 'json',
+      allowed: TrackStateCliOutput.values.map((value) => value.name).toList(),
+      help: 'Output format. Defaults to json.',
+    );
+
+  String? _trimmedOption(ArgResults results, String option) {
+    final value = results[option]?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
+  String? _trimmedPositionalArgument(List<String> arguments, int index) {
+    if (index < 0 || index >= arguments.length) {
+      return null;
+    }
+    final value = arguments[index].trim();
+    return value.isEmpty ? null : value;
+  }
+
+  String? _firstTrimmedOptionOrPositional(
+    ArgResults results,
+    List<String> optionNames,
+    List<String> positionalArguments,
+    int positionalIndex,
+  ) {
+    for (final option in optionNames) {
+      final value = _trimmedOption(results, option);
+      if (value != null) {
+        return value;
+      }
+    }
+    return _trimmedPositionalArgument(positionalArguments, positionalIndex);
+  }
+
+  String _firstRequiredTrimmedOptionOrPositional(
+    ArgResults results,
+    List<String> optionNames,
+    List<String> positionalArguments,
+    int positionalIndex,
+  ) {
+    final value = _firstTrimmedOptionOrPositional(
+      results,
+      optionNames,
+      positionalArguments,
+      positionalIndex,
+    );
+    if (value != null) {
+      return value;
+    }
+    throw _TrackStateCliException(
+      code: 'INVALID_ARGUMENT',
+      category: TrackStateCliErrorCategory.validation,
+      message: 'Missing required option "--${optionNames.first}".',
+      exitCode: 2,
+      details: <String, Object?>{'option': optionNames.first},
+    );
+  }
+
+  List<String> _multiOption(ArgResults results, String option) =>
+      ((results[option] as List<Object?>?) ?? const <Object?>[])
+          .map((value) => value?.toString() ?? '')
+          .toList(growable: false);
+
+  String _firstRequiredTrimmedOption(
+    ArgResults results,
+    List<String> optionNames,
+  ) {
+    for (final option in optionNames) {
+      final value = _trimmedOption(results, option);
+      if (value != null) {
+        return value;
+      }
+    }
+    throw _TrackStateCliException(
+      code: 'INVALID_ARGUMENT',
+      category: TrackStateCliErrorCategory.validation,
+      message: 'Missing required option "--${optionNames.first}".',
+      exitCode: 2,
+      details: <String, Object?>{'option': optionNames.first},
+    );
+  }
+
+  Map<String, Object?> _requiredJsonObjectOrPositional(
+    ArgResults results,
+    String option,
+    List<String> positionalArguments,
+    int positionalIndex,
+  ) {
+    final raw = _firstRequiredTrimmedOptionOrPositional(
+      results,
+      [option],
+      positionalArguments,
+      positionalIndex,
+    );
+    return _parseJsonObject(raw, option: option);
+  }
+
+  Map<String, Object?> _resolveJiraCreateTicketWithJsonPayload(
+    ArgResults results,
+  ) {
+    final rawJson = _trimmedOption(results, 'json');
+    final rawFieldsJson = _trimmedOption(results, 'fieldsJson');
+    final projectKey = _trimmedOption(results, 'project');
+
+    if (rawJson == null && rawFieldsJson == null) {
+      throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message: 'Missing required option "--json" or "--fieldsJson".',
+        exitCode: 2,
+        details: const <String, Object?>{
+          'options': ['json', 'fieldsJson'],
+        },
+      );
+    }
+
+    if (rawJson != null && rawFieldsJson != null) {
+      throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message: 'Use either "--json" or "--fieldsJson", but not both.',
+        exitCode: 2,
+        details: const <String, Object?>{
+          'options': ['json', 'fieldsJson'],
+        },
+      );
+    }
+
+    if (rawFieldsJson != null) {
+      return <String, Object?>{
+        if (projectKey != null) 'project': projectKey,
+        'fields': _parseJsonObject(rawFieldsJson, option: 'fieldsJson'),
+      };
+    }
+
+    final payload = _parseJsonObject(rawJson!, option: 'json');
+    if (projectKey == null) {
+      return payload;
+    }
+
+    final payloadProject =
+        _jiraScalarString(_jiraPayloadFields(payload)['project']) ??
+        _jiraScalarString(payload['project']);
+    if (payloadProject != null &&
+        payloadProject.toLowerCase() != projectKey.toLowerCase()) {
+      throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message:
+            'Option "--project" conflicts with the project value inside "--json".',
+        exitCode: 2,
+        details: <String, Object?>{
+          'project': projectKey,
+          'jsonProject': payloadProject,
+        },
+      );
+    }
+
+    return <String, Object?>{
+      ...payload,
+      if (!payload.containsKey('project')) 'project': projectKey,
+    };
+  }
+
+  Map<String, Object?> _parseJsonObject(String raw, {required String option}) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, Object?>) {
+        return decoded;
+      }
+    } on FormatException catch (error) {
+      throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message: 'Option "--$option" must contain valid JSON.',
+        exitCode: 2,
+        details: <String, Object?>{'option': option, 'reason': error.message},
+      );
+    }
+    throw _TrackStateCliException(
+      code: 'INVALID_ARGUMENT',
+      category: TrackStateCliErrorCategory.validation,
+      message: 'Option "--$option" must contain a JSON object.',
+      exitCode: 2,
+      details: <String, Object?>{'option': option},
+    );
+  }
+
+  void _validateProjectSelection(
+    ArgResults results,
+    ProjectConfig project, {
+    required List<String> optionNames,
+  }) {
+    for (final option in optionNames) {
+      final configured = _trimmedOption(results, option);
+      if (configured == null) {
+        continue;
+      }
+      if (configured.toLowerCase() == project.key.toLowerCase()) {
+        return;
+      }
+      throw _TrackStateCliException(
+        code: 'NOT_FOUND',
+        category: TrackStateCliErrorCategory.repository,
+        message:
+            'Project "$configured" was not found in the selected repository.',
+        exitCode: 4,
+        details: <String, Object?>{'project': configured},
+      );
+    }
+  }
+
+  void _validateProjectSelectionValue(
+    String projectKey,
+    ProjectConfig project,
+  ) {
+    if (projectKey.toLowerCase() == project.key.toLowerCase()) {
+      return;
+    }
+    throw _TrackStateCliException(
+      code: 'NOT_FOUND',
+      category: TrackStateCliErrorCategory.repository,
+      message:
+          'Project "$projectKey" was not found in the selected repository.',
+      exitCode: 4,
+      details: <String, Object?>{'project': projectKey},
+    );
+  }
+
+  _TrackStateCliException _mapMutationError(
+    Object error,
+    _ResolvedTarget target, {
+    required String commandName,
+  }) {
+    if (error is _TrackStateCliException) {
+      return error;
+    }
+    if (error is TrackStateProviderException) {
+      return target.type == TrackStateCliTargetType.hosted
+          ? _mapHostedProviderError(error, target)
+          : _TrackStateCliException(
+              code: 'REPOSITORY_OPEN_FAILED',
+              category: TrackStateCliErrorCategory.repository,
+              message:
+                  'Local repository mutation could not be opened for "${target.value}".',
+              exitCode: 4,
+              details: <String, Object?>{
+                'path': target.value,
+                'command': commandName,
+                'reason': error.message,
+              },
+            );
+    }
+    if (error is TrackStateRepositoryException) {
+      return _TrackStateCliException(
+        code: 'MUTATION_FAILED',
+        category: TrackStateCliErrorCategory.repository,
+        message: 'Mutation failed for "${target.value}".',
+        exitCode: 4,
+        details: <String, Object?>{
+          'provider': target.provider,
+          'target': target.value,
+          'command': commandName,
+          'reason': error.message,
+        },
+      );
+    }
+    return _TrackStateCliException(
+      code: 'UNEXPECTED_ERROR',
+      category: TrackStateCliErrorCategory.validation,
+      message: 'TrackState CLI failed unexpectedly.',
+      exitCode: 1,
+      details: <String, Object?>{'error': error.toString()},
+    );
+  }
+
+  T _requireMutationSuccess<T>(IssueMutationResult<T> result) {
+    if (result.isSuccess) {
+      return result.value as T;
+    }
+    final failure = result.failure!;
+    final (code, category, exitCode) = switch (failure.category) {
+      IssueMutationErrorCategory.validation => (
+        'INVALID_MUTATION',
+        TrackStateCliErrorCategory.validation,
+        2,
+      ),
+      IssueMutationErrorCategory.permission => (
+        'WRITE_ACCESS_REQUIRED',
+        TrackStateCliErrorCategory.auth,
+        3,
+      ),
+      IssueMutationErrorCategory.notFound => (
+        'NOT_FOUND',
+        TrackStateCliErrorCategory.repository,
+        4,
+      ),
+      IssueMutationErrorCategory.conflict => (
+        'MUTATION_CONFLICT',
+        TrackStateCliErrorCategory.repository,
+        4,
+      ),
+      IssueMutationErrorCategory.dirtyWorktree => (
+        'DIRTY_WORKTREE',
+        TrackStateCliErrorCategory.repository,
+        4,
+      ),
+      IssueMutationErrorCategory.providerFailure => (
+        'MUTATION_FAILED',
+        TrackStateCliErrorCategory.repository,
+        4,
+      ),
+    };
+    throw _TrackStateCliException(
+      code: code,
+      category: category,
+      message: failure.message,
+      exitCode: exitCode,
+      details: <String, Object?>{
+        'operation': result.operation,
+        'issueKey': result.issueKey,
+        ...failure.details,
+      },
+    );
+  }
+
+  TrackStateIssue _issueFromSnapshot(
+    TrackerSnapshot snapshot,
+    String issueKey,
+  ) {
+    final matches = snapshot.issues.where((issue) => issue.key == issueKey);
+    if (matches.isEmpty) {
+      throw _TrackStateCliException(
+        code: 'NOT_FOUND',
+        category: TrackStateCliErrorCategory.repository,
+        message: 'Issue "$issueKey" was not found.',
+        exitCode: 4,
+        details: <String, Object?>{'issueKey': issueKey},
+      );
+    }
+    return matches.single;
+  }
+
+  IssueComment _newestComment(
+    TrackStateIssue issue, {
+    required int previousCommentCount,
+  }) {
+    if (issue.comments.length > previousCommentCount) {
+      return issue.comments[issue.comments.length - 1];
+    }
+    if (issue.comments.isNotEmpty) {
+      return issue.comments.last;
+    }
+    throw _TrackStateCliException(
+      code: 'MUTATION_FAILED',
+      category: TrackStateCliErrorCategory.repository,
+      message:
+          'Comment mutation completed without a persisted comment payload.',
+      exitCode: 4,
+      details: <String, Object?>{'issueKey': issue.key},
+    );
+  }
+
+  List<_ResolvedMutationAssignment> _parseResolvedFieldAssignments(
+    List<String> rawAssignments,
+    ProjectConfig project,
+  ) {
+    final resolved = <_ResolvedMutationAssignment>[];
+    for (final assignment in rawAssignments) {
+      final separator = assignment.indexOf('=');
+      if (separator <= 0) {
+        throw _TrackStateCliException(
+          code: 'INVALID_ARGUMENT',
+          category: TrackStateCliErrorCategory.validation,
+          message:
+              'Field assignments must use key=value syntax. Invalid value: "$assignment".',
+          exitCode: 2,
+          details: <String, Object?>{'field': assignment},
+        );
+      }
+      final key = assignment.substring(0, separator).trim();
+      final value = assignment.substring(separator + 1);
+      final resolvedField = _resolveMutationField(project, key);
+      resolved.add(
+        _ResolvedMutationAssignment(
+          field: resolvedField,
+          value: _parseInlineValue(value),
+          requestedKey: key,
+        ),
+      );
+    }
+    return resolved;
+  }
+
+  Map<String, Object?> _mergeFieldMutations({
+    required ProjectConfig project,
+    required List<String> assignments,
+    required List<String> clearedFields,
+  }) {
+    final merged = _fieldMapFromResolved(
+      _parseResolvedFieldAssignments(assignments, project),
+    );
+    for (final rawField in clearedFields) {
+      final field = _resolveMutationField(project, rawField);
+      merged[field.canonicalKey] = null;
+    }
+    return merged;
+  }
+
+  Map<String, Object?> _fieldMapFromResolved(
+    List<_ResolvedMutationAssignment> assignments,
+  ) {
+    final merged = <String, Object?>{};
+    for (final assignment in assignments) {
+      merged[assignment.field.canonicalKey] = assignment.value;
+    }
+    return merged;
+  }
+
+  _ResolvedHierarchyInput _resolveHierarchyOptions(
+    ArgResults results, {
+    required List<_ResolvedMutationAssignment> fields,
+    required _PreparedMutationContext context,
+  }) {
+    final explicitParent = _trimmedOption(results, 'parent');
+    final explicitEpic = _trimmedOption(results, 'epic');
+    String? fieldParent;
+    String? fieldEpic;
+    for (final assignment in fields) {
+      if (assignment.field.canonicalKey == 'parent') {
+        fieldParent = assignment.value?.toString();
+      } else if (assignment.field.canonicalKey == 'epic') {
+        fieldEpic = assignment.value?.toString();
+      }
+    }
+    if (explicitParent != null &&
+        fieldParent != null &&
+        explicitParent != fieldParent) {
+      throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message: 'Conflicting parent values were provided.',
+        exitCode: 2,
+        details: <String, Object?>{
+          'explicitParent': explicitParent,
+          'fieldParent': fieldParent,
+        },
+      );
+    }
+    if (explicitEpic != null &&
+        fieldEpic != null &&
+        explicitEpic != fieldEpic) {
+      throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message: 'Conflicting epic values were provided.',
+        exitCode: 2,
+        details: <String, Object?>{
+          'explicitEpic': explicitEpic,
+          'fieldEpic': fieldEpic,
+        },
+      );
+    }
+    return _ResolvedHierarchyInput(
+      parentKey: explicitParent ?? fieldParent,
+      epicKey: explicitEpic ?? fieldEpic,
+    );
+  }
+
+  _ResolvedHierarchyInput _resolveJiraParentReference(
+    TrackerSnapshot snapshot,
+    String targetKey,
+  ) {
+    final target = _issueFromSnapshot(snapshot, targetKey);
+    return target.isEpic
+        ? _ResolvedHierarchyInput(epicKey: target.key)
+        : _ResolvedHierarchyInput(parentKey: target.key);
+  }
+
+  _ResolvedMutationField _resolveMutationField(
+    ProjectConfig project,
+    String identifier,
+  ) {
+    final trimmed = identifier.trim();
+    if (trimmed.isEmpty) {
+      throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message: 'Field identifiers cannot be empty.',
+        exitCode: 2,
+      );
+    }
+    final normalizedIdentifier = trimmed.toLowerCase();
+    final exactSystem = _mutationSystemFields.firstWhere(
+      (field) => field.canonicalKey.toLowerCase() == normalizedIdentifier,
+      orElse: () => const _ResolvedMutationField.none(),
+    );
+    if (exactSystem.isDefined) {
+      return exactSystem;
+    }
+
+    for (final definition in project.fieldDefinitions) {
+      if (definition.id == trimmed) {
+        return _ResolvedMutationField(
+          canonicalKey: definition.id,
+          displayName: definition.name,
+        );
+      }
+    }
+    if (RegExp(r'^customfield_\d+$').hasMatch(trimmed)) {
+      return _ResolvedMutationField(
+        canonicalKey: trimmed,
+        displayName: trimmed,
+      );
+    }
+
+    final normalizedToken = _normalizeFieldToken(trimmed);
+    final matches = <_ResolvedMutationField>[
+      for (final field in _mutationSystemFields)
+        if (field.matches(normalizedToken)) field,
+      for (final definition in project.fieldDefinitions)
+        if (_normalizeFieldToken(definition.name) == normalizedToken)
+          _ResolvedMutationField(
+            canonicalKey: definition.id,
+            displayName: definition.name,
+          ),
+    ];
+    final uniqueMatches = <String, _ResolvedMutationField>{
+      for (final match in matches) match.canonicalKey: match,
+    }.values.toList(growable: false);
+    if (uniqueMatches.length > 1) {
+      throw _TrackStateCliException(
+        code: 'AMBIGUOUS_FIELD',
+        category: TrackStateCliErrorCategory.validation,
+        message:
+            'Field "$identifier" matches multiple configured fields. Use a canonical id instead.',
+        exitCode: 2,
+        details: <String, Object?>{
+          'field': identifier,
+          'matches': [for (final match in uniqueMatches) match.canonicalKey],
+        },
+      );
+    }
+    if (uniqueMatches.isEmpty) {
+      throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message:
+            'Field "$identifier" does not match a system field, configured field name, or Jira custom field code.',
+        exitCode: 2,
+        details: <String, Object?>{'field': identifier},
+      );
+    }
+    return uniqueMatches.single;
+  }
+
+  String _normalizeFieldToken(String value) =>
+      value.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+
+  Object? _parseInlineValue(String rawValue) {
+    final value = rawValue.trim();
+    if (value.isEmpty) {
+      return '';
+    }
+    if (value == 'null') {
+      return null;
+    }
+    if (value == 'true') {
+      return true;
+    }
+    if (value == 'false') {
+      return false;
+    }
+    final intValue = int.tryParse(value);
+    if (intValue != null) {
+      return intValue;
+    }
+    final doubleValue = double.tryParse(value);
+    if (doubleValue != null) {
+      return doubleValue;
+    }
+    if ((value.startsWith('{') && value.endsWith('}')) ||
+        (value.startsWith('[') && value.endsWith(']')) ||
+        (value.startsWith('"') && value.endsWith('"'))) {
+      try {
+        return jsonDecode(value);
+      } on FormatException {
+        return rawValue;
+      }
+    }
+    return rawValue.trimRight();
+  }
+
+  _TicketCreateRequest _parseJiraCreatePayload(
+    Map<String, Object?> payload,
+    TrackerSnapshot snapshot, {
+    required String? explicitParentKey,
+  }) {
+    final fields = _jiraPayloadFields(payload);
+    final projectKey =
+        _jiraScalarString(fields['project']) ??
+        _jiraScalarString(payload['project']);
+    if (projectKey != null &&
+        projectKey.toLowerCase() != snapshot.project.key.toLowerCase()) {
+      throw _TrackStateCliException(
+        code: 'NOT_FOUND',
+        category: TrackStateCliErrorCategory.repository,
+        message:
+            'Project "$projectKey" was not found in the selected repository.',
+        exitCode: 4,
+        details: <String, Object?>{'project': projectKey},
+      );
+    }
+    final jiraParentKey =
+        explicitParentKey ?? _jiraScalarString(fields['parent']) ?? '';
+    final explicitEpicKey = _jiraScalarString(fields['epic']);
+    final hierarchy = jiraParentKey.isEmpty
+        ? _ResolvedHierarchyInput(epicKey: explicitEpicKey)
+        : _resolveJiraParentReference(snapshot, jiraParentKey);
+    final nativeFields = _extractJiraMutationFields(fields, snapshot.project);
+    return _TicketCreateRequest(
+      summary: _requiredJiraString(fields, 'summary'),
+      description: _jiraScalarString(fields['description']) ?? '',
+      issueTypeId: _jiraNamedEntityValue(
+        fields['issuetype'] ?? fields['issueType'],
+      ),
+      priorityId: _jiraNamedEntityValue(fields['priority']),
+      assignee: _jiraUserIdentifier(fields['assignee']),
+      reporter: _jiraUserIdentifier(fields['reporter']),
+      parentKey: hierarchy.parentKey,
+      epicKey: explicitEpicKey ?? hierarchy.epicKey,
+      fields: nativeFields,
+    );
+  }
+
+  Map<String, Object?> _parseJiraUpdatePayload(
+    Map<String, Object?> payload,
+    TrackerSnapshot snapshot,
+  ) {
+    final fields = _jiraPayloadFields(payload);
+    final projectKey =
+        _jiraScalarString(fields['project']) ??
+        _jiraScalarString(payload['project']);
+    if (projectKey != null &&
+        projectKey.toLowerCase() != snapshot.project.key.toLowerCase()) {
+      throw _TrackStateCliException(
+        code: 'NOT_FOUND',
+        category: TrackStateCliErrorCategory.repository,
+        message:
+            'Project "$projectKey" was not found in the selected repository.',
+        exitCode: 4,
+        details: <String, Object?>{'project': projectKey},
+      );
+    }
+    return _extractJiraMutationFields(fields, snapshot.project);
+  }
+
+  Map<String, Object?> _jiraPayloadFields(Map<String, Object?> payload) {
+    final rawFields = payload['fields'];
+    if (rawFields == null) {
+      return payload;
+    }
+    if (rawFields is Map<String, Object?>) {
+      return rawFields;
+    }
+    throw _TrackStateCliException(
+      code: 'INVALID_ARGUMENT',
+      category: TrackStateCliErrorCategory.validation,
+      message: 'Jira payload "fields" must be a JSON object.',
+      exitCode: 2,
+    );
+  }
+
+  String _requiredJiraString(Map<String, Object?> payload, String key) {
+    final value = _jiraScalarString(payload[key]);
+    if (value != null) {
+      return value;
+    }
+    throw _TrackStateCliException(
+      code: 'INVALID_ARGUMENT',
+      category: TrackStateCliErrorCategory.validation,
+      message: 'Jira payload requires "$key".',
+      exitCode: 2,
+      details: <String, Object?>{'field': key},
+    );
+  }
+
+  String? _jiraScalarString(Object? value) {
+    final normalized = switch (value) {
+      null => '',
+      final String stringValue => stringValue.trim(),
+      final Map<Object?, Object?> mapValue =>
+        (mapValue['key'] ??
+                    mapValue['id'] ??
+                    mapValue['name'] ??
+                    mapValue['value'] ??
+                    mapValue['displayName'])
+                ?.toString()
+                .trim() ??
+            '',
+      _ => value.toString().trim(),
+    };
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  String? _jiraNamedEntityValue(Object? value) {
+    return _jiraScalarString(value);
+  }
+
+  String? _jiraUserIdentifier(Object? value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is String) {
+      return value.trim().ifEmpty('');
+    }
+    if (value is Map<Object?, Object?>) {
+      return (value['accountId'] ??
+              value['name'] ??
+              value['login'] ??
+              value['displayName'])
+          ?.toString()
+          .trim()
+          .ifEmpty('');
+    }
+    return value.toString().trim().ifEmpty('');
+  }
+
+  List<String> _jiraStringList(Object? value) {
+    if (value == null) {
+      return const <String>[];
+    }
+    if (value is List<Object?>) {
+      return [
+        for (final item in value)
+          if ((_jiraScalarString(item) ?? '').isNotEmpty)
+            _jiraScalarString(item)!,
+      ];
+    }
+    final single = _jiraScalarString(value);
+    return single == null ? const <String>[] : <String>[single];
+  }
+
+  Map<String, Object?> _extractJiraMutationFields(
+    Map<String, Object?> fields,
+    ProjectConfig project,
+  ) {
+    final resolved = <String, Object?>{};
+    for (final entry in fields.entries) {
+      final key = entry.key;
+      if (key == 'project') {
+        continue;
+      }
+      if (key == 'labels' ||
+          key == 'components' ||
+          key == 'fixVersions' ||
+          key == 'watchers') {
+        resolved[key] = _jiraStringList(entry.value);
+        continue;
+      }
+      final resolvedField = _resolveMutationField(project, key);
+      resolved[resolvedField.canonicalKey] = switch (resolvedField
+          .canonicalKey) {
+        'labels' ||
+        'components' ||
+        'fixVersions' ||
+        'watchers' => _jiraStringList(entry.value),
+        'priority' => _jiraNamedEntityValue(entry.value),
+        'assignee' || 'reporter' => _jiraUserIdentifier(entry.value),
+        _ => switch (entry.value) {
+          final Map<Object?, Object?> mapValue =>
+            _jiraNamedEntityValue(mapValue) ?? mapValue.cast<String, Object?>(),
+          final List<Object?> listValue => [
+            for (final item in listValue)
+              switch (item) {
+                final Map<Object?, Object?> mapItem =>
+                  _jiraNamedEntityValue(mapItem) ??
+                      mapItem.cast<String, Object?>(),
+                _ => _parseInlineValue(item?.toString() ?? 'null'),
+              },
+          ],
+          _ => entry.value,
+        },
+      };
+    }
+    return resolved;
+  }
+
+  Map<String, Object?> _issueMutationPayload(TrackStateIssue issue) =>
+      <String, Object?>{
+        'key': issue.key,
+        'project': issue.project,
+        'summary': issue.summary,
+        'description': issue.description,
+        'issueType': issue.issueTypeId,
+        'status': issue.statusId,
+        'priority': issue.priorityId,
+        'assignee': issue.assignee,
+        'reporter': issue.reporter,
+        'labels': issue.labels,
+        'components': issue.components,
+        'fixVersions': issue.fixVersionIds,
+        'watchers': issue.watchers,
+        'customFields': issue.customFields,
+        'parent': issue.parentKey,
+        'epic': issue.epicKey,
+        'resolution': issue.resolutionId,
+        'acceptanceCriteria': issue.acceptanceCriteria,
+        'storagePath': issue.storagePath,
+        'archived': issue.isArchived,
+      };
+
+  Map<String, Object?> _commentPayload(IssueComment comment) =>
+      <String, Object?>{
+        'id': comment.id,
+        'author': comment.author,
+        'body': comment.body,
+        'created': comment.createdAt,
+        'updated': comment.updatedAt ?? comment.updatedLabel,
+        'storagePath': comment.storagePath,
+      };
+
+  Map<String, Object?> _linkPayload(IssueLink link) => <String, Object?>{
+    'type': link.type,
+    'target': link.targetKey,
+    'direction': link.direction,
+  };
+
+  Map<String, Object?> _deletedIssuePayload(DeletedIssueTombstone tombstone) =>
+      <String, Object?>{
+        'key': tombstone.key,
+        'project': tombstone.project,
+        'summary': tombstone.summary,
+        'issueType': tombstone.issueTypeId,
+        'parent': tombstone.parentKey,
+        'epic': tombstone.epicKey,
+        'formerPath': tombstone.formerPath,
+        'deletedAt': tombstone.deletedAt,
+      };
+
+  _ResolvedMutationField? _normalizeCliLinkType(String rawType) {
+    final normalized = rawType.trim().toLowerCase();
+    for (final linkType in _jiraLinkTypes) {
+      final id = linkType['id']!.toString();
+      final name = linkType['name']!.toString();
+      final outward = linkType['outward']!.toString();
+      final inward = linkType['inward']!.toString();
+      if (normalized == id.toLowerCase() ||
+          normalized == name.toLowerCase() ||
+          normalized == outward.toLowerCase()) {
+        return _ResolvedMutationField(
+          canonicalKey: id,
+          displayName: outward,
+          direction: 'outward',
+        );
+      }
+      if (normalized == inward.toLowerCase()) {
+        return _ResolvedMutationField(
+          canonicalKey: id,
+          displayName: inward,
+          direction: 'inward',
+        );
+      }
+    }
+    return null;
+  }
+
   Map<String, Object?> _jiraTicketPayload({
     required TrackStateIssue issue,
     required ProjectConfig project,
@@ -2969,6 +5397,38 @@ class TrackStateCli {
         'Saved file: ${data['savedFile']}',
       ].join('\n');
     }
+    if (command.toString().startsWith('ticket-') ||
+        command.toString().startsWith('jira-')) {
+      final lines = <String>[
+        'Mutation applied',
+        'Target: ${targetType.name} ($targetValue)',
+        'Provider: $provider',
+        'Auth source: ${data['authSource']}',
+        'Command: $command',
+      ];
+      final issue = data['issue'];
+      if (issue is Map<String, Object?>) {
+        lines.add('Issue: ${issue['key']} ${issue['summary'] ?? ''}'.trim());
+      }
+      final deletedIssue = data['deletedIssue'];
+      if (deletedIssue is Map<String, Object?>) {
+        lines.add('Deleted issue: ${deletedIssue['key']}');
+      }
+      final comment = data['comment'];
+      if (comment is Map<String, Object?>) {
+        lines.add('Comment: ${comment['id']}');
+      }
+      final link = data['link'];
+      if (link is Map<String, Object?>) {
+        lines.add(
+          'Link: ${link['type']} ${link['direction']} ${link['target']}',
+        );
+      }
+      if (data['revision'] != null) {
+        lines.add('Revision: ${data['revision']}');
+      }
+      return lines.join('\n');
+    }
 
     final user = data['user']! as Map<String, Object?>;
     final permissions = data['permissions']! as Map<String, Object?>;
@@ -3216,6 +5676,285 @@ class TrackStateCli {
     '  3. gh auth token',
   ].join('\n');
 
+  String get _ticketHelpText => [
+    'trackstate ticket',
+    '',
+    'Mutate tracker data through the shared issue mutation service.',
+    '',
+    'Actions:',
+    '  create             Create a ticket with explicit hierarchy options.',
+    '  update             Update multiple fields in one mutation.',
+    '  update-description Replace the issue description.',
+    '  update-field       Update one field by id, display name, or customfield code.',
+    '  clear-field        Clear one field by id, display name, or customfield code.',
+    '  update-parent      Move an issue within parent/epic hierarchy.',
+    '  move-status        Transition an issue to a new status.',
+    '  set-priority       Set the issue priority.',
+    '  assign             Assign the issue to a user.',
+    '  add-label          Add one label.',
+    '  remove-label       Remove one label.',
+    '  comment            Post one comment.',
+    '  link               Create one non-hierarchical issue link.',
+    '  archive            Archive one issue.',
+    '  delete             Permanently delete one issue.',
+    '',
+    'Examples:',
+    '  trackstate ticket create --target local --summary "Implement mutations" --issue-type Story --epic TRACK-1',
+    '  trackstate ticket update-field --target local --key TRACK-1 --field "Story Points" --value 8',
+    '  trackstate ticket move-status --target local --key TRACK-1 --status Done --resolution Done',
+    '',
+    'Use "trackstate ticket <action> --help" for action-specific options.',
+  ].join('\n');
+
+  String _mutationHelpText(
+    String command,
+    String summary,
+    String example,
+    ArgParser parser,
+  ) => [
+    command,
+    '',
+    summary,
+    '',
+    'Options:',
+    parser.usage,
+    '',
+    'Example:',
+    '  $example',
+  ].join('\n');
+
+  String _ticketCreateHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket create',
+    'Create a ticket using explicit TrackState-native hierarchy inputs.',
+    'trackstate ticket create --target local --summary "CLI write parity" --issue-type Story --epic TRACK-1 --field customfield_10016=5',
+    parser,
+  );
+
+  String _ticketUpdateHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket update',
+    'Update multiple fields in one mutation.',
+    'trackstate ticket update --target local --key TRACK-1 --field summary="Refined summary" --clear-field customfield_10016',
+    parser,
+  );
+
+  String _ticketUpdateDescriptionHelpText(
+    ArgParser parser,
+  ) => _mutationHelpText(
+    'trackstate ticket update-description',
+    'Replace the issue description.',
+    'trackstate ticket update-description --target local --key TRACK-1 --description "Updated markdown body."',
+    parser,
+  );
+
+  String _ticketUpdateFieldHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket update-field',
+    'Update one field by id, display name, or customfield code.',
+    'trackstate ticket update-field --target local --key TRACK-1 --field "Story Points" --value 13',
+    parser,
+  );
+
+  String _ticketClearFieldHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket clear-field',
+    'Clear one field by id, display name, or customfield code.',
+    'trackstate ticket clear-field --target local --key TRACK-1 --field customfield_10016',
+    parser,
+  );
+
+  String _ticketUpdateParentHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket update-parent',
+    'Move an issue within TrackState hierarchy.',
+    'trackstate ticket update-parent --target local --key TRACK-2 --epic TRACK-10',
+    parser,
+  );
+
+  String _ticketMoveStatusHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket move-status',
+    'Transition an issue to a new status.',
+    'trackstate ticket move-status --target local --key TRACK-1 --status Done --resolution Done',
+    parser,
+  );
+
+  String _ticketSetPriorityHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket set-priority',
+    'Set the issue priority.',
+    'trackstate ticket set-priority --target local --key TRACK-1 --priority High',
+    parser,
+  );
+
+  String _ticketAssignHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket assign',
+    'Assign an issue to a user.',
+    'trackstate ticket assign --target local --key TRACK-1 --assignee octocat',
+    parser,
+  );
+
+  String _ticketAddLabelHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket add-label',
+    'Add one label to an issue.',
+    'trackstate ticket add-label --target local --key TRACK-1 --label automation',
+    parser,
+  );
+
+  String _ticketRemoveLabelHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket remove-label',
+    'Remove one label from an issue.',
+    'trackstate ticket remove-label --target local --key TRACK-1 --label automation',
+    parser,
+  );
+
+  String _ticketCommentHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket comment',
+    'Post one comment through the shared mutation service.',
+    'trackstate ticket comment --target local --key TRACK-1 --body "Automation comment."',
+    parser,
+  );
+
+  String _ticketLinkHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket link',
+    'Create one non-hierarchical issue link.',
+    'trackstate ticket link --target local --key TRACK-1 --target-key TRACK-2 --type blocks',
+    parser,
+  );
+
+  String _ticketArchiveHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket archive',
+    'Archive one issue.',
+    'trackstate ticket archive --target local --key TRACK-1',
+    parser,
+  );
+
+  String _ticketDeleteHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket delete',
+    'Permanently delete one issue.',
+    'trackstate ticket delete --target local --key TRACK-1',
+    parser,
+  );
+
+  String _jiraCreateTicketBasicHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_create_ticket_basic',
+    'Jira-compatible create alias that still returns the TrackState envelope.',
+    'jira_create_ticket_basic --target local --summary "CLI write parity" --issueType Story',
+    parser,
+  );
+
+  String _jiraCreateTicketWithJsonHelpText(
+    ArgParser parser,
+  ) => _mutationHelpText(
+    'jira_create_ticket_with_json',
+    'Create a ticket from a JSON payload, Jira fields envelope, or the deployed --project/--fieldsJson automation shape.',
+    'jira_create_ticket_with_json --target local --project TRACK --fieldsJson \'{"summary":"CLI write parity","issuetype":{"name":"Story"}}\'',
+    parser,
+  );
+
+  String _jiraCreateTicketWithParentHelpText(
+    ArgParser parser,
+  ) => _mutationHelpText(
+    'jira_create_ticket_with_parent',
+    'Create a ticket with one Jira-compatible parent input.',
+    'jira_create_ticket_with_parent --target local --summary "CLI write parity" --issueType Story --parent TRACK-1',
+    parser,
+  );
+
+  String _jiraUpdateTicketHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_update_ticket',
+    'Update a ticket from a JSON payload or Jira fields envelope.',
+    'jira_update_ticket --target local --issueKey TRACK-1 --json \'{"fields":{"summary":"Updated summary"}}\'',
+    parser,
+  );
+
+  String _jiraUpdateDescriptionHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_update_description',
+    'Jira-compatible alias for description updates.',
+    'jira_update_description --target local --issueKey TRACK-1 --description "Updated markdown body."',
+    parser,
+  );
+
+  String _jiraUpdateFieldHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_update_field',
+    'Jira-compatible alias for updating one field.',
+    'jira_update_field --target local --issueKey TRACK-1 --field "Story Points" --value 13',
+    parser,
+  );
+
+  String _jiraClearFieldHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_clear_field',
+    'Jira-compatible alias for clearing one field.',
+    'jira_clear_field --target local --issueKey TRACK-1 --field customfield_10016',
+    parser,
+  );
+
+  String _jiraUpdateTicketParentHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_update_ticket_parent',
+    'Jira-compatible alias for parent/epic reassignment.',
+    'jira_update_ticket_parent --target local --issueKey TRACK-2 --parent TRACK-10',
+    parser,
+  );
+
+  String _jiraMoveToStatusHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_move_to_status',
+    'Jira-compatible alias for status transitions.',
+    'jira_move_to_status --target local --issueKey TRACK-1 --status Done',
+    parser,
+  );
+
+  String _jiraMoveToStatusWithResolutionHelpText(
+    ArgParser parser,
+  ) => _mutationHelpText(
+    'jira_move_to_status_with_resolution',
+    'Jira-compatible alias for status transitions with explicit resolution.',
+    'jira_move_to_status_with_resolution --target local --issueKey TRACK-1 --status Done --resolution Done',
+    parser,
+  );
+
+  String _jiraSetPriorityHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_set_priority',
+    'Jira-compatible alias for priority changes.',
+    'jira_set_priority --target local --issueKey TRACK-1 --priority High',
+    parser,
+  );
+
+  String _jiraAssignTicketHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_assign_ticket_to',
+    'Jira-compatible alias for assignee changes.',
+    'jira_assign_ticket_to --target local --issueKey TRACK-1 --assignee octocat',
+    parser,
+  );
+
+  String _jiraAddLabelHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_add_label',
+    'Jira-compatible alias for adding one label.',
+    'jira_add_label --target local --issueKey TRACK-1 --label automation',
+    parser,
+  );
+
+  String _jiraRemoveLabelHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_remove_label',
+    'Jira-compatible alias for removing one label.',
+    'jira_remove_label --target local --issueKey TRACK-1 --label automation',
+    parser,
+  );
+
+  String _jiraPostCommentHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_post_comment',
+    'Jira-compatible alias for posting one comment.',
+    'jira_post_comment --target local --issueKey TRACK-1 --body "Automation comment."',
+    parser,
+  );
+
+  String _jiraLinkIssuesHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_link_issues',
+    'Jira-compatible alias for linking issues.',
+    'jira_link_issues --target local --issueKey TRACK-1 --targetIssueKey TRACK-2 --type blocks',
+    parser,
+  );
+
+  String _jiraDeleteTicketHelpText(ArgParser parser) => _mutationHelpText(
+    'jira_delete_ticket',
+    'Jira-compatible alias for permanent deletion.',
+    'jira_delete_ticket --target local --issueKey TRACK-1',
+    parser,
+  );
+
   String get _rootHelpText => [
     'trackstate',
     '',
@@ -3228,6 +5967,7 @@ class TrackStateCli {
     '  session    Resolve the target and print session metadata.',
     '  search     Execute a paged JQL search.',
     '  read       Read tickets and metadata as Jira-shaped JSON.',
+    '  ticket     Mutate tickets through the shared mutation service.',
     '  attachment Upload or download one attachment.',
     '  jira_execute_request',
     '             Execute a narrow Jira-compatible raw request.',
@@ -3237,6 +5977,7 @@ class TrackStateCli {
     '  trackstate session --target hosted --provider github --repository owner/name',
     '  trackstate search --target local --jql \'project = TRACK ORDER BY key ASC\'',
     '  trackstate read ticket --key TRACK-1',
+    '  trackstate ticket create --target local --summary "Implement mutations" --issue-type Story',
     '  trackstate attachment upload --target local --issue TRACK-1 --file ./design.png',
     '  jira_execute_request --target local --method GET --request-path /rest/api/2/search --query jql=project%20%3D%20TRACK',
     '',
@@ -3460,6 +6201,98 @@ class _ReadResponse {
   final Object jsonPayload;
 }
 
+class _PreparedMutationContext {
+  const _PreparedMutationContext({
+    required this.repository,
+    required this.service,
+    required this.snapshot,
+    required this.authSource,
+  });
+
+  final TrackStateRepository repository;
+  final IssueMutationService service;
+  final TrackerSnapshot snapshot;
+  final String authSource;
+}
+
+class _ResolvedMutationField {
+  const _ResolvedMutationField({
+    required this.canonicalKey,
+    required this.displayName,
+    this.aliases = const <String>[],
+    this.direction,
+  });
+
+  const _ResolvedMutationField.none()
+    : canonicalKey = '',
+      displayName = '',
+      aliases = const <String>[],
+      direction = null;
+
+  final String canonicalKey;
+  final String displayName;
+  final List<String> aliases;
+  final String? direction;
+
+  bool get isDefined => canonicalKey.isNotEmpty;
+
+  bool matches(String normalizedToken) {
+    if (_normalizeFieldTokenStatic(canonicalKey) == normalizedToken ||
+        _normalizeFieldTokenStatic(displayName) == normalizedToken) {
+      return true;
+    }
+    for (final alias in aliases) {
+      if (_normalizeFieldTokenStatic(alias) == normalizedToken) {
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+class _ResolvedMutationAssignment {
+  const _ResolvedMutationAssignment({
+    required this.field,
+    required this.value,
+    required this.requestedKey,
+  });
+
+  final _ResolvedMutationField field;
+  final Object? value;
+  final String requestedKey;
+}
+
+class _ResolvedHierarchyInput {
+  const _ResolvedHierarchyInput({this.parentKey, this.epicKey});
+
+  final String? parentKey;
+  final String? epicKey;
+}
+
+class _TicketCreateRequest {
+  const _TicketCreateRequest({
+    required this.summary,
+    required this.description,
+    required this.issueTypeId,
+    required this.priorityId,
+    required this.assignee,
+    required this.reporter,
+    required this.parentKey,
+    required this.epicKey,
+    required this.fields,
+  });
+
+  final String summary;
+  final String description;
+  final String? issueTypeId;
+  final String? priorityId;
+  final String? assignee;
+  final String? reporter;
+  final String? parentKey;
+  final String? epicKey;
+  final Map<String, Object?> fields;
+}
+
 class _TrackStateCliException implements Exception {
   const _TrackStateCliException({
     required this.code,
@@ -3487,6 +6320,84 @@ const Set<String> _jiraSystemFieldIds = {
   'assignee',
   'labels',
 };
+
+const List<_ResolvedMutationField> _mutationSystemFields = [
+  _ResolvedMutationField(
+    canonicalKey: 'summary',
+    displayName: 'Summary',
+    aliases: <String>['summary'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'description',
+    displayName: 'Description',
+    aliases: <String>['description'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'issueType',
+    displayName: 'Issue Type',
+    aliases: <String>['issuetype', 'type'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'status',
+    displayName: 'Status',
+    aliases: <String>['status'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'priority',
+    displayName: 'Priority',
+    aliases: <String>['priority'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'assignee',
+    displayName: 'Assignee',
+    aliases: <String>['assignee'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'reporter',
+    displayName: 'Reporter',
+    aliases: <String>['reporter'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'labels',
+    displayName: 'Labels',
+    aliases: <String>['label'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'components',
+    displayName: 'Components',
+    aliases: <String>['component'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'fixVersions',
+    displayName: 'Fix Versions',
+    aliases: <String>['fixversion', 'fixversions'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'watchers',
+    displayName: 'Watchers',
+    aliases: <String>['watcher'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'parent',
+    displayName: 'Parent',
+    aliases: <String>['parent'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'epic',
+    displayName: 'Epic',
+    aliases: <String>['epic', 'epiclink'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'resolution',
+    displayName: 'Resolution',
+    aliases: <String>['resolution'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'acceptanceCriteria',
+    displayName: 'Acceptance Criteria',
+    aliases: <String>['acceptancecriteria'],
+  ),
+];
 
 const List<Map<String, Object?>> _jiraLinkTypes = [
   {
@@ -3518,3 +6429,10 @@ const List<Map<String, Object?>> _jiraLinkTypes = [
 extension on String {
   String ifEmpty(String fallback) => trim().isEmpty ? fallback : this;
 }
+
+extension<T> on List<T> {
+  T? get lastOrNull => isEmpty ? null : last;
+}
+
+String _normalizeFieldTokenStatic(String value) =>
+    value.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
