@@ -51,6 +51,45 @@ void main() {
       );
     });
 
+    test(
+      'creates tickets from legacy jira_create_ticket_with_json project and fieldsJson arguments',
+      () async {
+        final repo = await _createCliMutationRepository();
+        addTearDown(() => repo.delete(recursive: true));
+        final cli = _createCli();
+
+        final result = await cli.run([
+          'jira_create_ticket_with_json',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--project',
+          'DEMO',
+          '--fieldsJson',
+          jsonEncode({
+            'summary': 'Legacy CLI created story',
+            'description': 'Created from the deployed Jira automation shape.',
+            'issuetype': {'name': 'Story'},
+            'priority': {'name': 'Medium'},
+            'customfield_10016': 3,
+          }),
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final issue = data['issue']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json['ok'], isTrue);
+        expect(data['command'], 'jira-create-ticket-with-json');
+        expect(issue['key'], 'DEMO-11');
+        expect(issue['summary'], 'Legacy CLI created story');
+        expect(issue['priority'], 'medium');
+        expect(issue['customFields'], containsPair('customfield_10016', 3));
+        expect(File('${repo.path}/DEMO/DEMO-11/main.md').existsSync(), isTrue);
+      },
+    );
+
     test('accepts deployed Jira automation argument shapes', () async {
       final repo = await _createCliMutationRepository();
       addTearDown(() => repo.delete(recursive: true));

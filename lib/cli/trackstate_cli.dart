@@ -1528,18 +1528,26 @@ class TrackStateCli {
     List<String> arguments,
   ) async {
     final parser = _mutationParser()
+      ..addOption('project', help: 'Project key. Must match the repository.')
+      ..addOption(
+        'fieldsJson',
+        help:
+            'Legacy Jira fields payload used by deployed automation. Accepts a JSON object with field assignments.',
+      )
       ..addOption(
         'json',
         help:
             'JSON issue payload. Accepts native field maps or Jira fields envelopes.',
       );
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--projectKey': '--project',
+      }),
       parser: parser,
       helpText: _jiraCreateTicketWithJsonHelpText(parser),
       commandName: 'jira-create-ticket-with-json',
       execute: (context, results) async {
-        final payload = _requiredJsonObject(results, 'json');
+        final payload = _resolveJiraCreateTicketWithJsonPayload(results);
         final createRequest = _parseJiraCreatePayload(
           payload,
           context.snapshot,
@@ -4094,11 +4102,6 @@ class TrackStateCli {
     );
   }
 
-  Map<String, Object?> _requiredJsonObject(ArgResults results, String option) {
-    final raw = _requiredTrimmedOption(results, option);
-    return _parseJsonObject(raw, option: option);
-  }
-
   Map<String, Object?> _requiredJsonObjectOrPositional(
     ArgResults results,
     String option,
@@ -4112,6 +4115,73 @@ class TrackStateCli {
       positionalIndex,
     );
     return _parseJsonObject(raw, option: option);
+  }
+
+  Map<String, Object?> _resolveJiraCreateTicketWithJsonPayload(
+    ArgResults results,
+  ) {
+    final rawJson = _trimmedOption(results, 'json');
+    final rawFieldsJson = _trimmedOption(results, 'fieldsJson');
+    final projectKey = _trimmedOption(results, 'project');
+
+    if (rawJson == null && rawFieldsJson == null) {
+      throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message: 'Missing required option "--json" or "--fieldsJson".',
+        exitCode: 2,
+        details: const <String, Object?>{
+          'options': ['json', 'fieldsJson'],
+        },
+      );
+    }
+
+    if (rawJson != null && rawFieldsJson != null) {
+      throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message: 'Use either "--json" or "--fieldsJson", but not both.',
+        exitCode: 2,
+        details: const <String, Object?>{
+          'options': ['json', 'fieldsJson'],
+        },
+      );
+    }
+
+    if (rawFieldsJson != null) {
+      return <String, Object?>{
+        if (projectKey != null) 'project': projectKey,
+        'fields': _parseJsonObject(rawFieldsJson, option: 'fieldsJson'),
+      };
+    }
+
+    final payload = _parseJsonObject(rawJson!, option: 'json');
+    if (projectKey == null) {
+      return payload;
+    }
+
+    final payloadProject =
+        _jiraScalarString(_jiraPayloadFields(payload)['project']) ??
+        _jiraScalarString(payload['project']);
+    if (payloadProject != null &&
+        payloadProject.toLowerCase() != projectKey.toLowerCase()) {
+      throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message:
+            'Option "--project" conflicts with the project value inside "--json".',
+        exitCode: 2,
+        details: <String, Object?>{
+          'project': projectKey,
+          'jsonProject': payloadProject,
+        },
+      );
+    }
+
+    return <String, Object?>{
+      ...payload,
+      if (!payload.containsKey('project')) 'project': projectKey,
+    };
   }
 
   Map<String, Object?> _parseJsonObject(String raw, {required String option}) {
@@ -5651,8 +5721,8 @@ class TrackStateCli {
     ArgParser parser,
   ) => _mutationHelpText(
     'jira_create_ticket_with_json',
-    'Create a ticket from a JSON payload or Jira fields envelope.',
-    'jira_create_ticket_with_json --target local --json \'{"fields":{"summary":"CLI write parity","issuetype":{"name":"Story"}}}\'',
+    'Create a ticket from a JSON payload, Jira fields envelope, or the deployed --project/--fieldsJson automation shape.',
+    'jira_create_ticket_with_json --target local --project TRACK --fieldsJson \'{"summary":"CLI write parity","issuetype":{"name":"Story"}}\'',
     parser,
   );
 
