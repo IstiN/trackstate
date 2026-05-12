@@ -2,20 +2,68 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 import json
+import time
+from dataclasses import dataclass, field
+from threading import Lock
 
 from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
 
 from testing.frameworks.python.playwright_web_app_session import PlaywrightWebAppSession
 
 
+@dataclass(frozen=True)
+class StartupRecoveryObservedEvent:
+    observed_order: int
+    observed_at_monotonic: float
+
+
+@dataclass(frozen=True)
+class StartupRecoveryBlockedRequestObservation(StartupRecoveryObservedEvent):
+    url: str
+
+
+@dataclass
 class StartupRecoveryRateLimitObservation:
-    def __init__(self, *, blocked_repository_path: str) -> None:
-        self.blocked_repository_path = blocked_repository_path
-        self.blocked_urls: list[str] = []
+    blocked_repository_path: str
+    blocked_requests: list[StartupRecoveryBlockedRequestObservation] = field(
+        default_factory=list,
+    )
+    shell_ready_event: StartupRecoveryObservedEvent | None = None
+    _next_observed_order: int = field(default=1, init=False, repr=False)
+    _event_lock: Lock = field(default_factory=Lock, init=False, repr=False)
+
+    def record_blocked_request(self, url: str) -> StartupRecoveryBlockedRequestObservation:
+        observation = StartupRecoveryBlockedRequestObservation(
+            url=url,
+            **self._reserve_event_payload(),
+        )
+        self.blocked_requests.append(observation)
+        return observation
+
+    def record_shell_ready(self) -> StartupRecoveryObservedEvent:
+        if self.shell_ready_event is not None:
+            return self.shell_ready_event
+        self.shell_ready_event = StartupRecoveryObservedEvent(
+            **self._reserve_event_payload(),
+        )
+        return self.shell_ready_event
+
+    def _reserve_event_payload(self) -> dict[str, float | int]:
+        with self._event_lock:
+            observed_order = self._next_observed_order
+            self._next_observed_order += 1
+        return {
+            "observed_order": observed_order,
+            "observed_at_monotonic": time.monotonic(),
+        }
 
     @property
     def blocked_was_exercised(self) -> bool:
-        return len(self.blocked_urls) > 0
+        return len(self.blocked_requests) > 0
+
+    @property
+    def blocked_urls(self) -> list[str]:
+        return [request.url for request in self.blocked_requests]
 
 
 class StartupRecoveryRateLimitRuntime(
@@ -47,7 +95,7 @@ class StartupRecoveryRateLimitRuntime(
     def _handle_github_api_route(self, route: Route) -> None:
         url = route.request.url
         if f"/contents/{self._observation.blocked_repository_path}" in url:
-            self._observation.blocked_urls.append(url)
+            self._observation.record_blocked_request(url)
             route.fulfill(
                 status=403,
                 content_type="application/json",
@@ -76,4 +124,3 @@ class StartupRecoveryRateLimitRuntime(
         if self._playwright is not None:
             self._playwright.stop()
         return None
-

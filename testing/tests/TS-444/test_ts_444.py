@@ -18,6 +18,8 @@ from testing.core.config.live_setup_test_config import load_live_setup_test_conf
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from testing.tests.support.startup_recovery_rate_limit_runtime import (  # noqa: E402
+    StartupRecoveryBlockedRequestObservation,
+    StartupRecoveryObservedEvent,
     StartupRecoveryRateLimitObservation,
     StartupRecoveryRateLimitRuntime,
 )
@@ -80,19 +82,34 @@ def main() -> None:
                         "tracker shell before the TS-444 deferred-bootstrap scenario ran.\n"
                         f"Observed body text:\n{runtime_state.body_text}",
                     )
+                shell_ready_event = rate_limit_observation.record_shell_ready()
+                result["shell_ready_event"] = _event_payload(shell_ready_event)
 
-                blocked_detected, blocked_urls = poll_until(
-                    probe=lambda: tuple(rate_limit_observation.blocked_urls),
+                blocked_detected, blocked_requests = poll_until(
+                    probe=lambda: tuple(rate_limit_observation.blocked_requests),
                     is_satisfied=lambda blocked: len(blocked) > 0,
                     timeout_seconds=120,
                     interval_seconds=2,
                 )
+                blocked_urls = [request.url for request in blocked_requests]
                 result["blocked_urls"] = list(blocked_urls)
                 if not blocked_detected:
                     raise AssertionError(
                         "Step 1 failed: the live app never requested the deferred bootstrap "
                         f"artifact `{BLOCKED_BOOTSTRAP_PATH}`, so the recoverable rate-limit "
                         "path was not exercised.\n"
+                        f"Observed blocked URLs: {list(blocked_urls)}\n"
+                        f"Observed body text:\n{page.current_body_text()}",
+                    )
+                first_blocked_request = blocked_requests[0]
+                result["first_blocked_request"] = _blocked_request_payload(first_blocked_request)
+                if first_blocked_request.observed_order <= shell_ready_event.observed_order:
+                    raise AssertionError(
+                        "Step 1 failed: the synthetic tombstones rate limit was observed "
+                        "before the hosted shell was marked ready, so the test did not "
+                        "exercise the required deferred-bootstrap phase.\n"
+                        f"{_event_summary(shell_ready_event)}\n"
+                        f"{_blocked_request_summary(first_blocked_request)}\n"
                         f"Observed blocked URLs: {list(blocked_urls)}\n"
                         f"Observed body text:\n{page.current_body_text()}",
                     )
@@ -104,7 +121,11 @@ def main() -> None:
                         "Trigger a 403 GitHub rate limit during deferred bootstrap after the "
                         "mandatory hosted shell data has already loaded."
                     ),
-                    observed="\n".join(blocked_urls),
+                    observed=(
+                        f"{_event_summary(shell_ready_event)}\n"
+                        f"{_blocked_request_summary(first_blocked_request)}\n"
+                        + "\n".join(blocked_urls)
+                    ),
                 )
 
                 shell_observation = page.wait_for_shell_routed_to_settings(timeout_ms=120_000)
@@ -250,6 +271,40 @@ def _shell_payload(observation: StartupRecoveryShellObservation) -> dict[str, ob
         "topbar_title_visible": observation.topbar_title_visible,
         "settings_heading_visible": observation.settings_heading_visible,
     }
+
+
+def _event_payload(observation: StartupRecoveryObservedEvent) -> dict[str, object]:
+    return {
+        "observed_order": observation.observed_order,
+        "observed_at_monotonic": observation.observed_at_monotonic,
+    }
+
+
+def _blocked_request_payload(
+    observation: StartupRecoveryBlockedRequestObservation,
+) -> dict[str, object]:
+    payload = _event_payload(observation)
+    payload["url"] = observation.url
+    return payload
+
+
+def _event_summary(observation: StartupRecoveryObservedEvent) -> str:
+    return (
+        "shell_ready="
+        f"order:{observation.observed_order}, "
+        f"monotonic:{observation.observed_at_monotonic:.6f}"
+    )
+
+
+def _blocked_request_summary(
+    observation: StartupRecoveryBlockedRequestObservation,
+) -> str:
+    return (
+        "first_blocked_request="
+        f"order:{observation.observed_order}, "
+        f"monotonic:{observation.observed_at_monotonic:.6f}, "
+        f"url:{observation.url}"
+    )
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
