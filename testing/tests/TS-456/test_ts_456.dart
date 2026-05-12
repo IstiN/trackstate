@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../core/interfaces/issue_detail_accessibility_screen.dart';
 import '../../core/models/issue_detail_icon_observation.dart';
 import '../../core/models/issue_detail_row_style_observation.dart';
+import '../../core/models/issue_detail_text_contrast_observation.dart';
+import '../../core/models/issue_detail_theme_tokens.dart';
 import '../../fixtures/issue_detail_accessibility_screen_fixture.dart';
 import 'support/ts456_deferred_attachment_error_fixture.dart';
 
@@ -97,6 +99,14 @@ void main() {
           failures,
           issueKey: Ts456DeferredAttachmentErrorFixture.issueKey,
         );
+        final themeTokens = screen.themeTokens(
+          Ts456DeferredAttachmentErrorFixture.issueKey,
+        );
+        _verifyDeferredErrorIconForegroundToken(
+          failures,
+          observation: errorIcon,
+          tokens: themeTokens,
+        );
         if (errorIcon != null && errorIcon.contrastRatio < 3.0) {
           failures.add(
             'Step 5 failed: the deferred Attachments error icon contrast was ${errorIcon.describe()}, '
@@ -155,6 +165,13 @@ void main() {
           rowAnchorText: 'Retry',
           text: 'Attachments',
         );
+        _verifyDeferredErrorTextForegroundToken(
+          failures,
+          observation: titleContrast,
+          tokens: themeTokens,
+          expectedForegroundHex: themeTokens.errorHex,
+          context: 'error title',
+        );
         if (titleContrast.contrastRatio < 4.5) {
           failures.add(
             'Step 5 failed: the visible Attachments error title contrast was ${titleContrast.describe()}, '
@@ -166,6 +183,13 @@ void main() {
           Ts456DeferredAttachmentErrorFixture.issueKey,
           rowAnchorText: 'Retry',
           text: Ts456DeferredAttachmentErrorFixture.deferredErrorMessage,
+        );
+        _verifyDeferredErrorTextForegroundToken(
+          failures,
+          observation: messageContrast,
+          tokens: themeTokens,
+          expectedForegroundHex: themeTokens.mutedHex,
+          context: 'error message',
         );
         if (messageContrast.contrastRatio < 4.5) {
           failures.add(
@@ -307,6 +331,39 @@ void _verifyErrorRowUsesExpectedTokens(
     failures.add(
       'Step 5 failed: the deferred Attachments error row did not use the required surfaceAlt / AC5 styling contract. '
       'Observed ${observation.describe()}.',
+    );
+  }
+}
+
+void _verifyDeferredErrorTextForegroundToken(
+  List<String> failures, {
+  required IssueDetailTextContrastObservation observation,
+  required IssueDetailThemeTokens tokens,
+  required String expectedForegroundHex,
+  required String context,
+}) {
+  if (observation.foregroundHex != expectedForegroundHex) {
+    failures.add(
+      'Step 5 failed: the deferred Attachments $context did not use the required AC5 foreground token. '
+      'Rendered=${observation.foregroundHex} expected=$expectedForegroundHex '
+      '(error=${tokens.errorHex}, muted=${tokens.mutedHex}, surfaceAlt=${tokens.surfaceAltHex}).',
+    );
+  }
+}
+
+void _verifyDeferredErrorIconForegroundToken(
+  List<String> failures, {
+  required IssueDetailIconObservation? observation,
+  required IssueDetailThemeTokens tokens,
+}) {
+  if (observation == null) {
+    return;
+  }
+  if (observation.foregroundHex != tokens.errorHex) {
+    failures.add(
+      'Step 5 failed: the deferred Attachments error icon did not use the required AC5 error foreground token. '
+      'Rendered=${observation.foregroundHex} expected=${tokens.errorHex} '
+      '(surfaceAlt=${tokens.surfaceAltHex}, border=${tokens.borderHex}).',
     );
   }
 }

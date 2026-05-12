@@ -15,8 +15,9 @@ The automation:
    then activates it with `Enter`
 6. verifies the retry action re-attempts the deferred attachment read
 7. asserts the deferred error card keeps the expected `surfaceAlt` / AC5
-   styling contract, then measures the rendered error-card text and error-icon
-   contrast against that surface
+   styling contract, checks the rendered title/message/icon foreground tokens
+   against the expected `error` / `muted` theme colors, then measures the
+   rendered error-card text and error-icon contrast against that surface
 
 ## Install dependencies
 
@@ -46,6 +47,7 @@ WCAG AA contrast.
 
 Fail: the error state is missing, Retry is not exposed with an accessible label
 or keyboard activation path, the deferred error icon is missing or not labeled
-for assistive technology, or the rendered error treatment misses the required
-contrast threshold.
+for assistive technology, the deferred error treatment uses the wrong AC5
+foreground/background tokens, or the rendered contrast misses the required
+threshold.
 ```
