@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'dart:typed_data';
@@ -479,6 +480,93 @@ void main() {
       expect(viewModel.selectedIssue?.parentKey, 'TRACK-11');
       expect(viewModel.selectedIssue?.parentPath, 'TRACK-11/main.md');
       expect(viewModel.selectedIssue?.storagePath, 'TRACK-11/TRACK-12/main.md');
+    },
+  );
+
+  test(
+    'view model refreshes moved descendants from the hosted cache after hierarchy edits',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final repository = _HostedMutableEditRepository(
+        textFixtures: _hostedHierarchyTextFixtures(),
+        binaryFixtures: _hostedHierarchyBinaryFixtures(),
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-21',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: issue.summary,
+          description: issue.description,
+          priorityId: issue.priorityId,
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: issue.parentKey,
+          epicKey: 'TRACK-30',
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(repository.loadSnapshotCount, 1);
+      expect(viewModel.selectedIssue?.storagePath, 'TRACK-30/TRACK-21/main.md');
+      final movedDescendant = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-22',
+      );
+      expect(movedDescendant.parentKey, 'TRACK-21');
+      expect(movedDescendant.epicKey, 'TRACK-30');
+      expect(movedDescendant.storagePath, 'TRACK-30/TRACK-21/TRACK-22/main.md');
+    },
+  );
+
+  test(
+    'hosted hierarchy moves preserve attachment revisions for same-name overwrites',
+    () async {
+      final repository = _HostedMutableEditRepository(
+        textFixtures: _hostedHierarchyTextFixtures(),
+        binaryFixtures: _hostedHierarchyBinaryFixtures(),
+      );
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: 'trackstate/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final issue = repository.cachedSnapshot!.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-21',
+      );
+      final hydrated = await repository.hydrateIssue(
+        issue,
+        scopes: const {IssueHydrationScope.attachments},
+      );
+
+      final moved = await IssueMutationService(
+        repository: repository,
+      ).reassignIssue(issueKey: hydrated.key, epicKey: 'TRACK-30');
+
+      expect(moved.isSuccess, isTrue);
+      final uploaded = await repository.uploadIssueAttachment(
+        issue: moved.value!,
+        name: 'existing.pdf',
+        bytes: Uint8List.fromList(<int>[9, 9, 9]),
+      );
+      final overwritten = uploaded.attachments.firstWhere(
+        (attachment) => attachment.name == 'existing.pdf',
+      );
+      expect(
+        overwritten.storagePath,
+        'TRACK-30/TRACK-21/attachments/existing.pdf',
+      );
     },
   );
 
@@ -1612,8 +1700,15 @@ class _MutableEditRepository implements TrackStateRepository {
 }
 
 class _HostedMutableEditRepository extends ProviderBackedTrackStateRepository {
-  _HostedMutableEditRepository()
-    : super(provider: MutableIssueDetailTrackStateProvider());
+  _HostedMutableEditRepository({
+    Map<String, String> textFixtures = const <String, String>{},
+    Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
+  }) : super(
+         provider: MutableIssueDetailTrackStateProvider(
+           textFixtures: textFixtures,
+           binaryFixtures: binaryFixtures,
+         ),
+       );
 
   int loadSnapshotCount = 0;
 
@@ -1623,6 +1718,196 @@ class _HostedMutableEditRepository extends ProviderBackedTrackStateRepository {
     return super.loadSnapshot();
   }
 }
+
+Map<String, String> _hostedHierarchyTextFixtures() {
+  const track20 = '''
+---
+key: TRACK-20
+project: TRACK
+issueType: Epic
+status: To Do
+priority: Highest
+summary: Source hierarchy epic
+assignee: Denis
+reporter: Ana
+updated: 6 minutes ago
+---
+
+# Description
+Epic that currently owns the moved subtree.
+''';
+  const track21 = '''
+---
+key: TRACK-21
+project: TRACK
+issueType: Story
+status: In Progress
+priority: High
+summary: Move a nested subtree
+assignee: Denis
+reporter: Ana
+epic: TRACK-20
+updated: 4 minutes ago
+---
+
+# Description
+Story that owns a sub-task and an attachment.
+''';
+  const track22 = '''
+---
+key: TRACK-22
+project: TRACK
+issueType: Sub-task
+status: To Do
+priority: Medium
+summary: Follow the parent move
+assignee: Denis
+reporter: Ana
+parent: TRACK-21
+epic: TRACK-20
+updated: 3 minutes ago
+---
+
+# Description
+Sub-task used to verify subtree refreshes.
+''';
+  const track30 = '''
+---
+key: TRACK-30
+project: TRACK
+issueType: Epic
+status: To Do
+priority: Highest
+summary: Target hierarchy epic
+assignee: Denis
+reporter: Ana
+updated: 1 minute ago
+---
+
+# Description
+Epic that becomes the new subtree owner.
+''';
+
+  return {
+    '.trackstate/index/issues.json':
+        '${jsonEncode([
+          {
+            'key': 'TRACK-11',
+            'path': 'TRACK-11/main.md',
+            'parent': null,
+            'epic': null,
+            'parentPath': null,
+            'epicPath': null,
+            'summary': 'Stabilize dashboard polling',
+            'issueType': 'story',
+            'status': 'todo',
+            'priority': 'highest',
+            'assignee': 'Denis',
+            'labels': ['dashboard'],
+            'updated': '2 minutes ago',
+            'children': [],
+            'archived': false,
+          },
+          {
+            'key': 'TRACK-12',
+            'path': 'TRACK-12/main.md',
+            'parent': null,
+            'epic': null,
+            'parentPath': null,
+            'epicPath': null,
+            'summary': 'Implement Git sync service',
+            'issueType': 'story',
+            'status': 'in-progress',
+            'priority': 'high',
+            'assignee': 'Denis',
+            'labels': ['sync'],
+            'updated': '5 minutes ago',
+            'children': [],
+            'archived': false,
+          },
+          {
+            'key': 'TRACK-20',
+            'path': 'TRACK-20/main.md',
+            'parent': null,
+            'epic': null,
+            'parentPath': null,
+            'epicPath': null,
+            'summary': 'Source hierarchy epic',
+            'issueType': 'epic',
+            'status': 'todo',
+            'priority': 'highest',
+            'assignee': 'Denis',
+            'labels': ['hierarchy'],
+            'updated': '6 minutes ago',
+            'children': ['TRACK-21'],
+            'archived': false,
+          },
+          {
+            'key': 'TRACK-21',
+            'path': 'TRACK-20/TRACK-21/main.md',
+            'parent': null,
+            'epic': 'TRACK-20',
+            'parentPath': null,
+            'epicPath': 'TRACK-20/main.md',
+            'summary': 'Move a nested subtree',
+            'issueType': 'story',
+            'status': 'in-progress',
+            'priority': 'high',
+            'assignee': 'Denis',
+            'labels': ['hierarchy'],
+            'updated': '4 minutes ago',
+            'children': ['TRACK-22'],
+            'archived': false,
+          },
+          {
+            'key': 'TRACK-22',
+            'path': 'TRACK-20/TRACK-21/TRACK-22/main.md',
+            'parent': 'TRACK-21',
+            'epic': 'TRACK-20',
+            'parentPath': 'TRACK-20/TRACK-21/main.md',
+            'epicPath': 'TRACK-20/main.md',
+            'summary': 'Follow the parent move',
+            'issueType': 'subtask',
+            'status': 'todo',
+            'priority': 'medium',
+            'assignee': 'Denis',
+            'labels': ['hierarchy'],
+            'updated': '3 minutes ago',
+            'children': [],
+            'archived': false,
+          },
+          {
+            'key': 'TRACK-30',
+            'path': 'TRACK-30/main.md',
+            'parent': null,
+            'epic': null,
+            'parentPath': null,
+            'epicPath': null,
+            'summary': 'Target hierarchy epic',
+            'issueType': 'epic',
+            'status': 'todo',
+            'priority': 'highest',
+            'assignee': 'Denis',
+            'labels': ['hierarchy'],
+            'updated': '1 minute ago',
+            'children': [],
+            'archived': false,
+          },
+        ])}\n',
+    'TRACK-20/main.md': track20,
+    'TRACK-20/TRACK-21/main.md': track21,
+    'TRACK-20/TRACK-21/TRACK-22/main.md': track22,
+    'TRACK-30/main.md': track30,
+  };
+}
+
+Map<String, Uint8List> _hostedHierarchyBinaryFixtures() => {
+  'TRACK-20/TRACK-21/attachments/existing.pdf': Uint8List.fromList(<int>[
+    1,
+    2,
+    3,
+  ]),
+};
 
 class _RecordingEditIssueMutationService extends IssueMutationService {
   _RecordingEditIssueMutationService(

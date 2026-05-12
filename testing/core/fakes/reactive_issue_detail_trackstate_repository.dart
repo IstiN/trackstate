@@ -20,11 +20,15 @@ class ReactiveIssueDetailTrackStateRepository
     ),
     Set<String> lfsTrackedPaths = const <String>{},
     Set<String> failingTextPaths = const <String>{},
+    Map<String, String> textFixtures = const <String, String>{},
+    Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
   }) => ReactiveIssueDetailTrackStateRepository._(
     MutableIssueDetailTrackStateProvider(
       permission: permission,
       lfsTrackedPaths: lfsTrackedPaths,
       failingTextPaths: failingTextPaths,
+      textFixtures: textFixtures,
+      binaryFixtures: binaryFixtures,
     ),
   );
 
@@ -108,9 +112,19 @@ class MutableIssueDetailTrackStateProvider
     ),
     Set<String> lfsTrackedPaths = const <String>{},
     Set<String> failingTextPaths = const <String>{},
+    Map<String, String> textFixtures = const <String, String>{},
+    Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
   }) : _permission = permission,
        _lfsTrackedPaths = lfsTrackedPaths,
-       _failingTextPaths = failingTextPaths;
+       _failingTextPaths = failingTextPaths,
+       _textFiles = Map<String, String>.from(_textFixtures)
+         ..addAll(textFixtures),
+       _binaryFiles = <String, Uint8List>{
+         for (final entry in _binaryFixtures.entries)
+           entry.key: Uint8List.fromList(entry.value),
+         for (final entry in binaryFixtures.entries)
+           entry.key: Uint8List.fromList(entry.value),
+       };
 
   RepositoryPermission _permission;
   final Set<String> _lfsTrackedPaths;
@@ -282,14 +296,13 @@ Read and write tracker files through GitHub Contents API.
 ''',
   };
 
-  final Map<String, String> _textFiles = Map<String, String>.from(
-    _textFixtures,
-  );
-  final Map<String, Uint8List> _binaryFiles = <String, Uint8List>{
+  static final Map<String, Uint8List> _binaryFixtures = <String, Uint8List>{
     'TRACK-12/attachments/sync-sequence.svg': Uint8List.fromList(
       '<svg />'.codeUnits,
     ),
   };
+  final Map<String, String> _textFiles;
+  final Map<String, Uint8List> _binaryFiles;
 
   void updatePermission(RepositoryPermission permission) {
     _permission = permission;
@@ -428,6 +441,12 @@ Read and write tracker files through GitHub Contents API.
   Future<RepositoryAttachmentWriteResult> writeAttachment(
     RepositoryAttachmentWriteRequest request,
   ) async {
+    final existing = _binaryFiles[request.path];
+    if (existing != null && request.expectedRevision != _revision) {
+      throw TrackStateProviderException(
+        'Expected revision ${request.expectedRevision} does not match ${request.path}.',
+      );
+    }
     _binaryFiles[request.path] = Uint8List.fromList(request.bytes);
     return const RepositoryAttachmentWriteResult(
       path: '',

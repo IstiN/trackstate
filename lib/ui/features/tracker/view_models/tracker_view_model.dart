@@ -1710,10 +1710,23 @@ class TrackerViewModel extends ChangeNotifier {
       repositoryIndex: snapshot.repositoryIndex,
       loadWarnings: snapshot.loadWarnings,
       readiness: snapshot.readiness,
+      startupRecovery: snapshot.startupRecovery,
     );
   }
 
   void _applyTargetedIssueRefresh(TrackStateIssue issue) {
+    final repository = _repository;
+    if (repository is ProviderBackedTrackStateRepository) {
+      final cachedSnapshot = repository.cachedSnapshot;
+      if (cachedSnapshot != null &&
+          cachedSnapshot.issues.any(
+            (candidate) => candidate.key == issue.key,
+          )) {
+        _snapshot = cachedSnapshot;
+        _selectIssueFromSnapshot(issue);
+        return;
+      }
+    }
     _mergeIssueIntoSnapshot(issue);
     _selectIssueFromSnapshot(issue);
   }
