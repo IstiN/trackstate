@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import urllib.error
+from urllib.parse import quote
 from typing import Iterable
 import urllib.request
 from dataclasses import dataclass
@@ -403,6 +404,107 @@ class LiveSetupRepositoryService:
                     f"GitHub delete for release {release_id} returned unexpected status "
                     f"{response.status}.",
                 )
+
+    def create_release(
+        self,
+        *,
+        tag_name: str,
+        name: str,
+        body: str = "",
+        draft: bool = True,
+        prerelease: bool = False,
+        target_commitish: str | None = None,
+    ) -> LiveHostedRelease:
+        payload = {
+            "tag_name": tag_name,
+            "target_commitish": target_commitish or self.ref,
+            "name": name,
+            "body": body,
+            "draft": draft,
+            "prerelease": prerelease,
+        }
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{self.repository}/releases",
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Content-Type": "application/json",
+                **(
+                    {"Authorization": f"Bearer {self.token}"}
+                    if self.token
+                    else {}
+                ),
+            },
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            if response.status != 201:
+                raise RuntimeError(
+                    f"GitHub release create for {tag_name} returned unexpected status "
+                    f"{response.status}.",
+                )
+            raw_payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(raw_payload, dict):
+            raise RuntimeError(
+                f"GitHub release create for {tag_name} did not return an object payload.",
+            )
+        return LiveHostedRelease(
+            id=int(raw_payload.get("id", 0)),
+            tag_name=str(raw_payload.get("tag_name", "")).strip(),
+            name=str(raw_payload.get("name", "")).strip(),
+            assets=[
+                LiveHostedReleaseAsset(
+                    id=int(asset.get("id", 0)),
+                    name=str(asset.get("name", "")).strip(),
+                )
+                for asset in raw_payload.get("assets", [])
+                if isinstance(asset, dict)
+            ],
+        )
+
+    def upload_release_asset(
+        self,
+        *,
+        release_id: int,
+        asset_name: str,
+        content_type: str,
+        content: bytes,
+    ) -> LiveHostedReleaseAsset:
+        request = urllib.request.Request(
+            (
+                f"https://uploads.github.com/repos/{self.repository}/releases/"
+                f"{release_id}/assets?name={quote(asset_name)}"
+            ),
+            data=content,
+            method="POST",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Content-Type": content_type,
+                "Content-Length": str(len(content)),
+                **(
+                    {"Authorization": f"Bearer {self.token}"}
+                    if self.token
+                    else {}
+                ),
+            },
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            if response.status != 201:
+                raise RuntimeError(
+                    f"GitHub release asset upload for {asset_name} returned unexpected "
+                    f"status {response.status}.",
+                )
+            raw_payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(raw_payload, dict):
+            raise RuntimeError(
+                f"GitHub release asset upload for {asset_name} did not return an object payload.",
+            )
+        return LiveHostedReleaseAsset(
+            id=int(raw_payload.get("id", 0)),
+            name=str(raw_payload.get("name", "")).strip(),
+        )
 
     def _read_config_names(self, path: str) -> list[str]:
         values = self._read_repo_json(path)
