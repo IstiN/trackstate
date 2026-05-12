@@ -6,6 +6,7 @@ import 'package:trackstate/ui/core/trackstate_icons.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 
 import '../../core/interfaces/issue_detail_accessibility_screen.dart';
+import '../../core/models/action_availability.dart';
 import '../../core/models/issue_detail_icon_observation.dart';
 import '../../core/models/issue_detail_row_style_observation.dart';
 import '../../core/models/issue_detail_theme_tokens.dart';
@@ -158,6 +159,15 @@ class IssueDetailAccessibilityRobot
   }
 
   @override
+  ActionAvailability attachmentAction(String issueKey, String label) {
+    final action = _issueDetailAction(issueKey, label);
+    final visible = action.evaluate().isNotEmpty;
+    final enabled =
+        visible && tester.widget<ButtonStyleButton>(action.first).enabled;
+    return ActionAvailability(label: label, visible: visible, enabled: enabled);
+  }
+
+  @override
   List<String> commentActionLabels(String issueKey) {
     final rootLabel = 'Issue detail $issueKey';
     final targets = _screenReaderTargets(issueKey, rootLabel);
@@ -172,6 +182,95 @@ class IssueDetailAccessibilityRobot
         .where((target) => target.isButton)
         .map((target) => target.label)
         .toList();
+  }
+
+  @override
+  bool showsAttachmentUploadRestrictionNotice(
+    String issueKey, {
+    required String storageLabel,
+    required String actionLabel,
+  }) {
+    final callout = _attachmentUploadRestrictionCallout(
+      issueKey,
+      storageLabel: storageLabel,
+    );
+    if (callout.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(
+          of: callout,
+          matching: find.text(actionLabel, findRichText: true),
+        )
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  bool attachmentUploadRestrictionNoticeIsInline(
+    String issueKey, {
+    required String tabLabel,
+    required String storageLabel,
+  }) {
+    final callout = _attachmentUploadRestrictionCallout(
+      issueKey,
+      storageLabel: storageLabel,
+    );
+    final tab = _collaborationTab(issueKey, tabLabel);
+    if (callout.evaluate().isEmpty || tab.evaluate().isEmpty) {
+      return false;
+    }
+    final tabBottom = tester.getBottomLeft(tab.first).dy;
+    final calloutTop = tester.getTopLeft(callout.first).dy;
+    return calloutTop > tabBottom;
+  }
+
+  @override
+  bool attachmentRowIsBelowAttachmentUploadRestrictionNotice(
+    String issueKey, {
+    required String storageLabel,
+    required String attachmentName,
+  }) {
+    final callout = _attachmentUploadRestrictionCallout(
+      issueKey,
+      storageLabel: storageLabel,
+    );
+    final attachmentRow = _attachmentRow(issueKey, attachmentName);
+    if (callout.evaluate().isEmpty || attachmentRow.evaluate().isEmpty) {
+      return false;
+    }
+    final calloutBottom = tester.getBottomLeft(callout.first).dy;
+    final rowTop = tester.getTopLeft(attachmentRow.first).dy;
+    return rowTop > calloutBottom;
+  }
+
+  @override
+  Future<void> tapAttachmentUploadRestrictionAction(
+    String issueKey, {
+    required String storageLabel,
+    required String actionLabel,
+  }) async {
+    final callout = _attachmentUploadRestrictionCallout(
+      issueKey,
+      storageLabel: storageLabel,
+    );
+    if (callout.evaluate().isEmpty) {
+      throw StateError(
+        'No upload restriction callout mentioning "$storageLabel" was rendered for issue detail $issueKey.',
+      );
+    }
+    final action = find.descendant(
+      of: callout,
+      matching: find.text(actionLabel, findRichText: true),
+    );
+    if (action.evaluate().isEmpty) {
+      throw StateError(
+        'No "$actionLabel" action was rendered inside the "$storageLabel" upload restriction callout for issue detail $issueKey.',
+      );
+    }
+    await tester.ensureVisible(action.first);
+    await tester.tap(action.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
   }
 
   @override
@@ -558,6 +657,38 @@ class IssueDetailAccessibilityRobot
     );
   }
 
+  Finder _attachmentUploadRestrictionCallout(
+    String issueKey, {
+    required String storageLabel,
+  }) {
+    return find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! Semantics) {
+          return false;
+        }
+        final label = (widget.properties.label ?? '').trim();
+        return _containsReleaseUploadRestriction(label, storageLabel);
+      }, description: 'upload restriction callout for $storageLabel'),
+    );
+  }
+
+  Finder _issueDetailAction(String issueKey, String label) {
+    final button = find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.ancestor(
+        of: find.text(label, findRichText: true),
+        matching: find.bySubtype<ButtonStyleButton>(),
+      ),
+    );
+    return button.evaluate().isNotEmpty
+        ? button.first
+        : find.byWidgetPredicate(
+            (_) => false,
+            description: 'missing issue-detail action "$label"',
+          );
+  }
+
   Finder _attachmentRow(String issueKey, String attachmentName) =>
       find.descendant(
         of: _issueDetail(issueKey),
@@ -733,6 +864,20 @@ class IssueDetailAccessibilityRobot
     }
 
     throw StateError('No rendered text "$text" found within $scope.');
+  }
+
+  bool _containsReleaseUploadRestriction(String label, String storageLabel) {
+    final lowerLabel = label.toLowerCase();
+    final lowerStorageLabel = storageLabel.toLowerCase();
+    final mentionsUnavailable =
+        lowerLabel.contains('unavailable') ||
+        lowerLabel.contains('not available') ||
+        lowerLabel.contains('cannot complete');
+    final mentionsUpload =
+        lowerLabel.contains('upload') || lowerLabel.contains('transfer');
+    return lowerLabel.contains(lowerStorageLabel) &&
+        mentionsUnavailable &&
+        mentionsUpload;
   }
 
   Color _renderedBadgeBackground(Finder scope) {
