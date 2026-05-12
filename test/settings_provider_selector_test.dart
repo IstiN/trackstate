@@ -355,6 +355,56 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'settings locales keeps versions and resolutions visible after adding a locale',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1280, 720);
+      tester.view.devicePixelRatio = 1;
+      final repository = _EditableSettingsWidgetRepository();
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        final localesTab = find.widgetWithText(Tab, 'Locales');
+        await tester.ensureVisible(localesTab);
+        await tester.tap(localesTab);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Add locale'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Locale code'),
+          'fr',
+        );
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+
+        final viewportHeight =
+            tester.view.physicalSize.height / tester.view.devicePixelRatio;
+        final versionsSummary = find.bySemanticsLabel('Versions Locales\nsummary');
+        final resolutionsSummary = find.bySemanticsLabel(
+          'Resolutions Locales\nsummary',
+        );
+
+        expect(versionsSummary, findsOneWidget);
+        expect(resolutionsSummary, findsOneWidget);
+        expect(tester.getRect(versionsSummary).top, lessThan(viewportHeight));
+        expect(
+          tester.getRect(resolutionsSummary).top,
+          lessThan(viewportHeight),
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
 }
 
 class _EditableSettingsWidgetRepository
