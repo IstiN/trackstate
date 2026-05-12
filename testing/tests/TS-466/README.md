@@ -9,13 +9,13 @@ The automation:
 3. verifies the Locales tab exposes all seven required metadata catalogs
 4. enters a translation for a real priority ID
 5. leaves a real status translation empty and verifies the inline fallback warning
-6. saves the live settings and confirms the persisted result
-7. restores the repository state after verification
+6. saves the live settings and confirms the persisted user-visible result
+7. restores the temporary locale/UI state after verification
 
 ## Install dependencies
 
 ```bash
-python -m pip install playwright
+python -m pip install pillow playwright
 python -m playwright install chromium
 ```
 
