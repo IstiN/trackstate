@@ -12,6 +12,7 @@ from testing.core.config.live_setup_test_config import (
     LiveSetupTestConfig,
     load_live_setup_test_config,
 )
+from testing.core.models.hosted_repository_file import HostedRepositoryFile
 
 
 @dataclass(frozen=True)
@@ -57,13 +58,6 @@ class LiveHostedProjectLocaleConfiguration:
 class LiveHostedCatalogEntry:
     id: str
     name: str
-
-
-@dataclass(frozen=True)
-class LiveHostedRepositoryFile:
-    path: str
-    sha: str
-    content: str
 
 
 @dataclass(frozen=True)
@@ -198,7 +192,7 @@ class LiveSetupRepositoryService:
             if entry_id and name
         ]
 
-    def fetch_repo_file(self, path: str) -> LiveHostedRepositoryFile:
+    def fetch_repo_file(self, path: str) -> HostedRepositoryFile:
         response = self._read_json(
             f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
         )
@@ -208,7 +202,7 @@ class LiveSetupRepositoryService:
         sha = str(response.get("sha", "")).strip()
         if not sha:
             raise RuntimeError(f"GitHub response for {path} did not include a blob SHA.")
-        return LiveHostedRepositoryFile(
+        return HostedRepositoryFile(
             path=path,
             sha=sha,
             content=base64.b64decode(encoded).decode("utf-8"),
@@ -450,3 +444,6 @@ class LiveSetupRepositoryService:
         )
         with urllib.request.urlopen(request, timeout=60) as response:
             return json.loads(response.read().decode("utf-8"))
+
+
+LiveHostedRepositoryFile = HostedRepositoryFile
