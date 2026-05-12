@@ -30,9 +30,9 @@ class TrackStateCliAttachmentUploadBoundaryConfig:
                 "--issue",
                 "TS-22",
                 "--file",
-                "files/file1.png",
+                "file1.png",
                 "--file",
-                "files/file2.png",
+                "file2.png",
                 "--target",
                 "local",
             ),
@@ -56,5 +56,5 @@ class TrackStateCliAttachmentUploadBoundaryConfig:
             project_name="TS-387 Project",
             issue_key="TS-22",
             issue_summary="Attachment upload boundary fixture",
-            source_file_paths=("files/file1.png", "files/file2.png"),
+            source_file_paths=("file1.png", "file2.png"),
         )

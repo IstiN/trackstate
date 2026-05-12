@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 import tempfile
 from pathlib import Path
 
@@ -17,13 +16,13 @@ from testing.core.models.trackstate_cli_attachment_upload_boundary_result import
 from testing.core.models.trackstate_cli_command_observation import (
     TrackStateCliCommandObservation,
 )
-from testing.frameworks.python.trackstate_cli_jira_search_framework import (
-    PythonTrackStateCliJiraSearchFramework,
+from testing.frameworks.python.trackstate_cli_compiled_local_framework import (
+    PythonTrackStateCliCompiledLocalFramework,
 )
 
 
 class PythonTrackStateCliAttachmentUploadBoundaryFramework(
-    PythonTrackStateCliJiraSearchFramework,
+    PythonTrackStateCliCompiledLocalFramework,
     TrackStateCliAttachmentUploadBoundaryProbe,
 ):
     def __init__(self, repository_root: Path) -> None:
@@ -155,13 +154,17 @@ TS-387 duplicate file upload boundary fixture.
         attachment_directory = (
             repository_path / config.project_key / config.issue_key / "attachments"
         )
-        uploaded_attachment_paths = tuple(
-            sorted(
-                str(path.relative_to(repository_path))
-                for path in attachment_directory.rglob("*")
-                if path.is_file()
+        uploaded_attachment_paths = (
+            tuple(
+                sorted(
+                    str(path.relative_to(repository_path))
+                    for path in attachment_directory.rglob("*")
+                    if path.is_file()
+                )
             )
-        ) if attachment_directory.is_dir() else ()
+            if attachment_directory.is_dir()
+            else ()
+        )
         return TrackStateCliAttachmentUploadBoundaryRepositoryState(
             issue_main_exists=issue_main.is_file(),
             attachment_directory_exists=attachment_directory.is_dir(),
@@ -171,17 +174,6 @@ TS-387 duplicate file upload boundary fixture.
             head_commit_subject=self._git_head_subject(repository_path),
             head_commit_count=self._git_head_count(repository_path),
         )
-
-    @staticmethod
-    def _write_binary_file(path: Path, content: bytes) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content)
-
-    @staticmethod
-    def _read_text_if_exists(path: Path) -> str | None:
-        if not path.is_file():
-            return None
-        return path.read_text(encoding="utf-8")
 
     def _git_status_lines(self, repository_path: Path) -> tuple[str, ...]:
         output = self._git_output(repository_path, "status", "--short")
@@ -195,19 +187,3 @@ TS-387 duplicate file upload boundary fixture.
     def _git_head_count(self, repository_path: Path) -> int:
         output = self._git_output(repository_path, "rev-list", "--count", "HEAD").strip()
         return int(output) if output else 0
-
-    @staticmethod
-    def _git_output(repository_path: Path, *args: str) -> str:
-        completed = subprocess.run(
-            ("git", "-C", str(repository_path), *args),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if completed.returncode != 0:
-            raise AssertionError(
-                f"git {' '.join(args)} failed for {repository_path}.\n"
-                f"stdout:\n{completed.stdout}\n"
-                f"stderr:\n{completed.stderr}"
-            )
-        return completed.stdout
