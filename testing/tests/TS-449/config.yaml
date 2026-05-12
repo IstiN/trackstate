@@ -1,0 +1,8 @@
+test_id: TS-449
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Uses a ticket-specific delayed search repository wrapper so the real shell can be observed after loadSnapshot() completes but before initial search hydration finishes.
+  - Verifies the desktop shell renders branding, top-bar controls, and sidebar navigation immediately, then resizes to a compact layout and confirms navigation remains interactive while loading banners are still visible.
