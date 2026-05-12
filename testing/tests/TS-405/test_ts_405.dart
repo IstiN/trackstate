@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../fixtures/settings/local_git_settings_screen_context.dart';
@@ -44,54 +43,71 @@ void main() {
               'but `git status --short` returned ${initialStatus.join(' | ')}.',
         );
 
-        await _openStatuses(robot, tester, fixture.repositoryPath);
-        await _expectStatusSnapshot(
-          tester,
-          name: 'In Progress',
-          id: duplicateId,
-          category: 'indeterminate',
-          failingStep: 1,
-        );
-
-        await _tapButton(tester, filledLabel: 'Add status');
-        await _expectTextVisible(tester, 'Add status', failingStep: 2);
-        await _expectLabeledTextFieldVisible(tester, 'ID', failingStep: 3);
-        await _expectLabeledTextFieldVisible(tester, 'Name', failingStep: 3);
-        await _expectTextVisible(tester, 'Category', failingStep: 3);
-        await tester.enterText(
-          _labeledSettingsTextField('ID').first,
-          duplicateId,
-        );
-        await tester.pumpAndSettle();
-        await tester.enterText(
-          _labeledSettingsTextField('Name').first,
-          duplicateName,
-        );
-        await tester.pumpAndSettle();
+        await robot.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
+        await robot.openProjectStatuses();
 
         expect(
-          _textFormFieldValue(tester, 'ID'),
+          robot.isVisibleText('Project Settings'),
+          isTrue,
+          reason:
+              'Step 1 failed: the Settings surface did not render visible "Project Settings" text. '
+              'Visible texts: ${_formatSnapshot(robot.visibleTexts())}.',
+        );
+        expect(
+          robot.isVisibleText('Project settings administration'),
+          isTrue,
+          reason:
+              'Step 1 failed: the Settings surface did not render visible '
+              '"Project settings administration" text. Visible texts: '
+              '${_formatSnapshot(robot.visibleTexts())}.',
+        );
+        expect(
+          robot.isVisibleText('Statuses'),
+          isTrue,
+          reason:
+              'Step 1 failed: the Settings surface did not render visible "Statuses" text. '
+              'Visible texts: ${_formatSnapshot(robot.visibleTexts())}.',
+        );
+        expect(
+          robot.statusSummaryVisible(
+            name: 'In Progress',
+            id: duplicateId,
+            category: 'indeterminate',
+          ),
+          isTrue,
+          reason:
+              'Step 1 failed: the visible Statuses list did not show In Progress, ID: $duplicateId, '
+              'and Category: indeterminate for the seeded status. Visible texts: '
+              '${_formatSnapshot(robot.visibleTexts())}.',
+        );
+
+        await robot.tapActionButton('Add status');
+        robot.expectStatusEditorVisible('Add status');
+        await robot.enterTextField('ID', duplicateId);
+        await robot.enterTextField('Name', duplicateName);
+
+        expect(
+          robot.textFieldValue('ID'),
           duplicateId,
           reason:
               'Step 3 failed: the Add status dialog did not keep the entered duplicate ID visible.',
         );
         expect(
-          _textFormFieldValue(tester, 'Name'),
+          robot.textFieldValue('Name'),
           duplicateName,
           reason:
               'Step 3 failed: the Add status dialog did not keep the entered Name visible.',
         );
 
-        await _tapButton(tester, filledLabel: 'Save');
+        await robot.tapActionButton('Save');
         expect(
-          _labeledSettingsTextField('ID'),
-          findsNothing,
+          await robot.isTextFieldVisible('ID'),
+          isFalse,
           reason:
               'Step 4 failed: saving the Add status dialog should close the editor overlay before repository validation runs.',
         );
 
-        await _tapButton(tester, filledLabel: 'Save settings');
-        await tester.pumpAndSettle();
+        await robot.tapActionButton('Save settings');
         final duplicateAttemptHead =
             await tester.runAsync(fixture.headRevision) ?? '';
         final duplicateAttemptStatus =
@@ -101,7 +117,7 @@ void main() {
               () => fixture!.readRepositoryFile(statusesPath),
             ) ??
             '';
-        if (_messageText(duplicateError).evaluate().isEmpty) {
+        if (!robot.isVisibleText(duplicateError)) {
           fail(
             'Step 4 failed: saving Settings after adding the duplicate status '
             'ID "$duplicateId" did not render the expected validation message '
@@ -111,7 +127,7 @@ void main() {
             '${duplicateAttemptStatus.isEmpty ? '<clean>' : duplicateAttemptStatus.join(' | ')}, '
             'and DEMO/config/statuses.json stayed unchanged as '
             '$duplicateAttemptStatusesJson. Visible texts: '
-            '${_formatSnapshot(_visibleTexts(tester), limit: 60)}.',
+            '${_formatSnapshot(robot.visibleTexts(), limit: 60)}.',
           );
         }
 
@@ -125,39 +141,34 @@ void main() {
               'the duplicate-ID validation attempt should not write project settings',
         );
 
-        await _openStatuses(robot, tester, fixture.repositoryPath);
+        await robot.openProjectStatuses();
 
-        await _tapButton(tester, filledLabel: 'Add status');
-        await _expectTextVisible(tester, 'Add status', failingStep: 5);
-        await tester.enterText(
-          _labeledSettingsTextField('ID').first,
-          missingNameId,
-        );
-        await tester.pumpAndSettle();
+        await robot.tapActionButton('Add status');
+        robot.expectStatusEditorVisible('Add status');
+        await robot.enterTextField('ID', missingNameId);
 
         expect(
-          _textFormFieldValue(tester, 'ID'),
+          robot.textFieldValue('ID'),
           missingNameId,
           reason:
               'Step 5 failed: the second Add status dialog did not keep the entered ID visible.',
         );
         expect(
-          _textFormFieldValue(tester, 'Name'),
+          robot.textFieldValue('Name'),
           isEmpty,
           reason:
               'Step 5 precondition failed: the Name field should still be blank before the missing-name validation attempt.',
         );
 
-        await _tapButton(tester, filledLabel: 'Save');
-        await _tapButton(tester, filledLabel: 'Save settings');
-        await tester.pumpAndSettle();
+        await robot.tapActionButton('Save');
+        await robot.tapActionButton('Save settings');
 
         expect(
-          _messageText(missingNameError),
-          findsOneWidget,
+          robot.isVisibleText(missingNameError),
+          isTrue,
           reason:
               'Step 5 failed: saving Settings after leaving Name blank should show "$missingNameError". '
-              'Visible texts: ${_formatSnapshot(_visibleTexts(tester))}.',
+              'Visible texts: ${_formatSnapshot(robot.visibleTexts())}.',
         );
 
         await _expectRepositoryUnchanged(
@@ -182,141 +193,6 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
-}
-
-Future<void> _openStatuses(
-  dynamic robot,
-  WidgetTester tester,
-  String repositoryPath,
-) async {
-  await robot.pumpLocalGitApp(repositoryPath: repositoryPath);
-  await robot.openSettings();
-  robot.expectVisibleSettingsContent();
-  await tester.tap(robot.statusesTab);
-  await tester.pumpAndSettle();
-  await _expectTextVisible(tester, 'Project Settings', failingStep: 1);
-  await _expectTextVisible(
-    tester,
-    'Project settings administration',
-    failingStep: 1,
-  );
-  await _expectTextVisible(tester, 'Statuses', failingStep: 1);
-}
-
-Future<void> _tapButton(
-  WidgetTester tester, {
-  String? filledLabel,
-  String? textLabel,
-}) async {
-  final candidates = <Finder>[
-    if (filledLabel != null) find.widgetWithText(FilledButton, filledLabel),
-    if (textLabel != null) find.widgetWithText(TextButton, textLabel),
-    if (filledLabel != null) find.widgetWithText(TextButton, filledLabel),
-    if (filledLabel != null)
-      find.bySemanticsLabel(RegExp('^${RegExp.escape(filledLabel)}\$')),
-  ];
-  for (final candidate in candidates) {
-    if (candidate.evaluate().isEmpty) {
-      continue;
-    }
-    await tester.ensureVisible(candidate.first);
-    await tester.tap(candidate.first, warnIfMissed: false);
-    await tester.pumpAndSettle();
-    return;
-  }
-
-  fail(
-    'Expected a visible button labeled "${filledLabel ?? textLabel}", but none was rendered.',
-  );
-}
-
-Future<void> _expectTextVisible(
-  WidgetTester tester,
-  String text, {
-  required int failingStep,
-}) async {
-  await tester.pump();
-  final finder = find.text(text, findRichText: true);
-  if (finder.evaluate().isNotEmpty) {
-    return;
-  }
-  fail(
-    'Step $failingStep failed: the Settings surface did not render visible "$text" text. '
-    'Visible texts: ${_formatSnapshot(_visibleTexts(tester))}.',
-  );
-}
-
-Future<void> _expectLabeledTextFieldVisible(
-  WidgetTester tester,
-  String label, {
-  required int failingStep,
-}) async {
-  await tester.pump();
-  if (_labeledSettingsTextField(label).evaluate().isNotEmpty) {
-    return;
-  }
-  fail(
-    'Step $failingStep failed: the Add status dialog did not expose a visible "$label" field. '
-    'Visible texts: ${_formatSnapshot(_visibleTexts(tester))}.',
-  );
-}
-
-Future<void> _expectStatusSnapshot(
-  WidgetTester tester, {
-  required String name,
-  required String id,
-  required String category,
-  required int failingStep,
-}) async {
-  final combined = _visibleTexts(tester).join(' | ');
-  final expectedFragments = <String>[name, 'ID: $id', 'Category: $category'];
-  final missing = expectedFragments
-      .where((fragment) => !combined.contains(fragment))
-      .toList(growable: false);
-  if (missing.isEmpty) {
-    return;
-  }
-  fail(
-    'Step $failingStep failed: the visible Statuses list did not show ${missing.join(', ')} for the seeded status. '
-    'Visible texts: ${_formatSnapshot(_visibleTexts(tester))}.',
-  );
-}
-
-Finder _labeledSettingsTextField(String label) => find.descendant(
-  of: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
-  matching: find.byWidgetPredicate(
-    (widget) => widget is EditableText || widget is TextField,
-    description: 'editable control labeled $label',
-  ),
-);
-
-String _textFormFieldValue(WidgetTester tester, String label) {
-  final field = _labeledSettingsTextField(label);
-  if (field.evaluate().isEmpty) {
-    fail('Expected a visible editable control labeled "$label".');
-  }
-  final widget = tester.widget(field.first);
-  if (widget is EditableText) {
-    return widget.controller.text;
-  }
-  if (widget is TextField) {
-    return widget.controller?.text ?? '';
-  }
-  fail('Expected the "$label" control to expose an editable text controller.');
-}
-
-Finder _messageText(String text) => find.text(text, findRichText: true);
-
-List<String> _visibleTexts(WidgetTester tester) {
-  final values = <String>[];
-  for (final widget in tester.widgetList<Text>(find.byType(Text))) {
-    final value = widget.data?.trim();
-    if (value == null || value.isEmpty || values.contains(value)) {
-      continue;
-    }
-    values.add(value);
-  }
-  return values;
 }
 
 Future<void> _expectRepositoryUnchanged(
