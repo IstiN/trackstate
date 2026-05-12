@@ -262,6 +262,15 @@ def _assert_no_state_mutation(
     initial_state = validation.initial_state
     final_state = validation.final_state
 
+    if final_state.release_id != initial_state.release_id:
+        raise AssertionError(
+            "Expected result failed: the conflicting release object was replaced after "
+            "the failed upload.\n"
+            f"Initial release_id: {initial_state.release_id}\n"
+            f"Final release_id: {final_state.release_id}\n"
+            f"Initial state:\n{_describe_state(initial_state)}\n\n"
+            f"Final state:\n{_describe_state(final_state)}",
+        )
     if final_state.release_name != config.conflicting_release_title:
         raise AssertionError(
             "Expected result failed: the conflicting release title changed after the "
@@ -311,6 +320,7 @@ def _assert_no_state_mutation(
         status="passed",
         action="Verify that no hosted release or manifest state was mutated.",
         observed=(
+            f"release_id={final_state.release_id}; "
             f"release_assets={list(final_state.release_asset_names)}; "
             f"manifest_exists={final_state.manifest_exists}; "
             f"manifest_sha={final_state.manifest_sha}"
@@ -319,9 +329,9 @@ def _assert_no_state_mutation(
     _record_human_verification(
         result,
         check=(
-            "Verified the conflicting `Manual Release` container stayed in place with the "
-            "same visible asset list and the issue manifest remained unchanged after the "
-            "failed command."
+            "Verified the conflicting `Manual Release` container stayed in place as the "
+            "same hosted release object, with the same visible asset list, and the issue "
+            "manifest remained unchanged after the failed command."
         ),
         observed=_describe_state(final_state),
     )
