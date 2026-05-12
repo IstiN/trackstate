@@ -1,0 +1,9 @@
+test_id: TS-498
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Pumps the production hosted Settings surface with a GitHub-backed repository fixture that starts in a repository-path limited-upload state.
+  - Uses the real Project Settings > Attachments dropdown to switch to github-releases with a valid tag prefix, saves, and verifies the repository access area updates to the stacked green success pattern.
+  - Passes only when the top status band and secondary bordered attachment callout stay stacked above the token controls, and the amber/green styling matches the storage-specific state.
