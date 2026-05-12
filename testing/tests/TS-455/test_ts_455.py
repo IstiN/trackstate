@@ -257,6 +257,12 @@ def main() -> None:
                     expected_fragment=FAILURE_MESSAGE,
                     timeout_ms=30_000,
                 )
+                result["pre_retry_allowed_comment_urls"] = list(outage_observation.allowed_urls)
+                result["pre_retry_allowed_comment_paths"] = _tracked_paths_for_urls(
+                    outage_observation,
+                    outage_observation.allowed_urls,
+                )
+                outage_observation.allowed_urls.clear()
                 runtime.restore_connectivity()
                 page.click_deferred_retry("Comments", timeout_ms=30_000)
                 remaining_error_cards = page.wait_for_deferred_error_to_clear(
