@@ -328,6 +328,25 @@ class SettingsScreenRobot {
     await tester.pumpAndSettle();
   }
 
+  /// Taps the Save settings button and waits for the underlying async save
+  /// (which involves real git I/O) to complete before returning.
+  ///
+  /// Unlike [tapActionButton], this method performs the tap and initial pump
+  /// inside [WidgetTester.runAsync] so that the button's [onPressed] fires in
+  /// the real-async zone. This ensures continuations from git [Process.run]
+  /// calls are scheduled in the real microtask queue rather than the FakeAsync
+  /// intercepted queue, allowing the entire save chain to complete naturally.
+  Future<void> tapSaveSettingsButton() async {
+    final button = actionButton('Save settings');
+    await tester.ensureVisible(button);
+    await tester.runAsync(() async {
+      await tester.tap(button, warnIfMissed: false);
+      await tester.pump();
+      await Future<void>.delayed(const Duration(milliseconds: 2000));
+    });
+    await tester.pumpAndSettle();
+  }
+
   Future<void> enterTextField(String label, String text) async {
     final field = _labeledTextField(label);
     await tester.ensureVisible(field.first);

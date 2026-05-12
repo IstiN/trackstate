@@ -849,7 +849,7 @@ class ProjectConfig {
     statusDefinitions: statusDefinitions,
     workflowDefinitions: workflowDefinitions,
     issueTypeDefinitions: issueTypeDefinitions,
-    fieldDefinitions: fieldDefinitions,
+    fieldDefinitions: _settingsFieldDefinitions(fieldDefinitions),
     priorityDefinitions: priorityDefinitions,
     versionDefinitions: versionDefinitions,
     componentDefinitions: componentDefinitions,
@@ -954,6 +954,84 @@ class ProjectConfig {
     );
   }
 }
+
+List<TrackStateFieldDefinition> _settingsFieldDefinitions(
+  List<TrackStateFieldDefinition> fields,
+) {
+  final fieldIds = {for (final field in fields) field.id};
+  return [
+    ...fields,
+    for (final field in _reservedSettingsFieldDefinitions)
+      if (!fieldIds.contains(field.id)) field,
+  ];
+}
+
+const _reservedSettingsFieldDefinitions = [
+  TrackStateFieldDefinition(
+    id: 'summary',
+    name: 'Summary',
+    type: 'string',
+    required: true,
+    reserved: true,
+    localizedLabels: {'en': 'Summary'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'description',
+    name: 'Description',
+    type: 'markdown',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Description'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'acceptanceCriteria',
+    name: 'Acceptance Criteria',
+    type: 'markdown',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Acceptance Criteria'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'priority',
+    name: 'Priority',
+    type: 'option',
+    required: false,
+    options: _reservedPriorityFieldOptions,
+    reserved: true,
+    localizedLabels: {'en': 'Priority'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'assignee',
+    name: 'Assignee',
+    type: 'user',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Assignee'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'labels',
+    name: 'Labels',
+    type: 'array',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Labels'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'storyPoints',
+    name: 'Story Points',
+    type: 'number',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Story Points'},
+  ),
+];
+
+const _reservedPriorityFieldOptions = [
+  TrackStateFieldOption(id: 'highest', name: 'Highest'),
+  TrackStateFieldOption(id: 'high', name: 'High'),
+  TrackStateFieldOption(id: 'medium', name: 'Medium'),
+  TrackStateFieldOption(id: 'low', name: 'Low'),
+];
 
 class TrackerSnapshot {
   const TrackerSnapshot({
