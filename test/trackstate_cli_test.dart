@@ -637,6 +637,160 @@ void main() {
       },
     );
 
+    test(
+      'adds localized display names and fallback flags for metadata reads',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+              page: const TrackStateIssueSearchPage.empty(),
+            ),
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'read',
+          'fields',
+          '--locale',
+          'fr',
+        ]);
+        final json = jsonDecode(result.stdout) as List<Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json.first, <String, Object?>{
+          'id': 'summary',
+          'key': 'summary',
+          'name': 'Summary',
+          'displayName': 'Resume',
+          'usedFallback': false,
+          'custom': false,
+          'orderable': true,
+          'navigable': true,
+          'searchable': true,
+          'schema': <String, Object?>{'type': 'string', 'system': 'summary'},
+        });
+        expect(json[1], <String, Object?>{
+          'id': 'description',
+          'key': 'description',
+          'name': 'Description',
+          'displayName': 'Description',
+          'usedFallback': true,
+          'custom': false,
+          'orderable': true,
+          'navigable': true,
+          'searchable': true,
+          'schema': <String, Object?>{
+            'type': 'string',
+            'system': 'description',
+          },
+        });
+      },
+    );
+
+    test(
+      'localizes text output for read resources when locale is requested',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+              page: const TrackStateIssueSearchPage.empty(),
+            ),
+          ),
+        );
+
+        final ticketResult = await cli.run(const <String>[
+          'read',
+          'ticket',
+          '--key',
+          'TRACK-2',
+          '--locale',
+          'fr',
+          '--output',
+          'text',
+        ]);
+        final fieldsResult = await cli.run(const <String>[
+          'read',
+          'fields',
+          '--locale',
+          'fr',
+          '--output',
+          'text',
+        ]);
+        final statusesResult = await cli.run(const <String>[
+          'read',
+          'statuses',
+          '--project',
+          'TRACK',
+          '--locale',
+          'fr',
+          '--output',
+          'text',
+        ]);
+        final issueTypesResult = await cli.run(const <String>[
+          'read',
+          'issue-types',
+          '--project',
+          'TRACK',
+          '--locale',
+          'fr',
+          '--output',
+          'text',
+        ]);
+        final componentsResult = await cli.run(const <String>[
+          'read',
+          'components',
+          '--project',
+          'TRACK',
+          '--locale',
+          'fr',
+          '--output',
+          'text',
+        ]);
+        final versionsResult = await cli.run(const <String>[
+          'read',
+          'versions',
+          '--project',
+          'TRACK',
+          '--locale',
+          'fr',
+          '--output',
+          'text',
+        ]);
+
+        expect(ticketResult.exitCode, 0);
+        expect(ticketResult.stdout, contains('Type: Recit'));
+        expect(ticketResult.stdout, contains('Status: En cours'));
+        expect(ticketResult.stdout, contains('Priority: Elevee'));
+        expect(ticketResult.stdout, isNot(contains('Type: Story')));
+
+        expect(fieldsResult.exitCode, 0);
+        expect(fieldsResult.stdout, contains('Resume'));
+        expect(fieldsResult.stdout, contains('Description'));
+
+        expect(statusesResult.exitCode, 0);
+        expect(statusesResult.stdout, contains('A faire'));
+
+        expect(issueTypesResult.exitCode, 0);
+        expect(issueTypesResult.stdout, contains('Recit'));
+
+        expect(componentsResult.exitCode, 0);
+        expect(componentsResult.stdout, contains('Interface CLI'));
+        expect(componentsResult.stdout, contains('Noyau TrackState'));
+
+        expect(versionsResult.exitCode, 0);
+        expect(versionsResult.stdout, contains('Version 2026.05'));
+        expect(versionsResult.stdout, contains('Version MVP'));
+      },
+    );
+
     test('returns Jira project statuses grouped by issue type', () async {
       final cli = TrackStateCli(
         environment: const TrackStateCliEnvironment(
@@ -1475,14 +1629,27 @@ TrackerSnapshot _sampleSnapshot() => TrackerSnapshot(
     repository: 'trackstate/trackstate',
     branch: 'main',
     defaultLocale: 'en',
+    supportedLocales: <String>['en', 'fr'],
     issueTypeDefinitions: <TrackStateConfigEntry>[
       TrackStateConfigEntry(id: 'epic', name: 'Epic'),
-      TrackStateConfigEntry(id: 'story', name: 'Story'),
+      TrackStateConfigEntry(
+        id: 'story',
+        name: 'Story',
+        localizedLabels: <String, String>{'fr': 'Recit'},
+      ),
       TrackStateConfigEntry(id: 'subtask', name: 'Sub-task'),
     ],
     statusDefinitions: <TrackStateConfigEntry>[
-      TrackStateConfigEntry(id: 'todo', name: 'To Do'),
-      TrackStateConfigEntry(id: 'in-progress', name: 'In Progress'),
+      TrackStateConfigEntry(
+        id: 'todo',
+        name: 'To Do',
+        localizedLabels: <String, String>{'fr': 'A faire'},
+      ),
+      TrackStateConfigEntry(
+        id: 'in-progress',
+        name: 'In Progress',
+        localizedLabels: <String, String>{'fr': 'En cours'},
+      ),
       TrackStateConfigEntry(id: 'done', name: 'Done'),
     ],
     fieldDefinitions: <TrackStateFieldDefinition>[
@@ -1491,6 +1658,7 @@ TrackerSnapshot _sampleSnapshot() => TrackerSnapshot(
         name: 'Summary',
         type: 'string',
         required: true,
+        localizedLabels: <String, String>{'fr': 'Resume'},
       ),
       TrackStateFieldDefinition(
         id: 'description',
@@ -1500,16 +1668,36 @@ TrackerSnapshot _sampleSnapshot() => TrackerSnapshot(
       ),
     ],
     priorityDefinitions: <TrackStateConfigEntry>[
-      TrackStateConfigEntry(id: 'high', name: 'High'),
+      TrackStateConfigEntry(
+        id: 'high',
+        name: 'High',
+        localizedLabels: <String, String>{'fr': 'Elevee'},
+      ),
       TrackStateConfigEntry(id: 'medium', name: 'Medium'),
     ],
     componentDefinitions: <TrackStateConfigEntry>[
-      TrackStateConfigEntry(id: 'tracker-cli', name: 'Tracker CLI'),
-      TrackStateConfigEntry(id: 'tracker-core', name: 'Tracker Core'),
+      TrackStateConfigEntry(
+        id: 'tracker-cli',
+        name: 'Tracker CLI',
+        localizedLabels: <String, String>{'fr': 'Interface CLI'},
+      ),
+      TrackStateConfigEntry(
+        id: 'tracker-core',
+        name: 'Tracker Core',
+        localizedLabels: <String, String>{'fr': 'Noyau TrackState'},
+      ),
     ],
     versionDefinitions: <TrackStateConfigEntry>[
-      TrackStateConfigEntry(id: '2026.05', name: '2026.05'),
-      TrackStateConfigEntry(id: 'mvp', name: 'MVP'),
+      TrackStateConfigEntry(
+        id: '2026.05',
+        name: '2026.05',
+        localizedLabels: <String, String>{'fr': 'Version 2026.05'},
+      ),
+      TrackStateConfigEntry(
+        id: 'mvp',
+        name: 'MVP',
+        localizedLabels: <String, String>{'fr': 'Version MVP'},
+      ),
     ],
   ),
   repositoryIndex: const RepositoryIndex(
@@ -1651,8 +1839,8 @@ class _FakeSearchRepository implements TrackStateRepository {
     this.uploadedAttachmentNameBuilder,
     this.sortUploadedAttachmentsByName = false,
   }) : user =
-            user ??
-            connectedUser ??
+           user ??
+           connectedUser ??
            const RepositoryUser(login: 'searcher', displayName: 'Search User'),
        connectedUser =
            connectedUser ??
@@ -1769,9 +1957,7 @@ class _FakeSearchRepository implements TrackStateRepository {
     if (sortUploadedAttachmentsByName) {
       updatedAttachments.sort((left, right) => left.name.compareTo(right.name));
     }
-    final updatedIssue = issue.copyWith(
-      attachments: updatedAttachments,
-    );
+    final updatedIssue = issue.copyWith(attachments: updatedAttachments);
     final currentSnapshot = snapshot;
     snapshot = TrackerSnapshot(
       project: currentSnapshot.project,
