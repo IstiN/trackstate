@@ -8,8 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 
 import '../../components/screens/settings_screen_robot.dart';
-import '../../core/interfaces/issue_detail_accessibility_screen.dart';
 import '../../core/fakes/reactive_issue_detail_trackstate_repository.dart';
+import '../../core/interfaces/issue_detail_accessibility_screen.dart';
 import '../../fixtures/issue_detail_accessibility_screen_fixture.dart';
 
 const String _ticketKey = 'TS-497';
@@ -17,22 +17,13 @@ const String _hostedTokenKey = 'trackstate.githubToken.trackstate.trackstate';
 const String _issueKey = 'TRACK-12';
 const String _issueSummary = 'Implement Git sync service';
 const String _attachmentsTabLabel = 'Attachments';
-const String _noticeTitle =
-    'GitHub Releases uploads are unavailable in the browser';
-const String _attachmentsNoticeMessage =
-    'This project stores new attachments in GitHub Releases. Existing attachments remain available for download, but hosted release-backed uploads are not available in this browser session yet.';
-const String _repositoryAccessMessage =
-    'Issue edits and comments can continue, but this project stores new attachments in GitHub Releases and this hosted session cannot complete release-backed uploads yet.';
-const String _attachmentStorageTitle = 'GitHub Releases attachment storage';
-const String _attachmentStorageMessage =
-    'New attachments resolve to release tag trackstate-release-fixture-<ISSUE_KEY>, but this hosted session cannot complete release-backed uploads in the browser yet.';
+const String _releaseStorageLabel = 'GitHub Releases';
+const String _attachmentReleaseTagPrefix = 'trackstate-release-fixture-';
 const String _openSettingsLabel = 'Open settings';
 const String _chooseAttachmentLabel = 'Choose attachment';
 const String _uploadAttachmentLabel = 'Upload attachment';
 const String _attachmentName = 'release-backed-guide.txt';
 const String _downloadAttachmentLabel = 'Download $_attachmentName';
-const String _supportedStorageMessage =
-    'New attachments resolve to release tag trackstate-release-fixture-<ISSUE_KEY>, and this hosted session can complete release-backed uploads in the browser.';
 
 const RepositoryPermission _releaseRestrictedPermission = RepositoryPermission(
   canRead: true,
@@ -94,42 +85,25 @@ void main() {
             'Visible semantics: ${_formatSnapshot(issueSemantics)}',
           );
         }
-        if (!screen.showsAttachmentsRestrictionCallout(
+        if (!screen.showsAttachmentUploadRestrictionNotice(
           _issueKey,
-          title: _noticeTitle,
-          message: _attachmentsNoticeMessage,
+          storageLabel: _releaseStorageLabel,
+          actionLabel: _openSettingsLabel,
         )) {
           throw AssertionError(
-            'Step 1 failed: the Attachments tab did not render the release-backed restriction notice.\n'
+            'Step 1 failed: the Attachments tab did not render an inline restriction notice that surfaced $_releaseStorageLabel storage, kept hosted uploads unavailable, and exposed "$_openSettingsLabel".\n'
             'Visible texts: ${_formatSnapshot(issueTexts)}\n'
             'Visible semantics: ${_formatSnapshot(issueSemantics)}',
           );
         }
-        if (!screen.attachmentsRestrictionCalloutIsInline(
+        if (!screen.attachmentUploadRestrictionNoticeIsInline(
           _issueKey,
           tabLabel: _attachmentsTabLabel,
-          title: _noticeTitle,
-          message: _attachmentsNoticeMessage,
+          storageLabel: _releaseStorageLabel,
         )) {
           throw AssertionError(
             'Step 1 failed: the release-backed restriction notice did not stay inline below the Attachments tab controls.',
           );
-        }
-        for (final text in const <String>[
-          _noticeTitle,
-          _attachmentsNoticeMessage,
-          _openSettingsLabel,
-        ]) {
-          if (!screen.attachmentsRestrictionCalloutShowsText(
-            _issueKey,
-            title: _noticeTitle,
-            message: _attachmentsNoticeMessage,
-            text: text,
-          )) {
-            throw AssertionError(
-              'Step 1 failed: the inline Attachments notice did not keep "$text" visible in the callout surface.',
-            );
-          }
         }
         _recordStep(
           result,
@@ -137,40 +111,28 @@ void main() {
           status: 'passed',
           action: "Navigate to the Attachments section of the issue.",
           observed:
-              'issue=$_issueKey; tab=$_attachmentsTabLabel; callout=$_noticeTitle; visible_texts=${_formatSnapshot(issueTexts)}',
+              'issue=$_issueKey; tab=$_attachmentsTabLabel; restriction_notice_visible=true; storage=$_releaseStorageLabel; settings_action=$_openSettingsLabel; visible_texts=${_formatSnapshot(issueTexts)}',
         );
 
-        final chooseAttachmentFinder = find.widgetWithText(
-          OutlinedButton,
+        final chooseAttachmentAction = screen.attachmentAction(
+          _issueKey,
           _chooseAttachmentLabel,
         );
-        final uploadAttachmentFinder = find.widgetWithText(
-          FilledButton,
+        final uploadAttachmentAction = screen.attachmentAction(
+          _issueKey,
           _uploadAttachmentLabel,
         );
-        final chooseVisible = chooseAttachmentFinder.evaluate().isNotEmpty;
-        final uploadVisible = uploadAttachmentFinder.evaluate().isNotEmpty;
-        final chooseEnabled = chooseVisible
-            ? tester
-                      .widget<OutlinedButton>(chooseAttachmentFinder.first)
-                      .onPressed !=
-                  null
-            : false;
-        final uploadEnabled = uploadVisible
-            ? tester
-                      .widget<FilledButton>(uploadAttachmentFinder.first)
-                      .onPressed !=
-                  null
-            : false;
 
-        if (chooseVisible && chooseEnabled) {
+        if (!chooseAttachmentAction.isUnavailable) {
           throw AssertionError(
-            'Step 2 failed: the visible "$_chooseAttachmentLabel" trigger was enabled even though hosted release-backed uploads are unavailable.',
+            'Step 2 failed: the "$_chooseAttachmentLabel" trigger was not unavailable even though hosted release-backed uploads are unavailable. '
+            'Observed: ${chooseAttachmentAction.describe()}',
           );
         }
-        if (uploadVisible && uploadEnabled) {
+        if (!uploadAttachmentAction.isUnavailable) {
           throw AssertionError(
-            'Step 2 failed: the visible "$_uploadAttachmentLabel" trigger was enabled even though hosted release-backed uploads are unavailable.',
+            'Step 2 failed: the "$_uploadAttachmentLabel" trigger was not unavailable even though hosted release-backed uploads are unavailable. '
+            'Observed: ${uploadAttachmentAction.describe()}',
           );
         }
         if (!screen.showsAttachmentRow(_issueKey, _attachmentName)) {
@@ -179,10 +141,9 @@ void main() {
             'Visible texts: ${_formatSnapshot(issueTexts)}',
           );
         }
-        if (!screen.attachmentRowIsBelowAttachmentsRestrictionCallout(
+        if (!screen.attachmentRowIsBelowAttachmentUploadRestrictionNotice(
           _issueKey,
-          title: _noticeTitle,
-          message: _attachmentsNoticeMessage,
+          storageLabel: _releaseStorageLabel,
           attachmentName: _attachmentName,
         )) {
           throw AssertionError(
@@ -204,7 +165,7 @@ void main() {
           action:
               "Observe the Upload trigger state and the Download action for release-backed files.",
           observed:
-              'choose_visible=$chooseVisible; choose_enabled=$chooseEnabled; upload_visible=$uploadVisible; upload_enabled=$uploadEnabled; download_button=$_downloadAttachmentLabel',
+              '${chooseAttachmentAction.describe()}; ${uploadAttachmentAction.describe()}; download_button=$_downloadAttachmentLabel',
         );
         _recordHumanVerification(
           result,
@@ -214,21 +175,9 @@ void main() {
               'issue_texts=${_formatSnapshot(issueTexts)}; issue_buttons=${_formatSnapshot(issueButtons)}',
         );
 
-        if (!screen.showsAttachmentsRestrictionAction(
+        await screen.tapAttachmentUploadRestrictionAction(
           _issueKey,
-          title: _noticeTitle,
-          message: _attachmentsNoticeMessage,
-          actionLabel: _openSettingsLabel,
-        )) {
-          throw AssertionError(
-            'Step 3 failed: the Attachments notice did not expose the "$_openSettingsLabel" action needed to review repository access messaging.',
-          );
-        }
-
-        await screen.tapAttachmentsRestrictionAction(
-          _issueKey,
-          title: _noticeTitle,
-          message: _attachmentsNoticeMessage,
+          storageLabel: _releaseStorageLabel,
           actionLabel: _openSettingsLabel,
         );
 
@@ -240,29 +189,28 @@ void main() {
             'Visible texts: ${_formatSnapshot(settingsTexts)}',
           );
         }
-        final repositoryAccessCallout = settingsRobot.accessCallout(
-          _noticeTitle,
-          message: _repositoryAccessMessage,
-        );
-        if (repositoryAccessCallout.evaluate().isEmpty) {
+        if (!settingsRobot.showsHostedReleaseUploadRestriction(
+          storageLabel: _releaseStorageLabel,
+        )) {
           throw AssertionError(
-            'Step 3 failed: Project Settings did not render the repository access callout with the release-backed restriction message.\n'
+            'Step 3 failed: Project Settings did not surface repository access messaging that kept hosted $_releaseStorageLabel uploads unavailable.\n'
             'Visible texts: ${_formatSnapshot(settingsTexts)}',
           );
         }
-        final attachmentStorageCallout = settingsRobot.accessCallout(
-          _attachmentStorageTitle,
-          message: _attachmentStorageMessage,
-        );
-        if (attachmentStorageCallout.evaluate().isEmpty) {
+        if (!settingsRobot.showsReleaseAttachmentStorageConfiguration(
+          storageLabel: _releaseStorageLabel,
+          tagPrefix: _attachmentReleaseTagPrefix,
+        )) {
           throw AssertionError(
-            'Step 3 failed: Project Settings did not render the GitHub Releases attachment storage callout.\n'
+            'Step 3 failed: Project Settings did not surface the $_releaseStorageLabel attachment-storage configuration with the expected release tag prefix.\n'
             'Visible texts: ${_formatSnapshot(settingsTexts)}',
           );
         }
-        if (_containsSnapshot(settingsTexts, _supportedStorageMessage)) {
+        if (settingsRobot.suggestsHostedReleaseUploadSupport(
+          tagPrefix: _attachmentReleaseTagPrefix,
+        )) {
           throw AssertionError(
-            'Step 3 failed: Project Settings showed the success storage message even though the scenario expects hosted release-backed uploads to remain unavailable.\n'
+            'Step 3 failed: Project Settings implied hosted release-backed uploads were supported even though the scenario expects them to remain unavailable.\n'
             'Visible texts: ${_formatSnapshot(settingsTexts)}',
           );
         }
@@ -272,7 +220,7 @@ void main() {
           status: 'passed',
           action: 'Verify the messaging in the repository access callout.',
           observed:
-              'repository_access=$_noticeTitle / $_repositoryAccessMessage; attachment_storage=$_attachmentStorageTitle / $_attachmentStorageMessage',
+              'repository_access_release_uploads_unavailable=true; attachment_storage_tag_prefix=$_attachmentReleaseTagPrefix',
         );
         _recordHumanVerification(
           result,
