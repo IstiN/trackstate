@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from testing.components.pages.live_issue_detail_collaboration_page import (
     LiveIssueDetailCollaborationPage,
+    ScreenRect,
 )
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
 
@@ -21,6 +22,7 @@ class LocaleCatalogEntryObservation:
     warning_background_color: str | None
     warning_border_width: str | None
     input_index: int
+    input_rect: ScreenRect
 
 
 class LiveSettingsLocalesPage:
@@ -244,13 +246,14 @@ class LiveSettingsLocalesPage:
         payload = self._session.evaluate(
             """
             () => {
+              const suffix = ' Locales';
               const titles = Array.from(
-                document.querySelectorAll('flt-semantics[aria-label]'),
+                document.querySelectorAll('[aria-label]'),
               )
                 .map((element) => (element.getAttribute('aria-label') ?? '').trim())
-                .filter((label) => label.includes(' Locales'))
                 .map((label) => label.split('\\n')[0].trim())
-                .map((label) => label.slice(0, label.indexOf(' Locales')));
+                .filter((label) => label.endsWith(suffix))
+                .map((label) => label.slice(0, label.length - suffix.length));
               return Array.from(new Set(titles));
             }
             """,
@@ -289,29 +292,63 @@ class LiveSettingsLocalesPage:
               const sectionLabel = `${sectionTitle} Locales`;
               const translationLabel = `Translation (${locale})`;
               const section = Array.from(
-                document.querySelectorAll('flt-semantics[aria-label]'),
+                document.querySelectorAll('[aria-label]'),
               ).find(
-                (candidate) => (candidate.getAttribute('aria-label') ?? '').trim() === sectionLabel,
+                (candidate) =>
+                  ((candidate.getAttribute('aria-label') ?? '').trim().split('\\n')[0] ?? '').trim()
+                  === sectionLabel,
               );
               if (!section) {
                 return null;
               }
-              const sectionRect = section.getBoundingClientRect();
-              const allInputs = Array.from(
-                document.querySelectorAll(`input[aria-label="${translationLabel}"]`),
-              );
-              const inputEntries = allInputs
-                .map((input, globalIndex) => ({
-                  globalIndex,
+              section.scrollIntoView({ block: 'center' });
+              const sectionLines = (section.getAttribute('aria-label') ?? '')
+                .split('\\n')
+                .map((value) => value.trim())
+                .filter((value) => value.length > 0);
+              const sectionRows = [];
+              for (let index = 2; index < sectionLines.length; index += 1) {
+                const line = sectionLines[index];
+                if (!line.includes(' · ')) {
+                  continue;
+                }
+                const warnings = [];
+                let cursor = index + 1;
+                while (cursor < sectionLines.length && !sectionLines[cursor].includes(' · ')) {
+                  const warning = sectionLines[cursor];
+                  if (
+                    warning.startsWith('Missing translation.')
+                    && !warnings.includes(warning)
+                  ) {
+                    warnings.push(warning);
+                  }
+                  cursor += 1;
+                }
+                sectionRows.push({
+                  rowLabel: line,
+                  warningText: warnings[0] ?? null,
+                });
+              }
+
+              const inputEntries = Array.from(
+                section.querySelectorAll(`input[aria-label="${translationLabel}"]`),
+              )
+                .map((input) => ({
+                  element: input,
+                  globalIndex: Array.from(
+                    document.querySelectorAll(`input[aria-label="${translationLabel}"]`),
+                  ).indexOf(input),
                   value: input.value ?? '',
                   rect: input.getBoundingClientRect(),
                 }))
-                .filter(
-                  (entry) =>
-                    entry.rect.height > 0 &&
-                    entry.rect.top >= sectionRect.top - 12 &&
-                    entry.rect.bottom <= sectionRect.bottom + 24,
-                );
+                .filter((entry) => entry.rect.width > 0 && entry.rect.height > 0)
+                .sort((left, right) => {
+                  const topDelta = left.rect.top - right.rect.top;
+                  if (Math.abs(topDelta) > 1) {
+                    return topDelta;
+                  }
+                  return left.rect.left - right.rect.left;
+                });
 
               const visibleTextNodes = Array.from(document.querySelectorAll('body *'))
                 .map((element) => ({
@@ -324,8 +361,8 @@ class LiveSettingsLocalesPage:
                     entry.text.length > 0 &&
                     entry.rect.width > 0 &&
                     entry.rect.height > 0 &&
-                    entry.rect.top >= sectionRect.top - 12 &&
-                    entry.rect.bottom <= sectionRect.bottom + 120,
+                    entry.rect.top >= window.scrollY &&
+                    entry.rect.bottom <= window.scrollY + window.innerHeight,
                 );
 
               const dedupedNodes = [];
@@ -343,13 +380,16 @@ class LiveSettingsLocalesPage:
                 dedupedNodes.push(entry);
               }
 
-              return inputEntries.map((entry) => {
+              return inputEntries.map((entry, index) => {
+                entry.element.scrollIntoView({ block: 'center' });
+                const inputRect = entry.element.getBoundingClientRect();
+                const sectionRow = sectionRows[index] ?? { rowLabel: '', warningText: null };
                 const warningNode = dedupedNodes
                   .filter(
                     (candidate) =>
                       candidate.text.startsWith('Missing translation.') &&
-                      candidate.rect.top >= entry.rect.bottom - 4 &&
-                      candidate.rect.top <= entry.rect.bottom + 96,
+                      candidate.rect.top >= inputRect.bottom - 4 &&
+                      candidate.rect.top <= inputRect.bottom + 96,
                   )
                   .sort((left, right) => left.rect.top - right.rect.top)[0] ?? null;
 
@@ -384,22 +424,28 @@ class LiveSettingsLocalesPage:
                   .filter(
                     (candidate) =>
                       candidate.text.includes(' · ') &&
-                      candidate.rect.bottom <= entry.rect.top + 18 &&
-                      candidate.rect.top >= entry.rect.top - 120,
+                      candidate.rect.bottom <= inputRect.top + 18 &&
+                      candidate.rect.top >= inputRect.top - 120,
                   )
                   .sort(
                     (left, right) =>
-                      Math.abs(left.rect.top - entry.rect.top) -
-                      Math.abs(right.rect.top - entry.rect.top),
-                  )[0]?.text ?? '';
+                      Math.abs(left.rect.top - inputRect.top) -
+                      Math.abs(right.rect.top - inputRect.top),
+                  )[0]?.text ?? sectionRow.rowLabel;
 
                 return {
                   inputIndex: entry.globalIndex,
+                  inputRect: {
+                    left: inputRect.left,
+                    top: inputRect.top,
+                    width: inputRect.width,
+                    height: inputRect.height,
+                  },
                   rowLabel,
                   warningBackgroundColor,
                   warningBorderColor,
                   warningBorderWidth,
-                  warningText: warningNode?.text ?? null,
+                  warningText: warningNode?.text ?? sectionRow.warningText,
                   warningTextColor,
                   translation: entry.value,
                 };
@@ -453,6 +499,12 @@ class LiveSettingsLocalesPage:
                         else None
                     ),
                     input_index=int(item.get("inputIndex", 0)),
+                    input_rect=ScreenRect(
+                        left=float(item.get("inputRect", {}).get("left", 0)),
+                        top=float(item.get("inputRect", {}).get("top", 0)),
+                        width=float(item.get("inputRect", {}).get("width", 0)),
+                        height=float(item.get("inputRect", {}).get("height", 0)),
+                    ),
                 ),
             )
         return observations

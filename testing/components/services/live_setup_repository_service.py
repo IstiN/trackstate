@@ -5,14 +5,15 @@ import json
 import os
 import urllib.error
 from urllib.parse import quote
-from typing import Iterable
 import urllib.request
 from dataclasses import dataclass
+from typing import Iterable
 
 from testing.core.config.live_setup_test_config import (
     LiveSetupTestConfig,
     load_live_setup_test_config,
 )
+from testing.core.models.hosted_repository_file import HostedRepositoryFile
 from testing.core.models.hosted_repository_file import HostedRepositoryFile
 
 
@@ -85,8 +86,6 @@ class LiveHostedRelease:
     body: str = ""
     draft: bool = False
     target_commitish: str = ""
-
-
 class LiveSetupRepositoryService:
     def __init__(
         self,
@@ -293,7 +292,6 @@ class LiveSetupRepositoryService:
                 raise RuntimeError(
                     f"GitHub delete for {path} returned unexpected status {response.status}.",
                 )
-
     def fetch_locale_payload(self, project_path: str, locale: str) -> dict[str, object]:
         try:
             payload = self._read_repo_json(f"{project_path}/config/i18n/{locale}.json")
