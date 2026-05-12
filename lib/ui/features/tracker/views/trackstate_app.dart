@@ -2664,194 +2664,233 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     final canRemoveSelectedLocale =
         settings.effectiveSupportedLocales.length > 1 &&
         selectedLocale != settings.defaultLocale;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildCatalogHeader(
-          l10n: l10n,
-          title: l10n.locales,
-          addLabel: l10n.addLocale,
-          onAdd: canEdit ? () => _addLocale(l10n) : null,
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final locale in settings.effectiveSupportedLocales)
-              ChoiceChip(
-                label: Text(
-                  locale == settings.defaultLocale
-                      ? l10n.defaultLocaleChip(locale)
-                      : locale,
-                ),
-                selected: locale == selectedLocale,
-                onSelected: (_) {
-                  setState(() {
-                    _selectedLocale = locale;
-                  });
-                },
-              ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                initialValue: settings.defaultLocale,
-                decoration: InputDecoration(labelText: l10n.defaultLocale),
-                items: [
-                  for (final locale in settings.effectiveSupportedLocales)
-                    DropdownMenuItem(value: locale, child: Text(locale)),
-                ],
-                onChanged: !canEdit
-                    ? null
-                    : (value) {
-                        if (value != null) {
-                          _setDefaultLocale(value);
-                        }
-                      },
-              ),
-            ),
-            const SizedBox(width: 12),
-            Semantics(
-              button: true,
-              label: l10n.removeLocale(selectedLocale),
-              child: TextButton(
-                onPressed: canEdit && canRemoveSelectedLocale
-                    ? () => _removeLocale(selectedLocale)
-                    : null,
-                child: ExcludeSemantics(child: Text(l10n.removeLocaleAction)),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        _LocaleCatalogSection(
-          title: l10n.statuses,
-          locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          entries: settings.statusDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) {
-            _updateConfigEntryTranslation(
-              entries: settings.statusDefinitions,
-              onChanged: (entries) =>
-                  _replaceDraft(settings.copyWith(statusDefinitions: entries)),
-              id: id,
-              locale: selectedLocale,
-              value: value,
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        _LocaleCatalogSection(
-          title: l10n.issueTypes,
-          locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          entries: settings.issueTypeDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) {
-            _updateConfigEntryTranslation(
-              entries: settings.issueTypeDefinitions,
-              onChanged: (entries) => _replaceDraft(
-                settings.copyWith(issueTypeDefinitions: entries),
-              ),
-              id: id,
-              locale: selectedLocale,
-              value: value,
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        _LocaleFieldCatalogSection(
-          title: l10n.fields,
-          locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          fields: settings.fieldDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) => _updateFieldTranslation(
+    final localeCatalogTitles = <String>[
+      l10n.statuses,
+      l10n.issueTypes,
+      l10n.fields,
+      l10n.priorities,
+      l10n.components,
+      l10n.versions,
+      l10n.resolutions,
+    ];
+    final localeSections = <Widget>[
+      _LocaleCatalogSection(
+        title: l10n.statuses,
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.statusDefinitions,
+        canEdit: canEdit,
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.statusDefinitions,
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(statusDefinitions: entries)),
             id: id,
             locale: selectedLocale,
             value: value,
-          ),
-        ),
-        const SizedBox(height: 12),
-        _LocaleCatalogSection(
-          title: l10n.priorities,
+          );
+        },
+      ),
+      _LocaleCatalogSection(
+        title: l10n.priorities,
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.priorityDefinitions,
+        canEdit: canEdit,
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.priorityDefinitions,
+            onChanged: (entries) => _replaceDraft(
+              settings.copyWith(priorityDefinitions: entries),
+            ),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
+      ),
+      _LocaleCatalogSection(
+        title: l10n.versions,
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.versionDefinitions,
+        canEdit: canEdit,
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.versionDefinitions,
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(versionDefinitions: entries)),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
+      ),
+      _LocaleCatalogSection(
+        title: l10n.resolutions,
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.resolutionDefinitions,
+        canEdit: canEdit,
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.resolutionDefinitions,
+            onChanged: (entries) => _replaceDraft(
+              settings.copyWith(resolutionDefinitions: entries),
+            ),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
+      ),
+      _LocaleCatalogSection(
+        title: l10n.components,
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.componentDefinitions,
+        canEdit: canEdit,
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.componentDefinitions,
+            onChanged: (entries) => _replaceDraft(
+              settings.copyWith(componentDefinitions: entries),
+            ),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
+      ),
+      _LocaleCatalogSection(
+        title: l10n.issueTypes,
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.issueTypeDefinitions,
+        canEdit: canEdit,
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.issueTypeDefinitions,
+            onChanged: (entries) => _replaceDraft(
+              settings.copyWith(issueTypeDefinitions: entries),
+            ),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
+      ),
+      _LocaleFieldCatalogSection(
+        title: l10n.fields,
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        fields: settings.fieldDefinitions,
+        canEdit: canEdit,
+        onChanged: (id, value) => _updateFieldTranslation(
+          id: id,
           locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          entries: settings.priorityDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) {
-            _updateConfigEntryTranslation(
-              entries: settings.priorityDefinitions,
-              onChanged: (entries) => _replaceDraft(
-                settings.copyWith(priorityDefinitions: entries),
-              ),
-              id: id,
-              locale: selectedLocale,
-              value: value,
-            );
-          },
+          value: value,
         ),
-        const SizedBox(height: 12),
-        _LocaleCatalogSection(
-          title: l10n.components,
-          locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          entries: settings.componentDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) {
-            _updateConfigEntryTranslation(
-              entries: settings.componentDefinitions,
-              onChanged: (entries) => _replaceDraft(
-                settings.copyWith(componentDefinitions: entries),
-              ),
-              id: id,
-              locale: selectedLocale,
-              value: value,
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        _LocaleCatalogSection(
-          title: l10n.versions,
-          locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          entries: settings.versionDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) {
-            _updateConfigEntryTranslation(
-              entries: settings.versionDefinitions,
-              onChanged: (entries) =>
-                  _replaceDraft(settings.copyWith(versionDefinitions: entries)),
-              id: id,
-              locale: selectedLocale,
-              value: value,
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        _LocaleCatalogSection(
-          title: l10n.resolutions,
-          locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          entries: settings.resolutionDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) {
-            _updateConfigEntryTranslation(
-              entries: settings.resolutionDefinitions,
-              onChanged: (entries) => _replaceDraft(
-                settings.copyWith(resolutionDefinitions: entries),
-              ),
-              id: id,
-              locale: selectedLocale,
-              value: value,
-            );
-          },
-        ),
-      ],
+      ),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final useTwoColumns =
+            constraints.hasBoundedWidth && constraints.maxWidth >= 720;
+        final sectionWidth = useTwoColumns
+            ? (constraints.maxWidth - 12) / 2
+            : constraints.maxWidth;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildCatalogHeader(
+              l10n: l10n,
+              title: l10n.locales,
+              addLabel: l10n.addLocale,
+              onAdd: canEdit ? () => _addLocale(l10n) : null,
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final locale in settings.effectiveSupportedLocales)
+                  ChoiceChip(
+                    label: Text(
+                      locale == settings.defaultLocale
+                          ? l10n.defaultLocaleChip(locale)
+                          : locale,
+                    ),
+                    selected: locale == selectedLocale,
+                    onSelected: (_) {
+                      setState(() {
+                        _selectedLocale = locale;
+                      });
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: settings.defaultLocale,
+                    decoration: InputDecoration(labelText: l10n.defaultLocale),
+                    items: [
+                      for (final locale in settings.effectiveSupportedLocales)
+                        DropdownMenuItem(value: locale, child: Text(locale)),
+                    ],
+                    onChanged: !canEdit
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              _setDefaultLocale(value);
+                            }
+                          },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Semantics(
+                  button: true,
+                  label: l10n.removeLocale(selectedLocale),
+                  child: TextButton(
+                    onPressed: canEdit && canRemoveSelectedLocale
+                        ? () => _removeLocale(selectedLocale)
+                        : null,
+                    child: ExcludeSemantics(
+                      child: Text(l10n.removeLocaleAction),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final title in localeCatalogTitles)
+                  Semantics(
+                    container: true,
+                    label: '$title ${l10n.locales}\nsummary',
+                    child: ExcludeSemantics(
+                      child: Chip(label: Text(title)),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final section in localeSections)
+                  SizedBox(width: sectionWidth, child: section),
+              ],
+            ),
+          ],
+        );
+      },
     );
   }
 
