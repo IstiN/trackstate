@@ -16,6 +16,29 @@ class ProjectSettingsUiObservation:
     post_save_text: str
 
 
+@dataclass(frozen=True)
+class RepositoryAccessCalloutObservation:
+    title: str
+    message: str
+    rendered_text: str
+    semantic_label: str
+    border_color: str | None
+    background_color: str | None
+    border_width: str | None
+    top: float
+    left: float
+    width: float
+    height: float
+
+
+@dataclass(frozen=True)
+class RepositoryAccessSectionObservation:
+    body_text: str
+    section_text: str
+    primary_callout: RepositoryAccessCalloutObservation
+    secondary_callout: RepositoryAccessCalloutObservation
+
+
 class LiveProjectSettingsPage:
     _button_selector = 'flt-semantics[role="button"]'
     _tab_selector = 'flt-semantics[role="tab"]'
@@ -193,6 +216,145 @@ class LiveProjectSettingsPage:
     def body_text(self) -> str:
         return self._tracker_page.body_text()
 
+    def observe_repository_access_section(
+        self,
+        *,
+        primary_title: str,
+        secondary_title: str,
+        timeout_ms: int = 120_000,
+    ) -> RepositoryAccessSectionObservation:
+        payload = self._session.wait_for_function(
+            """
+            ({ primaryTitle, secondaryTitle }) => {
+              const normalize = (value) => value.replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const findCallout = (title) => {
+                const semanticsCandidates = Array.from(
+                  document.querySelectorAll('flt-semantics[aria-label]'),
+                )
+                  .filter((candidate) => isVisible(candidate))
+                  .map((candidate) => {
+                    const rect = candidate.getBoundingClientRect();
+                    const label = candidate.getAttribute('aria-label') ?? '';
+                    const normalizedLabel = normalize(label);
+                    return {
+                      element: candidate,
+                      rect,
+                      area: rect.width * rect.height,
+                      label,
+                      normalizedLabel,
+                    };
+                  })
+                  .filter((candidate) =>
+                    candidate.normalizedLabel.includes(title)
+                    && candidate.normalizedLabel.length > title.length + 20,
+                  )
+                  .sort((left, right) => left.area - right.area);
+                const semantics = semanticsCandidates[0];
+                if (!semantics) {
+                  return null;
+                }
+
+                let styled = semantics.element;
+                let borderColor = null;
+                let backgroundColor = null;
+                let borderWidth = null;
+                while (styled && styled !== document.body) {
+                  const style = window.getComputedStyle(styled);
+                  const hasVisibleBorder =
+                    Number.parseFloat(style.borderTopWidth || '0') > 0
+                    && style.borderTopColor !== 'transparent'
+                    && style.borderTopColor !== 'rgba(0, 0, 0, 0)';
+                  const hasVisibleBackground =
+                    style.backgroundColor !== 'transparent'
+                    && style.backgroundColor !== 'rgba(0, 0, 0, 0)';
+                  if (hasVisibleBorder || hasVisibleBackground) {
+                    borderColor = style.borderTopColor || null;
+                    backgroundColor = style.backgroundColor || null;
+                    borderWidth = style.borderTopWidth || null;
+                    break;
+                  }
+                  styled = styled.parentElement;
+                }
+
+                const renderedLines = semantics.label
+                  .split('\\n')
+                  .map((line) => normalize(line))
+                  .filter((line) => line.length > 0);
+                const renderedTitle =
+                  renderedLines.find((line) => line === title || line.startsWith(title))
+                  ?? title;
+                const nonTitleLines = renderedLines.filter((line) => line !== renderedTitle);
+                const message = nonTitleLines.length > 0
+                  ? nonTitleLines[nonTitleLines.length - 1]
+                  : '';
+                return {
+                  title: renderedTitle,
+                  message,
+                  renderedText: normalize([renderedTitle, message].join(' ')),
+                  semanticLabel: semantics.normalizedLabel,
+                  borderColor,
+                  backgroundColor,
+                  borderWidth,
+                  top: semantics.rect.top,
+                  left: semantics.rect.left,
+                  width: semantics.rect.width,
+                  height: semantics.rect.height,
+                };
+              };
+
+              const primaryCallout = findCallout(primaryTitle);
+              const secondaryCallout = findCallout(secondaryTitle);
+              if (!primaryCallout || !secondaryCallout) {
+                return null;
+              }
+
+              return {
+                bodyText: document.body?.innerText ?? '',
+                sectionText: [primaryCallout.semanticLabel, secondaryCallout.semanticLabel]
+                  .filter((value) => value.length > 0)
+                  .join('\\n'),
+                primaryCallout,
+                secondaryCallout,
+              };
+            }
+            """,
+            arg={
+                "primaryTitle": primary_title,
+                "secondaryTitle": secondary_title,
+            },
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The Repository access section did not expose the expected connected "
+                "and GitHub Releases callouts.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        primary_payload = payload.get("primaryCallout")
+        secondary_payload = payload.get("secondaryCallout")
+        if not isinstance(primary_payload, dict) or not isinstance(secondary_payload, dict):
+            raise AssertionError(
+                "The Repository access section did not expose readable callout observations.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        return RepositoryAccessSectionObservation(
+            body_text=str(payload.get("bodyText", "")),
+            section_text=str(payload.get("sectionText", "")),
+            primary_callout=self._repository_access_callout(primary_payload),
+            secondary_callout=self._repository_access_callout(secondary_payload),
+        )
+
     def observe_saved_configuration(
         self,
         *,
@@ -253,6 +415,36 @@ class LiveProjectSettingsPage:
                 f"Observed body text:\n{self.body_text()}",
             ) from error
         return self.body_text()
+
+    @staticmethod
+    def _repository_access_callout(
+        payload: dict[str, object],
+    ) -> RepositoryAccessCalloutObservation:
+        return RepositoryAccessCalloutObservation(
+            title=str(payload.get("title", "")).strip(),
+            message=str(payload.get("message", "")).strip(),
+            rendered_text=str(payload.get("renderedText", "")).strip(),
+            semantic_label=str(payload.get("semanticLabel", "")).strip(),
+            border_color=(
+                str(payload["borderColor"]).strip()
+                if payload.get("borderColor") is not None
+                else None
+            ),
+            background_color=(
+                str(payload["backgroundColor"]).strip()
+                if payload.get("backgroundColor") is not None
+                else None
+            ),
+            border_width=(
+                str(payload["borderWidth"]).strip()
+                if payload.get("borderWidth") is not None
+                else None
+            ),
+            top=float(payload.get("top", 0)),
+            left=float(payload.get("left", 0)),
+            width=float(payload.get("width", 0)),
+            height=float(payload.get("height", 0)),
+        )
 
     @staticmethod
     def _escape(value: str) -> str:
