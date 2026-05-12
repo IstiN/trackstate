@@ -1465,24 +1465,48 @@ class TrackStateCli {
             'Additional field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
       );
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--projectKey': '--project',
+      }),
       parser: parser,
       helpText: _jiraCreateTicketBasicHelpText(parser),
       commandName: 'jira-create-ticket-basic',
       execute: (context, results) async {
-        _validateProjectSelection(
+        final positionalArguments = results.rest;
+        final projectKey = _firstTrimmedOptionOrPositional(
           results,
-          context.snapshot.project,
-          optionNames: const ['project'],
+          const ['project'],
+          positionalArguments,
+          0,
         );
+        if (projectKey != null) {
+          _validateProjectSelectionValue(projectKey, context.snapshot.project);
+        }
         final resolvedFields = _parseResolvedFieldAssignments(
           _multiOption(results, 'field'),
           context.snapshot.project,
         );
         final result = await context.service.createIssue(
-          summary: _requiredTrimmedOption(results, 'summary'),
-          description: _trimmedOption(results, 'description') ?? '',
-          issueTypeId: _trimmedOption(results, 'issueType'),
+          summary: _firstRequiredTrimmedOptionOrPositional(
+            results,
+            const ['summary'],
+            positionalArguments,
+            2,
+          ),
+          description:
+              _firstTrimmedOptionOrPositional(
+                results,
+                const ['description'],
+                positionalArguments,
+                3,
+              ) ??
+              '',
+          issueTypeId: _firstTrimmedOptionOrPositional(
+            results,
+            const ['issueType'],
+            positionalArguments,
+            1,
+          ),
           priorityId: _trimmedOption(results, 'priority'),
           assignee: _trimmedOption(results, 'assignee'),
           reporter: _trimmedOption(results, 'reporter'),
@@ -1562,7 +1586,10 @@ class TrackStateCli {
             'Additional field assignments in key=value form. Values accept JSON scalars, arrays, or objects.',
       );
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--projectKey': '--project',
+        '--parentKey': '--parent',
+      }),
       parser: parser,
       helpText: _jiraCreateTicketWithParentHelpText(parser),
       commandName: 'jira-create-ticket-with-parent',
@@ -1615,15 +1642,26 @@ class TrackStateCli {
             'JSON update payload. Accepts native field maps or Jira fields envelopes.',
       );
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
       parser: parser,
       helpText: _jiraUpdateTicketHelpText(parser),
       commandName: 'jira-update-ticket',
       execute: (context, results) async {
-        final issueKey = _firstRequiredTrimmedOption(results, const [
-          'issueKey',
-        ]);
-        final payload = _requiredJsonObject(results, 'json');
+        final positionalArguments = results.rest;
+        final issueKey = _firstRequiredTrimmedOptionOrPositional(
+          results,
+          const ['issueKey'],
+          positionalArguments,
+          0,
+        );
+        final payload = _requiredJsonObjectOrPositional(
+          results,
+          'json',
+          positionalArguments,
+          1,
+        );
         final updateFields = _parseJiraUpdatePayload(payload, context.snapshot);
         final result = await context.service.updateFields(
           issueKey: issueKey,
@@ -1648,7 +1686,9 @@ class TrackStateCli {
       ..addOption('issueKey', help: 'Issue key to update.')
       ..addOption('description', help: 'New description markdown.');
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
       parser: parser,
       helpText: _jiraUpdateDescriptionHelpText(parser),
       commandName: 'jira-update-description',
@@ -1686,7 +1726,9 @@ class TrackStateCli {
             'Field value. Accepts JSON scalars, arrays, objects, or plain text.',
       );
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
       parser: parser,
       helpText: _jiraUpdateFieldHelpText(parser),
       commandName: 'jira-update-field',
@@ -1740,7 +1782,9 @@ class TrackStateCli {
         help: 'Field id, display name, or customfield code.',
       );
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
       parser: parser,
       helpText: _jiraClearFieldHelpText(parser),
       commandName: 'jira-clear-field',
@@ -1779,7 +1823,10 @@ class TrackStateCli {
       ..addOption('issueKey', help: 'Issue key to move.')
       ..addOption('parent', help: 'Jira-compatible parent issue key.');
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+        '--parentKey': '--parent',
+      }),
       parser: parser,
       helpText: _jiraUpdateTicketParentHelpText(parser),
       commandName: 'jira-update-ticket-parent',
@@ -1815,7 +1862,10 @@ class TrackStateCli {
       ..addOption('issueKey', help: 'Issue key to move.')
       ..addOption('status', help: 'Target status id or label.');
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+        '--statusName': '--status',
+      }),
       parser: parser,
       helpText: _jiraMoveToStatusHelpText(parser),
       commandName: 'jira-move-to-status',
@@ -1847,7 +1897,11 @@ class TrackStateCli {
       ..addOption('status', help: 'Target status id or label.')
       ..addOption('resolution', help: 'Resolution id or label.');
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+        '--statusName': '--status',
+        '--resolutionName': '--resolution',
+      }),
       parser: parser,
       helpText: _jiraMoveToStatusWithResolutionHelpText(parser),
       commandName: 'jira-move-to-status-with-resolution',
@@ -1879,7 +1933,9 @@ class TrackStateCli {
       ..addOption('issueKey', help: 'Issue key to update.')
       ..addOption('priority', help: 'Priority id or label.');
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
       parser: parser,
       helpText: _jiraSetPriorityHelpText(parser),
       commandName: 'jira-set-priority',
@@ -1912,7 +1968,10 @@ class TrackStateCli {
       ..addOption('issueKey', help: 'Issue key to update.')
       ..addOption('assignee', help: 'Assignee login.');
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+        '--accountId': '--assignee',
+      }),
       parser: parser,
       helpText: _jiraAssignTicketHelpText(parser),
       commandName: 'jira-assign-ticket',
@@ -1945,7 +2004,9 @@ class TrackStateCli {
       ..addOption('issueKey', help: 'Issue key to update.')
       ..addOption('label', help: 'Label to add.');
     return _runLabelMutation(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
       parser: parser,
       helpText: _jiraAddLabelHelpText(parser),
       commandName: 'jira-add-label',
@@ -1968,7 +2029,9 @@ class TrackStateCli {
       ..addOption('issueKey', help: 'Issue key to update.')
       ..addOption('label', help: 'Label to remove.');
     return _runLabelMutation(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
       parser: parser,
       helpText: _jiraRemoveLabelHelpText(parser),
       commandName: 'jira-remove-label',
@@ -1986,7 +2049,10 @@ class TrackStateCli {
       ..addOption('issueKey', help: 'Issue key to update.')
       ..addOption('body', help: 'Comment markdown body.');
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+        '--comment': '--body',
+      }),
       parser: parser,
       helpText: _jiraPostCommentHelpText(parser),
       commandName: 'jira-post-comment',
@@ -2024,7 +2090,11 @@ class TrackStateCli {
       ..addOption('targetIssueKey', help: 'Target issue key.')
       ..addOption('type', help: 'Link type label or canonical id.');
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--sourceKey': '--issueKey',
+        '--anotherKey': '--targetIssueKey',
+        '--relationship': '--type',
+      }),
       parser: parser,
       helpText: _jiraLinkIssuesHelpText(parser),
       commandName: 'jira-link-issues',
@@ -2076,7 +2146,9 @@ class TrackStateCli {
     final parser = _mutationParser()
       ..addOption('issueKey', help: 'Issue key to delete permanently.');
     return _runMutationCommand(
-      arguments: arguments,
+      arguments: _normalizeLegacyJiraArguments(arguments, const {
+        '--key': '--issueKey',
+      }),
       parser: parser,
       helpText: _jiraDeleteTicketHelpText(parser),
       commandName: 'jira-delete-ticket',
@@ -2304,6 +2376,32 @@ class TrackStateCli {
             _ => argument,
           },
       ];
+
+  List<String> _normalizeLegacyJiraArguments(
+    List<String> arguments,
+    Map<String, String> optionAliases,
+  ) => [
+    for (final argument in arguments)
+      _rewriteLegacyJiraOption(argument, optionAliases),
+  ];
+
+  String _rewriteLegacyJiraOption(
+    String argument,
+    Map<String, String> optionAliases,
+  ) {
+    for (final entry in optionAliases.entries) {
+      final legacyName = entry.key;
+      final canonicalName = entry.value;
+      if (argument == legacyName) {
+        return canonicalName;
+      }
+      if (argument.startsWith('$legacyName=')) {
+        return '$canonicalName${argument.substring(legacyName.length)}';
+      }
+    }
+    return argument;
+  }
+
   List<String> _normalizeSearchArguments(List<String> arguments) => [
     for (final argument in arguments)
       switch (argument) {
@@ -3925,6 +4023,53 @@ class TrackStateCli {
     return value.isEmpty ? null : value;
   }
 
+  String? _trimmedPositionalArgument(List<String> arguments, int index) {
+    if (index < 0 || index >= arguments.length) {
+      return null;
+    }
+    final value = arguments[index].trim();
+    return value.isEmpty ? null : value;
+  }
+
+  String? _firstTrimmedOptionOrPositional(
+    ArgResults results,
+    List<String> optionNames,
+    List<String> positionalArguments,
+    int positionalIndex,
+  ) {
+    for (final option in optionNames) {
+      final value = _trimmedOption(results, option);
+      if (value != null) {
+        return value;
+      }
+    }
+    return _trimmedPositionalArgument(positionalArguments, positionalIndex);
+  }
+
+  String _firstRequiredTrimmedOptionOrPositional(
+    ArgResults results,
+    List<String> optionNames,
+    List<String> positionalArguments,
+    int positionalIndex,
+  ) {
+    final value = _firstTrimmedOptionOrPositional(
+      results,
+      optionNames,
+      positionalArguments,
+      positionalIndex,
+    );
+    if (value != null) {
+      return value;
+    }
+    throw _TrackStateCliException(
+      code: 'INVALID_ARGUMENT',
+      category: TrackStateCliErrorCategory.validation,
+      message: 'Missing required option "--${optionNames.first}".',
+      exitCode: 2,
+      details: <String, Object?>{'option': optionNames.first},
+    );
+  }
+
   List<String> _multiOption(ArgResults results, String option) =>
       ((results[option] as List<Object?>?) ?? const <Object?>[])
           .map((value) => value?.toString() ?? '')
@@ -3951,6 +4096,25 @@ class TrackStateCli {
 
   Map<String, Object?> _requiredJsonObject(ArgResults results, String option) {
     final raw = _requiredTrimmedOption(results, option);
+    return _parseJsonObject(raw, option: option);
+  }
+
+  Map<String, Object?> _requiredJsonObjectOrPositional(
+    ArgResults results,
+    String option,
+    List<String> positionalArguments,
+    int positionalIndex,
+  ) {
+    final raw = _firstRequiredTrimmedOptionOrPositional(
+      results,
+      [option],
+      positionalArguments,
+      positionalIndex,
+    );
+    return _parseJsonObject(raw, option: option);
+  }
+
+  Map<String, Object?> _parseJsonObject(String raw, {required String option}) {
     try {
       final decoded = jsonDecode(raw);
       if (decoded is Map<String, Object?>) {
@@ -3996,6 +4160,23 @@ class TrackStateCli {
         details: <String, Object?>{'project': configured},
       );
     }
+  }
+
+  void _validateProjectSelectionValue(
+    String projectKey,
+    ProjectConfig project,
+  ) {
+    if (projectKey.toLowerCase() == project.key.toLowerCase()) {
+      return;
+    }
+    throw _TrackStateCliException(
+      code: 'NOT_FOUND',
+      category: TrackStateCliErrorCategory.repository,
+      message:
+          'Project "$projectKey" was not found in the selected repository.',
+      exitCode: 4,
+      details: <String, Object?>{'project': projectKey},
+    );
   }
 
   _TrackStateCliException _mapMutationError(

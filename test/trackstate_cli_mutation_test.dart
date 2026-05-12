@@ -51,6 +51,325 @@ void main() {
       );
     });
 
+    test('accepts deployed Jira automation argument shapes', () async {
+      final repo = await _createCliMutationRepository();
+      addTearDown(() => repo.delete(recursive: true));
+      final cli = _createCli();
+
+      final createBasicResult = await cli.run([
+        'jira_create_ticket_basic',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        'DEMO',
+        'Bug',
+        'Legacy positional bug',
+        'Created through positional Jira automation arguments.',
+      ]);
+      final createBasicIssue =
+          ((jsonDecode(createBasicResult.stdout)
+                      as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['issue']!
+              as Map<String, Object?>;
+      final createdBugKey = createBasicIssue['key']! as String;
+
+      expect(createBasicResult.exitCode, 0);
+      expect(createBasicIssue['summary'], 'Legacy positional bug');
+      expect(
+        File('${repo.path}/DEMO/$createdBugKey/main.md').existsSync(),
+        isTrue,
+      );
+
+      final createWithParentResult = await cli.run([
+        'jira_create_ticket_with_parent',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        '--project',
+        'DEMO',
+        '--issueType',
+        'Sub-task',
+        '--summary',
+        'Legacy parented subtask',
+        '--description',
+        'Created through the parentKey alias.',
+        '--parentKey',
+        'DEMO-2',
+      ]);
+      final createWithParentIssue =
+          ((jsonDecode(createWithParentResult.stdout)
+                      as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['issue']!
+              as Map<String, Object?>;
+      final createdSubtaskKey = createWithParentIssue['key']! as String;
+
+      expect(createWithParentResult.exitCode, 0);
+      expect(createWithParentIssue['parent'], 'DEMO-2');
+      expect(
+        File(
+          '${repo.path}/DEMO/DEMO-1/DEMO-2/$createdSubtaskKey/main.md',
+        ).existsSync(),
+        isTrue,
+      );
+
+      final updateTicketResult = await cli.run([
+        'jira_update_ticket',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        'DEMO-2',
+        jsonEncode({
+          'fields': {
+            'summary': 'Updated from legacy positional payload',
+            'priority': {'name': 'High'},
+          },
+        }),
+      ]);
+      final updateTicketIssue =
+          ((jsonDecode(updateTicketResult.stdout)
+                      as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['issue']!
+              as Map<String, Object?>;
+
+      expect(updateTicketResult.exitCode, 0);
+      expect(
+        updateTicketIssue['summary'],
+        'Updated from legacy positional payload',
+      );
+      expect(updateTicketIssue['priority'], 'high');
+
+      final updateFieldResult = await cli.run([
+        'jira_update_field',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        '--key',
+        'DEMO-2',
+        '--field',
+        'Story Points',
+        '--value',
+        '8',
+      ]);
+      final updateFieldIssue =
+          ((jsonDecode(updateFieldResult.stdout)
+                      as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['issue']!
+              as Map<String, Object?>;
+
+      expect(updateFieldResult.exitCode, 0);
+      expect(
+        updateFieldIssue['customFields'],
+        containsPair('customfield_10016', 8),
+      );
+
+      final clearFieldResult = await cli.run([
+        'jira_clear_field',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        '--key',
+        'DEMO-2',
+        '--field',
+        'customfield_10016',
+      ]);
+      final clearFieldIssue =
+          ((jsonDecode(clearFieldResult.stdout) as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['issue']!
+              as Map<String, Object?>;
+
+      expect(clearFieldResult.exitCode, 0);
+      expect(clearFieldIssue['customFields'], <String, Object?>{});
+
+      final setPriorityResult = await cli.run([
+        'jira_set_priority',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        '--key',
+        'DEMO-2',
+        '--priority',
+        'Medium',
+      ]);
+      final setPriorityIssue =
+          ((jsonDecode(setPriorityResult.stdout)
+                      as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['issue']!
+              as Map<String, Object?>;
+
+      expect(setPriorityResult.exitCode, 0);
+      expect(setPriorityIssue['priority'], 'medium');
+
+      final assignResult = await cli.run([
+        'jira_assign_ticket_to',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        '--key',
+        'DEMO-2',
+        '--accountId',
+        'legacy-user',
+      ]);
+      final assignIssue =
+          ((jsonDecode(assignResult.stdout) as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['issue']!
+              as Map<String, Object?>;
+
+      expect(assignResult.exitCode, 0);
+      expect(assignIssue['assignee'], 'legacy-user');
+
+      final addLabelResult = await cli.run([
+        'jira_add_label',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        '--key',
+        'DEMO-2',
+        '--label',
+        'legacy-automation',
+      ]);
+      final addLabelIssue =
+          ((jsonDecode(addLabelResult.stdout) as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['issue']!
+              as Map<String, Object?>;
+
+      expect(addLabelResult.exitCode, 0);
+      expect(addLabelIssue['labels'], contains('legacy-automation'));
+
+      final removeLabelResult = await cli.run([
+        'jira_remove_label',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        '--key',
+        'DEMO-2',
+        '--label',
+        'legacy-automation',
+      ]);
+      final removeLabelIssue =
+          ((jsonDecode(removeLabelResult.stdout)
+                      as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['issue']!
+              as Map<String, Object?>;
+
+      expect(removeLabelResult.exitCode, 0);
+      expect(removeLabelIssue['labels'], isNot(contains('legacy-automation')));
+
+      final updateDescriptionResult = await cli.run([
+        'jira_update_description',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        '--key',
+        'DEMO-2',
+        '--description',
+        'Updated through the legacy key alias.',
+      ]);
+      final updateDescriptionIssue =
+          ((jsonDecode(updateDescriptionResult.stdout)
+                      as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['issue']!
+              as Map<String, Object?>;
+
+      expect(updateDescriptionResult.exitCode, 0);
+      expect(
+        updateDescriptionIssue['description'],
+        'Updated through the legacy key alias.',
+      );
+
+      final moveResult = await cli.run([
+        'jira_move_to_status',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        '--key',
+        'DEMO-2',
+        '--statusName',
+        'Done',
+      ]);
+      final moveIssue =
+          ((jsonDecode(moveResult.stdout) as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['issue']!
+              as Map<String, Object?>;
+
+      expect(moveResult.exitCode, 0);
+      expect(moveIssue['status'], 'done');
+
+      final commentResult = await cli.run([
+        'jira_post_comment',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        '--key',
+        'DEMO-2',
+        '--comment',
+        'Legacy automation comment.',
+      ]);
+      final comment =
+          ((jsonDecode(commentResult.stdout) as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['comment']!
+              as Map<String, Object?>;
+
+      expect(commentResult.exitCode, 0);
+      expect(comment['body'], 'Legacy automation comment.');
+
+      final linkResult = await cli.run([
+        'jira_link_issues',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        '--sourceKey',
+        'DEMO-2',
+        '--anotherKey',
+        createdBugKey,
+        '--relationship',
+        'Blocks',
+      ]);
+      final link =
+          ((jsonDecode(linkResult.stdout) as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['link']!
+              as Map<String, Object?>;
+
+      expect(linkResult.exitCode, 0);
+      expect(link['target'], createdBugKey);
+      expect(link['type'], 'blocks');
+
+      final deleteResult = await cli.run([
+        'jira_delete_ticket',
+        '--target',
+        'local',
+        '--path',
+        repo.path,
+        '--key',
+        createdSubtaskKey,
+      ]);
+      final deletedIssue =
+          ((jsonDecode(deleteResult.stdout) as Map<String, Object?>)['data']
+                  as Map<String, Object?>)['deletedIssue']!
+              as Map<String, Object?>;
+
+      expect(deleteResult.exitCode, 0);
+      expect(deletedIssue['key'], createdSubtaskKey);
+      expect(
+        File(
+          '${repo.path}/DEMO/DEMO-1/DEMO-2/$createdSubtaskKey/main.md',
+        ).existsSync(),
+        isFalse,
+      );
+    });
+
     test(
       'updates and clears fields by display name and customfield id',
       () async {
