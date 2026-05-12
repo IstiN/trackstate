@@ -256,6 +256,75 @@ class LiveProjectSettingsPage:
               const matchesCallout = (candidate, title) =>
                 candidate.normalizedLabel.includes(title)
                 && candidate.normalizedLabel.length > title.length + 20;
+              const extractVisibleStyles = (element) => {
+                if (!element) {
+                  return null;
+                }
+                const style = window.getComputedStyle(element);
+                const hasVisibleBorder =
+                  Number.parseFloat(style.borderTopWidth || '0') > 0
+                  && style.borderTopColor !== 'transparent'
+                  && style.borderTopColor !== 'rgba(0, 0, 0, 0)';
+                const hasVisibleBackground =
+                  style.backgroundColor !== 'transparent'
+                  && style.backgroundColor !== 'rgba(0, 0, 0, 0)';
+                if (!hasVisibleBorder && !hasVisibleBackground) {
+                  return null;
+                }
+                return {
+                  borderColor: style.borderTopColor || null,
+                  backgroundColor: style.backgroundColor || null,
+                  borderWidth: style.borderTopWidth || null,
+                };
+              };
+              const findStyledElement = (semantics) => {
+                const candidateElements = [];
+                const seen = new Set();
+                const addCandidate = (element) => {
+                  if (!element || seen.has(element)) {
+                    return;
+                  }
+                  seen.add(element);
+                  candidateElements.push(element);
+                };
+
+                let ancestor = semantics.element;
+                while (ancestor && ancestor !== document.body) {
+                  addCandidate(ancestor);
+                  ancestor = ancestor.parentElement;
+                }
+
+                const insetX = Math.min(Math.max(semantics.rect.width * 0.1, 8), semantics.rect.width / 2);
+                const insetY = Math.min(Math.max(semantics.rect.height * 0.1, 8), semantics.rect.height / 2);
+                const probePoints = [
+                  [semantics.rect.left + semantics.rect.width / 2, semantics.rect.top + semantics.rect.height / 2],
+                  [semantics.rect.left + insetX, semantics.rect.top + insetY],
+                  [semantics.rect.right - insetX, semantics.rect.top + insetY],
+                  [semantics.rect.left + insetX, semantics.rect.bottom - insetY],
+                  [semantics.rect.right - insetX, semantics.rect.bottom - insetY],
+                ]
+                  .map(([x, y]) => [
+                    Math.min(Math.max(x, 0), window.innerWidth - 1),
+                    Math.min(Math.max(y, 0), window.innerHeight - 1),
+                  ]);
+                for (const [x, y] of probePoints) {
+                  for (const element of document.elementsFromPoint(x, y)) {
+                    addCandidate(element);
+                  }
+                }
+
+                for (const element of candidateElements) {
+                  const styles = extractVisibleStyles(element);
+                  if (styles) {
+                    return styles;
+                  }
+                }
+                return {
+                  borderColor: null,
+                  backgroundColor: null,
+                  borderWidth: null,
+                };
+              };
               const findRepositoryAccessSection = () => {
                 const sectionCandidates = Array.from(document.querySelectorAll('flt-semantics'))
                   .filter((candidate) => isVisible(candidate))
@@ -296,27 +365,7 @@ class LiveProjectSettingsPage:
                   return null;
                 }
 
-                let styled = semantics.element;
-                let borderColor = null;
-                let backgroundColor = null;
-                let borderWidth = null;
-                while (styled && styled !== document.body) {
-                  const style = window.getComputedStyle(styled);
-                  const hasVisibleBorder =
-                    Number.parseFloat(style.borderTopWidth || '0') > 0
-                    && style.borderTopColor !== 'transparent'
-                    && style.borderTopColor !== 'rgba(0, 0, 0, 0)';
-                  const hasVisibleBackground =
-                    style.backgroundColor !== 'transparent'
-                    && style.backgroundColor !== 'rgba(0, 0, 0, 0)';
-                  if (hasVisibleBorder || hasVisibleBackground) {
-                    borderColor = style.borderTopColor || null;
-                    backgroundColor = style.backgroundColor || null;
-                    borderWidth = style.borderTopWidth || null;
-                    break;
-                  }
-                  styled = styled.parentElement;
-                }
+                const visibleStyles = findStyledElement(semantics);
 
                 const renderedLines = semantics.label
                   .split('\\n')
@@ -334,9 +383,9 @@ class LiveProjectSettingsPage:
                   message,
                   renderedText: normalize([renderedTitle, message].join(' ')),
                   semanticLabel: semantics.normalizedLabel,
-                  borderColor,
-                  backgroundColor,
-                  borderWidth,
+                  borderColor: visibleStyles.borderColor,
+                  backgroundColor: visibleStyles.backgroundColor,
+                  borderWidth: visibleStyles.borderWidth,
                   top: semantics.rect.top,
                   left: semantics.rect.left,
                   width: semantics.rect.width,

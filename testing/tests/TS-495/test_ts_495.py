@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import sys
 import traceback
 import urllib.error
@@ -16,10 +17,6 @@ from testing.components.pages.live_project_settings_page import (  # noqa: E402
     LiveProjectSettingsPage,
     RepositoryAccessCalloutObservation,
     RepositoryAccessSectionObservation,
-)
-from testing.components.services.live_access_callout_color_probe import (  # noqa: E402
-    AccessCalloutColorObservation,
-    LiveAccessCalloutColorProbe,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveHostedRepositoryMetadata,
@@ -43,6 +40,12 @@ SETTINGS_HINT = (
 )
 SUCCESS_BORDER_HEX = "#3BBE60"
 SUCCESS_BACKGROUND_HEX = "#E7F7EC"
+EXPECTED_SUCCESS_BORDER_COLORS = {"rgb(59, 190, 96)", SUCCESS_BORDER_HEX.lower()}
+EXPECTED_SUCCESS_BACKGROUND_COLORS = {
+    "rgb(231, 247, 236)",
+    "rgba(59, 190, 96, 0.12)",
+    SUCCESS_BACKGROUND_HEX.lower(),
+}
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -73,7 +76,6 @@ def main() -> None:
     metadata = service.fetch_demo_metadata()
     _assert_preconditions(metadata)
     user = service.fetch_authenticated_user()
-    color_probe = LiveAccessCalloutColorProbe()
     mutation = RepoMutation(
         path=PROJECT_JSON_PATH,
         original_file=service.fetch_repo_file(PROJECT_JSON_PATH),
@@ -201,15 +203,12 @@ def main() -> None:
 
                 settings_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
-                secondary_colors = color_probe.observe(
-                    screenshot_path=SUCCESS_SCREENSHOT_PATH,
-                    callout=observation.secondary_callout,
-                )
-                result["secondary_callout_colors"] = _color_payload(secondary_colors)
-                _assert_exact_success_colors(
-                    secondary_colors,
+                secondary_styles = _assert_success_treatment(
+                    observation.secondary_callout,
+                    screenshot_path=str(SUCCESS_SCREENSHOT_PATH),
                     callout_name="secondary GitHub Releases callout",
                 )
+                result["secondary_callout_styles"] = secondary_styles
                 _record_step(
                     result,
                     step=4,
@@ -217,8 +216,9 @@ def main() -> None:
                     action="Verify the styling and copy of the secondary attachment callout.",
                     observed=(
                         f'secondary_message="{observation.secondary_callout.message}"; '
-                        f"secondary_border_hex={secondary_colors.border_hex}; "
-                        f"secondary_background_hex={secondary_colors.background_hex}; "
+                        f"secondary_border_color={secondary_styles['normalized_border_color']}; "
+                        f"secondary_background_color={secondary_styles['normalized_background_color']}; "
+                        f"secondary_border_width={secondary_styles['border_width']}; "
                         f'legacy_warning_present={LEGACY_WARNING_TITLE in observation.body_text}'
                     ),
                 )
@@ -244,8 +244,9 @@ def main() -> None:
                     observed=(
                         f'title="{observation.secondary_callout.title}"; '
                         f'message="{observation.secondary_callout.message}"; '
-                        f"border_hex={secondary_colors.border_hex}; "
-                        f"background_hex={secondary_colors.background_hex}; "
+                        f"border_color={secondary_styles['normalized_border_color']}; "
+                        f"background_color={secondary_styles['normalized_background_color']}; "
+                        f"border_width={secondary_styles['border_width']}; "
                         f"warning_count={observation.body_text.count(LEGACY_WARNING_TITLE)}"
                     ),
                 )
@@ -481,29 +482,38 @@ def _assert_local_git_warning_absent(
         )
 
 
-def _assert_exact_success_colors(
-    colors: AccessCalloutColorObservation,
+def _assert_success_treatment(
+    observation: RepositoryAccessCalloutObservation,
     *,
+    screenshot_path: str,
     callout_name: str,
-) -> None:
-    if colors.border_hex != SUCCESS_BORDER_HEX:
+) -> dict[str, object]:
+    normalized_border_color = _normalize_css_color(observation.border_color)
+    normalized_background_color = _normalize_css_color(observation.background_color)
+    border_width = _parse_css_pixels(observation.border_width)
+    if (
+        normalized_border_color not in EXPECTED_SUCCESS_BORDER_COLORS
+        or normalized_background_color not in EXPECTED_SUCCESS_BACKGROUND_COLORS
+        or border_width <= 0
+    ):
         raise AssertionError(
-            f"Step 4 failed: the {callout_name} border did not use the expected "
-            "success token.\n"
-            f"Expected border color: {SUCCESS_BORDER_HEX}\n"
-            f"Observed border color: {colors.border_hex}\n"
-            f"Screenshot: {colors.screenshot_path}\n"
-            f"Crop box: {colors.crop_box}",
+            f"Step 4 failed: the {callout_name} did not use the TrackState success "
+            "treatment exposed by the rendered DOM styles.\n"
+            f"Expected border colors: {sorted(EXPECTED_SUCCESS_BORDER_COLORS)}\n"
+            f"Expected background colors: {sorted(EXPECTED_SUCCESS_BACKGROUND_COLORS)}\n"
+            f"Observed border color: {observation.border_color!r}\n"
+            f"Observed background color: {observation.background_color!r}\n"
+            f"Observed border width: {observation.border_width!r}\n"
+            f"Observed rendered text: {observation.rendered_text}\n"
+            f"Screenshot: {screenshot_path}",
         )
-    if colors.background_hex != SUCCESS_BACKGROUND_HEX:
-        raise AssertionError(
-            f"Step 4 failed: the {callout_name} background did not use the expected "
-            "success token with 12% alpha.\n"
-            f"Expected background color: {SUCCESS_BACKGROUND_HEX}\n"
-            f"Observed background color: {colors.background_hex}\n"
-            f"Screenshot: {colors.screenshot_path}\n"
-            f"Crop box: {colors.crop_box}",
-        )
+    return {
+        "border_color": observation.border_color,
+        "background_color": observation.background_color,
+        "border_width": observation.border_width,
+        "normalized_border_color": normalized_border_color,
+        "normalized_background_color": normalized_background_color,
+    }
 
 
 def _section_payload(
@@ -535,13 +545,27 @@ def _callout_payload(
     }
 
 
-def _color_payload(observation: AccessCalloutColorObservation) -> dict[str, object]:
-    return {
-        "background_hex": observation.background_hex,
-        "border_hex": observation.border_hex,
-        "crop_box": observation.crop_box,
-        "screenshot_path": observation.screenshot_path,
-    }
+def _normalize_css_color(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = " ".join(value.strip().lower().split())
+    rgba_match = re.fullmatch(
+        r"rgba\((\d+), (\d+), (\d+), (1(?:\.0+)?)\)",
+        normalized,
+    )
+    if rgba_match:
+        red, green, blue, _ = rgba_match.groups()
+        return f"rgb({red}, {green}, {blue})"
+    return normalized
+
+
+def _parse_css_pixels(value: str | None) -> float:
+    if value is None:
+        return 0.0
+    match = re.fullmatch(r"\s*([0-9]+(?:\.[0-9]+)?)px\s*", value)
+    if not match:
+        return 0.0
+    return float(match.group(1))
 
 def _record_step(
     result: dict[str, object],
