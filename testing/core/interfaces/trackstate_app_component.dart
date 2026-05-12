@@ -47,6 +47,14 @@ abstract interface class TrackStateAppComponent {
 
   List<String> visibleIssueSearchResultLabelsSnapshot();
 
+  Future<bool> isIssueSearchResultTextVisible(
+    String key,
+    String summary,
+    String text,
+  );
+
+  List<String> issueSearchResultTextsSnapshot(String key, String summary);
+
   Future<void> dragIssueToStatusColumn({
     required String key,
     required String summary,
