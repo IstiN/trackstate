@@ -67,7 +67,7 @@ void main() {
             'Visible semantics: ${_formatSnapshot(settingsRobot.visibleSemanticsLabelsSnapshot())}.',
           );
         } else {
-          if (find.byType(Dialog).evaluate().isNotEmpty) {
+          if (settingsRobot.showsModalDialog()) {
             failures.add(
               'Step 2 failed: opening the Attachments tab showed a modal dialog instead of keeping the restriction notice inline. '
               'Visible texts: ${_formatSnapshot(settingsRobot.visibleTexts())}.',
@@ -133,20 +133,19 @@ void main() {
               actionLabel: _openSettingsLabel,
             );
 
-            if (find.byType(Dialog).evaluate().isNotEmpty) {
+            if (settingsRobot.showsModalDialog()) {
               failures.add(
                 'Step 3 failed: tapping "$_openSettingsLabel" opened a modal instead of navigating to Project Settings > Attachments. '
                 'Visible texts: ${_formatSnapshot(settingsRobot.visibleTexts())}.',
               );
             }
-            if (!settingsRobot.isVisibleText('Project Settings') ||
-                settingsRobot.tabByLabel('Attachments').evaluate().isEmpty) {
+            if (!settingsRobot.showsProjectSettingsTab('Attachments')) {
               failures.add(
                 'Step 3 failed: tapping "$_openSettingsLabel" did not navigate to Project Settings. '
                 'Visible texts: ${_formatSnapshot(settingsRobot.visibleTexts())}.',
               );
             }
-            if (!settingsRobot.isVisibleText('Attachment storage mode')) {
+            if (!settingsRobot.showsAttachmentStorageModeSetting()) {
               failures.add(
                 'Step 3 failed: tapping "$_openSettingsLabel" did not land on the Project Settings > Attachments tab. '
                 'The settings surface opened without the Attachment storage configuration. '
