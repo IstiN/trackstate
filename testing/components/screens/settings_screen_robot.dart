@@ -134,6 +134,9 @@ class SettingsScreenRobot {
     await tester.pumpAndSettle();
   }
 
+  Finder removeLocaleButton(String locale) =>
+      actionButton('Remove locale $locale');
+
   Finder localeEntryFieldScope({required String locale, required String id}) =>
       find.byKey(ValueKey('locale-$locale-$id'));
 
@@ -539,6 +542,11 @@ class SettingsScreenRobot {
 
   String semanticsLabelOf(Finder finder) {
     return tester.getSemantics(finder.first).label;
+  }
+
+  bool isButtonEnabled(Finder finder) {
+    final widget = tester.widget<ButtonStyleButton>(finder.first);
+    return widget.enabled;
   }
 
   Finder profileInitialsBadge(String initials) =>
