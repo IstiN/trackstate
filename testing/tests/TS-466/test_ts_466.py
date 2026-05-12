@@ -15,6 +15,7 @@ from testing.components.pages.live_settings_locales_page import (  # noqa: E402
     LiveSettingsLocalesPage,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
+    LiveHostedCatalogEntry,
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
@@ -60,15 +61,16 @@ def main() -> None:
         )
 
     user = service.fetch_authenticated_user()
-    default_locale = _project_default_locale(service)
+    project_locale_configuration = service.fetch_project_locale_configuration(PROJECT_PATH)
+    default_locale = project_locale_configuration.default_locale
     requested_target_locale = TARGET_LOCALE
     target_locale = requested_target_locale
     priority_seed = _first_catalog_entry(
-        service._read_repo_json(f"{PROJECT_PATH}/config/priorities.json"),
+        service.fetch_catalog_entries(PROJECT_PATH, "priorities"),
         subject="priority",
     )
     status_seed = _first_catalog_entry(
-        service._read_repo_json(f"{PROJECT_PATH}/config/statuses.json"),
+        service.fetch_catalog_entries(PROJECT_PATH, "statuses"),
         subject="status",
     )
     locale_state_before: dict[str, object] = {
@@ -399,24 +401,14 @@ def main() -> None:
     _write_result_if_requested(result)
     print(json.dumps(result, indent=2))
 
-
-def _project_default_locale(service: LiveSetupRepositoryService) -> str:
-    project_json = service._read_repo_json(f"{PROJECT_PATH}/project.json")
-    return str(project_json.get("defaultLocale", "en"))
-
-
-def _first_catalog_entry(entries: object, *, subject: str) -> dict[str, str]:
-    if not isinstance(entries, list):
-        raise AssertionError(
-            f"Precondition failed: {subject} config did not load as a JSON array.",
-        )
+def _first_catalog_entry(
+    entries: list[LiveHostedCatalogEntry],
+    *,
+    subject: str,
+) -> dict[str, str]:
     for item in entries:
-        if not isinstance(item, dict):
-            continue
-        entry_id = str(item.get("id", "")).strip()
-        name = str(item.get("name", "")).strip()
-        if entry_id and name:
-            return {"id": entry_id, "name": name}
+        if item.id and item.name:
+            return {"id": item.id, "name": item.name}
     raise AssertionError(
         f"Precondition failed: the live repository does not expose any seeded {subject} entries.",
     )
@@ -426,17 +418,12 @@ def _locale_state(
     service: LiveSetupRepositoryService,
     locale: str,
 ) -> dict[str, object]:
-    project_json = service._read_repo_json(f"{PROJECT_PATH}/project.json")
-    supported_locales = [
-        str(value).strip()
-        for value in project_json.get("supportedLocales", [])
-        if str(value).strip()
-    ]
+    locale_state = service.fetch_locale_state(PROJECT_PATH, locale)
     state: dict[str, object] = {
-        "supported_locales": supported_locales,
-        "locale_present": locale in supported_locales,
+        "supported_locales": locale_state.supported_locales,
+        "locale_present": locale_state.locale_present,
     }
-    if locale in supported_locales:
+    if locale_state.locale_present:
         state["locale_payload"] = _read_locale_payload(service, locale)
     return state
 
@@ -445,11 +432,7 @@ def _read_locale_payload(
     service: LiveSetupRepositoryService,
     locale: str,
 ) -> dict[str, object]:
-    try:
-        payload = service._read_repo_json(f"{PROJECT_PATH}/config/i18n/{locale}.json")
-    except Exception:
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    return service.fetch_locale_payload(PROJECT_PATH, locale)
 
 
 def _wait_for_locale_repo_state(
@@ -500,14 +483,8 @@ def _observe_locale_repo_state(
     expected_priority_id: str,
     expected_status_id: str,
 ) -> dict[str, object]:
-    project_json = service._read_repo_json(f"{PROJECT_PATH}/project.json")
-    supported_locales = [
-        str(value).strip()
-        for value in project_json.get("supportedLocales", [])
-        if str(value).strip()
-    ]
-    locale_present = locale in supported_locales
-    locale_payload = _read_locale_payload(service, locale) if locale_present else {}
+    locale_state = service.fetch_locale_state(PROJECT_PATH, locale)
+    locale_payload = locale_state.payload
     priorities = locale_payload.get("priorities", {})
     statuses = locale_payload.get("statuses", {})
     priority_translation = (
@@ -521,8 +498,8 @@ def _observe_locale_repo_state(
         else ""
     )
     return {
-        "supported_locales": supported_locales,
-        "locale_present": locale_present,
+        "supported_locales": locale_state.supported_locales,
+        "locale_present": locale_state.locale_present,
         "locale_payload": locale_payload,
         "priority_translation": priority_translation,
         "status_translation": status_translation,
