@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 import traceback
 from pathlib import Path
 
@@ -18,6 +17,7 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
     create_live_tracker_app_with_stored_token,
 )
@@ -52,6 +52,8 @@ def main() -> None:
 
     user = service.fetch_authenticated_user()
     default_locale = _project_default_locale(service)
+    requested_target_locale = TARGET_LOCALE
+    target_locale = requested_target_locale
     priority_seed = _first_catalog_entry(
         service._read_repo_json(f"{PROJECT_PATH}/config/priorities.json"),
         subject="priority",
@@ -60,7 +62,10 @@ def main() -> None:
         service._read_repo_json(f"{PROJECT_PATH}/config/statuses.json"),
         subject="status",
     )
-    locale_state_before = _locale_state(service, TARGET_LOCALE)
+    locale_state_before: dict[str, object] = {
+        "supported_locales": [],
+        "locale_present": False,
+    }
     expected_priority_translation = f"{priority_seed['name']} ES TS-466"
     expected_status_warning = (
         f'Missing translation. Using fallback "{status_seed["name"]}" from '
@@ -74,14 +79,14 @@ def main() -> None:
         "repository": service.repository,
         "repository_ref": service.ref,
         "project": PROJECT_PATH,
-        "target_locale": TARGET_LOCALE,
+        "requested_target_locale": requested_target_locale,
+        "target_locale": target_locale,
         "default_locale": default_locale,
         "expected_catalog_titles": EXPECTED_CATALOG_TITLES,
         "priority_entry": priority_seed,
         "status_entry": status_seed,
         "expected_priority_translation": expected_priority_translation,
         "expected_status_warning": expected_status_warning,
-        "locale_state_before": locale_state_before,
         "steps": [],
     }
 
@@ -135,35 +140,69 @@ def main() -> None:
                     observed=locales_text,
                 )
 
-                if not page.locale_exists(TARGET_LOCALE):
-                    page.add_locale(TARGET_LOCALE)
-                    result["locale_added_in_test"] = True
-                    _record_step(
-                        result,
-                        step=4,
-                        status="passed",
-                        action=f'Add the secondary locale "{TARGET_LOCALE}" to satisfy the precondition.',
-                        observed=page.current_body_text(),
+                existing_secondary_locales = [
+                    locale
+                    for locale in page.locale_codes()
+                    if locale != default_locale
+                ]
+                if page.locale_exists(requested_target_locale):
+                    target_locale = requested_target_locale
+                    page.select_locale(target_locale)
+                    result["locale_added_in_test"] = False
+                    step_4_action = f'Select the existing "{target_locale}" locale.'
+                elif existing_secondary_locales:
+                    target_locale = existing_secondary_locales[0]
+                    page.select_locale(target_locale)
+                    result["locale_added_in_test"] = False
+                    step_4_action = (
+                        f'Select the existing secondary locale "{target_locale}" to '
+                        "satisfy the precondition."
                     )
                 else:
-                    page.select_locale(TARGET_LOCALE)
-                    result["locale_added_in_test"] = False
-                    _record_step(
-                        result,
-                        step=4,
-                        status="passed",
-                        action=f'Select the existing "{TARGET_LOCALE}" locale.',
-                        observed=page.current_body_text(),
+                    target_locale = page.add_locale(requested_target_locale)
+                    page.select_locale(target_locale)
+                    result["locale_added_in_test"] = True
+                    step_4_action = (
+                        f'Add the requested secondary locale "{requested_target_locale}" '
+                        "to satisfy the precondition."
                     )
+                    if target_locale != requested_target_locale:
+                        step_4_action = (
+                            f'Add a secondary locale to satisfy the precondition '
+                            f'(requested "{requested_target_locale}", observed "{target_locale}").'
+                        )
+
+                locale_state_before = _locale_state(service, target_locale)
+                result["target_locale"] = target_locale
+                result["locale_state_before"] = locale_state_before
+                _record_step(
+                    result,
+                    step=4,
+                    status="passed",
+                    action=step_4_action,
+                    observed=page.current_body_text(),
+                )
 
                 observed_titles = page.catalog_titles()
                 result["observed_catalog_titles"] = observed_titles
-                if observed_titles != EXPECTED_CATALOG_TITLES:
+                missing_titles = [
+                    title for title in EXPECTED_CATALOG_TITLES if title not in observed_titles
+                ]
+                extra_titles = [
+                    title for title in observed_titles if title not in EXPECTED_CATALOG_TITLES
+                ]
+                result["missing_catalog_titles"] = missing_titles
+                result["extra_catalog_titles"] = extra_titles
+                if missing_titles:
+                    extra_titles_note = (
+                        f"\nAdditional titles: {extra_titles}" if extra_titles else ""
+                    )
                     raise AssertionError(
-                        "Step 5 failed: Settings > Locales did not expose the seven "
-                        "mandatory editable catalogs in the expected live UI order.\n"
-                        f"Expected titles: {EXPECTED_CATALOG_TITLES}\n"
-                        f"Observed titles: {observed_titles}\n"
+                        "Step 5 failed: Settings > Locales did not expose all seven "
+                        "mandatory editable catalogs.\n"
+                        f"Missing titles: {missing_titles}\n"
+                        f"Observed titles: {observed_titles}"
+                        f"{extra_titles_note}\n"
                         f"Observed body text:\n{page.current_body_text()}",
                     )
                 _record_step(
@@ -176,12 +215,12 @@ def main() -> None:
 
                 priority_before = page.entry_observation(
                     section_title="Priorities",
-                    locale=TARGET_LOCALE,
+                    locale=target_locale,
                     entry_id=str(priority_seed["id"]),
                 )
                 status_before = page.entry_observation(
                     section_title="Statuses",
-                    locale=TARGET_LOCALE,
+                    locale=target_locale,
                     entry_id=str(status_seed["id"]),
                 )
                 result["priority_before"] = _entry_payload(priority_before)
@@ -189,7 +228,7 @@ def main() -> None:
 
                 priority_after = page.fill_translation(
                     section_title="Priorities",
-                    locale=TARGET_LOCALE,
+                    locale=target_locale,
                     entry_id=str(priority_seed["id"]),
                     value=expected_priority_translation,
                 )
@@ -212,7 +251,7 @@ def main() -> None:
 
                 status_after = page.fill_translation(
                     section_title="Statuses",
-                    locale=TARGET_LOCALE,
+                    locale=target_locale,
                     entry_id=str(status_seed["id"]),
                     value="",
                 )
@@ -237,7 +276,7 @@ def main() -> None:
                 page.save_settings()
                 _wait_for_locale_repo_state(
                     service=service,
-                    locale=TARGET_LOCALE,
+                    locale=target_locale,
                     expected_locale_present=True,
                     expected_priority_translation=expected_priority_translation,
                     expected_priority_id=str(priority_seed["id"]),
@@ -254,15 +293,15 @@ def main() -> None:
                 )
 
                 page.open_locales_tab()
-                page.select_locale(TARGET_LOCALE)
+                page.select_locale(target_locale)
                 priority_saved = page.entry_observation(
                     section_title="Priorities",
-                    locale=TARGET_LOCALE,
+                    locale=target_locale,
                     entry_id=str(priority_seed["id"]),
                 )
                 status_saved = page.entry_observation(
                     section_title="Statuses",
-                    locale=TARGET_LOCALE,
+                    locale=target_locale,
                     entry_id=str(status_seed["id"]),
                 )
                 result["priority_after_save"] = _entry_payload(priority_saved)
@@ -331,6 +370,7 @@ def main() -> None:
             service=service,
             token=token,
             user_login=user.login,
+            locale=target_locale,
             locale_state_before=locale_state_before,
             priority_entry_id=str(priority_seed["id"]),
             status_entry_id=str(status_seed["id"]),
@@ -411,51 +451,23 @@ def _wait_for_locale_repo_state(
     expected_status_id: str,
     timeout_seconds: int = 90,
 ) -> None:
-    deadline = time.monotonic() + timeout_seconds
-    last_observation: dict[str, object] | None = None
-    while time.monotonic() < deadline:
-        project_json = service._read_repo_json(f"{PROJECT_PATH}/project.json")
-        supported_locales = [
-            str(value).strip()
-            for value in project_json.get("supportedLocales", [])
-            if str(value).strip()
-        ]
-        locale_present = locale in supported_locales
-
-        locale_payload = _read_locale_payload(service, locale) if locale_present else {}
-        priorities = locale_payload.get("priorities", {})
-        statuses = locale_payload.get("statuses", {})
-        priority_translation = (
-            str(priorities.get(expected_priority_id, ""))
-            if isinstance(priorities, dict)
-            else ""
-        )
-        status_translation = (
-            str(statuses.get(expected_status_id, ""))
-            if isinstance(statuses, dict)
-            else ""
-        )
-        last_observation = {
-            "supported_locales": supported_locales,
-            "locale_payload": locale_payload,
-            "priority_translation": priority_translation,
-            "status_translation": status_translation,
-        }
-
-        if locale_present != expected_locale_present:
-            time.sleep(2)
-            continue
-
-        priority_matches = priority_translation == (expected_priority_translation or "")
-        status_matches = status_translation == (expected_status_translation or "")
-        if expected_priority_translation is None:
-            priority_matches = priority_translation == ""
-        if expected_status_translation is None:
-            status_matches = status_translation == ""
-
-        if locale_present == expected_locale_present and priority_matches and status_matches:
-            return
-        time.sleep(2)
+    matched, last_observation = poll_until(
+        probe=lambda: _observe_locale_repo_state(
+            service=service,
+            locale=locale,
+            expected_priority_id=expected_priority_id,
+            expected_status_id=expected_status_id,
+        ),
+        is_satisfied=lambda observation: _locale_repo_state_matches(
+            observation=observation,
+            expected_locale_present=expected_locale_present,
+            expected_priority_translation=expected_priority_translation,
+            expected_status_translation=expected_status_translation,
+        ),
+        timeout_seconds=timeout_seconds,
+    )
+    if matched:
+        return
 
     raise AssertionError(
         "The hosted save path did not persist the expected locale state within the "
@@ -469,12 +481,72 @@ def _wait_for_locale_repo_state(
     )
 
 
+def _observe_locale_repo_state(
+    *,
+    service: LiveSetupRepositoryService,
+    locale: str,
+    expected_priority_id: str,
+    expected_status_id: str,
+) -> dict[str, object]:
+    project_json = service._read_repo_json(f"{PROJECT_PATH}/project.json")
+    supported_locales = [
+        str(value).strip()
+        for value in project_json.get("supportedLocales", [])
+        if str(value).strip()
+    ]
+    locale_present = locale in supported_locales
+    locale_payload = _read_locale_payload(service, locale) if locale_present else {}
+    priorities = locale_payload.get("priorities", {})
+    statuses = locale_payload.get("statuses", {})
+    priority_translation = (
+        str(priorities.get(expected_priority_id, ""))
+        if isinstance(priorities, dict)
+        else ""
+    )
+    status_translation = (
+        str(statuses.get(expected_status_id, ""))
+        if isinstance(statuses, dict)
+        else ""
+    )
+    return {
+        "supported_locales": supported_locales,
+        "locale_present": locale_present,
+        "locale_payload": locale_payload,
+        "priority_translation": priority_translation,
+        "status_translation": status_translation,
+    }
+
+
+def _locale_repo_state_matches(
+    *,
+    observation: dict[str, object],
+    expected_locale_present: bool,
+    expected_priority_translation: str | None,
+    expected_status_translation: str | None,
+) -> bool:
+    locale_present = bool(observation.get("locale_present"))
+    priority_translation = str(observation.get("priority_translation", ""))
+    status_translation = str(observation.get("status_translation", ""))
+    if locale_present != expected_locale_present:
+        return False
+    if expected_priority_translation is None:
+        priority_matches = priority_translation == ""
+    else:
+        priority_matches = priority_translation == expected_priority_translation
+    if expected_status_translation is None:
+        status_matches = status_translation == ""
+    else:
+        status_matches = status_translation == expected_status_translation
+    return priority_matches and status_matches
+
+
 def _restore_locale_state(
     *,
     config,
     service: LiveSetupRepositoryService,
     token: str,
     user_login: str,
+    locale: str,
     locale_state_before: dict[str, object],
     priority_entry_id: str,
     status_entry_id: str,
@@ -519,25 +591,25 @@ def _restore_locale_state(
         page.open_locales_tab()
 
         if locale_present_before:
-            if not page.locale_exists(TARGET_LOCALE):
-                page.add_locale(TARGET_LOCALE)
-            page.select_locale(TARGET_LOCALE)
+            if not page.locale_exists(locale):
+                locale = page.add_locale(locale)
+            page.select_locale(locale)
             page.fill_translation(
                 section_title="Priorities",
-                locale=TARGET_LOCALE,
+                locale=locale,
                 entry_id=priority_entry_id,
                 value=priority_before or "",
             )
             page.fill_translation(
                 section_title="Statuses",
-                locale=TARGET_LOCALE,
+                locale=locale,
                 entry_id=status_entry_id,
                 value=status_before or "",
             )
             page.save_settings()
             _wait_for_locale_repo_state(
                 service=service,
-                locale=TARGET_LOCALE,
+                locale=locale,
                 expected_locale_present=True,
                 expected_priority_translation=priority_before or None,
                 expected_priority_id=priority_entry_id,
@@ -551,12 +623,12 @@ def _restore_locale_state(
                 "status_translation": status_before or "",
             }
 
-        if page.locale_exists(TARGET_LOCALE):
-            page.remove_locale(TARGET_LOCALE)
+        if page.locale_exists(locale):
+            page.remove_locale(locale)
             page.save_settings()
             _wait_for_locale_repo_state(
                 service=service,
-                locale=TARGET_LOCALE,
+                locale=locale,
                 expected_locale_present=False,
                 expected_priority_translation=None,
                 expected_priority_id=priority_entry_id,

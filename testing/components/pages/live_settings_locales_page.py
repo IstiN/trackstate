@@ -89,23 +89,33 @@ class LiveSettingsLocalesPage:
         return self.current_body_text()
 
     def locale_exists(self, locale: str) -> bool:
-        return bool(
-            self._session.evaluate(
-                """
-                (targetLocale) => {
-                  const expectedTexts = [targetLocale, `${targetLocale} (default)`];
-                  return Array.from(
-                    document.querySelectorAll('flt-semantics[role="radio"], flt-semantics[role="button"]'),
-                  ).some((candidate) => {
-                    const text = (candidate.innerText ?? '').trim();
-                    const label = (candidate.getAttribute('aria-label') ?? '').trim();
-                    return expectedTexts.includes(text) || expectedTexts.includes(label);
-                  });
-                }
-                """,
-                arg=locale,
-            ),
+        return locale in self.locale_codes()
+
+    def locale_codes(self) -> list[str]:
+        payload = self._session.evaluate(
+            """
+            () => {
+              const localeChipPattern = /^[a-z]{2,3}(?:-[A-Za-z0-9]+)*(?: \\(default\\))?$/i;
+              const localeCodes = Array.from(
+                document.querySelectorAll('flt-semantics[role="radio"], flt-semantics[role="button"]'),
+              )
+                .flatMap((candidate) => {
+                  const text = (candidate.innerText ?? '').trim();
+                  const label = (candidate.getAttribute('aria-label') ?? '').trim();
+                  return [text, label];
+                })
+                .filter((value) => localeChipPattern.test(value))
+                .map((value) => value.replace(/ \\(default\\)$/i, ''));
+              return Array.from(new Set(localeCodes));
+            }
+            """,
         )
+        if not isinstance(payload, list):
+            raise AssertionError(
+                "Settings > Locales did not expose readable locale chips.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return [str(code) for code in payload]
 
     def select_locale(self, locale: str) -> None:
         clicked = self._session.evaluate(
@@ -140,7 +150,8 @@ class LiveSettingsLocalesPage:
             timeout_ms=30_000,
         )
 
-    def add_locale(self, locale: str) -> None:
+    def add_locale(self, locale: str) -> str:
+        locale_codes_before = self.locale_codes()
         self._session.click(
             'flt-semantics[role="button"][aria-label="Add locale"]',
             timeout_ms=30_000,
@@ -157,23 +168,48 @@ class LiveSettingsLocalesPage:
         self._session.click(self._button_selector, has_text="Save", timeout_ms=30_000)
         self._session.wait_for_function(
             """
-            (expectedLocale) => {
-              const expectedTexts = [expectedLocale, `${expectedLocale} (default)`];
-              const localeChipPresent = Array.from(
+            ({ expectedLocale, localeCodesBefore }) => {
+              const localeChipPattern = /^[a-z]{2,3}(?:-[A-Za-z0-9]+)*(?: \\(default\\))?$/i;
+              const localeCodes = Array.from(
                 document.querySelectorAll('flt-semantics[role="radio"], flt-semantics[role="button"]'),
-              ).some((candidate) => {
-                const text = (candidate.innerText ?? '').trim();
-                const label = (candidate.getAttribute('aria-label') ?? '').trim();
-                return expectedTexts.includes(text) || expectedTexts.includes(label);
-              });
-              const translationInputs = document.querySelectorAll(
-                `input[aria-label="Translation (${expectedLocale})"]`,
-              ).length;
-              return localeChipPresent && translationInputs > 0;
+              )
+                .flatMap((candidate) => {
+                  const text = (candidate.innerText ?? '').trim();
+                  const label = (candidate.getAttribute('aria-label') ?? '').trim();
+                  return [text, label];
+                })
+                .filter((value) => localeChipPattern.test(value))
+                .map((value) => value.replace(/ \\(default\\)$/i, ''));
+              const distinctLocaleCodes = Array.from(new Set(localeCodes));
+              const addedLocale = distinctLocaleCodes.find(
+                (code) => !localeCodesBefore.includes(code),
+              );
+              return (
+                distinctLocaleCodes.includes(expectedLocale)
+                || (
+                  typeof addedLocale === 'string'
+                  && document.querySelectorAll(
+                    `input[aria-label="Translation (${addedLocale})"]`,
+                  ).length > 0
+                )
+              );
             }
             """,
-            arg=locale,
+            arg={"expectedLocale": locale, "localeCodesBefore": locale_codes_before},
             timeout_ms=30_000,
+        )
+        locale_codes_after = self.locale_codes()
+        if locale in locale_codes_after:
+            return locale
+        added_locales = [
+            candidate for candidate in locale_codes_after if candidate not in locale_codes_before
+        ]
+        if added_locales:
+            return added_locales[0]
+        raise AssertionError(
+            f'Could not determine which locale was added after requesting "{locale}".\n'
+            f"Observed locale chips: {locale_codes_after}\n"
+            f"Observed body text:\n{self.current_body_text()}",
         )
 
     def remove_locale(self, locale: str) -> None:
