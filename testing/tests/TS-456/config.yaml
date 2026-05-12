@@ -5,4 +5,4 @@ platform: widget
 dependencies: []
 notes:
   - Launches the production issue-detail screen with a provider-backed repository whose deferred attachment hydration always fails.
-  - Verifies the rendered Attachments error state keeps a visible Retry action with an exact semantics label, exposes a labeled deferred error icon, remains keyboard-reachable, and measures the rendered contrast against the error card surface.
+  - Verifies the rendered Attachments error state keeps a visible Retry action with an exact semantics label, exposes a labeled deferred error icon, remains keyboard-reachable, asserts the required surfaceAlt / AC5 card styling contract, and measures the rendered contrast against that error card surface.

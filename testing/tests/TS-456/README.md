@@ -14,8 +14,9 @@ The automation:
 5. tabs through the rendered issue detail until `Retry` receives keyboard focus,
    then activates it with `Enter`
 6. verifies the retry action re-attempts the deferred attachment read
-7. measures the rendered error-card text and error-icon contrast against the
-   visible `surfaceAlt` background
+7. asserts the deferred error card keeps the expected `surfaceAlt` / AC5
+   styling contract, then measures the rendered error-card text and error-icon
+   contrast against that surface
 
 ## Install dependencies
 

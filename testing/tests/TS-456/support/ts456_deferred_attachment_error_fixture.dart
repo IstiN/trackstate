@@ -1,12 +1,8 @@
 import 'dart:typed_data';
 
-import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
-
-import '../../../core/interfaces/issue_detail_accessibility_screen.dart';
-import '../../../frameworks/flutter/issue_detail_accessibility_widget_framework.dart';
 
 class Ts456DeferredAttachmentErrorFixture {
   Ts456DeferredAttachmentErrorFixture._({
@@ -40,17 +36,6 @@ class Ts456DeferredAttachmentErrorFixture {
       provider: provider,
     );
   }
-}
-
-Future<IssueDetailAccessibilityScreenHandle>
-launchTs456DeferredAttachmentErrorScreen(
-  WidgetTester tester, {
-  required Ts456DeferredAttachmentErrorFixture fixture,
-}) {
-  return launchIssueDetailAccessibilityWidgetScreen(
-    tester,
-    repository: fixture.repository,
-  );
 }
 
 class _Ts456DeferredAttachmentErrorProvider

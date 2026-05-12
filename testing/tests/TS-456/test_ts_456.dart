@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../../core/interfaces/issue_detail_accessibility_screen.dart';
 import '../../core/models/issue_detail_icon_observation.dart';
+import '../../core/models/issue_detail_row_style_observation.dart';
+import '../../fixtures/issue_detail_accessibility_screen_fixture.dart';
 import 'support/ts456_deferred_attachment_error_fixture.dart';
 
 void main() {
@@ -15,9 +17,9 @@ void main() {
 
       try {
         final fixture = await Ts456DeferredAttachmentErrorFixture.create();
-        screen = await launchTs456DeferredAttachmentErrorScreen(
+        screen = await launchIssueDetailAccessibilityFixture(
           tester,
-          fixture: fixture,
+          repository: fixture.repository,
         );
         final failures = <String>[];
 
@@ -101,6 +103,12 @@ void main() {
             'below the required WCAG AA 3.0:1 threshold for non-text icons.',
           );
         }
+
+        final errorRowStyle = screen.observeDecoratedRowStyle(
+          Ts456DeferredAttachmentErrorFixture.issueKey,
+          rowAnchorText: 'Retry',
+        );
+        _verifyErrorRowUsesExpectedTokens(failures, observation: errorRowStyle);
 
         final retryTraversalFailure = _orderedSubsequenceFailure(
           buttonLabels,
@@ -289,6 +297,18 @@ String? _orderedSubsequenceFailure(
     previousIndex = index;
   }
   return null;
+}
+
+void _verifyErrorRowUsesExpectedTokens(
+  List<String> failures, {
+  required IssueDetailRowStyleObservation observation,
+}) {
+  if (!observation.usesExpectedTokens) {
+    failures.add(
+      'Step 5 failed: the deferred Attachments error row did not use the required surfaceAlt / AC5 styling contract. '
+      'Observed ${observation.describe()}.',
+    );
+  }
 }
 
 int _indexOfLabel(List<String> observed, String label) {
