@@ -364,7 +364,23 @@ class ProviderBackedTrackStateRepository
             )
             as Map<String, Object?>;
     final configRoot = _resolveConfigRoot(projectJson, dataRoot);
-    final changes = [
+    final existingSupportedLocales = _resolveSupportedLocales(
+      projectJson: projectJson,
+      blobPaths: blobPaths,
+      configRoot: configRoot,
+      defaultLocale: projectJson['defaultLocale']?.toString() ?? 'en',
+    );
+    final changes = <RepositoryFileChange>[
+      RepositoryTextFileChange(
+        path: projectPath,
+        content:
+            '${jsonEncode(_settingsProjectJson(projectJson, normalizedSettings))}\n',
+        expectedRevision: await _existingRevision(
+          path: projectPath,
+          ref: writeBranch,
+          blobPaths: blobPaths,
+        ),
+      ),
       RepositoryTextFileChange(
         path: _joinPath(configRoot, 'statuses.json'),
         content:
@@ -405,19 +421,104 @@ class ProviderBackedTrackStateRepository
           blobPaths: blobPaths,
         ),
       ),
+      RepositoryTextFileChange(
+        path: _joinPath(configRoot, 'priorities.json'),
+        content:
+            '${jsonEncode(_settingsConfigEntriesJson(normalizedSettings.priorityDefinitions))}\n',
+        expectedRevision: await _existingRevision(
+          path: _joinPath(configRoot, 'priorities.json'),
+          ref: writeBranch,
+          blobPaths: blobPaths,
+        ),
+      ),
+      RepositoryTextFileChange(
+        path: _joinPath(configRoot, 'versions.json'),
+        content:
+            '${jsonEncode(_settingsConfigEntriesJson(normalizedSettings.versionDefinitions))}\n',
+        expectedRevision: await _existingRevision(
+          path: _joinPath(configRoot, 'versions.json'),
+          ref: writeBranch,
+          blobPaths: blobPaths,
+        ),
+      ),
+      RepositoryTextFileChange(
+        path: _joinPath(configRoot, 'components.json'),
+        content:
+            '${jsonEncode(_settingsConfigEntriesJson(normalizedSettings.componentDefinitions))}\n',
+        expectedRevision: await _existingRevision(
+          path: _joinPath(configRoot, 'components.json'),
+          ref: writeBranch,
+          blobPaths: blobPaths,
+        ),
+      ),
+      RepositoryTextFileChange(
+        path: _joinPath(configRoot, 'resolutions.json'),
+        content:
+            '${jsonEncode(_settingsConfigEntriesJson(normalizedSettings.resolutionDefinitions))}\n',
+        expectedRevision: await _existingRevision(
+          path: _joinPath(configRoot, 'resolutions.json'),
+          ref: writeBranch,
+          blobPaths: blobPaths,
+        ),
+      ),
     ];
+    for (final locale in normalizedSettings.effectiveSupportedLocales) {
+      final path = _joinPath(configRoot, 'i18n/$locale.json');
+      changes.add(
+        RepositoryTextFileChange(
+          path: path,
+          content:
+              '${jsonEncode(_localizedLabelsJson(normalizedSettings, locale))}\n',
+          expectedRevision: await _existingRevision(
+            path: path,
+            ref: writeBranch,
+            blobPaths: blobPaths,
+          ),
+        ),
+      );
+    }
+    for (final locale in existingSupportedLocales) {
+      if (normalizedSettings.effectiveSupportedLocales.contains(locale)) {
+        continue;
+      }
+      final path = _joinPath(configRoot, 'i18n/$locale.json');
+      if (!blobPaths.contains(path)) {
+        continue;
+      }
+      changes.add(
+        RepositoryDeleteFileChange(
+          path: path,
+          expectedRevision: await _existingRevision(
+            path: path,
+            ref: writeBranch,
+            blobPaths: blobPaths,
+          ),
+        ),
+      );
+    }
     final mutator = _provider as RepositoryFileMutator?;
     if (mutator == null) {
       for (final change in changes) {
-        await _provider.writeTextFile(
-          RepositoryWriteRequest(
-            path: change.path,
-            content: change.content,
-            message: 'Update project settings',
-            branch: writeBranch,
-            expectedRevision: change.expectedRevision,
-          ),
-        );
+        switch (change) {
+          case RepositoryTextFileChange():
+            await _provider.writeTextFile(
+              RepositoryWriteRequest(
+                path: change.path,
+                content: change.content,
+                message: 'Update project settings',
+                branch: writeBranch,
+                expectedRevision: change.expectedRevision,
+              ),
+            );
+          case RepositoryDeleteFileChange():
+            throw const TrackStateRepositoryException(
+              'This repository implementation does not support deleting locale configuration files.',
+            );
+          case RepositoryBinaryFileChange():
+            throw const TrackStateRepositoryException(
+              'Project settings do not support binary file changes.',
+            );
+        }
       }
     } else {
       await mutator.applyFileChanges(
@@ -1266,16 +1367,21 @@ class ProviderBackedTrackStateRepository
         await _getRepositoryJson(projectPath) as Map<String, Object?>;
     final configRoot = _resolveConfigRoot(projectJson, dataRoot);
     final defaultLocale = projectJson['defaultLocale']?.toString() ?? 'en';
+    final supportedLocales = _resolveSupportedLocales(
+      projectJson: projectJson,
+      blobPaths: blobPaths,
+      configRoot: configRoot,
+      defaultLocale: defaultLocale,
+    );
     final localizedLabels = await _loadLocalizedLabels(
       blobPaths: blobPaths,
       configRoot: configRoot,
-      locale: defaultLocale,
+      locales: supportedLocales,
     );
     final issueTypes = await _loadRequiredConfigEntries(
       _joinPath(configRoot, 'issue-types.json'),
       blobPaths: blobPaths,
       localizedLabels: localizedLabels['issueTypes'] ?? const {},
-      locale: defaultLocale,
       loadWarnings: loadWarnings,
       warningSubject: 'issue types',
       fallbackEntries: _issueTypeDefinitions,
@@ -1284,7 +1390,6 @@ class ProviderBackedTrackStateRepository
       _joinPath(configRoot, 'statuses.json'),
       blobPaths: blobPaths,
       localizedLabels: localizedLabels['statuses'] ?? const {},
-      locale: defaultLocale,
       loadWarnings: loadWarnings,
       warningSubject: 'statuses',
       fallbackEntries: _statusDefinitions,
@@ -1293,7 +1398,6 @@ class ProviderBackedTrackStateRepository
       _joinPath(configRoot, 'fields.json'),
       blobPaths: blobPaths,
       localizedLabels: localizedLabels['fields'] ?? const {},
-      locale: defaultLocale,
       loadWarnings: loadWarnings,
     );
     final workflows = await _loadWorkflowDefinitions(
@@ -1305,25 +1409,21 @@ class ProviderBackedTrackStateRepository
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'priorities.json'),
       localizedLabels: localizedLabels['priorities'] ?? const {},
-      locale: defaultLocale,
     );
     final versions = await _loadOptionalConfigEntries(
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'versions.json'),
       localizedLabels: localizedLabels['versions'] ?? const {},
-      locale: defaultLocale,
     );
     final components = await _loadOptionalConfigEntries(
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'components.json'),
       localizedLabels: localizedLabels['components'] ?? const {},
-      locale: defaultLocale,
     );
     final resolutions = await _loadOptionalConfigEntries(
       blobPaths: blobPaths,
       path: _joinPath(configRoot, 'resolutions.json'),
       localizedLabels: localizedLabels['resolutions'] ?? const {},
-      locale: defaultLocale,
     );
     final repositoryIndex = await _loadRepositoryIndex(
       blobPaths: blobPaths,
@@ -1336,6 +1436,7 @@ class ProviderBackedTrackStateRepository
       repository: _provider.repositoryLabel,
       branch: await _provider.resolveWriteBranch(),
       defaultLocale: defaultLocale,
+      supportedLocales: supportedLocales,
       issueTypeDefinitions: issueTypes,
       statusDefinitions: statuses,
       fieldDefinitions: fields,
@@ -1640,44 +1741,93 @@ class ProviderBackedTrackStateRepository
   Future<Object?> _getRepositoryJson(String path) async =>
       jsonDecode(await _getRepositoryText(path));
 
-  Future<Map<String, Map<String, String>>> _loadLocalizedLabels({
+  List<String> _resolveSupportedLocales({
+    required Map<String, Object?> projectJson,
     required Set<String> blobPaths,
     required String configRoot,
-    required String locale,
+    required String defaultLocale,
+  }) {
+    final locales = <String>[];
+    final configuredLocales = projectJson['supportedLocales'];
+    if (configuredLocales is List) {
+      for (final locale in configuredLocales) {
+        final normalized = locale.toString().trim();
+        if (normalized.isNotEmpty && !locales.contains(normalized)) {
+          locales.add(normalized);
+        }
+      }
+    }
+    final i18nPrefix = _joinPath(configRoot, 'i18n/');
+    for (final path in blobPaths) {
+      if (!path.startsWith(i18nPrefix) || !path.endsWith('.json')) {
+        continue;
+      }
+      final locale = path
+          .substring(i18nPrefix.length, path.length - '.json'.length)
+          .trim();
+      if (locale.isNotEmpty && !locales.contains(locale)) {
+        locales.add(locale);
+      }
+    }
+    final normalizedDefaultLocale = defaultLocale.trim().isEmpty
+        ? 'en'
+        : defaultLocale.trim();
+    if (!locales.contains(normalizedDefaultLocale)) {
+      locales.insert(0, normalizedDefaultLocale);
+    }
+    return locales;
+  }
+
+  Future<Map<String, Map<String, Map<String, String>>>> _loadLocalizedLabels({
+    required Set<String> blobPaths,
+    required String configRoot,
+    required List<String> locales,
   }) async {
-    final path = _joinPath(configRoot, 'i18n/$locale.json');
-    if (!blobPaths.contains(path)) return const {};
-    final json = await _getRepositoryJson(path);
-    if (json is! Map) return const {};
-    final result = <String, Map<String, String>>{};
-    for (final entry in json.entries) {
-      final value = entry.value;
-      if (value is! Map) continue;
-      result[entry.key.toString()] = {
-        for (final localizedEntry in value.entries)
-          localizedEntry.key.toString(): localizedEntry.value.toString(),
-      };
+    final result = <String, Map<String, Map<String, String>>>{};
+    for (final locale in locales) {
+      final path = _joinPath(configRoot, 'i18n/$locale.json');
+      if (!blobPaths.contains(path)) {
+        continue;
+      }
+      final json = await _getRepositoryJson(path);
+      if (json is! Map) {
+        continue;
+      }
+      for (final entry in json.entries) {
+        final value = entry.value;
+        if (value is! Map) continue;
+        final localizedCatalog = result.putIfAbsent(
+          entry.key.toString(),
+          () => <String, Map<String, String>>{},
+        );
+        for (final localizedEntry in value.entries) {
+          final key = localizedEntry.key.toString();
+          final label = localizedEntry.value.toString().trim();
+          if (key.isEmpty || label.isEmpty) {
+            continue;
+          }
+          localizedCatalog.putIfAbsent(key, () => <String, String>{})[locale] =
+              label;
+        }
+      }
     }
     return result;
   }
 
   Future<List<TrackStateConfigEntry>> _getConfigEntries(
     String path, {
-    required Map<String, String> localizedLabels,
-    required String locale,
+    required Map<String, Map<String, String>> localizedLabels,
   }) async {
     return _configEntriesFromJson(
       await _getRepositoryJson(path),
       localizedLabels: localizedLabels,
-      locale: locale,
     );
   }
 
   Future<List<TrackStateConfigEntry>> _loadRequiredConfigEntries(
     String path, {
     required Set<String> blobPaths,
-    required Map<String, String> localizedLabels,
-    required String locale,
+    required Map<String, Map<String, String>> localizedLabels,
     required List<String> loadWarnings,
     required String warningSubject,
     required List<TrackStateConfigEntry> fallbackEntries,
@@ -1689,11 +1839,7 @@ class ProviderBackedTrackStateRepository
       return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
     }
     try {
-      return await _getConfigEntries(
-        path,
-        localizedLabels: localizedLabels,
-        locale: locale,
-      );
+      return await _getConfigEntries(path, localizedLabels: localizedLabels);
     } on FormatException catch (error) {
       loadWarnings.add(
         'Falling back to built-in $warningSubject after failing to parse $path: $error',
@@ -1705,22 +1851,16 @@ class ProviderBackedTrackStateRepository
   Future<List<TrackStateConfigEntry>> _loadOptionalConfigEntries({
     required Set<String> blobPaths,
     required String path,
-    required Map<String, String> localizedLabels,
-    required String locale,
+    required Map<String, Map<String, String>> localizedLabels,
   }) async {
     if (!blobPaths.contains(path)) return const [];
-    return _getConfigEntries(
-      path,
-      localizedLabels: localizedLabels,
-      locale: locale,
-    );
+    return _getConfigEntries(path, localizedLabels: localizedLabels);
   }
 
   Future<List<TrackStateFieldDefinition>> _getFieldDefinitions(
     String path, {
     required Set<String> blobPaths,
-    required Map<String, String> localizedLabels,
-    required String locale,
+    required Map<String, Map<String, String>> localizedLabels,
     required List<String> loadWarnings,
   }) async {
     if (!blobPaths.contains(path)) {
@@ -1743,7 +1883,7 @@ class ProviderBackedTrackStateRepository
                 ? _canonicalConfigId(entry['name']?.toString())
                 : rawId;
             final fallbackName = entry['name']?.toString() ?? id;
-            final localizedLabel = localizedLabels[id];
+            final entryLocalizedLabels = localizedLabels[id] ?? const {};
             final optionsJson = entry['options'];
             final applicableIssueTypes = entry['issueTypes'];
             return TrackStateFieldDefinition(
@@ -1780,9 +1920,7 @@ class ProviderBackedTrackStateRepository
                   : const [],
               reserved: ProjectSettingsValidationService.reservedFieldIds
                   .contains(id),
-              localizedLabels: localizedLabel == null
-                  ? const {}
-                  : {locale: localizedLabel},
+              localizedLabels: entryLocalizedLabels,
             );
           })
           .toList(growable: false);
@@ -2481,7 +2619,6 @@ class ProviderBackedTrackStateRepository
       return _configEntriesFromJson(
         jsonDecode(file.content),
         localizedLabels: const {},
-        locale: 'en',
       );
     } on TrackStateProviderException {
       return _snapshot?.project.statusDefinitions ?? const [];
@@ -3263,6 +3400,13 @@ List<Map<String, Object?>> _settingsStatusesJson(
     },
 ];
 
+List<Map<String, Object?>> _settingsConfigEntriesJson(
+  List<TrackStateConfigEntry> entries,
+) => [
+  for (final entry in entries)
+    {'id': entry.id.trim(), 'name': entry.name.trim()},
+];
+
 List<Map<String, Object?>> _settingsIssueTypesJson(
   List<TrackStateConfigEntry> issueTypes,
 ) => [
@@ -3322,10 +3466,63 @@ Map<String, Object?> _settingsWorkflowsJson(
     },
 };
 
+Map<String, Object?> _settingsProjectJson(
+  Map<String, Object?> currentProjectJson,
+  ProjectSettingsCatalog settings,
+) => <String, Object?>{
+  ...currentProjectJson,
+  'defaultLocale': settings.defaultLocale,
+  'supportedLocales': settings.effectiveSupportedLocales,
+};
+
+Map<String, Object?> _localizedLabelsJson(
+  ProjectSettingsCatalog settings,
+  String locale,
+) => <String, Object?>{
+  'issueTypes': _configLocalizedLabelsJson(
+    settings.issueTypeDefinitions,
+    locale,
+  ),
+  'statuses': _configLocalizedLabelsJson(settings.statusDefinitions, locale),
+  'fields': _fieldLocalizedLabelsJson(settings.fieldDefinitions, locale),
+  'priorities': _configLocalizedLabelsJson(
+    settings.priorityDefinitions,
+    locale,
+  ),
+  'versions': _configLocalizedLabelsJson(settings.versionDefinitions, locale),
+  'components': _configLocalizedLabelsJson(
+    settings.componentDefinitions,
+    locale,
+  ),
+  'resolutions': _configLocalizedLabelsJson(
+    settings.resolutionDefinitions,
+    locale,
+  ),
+};
+
+Map<String, Object?> _configLocalizedLabelsJson(
+  List<TrackStateConfigEntry> entries,
+  String locale,
+) => {
+  for (final entry in entries)
+    if (entry.localizedLabels[locale] case final label?
+        when label.trim().isNotEmpty)
+      entry.id.trim(): label.trim(),
+};
+
+Map<String, Object?> _fieldLocalizedLabelsJson(
+  List<TrackStateFieldDefinition> fields,
+  String locale,
+) => {
+  for (final field in fields)
+    if (field.localizedLabels[locale] case final label?
+        when label.trim().isNotEmpty)
+      field.id.trim(): label.trim(),
+};
+
 List<TrackStateConfigEntry> _configEntriesFromJson(
   Object? json, {
-  required Map<String, String> localizedLabels,
-  required String locale,
+  required Map<String, Map<String, String>> localizedLabels,
 }) {
   if (json is! List) return const [];
   return json
@@ -3336,7 +3533,7 @@ List<TrackStateConfigEntry> _configEntriesFromJson(
             ? _canonicalConfigId(entry['name']?.toString())
             : rawId;
         final fallbackName = entry['name']?.toString() ?? id;
-        final localizedLabel = localizedLabels[id];
+        final entryLocalizedLabels = localizedLabels[id] ?? const {};
         return TrackStateConfigEntry(
           id: id,
           name: fallbackName,
@@ -3347,9 +3544,7 @@ List<TrackStateConfigEntry> _configEntriesFromJson(
           icon: entry['icon']?.toString(),
           workflowId:
               entry['workflow']?.toString() ?? entry['workflowId']?.toString(),
-          localizedLabels: localizedLabel == null
-              ? const {}
-              : {locale: localizedLabel},
+          localizedLabels: entryLocalizedLabels,
         );
       })
       .toList(growable: false);

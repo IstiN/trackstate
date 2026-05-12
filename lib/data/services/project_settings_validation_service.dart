@@ -27,6 +27,10 @@ class ProjectSettingsValidationService {
     'storyPoints': 'number',
   };
 
+  static final RegExp _localeCodePattern = RegExp(
+    r'^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2})?$',
+  );
+
   ProjectSettingsCatalog normalizeForPersistence(
     ProjectSettingsCatalog settings,
   ) {
@@ -49,7 +53,28 @@ class ProjectSettingsValidationService {
         workflows.any((workflow) => workflow.id == legacyDefaultWorkflowId)
         ? legacyDefaultWorkflowId
         : workflows.first.id;
+    final normalizedDefaultLocale = settings.defaultLocale.trim().isEmpty
+        ? 'en'
+        : settings.defaultLocale.trim();
+    final supportedLocales = <String>[
+      normalizedDefaultLocale,
+      for (final locale in settings.supportedLocales)
+        if (locale.trim().isNotEmpty &&
+            locale.trim() != normalizedDefaultLocale)
+          locale.trim(),
+    ];
     return settings.copyWith(
+      defaultLocale: normalizedDefaultLocale,
+      supportedLocales: supportedLocales,
+      statusDefinitions: [
+        for (final status in settings.statusDefinitions)
+          status.copyWith(
+            localizedLabels: _normalizedLocalizedLabels(
+              status.localizedLabels,
+              supportedLocales: supportedLocales,
+            ),
+          ),
+      ],
       workflowDefinitions: workflows,
       issueTypeDefinitions: [
         for (final issueType in settings.issueTypeDefinitions)
@@ -58,12 +83,62 @@ class ProjectSettingsValidationService {
               issueType.workflowId,
               fallbackWorkflowId: fallbackWorkflowId,
             ),
+            localizedLabels: _normalizedLocalizedLabels(
+              issueType.localizedLabels,
+              supportedLocales: supportedLocales,
+            ),
+          ),
+      ],
+      fieldDefinitions: [
+        for (final field in settings.fieldDefinitions)
+          field.copyWith(
+            localizedLabels: _normalizedLocalizedLabels(
+              field.localizedLabels,
+              supportedLocales: supportedLocales,
+            ),
+          ),
+      ],
+      priorityDefinitions: [
+        for (final priority in settings.priorityDefinitions)
+          priority.copyWith(
+            localizedLabels: _normalizedLocalizedLabels(
+              priority.localizedLabels,
+              supportedLocales: supportedLocales,
+            ),
+          ),
+      ],
+      versionDefinitions: [
+        for (final version in settings.versionDefinitions)
+          version.copyWith(
+            localizedLabels: _normalizedLocalizedLabels(
+              version.localizedLabels,
+              supportedLocales: supportedLocales,
+            ),
+          ),
+      ],
+      componentDefinitions: [
+        for (final component in settings.componentDefinitions)
+          component.copyWith(
+            localizedLabels: _normalizedLocalizedLabels(
+              component.localizedLabels,
+              supportedLocales: supportedLocales,
+            ),
+          ),
+      ],
+      resolutionDefinitions: [
+        for (final resolution in settings.resolutionDefinitions)
+          resolution.copyWith(
+            localizedLabels: _normalizedLocalizedLabels(
+              resolution.localizedLabels,
+              supportedLocales: supportedLocales,
+            ),
           ),
       ],
     );
   }
 
   void validate(ProjectSettingsCatalog settings) {
+    _validateLocales(settings);
     _validateStatuses(settings.statusDefinitions);
     _validateWorkflows(
       statuses: settings.statusDefinitions,
@@ -77,6 +152,104 @@ class ProjectSettingsValidationService {
       issueTypes: settings.issueTypeDefinitions,
       fields: settings.fieldDefinitions,
     );
+    _validateGenericCatalog(
+      entries: settings.priorityDefinitions,
+      invalidEntryMessage: 'Priorities must include both an ID and a name.',
+      duplicateEntryMessage: 'Priority ID "%s" is defined more than once.',
+    );
+    _validateGenericCatalog(
+      entries: settings.componentDefinitions,
+      invalidEntryMessage: 'Components must include both an ID and a name.',
+      duplicateEntryMessage: 'Component ID "%s" is defined more than once.',
+    );
+    _validateGenericCatalog(
+      entries: settings.versionDefinitions,
+      invalidEntryMessage: 'Versions must include both an ID and a name.',
+      duplicateEntryMessage: 'Version ID "%s" is defined more than once.',
+    );
+    _validateGenericCatalog(
+      entries: settings.resolutionDefinitions,
+      invalidEntryMessage: 'Resolutions must include both an ID and a name.',
+      duplicateEntryMessage: 'Resolution ID "%s" is defined more than once.',
+    );
+  }
+
+  Map<String, String> _normalizedLocalizedLabels(
+    Map<String, String> localizedLabels, {
+    required List<String> supportedLocales,
+  }) {
+    final normalized = <String, String>{};
+    for (final entry in localizedLabels.entries) {
+      final locale = entry.key.trim();
+      final value = entry.value.trim();
+      if (locale.isEmpty ||
+          value.isEmpty ||
+          !supportedLocales.contains(locale) ||
+          normalized.containsKey(locale)) {
+        continue;
+      }
+      normalized[locale] = value;
+    }
+    return normalized;
+  }
+
+  void _validateLocales(ProjectSettingsCatalog settings) {
+    final defaultLocale = settings.defaultLocale.trim();
+    if (defaultLocale.isEmpty) {
+      throw const TrackStateProviderException('A default locale is required.');
+    }
+    if (!_localeCodePattern.hasMatch(defaultLocale)) {
+      throw TrackStateProviderException(
+        'Locale "$defaultLocale" is not a supported locale code.',
+      );
+    }
+    final locales = settings.effectiveSupportedLocales;
+    if (locales.isEmpty) {
+      throw const TrackStateProviderException(
+        'At least one supported locale is required.',
+      );
+    }
+    if (!locales.contains(defaultLocale)) {
+      throw TrackStateProviderException(
+        'The default locale "$defaultLocale" must remain in the supported locale list.',
+      );
+    }
+    final seen = <String>{};
+    for (final locale in locales) {
+      if (!_localeCodePattern.hasMatch(locale)) {
+        throw TrackStateProviderException(
+          'Locale "$locale" is not a supported locale code.',
+        );
+      }
+      if (!seen.add(locale)) {
+        throw TrackStateProviderException(
+          'Locale "$locale" is defined more than once.',
+        );
+      }
+    }
+  }
+
+  void _validateGenericCatalog({
+    required List<TrackStateConfigEntry> entries,
+    required String invalidEntryMessage,
+    required String duplicateEntryMessage,
+  }) {
+    if (entries.isEmpty) {
+      return;
+    }
+    final ids = <String>{};
+    for (final entry in entries) {
+      final id = entry.id.trim();
+      final name = entry.name.trim();
+      if (id.isEmpty || name.isEmpty) {
+        throw TrackStateProviderException(invalidEntryMessage);
+      }
+      if (!ids.add(id)) {
+        throw TrackStateProviderException(
+          duplicateEntryMessage.replaceFirst('%s', id),
+        );
+      }
+    }
   }
 
   String _normalizedWorkflowId(
