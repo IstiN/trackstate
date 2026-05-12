@@ -103,6 +103,80 @@ void main() {
               'Precondition failed for $scenario: the initial search completed even though mandatory bootstrap failed before search hydration should start.',
             );
           }
+          if (viewModel.hasPublishedBootstrapSnapshot) {
+            failures.add(
+              'Step 3 failed for $scenario: mandatory bootstrap should remain blocked before publishing a bootstrap snapshot, but hasPublishedBootstrapSnapshot was true.',
+            );
+          }
+          if (viewModel.showsInitialBootstrapPlaceholders) {
+            failures.add(
+              'Step 3 failed for $scenario: blocking mandatory bootstrap should not expose partial placeholder content, but showsInitialBootstrapPlaceholders was true.',
+            );
+          }
+          if (viewModel.shouldUseBootstrapSearchFallback) {
+            failures.add(
+              'Step 3 failed for $scenario: blocking mandatory bootstrap should not publish fallback bootstrap search data, but shouldUseBootstrapSearchFallback was true.',
+            );
+          }
+          if (!viewModel.supportsGitHubAuth) {
+            failures.add(
+              'Expected Result failed for $scenario: the hosted recovery model did not advertise GitHub auth support, so the Connect GitHub recovery action was unavailable on the model surface.',
+            );
+          }
+          if (viewModel.repositoryAccessState !=
+              RepositoryAccessState.connectGitHub) {
+            failures.add(
+              'Expected Result failed for $scenario: repositoryAccessState was ${viewModel.repositoryAccessState} instead of RepositoryAccessState.connectGitHub while startup recovery was active.',
+            );
+          }
+
+          final blockingDomainStates = {
+            for (final domain in TrackerDataDomain.values)
+              domain: viewModel.loadStateForDomain(domain),
+          };
+          final blockingSectionStates = {
+            for (final section in TrackerSection.values)
+              section: viewModel.loadStateForSection(section),
+          };
+          for (final entry in blockingDomainStates.entries) {
+            if (entry.value != TrackerLoadState.loading) {
+              failures.add(
+                'Step 3 failed for $scenario: mandatory bootstrap recovery should keep ${entry.key} in TrackerLoadState.loading, but observed ${entry.value}. '
+                'Observed readiness: ${_formatReadiness(blockingDomainStates, blockingSectionStates)}.',
+              );
+            }
+          }
+          for (final entry in blockingSectionStates.entries) {
+            if (entry.value != TrackerLoadState.loading) {
+              failures.add(
+                'Step 3 failed for $scenario: mandatory bootstrap recovery should keep ${entry.key} in TrackerLoadState.loading, but observed ${entry.value}. '
+                'Observed readiness: ${_formatReadiness(blockingDomainStates, blockingSectionStates)}.',
+              );
+            }
+          }
+
+          await viewModel.retryStartupRecovery();
+
+          if (metadataFixture.requestCount(
+                metadataFixture.failingRequestPath,
+              ) !=
+              2) {
+            failures.add(
+              'Expected Result failed for $scenario: invoking the model-level Retry recovery action did not re-run the blocked bootstrap request exactly once. '
+              'Observed requests: ${_formatSnapshot(metadataFixture.requestedPaths)}.',
+            );
+          }
+          if (viewModel.startupRecovery != null) {
+            failures.add(
+              'Expected Result failed for $scenario: retryStartupRecovery() should clear startupRecovery after the second bootstrap attempt succeeded, but recovery remained ${viewModel.startupRecovery}.',
+            );
+          }
+          if (viewModel.snapshot == null ||
+              !viewModel.hasPublishedBootstrapSnapshot) {
+            failures.add(
+              'Expected Result failed for $scenario: retryStartupRecovery() did not publish a bootstrap snapshot after the hosted rate-limit fixture recovered.',
+            );
+          }
 
           final uiFixture =
               await Ts448MandatoryBootstrapRateLimitFixture.create(
@@ -236,4 +310,17 @@ String _formatSnapshot(List<String> values, {int limit = 24}) {
     return '<none>';
   }
   return snapshot.join(' | ');
+}
+
+String _formatReadiness(
+  Map<TrackerDataDomain, TrackerLoadState> domainStates,
+  Map<TrackerSection, TrackerLoadState> sectionStates,
+) {
+  final domains = domainStates.entries
+      .map((entry) => '${entry.key.name}=${entry.value.name}')
+      .join(', ');
+  final sections = sectionStates.entries
+      .map((entry) => '${entry.key.name}=${entry.value.name}')
+      .join(', ');
+  return 'domains[$domains]; sections[$sections]';
 }
