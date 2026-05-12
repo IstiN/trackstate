@@ -41,6 +41,8 @@ abstract interface class TrackStateAppComponent {
 
   Future<String?> readJqlSearchFieldValue();
 
+  Future<bool> isBlockingSearchLoaderVisible();
+
   Future<void> expectIssueSearchResultVisible(String key, String summary);
 
   void expectIssueSearchResultAbsent(String key, String summary);
@@ -155,6 +157,11 @@ abstract interface class TrackStateAppComponent {
   Future<String?> readReadOnlyFieldValue(String label);
 
   Future<void> enterLabeledTextField(String label, {required String text});
+
+  Future<void> enterLabeledTextFieldWithoutSettling(
+    String label, {
+    required String text,
+  });
 
   Future<String?> readLabeledTextFieldValue(String label);
 
