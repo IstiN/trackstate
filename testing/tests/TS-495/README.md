@@ -7,7 +7,7 @@ connected provider session supports release-backed browser uploads.
 ## Install dependencies
 
 ```bash
-python -m pip install playwright pillow
+python -m pip install playwright
 python -m playwright install chromium
 ```
 

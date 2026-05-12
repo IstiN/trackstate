@@ -4,12 +4,11 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image
-
 from testing.components.pages.live_project_settings_page import (
     RepositoryAccessCalloutObservation,
 )
 from testing.core.utils.color_contrast import RgbColor, color_distance, rgb_to_hex
+from testing.core.utils.png_image import RgbImage
 
 
 @dataclass(frozen=True)
@@ -29,7 +28,7 @@ class LiveAccessCalloutColorProbe:
         screenshot_path: Path,
         callout: RepositoryAccessCalloutObservation,
     ) -> AccessCalloutColorObservation:
-        image = Image.open(screenshot_path).convert("RGB")
+        image = RgbImage.open(screenshot_path)
         crop_box = self._callout_box(image, callout)
         background_box = self._inset_box(crop_box, horizontal=24, vertical=20)
         background = self._dominant_color(image.crop(background_box))
@@ -45,7 +44,7 @@ class LiveAccessCalloutColorProbe:
 
     @staticmethod
     def _callout_box(
-        image: Image.Image,
+        image: RgbImage,
         callout: RepositoryAccessCalloutObservation,
     ) -> tuple[int, int, int, int]:
         left = max(int(callout.left), 0)
@@ -70,7 +69,7 @@ class LiveAccessCalloutColorProbe:
 
     def _edge_color(
         self,
-        image: Image.Image,
+        image: RgbImage,
         crop_box: tuple[int, int, int, int],
         *,
         background: RgbColor,
@@ -93,7 +92,7 @@ class LiveAccessCalloutColorProbe:
         return self._dominant_color_from_pixels(edge_pixels)
 
     @staticmethod
-    def _dominant_color(image: Image.Image) -> RgbColor:
+    def _dominant_color(image: RgbImage) -> RgbColor:
         return LiveAccessCalloutColorProbe._dominant_color_from_pixels(image.getdata())
 
     @staticmethod

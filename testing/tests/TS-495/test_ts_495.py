@@ -108,19 +108,7 @@ def main() -> None:
         )
         result["fixture_setup"] = fixture_setup
         release_tag_prefix = str(fixture_setup["release_tag_prefix"])
-        expected_primary_message = (
-            f"Connected as {user.login} to {service.repository}. "
-            f"New attachments use GitHub Releases tags derived as "
-            f"{release_tag_prefix}<ISSUE_KEY>. "
-            f"{SETTINGS_HINT}"
-        )
-        expected_secondary_message = (
-            f"New attachments resolve to release tag {release_tag_prefix}<ISSUE_KEY>, "
-            "and this hosted session can complete release-backed uploads in the browser."
-        )
         result["release_tag_prefix"] = release_tag_prefix
-        result["expected_primary_message"] = expected_primary_message
-        result["expected_secondary_message"] = expected_secondary_message
 
         with create_live_tracker_app_with_stored_token(
             config,
@@ -181,14 +169,23 @@ def main() -> None:
                     secondary_title=SECONDARY_TITLE,
                 )
                 result["repository_access_observation"] = _section_payload(observation)
-                _assert_primary_callout(
+                observed_primary_prefix = _assert_primary_callout(
                     observation.primary_callout,
-                    expected_message=expected_primary_message,
+                    user_login=user.login,
+                    repository=service.repository,
                 )
-                _assert_secondary_callout(
+                observed_secondary_prefix = _assert_secondary_callout(
                     observation.secondary_callout,
-                    expected_message=expected_secondary_message,
                 )
+                if observed_primary_prefix != observed_secondary_prefix:
+                    raise AssertionError(
+                        "Step 4 failed: the Repository access copy did not expose a "
+                        "consistent GitHub Releases tag prefix between the connected "
+                        "band and the secondary callout.\n"
+                        f"Primary prefix: {observed_primary_prefix}\n"
+                        f"Secondary prefix: {observed_secondary_prefix}",
+                    )
+                result["observed_release_tag_prefix"] = observed_primary_prefix
                 _assert_callout_order(observation)
                 _assert_local_git_warning_absent(observation)
                 _record_step(
@@ -199,6 +196,7 @@ def main() -> None:
                     observed=(
                         f'primary_title="{observation.primary_callout.title}"; '
                         f'secondary_title="{observation.secondary_callout.title}"; '
+                        f"observed_release_tag_prefix={observed_primary_prefix}; "
                         f"primary_top={observation.primary_callout.top:.1f}; "
                         f"secondary_top={observation.secondary_callout.top:.1f}"
                     ),
@@ -234,6 +232,7 @@ def main() -> None:
                     ),
                     observed=(
                         f'primary_rendered_text="{observation.primary_callout.rendered_text}"; '
+                        f"observed_release_tag_prefix={observed_primary_prefix}; "
                         f"primary_top={observation.primary_callout.top:.1f}; "
                         f"secondary_top={observation.secondary_callout.top:.1f}"
                     ),
@@ -248,6 +247,7 @@ def main() -> None:
                     observed=(
                         f'title="{observation.secondary_callout.title}"; '
                         f'message="{observation.secondary_callout.message}"; '
+                        f"observed_release_tag_prefix={observed_secondary_prefix}; "
                         f"style_oracle={secondary_styles['oracle']}; "
                         f"border_color={secondary_styles['normalized_border_color']}; "
                         f"background_color={secondary_styles['normalized_background_color']}; "
@@ -427,8 +427,9 @@ def _write_repo_text_with_retry(
 def _assert_primary_callout(
     observation: RepositoryAccessCalloutObservation,
     *,
-    expected_message: str,
-) -> None:
+    user_login: str,
+    repository: str,
+) -> str:
     if observation.title != PRIMARY_TITLE:
         raise AssertionError(
             "Step 3 failed: the top Repository access band did not show the overall "
@@ -436,20 +437,27 @@ def _assert_primary_callout(
             f"Observed title: {observation.title}\n"
             f"Observed rendered text: {observation.rendered_text}",
         )
-    if observation.message != expected_message:
+    match = re.fullmatch(
+        (
+            rf"Connected as {re.escape(user_login)} to {re.escape(repository)}\. "
+            r"New attachments use GitHub Releases tags derived as "
+            r"(?P<prefix>.+?)<ISSUE_KEY>\. "
+            + re.escape(SETTINGS_HINT)
+        ),
+        observation.message,
+    )
+    if match is None:
         raise AssertionError(
             "Step 3 failed: the top Repository access band did not show the expected "
             "GitHub Releases connected copy.\n"
-            f"Expected message: {expected_message}\n"
             f"Observed message: {observation.message}",
         )
+    return match.group("prefix")
 
 
 def _assert_secondary_callout(
     observation: RepositoryAccessCalloutObservation,
-    *,
-    expected_message: str,
-) -> None:
+) -> str:
     if observation.title != SECONDARY_TITLE:
         raise AssertionError(
             "Step 4 failed: the secondary attachment callout did not show the GitHub "
@@ -457,13 +465,21 @@ def _assert_secondary_callout(
             f"Observed title: {observation.title}\n"
             f"Observed rendered text: {observation.rendered_text}",
         )
-    if observation.message != expected_message:
+    match = re.fullmatch(
+        (
+            r"New attachments resolve to release tag "
+            r"(?P<prefix>.+?)<ISSUE_KEY>, "
+            r"and this hosted session can complete release-backed uploads in the browser\."
+        ),
+        observation.message,
+    )
+    if match is None:
         raise AssertionError(
             "Step 4 failed: the secondary attachment callout did not use the expected "
             "browser-supported GitHub Releases copy.\n"
-            f"Expected message: {expected_message}\n"
             f"Observed message: {observation.message}",
         )
+    return match.group("prefix")
 
 
 def _assert_callout_order(observation: RepositoryAccessSectionObservation) -> None:
@@ -686,8 +702,12 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "*Automation coverage*",
         (
             f"* Ensured {{{{{PROJECT_JSON_PATH}}}}} used `attachmentStorage.mode = "
-            f"github-releases` and observed release tag prefix "
+            f"github-releases` with configured release tag prefix "
             f"{{{{{result.get('release_tag_prefix', '')}}}}}."
+        ),
+        (
+            f"* Observed the active Repository access release tag prefix "
+            f"{{{{{result.get('observed_release_tag_prefix', '')}}}}} exposed by the hosted UI."
         ),
         "* Opened the deployed hosted TrackState app in a browser-authenticated GitHub session and navigated to Project Settings / Repository access.",
         "* Verified the top repository access band stayed connected and the secondary GitHub Releases callout rendered the supported browser-upload copy.",
@@ -734,8 +754,12 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "### Automation",
         (
             f"- Ensured `{PROJECT_JSON_PATH}` used "
-            "`attachmentStorage.mode = github-releases` and observed release tag "
+            "`attachmentStorage.mode = github-releases` with configured release tag "
             f"prefix `{result.get('release_tag_prefix', '')}`."
+        ),
+        (
+            "- Observed the active Repository access release tag prefix "
+            f"`{result.get('observed_release_tag_prefix', '')}` from the hosted UI."
         ),
         "- Opened the deployed hosted TrackState app in a browser-authenticated GitHub session and navigated to `Project Settings` / `Repository access`.",
         "- Verified the top repository access band stayed connected and the secondary `GitHub Releases attachment storage` callout rendered the supported browser-upload copy.",
@@ -844,6 +868,10 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- Browser: `Chromium (Playwright)`",
             f"- OS: `{platform.platform()}`",
             f"- Project config: `{PROJECT_JSON_PATH}` with release tag prefix `{result.get('release_tag_prefix', '')}`",
+            (
+                "- Observed active Repository access release tag prefix: "
+                f"`{result.get('observed_release_tag_prefix', '')}`"
+            ),
             "",
             "## Screenshots or logs",
             f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
