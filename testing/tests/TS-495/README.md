@@ -27,8 +27,8 @@ python testing/tests/TS-495/test_ts_495.py
 
 ## Scenario notes
 
-- The test temporarily updates `DEMO/project.json` so attachment storage uses
-  `github-releases` with a ticket-specific release tag prefix.
+- The test ensures `DEMO/project.json` uses `github-releases` attachment
+  storage and uses the active release tag prefix that the hosted app exposes.
 - It opens the deployed hosted TrackState app with a stored token session and
   navigates to `Project Settings`.
 - A passing result means the top Repository access band stays connected, the

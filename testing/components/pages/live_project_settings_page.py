@@ -238,10 +238,8 @@ class LiveProjectSettingsPage:
                   && style.visibility !== 'hidden'
                   && style.display !== 'none';
               };
-              const findCallout = (title) => {
-                const semanticsCandidates = Array.from(
-                  document.querySelectorAll('flt-semantics[aria-label]'),
-                )
+              const collectSemantics = (root) =>
+                Array.from(root.querySelectorAll('flt-semantics[aria-label]'))
                   .filter((candidate) => isVisible(candidate))
                   .map((candidate) => {
                     const rect = candidate.getBoundingClientRect();
@@ -254,11 +252,44 @@ class LiveProjectSettingsPage:
                       label,
                       normalizedLabel,
                     };
+                  });
+              const matchesCallout = (candidate, title) =>
+                candidate.normalizedLabel.includes(title)
+                && candidate.normalizedLabel.length > title.length + 20;
+              const findRepositoryAccessSection = () => {
+                const sectionCandidates = Array.from(document.querySelectorAll('flt-semantics'))
+                  .filter((candidate) => isVisible(candidate))
+                  .map((candidate) => {
+                    const rect = candidate.getBoundingClientRect();
+                    const label = candidate.getAttribute('aria-label') ?? '';
+                    const text = normalize(candidate.innerText ?? '');
+                    return {
+                      element: candidate,
+                      rect,
+                      area: rect.width * rect.height,
+                      normalizedLabel: normalize(label),
+                      normalizedText: text,
+                    };
                   })
                   .filter((candidate) =>
-                    candidate.normalizedLabel.includes(title)
-                    && candidate.normalizedLabel.length > title.length + 20,
+                    candidate.normalizedText.includes('Connect token')
+                    && candidate.normalizedText.includes('Local Git'),
                   )
+                  .sort((left, right) => left.area - right.area);
+                return sectionCandidates.find((candidate) => {
+                  const semantics = collectSemantics(candidate.element);
+                  return semantics.some((entry) => matchesCallout(entry, primaryTitle))
+                    && semantics.some((entry) => matchesCallout(entry, secondaryTitle));
+                }) ?? null;
+              };
+              const section = findRepositoryAccessSection();
+              if (!section) {
+                return null;
+              }
+              const sectionSemantics = collectSemantics(section.element);
+              const findCallout = (title) => {
+                const semanticsCandidates = sectionSemantics
+                  .filter((candidate) => matchesCallout(candidate, title))
                   .sort((left, right) => left.area - right.area);
                 const semantics = semanticsCandidates[0];
                 if (!semantics) {
@@ -321,8 +352,11 @@ class LiveProjectSettingsPage:
 
               return {
                 bodyText: document.body?.innerText ?? '',
-                sectionText: [primaryCallout.semanticLabel, secondaryCallout.semanticLabel]
-                  .filter((value) => value.length > 0)
+                sectionText: [
+                  section.normalizedLabel,
+                  ...sectionSemantics.map((value) => value.normalizedLabel),
+                ]
+                  .filter((value, index, values) => value.length > 0 && values.indexOf(value) === index)
                   .join('\\n'),
                 primaryCallout,
                 secondaryCallout,

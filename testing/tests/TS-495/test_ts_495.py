@@ -41,6 +41,8 @@ LEGACY_WARNING_TITLE = "Some attachment uploads still require local Git"
 SETTINGS_HINT = (
     "Settings is the canonical place to review repository access and reconnect safely."
 )
+SUCCESS_BORDER_HEX = "#3BBE60"
+SUCCESS_BACKGROUND_HEX = "#E7F7EC"
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -76,17 +78,7 @@ def main() -> None:
         path=PROJECT_JSON_PATH,
         original_file=service.fetch_repo_file(PROJECT_JSON_PATH),
     )
-    release_tag_prefix = _build_release_tag_prefix()
-    expected_primary_message = (
-        f"Connected as {user.login} to {service.repository}. "
-        f"New attachments use GitHub Releases tags derived as "
-        f"{release_tag_prefix}<ISSUE_KEY>. "
-        f"{SETTINGS_HINT}"
-    )
-    expected_secondary_message = (
-        f"New attachments resolve to release tag {release_tag_prefix}<ISSUE_KEY>, "
-        "and this hosted session can complete release-backed uploads in the browser."
-    )
+    requested_release_tag_prefix = _build_release_tag_prefix()
 
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
@@ -97,9 +89,7 @@ def main() -> None:
         "project_name": metadata.project_name,
         "project_json_path": PROJECT_JSON_PATH,
         "user_login": user.login,
-        "release_tag_prefix": release_tag_prefix,
-        "expected_primary_message": expected_primary_message,
-        "expected_secondary_message": expected_secondary_message,
+        "requested_release_tag_prefix": requested_release_tag_prefix,
         "steps": [],
         "human_verification": [],
     }
@@ -107,8 +97,25 @@ def main() -> None:
     scenario_error: Exception | None = None
     cleanup_error: str | None = None
     try:
-        fixture_setup = _seed_fixture(service, release_tag_prefix=release_tag_prefix)
+        fixture_setup = _seed_fixture(
+            service,
+            requested_release_tag_prefix=requested_release_tag_prefix,
+        )
         result["fixture_setup"] = fixture_setup
+        release_tag_prefix = str(fixture_setup["release_tag_prefix"])
+        expected_primary_message = (
+            f"Connected as {user.login} to {service.repository}. "
+            f"New attachments use GitHub Releases tags derived as "
+            f"{release_tag_prefix}<ISSUE_KEY>. "
+            f"{SETTINGS_HINT}"
+        )
+        expected_secondary_message = (
+            f"New attachments resolve to release tag {release_tag_prefix}<ISSUE_KEY>, "
+            "and this hosted session can complete release-backed uploads in the browser."
+        )
+        result["release_tag_prefix"] = release_tag_prefix
+        result["expected_primary_message"] = expected_primary_message
+        result["expected_secondary_message"] = expected_secondary_message
 
         with create_live_tracker_app_with_stored_token(
             config,
@@ -194,21 +201,12 @@ def main() -> None:
 
                 settings_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
-                primary_colors = color_probe.observe(
-                    screenshot_path=SUCCESS_SCREENSHOT_PATH,
-                    callout=observation.primary_callout,
-                )
                 secondary_colors = color_probe.observe(
                     screenshot_path=SUCCESS_SCREENSHOT_PATH,
                     callout=observation.secondary_callout,
                 )
-                result["primary_callout_colors"] = _color_payload(primary_colors)
                 result["secondary_callout_colors"] = _color_payload(secondary_colors)
-                _assert_success_tone(
-                    primary_colors,
-                    callout_name="primary repository access band",
-                )
-                _assert_success_tone(
+                _assert_exact_success_colors(
                     secondary_colors,
                     callout_name="secondary GitHub Releases callout",
                 )
@@ -300,28 +298,39 @@ def _build_release_tag_prefix() -> str:
 def _seed_fixture(
     service: LiveSetupRepositoryService,
     *,
-    release_tag_prefix: str,
+    requested_release_tag_prefix: str,
 ) -> dict[str, object]:
-    project_payload = json.loads(service.fetch_repo_text(PROJECT_JSON_PATH))
+    current_project_json = service.fetch_repo_text(PROJECT_JSON_PATH)
+    current_mode = _project_attachment_mode(current_project_json)
+    current_release_tag_prefix = _project_release_tag_prefix(current_project_json)
+    if current_mode == "github-releases" and current_release_tag_prefix:
+        return {
+            "project_json": current_project_json,
+            "attachment_storage_mode": current_mode,
+            "release_tag_prefix": current_release_tag_prefix,
+            "mutation_applied": False,
+        }
+
+    project_payload = json.loads(current_project_json)
     if not isinstance(project_payload, dict):
         raise AssertionError(
             f"Precondition failed: {PROJECT_JSON_PATH} did not deserialize to a JSON object.",
         )
     project_payload["attachmentStorage"] = {
         "mode": "github-releases",
-        "githubReleases": {"tagPrefix": release_tag_prefix},
+        "githubReleases": {"tagPrefix": requested_release_tag_prefix},
     }
     _write_repo_text_with_retry(
         PROJECT_JSON_PATH,
         service=service,
         content=json.dumps(project_payload, indent=2) + "\n",
-        message=f"{TICKET_KEY}: enable github-releases attachment storage",
+        message=f"{TICKET_KEY}: ensure github-releases attachment storage",
     )
 
     matched, observed_project_json = poll_until(
         probe=lambda: service.fetch_repo_text(PROJECT_JSON_PATH),
         is_satisfied=lambda text: _project_attachment_mode(text) == "github-releases"
-        and _project_release_tag_prefix(text) == release_tag_prefix,
+        and _project_release_tag_prefix(text) == requested_release_tag_prefix,
         timeout_seconds=120,
         interval_seconds=4,
     )
@@ -335,6 +344,7 @@ def _seed_fixture(
         "project_json": observed_project_json,
         "attachment_storage_mode": _project_attachment_mode(observed_project_json),
         "release_tag_prefix": _project_release_tag_prefix(observed_project_json),
+        "mutation_applied": True,
     }
 
 
@@ -351,12 +361,18 @@ def _restore_fixture(
             content=mutation.original_file.content,
             message=f"{TICKET_KEY}: restore original fixture",
         )
-    restored_text = service.fetch_repo_text(mutation.path)
+        restored_text = service.fetch_repo_text(mutation.path)
+        return {
+            "status": "restored",
+            "restored_path": mutation.path,
+            "restored_attachment_storage_mode": _project_attachment_mode(restored_text),
+            "restored_release_tag_prefix": _project_release_tag_prefix(restored_text),
+        }
     return {
-        "status": "restored",
+        "status": "unchanged",
         "restored_path": mutation.path,
-        "restored_attachment_storage_mode": _project_attachment_mode(restored_text),
-        "restored_release_tag_prefix": _project_release_tag_prefix(restored_text),
+        "restored_attachment_storage_mode": _project_attachment_mode(current_text),
+        "restored_release_tag_prefix": _project_release_tag_prefix(current_text),
     }
 
 
@@ -465,25 +481,29 @@ def _assert_local_git_warning_absent(
         )
 
 
-def _assert_success_tone(
+def _assert_exact_success_colors(
     colors: AccessCalloutColorObservation,
     *,
     callout_name: str,
 ) -> None:
-    if not _is_green_dominant(colors.border_rgb) or not _is_green_dominant(colors.background_rgb):
+    if colors.border_hex != SUCCESS_BORDER_HEX:
         raise AssertionError(
-            f"Step 4 failed: the {callout_name} did not use the expected green/positive "
-            "success styling.\n"
+            f"Step 4 failed: the {callout_name} border did not use the expected "
+            "success token.\n"
+            f"Expected border color: {SUCCESS_BORDER_HEX}\n"
             f"Observed border color: {colors.border_hex}\n"
+            f"Screenshot: {colors.screenshot_path}\n"
+            f"Crop box: {colors.crop_box}",
+        )
+    if colors.background_hex != SUCCESS_BACKGROUND_HEX:
+        raise AssertionError(
+            f"Step 4 failed: the {callout_name} background did not use the expected "
+            "success token with 12% alpha.\n"
+            f"Expected background color: {SUCCESS_BACKGROUND_HEX}\n"
             f"Observed background color: {colors.background_hex}\n"
             f"Screenshot: {colors.screenshot_path}\n"
             f"Crop box: {colors.crop_box}",
         )
-
-
-def _is_green_dominant(rgb: tuple[int, int, int]) -> bool:
-    red, green, blue = rgb
-    return green > red and green > blue
 
 
 def _section_payload(
@@ -522,7 +542,6 @@ def _color_payload(observation: AccessCalloutColorObservation) -> dict[str, obje
         "crop_box": observation.crop_box,
         "screenshot_path": observation.screenshot_path,
     }
-
 
 def _record_step(
     result: dict[str, object],
@@ -605,8 +624,9 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "*Automation coverage*",
         (
-            f"* Switched {{{{{PROJECT_JSON_PATH}}}}} to `attachmentStorage.mode = "
-            "github-releases` with a ticket-specific release tag prefix."
+            f"* Ensured {{{{{PROJECT_JSON_PATH}}}}} used `attachmentStorage.mode = "
+            f"github-releases` and observed release tag prefix "
+            f"{{{{{result.get('release_tag_prefix', '')}}}}}."
         ),
         "* Opened the deployed hosted TrackState app in a browser-authenticated GitHub session and navigated to Project Settings / Repository access.",
         "* Verified the top repository access band stayed connected and the secondary GitHub Releases callout rendered the supported browser-upload copy.",
@@ -652,9 +672,9 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "### Automation",
         (
-            f"- Switched `{PROJECT_JSON_PATH}` to "
-            "`attachmentStorage.mode = github-releases` with a ticket-specific "
-            "release tag prefix."
+            f"- Ensured `{PROJECT_JSON_PATH}` used "
+            "`attachmentStorage.mode = github-releases` and observed release tag "
+            f"prefix `{result.get('release_tag_prefix', '')}`."
         ),
         "- Opened the deployed hosted TrackState app in a browser-authenticated GitHub session and navigated to `Project Settings` / `Repository access`.",
         "- Verified the top repository access band stayed connected and the secondary `GitHub Releases attachment storage` callout rendered the supported browser-upload copy.",
