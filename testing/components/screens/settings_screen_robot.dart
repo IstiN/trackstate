@@ -136,6 +136,14 @@ class SettingsScreenRobot {
 
   Future<void> openLocalesTab() => selectTab('Locales');
 
+  Future<void> openStatusesTab() => selectTab('Statuses');
+
+  Future<void> openProjectStatuses() async {
+    await openSettings();
+    expectVisibleSettingsContent();
+    await openStatusesTab();
+  }
+
   Finder localeChip(String label) => find.widgetWithText(ChoiceChip, label);
 
   Future<void> selectLocaleChip(String label) async {
@@ -318,6 +326,51 @@ class SettingsScreenRobot {
     await tester.ensureVisible(button);
     await tester.tap(button, warnIfMissed: false);
     await tester.pumpAndSettle();
+  }
+
+  Future<void> enterTextField(String label, String text) async {
+    final field = _labeledTextField(label);
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(field.first, text);
+    await tester.pumpAndSettle();
+  }
+
+  String textFieldValue(String label) {
+    final field = _labeledTextField(label);
+    if (field.evaluate().isEmpty) {
+      throw StateError('Expected a visible editable control labeled "$label".');
+    }
+    final widget = tester.widget(field.first);
+    return switch (widget) {
+      EditableText editableText => editableText.controller.text,
+      TextField textField => textField.controller?.text ?? '',
+      _ => throw StateError(
+        'Expected the "$label" control to expose an editable text controller.',
+      ),
+    };
+  }
+
+  bool isVisibleText(String text) =>
+      find.text(text, findRichText: true).evaluate().isNotEmpty;
+
+  bool statusSummaryVisible({
+    required String name,
+    required String id,
+    required String category,
+  }) {
+    final combined = visibleTexts().join(' | ');
+    return combined.contains(name) &&
+        combined.contains('ID: $id') &&
+        combined.contains('Category: $category');
+  }
+
+  void expectStatusEditorVisible(String title) {
+    expect(editorTitle(title), findsWidgets);
+    expect(find.text('ID'), findsOneWidget);
+    expect(find.text('Name'), findsOneWidget);
+    expect(find.text('Category'), findsOneWidget);
   }
 
   Future<bool> isTextFieldVisible(String label) async {
@@ -670,7 +723,10 @@ class SettingsScreenRobot {
         (candidate) => candidate == element,
         description: 'button within $scope',
       );
-      final texts = find.descendant(of: buttonFinder, matching: find.byType(Text));
+      final texts = find.descendant(
+        of: buttonFinder,
+        matching: find.byType(Text),
+      );
       String? label;
       for (final textElement in texts.evaluate()) {
         final widget = textElement.widget;
@@ -739,7 +795,10 @@ class SettingsScreenRobot {
         return widget;
       }
     }
-    final containers = find.descendant(of: scope, matching: find.byType(Container));
+    final containers = find.descendant(
+      of: scope,
+      matching: find.byType(Container),
+    );
     for (final element in containers.evaluate()) {
       final widget = element.widget;
       if (widget is Container && widget.decoration is BoxDecoration) {
