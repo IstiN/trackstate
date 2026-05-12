@@ -28,6 +28,13 @@ class TabChipObservation:
     height: float
 
 
+@dataclass(frozen=True)
+class CommentCardObservation:
+    body_fragment: str
+    visible_text: str
+    accessible_label: str
+
+
 class LiveIssueDetailCollaborationPage:
     _button_selector = 'flt-semantics[role="button"]'
     _tab_button_selector = 'flt-semantics[role="button"][aria-current]'
@@ -359,6 +366,59 @@ class LiveIssueDetailCollaborationPage:
 
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
+
+    def wait_for_comment_card(
+        self,
+        body_fragment: str,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> CommentCardObservation:
+        self.wait_for_text(body_fragment, timeout_ms=timeout_ms)
+        payload = self._session.wait_for_function(
+            """
+            ({ bodyFragment }) => {
+              const timestampPattern = /\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;
+              const candidates = Array.from(document.querySelectorAll("flt-semantics"))
+                .map((element) => {
+                  const label = (element.getAttribute("aria-label") ?? "").trim();
+                  const text = (element.innerText ?? "").trim();
+                  const combined = [label, text].filter((value) => value.length > 0).join("\\n");
+                  return {
+                    label,
+                    text,
+                    combined,
+                    textLength: text.length,
+                    hasTimestamp: timestampPattern.test(combined),
+                  };
+                })
+                .filter((candidate) => candidate.combined.includes(bodyFragment))
+                .sort((left, right) => left.textLength - right.textLength);
+              return candidates.find((candidate) => candidate.hasTimestamp) ?? candidates[0] ?? null;
+            }
+            """,
+            arg={"bodyFragment": body_fragment},
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 3 failed: the live Comments tab did not expose a visible comment "
+                f"row for {body_fragment!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        visible_text = str(payload.get("text", "")).strip()
+        accessible_label = str(payload.get("label", "")).strip()
+        if not visible_text:
+            raise AssertionError(
+                "Step 3 failed: the live Comments tab rendered an empty comment row for "
+                f"{body_fragment!r}.\n"
+                f"Observed payload: {payload}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return CommentCardObservation(
+            body_fragment=body_fragment,
+            visible_text=visible_text,
+            accessible_label=accessible_label,
+        )
 
     def issue_detail_accessible_label(
         self,
