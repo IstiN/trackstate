@@ -1,0 +1,8 @@
+test_id: TS-463
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Exercises the deployed hosted tracker settings UI against https://istin.github.io/trackstate-setup/.
+  - Seeds a disposable unused version in the live repository, performs the requested Priorities/Components/Versions CRUD flow through the UI, verifies the saved repository JSON, and restores the original catalog files afterward.
