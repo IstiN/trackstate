@@ -126,10 +126,16 @@ def main() -> None:
 
                 new_comment_card = page.wait_for_comment_card(
                     NEW_BODY,
+                    required_fragments=(NEW_AUTHOR, NEW_CREATED_AT),
                     timeout_ms=120_000,
                 )
                 edited_comment_card = page.wait_for_comment_card(
                     EDITED_BODY,
+                    required_fragments=(
+                        EDITED_AUTHOR,
+                        EDITED_CREATED_AT,
+                        f"Edited {EDITED_UPDATED_AT}",
+                    ),
                     timeout_ms=120_000,
                 )
                 result["new_comment_card"] = _comment_payload(new_comment_card)
@@ -346,6 +352,13 @@ def _restore_comment_files(
 
 
 def _assert_new_comment_card(observation: CommentCardObservation) -> None:
+    if NEW_BODY not in observation.visible_text:
+        raise AssertionError(
+            "Step 4 failed: the untouched comment row did not keep the prepared body "
+            "text in the same visible row as the metadata.\n"
+            f"Expected body: {NEW_BODY}\n"
+            f"Observed row text: {observation.visible_text}",
+        )
     if NEW_AUTHOR not in observation.visible_text:
         raise AssertionError(
             "Step 4 failed: the untouched comment row did not show the prepared author.\n"
@@ -376,6 +389,13 @@ def _assert_new_comment_card(observation: CommentCardObservation) -> None:
 
 def _assert_edited_comment_card(observation: CommentCardObservation) -> None:
     expected_marker = f"Edited {EDITED_UPDATED_AT}"
+    if EDITED_BODY not in observation.visible_text:
+        raise AssertionError(
+            "Step 4 failed: the edited comment row did not keep the prepared body text "
+            "in the same visible row as the metadata.\n"
+            f"Expected body: {EDITED_BODY}\n"
+            f"Observed row text: {observation.visible_text}",
+        )
     if EDITED_AUTHOR not in observation.visible_text:
         raise AssertionError(
             "Step 4 failed: the edited comment row did not show the prepared author.\n"

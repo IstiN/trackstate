@@ -371,32 +371,83 @@ class LiveIssueDetailCollaborationPage:
         self,
         body_fragment: str,
         *,
+        required_fragments: tuple[str, ...] = (),
         timeout_ms: int = 60_000,
     ) -> CommentCardObservation:
+        expected_fragments = tuple(
+            fragment.strip()
+            for fragment in (body_fragment, *required_fragments)
+            if fragment.strip()
+        )
         self.wait_for_text(body_fragment, timeout_ms=timeout_ms)
         payload = self._session.wait_for_function(
             """
-            ({ bodyFragment }) => {
-              const timestampPattern = /\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;
-              const candidates = Array.from(document.querySelectorAll("flt-semantics"))
-                .map((element) => {
-                  const label = (element.getAttribute("aria-label") ?? "").trim();
-                  const text = (element.innerText ?? "").trim();
-                  const combined = [label, text].filter((value) => value.length > 0).join("\\n");
-                  return {
-                    label,
-                    text,
-                    combined,
-                    textLength: text.length,
-                    hasTimestamp: timestampPattern.test(combined),
-                  };
-                })
-                .filter((candidate) => candidate.combined.includes(bodyFragment))
-                .sort((left, right) => left.textLength - right.textLength);
-              return candidates.find((candidate) => candidate.hasTimestamp) ?? candidates[0] ?? null;
+            ({ bodyFragment, expectedFragments }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const descriptionCache = new WeakMap();
+              const describe = (element) => {
+                const cached = descriptionCache.get(element);
+                if (cached) {
+                  return cached;
+                }
+
+                const rect = element.getBoundingClientRect();
+                const label = normalize(element.getAttribute('aria-label') ?? '');
+                const text = normalize(element.innerText || element.textContent || '');
+                const described = {
+                  label,
+                  text,
+                  combined: [text, label].filter((value) => value.length > 0).join("\\n"),
+                  width: rect.width,
+                  height: rect.height,
+                  area: rect.width * rect.height,
+                };
+                descriptionCache.set(element, described);
+                return described;
+              };
+              const isVisible = (element) => {
+                const rect = element.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+              };
+
+              const visibleSemantics = Array.from(document.querySelectorAll('flt-semantics'))
+                .filter((element) => isVisible(element));
+              const subtreeContainsFragment = (container, fragment) =>
+                visibleSemantics.some((element) =>
+                  container.contains(element) && describe(element).combined.includes(fragment)
+                );
+
+              const matches = [];
+              const seen = new Set();
+              for (const element of visibleSemantics) {
+                if (!describe(element).combined.includes(bodyFragment)) {
+                  continue;
+                }
+
+                let current = element;
+                while (current) {
+                  if (current.matches?.('flt-semantics') && isVisible(current) && !seen.has(current)) {
+                    if (
+                      expectedFragments.every((fragment) =>
+                        subtreeContainsFragment(current, fragment)
+                      )
+                    ) {
+                      seen.add(current);
+                      matches.push(describe(current));
+                    }
+                  }
+                  current = current.parentElement;
+                }
+              }
+
+              matches.sort((left, right) => left.area - right.area || left.text.length - right.text.length);
+              return matches[0] ?? null;
             }
             """,
-            arg={"bodyFragment": body_fragment},
+            arg={
+                "bodyFragment": body_fragment,
+                "expectedFragments": list(expected_fragments),
+            },
             timeout_ms=timeout_ms,
         )
         if not isinstance(payload, dict):
@@ -412,6 +463,18 @@ class LiveIssueDetailCollaborationPage:
                 "Step 3 failed: the live Comments tab rendered an empty comment row for "
                 f"{body_fragment!r}.\n"
                 f"Observed payload: {payload}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        missing_fragments = [
+            fragment for fragment in expected_fragments if fragment not in visible_text
+        ]
+        if missing_fragments:
+            raise AssertionError(
+                "Step 3 failed: the live Comments tab did not keep the expected comment "
+                f"metadata in the same visible row for {body_fragment!r}.\n"
+                f"Missing visible fragments: {missing_fragments}\n"
+                f"Observed row text: {visible_text}\n"
+                f"Observed accessibility label: {accessible_label}\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
         return CommentCardObservation(
