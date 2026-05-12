@@ -609,6 +609,141 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=60_000,
         )
 
+    def visible_button_count(self, label: str) -> int:
+        return self._session.count(self._button_selector, has_text=label)
+
+    def choose_attachment_file(self, file_path: str) -> None:
+        self._session.click_and_set_files(
+            self._button_selector,
+            [file_path],
+            has_text="Choose attachment",
+            timeout_ms=30_000,
+        )
+
+    def click_upload_attachment(self) -> None:
+        self._session.click(
+            self._button_selector,
+            has_text="Upload attachment",
+            timeout_ms=30_000,
+        )
+
+    def wait_for_selected_attachment_summary(
+        self,
+        *,
+        attachment_name: str,
+        attachment_size_label: str,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        expected_label = (
+            f"Selected attachment: {attachment_name} ({attachment_size_label})"
+        )
+        self._session.wait_for_function(
+            """
+            ({ expectedLabel }) => Array.from(document.querySelectorAll('[aria-label]'))
+              .map((element) => element.getAttribute('aria-label') ?? '')
+              .some((label) => label.includes(expectedLabel))
+            """,
+            arg={"expectedLabel": expected_label},
+            timeout_ms=timeout_ms,
+        )
+        payload = self._session.evaluate(
+            """
+            ({ expectedLabel }) => Array.from(document.querySelectorAll('[aria-label]'))
+              .map((element) => element.getAttribute('aria-label') ?? '')
+              .find((label) => label.includes(expectedLabel)) ?? ''
+            """,
+            arg={"expectedLabel": expected_label},
+        )
+        label = str(payload).strip()
+        if not label:
+            raise AssertionError(
+                "Step 2 failed: the Attachments tab did not expose the selected attachment "
+                f"summary for {attachment_name!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return label
+
+    def wait_for_replace_attachment_dialog(
+        self,
+        attachment_name: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        expected_fragments = (
+            "Replace attachment?",
+            f"Uploading this file will replace the existing attachment stored as {attachment_name}.",
+            "Keep current attachment",
+            "Replace attachment",
+        )
+        self._session.wait_for_function(
+            """
+            ({ expectedFragments }) => {
+              const bodyText = document.body?.innerText ?? '';
+              return expectedFragments.every((fragment) => bodyText.includes(fragment));
+            }
+            """,
+            arg={"expectedFragments": list(expected_fragments)},
+            timeout_ms=timeout_ms,
+        )
+        return self.current_body_text()
+
+    def confirm_replace_attachment(self) -> None:
+        self._session.click(
+            self._button_selector,
+            has_text="Replace attachment",
+            timeout_ms=30_000,
+        )
+
+    def wait_for_replace_attachment_dialog_to_close(
+        self,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        self._session.wait_for_text_absence("Replace attachment?", timeout_ms=timeout_ms)
+
+    def attachment_row_text(self, attachment_name: str, *, timeout_ms: int = 30_000) -> str:
+        download_label = self._download_button_label(attachment_name)
+        self._session.wait_for_function(
+            """
+            ({ downloadLabel }) => Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+              .some((element) => (element.getAttribute('aria-label') ?? '').includes(downloadLabel))
+            """,
+            arg={"downloadLabel": download_label},
+            timeout_ms=timeout_ms,
+        )
+        payload = self._session.evaluate(
+            """
+            ({ attachmentName, downloadLabel }) => {
+              const button = Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+                .find((element) => (element.getAttribute('aria-label') ?? '').includes(downloadLabel));
+              if (!button) {
+                return '';
+              }
+              let candidate = button;
+              for (let depth = 0; depth < 8 && candidate; depth += 1) {
+                const text = (candidate.innerText ?? '').trim();
+                if (text.includes(attachmentName) && /\\b\\d+ B\\b/.test(text)) {
+                  return text;
+                }
+                candidate = candidate.parentElement;
+              }
+              return ((button.parentElement?.innerText) ?? button.innerText ?? '').trim();
+            }
+            """,
+            arg={
+                "attachmentName": attachment_name,
+                "downloadLabel": download_label,
+            },
+        )
+        row_text = str(payload).strip()
+        if not row_text:
+            raise AssertionError(
+                "Step 5 failed: the Attachments tab did not expose the expected attachment "
+                f"row for {attachment_name!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return row_text
+
     def _is_connected(self, connected_banner: str) -> bool:
         return (
             self._session.count(self._connected_button_selector) > 0

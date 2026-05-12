@@ -128,6 +128,26 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out pressing page key "{key}".',
             ) from error
 
+    def click_and_set_files(
+        self,
+        selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_file_chooser(timeout=timeout_ms) as chooser_info:
+                locator.click(timeout=timeout_ms)
+            chooser_info.value.set_files(list(files))
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out setting files via selector "{selector}".',
+            ) from error
+
     def count(
         self,
         selector: str,
