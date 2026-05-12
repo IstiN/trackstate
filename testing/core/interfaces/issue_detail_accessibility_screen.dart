@@ -11,6 +11,8 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
 
   Future<void> selectCollaborationTab(String issueKey, String label);
 
+  Future<void> enterCommentComposerText(String issueKey, String text);
+
   Future<List<String>> collectForwardCollaborationTabFocusOrder(
     String issueKey,
   );
@@ -27,6 +29,10 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
 
   List<String> commentActionLabels(String issueKey);
 
+  String? commentComposerPlaceholderText(String issueKey);
+
+  String? readCommentComposerText(String issueKey);
+
   IssueDetailThemeTokens themeTokens(String issueKey);
 
   StatusBadgeContrastObservation observeStatusBadgeContrast(
@@ -39,6 +45,15 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
     required String rowAnchorText,
     required String text,
   });
+
+  IssueDetailTextContrastObservation observeCommentComposerEnteredTextContrast(
+    String issueKey, {
+    required String text,
+  });
+
+  IssueDetailTextContrastObservation observeCommentComposerPlaceholderContrast(
+    String issueKey,
+  );
 
   IssueDetailRowStyleObservation observeDecoratedRowStyle(
     String issueKey, {
