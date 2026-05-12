@@ -1,0 +1,10 @@
+test_id: TS-462
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH for seeding a disposable Local Git repository
+notes:
+  - Executes the live `trackstate ticket comment --target local --path <temp-repo> --key TS-1 --body "Test Comment"` command twice against a seeded disposable repository.
+  - Verifies the duplicate comment call creates `comments/0001.md` and `comments/0002.md`, returns created comment metadata, and surfaces a non-empty repository revision in each success envelope.

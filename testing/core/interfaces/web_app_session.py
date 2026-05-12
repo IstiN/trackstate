@@ -94,6 +94,16 @@ class WebAppSession(Protocol):
         timeout_ms: int = 30_000,
     ) -> None: ...
 
+    def click_and_set_files(
+        self,
+        selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None: ...
+
     def count(
         self,
         selector: str,
@@ -115,6 +125,16 @@ class WebAppSession(Protocol):
         selector: str,
         expected_count: int,
         *,
+        timeout_ms: int = 30_000,
+    ) -> None: ...
+
+    def click_and_choose_file(
+        self,
+        selector: str,
+        file_paths: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
         timeout_ms: int = 30_000,
     ) -> None: ...
 
@@ -191,6 +211,16 @@ class WebAppSession(Protocol):
         *,
         timeout_ms: int = 30_000,
     ) -> str: ...
+
+    def select_files_after_click(
+        self,
+        trigger_selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None: ...
 
     def screenshot(self, path: str) -> None: ...
 

@@ -15,6 +15,11 @@ class LocaleWarningVisualObservation:
     background_hex: str
     expected_background_hex: str
     foreground_hex: str
+    expected_foreground_hex: str
+    foreground_distance: float
+    border_hex: str
+    expected_border_hex: str
+    border_distance: float
     foreground_contrast_ratio: float
     screenshot_path: str
     crop_box: tuple[int, int, int, int]
@@ -25,6 +30,11 @@ class LocaleWarningVisualObservation:
             f"background={self.background_hex}, "
             f"expectedBackground={self.expected_background_hex}, "
             f"foreground={self.foreground_hex}, "
+            f"expectedForeground={self.expected_foreground_hex}, "
+            f"foregroundDistance={self.foreground_distance:.2f}, "
+            f"border={self.border_hex}, "
+            f"expectedBorder={self.expected_border_hex}, "
+            f"borderDistance={self.border_distance:.2f}, "
             f"contrast={self.foreground_contrast_ratio:.2f}:1, "
             f"screenshot={self.screenshot_path}, "
             f"cropBox={self.crop_box}, "
@@ -36,9 +46,9 @@ class LiveLocaleWarningVisualProbe:
     _background_tolerance = 6.0
 
     def __init__(self) -> None:
-        self._surface_alt_palettes = (
-            (0xF1, 0xE4, 0xD5),
-            (0x24, 0x28, 0x27),
+        self._palettes = (
+            {"surface_alt": (0xF1, 0xE4, 0xD5), "warning": (0x7A, 0x65, 0x11)},
+            {"surface_alt": (0x24, 0x28, 0x27), "warning": (0xF7, 0xC9, 0x66)},
         )
 
     def observe(
@@ -62,14 +72,24 @@ class LiveLocaleWarningVisualProbe:
                 f"Expected background: {rgb_to_hex(expected_background)}\n"
                 f"Screenshot: {screenshot_path}",
             )
+        expected_warning = self._expected_warning(expected_background)
         foreground = self._sample_rendered_foreground(
             warning_crop,
+            background=background,
+        )
+        border = self._sample_border_color(
+            crop.crop(self._expand_box(crop, warning_box, pixels=3)),
             background=background,
         )
         return LocaleWarningVisualObservation(
             background_hex=rgb_to_hex(background),
             expected_background_hex=rgb_to_hex(expected_background),
             foreground_hex=rgb_to_hex(foreground),
+            expected_foreground_hex=rgb_to_hex(expected_warning),
+            foreground_distance=color_distance(foreground, expected_warning),
+            border_hex=rgb_to_hex(border),
+            expected_border_hex=rgb_to_hex(expected_warning),
+            border_distance=color_distance(border, expected_warning),
             foreground_contrast_ratio=contrast_ratio(foreground, background),
             screenshot_path=str(screenshot_path),
             crop_box=crop_box,
@@ -86,9 +106,18 @@ class LiveLocaleWarningVisualProbe:
 
     def _expected_background(self, image: Image.Image) -> RgbColor:
         observed = self._dominant_color(image)
-        return min(
-            self._surface_alt_palettes,
-            key=lambda palette: color_distance(observed, palette),
+        palette = min(
+            self._palettes,
+            key=lambda candidate: color_distance(observed, candidate["surface_alt"]),
+        )
+        return palette["surface_alt"]
+
+    def _expected_warning(self, expected_background: RgbColor) -> RgbColor:
+        for palette in self._palettes:
+            if palette["surface_alt"] == expected_background:
+                return palette["warning"]
+        raise AssertionError(
+            "Could not determine the expected TrackState warning token for the sampled warning pill.",
         )
 
     def _warning_box(
@@ -128,6 +157,21 @@ class LiveLocaleWarningVisualProbe:
             )
         _, left, top, right, bottom = max(viable_components)
         return (left, top, right + 1, bottom + 1)
+
+    @staticmethod
+    def _expand_box(
+        image: Image.Image,
+        box: tuple[int, int, int, int],
+        *,
+        pixels: int,
+    ) -> tuple[int, int, int, int]:
+        left, top, right, bottom = box
+        return (
+            max(left - pixels, 0),
+            max(top - pixels, 0),
+            min(right + pixels, image.width),
+            min(bottom + pixels, image.height),
+        )
 
     @staticmethod
     def _component(
@@ -186,3 +230,27 @@ class LiveLocaleWarningVisualProbe:
             reverse=True,
         )
         return samples[0][0]
+
+    @staticmethod
+    def _sample_border_color(
+        image: Image.Image,
+        *,
+        background: RgbColor,
+    ) -> RgbColor:
+        edge_width = max(2, min(6, image.width // 30, image.height // 12))
+        edge_pixels = [
+            *image.crop((0, 0, image.width, min(edge_width, image.height))).getdata(),
+            *image.crop((0, max(image.height - edge_width, 0), image.width, image.height)).getdata(),
+            *image.crop((0, 0, min(edge_width, image.width), image.height)).getdata(),
+            *image.crop((max(image.width - edge_width, 0), 0, image.width, image.height)).getdata(),
+        ]
+        contrasting = [
+            color for color in edge_pixels if color_distance(color, background) > 10
+        ]
+        if contrasting:
+            counts = Counter(contrasting)
+            color, _ = counts.most_common(1)[0]
+            return color
+        counts = Counter(edge_pixels)
+        color, _ = counts.most_common(1)[0]
+        return color

@@ -39,7 +39,7 @@ EXPECTED_CATALOG_TITLES = [
     "Resolutions",
 ]
 EXPECTED_WARNING_COLORS = {
-    "rgb(193, 179, 65)",
+    "rgb(122, 101, 17)",
     "rgb(247, 201, 102)",
 }
 EXPECTED_WARNING_BACKGROUND_COLORS = {
@@ -47,6 +47,7 @@ EXPECTED_WARNING_BACKGROUND_COLORS = {
     "rgb(36, 40, 39)",
 }
 WARNING_MIN_CONTRAST_RATIO = 4.5
+WARNING_MAX_COLOR_DISTANCE = 24.0
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts466_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts466_success.png"
@@ -77,6 +78,11 @@ def main() -> None:
         service.fetch_catalog_entries(PROJECT_PATH, "statuses"),
         subject="status",
     )
+    locale_state_before: dict[str, object] = {
+        "supported_locales": project_locale_configuration.supported_locales,
+        "locale_present": False,
+        "locale_payload": {},
+    }
     expected_priority_translation = f"{priority_seed['name']} ES TS-466"
     expected_status_warning = (
         f'Missing translation. Using fallback "{status_seed["name"]}" from '
@@ -163,6 +169,7 @@ def main() -> None:
                     target_locale = requested_target_locale
                     page.select_locale(target_locale)
                     step_4_action = f'Select the existing "{target_locale}" locale.'
+                    locale_state_before = _locale_state(service, target_locale)
                 elif existing_secondary_locales:
                     target_locale = existing_secondary_locales[0]
                     page.select_locale(target_locale)
@@ -170,6 +177,7 @@ def main() -> None:
                         f'Select the existing secondary locale "{target_locale}" to '
                         "satisfy the precondition."
                     )
+                    locale_state_before = _locale_state(service, target_locale)
                 else:
                     target_locale = page.add_locale(requested_target_locale)
                     page.select_locale(target_locale)
@@ -186,6 +194,8 @@ def main() -> None:
 
                 result["target_locale"] = target_locale
                 result["locale_added_in_test"] = locale_added_in_test
+                result["locale_state_before"] = locale_state_before
+                cleanup_target_locale = target_locale
                 _record_step(
                     result,
                     step=4,
@@ -236,7 +246,6 @@ def main() -> None:
                 )
                 result["priority_before"] = _entry_payload(priority_before)
                 result["status_before"] = _entry_payload(status_before)
-                cleanup_target_locale = target_locale
                 cleanup_priority_translation = priority_before.translation
                 cleanup_status_translation = status_before.translation
 
@@ -413,17 +422,38 @@ def _first_catalog_entry(
     )
 
 
+def _locale_state(
+    service: LiveSetupRepositoryService,
+    locale: str,
+) -> dict[str, object]:
+    locale_state = service.fetch_locale_state(PROJECT_PATH, locale)
+    state: dict[str, object] = {
+        "supported_locales": locale_state.supported_locales,
+        "locale_present": locale_state.locale_present,
+    }
+    if locale_state.locale_present:
+        state["locale_payload"] = _read_locale_payload(service, locale)
+    return state
+
+
+def _read_locale_payload(
+    service: LiveSetupRepositoryService,
+    locale: str,
+) -> dict[str, object]:
+    return service.fetch_locale_payload(PROJECT_PATH, locale)
+
+
 def _restore_ui_state(
     *,
     page: LiveSettingsLocalesPage | None,
-    locale: str | None,
+    locale: str,
     locale_added_in_test: bool,
     priority_entry_id: str,
     priority_translation: str | None,
     status_entry_id: str,
     status_translation: str | None,
 ) -> dict[str, object]:
-    if page is None or locale is None:
+    if page is None or not locale:
         return {"status": "not-needed", "reason": "No live page was available for cleanup."}
 
     try:
@@ -475,6 +505,18 @@ def _restore_ui_state(
             "status": "failed",
             "reason": f"{type(error).__name__}: {error}",
         }
+
+
+def _lookup_translation(
+    locale_payload: dict[str, object],
+    *,
+    section: str,
+    entry_id: str,
+) -> str:
+    entries = locale_payload.get(section, {})
+    if not isinstance(entries, dict):
+        return ""
+    return str(entries.get(entry_id, ""))
 
 
 def _entry_payload(entry) -> dict[str, object]:
@@ -542,10 +584,23 @@ def _assert_warning_state(
                 f"Minimum contrast: {WARNING_MIN_CONTRAST_RATIO:.1f}:1\n"
                 f"Observed body text:\n{page_body_text}",
             )
+        if visual_observation.foreground_distance > WARNING_MAX_COLOR_DISTANCE:
+            raise AssertionError(
+                f"Step {step} failed: the visible warning pill did not use the "
+                "TrackState warning foreground token.\n"
+                f"Observed warning visual: {visual_observation.describe()}\n"
+                f"Maximum token distance: {WARNING_MAX_COLOR_DISTANCE:.1f}\n"
+                f"Observed body text:\n{page_body_text}",
+            )
         return {
             "background_hex": visual_observation.background_hex,
             "expected_background_hex": visual_observation.expected_background_hex,
             "foreground_hex": visual_observation.foreground_hex,
+            "expected_foreground_hex": visual_observation.expected_foreground_hex,
+            "foreground_distance": round(visual_observation.foreground_distance, 2),
+            "border_hex": visual_observation.border_hex,
+            "expected_border_hex": visual_observation.expected_border_hex,
+            "border_distance": round(visual_observation.border_distance, 2),
             "foreground_contrast_ratio": round(
                 visual_observation.foreground_contrast_ratio,
                 2,
@@ -570,9 +625,9 @@ def _assert_warning_state(
             f"Observed warning border color: {entry.warning_border_color!r}\n"
             f"Observed warning background color: {entry.warning_background_color!r}\n"
             f"Observed warning border width: {entry.warning_border_width!r}\n"
-                f"Observed row: {entry.row_label}\n"
-                f"Observed body text:\n{page_body_text}",
-            )
+            f"Observed row: {entry.row_label}\n"
+            f"Observed body text:\n{page_body_text}",
+        )
     return {
         "text_color": normalized_text_color,
         "border_color": normalized_border_color,

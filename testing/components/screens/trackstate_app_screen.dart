@@ -73,6 +73,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Finder _globalAction(String label) =>
       find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
 
+  Finder _navigationControl(String label) => find.byWidgetPredicate(
+    (widget) =>
+        widget is Semantics &&
+        widget.properties.button == true &&
+        widget.properties.label == label,
+    description: 'navigation control labeled $label',
+  );
+
+  Finder get _navigationChrome =>
+      find.bySemanticsLabel(RegExp('^TrackState\\.AI navigation\$'));
+
   Finder _issueDetailEditor(String key) => find.descendant(
     of: _issueDetail(key),
     matching: find.byWidgetPredicate(
@@ -102,7 +113,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   Finder _labeledDropdownField(String label) =>
       find.byWidgetPredicate((widget) {
-        return widget is DropdownButtonFormField<String> &&
+        return widget is DropdownButtonFormField &&
             widget.decoration.labelText == label;
       }, description: 'dropdown field labeled $label');
 
@@ -408,6 +419,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
           'Expected the JQL Search panel field to expose a readable value, but '
           'no controller-backed editable widget was found.',
     );
+  }
+
+  @override
+  Future<bool> isBlockingSearchLoaderVisible() async {
+    await tester.pump();
+    return find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
   }
 
   @override
@@ -749,6 +766,99 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> isNavigationControlVisible(String label) async {
+    await tester.pump();
+    return _navigationControl(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<void> expectNavigationControlEnabled(String label) async {
+    final target = _navigationControl(label);
+    await tester.pump();
+    expect(
+      target,
+      findsOneWidget,
+      reason:
+          'Expected a visible navigation control labeled "$label". Visible '
+          'semantics: ${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
+    );
+
+    final semanticsData = tester.getSemantics(target.last).getSemanticsData();
+    final hasTapAction = semanticsData.hasAction(SemanticsAction.tap);
+    final isEnabled = semanticsData.hasFlag(SemanticsFlag.isEnabled);
+    expect(
+      hasTapAction || isEnabled,
+      isTrue,
+      reason:
+          'Expected "$label" navigation control to remain interactive. '
+          'Semantics label="${semanticsData.label}", hasTapAction='
+          '$hasTapAction, isEnabled=$isEnabled.',
+    );
+  }
+
+  @override
+  Future<bool> isNavigationChromeVisible() async {
+    await tester.pump();
+    return _navigationChrome.evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<List<String>> collectDisabledNavigationViolations({
+    required String label,
+    required String retainedText,
+    required List<String> disallowedTexts,
+  }) async {
+    final violations = <String>[];
+    final target = _navigationControl(label);
+    await tester.pump();
+
+    if (target.evaluate().isEmpty) {
+      violations.add(
+        'no visible navigation control labeled "$label" was rendered in the recovery shell.',
+      );
+      return violations;
+    }
+
+    final semanticsData = tester.getSemantics(target.last).getSemanticsData();
+    final hasTapAction = semanticsData.hasAction(SemanticsAction.tap);
+    final isEnabled = semanticsData.hasFlag(SemanticsFlag.isEnabled);
+
+    if (hasTapAction || isEnabled) {
+      violations.add(
+        'the "$label" navigation control remained enabled during mandatory bootstrap recovery. '
+        'Semantics label="${semanticsData.label}", hasTapAction=$hasTapAction, isEnabled=$isEnabled.',
+      );
+    }
+
+    await tester.tap(target.last, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    final visibleTexts = visibleTextsSnapshot();
+    final visibleSemantics = visibleSemanticsLabelsSnapshot();
+    if (!_snapshotContains(visibleTexts, retainedText) &&
+        !_snapshotContains(visibleSemantics, retainedText)) {
+      violations.add(
+        'tapping "$label" navigated away from Settings while recovery was active. '
+        'Visible texts: ${_formatSnapshot(visibleTexts)}. '
+        'Visible semantics: ${_formatSnapshot(visibleSemantics)}.',
+      );
+    }
+
+    for (final disallowedText in disallowedTexts) {
+      if (_snapshotContains(visibleTexts, disallowedText) ||
+          _snapshotContains(visibleSemantics, disallowedText)) {
+        violations.add(
+          'tapping "$label" surfaced "$disallowedText" while the recovery container was still active. '
+          'Visible texts: ${_formatSnapshot(visibleTexts)}. '
+          'Visible semantics: ${_formatSnapshot(visibleSemantics)}.',
+        );
+      }
+    }
+
+    return violations;
+  }
+
+  @override
   Future<bool> isDialogTextVisible(String text) async {
     await tester.pump();
     final dialogScope = _dialogScope;
@@ -920,7 +1030,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     if (field.evaluate().isEmpty) {
       return null;
     }
-    final dropdown = tester.widget<DropdownButtonFormField<String>>(
+    final dropdown = tester.widget<DropdownButtonFormField<Object?>>(
       field.first,
     );
     final helperText = dropdown.decoration.helperText?.trim();
@@ -988,19 +1098,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     String label, {
     required String text,
   }) async {
-    final field = _labeledTextField(label);
-    await tester.pump();
-    if (field.evaluate().isEmpty) {
-      fail(
-        'Expected a visible text field labeled "$label", but no matching '
-        'editable control was rendered.',
-      );
-    }
-    await tester.ensureVisible(field.first);
-    await tester.tap(field.first, warnIfMissed: false);
-    await tester.pump();
-    await tester.enterText(field.first, text);
-    await tester.pumpAndSettle();
+    final field = await _requireVisibleLabeledTextField(label);
+    await _enterTextField(field, text: text, settle: true);
+  }
+
+  @override
+  Future<void> enterLabeledTextFieldWithoutSettling(
+    String label, {
+    required String text,
+  }) async {
+    final field = await _requireVisibleLabeledTextField(label);
+    await _enterTextField(field, text: text, settle: false);
   }
 
   @override
@@ -1016,6 +1124,34 @@ class TrackStateAppScreen implements TrackStateAppComponent {
           'Expected the visible text field labeled "$label" to expose a '
           'readable value, but no controller-backed editable widget was found.',
     );
+  }
+
+  Future<Finder> _requireVisibleLabeledTextField(String label) async {
+    final field = _labeledTextField(label);
+    await tester.pump();
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible text field labeled "$label", but no matching '
+        'editable control was rendered.',
+      );
+    }
+    return field.first;
+  }
+
+  Future<void> _enterTextField(
+    Finder field, {
+    required String text,
+    required bool settle,
+  }) async {
+    await tester.ensureVisible(field);
+    await tester.tap(field, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(field, text);
+    if (settle) {
+      await tester.pumpAndSettle();
+      return;
+    }
+    await tester.pump();
   }
 
   String? _readTextFieldValue(
@@ -1081,6 +1217,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       return '<none>';
     }
     return snapshot.join(' | ');
+  }
+
+  bool _snapshotContains(List<String> values, String expected) {
+    for (final value in values) {
+      final trimmed = value.trim();
+      if (trimmed == expected ||
+          trimmed.startsWith(expected) ||
+          trimmed.contains(expected)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @override

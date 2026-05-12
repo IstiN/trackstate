@@ -1,0 +1,9 @@
+test_id: TS-510
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Seeds the existing hosted DEMO-2 issue with a legacy repository-path attachment entry named manual.pdf.
+  - Temporarily switches the live DEMO project attachment storage mode to github-releases with a ticket-specific tag prefix.
+  - Runs the replacement flow in the deployed hosted UI, then verifies the refreshed Attachments tab still shows exactly one manual.pdf row and attachments.json records github-releases metadata.

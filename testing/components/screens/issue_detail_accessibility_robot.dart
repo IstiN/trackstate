@@ -6,8 +6,10 @@ import 'package:trackstate/ui/core/trackstate_icons.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 
 import '../../core/interfaces/issue_detail_accessibility_screen.dart';
+import '../../core/models/action_availability.dart';
 import '../../core/models/issue_detail_icon_observation.dart';
 import '../../core/models/issue_detail_row_style_observation.dart';
+import '../../core/models/issue_detail_theme_tokens.dart';
 import '../../core/models/issue_detail_text_contrast_observation.dart';
 import '../../core/models/status_badge_contrast_observation.dart';
 import '../../core/utils/color_contrast.dart';
@@ -39,6 +41,16 @@ class IssueDetailAccessibilityRobot
     final tab = _collaborationTab(issueKey, label);
     await tester.ensureVisible(tab.first);
     await tester.tap(tab.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> enterCommentComposerText(String issueKey, String text) async {
+    final field = _commentComposerField(issueKey);
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(field.first, text);
     await tester.pumpAndSettle();
   }
 
@@ -147,6 +159,15 @@ class IssueDetailAccessibilityRobot
   }
 
   @override
+  ActionAvailability attachmentAction(String issueKey, String label) {
+    final action = _issueDetailAction(issueKey, label);
+    final visible = action.evaluate().isNotEmpty;
+    final enabled =
+        visible && tester.widget<ButtonStyleButton>(action.first).enabled;
+    return ActionAvailability(label: label, visible: visible, enabled: enabled);
+  }
+
+  @override
   List<String> commentActionLabels(String issueKey) {
     final rootLabel = 'Issue detail $issueKey';
     final targets = _screenReaderTargets(issueKey, rootLabel);
@@ -161,6 +182,254 @@ class IssueDetailAccessibilityRobot
         .where((target) => target.isButton)
         .map((target) => target.label)
         .toList();
+  }
+
+  @override
+  bool showsAttachmentUploadRestrictionNotice(
+    String issueKey, {
+    required String storageLabel,
+    required String actionLabel,
+  }) {
+    final callout = _attachmentUploadRestrictionCallout(
+      issueKey,
+      storageLabel: storageLabel,
+    );
+    if (callout.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(
+          of: callout,
+          matching: find.text(actionLabel, findRichText: true),
+        )
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  bool attachmentUploadRestrictionNoticeIsInline(
+    String issueKey, {
+    required String tabLabel,
+    required String storageLabel,
+  }) {
+    final callout = _attachmentUploadRestrictionCallout(
+      issueKey,
+      storageLabel: storageLabel,
+    );
+    final tab = _collaborationTab(issueKey, tabLabel);
+    if (callout.evaluate().isEmpty || tab.evaluate().isEmpty) {
+      return false;
+    }
+    final tabBottom = tester.getBottomLeft(tab.first).dy;
+    final calloutTop = tester.getTopLeft(callout.first).dy;
+    return calloutTop > tabBottom;
+  }
+
+  @override
+  bool attachmentRowIsBelowAttachmentUploadRestrictionNotice(
+    String issueKey, {
+    required String storageLabel,
+    required String attachmentName,
+  }) {
+    final callout = _attachmentUploadRestrictionCallout(
+      issueKey,
+      storageLabel: storageLabel,
+    );
+    final attachmentRow = _attachmentRow(issueKey, attachmentName);
+    if (callout.evaluate().isEmpty || attachmentRow.evaluate().isEmpty) {
+      return false;
+    }
+    final calloutBottom = tester.getBottomLeft(callout.first).dy;
+    final rowTop = tester.getTopLeft(attachmentRow.first).dy;
+    return rowTop > calloutBottom;
+  }
+
+  @override
+  Future<void> tapAttachmentUploadRestrictionAction(
+    String issueKey, {
+    required String storageLabel,
+    required String actionLabel,
+  }) async {
+    final callout = _attachmentUploadRestrictionCallout(
+      issueKey,
+      storageLabel: storageLabel,
+    );
+    if (callout.evaluate().isEmpty) {
+      throw StateError(
+        'No upload restriction callout mentioning "$storageLabel" was rendered for issue detail $issueKey.',
+      );
+    }
+    final action = find.descendant(
+      of: callout,
+      matching: find.text(actionLabel, findRichText: true),
+    );
+    if (action.evaluate().isEmpty) {
+      throw StateError(
+        'No "$actionLabel" action was rendered inside the "$storageLabel" upload restriction callout for issue detail $issueKey.',
+      );
+    }
+    await tester.ensureVisible(action.first);
+    await tester.tap(action.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  bool showsAttachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+  }) => _attachmentsRestrictionCallout(
+    issueKey,
+    title: title,
+    message: message,
+  ).evaluate().isNotEmpty;
+
+  @override
+  bool attachmentsRestrictionCalloutShowsText(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String text,
+  }) {
+    final callout = _attachmentsRestrictionCallout(
+      issueKey,
+      title: title,
+      message: message,
+    );
+    if (callout.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(of: callout, matching: find.text(text, findRichText: true))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  bool attachmentsRestrictionCalloutIsInline(
+    String issueKey, {
+    required String tabLabel,
+    required String title,
+    required String message,
+  }) {
+    final callout = _attachmentsRestrictionCallout(
+      issueKey,
+      title: title,
+      message: message,
+    );
+    final tab = _collaborationTab(issueKey, tabLabel);
+    if (callout.evaluate().isEmpty || tab.evaluate().isEmpty) {
+      return false;
+    }
+    final tabBottom = tester.getBottomLeft(tab.first).dy;
+    final calloutTop = tester.getTopLeft(callout.first).dy;
+    return calloutTop > tabBottom;
+  }
+
+  @override
+  bool showsAttachmentRow(String issueKey, String attachmentName) =>
+      _attachmentRow(issueKey, attachmentName).evaluate().isNotEmpty;
+
+  @override
+  bool attachmentRowIsBelowAttachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String attachmentName,
+  }) {
+    final callout = _attachmentsRestrictionCallout(
+      issueKey,
+      title: title,
+      message: message,
+    );
+    final attachmentRow = _attachmentRow(issueKey, attachmentName);
+    if (callout.evaluate().isEmpty || attachmentRow.evaluate().isEmpty) {
+      return false;
+    }
+    final calloutBottom = tester.getBottomLeft(callout.first).dy;
+    final rowTop = tester.getTopLeft(attachmentRow.first).dy;
+    return rowTop > calloutBottom;
+  }
+
+  @override
+  bool showsAttachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) {
+    final action = _attachmentsRestrictionAction(
+      issueKey,
+      title: title,
+      message: message,
+      actionLabel: actionLabel,
+    );
+    return action.evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<void> tapAttachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) async {
+    final action = _attachmentsRestrictionAction(
+      issueKey,
+      title: title,
+      message: message,
+      actionLabel: actionLabel,
+    );
+    if (action.evaluate().isEmpty) {
+      throw StateError(
+        'No "$actionLabel" action was rendered inside the "$title" restriction callout for issue detail $issueKey.',
+      );
+    }
+    await tester.ensureVisible(action.first);
+    await tester.tap(action.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  String? commentComposerPlaceholderText(String issueKey) {
+    final decoration = _commentComposerDecoration(issueKey);
+    final placeholder = decoration.hintText?.trim();
+    if (placeholder == null || placeholder.isEmpty) {
+      return null;
+    }
+    return placeholder;
+  }
+
+  @override
+  String? readCommentComposerText(String issueKey) {
+    final field = _commentComposerField(issueKey);
+    final widget = tester.widget<TextField>(field.first);
+    final controller = widget.controller;
+    if (controller != null) {
+      return controller.text;
+    }
+
+    final editableText = find.descendant(
+      of: field.first,
+      matching: find.byType(EditableText),
+    );
+    if (editableText.evaluate().isNotEmpty) {
+      return tester.widget<EditableText>(editableText.first).controller.text;
+    }
+
+    return null;
+  }
+
+  @override
+  IssueDetailThemeTokens themeTokens(String issueKey) {
+    final colors = _trackStateColors(issueKey);
+    return IssueDetailThemeTokens(
+      textHex: _rgbHex(colors.text),
+      mutedHex: _rgbHex(colors.muted),
+      errorHex: _rgbHex(colors.error),
+      surfaceAltHex: _rgbHex(colors.surfaceAlt),
+      borderHex: _rgbHex(colors.border),
+    );
   }
 
   @override
@@ -190,6 +459,42 @@ class IssueDetailAccessibilityRobot
     final background = _renderedContainerBackground(row);
     return IssueDetailTextContrastObservation(
       text: text,
+      foregroundHex: _rgbHex(foreground),
+      backgroundHex: _rgbHex(background),
+      contrastRatio: contrastRatio(foreground, background),
+    );
+  }
+
+  @override
+  IssueDetailTextContrastObservation observeCommentComposerEnteredTextContrast(
+    String issueKey, {
+    required String text,
+  }) {
+    final foreground = _editableTextColor(_commentComposerField(issueKey));
+    final background = _commentComposerBackgroundColor(issueKey);
+    return IssueDetailTextContrastObservation(
+      text: text,
+      foregroundHex: _rgbHex(foreground),
+      backgroundHex: _rgbHex(background),
+      contrastRatio: contrastRatio(foreground, background),
+    );
+  }
+
+  @override
+  IssueDetailTextContrastObservation observeCommentComposerPlaceholderContrast(
+    String issueKey,
+  ) {
+    final placeholder = commentComposerPlaceholderText(issueKey);
+    if (placeholder == null) {
+      throw StateError(
+        'No comment composer placeholder (hintText) was rendered for issue detail $issueKey.',
+      );
+    }
+    final field = _commentComposerField(issueKey);
+    final foreground = _renderedTextColorWithin(field, placeholder);
+    final background = _commentComposerBackgroundColor(issueKey);
+    return IssueDetailTextContrastObservation(
+      text: placeholder,
       foregroundHex: _rgbHex(foreground),
       backgroundHex: _rgbHex(background),
       contrastRatio: contrastRatio(foreground, background),
@@ -279,6 +584,132 @@ class IssueDetailAccessibilityRobot
       );
     }
     return bestMatch;
+  }
+
+  Finder _commentComposerField(String issueKey) {
+    final field = find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.byWidgetPredicate((widget) {
+        return widget is TextField &&
+            widget.decoration?.labelText == 'Comments';
+      }, description: 'comment composer text field'),
+    );
+    if (field.evaluate().isEmpty) {
+      throw StateError(
+        'No comment composer TextField labeled "Comments" was rendered in issue detail $issueKey.',
+      );
+    }
+    return field.first;
+  }
+
+  Finder _attachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+  }) => find.ancestor(
+    of: find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.text(title, findRichText: true),
+    ),
+    matching: find.byWidgetPredicate((widget) {
+      if (widget is! Semantics) {
+        return false;
+      }
+      final label = widget.properties.label ?? '';
+      return label.contains(title) && label.contains(message);
+    }, description: 'attachments restriction callout "$title"'),
+  );
+
+  Finder _attachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) {
+    final callout = _attachmentsRestrictionCallout(
+      issueKey,
+      title: title,
+      message: message,
+    );
+    if (callout.evaluate().isEmpty) {
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing attachments restriction action "$actionLabel"',
+      );
+    }
+    final outlinedButton = find.descendant(
+      of: callout,
+      matching: find.widgetWithText(OutlinedButton, actionLabel),
+    );
+    if (outlinedButton.evaluate().isNotEmpty) {
+      return outlinedButton.first;
+    }
+    final filledButton = find.descendant(
+      of: callout,
+      matching: find.widgetWithText(FilledButton, actionLabel),
+    );
+    if (filledButton.evaluate().isNotEmpty) {
+      return filledButton.first;
+    }
+    return find.descendant(
+      of: callout,
+      matching: find.text(actionLabel, findRichText: true),
+    );
+  }
+
+  Finder _attachmentUploadRestrictionCallout(
+    String issueKey, {
+    required String storageLabel,
+  }) {
+    return find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! Semantics) {
+          return false;
+        }
+        final label = (widget.properties.label ?? '').trim();
+        return _containsReleaseUploadRestriction(label, storageLabel);
+      }, description: 'upload restriction callout for $storageLabel'),
+    );
+  }
+
+  Finder _issueDetailAction(String issueKey, String label) {
+    final button = find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.ancestor(
+        of: find.text(label, findRichText: true),
+        matching: find.bySubtype<ButtonStyleButton>(),
+      ),
+    );
+    return button.evaluate().isNotEmpty
+        ? button.first
+        : find.byWidgetPredicate(
+            (_) => false,
+            description: 'missing issue-detail action "$label"',
+          );
+  }
+
+  Finder _attachmentRow(String issueKey, String attachmentName) =>
+      find.descendant(
+        of: _issueDetail(issueKey),
+        matching: find.byWidgetPredicate((widget) {
+          if (widget is! Semantics) {
+            return false;
+          }
+          final label = widget.properties.label ?? '';
+          return label.contains(attachmentName);
+        }, description: 'attachment row for $attachmentName'),
+      );
+
+  InputDecoration _commentComposerDecoration(String issueKey) {
+    final field = tester.widget<TextField>(_commentComposerField(issueKey));
+    final decoration = field.decoration;
+    if (decoration == null) {
+      throw StateError(
+        'The comment composer TextField in issue detail $issueKey did not expose an InputDecoration.',
+      );
+    }
+    return decoration;
   }
 
   Finder _collaborationTab(String issueKey, String label) {
@@ -435,8 +866,45 @@ class IssueDetailAccessibilityRobot
     throw StateError('No rendered text "$text" found within $scope.');
   }
 
+  bool _containsReleaseUploadRestriction(String label, String storageLabel) {
+    final lowerLabel = label.toLowerCase();
+    final lowerStorageLabel = storageLabel.toLowerCase();
+    final mentionsUnavailable =
+        lowerLabel.contains('unavailable') ||
+        lowerLabel.contains('not available') ||
+        lowerLabel.contains('cannot complete');
+    final mentionsUpload =
+        lowerLabel.contains('upload') || lowerLabel.contains('transfer');
+    return lowerLabel.contains(lowerStorageLabel) &&
+        mentionsUnavailable &&
+        mentionsUpload;
+  }
+
   Color _renderedBadgeBackground(Finder scope) {
     return _renderedContainerBackground(scope);
+  }
+
+  Color _editableTextColor(Finder textField) {
+    final editable = find.descendant(
+      of: textField,
+      matching: find.byType(EditableText),
+    );
+    if (editable.evaluate().isEmpty) {
+      throw StateError('No EditableText found within $textField.');
+    }
+    return tester.widget<EditableText>(editable.first).style.color ??
+        TrackStateColors.light.text;
+  }
+
+  Color _commentComposerBackgroundColor(String issueKey) {
+    final field = _commentComposerField(issueKey);
+    final element = field.evaluate().single;
+    final widget = element.widget as TextField;
+    final theme = Theme.of(element);
+    return widget.decoration?.fillColor ??
+        theme.inputDecorationTheme.fillColor ??
+        (theme.extension<TrackStateColors>()?.surface ??
+            TrackStateColors.light.surface);
   }
 
   Color _renderedContainerBackground(Finder scope) {

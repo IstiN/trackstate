@@ -8,6 +8,9 @@ import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../testing/components/screens/settings_screen_robot.dart';
+import '../testing/core/utils/color_contrast.dart';
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -272,6 +275,7 @@ void main() {
         expect(find.widgetWithText(Tab, 'Priorities'), findsOneWidget);
         expect(find.widgetWithText(Tab, 'Components'), findsOneWidget);
         expect(find.widgetWithText(Tab, 'Versions'), findsOneWidget);
+        expect(find.widgetWithText(Tab, 'Attachments'), findsOneWidget);
         expect(find.widgetWithText(Tab, 'Locales'), findsOneWidget);
 
         await tester.tap(find.widgetWithText(Tab, 'Fields'));
@@ -352,6 +356,235 @@ void main() {
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'settings locale warnings stay accessible and focus in catalog order',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      final repository = _EditableSettingsWidgetRepository();
+      final robot = SettingsScreenRobot(tester);
+
+      const locale = 'fr';
+      const warningText =
+          'Missing translation. Using fallback "Description" from en.';
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        await robot.openSettings();
+        await robot.openLocalesTab();
+        await tester.tap(find.text('Add locale'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Locale code'),
+          locale,
+        );
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+
+        final warningIcon = robot.localeWarningIcon(warningText);
+        expect(warningIcon, findsOneWidget);
+        expect(tester.getSemantics(warningIcon).label.trim(), isNotEmpty);
+
+        final warningBackground = robot.localeWarningBackgroundColor(
+          warningText,
+        );
+        expect(warningBackground, isNotNull);
+        expect(
+          contrastRatio(
+            robot.localeWarningTextColor(warningText),
+            warningBackground!,
+          ),
+          greaterThanOrEqualTo(4.5),
+        );
+
+        final focusCandidates = <String, Finder>{
+          'Status To Do': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'todo',
+            section: 'status',
+          ),
+          'Status Done': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'done',
+            section: 'status',
+          ),
+          'Issue type Story': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'story',
+            section: 'issueType',
+          ),
+          'Field Summary': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'summary',
+            section: 'field',
+          ),
+          'Field Description': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'description',
+            section: 'field',
+          ),
+          'Priority High': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'high',
+            section: 'priority',
+          ),
+          'Component Tracker Core': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'tracker-core',
+            section: 'component',
+          ),
+          'Version MVP': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'mvp',
+            section: 'version',
+          ),
+          'Resolution Done': robot.localeEntryFieldScope(
+            locale: locale,
+            id: 'done',
+            section: 'resolution',
+          ),
+        };
+
+        await robot.clearFocus();
+        await robot.focusLocaleTranslationField(
+          locale: locale,
+          id: 'todo',
+          section: 'status',
+        );
+        final focusedOrder = <String>[];
+        final firstFocused = robot.focusedLabel(focusCandidates);
+        if (firstFocused != null) {
+          focusedOrder.add(firstFocused);
+        }
+        focusedOrder.addAll(
+          await robot.collectFocusOrder(candidates: focusCandidates, tabs: 24),
+        );
+
+        expect(
+          focusedOrder,
+          containsAllInOrder([
+            'Status To Do',
+            'Status Done',
+            'Issue type Story',
+            'Field Summary',
+            'Field Description',
+            'Priority High',
+            'Component Tracker Core',
+            'Version MVP',
+            'Resolution Done',
+          ]),
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'settings attachments tab persists github releases attachment storage',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      final repository = _EditableSettingsWidgetRepository();
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        final attachmentsTab = find.widgetWithText(Tab, 'Attachments');
+        await tester.ensureVisible(attachmentsTab);
+        await tester.tap(attachmentsTab);
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.byKey(const ValueKey('attachment-storage-mode-field')),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('GitHub Releases').last);
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const ValueKey('attachment-release-tag-prefix-field')),
+          'custom-prefix-',
+        );
+
+        await tester.tap(find.text('Save settings'));
+        await tester.pumpAndSettle();
+
+        expect(
+          repository.savedSettings?.attachmentStorage.mode,
+          AttachmentStorageMode.githubReleases,
+        );
+        expect(
+          repository.savedSettings?.attachmentStorage.githubReleases?.tagPrefix,
+          'custom-prefix-',
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'settings locales keeps versions and resolutions visible after adding a locale',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1280, 720);
+      tester.view.devicePixelRatio = 1;
+      final repository = _EditableSettingsWidgetRepository();
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        final localesTab = find.widgetWithText(Tab, 'Locales');
+        await tester.ensureVisible(localesTab);
+        await tester.tap(localesTab);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Add locale'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Locale code'),
+          'fr',
+        );
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+
+        final viewportHeight =
+            tester.view.physicalSize.height / tester.view.devicePixelRatio;
+        final versionsSummary = find.bySemanticsLabel(
+          'Versions Locales\nsummary',
+        );
+        final resolutionsSummary = find.bySemanticsLabel(
+          'Resolutions Locales\nsummary',
+        );
+
+        expect(versionsSummary, findsOneWidget);
+        expect(resolutionsSummary, findsOneWidget);
+        expect(tester.getRect(versionsSummary).top, lessThan(viewportHeight));
+        expect(
+          tester.getRect(resolutionsSummary).top,
+          lessThan(viewportHeight),
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
       }
     },
   );
@@ -472,6 +705,7 @@ class _EditableSettingsWidgetRepository
         versionDefinitions: settings.versionDefinitions,
         componentDefinitions: settings.componentDefinitions,
         resolutionDefinitions: settings.resolutionDefinitions,
+        attachmentStorage: settings.attachmentStorage,
       ),
       issues: current.issues,
       repositoryIndex: current.repositoryIndex,

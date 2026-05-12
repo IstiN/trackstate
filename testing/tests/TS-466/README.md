@@ -10,7 +10,7 @@ The automation:
 4. enters a translation for a real priority ID
 5. leaves a real status translation empty and verifies the inline fallback warning
 6. saves the live settings and confirms the persisted user-visible result
-7. restores the temporary locale/UI state after verification
+7. restores the repository state after verification
 
 ## Install dependencies
 
