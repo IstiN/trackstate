@@ -6,7 +6,7 @@ dependencies:
   - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
 notes:
   - Verifies jira_execute_request rejects the unsafe fallback paths from TS-385 before local repository access.
-  - Runs each command from an empty temporary working directory so provider or repository access would surface as a git/repository error instead of the expected unsupported envelope.
+  - Executes the packaged CLI from this repository checkout via `dart run trackstate` and passes an empty temporary directory with `--path` so Dart package resolution succeeds while local repository access remains observable.
 runtime_inputs:
   expected_exit_code: 5
   expected_error_code: UNSUPPORTED_REQUEST

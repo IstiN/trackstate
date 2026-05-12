@@ -27,20 +27,21 @@ class PythonTrackStateCliFallbackBoundariesFramework:
     ) -> TrackStateCliFallbackBoundariesValidationResult:
         observations: list[TrackStateCliFallbackBoundaryObservation] = []
         dart_bin = os.environ.get("TRACKSTATE_DART_BIN", "dart")
-        entrypoint = self._repository_root / "bin" / "trackstate.dart"
 
         for scenario in config.scenarios:
             with tempfile.TemporaryDirectory(
                 prefix=f"trackstate-ts-385-{scenario.name}-"
             ) as temp_dir:
-                execution_cwd = Path(temp_dir)
+                local_target_path = Path(temp_dir)
                 executed_command = (
                     dart_bin,
                     "run",
-                    str(entrypoint),
+                    "trackstate",
                     "jira_execute_request",
                     "--target",
                     "local",
+                    "--path",
+                    str(local_target_path),
                     "--method",
                     scenario.method,
                     "--request-path",
@@ -50,9 +51,10 @@ class PythonTrackStateCliFallbackBoundariesFramework:
                     TrackStateCliFallbackBoundaryObservation(
                         name=scenario.name,
                         ticket_command=scenario.ticket_command,
-                        execution_cwd=str(execution_cwd),
+                        local_target_path=str(local_target_path),
+                        process_cwd=str(self._repository_root),
                         executed_command=executed_command,
-                        result=self._run(executed_command, cwd=execution_cwd),
+                        result=self._run(executed_command, cwd=self._repository_root),
                     )
                 )
 

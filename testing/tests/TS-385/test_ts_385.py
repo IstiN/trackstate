@@ -83,7 +83,8 @@ class TrackStateCliFallbackBoundariesTest(unittest.TestCase):
                 "readable JSON envelope.\n"
                 f"Ticket command: {scenario.ticket_command}\n"
                 f"Executed command: {observation.executed_command_text}\n"
-                f"Execution cwd: {observation.execution_cwd}\n"
+                f"Process cwd: {observation.process_cwd}\n"
+                f"Local target path: {observation.local_target_path}\n"
                 f"Exit code: {observation.result.exit_code}\n"
                 f"stdout:\n{observation.result.stdout}\n"
                 f"stderr:\n{observation.result.stderr}"
@@ -96,7 +97,8 @@ class TrackStateCliFallbackBoundariesTest(unittest.TestCase):
                 "the documented unsupported exit code before repository access.\n"
                 f"Ticket command: {scenario.ticket_command}\n"
                 f"Executed command: {observation.executed_command_text}\n"
-                f"Execution cwd: {observation.execution_cwd}\n"
+                f"Process cwd: {observation.process_cwd}\n"
+                f"Local target path: {observation.local_target_path}\n"
                 f"Expected exit code: {self.config.expected_exit_code}\n"
                 f"Observed exit code: {observation.result.exit_code}\n"
                 f"Observed payload: {payload_dict}\n"
@@ -159,12 +161,12 @@ class TrackStateCliFallbackBoundariesTest(unittest.TestCase):
                     "target type was not local.\n"
                     f"Observed target: {target_dict}"
                 )
-            if target_dict.get("value") != observation.execution_cwd:
+            if target_dict.get("value") != observation.local_target_path:
                 failures.append(
                     f"Human-style verification failed for {scenario.name}: the visible "
-                    "target value did not match the empty working directory used to "
+                    "target value did not match the empty local directory used to "
                     "prove repository access was unnecessary.\n"
-                    f"Expected target value: {observation.execution_cwd}\n"
+                    f"Expected target value: {observation.local_target_path}\n"
                     f"Observed target: {target_dict}"
                 )
 

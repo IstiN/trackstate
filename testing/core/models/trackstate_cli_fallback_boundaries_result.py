@@ -9,7 +9,8 @@ from testing.core.models.cli_command_result import CliCommandResult
 class TrackStateCliFallbackBoundaryObservation:
     name: str
     ticket_command: str
-    execution_cwd: str
+    local_target_path: str
+    process_cwd: str
     executed_command: tuple[str, ...]
     result: CliCommandResult
 
@@ -21,7 +22,8 @@ class TrackStateCliFallbackBoundaryObservation:
         return {
             "name": self.name,
             "ticketCommand": self.ticket_command,
-            "executionCwd": self.execution_cwd,
+            "localTargetPath": self.local_target_path,
+            "processCwd": self.process_cwd,
             "executedCommand": list(self.executed_command),
             "executedCommandText": self.executed_command_text,
             "result": {
