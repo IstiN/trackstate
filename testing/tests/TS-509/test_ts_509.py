@@ -7,6 +7,7 @@ import sys
 import tempfile
 import traceback
 import urllib.error
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,8 +37,7 @@ ISSUE_KEY = "DEMO-2"
 ISSUE_SUMMARY = "Explore the issue board"
 PROJECT_JSON_PATH = "DEMO/project.json"
 MANIFEST_PATH = f"{ISSUE_PATH}/attachments.json"
-RELEASE_TAG_PREFIX = "ts509-release-bypass-"
-EXPECTED_RELEASE_TAG = f"{RELEASE_TAG_PREFIX}{ISSUE_KEY}"
+RELEASE_TAG_PREFIX_BASE = "ts509-release-bypass-"
 UPLOAD_SIZE_BYTES = 2_500_000
 
 HOSTED_LIMITED_UPLOAD_TITLE = "Some attachment uploads still require local Git"
@@ -83,8 +83,8 @@ def main() -> None:
     lfs_extension = _pick_lfs_extension(gitattributes_text)
     upload_name = f"ts509-release-upload.{lfs_extension}"
     upload_path_in_repo = f"{ISSUE_PATH}/attachments/{upload_name}"
-
-    original_release = service.fetch_release_by_tag(EXPECTED_RELEASE_TAG)
+    release_tag_prefix = _build_release_tag_prefix()
+    expected_release_tag = _expected_release_tag(release_tag_prefix)
     mutations = _collect_original_files(
         service,
         (PROJECT_JSON_PATH, MANIFEST_PATH, upload_path_in_repo),
@@ -100,7 +100,8 @@ def main() -> None:
         "issue_path": issue_fixture.path,
         "project_json_path": PROJECT_JSON_PATH,
         "manifest_path": MANIFEST_PATH,
-        "release_tag": EXPECTED_RELEASE_TAG,
+        "release_tag_prefix": release_tag_prefix,
+        "release_tag": expected_release_tag,
         "upload_name": upload_name,
         "upload_path": upload_path_in_repo,
         "lfs_extension": lfs_extension,
@@ -113,7 +114,11 @@ def main() -> None:
     scenario_error: Exception | None = None
     cleanup_error: Exception | None = None
     try:
-        fixture_setup = _seed_fixture(service)
+        fixture_setup = _seed_fixture(
+            service,
+            release_tag_prefix=release_tag_prefix,
+            expected_release_tag=expected_release_tag,
+        )
         result["fixture_setup"] = fixture_setup
 
         with tempfile.TemporaryDirectory(prefix="ts509-", dir=OUTPUTS_DIR) as temp_dir:
@@ -242,6 +247,7 @@ def main() -> None:
                         probe=lambda: _observe_manifest_state(
                             service,
                             attachment_name=upload_name,
+                            expected_release_tag=expected_release_tag,
                         ),
                         is_satisfied=lambda state: state["single_entry_is_release"] is True,
                         timeout_seconds=120,
@@ -289,7 +295,7 @@ def main() -> None:
                             "the GitHub Release-backed attachment flow."
                         ),
                         observed=(
-                            f"release_tag={EXPECTED_RELEASE_TAG}; "
+                            f"release_tag={expected_release_tag}; "
                             f"manifest_entry={json.dumps(manifest_observation['matching_entries'][0], sort_keys=True)}"
                         ),
                     )
@@ -318,7 +324,7 @@ def main() -> None:
             cleanup_result = _restore_fixture(
                 service=service,
                 mutations=mutations,
-                original_release=original_release,
+                expected_release_tag=expected_release_tag,
             )
             result["cleanup"] = cleanup_result
         except Exception:
@@ -391,8 +397,21 @@ def _fetch_repo_file_if_exists(
         raise
 
 
-def _seed_fixture(service: LiveSetupRepositoryService) -> dict[str, object]:
-    _delete_release_if_present(service, service.fetch_release_by_tag(EXPECTED_RELEASE_TAG))
+def _build_release_tag_prefix() -> str:
+    return f"{RELEASE_TAG_PREFIX_BASE}{uuid.uuid4().hex[:8]}-"
+
+
+def _expected_release_tag(release_tag_prefix: str) -> str:
+    return f"{release_tag_prefix}{ISSUE_KEY}"
+
+
+def _seed_fixture(
+    service: LiveSetupRepositoryService,
+    *,
+    release_tag_prefix: str,
+    expected_release_tag: str,
+) -> dict[str, object]:
+    _delete_release_if_present(service, service.fetch_release_by_tag(expected_release_tag))
     project_payload = json.loads(service.fetch_repo_text(PROJECT_JSON_PATH))
     if not isinstance(project_payload, dict):
         raise AssertionError(
@@ -400,7 +419,7 @@ def _seed_fixture(service: LiveSetupRepositoryService) -> dict[str, object]:
         )
     project_payload["attachmentStorage"] = {
         "mode": "github-releases",
-        "githubReleases": {"tagPrefix": RELEASE_TAG_PREFIX},
+        "githubReleases": {"tagPrefix": release_tag_prefix},
     }
     service.write_repo_text(
         PROJECT_JSON_PATH,
@@ -411,7 +430,7 @@ def _seed_fixture(service: LiveSetupRepositoryService) -> dict[str, object]:
     matched, observed_project_json = poll_until(
         probe=lambda: service.fetch_repo_text(PROJECT_JSON_PATH),
         is_satisfied=lambda text: _project_attachment_mode(text) == "github-releases"
-        and _project_release_tag_prefix(text) == RELEASE_TAG_PREFIX,
+        and _project_release_tag_prefix(text) == release_tag_prefix,
         timeout_seconds=120,
         interval_seconds=4,
     )
@@ -425,6 +444,7 @@ def _seed_fixture(service: LiveSetupRepositoryService) -> dict[str, object]:
         "project_json": observed_project_json,
         "attachment_storage_mode": _project_attachment_mode(observed_project_json),
         "release_tag_prefix": _project_release_tag_prefix(observed_project_json),
+        "expected_release_tag": expected_release_tag,
     }
 
 
@@ -455,6 +475,7 @@ def _observe_manifest_state(
     service: LiveSetupRepositoryService,
     *,
     attachment_name: str,
+    expected_release_tag: str,
 ) -> dict[str, object]:
     manifest_file = _fetch_repo_file_if_exists(service, MANIFEST_PATH)
     manifest_text = manifest_file.content if manifest_file is not None else "[]\n"
@@ -468,7 +489,7 @@ def _observe_manifest_state(
         for entry in entries
         if isinstance(entry, dict) and str(entry.get("name", "")) == attachment_name
     ]
-    release = service.fetch_release_by_tag(EXPECTED_RELEASE_TAG)
+    release = service.fetch_release_by_tag(expected_release_tag)
     release_asset_names = [
         asset.name
         for asset in (release.assets if release is not None else [])
@@ -480,7 +501,7 @@ def _observe_manifest_state(
         "release_asset_names": release_asset_names,
         "single_entry_is_release": len(matching_entries) == 1
         and str(matching_entries[0].get("storageBackend", "")) == "github-releases"
-        and str(matching_entries[0].get("githubReleaseTag", "")) == EXPECTED_RELEASE_TAG
+        and str(matching_entries[0].get("githubReleaseTag", "")) == expected_release_tag
         and str(matching_entries[0].get("githubReleaseAssetName", "")) == attachment_name
         and attachment_name in release_asset_names,
     }
@@ -511,7 +532,7 @@ def _restore_fixture(
     *,
     service: LiveSetupRepositoryService,
     mutations: list[RepoMutation],
-    original_release: LiveHostedRelease | None,
+    expected_release_tag: str,
 ) -> dict[str, object]:
     restored_paths: list[str] = []
     deleted_paths: list[str] = []
@@ -534,16 +555,13 @@ def _restore_fixture(
             )
         restored_paths.append(mutation.path)
 
-    release_after_test = service.fetch_release_by_tag(EXPECTED_RELEASE_TAG)
-    if original_release is None:
-        _delete_release_if_present(service, release_after_test)
-        release_cleanup = "deleted-seeded-release"
-    else:
-        release_cleanup = (
-            "kept-original-release"
-            if release_after_test is not None
-            else "original-release-missing"
-        )
+    release_after_test = service.fetch_release_by_tag(expected_release_tag)
+    _delete_release_if_present(service, release_after_test)
+    release_cleanup = (
+        "deleted-seeded-release"
+        if release_after_test is not None
+        else "no-seeded-release"
+    )
 
     return {
         "status": "restored",
@@ -736,6 +754,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
     status = "PASSED" if passed else "FAILED"
     screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
+    release_tag = str(result.get("release_tag", ""))
     lines = [
         f"h3. {TICKET_KEY} {status}",
         "",
@@ -750,7 +769,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             "the upload from the Attachments tab."
         ),
         (
-            f"* Polled {{{{{MANIFEST_PATH}}}}} plus the GitHub Release {{{{{EXPECTED_RELEASE_TAG}}}}} "
+            f"* Polled {{{{{MANIFEST_PATH}}}}} plus the GitHub Release {{{{{release_tag}}}}} "
             "to verify the upload was routed to release-backed storage."
         ),
         "",
@@ -791,6 +810,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
 def _pr_body(result: dict[str, object], *, passed: bool) -> str:
     status = "Passed" if passed else "Failed"
     screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
+    release_tag = str(result.get("release_tag", ""))
     lines = [
         f"## {TICKET_KEY} {status}",
         "",
@@ -805,7 +825,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             "the upload from the Attachments tab."
         ),
         (
-            f"- Polled `{MANIFEST_PATH}` plus the GitHub Release `{EXPECTED_RELEASE_TAG}` "
+            f"- Polled `{MANIFEST_PATH}` plus the GitHub Release `{release_tag}` "
             "to verify the upload was routed to release-backed storage."
         ),
         "",
@@ -873,6 +893,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    release_tag = str(result.get("release_tag", ""))
     return "\n".join(
         [
             "# TS-509 - Release-backed hosted upload still shows local Git / Git LFS restriction or fails to route to GitHub Releases",
@@ -920,7 +941,7 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- Selected file: `{result.get('selected_file_path')}`",
             f"- Project config path: `{PROJECT_JSON_PATH}`",
             f"- Manifest path: `{MANIFEST_PATH}`",
-            f"- Release tag: `{EXPECTED_RELEASE_TAG}`",
+            f"- Release tag: `{release_tag}`",
             "",
             "## Screenshots or logs",
             f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
