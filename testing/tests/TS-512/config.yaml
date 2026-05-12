@@ -5,4 +5,4 @@ platform: widget
 dependencies: []
 notes:
   - Pumps the production issue-detail Attachments tab with a hosted remembered-token session whose repository is write-enabled but configured for github-releases storage without release-backed browser uploads.
-  - Verifies the visible restriction notice, its semantics label, the Open settings recovery control, keyboard reachability, and WCAG AA text contrast on the warning callout.
+  - Verifies the visible restriction notice, its semantics label, the Open settings recovery control, keyboard reachability, recovery navigation to Project Settings > Attachments, and WCAG AA text contrast on the warning callout.

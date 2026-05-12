@@ -21,6 +21,10 @@ const String _chooseAttachmentLabel = 'Choose attachment';
 const String _uploadAttachmentLabel = 'Upload attachment';
 const String _attachmentName = 'sync-sequence.svg';
 const String _downloadAttachmentLabel = 'Download sync-sequence.svg';
+const String _projectSettingsHeading = 'Project Settings';
+const String _settingsAttachmentsTabLabel = 'Attachments';
+const String _attachmentStorageModeLabel = 'Attachment storage mode';
+const String _githubReleasesLabel = 'GitHub Releases';
 
 const String _githubReleasesProjectJson = '''
 {
@@ -321,9 +325,29 @@ void main() {
             if (openSettingsReached) {
               await tester.sendKeyEvent(LogicalKeyboardKey.enter);
               await tester.pumpAndSettle();
-              if (find.text('Project Settings').evaluate().isEmpty) {
+              if (find.text(_projectSettingsHeading).evaluate().isEmpty) {
                 failures.add(
                   'Human-style verification failed: activating the keyboard-focused Open settings action did not navigate to Project Settings.',
+                );
+              }
+              if (find.text(_attachmentStorageModeLabel).evaluate().isEmpty) {
+                failures.add(
+                  'Human-style verification failed: activating Open settings did not land on Project Settings > Attachments. '
+                  'Visible settings text: ${_formatSnapshot(robot.visibleTexts())}. '
+                  'Expected to see "$_attachmentStorageModeLabel" after opening settings from the Attachments notice.',
+                );
+              }
+              if (find.text(_githubReleasesLabel).evaluate().isEmpty) {
+                failures.add(
+                  'Human-style verification failed: Project Settings > Attachments did not show the current "$_githubReleasesLabel" storage mode after activating Open settings from the Attachments notice.',
+                );
+              }
+              if (find
+                  .widgetWithText(Tab, _settingsAttachmentsTabLabel)
+                  .evaluate()
+                  .isEmpty) {
+                failures.add(
+                  'Human-style verification failed: Project Settings did not keep the visible "$_settingsAttachmentsTabLabel" tab after activating Open settings from the Attachments notice.',
                 );
               }
             }
