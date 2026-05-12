@@ -5774,6 +5774,7 @@ class _SelectableChipField extends StatelessWidget {
     required this.selectedValues,
     required this.onToggle,
     this.enabled = true,
+    this.optionLabelBuilder,
   });
 
   final String label;
@@ -5781,6 +5782,7 @@ class _SelectableChipField extends StatelessWidget {
   final List<String> selectedValues;
   final ValueChanged<String> onToggle;
   final bool enabled;
+  final String Function(TrackStateConfigEntry option)? optionLabelBuilder;
 
   @override
   Widget build(BuildContext context) {
@@ -5798,7 +5800,9 @@ class _SelectableChipField extends StatelessWidget {
             children: [
               for (final option in options)
                 FilterChip(
-                  label: Text(option.label()),
+                  label: Text(
+                    optionLabelBuilder?.call(option) ?? option.label(),
+                  ),
                   selected: selectedValues.any(
                     (value) =>
                         _canonicalConfigId(value) ==
@@ -7021,6 +7025,12 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                 options: componentOptions,
                                 selectedValues: _components,
                                 enabled: canEditFields,
+                                optionLabelBuilder: (option) =>
+                                    project?.componentLabel(
+                                      option.id,
+                                      locale: metadataLocale,
+                                    ) ??
+                                    option.name,
                                 onToggle: (value) =>
                                     _toggleConfigSelection(_components, value),
                               ),
@@ -7030,6 +7040,12 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                 options: versionOptions,
                                 selectedValues: _fixVersions,
                                 enabled: canEditFields,
+                                optionLabelBuilder: (option) =>
+                                    project?.versionLabel(
+                                      option.id,
+                                      locale: metadataLocale,
+                                    ) ??
+                                    option.name,
                                 onToggle: (value) =>
                                     _toggleConfigSelection(_fixVersions, value),
                               ),
