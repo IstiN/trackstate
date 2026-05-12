@@ -50,7 +50,6 @@ def main() -> None:
 
     user = service.fetch_authenticated_user()
     issue_fixture = service.fetch_issue_fixture(ISSUE_PATH)
-    _assert_comment_preconditions(issue_fixture)
 
     result: dict[str, object] = {
         "status": "failed",
@@ -69,6 +68,7 @@ def main() -> None:
     }
 
     try:
+        _assert_fixture_preconditions(issue_fixture)
         with create_live_tracker_app_with_stored_token(
             config,
             token=token,
@@ -214,13 +214,20 @@ def main() -> None:
         raise
 
 
-def _assert_comment_preconditions(issue_fixture: LiveHostedIssueFixture) -> None:
+def _assert_fixture_preconditions(issue_fixture: LiveHostedIssueFixture) -> None:
     if len(issue_fixture.comment_bodies) < 2:
         raise AssertionError(
             "Precondition failed: the live issue fixture does not expose at least two "
             "comments needed to verify chronological comment ordering.\n"
             f"Issue path: {ISSUE_PATH}\n"
             f"Observed comment paths: {issue_fixture.comment_paths}",
+        )
+    if len(issue_fixture.attachment_paths) < 2:
+        raise AssertionError(
+            "Precondition failed: the live issue fixture does not expose at least two "
+            "attachments needed to verify newest-to-oldest attachment ordering.\n"
+            f"Issue path: {ISSUE_PATH}\n"
+            f"Observed attachment paths: {issue_fixture.attachment_paths}",
         )
 
 
