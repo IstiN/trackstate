@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart' show CircularProgressIndicator;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -25,6 +24,8 @@ void main() {
 
       const defaultQuery =
           'project = TRACK AND status != Done ORDER BY priority DESC';
+      const interactiveQuery =
+          'project = TRACK AND status != Done ORDER BY priority DESC AND labels = search';
       const firstPageSummary = 'Showing 6 of 8 issues';
       const bootstrapVisibleLabels = <String>[
         'Open TRACK-401 Highest priority bootstrap alpha',
@@ -70,10 +71,10 @@ void main() {
               'Step 2 failed: the search section did not expose its in-place loading banner during hydration.',
         );
         expect(
-          find.byType(CircularProgressIndicator),
-          findsNothing,
+          await screen.isBlockingSearchLoaderVisible(),
+          isFalse,
           reason:
-              'Step 3 failed: a blocking CircularProgressIndicator replaced the visible search surface during hydration.',
+              'Step 3 failed: a blocking search loader replaced the visible search surface during hydration.',
         );
         expect(
           _baseSearchRowLabels(screen.visibleIssueSearchResultLabelsSnapshot()),
@@ -109,6 +110,42 @@ void main() {
           isFalse,
           reason:
               'Step 4 failed: the paginated hydrated summary appeared before the async search request completed.',
+        );
+        await screen.enterLabeledTextFieldWithoutSettling(
+          'Search issues',
+          text: interactiveQuery,
+        );
+        await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
+        expect(
+          await screen.readJqlSearchFieldValue(),
+          interactiveQuery,
+          reason:
+              'Step 5 failed: the Search issues field was not editable while hydration was pending, so the search surface did not remain interactive.',
+        );
+        expect(
+          await screen.isSemanticsLabelVisible('JQL Search Loading...'),
+          isTrue,
+          reason:
+              'Step 5 failed: editing the visible Search issues field caused the in-place hydration state to disappear instead of keeping the search surface usable during loading.',
+        );
+        expect(
+          await screen.isBlockingSearchLoaderVisible(),
+          isFalse,
+          reason:
+              'Step 5 failed: interacting with the visible Search issues field triggered a blocking loader instead of keeping the search surface usable during hydration.',
+        );
+        expect(
+          _baseSearchRowLabels(screen.visibleIssueSearchResultLabelsSnapshot()),
+          equals(bootstrapVisibleLabels),
+          reason:
+              'Step 5 failed: interacting with the visible Search issues field hid the bootstrap-backed rows during hydration. Visible issue rows: '
+              '${_formatSnapshot(screen.visibleIssueSearchResultLabelsSnapshot())}.',
+        );
+        expect(
+          repository.searchRequests,
+          1,
+          reason:
+              'Step 5 failed: editing the Search issues field unexpectedly restarted hydration before the user submitted a new search.',
         );
 
         await screen.waitWithoutInteraction(
@@ -151,10 +188,10 @@ void main() {
               'Human-style verification failed: after hydration completed, the user-facing JQL Search panel did not expose the visible "Load more" control for the remaining results.',
         );
         expect(
-          find.byType(CircularProgressIndicator),
-          findsNothing,
+          await screen.isBlockingSearchLoaderVisible(),
+          isFalse,
           reason:
-              'Human-style verification failed: a blocking spinner was still visible after the search hydration completed.',
+              'Human-style verification failed: a blocking search loader was still visible after the search hydration completed.',
         );
       } finally {
         screen.resetView();

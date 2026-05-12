@@ -9,8 +9,10 @@ The automation:
    but the initial async search page is still pending
 2. confirms the search shell, query field, and bootstrap-backed rows remain
    visible during hydration
-3. proves no full-screen blocking spinner replaces the search surface
-4. waits for hydration to complete and confirms the visible rows stay in place
+3. edits the visible Search issues field during hydration to prove the surface
+   stays interactive without restarting the pending bootstrap hydration
+4. proves no full-screen blocking search loader replaces the search surface
+5. waits for hydration to complete and confirms the visible rows stay in place
    while the summary/load-more controls appear in place
 
 ## Install dependencies

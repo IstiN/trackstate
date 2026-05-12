@@ -411,6 +411,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> isBlockingSearchLoaderVisible() async {
+    await tester.pump();
+    return find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
+  }
+
+  @override
   Future<void> expectIssueSearchResultVisible(
     String key,
     String summary,
@@ -988,19 +994,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     String label, {
     required String text,
   }) async {
-    final field = _labeledTextField(label);
-    await tester.pump();
-    if (field.evaluate().isEmpty) {
-      fail(
-        'Expected a visible text field labeled "$label", but no matching '
-        'editable control was rendered.',
-      );
-    }
-    await tester.ensureVisible(field.first);
-    await tester.tap(field.first, warnIfMissed: false);
-    await tester.pump();
-    await tester.enterText(field.first, text);
-    await tester.pumpAndSettle();
+    final field = await _requireVisibleLabeledTextField(label);
+    await _enterTextField(field, text: text, settle: true);
+  }
+
+  @override
+  Future<void> enterLabeledTextFieldWithoutSettling(
+    String label, {
+    required String text,
+  }) async {
+    final field = await _requireVisibleLabeledTextField(label);
+    await _enterTextField(field, text: text, settle: false);
   }
 
   @override
@@ -1016,6 +1020,34 @@ class TrackStateAppScreen implements TrackStateAppComponent {
           'Expected the visible text field labeled "$label" to expose a '
           'readable value, but no controller-backed editable widget was found.',
     );
+  }
+
+  Future<Finder> _requireVisibleLabeledTextField(String label) async {
+    final field = _labeledTextField(label);
+    await tester.pump();
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible text field labeled "$label", but no matching '
+        'editable control was rendered.',
+      );
+    }
+    return field.first;
+  }
+
+  Future<void> _enterTextField(
+    Finder field, {
+    required String text,
+    required bool settle,
+  }) async {
+    await tester.ensureVisible(field);
+    await tester.tap(field, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(field, text);
+    if (settle) {
+      await tester.pumpAndSettle();
+      return;
+    }
+    await tester.pump();
   }
 
   String? _readTextFieldValue(
