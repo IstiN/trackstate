@@ -41,11 +41,21 @@ abstract interface class TrackStateAppComponent {
 
   Future<String?> readJqlSearchFieldValue();
 
+  Future<bool> isBlockingSearchLoaderVisible();
+
   Future<void> expectIssueSearchResultVisible(String key, String summary);
 
   void expectIssueSearchResultAbsent(String key, String summary);
 
   List<String> visibleIssueSearchResultLabelsSnapshot();
+
+  Future<bool> isIssueSearchResultTextVisible(
+    String key,
+    String summary,
+    String text,
+  );
+
+  List<String> issueSearchResultTextsSnapshot(String key, String summary);
 
   Future<void> dragIssueToStatusColumn({
     required String key,
@@ -122,6 +132,24 @@ abstract interface class TrackStateAppComponent {
 
   Future<bool> tapTopBarControl(String label);
 
+  Future<bool> isNavigationControlVisible(String label);
+
+  Future<void> expectNavigationControlEnabled(String label);
+
+  Future<bool> isNavigationChromeVisible();
+
+  Future<List<String>> collectDisabledNavigationViolations({
+    required String label,
+    required String retainedText,
+    required List<String> disallowedTexts,
+  });
+
+  Future<bool> isDialogTextVisible(String text);
+
+  List<String> visibleDialogTextsSnapshot();
+
+  Future<bool> tapDialogControl(String label);
+
   Future<bool> isTextFieldVisible(String label);
 
   Future<int> countLabeledTextFields(String label);
@@ -141,6 +169,11 @@ abstract interface class TrackStateAppComponent {
   Future<String?> readReadOnlyFieldValue(String label);
 
   Future<void> enterLabeledTextField(String label, {required String text});
+
+  Future<void> enterLabeledTextFieldWithoutSettling(
+    String label, {
+    required String text,
+  });
 
   Future<String?> readLabeledTextFieldValue(String label);
 

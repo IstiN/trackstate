@@ -1,0 +1,9 @@
+test_id: TS-422
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Exercises the deployed hosted TrackState app with the hosted issue summary index removed from the intercepted GitHub tree response.
+  - Verifies the app exposes a recoverable failure state with Retry and index-regeneration guidance instead of silently scanning issue files.
+  - Confirms no automatic fallback tree replay or mass `main.md` hydration occurs while the failure surface is visible.

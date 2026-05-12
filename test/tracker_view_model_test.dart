@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -27,6 +29,118 @@ void main() {
     expect(viewModel.selectedIssue?.key, 'TRACK-12');
     expect(viewModel.searchResults, isNotEmpty);
   });
+
+  test(
+    'view model publishes bootstrap snapshot before initial search hydration completes',
+    () async {
+      final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+      final repository = _DelayedInitialSearchRepository(
+        snapshot: _hostedBootstrapSnapshot(snapshot),
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+      final states =
+          <({bool isLoading, bool hasLoadedSearch, bool hasSnapshot})>[];
+      viewModel.addListener(() {
+        states.add((
+          isLoading: viewModel.isLoading,
+          hasLoadedSearch: viewModel.hasLoadedInitialSearchResults,
+          hasSnapshot: viewModel.snapshot != null,
+        ));
+      });
+
+      final loadFuture = viewModel.load();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.isLoading, isTrue);
+      expect(viewModel.hasLoadedInitialSearchResults, isFalse);
+      expect(viewModel.selectedIssue?.hasDetailLoaded, isFalse);
+      expect(
+        states.any(
+          (state) =>
+              state.hasSnapshot && state.isLoading && !state.hasLoadedSearch,
+        ),
+        isTrue,
+      );
+
+      repository.completeInitialSearch();
+      await loadFuture;
+
+      expect(viewModel.hasLoadedInitialSearchResults, isTrue);
+      expect(viewModel.searchResults, isNotEmpty);
+    },
+  );
+
+  test(
+    'view model keeps bootstrap search fallback after the initial hosted search fails',
+    () async {
+      final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+      final viewModel = TrackerViewModel(
+        repository: _FailingInitialSearchRepository(
+          snapshot: _hostedBootstrapSnapshot(snapshot),
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.isLoading, isFalse);
+      expect(viewModel.hasLoadedInitialSearchResults, isFalse);
+      expect(viewModel.showsInitialBootstrapPlaceholders, isFalse);
+      expect(viewModel.shouldUseBootstrapSearchFallback, isTrue);
+      expect(viewModel.selectedIssue?.key, 'TRACK-12');
+      expect(viewModel.message?.kind, TrackerMessageKind.dataLoadFailed);
+    },
+  );
+
+  test(
+    'view model routes hosted startup recovery into settings when reduced bootstrap succeeds',
+    () async {
+      final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+      final recoveryRepository = _StartupRecoveryRepository(
+        loadResults: [_withStartupRecovery(snapshot)],
+      );
+      final viewModel = TrackerViewModel(repository: recoveryRepository);
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNotNull);
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.githubRateLimit,
+      );
+      expect(viewModel.section, TrackerSection.settings);
+      expect(recoveryRepository.loadCount, 1);
+    },
+  );
+
+  test(
+    'view model maps blocking hosted rate limits into recovery instead of generic data-load failure',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: _StartupRecoveryRepository(
+          loadResults: const [
+            GitHubRateLimitException(
+              message:
+                  'GitHub API request failed for /repos/demo/contents/.trackstate/index/issues.json (403): {"message":"API rate limit exceeded"}',
+              requestPath: '/repos/demo/contents/.trackstate/index/issues.json',
+              statusCode: 403,
+            ),
+          ],
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNull);
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.githubRateLimit,
+      );
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
+    },
+  );
 
   test('view model appends the next search page through load more', () async {
     final viewModel = TrackerViewModel(
@@ -100,6 +214,25 @@ void main() {
   });
 
   test(
+    'view model resumes startup recovery once after GitHub authentication succeeds',
+    () async {
+      final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+      final repository = _StartupRecoveryRepository(
+        loadResults: [_withStartupRecovery(snapshot), snapshot],
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      await viewModel.connectGitHub('token');
+
+      expect(repository.loadCount, 2);
+      expect(repository.connectCount, 1);
+      expect(viewModel.startupRecovery, isNull);
+      expect(viewModel.section, TrackerSection.settings);
+    },
+  );
+
+  test(
     'view model loads the local repository user for avatar details',
     () async {
       final viewModel = TrackerViewModel(
@@ -114,6 +247,41 @@ void main() {
   );
 
   test(
+    'view model keeps deferred detail failures scoped to the issue instead of failing the whole app',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(
+          failingTextPaths: {'TRACK-12/main.md'},
+        ),
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      await viewModel.ensureIssueDetailLoaded(issue);
+
+      expect(
+        viewModel.issueDeferredError(issue.key, IssueDeferredSection.detail),
+        contains('Deferred read failed for TRACK-12/main.md'),
+      );
+      expect(
+        viewModel.hasIssueDeferredError(issue.key, IssueDeferredSection.detail),
+        isTrue,
+      );
+      expect(
+        viewModel.message?.kind,
+        isNot(TrackerMessageKind.issueSaveFailed),
+      );
+      expect(viewModel.snapshot, isNotNull);
+    },
+  );
+
+  test(
     'view model reports local persistence after a successful move',
     () async {
       final viewModel = TrackerViewModel(
@@ -124,6 +292,281 @@ void main() {
       await viewModel.moveIssue(viewModel.selectedIssue!, IssueStatus.done);
 
       expect(viewModel.message?.kind, TrackerMessageKind.localGitMoveCommitted);
+    },
+  );
+
+  test(
+    'view model updates issue status without reloading the full snapshot',
+    () async {
+      final repository = _MutableEditRepository(
+        snapshot: await const DemoTrackStateRepository().loadSnapshot(),
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.selectedIssue!;
+
+      await viewModel.moveIssue(issue, IssueStatus.done);
+
+      expect(repository.loadSnapshotCount, 1);
+      expect(viewModel.selectedIssue?.statusId, 'done');
+    },
+  );
+
+  test(
+    'view model posts comments without reloading the full snapshot',
+    () async {
+      final repository = _MutableEditRepository(
+        snapshot: await const DemoTrackStateRepository().loadSnapshot(),
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.selectedIssue!;
+
+      final success = await viewModel.postIssueComment(
+        issue,
+        'Scoped comment refresh.',
+      );
+
+      expect(success, isTrue);
+      expect(repository.loadSnapshotCount, 1);
+      expect(
+        viewModel.selectedIssue?.comments.any(
+          (comment) => comment.body == 'Scoped comment refresh.',
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test(
+    'view model uploads attachments without reloading the full snapshot',
+    () async {
+      final repository = _MutableEditRepository(
+        snapshot: await const DemoTrackStateRepository().loadSnapshot(),
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.selectedIssue!;
+
+      final success = await viewModel.uploadIssueAttachment(
+        issue: issue,
+        name: 'design spec.pdf',
+        bytes: Uint8List.fromList(<int>[1, 2, 3]),
+      );
+
+      expect(success, isTrue);
+      expect(repository.loadSnapshotCount, 1);
+      expect(
+        viewModel.selectedIssue?.attachments.any(
+          (attachment) => attachment.name == 'design-spec.pdf',
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test(
+    'view model saves hosted field edits without reloading the full snapshot',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final repository = _HostedMutableEditRepository();
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: 'Implement targeted hosted edits',
+          description: 'Persist field updates without reloading the bootstrap.',
+          priorityId: issue.priorityId,
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: issue.parentKey,
+          epicKey: issue.epicKey,
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(repository.loadSnapshotCount, 1);
+      expect(
+        viewModel.selectedIssue?.summary,
+        'Implement targeted hosted edits',
+      );
+      expect(
+        viewModel.selectedIssue?.description,
+        'Persist field updates without reloading the bootstrap.',
+      );
+    },
+  );
+
+  test(
+    'view model saves hosted transitions without reloading the full snapshot',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final repository = _HostedMutableEditRepository();
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: issue.summary,
+          description: issue.description,
+          priorityId: issue.priorityId,
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: issue.parentKey,
+          epicKey: issue.epicKey,
+          transitionStatusId: 'in-review',
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(repository.loadSnapshotCount, 1);
+      expect(viewModel.selectedIssue?.statusId, 'in-review');
+    },
+  );
+
+  test(
+    'view model saves hosted hierarchy changes without reloading the full snapshot',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final repository = _HostedMutableEditRepository();
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: issue.summary,
+          description: issue.description,
+          priorityId: issue.priorityId,
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: 'TRACK-11',
+          epicKey: issue.epicKey,
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(repository.loadSnapshotCount, 1);
+      expect(viewModel.selectedIssue?.parentKey, 'TRACK-11');
+      expect(viewModel.selectedIssue?.parentPath, 'TRACK-11/main.md');
+      expect(viewModel.selectedIssue?.storagePath, 'TRACK-11/TRACK-12/main.md');
+    },
+  );
+
+  test(
+    'view model refreshes moved descendants from the hosted cache after hierarchy edits',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final repository = _HostedMutableEditRepository(
+        textFixtures: _hostedHierarchyTextFixtures(),
+        binaryFixtures: _hostedHierarchyBinaryFixtures(),
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-21',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: issue.summary,
+          description: issue.description,
+          priorityId: issue.priorityId,
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: issue.parentKey,
+          epicKey: 'TRACK-30',
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(repository.loadSnapshotCount, 1);
+      expect(viewModel.selectedIssue?.storagePath, 'TRACK-30/TRACK-21/main.md');
+      final movedDescendant = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-22',
+      );
+      expect(movedDescendant.parentKey, 'TRACK-21');
+      expect(movedDescendant.epicKey, 'TRACK-30');
+      expect(movedDescendant.storagePath, 'TRACK-30/TRACK-21/TRACK-22/main.md');
+    },
+  );
+
+  test(
+    'hosted hierarchy moves preserve attachment revisions for same-name overwrites',
+    () async {
+      final repository = _HostedMutableEditRepository(
+        textFixtures: _hostedHierarchyTextFixtures(),
+        binaryFixtures: _hostedHierarchyBinaryFixtures(),
+      );
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: 'trackstate/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final issue = repository.cachedSnapshot!.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-21',
+      );
+      final hydrated = await repository.hydrateIssue(
+        issue,
+        scopes: const {IssueHydrationScope.attachments},
+      );
+
+      final moved = await IssueMutationService(
+        repository: repository,
+      ).reassignIssue(issueKey: hydrated.key, epicKey: 'TRACK-30');
+
+      expect(moved.isSuccess, isTrue);
+      final uploaded = await repository.uploadIssueAttachment(
+        issue: moved.value!,
+        name: 'existing.pdf',
+        bytes: Uint8List.fromList(<int>[9, 9, 9]),
+      );
+      final overwritten = uploaded.attachments.firstWhere(
+        (attachment) => attachment.name == 'existing.pdf',
+      );
+      expect(
+        overwritten.storagePath,
+        'TRACK-30/TRACK-21/attachments/existing.pdf',
+      );
     },
   );
 
@@ -520,7 +963,10 @@ void main() {
     () async {
       final initialSnapshot = await const DemoTrackStateRepository()
           .loadSnapshot();
-      final repository = _MutableEditRepository(snapshot: initialSnapshot);
+      final repository = _MutableEditRepository(
+        snapshot: initialSnapshot,
+        reloadReturnsSummaryOnly: true,
+      );
       final service = _RecordingEditIssueMutationService(repository);
       final viewModel = TrackerViewModel(
         repository: repository,
@@ -554,9 +1000,14 @@ void main() {
       expect(service.reassignedEpicKey, isNull);
       expect(service.transitionStatusId, 'done');
       expect(viewModel.selectedIssue?.summary, 'Refine Git sync service');
+      expect(
+        viewModel.selectedIssue?.description,
+        'Syncs repository-backed tracker data safely.',
+      );
       expect(viewModel.selectedIssue?.epicKey, isNull);
       expect(viewModel.selectedIssue?.statusId, 'done');
       expect(viewModel.selectedIssue?.resolutionId, 'done');
+      expect(viewModel.selectedIssue?.hasDetailLoaded, isTrue);
       expect(
         viewModel.searchResults.where(
           (candidate) => candidate.key == 'TRACK-12',
@@ -567,30 +1018,50 @@ void main() {
   );
 
   test(
-    'view model preserves empty successful workflow transitions',
+    'view model keeps the selected issue hydrated after hosted same-key status reloads',
     () async {
       final initialSnapshot = await const DemoTrackStateRepository()
           .loadSnapshot();
-      final repository = _MutableEditRepository(snapshot: initialSnapshot);
-      final service = _RecordingEditIssueMutationService(
-        repository,
-        transitions: const [],
+      final repository = _MutableEditRepository(
+        snapshot: initialSnapshot,
+        reloadReturnsSummaryOnly: true,
       );
-      final viewModel = TrackerViewModel(
-        repository: repository,
-        issueMutationService: service,
-      );
+      final viewModel = TrackerViewModel(repository: repository);
 
       await viewModel.load();
-      final issue = viewModel.issues.firstWhere(
-        (candidate) => candidate.key == 'TRACK-12',
-      );
+      final issue = viewModel.selectedIssue!;
 
-      final transitions = await viewModel.availableWorkflowTransitions(issue);
+      await viewModel.moveIssue(issue, IssueStatus.done);
 
-      expect(transitions, isEmpty);
+      expect(viewModel.selectedIssue?.key, issue.key);
+      expect(viewModel.selectedIssue?.statusId, 'done');
+      expect(viewModel.selectedIssue?.description, issue.description);
+      expect(viewModel.selectedIssue?.hasDetailLoaded, isTrue);
     },
   );
+
+  test('view model preserves empty successful workflow transitions', () async {
+    final initialSnapshot = await const DemoTrackStateRepository()
+        .loadSnapshot();
+    final repository = _MutableEditRepository(snapshot: initialSnapshot);
+    final service = _RecordingEditIssueMutationService(
+      repository,
+      transitions: const [],
+    );
+    final viewModel = TrackerViewModel(
+      repository: repository,
+      issueMutationService: service,
+    );
+
+    await viewModel.load();
+    final issue = viewModel.issues.firstWhere(
+      (candidate) => candidate.key == 'TRACK-12',
+    );
+
+    final transitions = await viewModel.availableWorkflowTransitions(issue);
+
+    expect(transitions, isEmpty);
+  });
 
   test(
     'view model falls back to in-memory local edits when shared mutations are unavailable',
@@ -927,6 +1398,61 @@ class _ThrowingSearchRepository extends _LocalRuntimeRepository {
   }
 }
 
+class _DelayedInitialSearchRepository extends _LocalRuntimeRepository {
+  _DelayedInitialSearchRepository({required TrackerSnapshot snapshot})
+    : _snapshot = snapshot;
+
+  final TrackerSnapshot _snapshot;
+  final JqlSearchService _searchService = const JqlSearchService();
+  final Completer<TrackStateIssueSearchPage> _searchCompleter =
+      Completer<TrackStateIssueSearchPage>();
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => _searchCompleter.future;
+
+  void completeInitialSearch() {
+    if (_searchCompleter.isCompleted) {
+      return;
+    }
+    _searchCompleter.complete(
+      _searchService.search(
+        issues: _snapshot.issues,
+        project: _snapshot.project,
+        jql: 'project = TRACK AND status != Done ORDER BY priority DESC',
+        maxResults: 6,
+      ),
+    );
+  }
+}
+
+class _FailingInitialSearchRepository extends _LocalRuntimeRepository {
+  _FailingInitialSearchRepository({required TrackerSnapshot snapshot})
+    : _snapshot = snapshot;
+
+  final TrackerSnapshot _snapshot;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    throw const JqlSearchException('Hosted bootstrap search failed.');
+  }
+}
+
 class _EditableSettingsRepository extends _LocalRuntimeRepository
     implements ProjectSettingsRepository {
   _EditableSettingsRepository()
@@ -997,11 +1523,15 @@ class _MutableEditRepository implements TrackStateRepository {
   _MutableEditRepository({
     required TrackerSnapshot snapshot,
     this.usesLocalPersistence = false,
+    this.reloadReturnsSummaryOnly = false,
   }) : _snapshot = snapshot;
 
   TrackerSnapshot _snapshot;
   final JqlSearchService _searchService = const JqlSearchService();
   String? lastSavedDescription;
+  int loadSnapshotCount = 0;
+
+  final bool reloadReturnsSummaryOnly;
 
   @override
   final bool usesLocalPersistence;
@@ -1014,7 +1544,19 @@ class _MutableEditRepository implements TrackStateRepository {
       const RepositoryUser(login: 'mutable-user', displayName: 'Mutable User');
 
   @override
-  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+  Future<TrackerSnapshot> loadSnapshot() async {
+    loadSnapshotCount += 1;
+    if (!reloadReturnsSummaryOnly) {
+      return _snapshot;
+    }
+    return TrackerSnapshot(
+      project: _snapshot.project,
+      issues: [for (final issue in _snapshot.issues) _summaryOnlyIssue(issue)],
+      repositoryIndex: _snapshot.repositoryIndex,
+      loadWarnings: _snapshot.loadWarnings,
+      readiness: _snapshot.readiness,
+    );
+  }
 
   @override
   Future<TrackStateIssueSearchPage> searchIssuePage(
@@ -1082,7 +1624,27 @@ class _MutableEditRepository implements TrackStateRepository {
   Future<TrackStateIssue> addIssueComment(
     TrackStateIssue issue,
     String body,
-  ) async => issue;
+  ) async {
+    final timestamp = DateTime.now().toUtc().toIso8601String();
+    final updated = issue.copyWith(
+      hasCommentsLoaded: true,
+      comments: [
+        ...issue.comments,
+        IssueComment(
+          id: (issue.comments.length + 1).toString().padLeft(4, '0'),
+          author: 'mutable-user',
+          body: body,
+          updatedLabel: timestamp,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          storagePath:
+              '${issue.storagePath.substring(0, issue.storagePath.lastIndexOf('/'))}/comments/${(issue.comments.length + 1).toString().padLeft(4, '0')}.md',
+        ),
+      ],
+    );
+    applyIssue(updated);
+    return updated;
+  }
 
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
@@ -1098,7 +1660,28 @@ class _MutableEditRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
-  }) async => issue;
+  }) async {
+    final sanitizedName = sanitizeAttachmentName(name);
+    final updated = issue.copyWith(
+      hasAttachmentsLoaded: true,
+      attachments: [
+        ...issue.attachments,
+        IssueAttachment(
+          id: '${issue.storagePath}/$sanitizedName',
+          name: sanitizedName,
+          mediaType: 'application/pdf',
+          sizeBytes: bytes.length,
+          author: 'mutable-user',
+          createdAt: 'just now',
+          storagePath:
+              '${issue.storagePath.substring(0, issue.storagePath.lastIndexOf('/'))}/attachments/$sanitizedName',
+          revisionOrOid: 'mutable-revision',
+        ),
+      ],
+    );
+    applyIssue(updated);
+    return updated;
+  }
 
   TrackStateIssue issueForKey(String key) =>
       _snapshot.issues.firstWhere((issue) => issue.key == key);
@@ -1116,6 +1699,216 @@ class _MutableEditRepository implements TrackStateRepository {
   }
 }
 
+class _HostedMutableEditRepository extends ProviderBackedTrackStateRepository {
+  _HostedMutableEditRepository({
+    Map<String, String> textFixtures = const <String, String>{},
+    Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
+  }) : super(
+         provider: MutableIssueDetailTrackStateProvider(
+           textFixtures: textFixtures,
+           binaryFixtures: binaryFixtures,
+         ),
+       );
+
+  int loadSnapshotCount = 0;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    loadSnapshotCount += 1;
+    return super.loadSnapshot();
+  }
+}
+
+Map<String, String> _hostedHierarchyTextFixtures() {
+  const track20 = '''
+---
+key: TRACK-20
+project: TRACK
+issueType: Epic
+status: To Do
+priority: Highest
+summary: Source hierarchy epic
+assignee: Denis
+reporter: Ana
+updated: 6 minutes ago
+---
+
+# Description
+Epic that currently owns the moved subtree.
+''';
+  const track21 = '''
+---
+key: TRACK-21
+project: TRACK
+issueType: Story
+status: In Progress
+priority: High
+summary: Move a nested subtree
+assignee: Denis
+reporter: Ana
+epic: TRACK-20
+updated: 4 minutes ago
+---
+
+# Description
+Story that owns a sub-task and an attachment.
+''';
+  const track22 = '''
+---
+key: TRACK-22
+project: TRACK
+issueType: Sub-task
+status: To Do
+priority: Medium
+summary: Follow the parent move
+assignee: Denis
+reporter: Ana
+parent: TRACK-21
+epic: TRACK-20
+updated: 3 minutes ago
+---
+
+# Description
+Sub-task used to verify subtree refreshes.
+''';
+  const track30 = '''
+---
+key: TRACK-30
+project: TRACK
+issueType: Epic
+status: To Do
+priority: Highest
+summary: Target hierarchy epic
+assignee: Denis
+reporter: Ana
+updated: 1 minute ago
+---
+
+# Description
+Epic that becomes the new subtree owner.
+''';
+
+  return {
+    '.trackstate/index/issues.json':
+        '${jsonEncode([
+          {
+            'key': 'TRACK-11',
+            'path': 'TRACK-11/main.md',
+            'parent': null,
+            'epic': null,
+            'parentPath': null,
+            'epicPath': null,
+            'summary': 'Stabilize dashboard polling',
+            'issueType': 'story',
+            'status': 'todo',
+            'priority': 'highest',
+            'assignee': 'Denis',
+            'labels': ['dashboard'],
+            'updated': '2 minutes ago',
+            'children': [],
+            'archived': false,
+          },
+          {
+            'key': 'TRACK-12',
+            'path': 'TRACK-12/main.md',
+            'parent': null,
+            'epic': null,
+            'parentPath': null,
+            'epicPath': null,
+            'summary': 'Implement Git sync service',
+            'issueType': 'story',
+            'status': 'in-progress',
+            'priority': 'high',
+            'assignee': 'Denis',
+            'labels': ['sync'],
+            'updated': '5 minutes ago',
+            'children': [],
+            'archived': false,
+          },
+          {
+            'key': 'TRACK-20',
+            'path': 'TRACK-20/main.md',
+            'parent': null,
+            'epic': null,
+            'parentPath': null,
+            'epicPath': null,
+            'summary': 'Source hierarchy epic',
+            'issueType': 'epic',
+            'status': 'todo',
+            'priority': 'highest',
+            'assignee': 'Denis',
+            'labels': ['hierarchy'],
+            'updated': '6 minutes ago',
+            'children': ['TRACK-21'],
+            'archived': false,
+          },
+          {
+            'key': 'TRACK-21',
+            'path': 'TRACK-20/TRACK-21/main.md',
+            'parent': null,
+            'epic': 'TRACK-20',
+            'parentPath': null,
+            'epicPath': 'TRACK-20/main.md',
+            'summary': 'Move a nested subtree',
+            'issueType': 'story',
+            'status': 'in-progress',
+            'priority': 'high',
+            'assignee': 'Denis',
+            'labels': ['hierarchy'],
+            'updated': '4 minutes ago',
+            'children': ['TRACK-22'],
+            'archived': false,
+          },
+          {
+            'key': 'TRACK-22',
+            'path': 'TRACK-20/TRACK-21/TRACK-22/main.md',
+            'parent': 'TRACK-21',
+            'epic': 'TRACK-20',
+            'parentPath': 'TRACK-20/TRACK-21/main.md',
+            'epicPath': 'TRACK-20/main.md',
+            'summary': 'Follow the parent move',
+            'issueType': 'subtask',
+            'status': 'todo',
+            'priority': 'medium',
+            'assignee': 'Denis',
+            'labels': ['hierarchy'],
+            'updated': '3 minutes ago',
+            'children': [],
+            'archived': false,
+          },
+          {
+            'key': 'TRACK-30',
+            'path': 'TRACK-30/main.md',
+            'parent': null,
+            'epic': null,
+            'parentPath': null,
+            'epicPath': null,
+            'summary': 'Target hierarchy epic',
+            'issueType': 'epic',
+            'status': 'todo',
+            'priority': 'highest',
+            'assignee': 'Denis',
+            'labels': ['hierarchy'],
+            'updated': '1 minute ago',
+            'children': [],
+            'archived': false,
+          },
+        ])}\n',
+    'TRACK-20/main.md': track20,
+    'TRACK-20/TRACK-21/main.md': track21,
+    'TRACK-20/TRACK-21/TRACK-22/main.md': track22,
+    'TRACK-30/main.md': track30,
+  };
+}
+
+Map<String, Uint8List> _hostedHierarchyBinaryFixtures() => {
+  'TRACK-20/TRACK-21/attachments/existing.pdf': Uint8List.fromList(<int>[
+    1,
+    2,
+    3,
+  ]),
+};
+
 class _RecordingEditIssueMutationService extends IssueMutationService {
   _RecordingEditIssueMutationService(
     this._repository, {
@@ -1123,8 +1916,7 @@ class _RecordingEditIssueMutationService extends IssueMutationService {
       TrackStateConfigEntry(id: 'in-review', name: 'In Review'),
       TrackStateConfigEntry(id: 'done', name: 'Done'),
     ],
-  })
-    : super(repository: const DemoTrackStateRepository());
+  }) : super(repository: const DemoTrackStateRepository());
 
   final _MutableEditRepository _repository;
   final List<TrackStateConfigEntry> transitions;
@@ -1284,6 +2076,67 @@ IssuePriority _priorityForId(String id) {
   };
 }
 
+TrackStateIssue _summaryOnlyIssue(TrackStateIssue issue) => TrackStateIssue(
+  key: issue.key,
+  project: issue.project,
+  issueType: issue.issueType,
+  issueTypeId: issue.issueTypeId,
+  status: issue.status,
+  statusId: issue.statusId,
+  priority: issue.priority,
+  priorityId: issue.priorityId,
+  summary: issue.summary,
+  description: '',
+  assignee: issue.assignee,
+  reporter: issue.reporter,
+  labels: issue.labels,
+  components: const [],
+  fixVersionIds: const [],
+  watchers: const [],
+  customFields: const {},
+  parentKey: issue.parentKey,
+  epicKey: issue.epicKey,
+  parentPath: issue.parentPath,
+  epicPath: issue.epicPath,
+  progress: issue.progress,
+  updatedLabel: issue.updatedLabel,
+  acceptanceCriteria: const [],
+  comments: const [],
+  links: const [],
+  attachments: const [],
+  isArchived: issue.isArchived,
+  hasDetailLoaded: false,
+  hasCommentsLoaded: false,
+  hasAttachmentsLoaded: false,
+  resolutionId: issue.resolutionId,
+  storagePath: issue.storagePath,
+  rawMarkdown: issue.rawMarkdown,
+);
+
+TrackerSnapshot _hostedBootstrapSnapshot(TrackerSnapshot snapshot) {
+  return TrackerSnapshot(
+    project: snapshot.project,
+    issues: [for (final issue in snapshot.issues) _summaryOnlyIssue(issue)],
+    repositoryIndex: snapshot.repositoryIndex,
+    loadWarnings: snapshot.loadWarnings,
+    readiness: const TrackerBootstrapReadiness(
+      domainStates: {
+        TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+        TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
+        TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+        TrackerDataDomain.issueDetails: TrackerLoadState.partial,
+      },
+      sectionStates: {
+        TrackerSectionKey.dashboard: TrackerLoadState.ready,
+        TrackerSectionKey.board: TrackerLoadState.ready,
+        TrackerSectionKey.search: TrackerLoadState.partial,
+        TrackerSectionKey.hierarchy: TrackerLoadState.ready,
+        TrackerSectionKey.settings: TrackerLoadState.ready,
+      },
+    ),
+  );
+}
+
 TrackerSnapshot _searchPaginationSnapshot() {
   final issues = [
     for (var index = 1; index <= 8; index += 1)
@@ -1345,4 +2198,133 @@ TrackerSnapshot _searchPaginationSnapshot() {
     ),
     issues: issues,
   );
+}
+
+TrackerSnapshot _withStartupRecovery(TrackerSnapshot snapshot) {
+  return TrackerSnapshot(
+    project: snapshot.project,
+    issues: snapshot.issues,
+    repositoryIndex: snapshot.repositoryIndex,
+    loadWarnings: snapshot.loadWarnings,
+    readiness: snapshot.readiness,
+    startupRecovery: const TrackerStartupRecovery(
+      kind: TrackerStartupRecoveryKind.githubRateLimit,
+      failedPath:
+          '/repos/trackstate/trackstate/contents/.trackstate/index/tombstones.json',
+    ),
+  );
+}
+
+class _StartupRecoveryRepository implements TrackStateRepository {
+  _StartupRecoveryRepository({required List<Object> loadResults})
+    : _loadResults = List<Object>.from(loadResults);
+
+  final List<Object> _loadResults;
+  final JqlSearchService _searchService = const JqlSearchService();
+  int loadCount = 0;
+  int connectCount = 0;
+  TrackerSnapshot? _currentSnapshot;
+
+  @override
+  bool get supportsGitHubAuth => true;
+
+  @override
+  bool get usesLocalPersistence => false;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    connectCount += 1;
+    return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+  }
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    final index = loadCount < _loadResults.length
+        ? loadCount
+        : _loadResults.length - 1;
+    loadCount += 1;
+    final result = _loadResults[index];
+    if (result is TrackerSnapshot) {
+      _currentSnapshot = result;
+      return result;
+    }
+    throw result;
+  }
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    final snapshot =
+        _currentSnapshot ??
+        await const DemoTrackStateRepository().loadSnapshot();
+    return _searchService.search(
+      issues: snapshot.issues,
+      project: snapshot.project,
+      jql: jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+  }
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) async =>
+      (await searchIssuePage(jql, maxResults: 500)).issues;
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Startup recovery test repository does not support archiving.',
+      );
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
+      throw const TrackStateRepositoryException(
+        'Startup recovery test repository does not support deletion.',
+      );
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+    Map<String, String> customFields = const {},
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async => issue;
+
+  @override
+  Future<TrackStateIssue> updateIssueStatus(
+    TrackStateIssue issue,
+    IssueStatus status,
+  ) async => issue;
+
+  @override
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => issue;
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
+      Uint8List(0);
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async => issue;
 }

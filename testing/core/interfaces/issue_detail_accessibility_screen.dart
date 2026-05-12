@@ -1,5 +1,6 @@
 import '../models/issue_detail_icon_observation.dart';
 import '../models/issue_detail_row_style_observation.dart';
+import '../models/issue_detail_theme_tokens.dart';
 import '../models/issue_detail_text_contrast_observation.dart';
 import '../models/status_badge_contrast_observation.dart';
 
@@ -9,6 +10,8 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
   Future<void> selectIssue(String issueKey, String issueSummary);
 
   Future<void> selectCollaborationTab(String issueKey, String label);
+
+  Future<void> enterCommentComposerText(String issueKey, String text);
 
   Future<List<String>> collectForwardCollaborationTabFocusOrder(
     String issueKey,
@@ -26,6 +29,12 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
 
   List<String> commentActionLabels(String issueKey);
 
+  String? commentComposerPlaceholderText(String issueKey);
+
+  String? readCommentComposerText(String issueKey);
+
+  IssueDetailThemeTokens themeTokens(String issueKey);
+
   StatusBadgeContrastObservation observeStatusBadgeContrast(
     String issueKey,
     String label,
@@ -36,6 +45,15 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
     required String rowAnchorText,
     required String text,
   });
+
+  IssueDetailTextContrastObservation observeCommentComposerEnteredTextContrast(
+    String issueKey, {
+    required String text,
+  });
+
+  IssueDetailTextContrastObservation observeCommentComposerPlaceholderContrast(
+    String issueKey,
+  );
 
   IssueDetailRowStyleObservation observeDecoratedRowStyle(
     String issueKey, {

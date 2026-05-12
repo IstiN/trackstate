@@ -8,6 +8,7 @@ import 'package:trackstate/ui/core/trackstate_theme.dart';
 import '../../core/interfaces/issue_detail_accessibility_screen.dart';
 import '../../core/models/issue_detail_icon_observation.dart';
 import '../../core/models/issue_detail_row_style_observation.dart';
+import '../../core/models/issue_detail_theme_tokens.dart';
 import '../../core/models/issue_detail_text_contrast_observation.dart';
 import '../../core/models/status_badge_contrast_observation.dart';
 import '../../core/utils/color_contrast.dart';
@@ -39,6 +40,16 @@ class IssueDetailAccessibilityRobot
     final tab = _collaborationTab(issueKey, label);
     await tester.ensureVisible(tab.first);
     await tester.tap(tab.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> enterCommentComposerText(String issueKey, String text) async {
+    final field = _commentComposerField(issueKey);
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(field.first, text);
     await tester.pumpAndSettle();
   }
 
@@ -164,6 +175,48 @@ class IssueDetailAccessibilityRobot
   }
 
   @override
+  String? commentComposerPlaceholderText(String issueKey) {
+    final decoration = _commentComposerDecoration(issueKey);
+    final placeholder = decoration.hintText?.trim();
+    if (placeholder == null || placeholder.isEmpty) {
+      return null;
+    }
+    return placeholder;
+  }
+
+  @override
+  String? readCommentComposerText(String issueKey) {
+    final field = _commentComposerField(issueKey);
+    final widget = tester.widget<TextField>(field.first);
+    final controller = widget.controller;
+    if (controller != null) {
+      return controller.text;
+    }
+
+    final editableText = find.descendant(
+      of: field.first,
+      matching: find.byType(EditableText),
+    );
+    if (editableText.evaluate().isNotEmpty) {
+      return tester.widget<EditableText>(editableText.first).controller.text;
+    }
+
+    return null;
+  }
+
+  @override
+  IssueDetailThemeTokens themeTokens(String issueKey) {
+    final colors = _trackStateColors(issueKey);
+    return IssueDetailThemeTokens(
+      textHex: _rgbHex(colors.text),
+      mutedHex: _rgbHex(colors.muted),
+      errorHex: _rgbHex(colors.error),
+      surfaceAltHex: _rgbHex(colors.surfaceAlt),
+      borderHex: _rgbHex(colors.border),
+    );
+  }
+
+  @override
   StatusBadgeContrastObservation observeStatusBadgeContrast(
     String issueKey,
     String label,
@@ -190,6 +243,42 @@ class IssueDetailAccessibilityRobot
     final background = _renderedContainerBackground(row);
     return IssueDetailTextContrastObservation(
       text: text,
+      foregroundHex: _rgbHex(foreground),
+      backgroundHex: _rgbHex(background),
+      contrastRatio: contrastRatio(foreground, background),
+    );
+  }
+
+  @override
+  IssueDetailTextContrastObservation observeCommentComposerEnteredTextContrast(
+    String issueKey, {
+    required String text,
+  }) {
+    final foreground = _editableTextColor(_commentComposerField(issueKey));
+    final background = _commentComposerBackgroundColor(issueKey);
+    return IssueDetailTextContrastObservation(
+      text: text,
+      foregroundHex: _rgbHex(foreground),
+      backgroundHex: _rgbHex(background),
+      contrastRatio: contrastRatio(foreground, background),
+    );
+  }
+
+  @override
+  IssueDetailTextContrastObservation observeCommentComposerPlaceholderContrast(
+    String issueKey,
+  ) {
+    final placeholder = commentComposerPlaceholderText(issueKey);
+    if (placeholder == null) {
+      throw StateError(
+        'No comment composer placeholder (hintText) was rendered for issue detail $issueKey.',
+      );
+    }
+    final field = _commentComposerField(issueKey);
+    final foreground = _renderedTextColorWithin(field, placeholder);
+    final background = _commentComposerBackgroundColor(issueKey);
+    return IssueDetailTextContrastObservation(
+      text: placeholder,
       foregroundHex: _rgbHex(foreground),
       backgroundHex: _rgbHex(background),
       contrastRatio: contrastRatio(foreground, background),
@@ -279,6 +368,33 @@ class IssueDetailAccessibilityRobot
       );
     }
     return bestMatch;
+  }
+
+  Finder _commentComposerField(String issueKey) {
+    final field = find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.byWidgetPredicate((widget) {
+        return widget is TextField &&
+            widget.decoration?.labelText == 'Comments';
+      }, description: 'comment composer text field'),
+    );
+    if (field.evaluate().isEmpty) {
+      throw StateError(
+        'No comment composer TextField labeled "Comments" was rendered in issue detail $issueKey.',
+      );
+    }
+    return field.first;
+  }
+
+  InputDecoration _commentComposerDecoration(String issueKey) {
+    final field = tester.widget<TextField>(_commentComposerField(issueKey));
+    final decoration = field.decoration;
+    if (decoration == null) {
+      throw StateError(
+        'The comment composer TextField in issue detail $issueKey did not expose an InputDecoration.',
+      );
+    }
+    return decoration;
   }
 
   Finder _collaborationTab(String issueKey, String label) {
@@ -437,6 +553,29 @@ class IssueDetailAccessibilityRobot
 
   Color _renderedBadgeBackground(Finder scope) {
     return _renderedContainerBackground(scope);
+  }
+
+  Color _editableTextColor(Finder textField) {
+    final editable = find.descendant(
+      of: textField,
+      matching: find.byType(EditableText),
+    );
+    if (editable.evaluate().isEmpty) {
+      throw StateError('No EditableText found within $textField.');
+    }
+    return tester.widget<EditableText>(editable.first).style.color ??
+        TrackStateColors.light.text;
+  }
+
+  Color _commentComposerBackgroundColor(String issueKey) {
+    final field = _commentComposerField(issueKey);
+    final element = field.evaluate().single;
+    final widget = element.widget as TextField;
+    final theme = Theme.of(element);
+    return widget.decoration?.fillColor ??
+        theme.inputDecorationTheme.fillColor ??
+        (theme.extension<TrackStateColors>()?.surface ??
+            TrackStateColors.light.surface);
   }
 
   Color _renderedContainerBackground(Finder scope) {

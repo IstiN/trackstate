@@ -553,7 +553,7 @@ abstract class AppLocalizations {
   /// No description provided for @projectSettingsDescription.
   ///
   /// In en, this message translates to:
-  /// **'Manage repository-backed statuses, workflows, issue types, and fields with validation before Git writes.'**
+  /// **'Manage repository-backed metadata catalogs, supported locales, and localized display labels before Git writes.'**
   String get projectSettingsDescription;
 
   /// No description provided for @issueTypes.
@@ -586,11 +586,47 @@ abstract class AppLocalizations {
   /// **'Fields'**
   String get fields;
 
+  /// No description provided for @priorities.
+  ///
+  /// In en, this message translates to:
+  /// **'Priorities'**
+  String get priorities;
+
+  /// No description provided for @versions.
+  ///
+  /// In en, this message translates to:
+  /// **'Versions'**
+  String get versions;
+
+  /// No description provided for @resolutions.
+  ///
+  /// In en, this message translates to:
+  /// **'Resolutions'**
+  String get resolutions;
+
+  /// No description provided for @locales.
+  ///
+  /// In en, this message translates to:
+  /// **'Locales'**
+  String get locales;
+
   /// No description provided for @language.
   ///
   /// In en, this message translates to:
   /// **'Language'**
   String get language;
+
+  /// No description provided for @defaultLocale.
+  ///
+  /// In en, this message translates to:
+  /// **'Default locale'**
+  String get defaultLocale;
+
+  /// No description provided for @defaultLocaleChip.
+  ///
+  /// In en, this message translates to:
+  /// **'{locale} (default)'**
+  String defaultLocaleChip(String locale);
 
   /// No description provided for @resetSettings.
   ///
@@ -675,6 +711,108 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Delete field'**
   String get deleteField;
+
+  /// No description provided for @addPriority.
+  ///
+  /// In en, this message translates to:
+  /// **'Add priority'**
+  String get addPriority;
+
+  /// No description provided for @editPriority.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit priority'**
+  String get editPriority;
+
+  /// No description provided for @deletePriority.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete priority'**
+  String get deletePriority;
+
+  /// No description provided for @addComponent.
+  ///
+  /// In en, this message translates to:
+  /// **'Add component'**
+  String get addComponent;
+
+  /// No description provided for @editComponent.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit component'**
+  String get editComponent;
+
+  /// No description provided for @deleteComponent.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete component'**
+  String get deleteComponent;
+
+  /// No description provided for @addVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Add version'**
+  String get addVersion;
+
+  /// No description provided for @editVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit version'**
+  String get editVersion;
+
+  /// No description provided for @deleteVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete version'**
+  String get deleteVersion;
+
+  /// No description provided for @addLocale.
+  ///
+  /// In en, this message translates to:
+  /// **'Add locale'**
+  String get addLocale;
+
+  /// No description provided for @localeCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Locale code'**
+  String get localeCode;
+
+  /// No description provided for @localeCodeHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Use stable locale identifiers such as en, fr, or pt-BR.'**
+  String get localeCodeHelper;
+
+  /// No description provided for @removeLocaleAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove locale'**
+  String get removeLocaleAction;
+
+  /// No description provided for @removeLocale.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove locale {locale}'**
+  String removeLocale(String locale);
+
+  /// No description provided for @translationField.
+  ///
+  /// In en, this message translates to:
+  /// **'Translation ({locale})'**
+  String translationField(String locale);
+
+  /// No description provided for @translationFallbackWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Missing translation. Using fallback \"{value}\" from {source}.'**
+  String translationFallbackWarning(String value, String source);
+
+  /// No description provided for @canonicalNameFallback.
+  ///
+  /// In en, this message translates to:
+  /// **'canonical name'**
+  String get canonicalNameFallback;
 
   /// No description provided for @catalogId.
   ///
@@ -832,6 +970,12 @@ abstract class AppLocalizations {
   /// **'Mobile issue preview'**
   String get mobilePreview;
 
+  /// No description provided for @loading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading...'**
+  String get loading;
+
   /// No description provided for @noResults.
   ///
   /// In en, this message translates to:
@@ -945,6 +1089,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Settings is the canonical place to review repository access and reconnect safely.'**
   String get repositoryAccessSettingsHint;
+
+  /// No description provided for @startupRecovery.
+  ///
+  /// In en, this message translates to:
+  /// **'Startup recovery'**
+  String get startupRecovery;
+
+  /// No description provided for @startupRateLimitRecoveryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'GitHub startup limit reached'**
+  String get startupRateLimitRecoveryTitle;
+
+  /// No description provided for @startupRateLimitRecoveryBlockingMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted startup hit GitHub\'\'s rate limit before TrackState finished loading the required repository data. Retry later or connect GitHub for a higher limit. TrackState will retry once after GitHub authentication succeeds.'**
+  String get startupRateLimitRecoveryBlockingMessage;
+
+  /// No description provided for @startupRateLimitRecoveryShellMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.'**
+  String get startupRateLimitRecoveryShellMessage;
 
   /// No description provided for @repositoryPath.
   ///
@@ -1111,6 +1279,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Connect GitHub'**
   String get connectGitHub;
+
+  /// No description provided for @retry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get retry;
 
   /// No description provided for @editIssue.
   ///

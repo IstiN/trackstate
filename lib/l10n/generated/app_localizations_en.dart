@@ -256,7 +256,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get projectSettingsDescription =>
-      'Manage repository-backed statuses, workflows, issue types, and fields with validation before Git writes.';
+      'Manage repository-backed metadata catalogs, supported locales, and localized display labels before Git writes.';
 
   @override
   String get issueTypes => 'Issue Types';
@@ -274,7 +274,27 @@ class AppLocalizationsEn extends AppLocalizations {
   String get fields => 'Fields';
 
   @override
+  String get priorities => 'Priorities';
+
+  @override
+  String get versions => 'Versions';
+
+  @override
+  String get resolutions => 'Resolutions';
+
+  @override
+  String get locales => 'Locales';
+
+  @override
   String get language => 'Language';
+
+  @override
+  String get defaultLocale => 'Default locale';
+
+  @override
+  String defaultLocaleChip(String locale) {
+    return '$locale (default)';
+  }
 
   @override
   String get resetSettings => 'Reset';
@@ -317,6 +337,64 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get deleteField => 'Delete field';
+
+  @override
+  String get addPriority => 'Add priority';
+
+  @override
+  String get editPriority => 'Edit priority';
+
+  @override
+  String get deletePriority => 'Delete priority';
+
+  @override
+  String get addComponent => 'Add component';
+
+  @override
+  String get editComponent => 'Edit component';
+
+  @override
+  String get deleteComponent => 'Delete component';
+
+  @override
+  String get addVersion => 'Add version';
+
+  @override
+  String get editVersion => 'Edit version';
+
+  @override
+  String get deleteVersion => 'Delete version';
+
+  @override
+  String get addLocale => 'Add locale';
+
+  @override
+  String get localeCode => 'Locale code';
+
+  @override
+  String get localeCodeHelper =>
+      'Use stable locale identifiers such as en, fr, or pt-BR.';
+
+  @override
+  String get removeLocaleAction => 'Remove locale';
+
+  @override
+  String removeLocale(String locale) {
+    return 'Remove locale $locale';
+  }
+
+  @override
+  String translationField(String locale) {
+    return 'Translation ($locale)';
+  }
+
+  @override
+  String translationFallbackWarning(String value, String source) {
+    return 'Missing translation. Using fallback \"$value\" from $source.';
+  }
+
+  @override
+  String get canonicalNameFallback => 'canonical name';
 
   @override
   String get catalogId => 'ID';
@@ -397,6 +475,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get mobilePreview => 'Mobile issue preview';
 
   @override
+  String get loading => 'Loading...';
+
+  @override
   String get noResults => 'No issues match this query';
 
   @override
@@ -462,6 +543,20 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get repositoryAccessSettingsHint =>
       'Settings is the canonical place to review repository access and reconnect safely.';
+
+  @override
+  String get startupRecovery => 'Startup recovery';
+
+  @override
+  String get startupRateLimitRecoveryTitle => 'GitHub startup limit reached';
+
+  @override
+  String get startupRateLimitRecoveryBlockingMessage =>
+      'Hosted startup hit GitHub\'s rate limit before TrackState finished loading the required repository data. Retry later or connect GitHub for a higher limit. TrackState will retry once after GitHub authentication succeeds.';
+
+  @override
+  String get startupRateLimitRecoveryShellMessage =>
+      'Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.';
 
   @override
   String get repositoryPath => 'Repository Path';
@@ -578,6 +673,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get connectGitHub => 'Connect GitHub';
+
+  @override
+  String get retry => 'Retry';
 
   @override
   String get editIssue => 'Edit issue';

@@ -233,7 +233,7 @@ class _TrackerHome extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
-    if (viewModel.isLoading) {
+    if (viewModel.snapshot == null && viewModel.isLoading) {
       return Scaffold(
         body: Center(
           child: Semantics(
@@ -244,6 +244,12 @@ class _TrackerHome extends StatelessWidget {
       );
     }
     if (viewModel.snapshot == null) {
+      if (viewModel.startupRecovery != null) {
+        return Scaffold(
+          backgroundColor: colors.page,
+          body: SafeArea(child: _StartupRecoveryView(viewModel: viewModel)),
+        );
+      }
       return Scaffold(
         backgroundColor: colors.page,
         body: SafeArea(
@@ -1045,6 +1051,29 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
   };
 }
 
+String _startupRecoveryTitle(
+  AppLocalizations l10n,
+  TrackerStartupRecovery recovery,
+) {
+  return switch (recovery.kind) {
+    TrackerStartupRecoveryKind.githubRateLimit =>
+      l10n.startupRateLimitRecoveryTitle,
+  };
+}
+
+String _startupRecoveryMessage(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  final recovery = viewModel.startupRecovery;
+  if (recovery == null) {
+    return '';
+  }
+  return viewModel.snapshot == null
+      ? l10n.startupRateLimitRecoveryBlockingMessage
+      : l10n.startupRateLimitRecoveryShellMessage;
+}
+
 class _MessageBanner extends StatelessWidget {
   const _MessageBanner({required this.message, this.onDismiss});
 
@@ -1141,6 +1170,8 @@ class _AccessCallout extends StatelessWidget {
     required this.message,
     this.primaryActionLabel,
     this.onPrimaryAction,
+    this.secondaryActionLabel,
+    this.onSecondaryAction,
   });
 
   final String semanticLabel;
@@ -1148,6 +1179,8 @@ class _AccessCallout extends StatelessWidget {
   final String message;
   final String? primaryActionLabel;
   final VoidCallback? onPrimaryAction;
+  final String? secondaryActionLabel;
+  final VoidCallback? onSecondaryAction;
 
   @override
   Widget build(BuildContext context) {
@@ -1188,22 +1221,97 @@ class _AccessCallout extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(message),
-            if (primaryActionLabel != null && onPrimaryAction != null) ...[
+            if ((primaryActionLabel != null && onPrimaryAction != null) ||
+                (secondaryActionLabel != null &&
+                    onSecondaryAction != null)) ...[
               const SizedBox(height: 12),
-              Semantics(
-                button: true,
-                label: primaryActionLabel,
-                child: OutlinedButton(
-                  onPressed: onPrimaryAction,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: colors.text,
-                    side: BorderSide(color: colors.accent),
-                  ),
-                  child: Text(primaryActionLabel!),
-                ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (primaryActionLabel != null && onPrimaryAction != null)
+                    Semantics(
+                      button: true,
+                      label: primaryActionLabel,
+                      child: OutlinedButton(
+                        onPressed: onPrimaryAction,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: colors.text,
+                          side: BorderSide(color: colors.accent),
+                        ),
+                        child: Text(primaryActionLabel!),
+                      ),
+                    ),
+                  if (secondaryActionLabel != null && onSecondaryAction != null)
+                    Semantics(
+                      button: true,
+                      label: secondaryActionLabel,
+                      child: FilledButton(
+                        onPressed: onSecondaryAction,
+                        child: Text(secondaryActionLabel!),
+                      ),
+                    ),
+                ],
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StartupRecoveryView extends StatelessWidget {
+  const _StartupRecoveryView({required this.viewModel});
+
+  final TrackerViewModel viewModel;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final recovery = viewModel.startupRecovery;
+    if (recovery == null) {
+      return const SizedBox.shrink();
+    }
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Semantics(
+                header: true,
+                child: Text(
+                  l10n.appTitle,
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+              ),
+              const SizedBox(height: 16),
+              if (viewModel.message != null) ...[
+                _MessageBanner(
+                  message: viewModel.message!,
+                  onDismiss: viewModel.dismissMessage,
+                ),
+                const SizedBox(height: 12),
+              ],
+              _AccessCallout(
+                semanticLabel: l10n.startupRecovery,
+                title: _startupRecoveryTitle(l10n, recovery),
+                message: _startupRecoveryMessage(l10n, viewModel),
+                primaryActionLabel: l10n.retry,
+                onPrimaryAction: viewModel.retryStartupRecovery,
+                secondaryActionLabel: viewModel.supportsGitHubAuth
+                    ? l10n.connectGitHub
+                    : null,
+                onSecondaryAction: viewModel.supportsGitHubAuth
+                    ? () => _showRepositoryAccessDialog(context, viewModel)
+                    : null,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1282,10 +1390,18 @@ class _Dashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final showBootstrapHint = viewModel.showsInitialBootstrapPlaceholders;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _ScreenHeading(title: l10n.dashboard, subtitle: l10n.appTagline),
+        if (showBootstrapHint) ...[
+          _SectionLoadingBanner(
+            semanticLabel: '${l10n.dashboard} ${l10n.loading}',
+            label: l10n.loading,
+          ),
+          const SizedBox(height: 16),
+        ],
         LayoutBuilder(
           builder: (context, constraints) {
             final cards = [
@@ -1294,24 +1410,29 @@ class _Dashboard extends StatelessWidget {
                 value: '${viewModel.openIssueCount}',
                 delta: '-6d',
                 tone: MetricTone.accent,
+                showDeltaPlaceholder: showBootstrapHint,
               ),
               _MetricCard(
                 label: l10n.issuesInProgress,
                 value: '${viewModel.inProgressIssueCount}',
                 delta: '+4',
                 tone: MetricTone.primary,
+                showDeltaPlaceholder: showBootstrapHint,
               ),
               _MetricCard(
                 label: l10n.completed,
                 value: '${viewModel.completedIssueCount}',
                 delta: '+12',
                 tone: MetricTone.secondary,
+                showDeltaPlaceholder: showBootstrapHint,
               ),
               _MetricCard(
                 label: l10n.teamVelocity,
                 value: '42',
                 delta: '+18%',
                 tone: MetricTone.secondary,
+                showValuePlaceholder: showBootstrapHint,
+                showDeltaPlaceholder: showBootstrapHint,
               ),
             ];
             return GridView.builder(
@@ -1365,10 +1486,18 @@ class _Board extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final grouped = viewModel.issuesByStatus;
+    final showBootstrapHint = viewModel.showsInitialBootstrapPlaceholders;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _ScreenHeading(title: l10n.board, subtitle: l10n.kanbanHint),
+        if (showBootstrapHint) ...[
+          _SectionLoadingBanner(
+            semanticLabel: '${l10n.board} ${l10n.loading}',
+            label: l10n.loading,
+          ),
+          const SizedBox(height: 16),
+        ],
         LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 900;
@@ -1428,6 +1557,17 @@ class _SearchAndDetail extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final viewModel = this.viewModel;
+    final subtitle = switch ((
+      viewModel.hasLoadedInitialSearchResults,
+      viewModel.shouldUseBootstrapSearchFallback,
+      viewModel.isLoading,
+    )) {
+      (true, _, _) => l10n.issueCount(viewModel.totalSearchResults),
+      (false, true, false) => l10n.issueCount(
+        math.min(viewModel.issues.length, 6),
+      ),
+      _ => l10n.loading,
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1435,10 +1575,7 @@ class _SearchAndDetail extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: _ScreenHeading(
-                title: l10n.jqlSearch,
-                subtitle: l10n.issueCount(viewModel.totalSearchResults),
-              ),
+              child: _ScreenHeading(title: l10n.jqlSearch, subtitle: subtitle),
             ),
           ],
         ),
@@ -1524,18 +1661,33 @@ void _syncCreateFieldControllers(
 String _createIssueFieldLabel(
   ProjectConfig? project,
   TrackStateFieldDefinition field,
-) => project?.fieldLabel(field.id) ?? field.name;
+  String? locale,
+) => project?.fieldLabel(field.id, locale: locale) ?? field.name;
 
 String _projectFieldLabel(
   ProjectConfig? project,
   String fieldId, {
   required String fallback,
+  String? locale,
 }) {
-  final resolved = project?.fieldLabel(fieldId);
+  final resolved = project?.fieldLabel(fieldId, locale: locale);
   if (resolved == null || resolved == fieldId) {
     return fallback;
   }
   return resolved;
+}
+
+String _projectMetadataLocale(BuildContext context, ProjectConfig? project) {
+  final locale = Localizations.maybeLocaleOf(context);
+  final normalized = switch ((locale?.languageCode, locale?.countryCode)) {
+    (final String languageCode?, final String countryCode?)
+        when languageCode.isNotEmpty && countryCode.isNotEmpty =>
+      '$languageCode-${countryCode.toUpperCase()}',
+    (final String languageCode?, _) when languageCode.isNotEmpty =>
+      languageCode,
+    _ => project?.defaultLocale ?? 'en',
+  };
+  return normalized;
 }
 
 class _CreateIssuePrefill {
@@ -1852,6 +2004,22 @@ class _SettingsState extends State<_Settings> {
           title: l10n.projectSettings,
           subtitle: project.repository,
         ),
+        if (widget.viewModel.startupRecovery case final recovery?) ...[
+          _AccessCallout(
+            semanticLabel: l10n.startupRecovery,
+            title: _startupRecoveryTitle(l10n, recovery),
+            message: _startupRecoveryMessage(l10n, widget.viewModel),
+            primaryActionLabel: l10n.retry,
+            onPrimaryAction: widget.viewModel.retryStartupRecovery,
+            secondaryActionLabel: widget.viewModel.supportsGitHubAuth
+                ? l10n.connectGitHub
+                : null,
+            onSecondaryAction: widget.viewModel.supportsGitHubAuth
+                ? () => _showRepositoryAccessDialog(context, widget.viewModel)
+                : null,
+          ),
+          const SizedBox(height: 16),
+        ],
         _SurfaceCard(
           semanticLabel: l10n.repositoryAccessSettings,
           child: Column(
@@ -1872,7 +2040,16 @@ class _SettingsState extends State<_Settings> {
 
 enum _SettingsProviderSelection { hosted, localGit }
 
-enum _SettingsCatalogTab { statuses, workflows, issueTypes, fields }
+enum _SettingsCatalogTab {
+  statuses,
+  workflows,
+  issueTypes,
+  fields,
+  priorities,
+  components,
+  versions,
+  locales,
+}
 
 class _ProjectSettingsAdmin extends StatefulWidget {
   const _ProjectSettingsAdmin({required this.viewModel});
@@ -1888,6 +2065,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
   late final TabController _tabController;
   ProjectSettingsCatalog? _draftSettings;
   String? _projectSignature;
+  String? _selectedLocale;
 
   @override
   void initState() {
@@ -1911,10 +2089,17 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
   void _syncDraft(ProjectConfig project) {
     final signature = _projectSettingsSignature(project.settingsCatalog);
     if (_projectSignature == signature && _draftSettings != null) {
+      final locales = _draftSettings!.effectiveSupportedLocales;
+      if (_selectedLocale == null ||
+          !locales.contains(_selectedLocale) && locales.isNotEmpty) {
+        _selectedLocale = locales.first;
+      }
       return;
     }
     _projectSignature = signature;
     _draftSettings = _cloneProjectSettings(project.settingsCatalog);
+    final locales = _draftSettings!.effectiveSupportedLocales;
+    _selectedLocale = locales.isEmpty ? null : locales.first;
   }
 
   void _replaceDraft(ProjectSettingsCatalog settings) {
@@ -1927,6 +2112,8 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     setState(() {
       _projectSignature = _projectSettingsSignature(project.settingsCatalog);
       _draftSettings = _cloneProjectSettings(project.settingsCatalog);
+      final locales = _draftSettings!.effectiveSupportedLocales;
+      _selectedLocale = locales.isEmpty ? null : locales.first;
     });
   }
 
@@ -2066,6 +2253,166 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       }
     }
     _replaceDraft(current.copyWith(fieldDefinitions: fields));
+  }
+
+  Future<void> _editSimpleConfigEntry({
+    required String addTitle,
+    required String editTitle,
+    required List<TrackStateConfigEntry> currentEntries,
+    required ValueChanged<List<TrackStateConfigEntry>> onChanged,
+    TrackStateConfigEntry? initial,
+  }) async {
+    final edited = await _showSettingsEditor<TrackStateConfigEntry>(
+      title: initial == null ? addTitle : editTitle,
+      child: _BasicConfigEntryEditor(initial: initial),
+    );
+    if (edited == null) {
+      return;
+    }
+    final entries = [...currentEntries];
+    if (initial == null) {
+      entries.add(edited);
+    } else {
+      final index = entries.indexWhere((entry) => entry.id == initial.id);
+      if (index != -1) {
+        entries[index] = edited;
+      }
+    }
+    onChanged(entries);
+  }
+
+  Future<void> _addLocale(AppLocalizations l10n) async {
+    final locale = await _showSettingsEditor<String>(
+      title: l10n.addLocale,
+      child: const _LocaleCodeEditor(),
+    );
+    if (locale == null || _draftSettings == null) {
+      return;
+    }
+    final current = _draftSettings!;
+    final supportedLocales = <String>[
+      ...current.effectiveSupportedLocales,
+      if (!current.effectiveSupportedLocales.contains(locale)) locale,
+    ];
+    _replaceDraft(current.copyWith(supportedLocales: supportedLocales));
+    setState(() {
+      _selectedLocale = locale;
+    });
+  }
+
+  void _removeLocale(String locale) {
+    final current = _draftSettings;
+    if (current == null) {
+      return;
+    }
+    final nextSupportedLocales = [
+      for (final value in current.effectiveSupportedLocales)
+        if (value != locale) value,
+    ];
+    _replaceDraft(
+      current.copyWith(
+        supportedLocales: nextSupportedLocales,
+        statusDefinitions: _removeConfigEntryLocale(
+          current.statusDefinitions,
+          locale,
+        ),
+        issueTypeDefinitions: _removeConfigEntryLocale(
+          current.issueTypeDefinitions,
+          locale,
+        ),
+        fieldDefinitions: _removeFieldLocale(current.fieldDefinitions, locale),
+        priorityDefinitions: _removeConfigEntryLocale(
+          current.priorityDefinitions,
+          locale,
+        ),
+        versionDefinitions: _removeConfigEntryLocale(
+          current.versionDefinitions,
+          locale,
+        ),
+        componentDefinitions: _removeConfigEntryLocale(
+          current.componentDefinitions,
+          locale,
+        ),
+        resolutionDefinitions: _removeConfigEntryLocale(
+          current.resolutionDefinitions,
+          locale,
+        ),
+      ),
+    );
+    setState(() {
+      if (_selectedLocale == locale) {
+        _selectedLocale = nextSupportedLocales.isEmpty
+            ? null
+            : nextSupportedLocales.first;
+      }
+    });
+  }
+
+  void _setDefaultLocale(String locale) {
+    final current = _draftSettings;
+    if (current == null) {
+      return;
+    }
+    _replaceDraft(
+      current.copyWith(
+        defaultLocale: locale,
+        supportedLocales: [
+          locale,
+          for (final value in current.effectiveSupportedLocales)
+            if (value != locale) value,
+        ],
+      ),
+    );
+  }
+
+  void _updateConfigEntryTranslation({
+    required List<TrackStateConfigEntry> entries,
+    required ValueChanged<List<TrackStateConfigEntry>> onChanged,
+    required String id,
+    required String locale,
+    required String value,
+  }) {
+    onChanged([
+      for (final entry in entries)
+        if (entry.id == id)
+          entry.copyWith(
+            localizedLabels: _updatedLocalizedLabels(
+              entry.localizedLabels,
+              locale: locale,
+              value: value,
+            ),
+          )
+        else
+          entry,
+    ]);
+  }
+
+  void _updateFieldTranslation({
+    required String id,
+    required String locale,
+    required String value,
+  }) {
+    final current = _draftSettings;
+    if (current == null) {
+      return;
+    }
+    _replaceDraft(
+      current.copyWith(
+        fieldDefinitions: [
+          for (final field in current.fieldDefinitions)
+            if (field.id == id)
+              field.copyWith(
+                localizedLabels: _updatedLocalizedLabels(
+                  field.localizedLabels,
+                  locale: locale,
+                  value: value,
+                ),
+              )
+            else
+              field,
+        ],
+      ),
+    );
   }
 
   Future<void> _saveSettings() async {
@@ -2269,6 +2616,245 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     );
   }
 
+  Widget _buildSimpleEntryTab({
+    required AppLocalizations l10n,
+    required String title,
+    required String addLabel,
+    required String editLabel,
+    required String deleteLabel,
+    required List<TrackStateConfigEntry> entries,
+    required bool canEdit,
+    required void Function(TrackStateConfigEntry? initial) onEdit,
+    required ValueChanged<List<TrackStateConfigEntry>> onChanged,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildCatalogHeader(
+          l10n: l10n,
+          title: title,
+          addLabel: addLabel,
+          onAdd: canEdit ? () => onEdit(null) : null,
+        ),
+        for (final entry in entries)
+          _SettingsCatalogListTile(
+            title: entry.name,
+            subtitle: '${l10n.catalogId}: ${entry.id}',
+            onEdit: canEdit ? () => onEdit(entry) : null,
+            onDelete: canEdit
+                ? () => onChanged([
+                    for (final candidate in entries)
+                      if (candidate.id != entry.id) candidate,
+                  ])
+                : null,
+            editLabel: '$editLabel ${entry.name}',
+            deleteLabel: '$deleteLabel ${entry.name}',
+          ),
+      ],
+    );
+  }
+
+  Widget _buildLocalesTab(
+    AppLocalizations l10n,
+    ProjectSettingsCatalog settings,
+    bool canEdit,
+  ) {
+    final selectedLocale =
+        _selectedLocale ?? settings.effectiveSupportedLocales.first;
+    final canRemoveSelectedLocale =
+        settings.effectiveSupportedLocales.length > 1 &&
+        selectedLocale != settings.defaultLocale;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildCatalogHeader(
+          l10n: l10n,
+          title: l10n.locales,
+          addLabel: l10n.addLocale,
+          onAdd: canEdit ? () => _addLocale(l10n) : null,
+        ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final locale in settings.effectiveSupportedLocales)
+              ChoiceChip(
+                label: Text(
+                  locale == settings.defaultLocale
+                      ? l10n.defaultLocaleChip(locale)
+                      : locale,
+                ),
+                selected: locale == selectedLocale,
+                onSelected: (_) {
+                  setState(() {
+                    _selectedLocale = locale;
+                  });
+                },
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                initialValue: settings.defaultLocale,
+                decoration: InputDecoration(labelText: l10n.defaultLocale),
+                items: [
+                  for (final locale in settings.effectiveSupportedLocales)
+                    DropdownMenuItem(value: locale, child: Text(locale)),
+                ],
+                onChanged: !canEdit
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          _setDefaultLocale(value);
+                        }
+                      },
+              ),
+            ),
+            const SizedBox(width: 12),
+            Semantics(
+              button: true,
+              label: l10n.removeLocale(selectedLocale),
+              child: TextButton(
+                onPressed: canEdit && canRemoveSelectedLocale
+                    ? () => _removeLocale(selectedLocale)
+                    : null,
+                child: ExcludeSemantics(child: Text(l10n.removeLocaleAction)),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _LocaleCatalogSection(
+          title: l10n.statuses,
+          locale: selectedLocale,
+          defaultLocale: settings.defaultLocale,
+          entries: settings.statusDefinitions,
+          canEdit: canEdit,
+          onChanged: (id, value) {
+            _updateConfigEntryTranslation(
+              entries: settings.statusDefinitions,
+              onChanged: (entries) =>
+                  _replaceDraft(settings.copyWith(statusDefinitions: entries)),
+              id: id,
+              locale: selectedLocale,
+              value: value,
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        _LocaleCatalogSection(
+          title: l10n.issueTypes,
+          locale: selectedLocale,
+          defaultLocale: settings.defaultLocale,
+          entries: settings.issueTypeDefinitions,
+          canEdit: canEdit,
+          onChanged: (id, value) {
+            _updateConfigEntryTranslation(
+              entries: settings.issueTypeDefinitions,
+              onChanged: (entries) => _replaceDraft(
+                settings.copyWith(issueTypeDefinitions: entries),
+              ),
+              id: id,
+              locale: selectedLocale,
+              value: value,
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        _LocaleFieldCatalogSection(
+          title: l10n.fields,
+          locale: selectedLocale,
+          defaultLocale: settings.defaultLocale,
+          fields: settings.fieldDefinitions,
+          canEdit: canEdit,
+          onChanged: (id, value) => _updateFieldTranslation(
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _LocaleCatalogSection(
+          title: l10n.priorities,
+          locale: selectedLocale,
+          defaultLocale: settings.defaultLocale,
+          entries: settings.priorityDefinitions,
+          canEdit: canEdit,
+          onChanged: (id, value) {
+            _updateConfigEntryTranslation(
+              entries: settings.priorityDefinitions,
+              onChanged: (entries) => _replaceDraft(
+                settings.copyWith(priorityDefinitions: entries),
+              ),
+              id: id,
+              locale: selectedLocale,
+              value: value,
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        _LocaleCatalogSection(
+          title: l10n.components,
+          locale: selectedLocale,
+          defaultLocale: settings.defaultLocale,
+          entries: settings.componentDefinitions,
+          canEdit: canEdit,
+          onChanged: (id, value) {
+            _updateConfigEntryTranslation(
+              entries: settings.componentDefinitions,
+              onChanged: (entries) => _replaceDraft(
+                settings.copyWith(componentDefinitions: entries),
+              ),
+              id: id,
+              locale: selectedLocale,
+              value: value,
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        _LocaleCatalogSection(
+          title: l10n.versions,
+          locale: selectedLocale,
+          defaultLocale: settings.defaultLocale,
+          entries: settings.versionDefinitions,
+          canEdit: canEdit,
+          onChanged: (id, value) {
+            _updateConfigEntryTranslation(
+              entries: settings.versionDefinitions,
+              onChanged: (entries) =>
+                  _replaceDraft(settings.copyWith(versionDefinitions: entries)),
+              id: id,
+              locale: selectedLocale,
+              value: value,
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        _LocaleCatalogSection(
+          title: l10n.resolutions,
+          locale: selectedLocale,
+          defaultLocale: settings.defaultLocale,
+          entries: settings.resolutionDefinitions,
+          canEdit: canEdit,
+          onChanged: (id, value) {
+            _updateConfigEntryTranslation(
+              entries: settings.resolutionDefinitions,
+              onChanged: (entries) => _replaceDraft(
+                settings.copyWith(resolutionDefinitions: entries),
+              ),
+              id: id,
+              locale: selectedLocale,
+              value: value,
+            );
+          },
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final project = widget.viewModel.project!;
@@ -2287,6 +2873,10 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         Tab(text: l10n.workflows),
         Tab(text: l10n.issueTypes),
         Tab(text: l10n.fields),
+        Tab(text: l10n.priorities),
+        Tab(text: l10n.components),
+        Tab(text: l10n.versions),
+        Tab(text: l10n.locales),
       ],
     );
     final content = switch (_SettingsCatalogTab.values[_tabController.index]) {
@@ -2302,6 +2892,64 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         canEdit,
       ),
       _SettingsCatalogTab.fields => _buildFieldTab(l10n, settings, canEdit),
+      _SettingsCatalogTab.priorities => _buildSimpleEntryTab(
+        l10n: l10n,
+        title: l10n.priorities,
+        addLabel: l10n.addPriority,
+        editLabel: l10n.editPriority,
+        deleteLabel: l10n.deletePriority,
+        entries: settings.priorityDefinitions,
+        canEdit: canEdit,
+        onEdit: (initial) => _editSimpleConfigEntry(
+          addTitle: l10n.addPriority,
+          editTitle: l10n.editPriority,
+          currentEntries: settings.priorityDefinitions,
+          onChanged: (entries) =>
+              _replaceDraft(settings.copyWith(priorityDefinitions: entries)),
+          initial: initial,
+        ),
+        onChanged: (entries) =>
+            _replaceDraft(settings.copyWith(priorityDefinitions: entries)),
+      ),
+      _SettingsCatalogTab.components => _buildSimpleEntryTab(
+        l10n: l10n,
+        title: l10n.components,
+        addLabel: l10n.addComponent,
+        editLabel: l10n.editComponent,
+        deleteLabel: l10n.deleteComponent,
+        entries: settings.componentDefinitions,
+        canEdit: canEdit,
+        onEdit: (initial) => _editSimpleConfigEntry(
+          addTitle: l10n.addComponent,
+          editTitle: l10n.editComponent,
+          currentEntries: settings.componentDefinitions,
+          onChanged: (entries) =>
+              _replaceDraft(settings.copyWith(componentDefinitions: entries)),
+          initial: initial,
+        ),
+        onChanged: (entries) =>
+            _replaceDraft(settings.copyWith(componentDefinitions: entries)),
+      ),
+      _SettingsCatalogTab.versions => _buildSimpleEntryTab(
+        l10n: l10n,
+        title: l10n.versions,
+        addLabel: l10n.addVersion,
+        editLabel: l10n.editVersion,
+        deleteLabel: l10n.deleteVersion,
+        entries: settings.versionDefinitions,
+        canEdit: canEdit,
+        onEdit: (initial) => _editSimpleConfigEntry(
+          addTitle: l10n.addVersion,
+          editTitle: l10n.editVersion,
+          currentEntries: settings.versionDefinitions,
+          onChanged: (entries) =>
+              _replaceDraft(settings.copyWith(versionDefinitions: entries)),
+          initial: initial,
+        ),
+        onChanged: (entries) =>
+            _replaceDraft(settings.copyWith(versionDefinitions: entries)),
+      ),
+      _SettingsCatalogTab.locales => _buildLocalesTab(l10n, settings, canEdit),
     };
     return _SurfaceCard(
       semanticLabel: l10n.projectSettingsAdmin,
@@ -2422,6 +3070,254 @@ class _SettingsEditorShell extends StatelessWidget {
           Flexible(child: SingleChildScrollView(child: child)),
         ],
       ),
+    );
+  }
+}
+
+class _BasicConfigEntryEditor extends StatefulWidget {
+  const _BasicConfigEntryEditor({this.initial});
+
+  final TrackStateConfigEntry? initial;
+
+  @override
+  State<_BasicConfigEntryEditor> createState() =>
+      _BasicConfigEntryEditorState();
+}
+
+class _BasicConfigEntryEditorState extends State<_BasicConfigEntryEditor> {
+  late final TextEditingController _idController;
+  late final TextEditingController _nameController;
+
+  @override
+  void initState() {
+    super.initState();
+    _idController = TextEditingController(text: widget.initial?.id ?? '');
+    _nameController = TextEditingController(text: widget.initial?.name ?? '');
+  }
+
+  @override
+  void dispose() {
+    _idController.dispose();
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SettingsTextField(label: l10n.catalogId, controller: _idController),
+        const SizedBox(height: 12),
+        _SettingsTextField(label: l10n.name, controller: _nameController),
+        const SizedBox(height: 16),
+        _SettingsEditorActions(
+          onSave: () {
+            Navigator.of(context).pop(
+              TrackStateConfigEntry(
+                id: _normalizedEditorId(
+                  _idController.text,
+                  _nameController.text,
+                ),
+                name: _nameController.text.trim(),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _LocaleCodeEditor extends StatefulWidget {
+  const _LocaleCodeEditor();
+
+  @override
+  State<_LocaleCodeEditor> createState() => _LocaleCodeEditorState();
+}
+
+class _LocaleCodeEditorState extends State<_LocaleCodeEditor> {
+  final TextEditingController _controller = TextEditingController(text: 'fr');
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SettingsTextField(
+          label: l10n.localeCode,
+          controller: _controller,
+          helperText: l10n.localeCodeHelper,
+        ),
+        const SizedBox(height: 16),
+        _SettingsEditorActions(
+          onSave: () => Navigator.of(context).pop(_controller.text.trim()),
+        ),
+      ],
+    );
+  }
+}
+
+class _LocaleCatalogSection extends StatelessWidget {
+  const _LocaleCatalogSection({
+    required this.title,
+    required this.locale,
+    required this.defaultLocale,
+    required this.entries,
+    required this.canEdit,
+    required this.onChanged,
+  });
+
+  final String title;
+  final String locale;
+  final String defaultLocale;
+  final List<TrackStateConfigEntry> entries;
+  final bool canEdit;
+  final void Function(String id, String value) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SurfaceCard(
+      semanticLabel: '$title ${AppLocalizations.of(context)!.locales}',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionTitle(title),
+          const SizedBox(height: 8),
+          for (final entry in entries) ...[
+            _LocaleEntryRow(
+              label: entry.name,
+              id: entry.id,
+              locale: locale,
+              translation: entry.localizedLabels[locale] ?? '',
+              resolution: entry.resolveLabel(
+                locale: locale,
+                defaultLocale: defaultLocale,
+              ),
+              canEdit: canEdit,
+              onChanged: (value) => onChanged(entry.id, value),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _LocaleFieldCatalogSection extends StatelessWidget {
+  const _LocaleFieldCatalogSection({
+    required this.title,
+    required this.locale,
+    required this.defaultLocale,
+    required this.fields,
+    required this.canEdit,
+    required this.onChanged,
+  });
+
+  final String title;
+  final String locale;
+  final String defaultLocale;
+  final List<TrackStateFieldDefinition> fields;
+  final bool canEdit;
+  final void Function(String id, String value) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SurfaceCard(
+      semanticLabel: '$title ${AppLocalizations.of(context)!.locales}',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionTitle(title),
+          const SizedBox(height: 8),
+          for (final field in fields) ...[
+            _LocaleEntryRow(
+              label: field.name,
+              id: field.id,
+              locale: locale,
+              translation: field.localizedLabels[locale] ?? '',
+              resolution: field.resolveLabel(
+                locale: locale,
+                defaultLocale: defaultLocale,
+              ),
+              canEdit: canEdit,
+              onChanged: (value) => onChanged(field.id, value),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _LocaleEntryRow extends StatelessWidget {
+  const _LocaleEntryRow({
+    required this.label,
+    required this.id,
+    required this.locale,
+    required this.translation,
+    required this.resolution,
+    required this.canEdit,
+    required this.onChanged,
+  });
+
+  final String label;
+  final String id;
+  final String locale;
+  final String translation;
+  final LocalizedLabelResolution resolution;
+  final bool canEdit;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.ts;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('$label · $id', style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height: 8),
+        KeyedSubtree(
+          key: ValueKey('locale-$locale-$id'),
+          child: _SettingsTextField(
+            label: l10n.translationField(locale),
+            initialValue: translation,
+            enabled: canEdit,
+            onChanged: onChanged,
+          ),
+        ),
+        if (resolution.usedFallback) ...[
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: colors.surfaceAlt,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: colors.warning),
+            ),
+            child: Text(
+              l10n.translationFallbackWarning(
+                resolution.displayName,
+                resolution.fallbackLocale ?? l10n.canonicalNameFallback,
+              ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.warning),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -3048,6 +3944,8 @@ class _SettingsEditorActions extends StatelessWidget {
 
 ProjectSettingsCatalog _cloneProjectSettings(ProjectSettingsCatalog settings) {
   return ProjectSettingsCatalog(
+    defaultLocale: settings.defaultLocale,
+    supportedLocales: [...settings.effectiveSupportedLocales],
     statusDefinitions: [
       for (final status in settings.statusDefinitions) status.copyWith(),
     ],
@@ -3072,21 +3970,87 @@ ProjectSettingsCatalog _cloneProjectSettings(ProjectSettingsCatalog settings) {
           applicableIssueTypeIds: [...field.applicableIssueTypeIds],
         ),
     ],
+    priorityDefinitions: [
+      for (final priority in settings.priorityDefinitions) priority.copyWith(),
+    ],
+    versionDefinitions: [
+      for (final version in settings.versionDefinitions) version.copyWith(),
+    ],
+    componentDefinitions: [
+      for (final component in settings.componentDefinitions)
+        component.copyWith(),
+    ],
+    resolutionDefinitions: [
+      for (final resolution in settings.resolutionDefinitions)
+        resolution.copyWith(),
+    ],
   );
 }
 
 String _projectSettingsSignature(ProjectSettingsCatalog settings) {
   return [
+    'locale:${settings.defaultLocale}:${settings.effectiveSupportedLocales.join(',')}',
     for (final status in settings.statusDefinitions)
-      'status:${status.id}:${status.name}:${status.category ?? ''}',
+      'status:${status.id}:${status.name}:${status.category ?? ''}:${status.localizedLabels}',
     for (final workflow in settings.workflowDefinitions)
       'workflow:${workflow.id}:${workflow.name}:${workflow.statusIds.join(',')}:${workflow.transitions.map((transition) => '${transition.id}:${transition.name}:${transition.fromStatusId}:${transition.toStatusId}').join('|')}',
     for (final issueType in settings.issueTypeDefinitions)
-      'issueType:${issueType.id}:${issueType.name}:${issueType.workflowId ?? ''}:${issueType.hierarchyLevel ?? ''}:${issueType.icon ?? ''}',
+      'issueType:${issueType.id}:${issueType.name}:${issueType.workflowId ?? ''}:${issueType.hierarchyLevel ?? ''}:${issueType.icon ?? ''}:${issueType.localizedLabels}',
     for (final field in settings.fieldDefinitions)
-      'field:${field.id}:${field.name}:${field.type}:${field.required}:${field.reserved}:${field.options.map((option) => '${option.id}:${option.name}').join('|')}:${field.defaultValue ?? ''}:${field.applicableIssueTypeIds.join(',')}',
+      'field:${field.id}:${field.name}:${field.type}:${field.required}:${field.reserved}:${field.options.map((option) => '${option.id}:${option.name}').join('|')}:${field.defaultValue ?? ''}:${field.applicableIssueTypeIds.join(',')}:${field.localizedLabels}',
+    for (final priority in settings.priorityDefinitions)
+      'priority:${priority.id}:${priority.name}:${priority.localizedLabels}',
+    for (final version in settings.versionDefinitions)
+      'version:${version.id}:${version.name}:${version.localizedLabels}',
+    for (final component in settings.componentDefinitions)
+      'component:${component.id}:${component.name}:${component.localizedLabels}',
+    for (final resolution in settings.resolutionDefinitions)
+      'resolution:${resolution.id}:${resolution.name}:${resolution.localizedLabels}',
   ].join('\n');
 }
+
+Map<String, String> _updatedLocalizedLabels(
+  Map<String, String> current, {
+  required String locale,
+  required String value,
+}) {
+  final updated = <String, String>{...current};
+  final normalizedValue = value.trim();
+  if (normalizedValue.isEmpty) {
+    updated.remove(locale);
+  } else {
+    updated[locale] = normalizedValue;
+  }
+  return updated;
+}
+
+List<TrackStateConfigEntry> _removeConfigEntryLocale(
+  List<TrackStateConfigEntry> entries,
+  String locale,
+) => [
+  for (final entry in entries)
+    entry.copyWith(
+      localizedLabels: {
+        for (final localizedEntry in entry.localizedLabels.entries)
+          if (localizedEntry.key != locale)
+            localizedEntry.key: localizedEntry.value,
+      },
+    ),
+];
+
+List<TrackStateFieldDefinition> _removeFieldLocale(
+  List<TrackStateFieldDefinition> fields,
+  String locale,
+) => [
+  for (final field in fields)
+    field.copyWith(
+      localizedLabels: {
+        for (final localizedEntry in field.localizedLabels.entries)
+          if (localizedEntry.key != locale)
+            localizedEntry.key: localizedEntry.value,
+      },
+    ),
+];
 
 const _reservedFieldIds = {
   'summary',
@@ -3138,6 +4102,7 @@ class _IssueDetailState extends State<_IssueDetail> {
   void initState() {
     super.initState();
     _commentController = TextEditingController();
+    _scheduleActiveIssueDataLoad();
   }
 
   @override
@@ -3148,10 +4113,56 @@ class _IssueDetailState extends State<_IssueDetail> {
       _commentController.clear();
       _selectedAttachment = null;
       _attachmentUploadNotice = null;
-      if (_selectedCollaborationTab == 3) {
-        widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
-      }
     }
+    if (issueChanged ||
+        (!_activeTabDataLoaded(widget.issue) &&
+            !_activeTabHasDeferredError(widget.issue))) {
+      _scheduleActiveIssueDataLoad();
+    }
+  }
+
+  void _scheduleActiveIssueDataLoad() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _ensureActiveIssueDataLoaded();
+    });
+  }
+
+  void _ensureActiveIssueDataLoaded() {
+    widget.viewModel.ensureIssueDetailLoaded(widget.issue);
+    switch (_selectedCollaborationTab) {
+      case 1:
+        widget.viewModel.ensureIssueCommentsLoaded(widget.issue);
+      case 2:
+        widget.viewModel.ensureIssueAttachmentsLoaded(widget.issue);
+      case 3:
+        widget.viewModel.ensureIssueHistoryLoaded(widget.issue);
+      case 0:
+        break;
+    }
+  }
+
+  bool _activeTabDataLoaded(TrackStateIssue issue) {
+    if (!issue.hasDetailLoaded) {
+      return false;
+    }
+    return switch (_selectedCollaborationTab) {
+      1 => issue.hasCommentsLoaded,
+      2 => issue.hasAttachmentsLoaded,
+      _ => true,
+    };
+  }
+
+  bool _activeTabHasDeferredError(TrackStateIssue issue) {
+    final section = switch (_selectedCollaborationTab) {
+      0 => IssueDeferredSection.detail,
+      1 => IssueDeferredSection.comments,
+      2 => IssueDeferredSection.attachments,
+      _ => IssueDeferredSection.history,
+    };
+    return widget.viewModel.hasIssueDeferredError(issue.key, section);
   }
 
   @override
@@ -3272,6 +4283,28 @@ class _IssueDetailState extends State<_IssueDetail> {
     required AppLocalizations l10n,
     required TrackStateColors colors,
   }) {
+    final errorText = widget.viewModel.issueDeferredError(
+      issue.key,
+      IssueDeferredSection.detail,
+    );
+    if (errorText != null) {
+      return _DeferredSectionStateCard(
+        semanticLabel: '${l10n.detail} error',
+        title: l10n.detail,
+        message: errorText,
+        tone: _DeferredSectionTone.error,
+        actionLabel: l10n.retry,
+        onAction: () => widget.viewModel.ensureIssueDetailLoaded(issue),
+      );
+    }
+    if (widget.viewModel.isIssueDetailLoading(issue.key) ||
+        !issue.hasDetailLoaded) {
+      return _SectionContentPlaceholder(
+        semanticLabel: '${l10n.detail} ${l10n.loading}',
+        lineWidths: const [.94, .78, .88, .72],
+        blockCount: 3,
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3395,12 +4428,41 @@ class _IssueDetailState extends State<_IssueDetail> {
           _IssueDetailTabs(
             selectedIndex: _selectedCollaborationTab,
             tabs: [l10n.detail, l10n.comments, l10n.attachments, l10n.history],
+            failedTabIndexes: {
+              if (widget.viewModel.hasIssueDeferredError(
+                issue.key,
+                IssueDeferredSection.detail,
+              ))
+                0,
+              if (widget.viewModel.hasIssueDeferredError(
+                issue.key,
+                IssueDeferredSection.comments,
+              ))
+                1,
+              if (widget.viewModel.hasIssueDeferredError(
+                issue.key,
+                IssueDeferredSection.attachments,
+              ))
+                2,
+              if (widget.viewModel.hasIssueDeferredError(
+                issue.key,
+                IssueDeferredSection.history,
+              ))
+                3,
+            },
             onSelected: (index) {
               setState(() {
                 _selectedCollaborationTab = index;
               });
-              if (index == 3) {
-                widget.viewModel.ensureIssueHistoryLoaded(issue);
+              switch (index) {
+                case 0:
+                  widget.viewModel.ensureIssueDetailLoaded(issue);
+                case 1:
+                  widget.viewModel.ensureIssueCommentsLoaded(issue);
+                case 2:
+                  widget.viewModel.ensureIssueAttachmentsLoaded(issue);
+                case 3:
+                  widget.viewModel.ensureIssueHistoryLoaded(issue);
               }
             },
           ),
@@ -3413,8 +4475,14 @@ class _IssueDetailState extends State<_IssueDetail> {
               viewModel: widget.viewModel,
               controller: _commentController,
               isSaving: widget.viewModel.isSaving,
+              isLoading: widget.viewModel.isIssueCommentsLoading(issue.key),
+              errorText: widget.viewModel.issueDeferredError(
+                issue.key,
+                IssueDeferredSection.comments,
+              ),
               writeBlocked: hasBlockedWriteAccess,
               onSave: canUseWriteActions ? _saveComment : null,
+              onRetry: () => widget.viewModel.ensureIssueCommentsLoaded(issue),
             )
           else if (_selectedCollaborationTab == 2)
             _AttachmentsTab(
@@ -3424,6 +4492,11 @@ class _IssueDetailState extends State<_IssueDetail> {
               selectedAttachment: _selectedAttachment,
               uploadNotice: _attachmentUploadNotice,
               isSaving: widget.viewModel.isSaving,
+              isLoading: widget.viewModel.isIssueAttachmentsLoading(issue.key),
+              errorText: widget.viewModel.issueDeferredError(
+                issue.key,
+                IssueDeferredSection.attachments,
+              ),
               onChooseAttachment: _chooseAttachment,
               onClearSelection: () {
                 setState(() {
@@ -3432,11 +4505,18 @@ class _IssueDetailState extends State<_IssueDetail> {
                 });
               },
               onUpload: _uploadAttachment,
+              onRetry: () =>
+                  widget.viewModel.ensureIssueAttachmentsLoaded(issue),
             )
           else
             _HistoryTab(
               entries: widget.viewModel.issueHistoryFor(issue.key),
               isLoading: widget.viewModel.isIssueHistoryLoading(issue.key),
+              errorText: widget.viewModel.issueDeferredError(
+                issue.key,
+                IssueDeferredSection.history,
+              ),
+              onRetry: () => widget.viewModel.ensureIssueHistoryLoaded(issue),
             ),
         ],
       ),
@@ -3498,6 +4578,13 @@ class _IssueList extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
     final searchResults = viewModel.searchResults;
+    final bootstrapResults = viewModel.shouldUseBootstrapSearchFallback
+        ? viewModel.issues.take(6).toList(growable: false)
+        : const <TrackStateIssue>[];
+    final visibleResults = searchResults.isEmpty
+        ? bootstrapResults
+        : searchResults;
+    final showSearchBootstrapLoading = viewModel.isInitialSearchLoading;
     return _SurfaceCard(
       semanticLabel: l10n.jqlSearch,
       explicitChildNodes: true,
@@ -3523,10 +4610,18 @@ class _IssueList extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          if (searchResults.isEmpty)
+          if (showSearchBootstrapLoading) ...[
+            _SectionLoadingBanner(
+              semanticLabel: '${l10n.jqlSearch} ${l10n.loading}',
+              label: l10n.loading,
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (visibleResults.isEmpty)
             Text(l10n.noResults)
           else ...[
-            if (searchResults.length < viewModel.totalSearchResults)
+            if (!showSearchBootstrapLoading &&
+                searchResults.length < viewModel.totalSearchResults)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
@@ -3539,12 +4634,19 @@ class _IssueList extends StatelessWidget {
                   ).textTheme.labelMedium?.copyWith(color: colors.muted),
                 ),
               ),
-            for (var index = 0; index < searchResults.length; index += 1)
+            for (var index = 0; index < visibleResults.length; index += 1)
               FocusTraversalOrder(
                 order: NumericFocusOrder(index + 2.0),
                 child: _IssueListRow(
-                  issue: searchResults[index],
+                  issue: visibleResults[index],
                   onSelect: viewModel.selectIssue,
+                  trailingAction: showSearchBootstrapLoading
+                      ? _LoadingPill(
+                          semanticLabel:
+                              'Open ${visibleResults[index].key} ${visibleResults[index].summary} ${l10n.loading}',
+                          label: l10n.loading,
+                        )
+                      : null,
                 ),
               ),
             if (viewModel.hasMoreSearchResults)
@@ -3953,12 +5055,16 @@ class _MetricCard extends StatelessWidget {
     required this.value,
     required this.delta,
     required this.tone,
+    this.showValuePlaceholder = false,
+    this.showDeltaPlaceholder = false,
   });
 
   final String label;
   final String value;
   final String delta;
   final MetricTone tone;
+  final bool showValuePlaceholder;
+  final bool showDeltaPlaceholder;
 
   @override
   Widget build(BuildContext context) {
@@ -3969,17 +5075,23 @@ class _MetricCard extends StatelessWidget {
       MetricTone.accent => colors.accent,
     };
     return _SurfaceCard(
-      semanticLabel: '$label $value',
+      semanticLabel: showValuePlaceholder ? '$label loading' : '$label $value',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: Theme.of(context).textTheme.labelLarge),
-          Text(value, style: Theme.of(context).textTheme.headlineLarge),
-          Text(
-            delta,
-            style: TextStyle(color: toneColor, fontWeight: FontWeight.w700),
-          ),
+          if (showValuePlaceholder)
+            const _SkeletonBar(widthFactor: .42, height: 34)
+          else
+            Text(value, style: Theme.of(context).textTheme.headlineLarge),
+          if (showDeltaPlaceholder)
+            const _SkeletonBar(widthFactor: .34)
+          else
+            Text(
+              delta,
+              style: TextStyle(color: toneColor, fontWeight: FontWeight.w700),
+            ),
         ],
       ),
     );
@@ -3987,6 +5099,164 @@ class _MetricCard extends StatelessWidget {
 }
 
 enum MetricTone { primary, secondary, accent }
+
+class _LoadingPill extends StatelessWidget {
+  const _LoadingPill({required this.semanticLabel, required this.label});
+
+  final String semanticLabel;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return Semantics(
+      container: true,
+      label: semanticLabel,
+      child: ExcludeSemantics(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: colors.surfaceAlt,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: colors.border),
+          ),
+          child: Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: colors.muted),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionLoadingBanner extends StatelessWidget {
+  const _SectionLoadingBanner({
+    required this.semanticLabel,
+    required this.label,
+  });
+
+  final String semanticLabel;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return Semantics(
+      container: true,
+      label: semanticLabel,
+      child: ExcludeSemantics(
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: colors.surfaceAlt,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colors.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: colors.primarySoft,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: colors.primary),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelMedium?.copyWith(color: colors.muted),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionContentPlaceholder extends StatelessWidget {
+  const _SectionContentPlaceholder({
+    required this.semanticLabel,
+    this.lineWidths = const [.94, .82, .68],
+    this.blockCount = 0,
+  });
+
+  final String semanticLabel;
+  final List<double> lineWidths;
+  final int blockCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.ts;
+    return Semantics(
+      container: true,
+      label: semanticLabel,
+      child: ExcludeSemantics(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SectionLoadingBanner(
+              semanticLabel: semanticLabel,
+              label: l10n.loading,
+            ),
+            const SizedBox(height: 12),
+            for (final width in lineWidths) ...[
+              _SkeletonBar(widthFactor: width),
+              const SizedBox(height: 10),
+            ],
+            for (var index = 0; index < blockCount; index += 1) ...[
+              Container(
+                width: double.infinity,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: colors.surfaceAlt,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: colors.border),
+                ),
+              ),
+              if (index != blockCount - 1) const SizedBox(height: 10),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SkeletonBar extends StatelessWidget {
+  const _SkeletonBar({required this.widthFactor, this.height = 12});
+
+  final double widthFactor;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return FractionallySizedBox(
+      widthFactor: widthFactor,
+      alignment: Alignment.centerLeft,
+      child: Container(
+        height: height,
+        decoration: BoxDecoration(
+          color: colors.surfaceAlt,
+          borderRadius: BorderRadius.circular(height / 2),
+          border: Border.all(color: colors.border),
+        ),
+      ),
+    );
+  }
+}
 
 class _SettingsProviderButton extends StatelessWidget {
   const _SettingsProviderButton({
@@ -4229,20 +5499,31 @@ class _LocalGitConfiguration extends StatelessWidget {
 class _SettingsTextField extends StatelessWidget {
   const _SettingsTextField({
     required this.label,
-    required this.controller,
+    this.controller,
+    this.initialValue,
     this.focusNode,
+    this.helperText,
+    this.onChanged,
+    this.enabled = true,
   });
 
   final String label;
-  final TextEditingController controller;
+  final TextEditingController? controller;
+  final String? initialValue;
   final FocusNode? focusNode;
+  final String? helperText;
+  final ValueChanged<String>? onChanged;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       controller: controller,
+      initialValue: controller == null ? initialValue : null,
       focusNode: focusNode,
-      decoration: InputDecoration(labelText: label),
+      enabled: enabled,
+      onChanged: onChanged,
+      decoration: InputDecoration(labelText: label, helperText: helperText),
     );
   }
 }
@@ -4493,6 +5774,7 @@ class _SelectableChipField extends StatelessWidget {
     required this.selectedValues,
     required this.onToggle,
     this.enabled = true,
+    this.optionLabelBuilder,
   });
 
   final String label;
@@ -4500,6 +5782,7 @@ class _SelectableChipField extends StatelessWidget {
   final List<String> selectedValues;
   final ValueChanged<String> onToggle;
   final bool enabled;
+  final String Function(TrackStateConfigEntry option)? optionLabelBuilder;
 
   @override
   Widget build(BuildContext context) {
@@ -4517,7 +5800,9 @@ class _SelectableChipField extends StatelessWidget {
             children: [
               for (final option in options)
                 FilterChip(
-                  label: Text(option.label()),
+                  label: Text(
+                    optionLabelBuilder?.call(option) ?? option.label(),
+                  ),
                   selected: selectedValues.any(
                     (value) =>
                         _canonicalConfigId(value) ==
@@ -4805,37 +6090,49 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final project = widget.viewModel.project;
+    final metadataLocale = _projectMetadataLocale(context, project);
     final summaryLabel = _projectFieldLabel(
       project,
       'summary',
       fallback: 'Summary',
+      locale: metadataLocale,
     );
     final issueTypeLabel = _projectFieldLabel(
       project,
       'issueType',
       fallback: l10n.issueType,
+      locale: metadataLocale,
     );
     final priorityLabel = _projectFieldLabel(
       project,
       'priority',
       fallback: l10n.priority,
+      locale: metadataLocale,
     );
     final assigneeLabel = _projectFieldLabel(
       project,
       'assignee',
       fallback: l10n.assignee,
+      locale: metadataLocale,
     );
     final labelsLabel = _projectFieldLabel(
       project,
       'labels',
       fallback: l10n.labels,
+      locale: metadataLocale,
     );
     final parentLabel = _projectFieldLabel(
       project,
       'parent',
       fallback: l10n.parent,
+      locale: metadataLocale,
     );
-    final epicLabel = _projectFieldLabel(project, 'epic', fallback: l10n.epic);
+    final epicLabel = _projectFieldLabel(
+      project,
+      'epic',
+      fallback: l10n.epic,
+      locale: metadataLocale,
+    );
     final createFields = _createIssueFieldDefinitions(project);
     _syncCreateFieldControllers(_customFieldControllers, createFields);
     final issueTypeOptions = project == null
@@ -4927,7 +6224,11 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                     DropdownMenuItem<String>(
                                       value: option.id,
                                       child: Text(
-                                        option.label(project?.defaultLocale),
+                                        project?.issueTypeLabel(
+                                              option.id,
+                                              locale: metadataLocale,
+                                            ) ??
+                                            option.name,
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
@@ -4971,7 +6272,11 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                     DropdownMenuItem<String>(
                                       value: option.id,
                                       child: Text(
-                                        option.label(project?.defaultLocale),
+                                        project?.priorityLabel(
+                                              option.id,
+                                              locale: metadataLocale,
+                                            ) ??
+                                            option.name,
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
@@ -4989,9 +6294,12 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                               _ReadOnlyCreateField(
                                 label: l10n.initialStatus,
                                 value:
-                                    defaultStatus?.label(
-                                      project?.defaultLocale,
-                                    ) ??
+                                    (defaultStatus == null
+                                        ? null
+                                        : project?.statusLabel(
+                                            defaultStatus.id,
+                                            locale: metadataLocale,
+                                          )) ??
                                     l10n.toDo,
                               ),
                               if (!_isEpicType && !_isSubtaskType) ...[
@@ -5090,7 +6398,11 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                               for (final field in createFields) ...[
                                 const SizedBox(height: 12),
                                 Semantics(
-                                  label: _createIssueFieldLabel(project, field),
+                                  label: _createIssueFieldLabel(
+                                    project,
+                                    field,
+                                    metadataLocale,
+                                  ),
                                   textField: true,
                                   child: TextField(
                                     key: ValueKey('create-field-${field.id}'),
@@ -5105,6 +6417,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                                       labelText: _createIssueFieldLabel(
                                         project,
                                         field,
+                                        metadataLocale,
                                       ),
                                       alignLabelWithHint:
                                           field.type == 'markdown',
@@ -5403,52 +6716,66 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final project = widget.viewModel.project;
+    final metadataLocale = _projectMetadataLocale(context, project);
     final issueTypeLabel =
         project?.issueTypeLabel(
           widget.issue.issueTypeId,
-          locale: project.defaultLocale,
+          locale: metadataLocale,
         ) ??
         widget.issue.issueType.label;
     final summaryLabel = _projectFieldLabel(
       project,
       'summary',
       fallback: 'Summary',
+      locale: metadataLocale,
     );
     final priorityLabel = _projectFieldLabel(
       project,
       'priority',
       fallback: l10n.priority,
+      locale: metadataLocale,
     );
     final assigneeLabel = _projectFieldLabel(
       project,
       'assignee',
       fallback: l10n.assignee,
+      locale: metadataLocale,
     );
     final labelsLabel = _projectFieldLabel(
       project,
       'labels',
       fallback: l10n.labels,
+      locale: metadataLocale,
     );
     final parentLabel = _projectFieldLabel(
       project,
       'parent',
       fallback: l10n.parent,
+      locale: metadataLocale,
     );
-    final epicLabel = _projectFieldLabel(project, 'epic', fallback: l10n.epic);
+    final epicLabel = _projectFieldLabel(
+      project,
+      'epic',
+      fallback: l10n.epic,
+      locale: metadataLocale,
+    );
     final componentsLabel = _projectFieldLabel(
       project,
       'components',
       fallback: l10n.components,
+      locale: metadataLocale,
     );
     final fixVersionsLabel = _projectFieldLabel(
       project,
       'fixVersions',
       fallback: l10n.fixVersions,
+      locale: metadataLocale,
     );
     final resolutionLabel = _projectFieldLabel(
       project,
       'resolution',
       fallback: l10n.resolution,
+      locale: metadataLocale,
     );
     final parentOptions = _availableParentOptions();
     final epicOptions = _epicOptions(widget.viewModel);
@@ -5533,7 +6860,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                 value:
                                     project?.statusLabel(
                                       widget.issue.statusId,
-                                      locale: project.defaultLocale,
+                                      locale: metadataLocale,
                                     ) ??
                                     widget.issue.status.label,
                               ),
@@ -5551,7 +6878,11 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                     DropdownMenuItem<String>(
                                       value: option.id,
                                       child: Text(
-                                        option.label(project?.defaultLocale),
+                                        project?.statusLabel(
+                                              option.id,
+                                              locale: metadataLocale,
+                                            ) ??
+                                            option.name,
                                       ),
                                     ),
                                 ],
@@ -5583,7 +6914,11 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                       DropdownMenuItem<String>(
                                         value: option.id,
                                         child: Text(
-                                          option.label(project?.defaultLocale),
+                                          project?.resolutionLabel(
+                                                option.id,
+                                                locale: metadataLocale,
+                                              ) ??
+                                              option.name,
                                         ),
                                       ),
                                   ],
@@ -5638,7 +6973,11 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                     DropdownMenuItem<String>(
                                       value: option.id,
                                       child: Text(
-                                        option.label(project?.defaultLocale),
+                                        project?.priorityLabel(
+                                              option.id,
+                                              locale: metadataLocale,
+                                            ) ??
+                                            option.name,
                                       ),
                                     ),
                                 ],
@@ -5686,6 +7025,12 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                 options: componentOptions,
                                 selectedValues: _components,
                                 enabled: canEditFields,
+                                optionLabelBuilder: (option) =>
+                                    project?.componentLabel(
+                                      option.id,
+                                      locale: metadataLocale,
+                                    ) ??
+                                    option.name,
                                 onToggle: (value) =>
                                     _toggleConfigSelection(_components, value),
                               ),
@@ -5695,6 +7040,12 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                 options: versionOptions,
                                 selectedValues: _fixVersions,
                                 enabled: canEditFields,
+                                optionLabelBuilder: (option) =>
+                                    project?.versionLabel(
+                                      option.id,
+                                      locale: metadataLocale,
+                                    ) ??
+                                    option.name,
                                 onToggle: (value) =>
                                     _toggleConfigSelection(_fixVersions, value),
                               ),
@@ -6085,11 +7436,13 @@ class _IssueDetailTabs extends StatelessWidget {
   const _IssueDetailTabs({
     required this.selectedIndex,
     required this.tabs,
+    this.failedTabIndexes = const <int>{},
     required this.onSelected,
   });
 
   final int selectedIndex;
   final List<String> tabs;
+  final Set<int> failedTabIndexes;
   final ValueChanged<int> onSelected;
 
   @override
@@ -6102,6 +7455,7 @@ class _IssueDetailTabs extends StatelessWidget {
           _IssueDetailTabChip(
             label: tabs[index],
             selected: index == selectedIndex,
+            showFailureIndicator: failedTabIndexes.contains(index),
             onPressed: () => onSelected(index),
           ),
       ],
@@ -6113,11 +7467,13 @@ class _IssueDetailTabChip extends StatelessWidget {
   const _IssueDetailTabChip({
     required this.label,
     required this.selected,
+    required this.showFailureIndicator,
     required this.onPressed,
   });
 
   final String label;
   final bool selected;
+  final bool showFailureIndicator;
   final VoidCallback onPressed;
 
   @override
@@ -6141,9 +7497,29 @@ class _IssueDetailTabChip extends StatelessWidget {
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Text(
-                label,
-                style: TextStyle(color: selected ? colors.page : colors.text),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: selected ? colors.page : colors.text,
+                    ),
+                  ),
+                  if (showFailureIndicator) ...[
+                    const SizedBox(width: 8),
+                    ExcludeSemantics(
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: selected ? colors.page : colors.error,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ),
@@ -6159,16 +7535,22 @@ class _CommentsTab extends StatelessWidget {
     required this.viewModel,
     required this.controller,
     required this.isSaving,
+    required this.isLoading,
+    required this.errorText,
     required this.writeBlocked,
     required this.onSave,
+    required this.onRetry,
   });
 
   final TrackStateIssue issue;
   final TrackerViewModel viewModel;
   final TextEditingController controller;
   final bool isSaving;
+  final bool isLoading;
+  final String? errorText;
   final bool writeBlocked;
   final VoidCallback? onSave;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -6195,7 +7577,7 @@ class _CommentsTab extends StatelessWidget {
             controller: controller,
             minLines: 3,
             maxLines: null,
-            enabled: !isSaving && !writeBlocked,
+            enabled: !isSaving && !isLoading && !writeBlocked,
             decoration: InputDecoration(
               labelText: l10n.comments,
               alignLabelWithHint: true,
@@ -6208,11 +7590,27 @@ class _CommentsTab extends StatelessWidget {
           child: _IssueDetailActionButton(
             label: l10n.postComment,
             emphasized: true,
-            onPressed: writeBlocked ? null : onSave,
+            onPressed: writeBlocked || isLoading ? null : onSave,
           ),
         ),
         const SizedBox(height: 16),
-        if (issue.comments.isEmpty)
+        if (errorText != null)
+          _DeferredSectionStateCard(
+            semanticLabel: '${l10n.comments} error',
+            title: l10n.comments,
+            message: errorText!,
+            tone: _DeferredSectionTone.error,
+            actionLabel: l10n.retry,
+            onAction: onRetry,
+          )
+        else if (isLoading || !issue.hasCommentsLoaded)
+          _DeferredSectionStateCard(
+            semanticLabel: '${l10n.comments} loading',
+            title: l10n.comments,
+            message: l10n.loading,
+            tone: _DeferredSectionTone.loading,
+          )
+        else if (issue.comments.isEmpty)
           Text(l10n.noResults, style: TextStyle(color: colors.muted))
         else
           for (final comment in issue.comments)
@@ -6230,9 +7628,12 @@ class _AttachmentsTab extends StatelessWidget {
     required this.selectedAttachment,
     required this.uploadNotice,
     required this.isSaving,
+    required this.isLoading,
+    required this.errorText,
     required this.onChooseAttachment,
     required this.onClearSelection,
     required this.onUpload,
+    required this.onRetry,
   });
 
   final TrackStateIssue issue;
@@ -6241,9 +7642,12 @@ class _AttachmentsTab extends StatelessWidget {
   final PickedAttachment? selectedAttachment;
   final String? uploadNotice;
   final bool isSaving;
+  final bool isLoading;
+  final String? errorText;
   final VoidCallback onChooseAttachment;
   final VoidCallback onClearSelection;
   final VoidCallback onUpload;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -6255,7 +7659,7 @@ class _AttachmentsTab extends StatelessWidget {
             HostedRepositoryAccessMode.attachmentRestricted &&
         !viewModel.canUploadIssueAttachments;
     final canChooseAttachment =
-        !isSaving && viewModel.canUploadIssueAttachments;
+        !isSaving && !isLoading && viewModel.canUploadIssueAttachments;
     final canUploadAttachment =
         canChooseAttachment && selectedAttachment != null;
     return Column(
@@ -6358,7 +7762,23 @@ class _AttachmentsTab extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        if (issue.attachments.isEmpty)
+        if (errorText != null)
+          _DeferredSectionStateCard(
+            semanticLabel: '${l10n.attachments} error',
+            title: l10n.attachments,
+            message: errorText!,
+            tone: _DeferredSectionTone.error,
+            actionLabel: l10n.retry,
+            onAction: onRetry,
+          )
+        else if (isLoading || !issue.hasAttachmentsLoaded)
+          _DeferredSectionStateCard(
+            semanticLabel: '${l10n.attachments} loading',
+            title: l10n.attachments,
+            message: l10n.loading,
+            tone: _DeferredSectionTone.loading,
+          )
+        else if (issue.attachments.isEmpty)
           Text(l10n.noResults, style: TextStyle(color: colors.muted))
         else
           for (final attachment in issue.attachments)
@@ -6462,23 +7882,111 @@ class _AttachmentRow extends StatelessWidget {
 }
 
 class _HistoryTab extends StatelessWidget {
-  const _HistoryTab({required this.entries, required this.isLoading});
+  const _HistoryTab({
+    required this.entries,
+    required this.isLoading,
+    required this.errorText,
+    required this.onRetry,
+  });
 
   final List<IssueHistoryEntry> entries;
   final bool isLoading;
+  final String? errorText;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
+    if (errorText != null) {
+      return _DeferredSectionStateCard(
+        semanticLabel: '${l10n.history} error',
+        title: l10n.history,
+        message: errorText!,
+        tone: _DeferredSectionTone.error,
+        actionLabel: l10n.retry,
+        onAction: onRetry,
+      );
+    }
     if (isLoading) {
-      return const LinearProgressIndicator(minHeight: 2);
+      return _DeferredSectionStateCard(
+        semanticLabel: '${l10n.history} loading',
+        title: l10n.history,
+        message: l10n.loading,
+        tone: _DeferredSectionTone.loading,
+      );
     }
     if (entries.isEmpty) {
       return Text(l10n.noResults, style: TextStyle(color: colors.muted));
     }
     return Column(
       children: [for (final entry in entries) _HistoryRow(entry: entry)],
+    );
+  }
+}
+
+enum _DeferredSectionTone { loading, error }
+
+class _DeferredSectionStateCard extends StatelessWidget {
+  const _DeferredSectionStateCard({
+    required this.semanticLabel,
+    required this.title,
+    required this.message,
+    required this.tone,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final String semanticLabel;
+  final String title;
+  final String message;
+  final _DeferredSectionTone tone;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final accentColor = switch (tone) {
+      _DeferredSectionTone.loading => colors.info,
+      _DeferredSectionTone.error => colors.error,
+    };
+    return Semantics(
+      container: true,
+      label: semanticLabel,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colors.surfaceAlt,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (tone == _DeferredSectionTone.loading) ...[
+              const LinearProgressIndicator(minHeight: 2),
+              const SizedBox(height: 12),
+            ],
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(color: accentColor),
+            ),
+            const SizedBox(height: 8),
+            Text(message),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 12),
+              _IssueDetailActionButton(
+                label: actionLabel!,
+                onPressed: onAction,
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

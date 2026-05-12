@@ -31,6 +31,7 @@ class SettingsScreenRobot {
   Finder get issueTypesCard => find.widgetWithText(Tab, 'Issue Types');
   Finder get workflowCard => find.widgetWithText(Tab, 'Workflows');
   Finder get fieldsCard => find.widgetWithText(Tab, 'Fields');
+  Finder get localesTab => find.widgetWithText(Tab, 'Locales');
   Finder get repositoryAccessSection =>
       find.bySemanticsLabel(RegExp('Repository access'));
   Finder get settingsAdminSection =>
@@ -65,6 +66,20 @@ class SettingsScreenRobot {
   );
   Finder get darkThemeControl => find.bySemanticsLabel('Dark theme').first;
   Finder get placeholderText => find.text(jqlPlaceholderText);
+  Finder get saveSettingsButton => actionButton('Save settings');
+  Finder get resetSettingsButton => actionButton('Reset');
+  Finder get settingsEditorDialog => find.byType(Dialog);
+  Finder get startupRecoveryCalloutTitle =>
+      find.text('GitHub startup limit reached');
+  Finder get startupRecoveryCallout => _smallestByArea(
+    find.ancestor(
+      of: startupRecoveryCalloutTitle,
+      matching: find.byWidgetPredicate(
+        (widget) => widget is Container && widget.decoration is BoxDecoration,
+        description: 'startup recovery callout container',
+      ),
+    ),
+  );
 
   Future<void> pumpApp({
     required TrackStateRepository repository,
@@ -102,8 +117,247 @@ class SettingsScreenRobot {
     await tester.pumpAndSettle();
   }
 
+  Future<void> resize(Size size) async {
+    tester.view.physicalSize = size;
+    tester.view.devicePixelRatio = 1;
+    await tester.pumpAndSettle();
+  }
+
+  Size get viewportSize => tester.view.physicalSize;
+
+  Finder tabByLabel(String label) => find.widgetWithText(Tab, label);
+
+  Future<void> selectTab(String label) async {
+    final tab = tabByLabel(label);
+    await tester.ensureVisible(tab);
+    await tester.tap(tab, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> openLocalesTab() => selectTab('Locales');
+
+  Finder localeChip(String label) => find.widgetWithText(ChoiceChip, label);
+
+  Future<void> selectLocaleChip(String label) async {
+    final chip = localeChip(label);
+    await tester.ensureVisible(chip);
+    await tester.tap(chip, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  Finder removeLocaleButton(String locale) =>
+      actionButton('Remove locale $locale');
+
+  Finder localeEntryFieldScope({required String locale, required String id}) =>
+      find.byKey(ValueKey('locale-$locale-$id'));
+
+  Finder localeEntryTextField({required String locale, required String id}) =>
+      find.descendant(
+        of: localeEntryFieldScope(locale: locale, id: id),
+        matching: find.byType(EditableText),
+      );
+
+  Future<void> enterLocaleTranslation({
+    required String locale,
+    required String id,
+    required String text,
+  }) async {
+    final field = localeEntryTextField(locale: locale, id: id);
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(field.first, text);
+    await tester.pumpAndSettle();
+  }
+
+  String localeTranslationFieldValue({
+    required String locale,
+    required String id,
+  }) {
+    final field = localeEntryTextField(locale: locale, id: id);
+    if (field.evaluate().isEmpty) {
+      throw StateError(
+        'No locale translation field found for locale "$locale" and id "$id".',
+      );
+    }
+    return tester.widget<EditableText>(field.first).controller.text;
+  }
+
+  Future<void> focusLocaleTranslationField({
+    required String locale,
+    required String id,
+  }) async {
+    final field = localeEntryTextField(locale: locale, id: id);
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  String localeTranslationFieldSemanticsLabel({
+    required String locale,
+    required String id,
+  }) {
+    final field = localeEntryTextField(locale: locale, id: id);
+    if (field.evaluate().isEmpty) {
+      throw StateError(
+        'No locale translation field found for locale "$locale" and id "$id".',
+      );
+    }
+    return tester.getSemantics(field.first).label;
+  }
+
+  Color localeTranslationFieldPlaceholderColor({
+    required String locale,
+    required String id,
+  }) {
+    return _decoratedFieldTextColorWithin(
+      localeEntryFieldScope(locale: locale, id: id),
+      'Translation ($locale)',
+    );
+  }
+
+  Finder localeWarningText(String text) => find.text(text);
+
+  Finder localeWarningContainer(String text) => _smallestByArea(
+    find.ancestor(
+      of: localeWarningText(text),
+      matching: find.byType(Container),
+    ),
+  );
+
+  Finder localeWarningIcon(String text) => find.descendant(
+    of: localeWarningContainer(text),
+    matching: find.byType(Icon),
+  );
+
+  Color localeWarningTextColor(String text) =>
+      renderedTextColorWithin(localeWarningContainer(text), text);
+
+  Color? localeWarningBackgroundColor(String text) {
+    final container = localeWarningContainer(text);
+    if (container.evaluate().isEmpty) {
+      return null;
+    }
+    final widget = container.evaluate().first.widget;
+    if (widget is! Container) {
+      return null;
+    }
+    final decoration = widget.decoration;
+    if (decoration is! BoxDecoration) {
+      return null;
+    }
+    return decoration.color;
+  }
+
+  Color? localeWarningBorderColor(String text) {
+    final container = localeWarningContainer(text);
+    if (container.evaluate().isEmpty) {
+      return null;
+    }
+    final widget = container.evaluate().first.widget;
+    if (widget is! Container) {
+      return null;
+    }
+    final decoration = widget.decoration;
+    if (decoration is! BoxDecoration) {
+      return null;
+    }
+    final border = decoration.border;
+    if (border is Border) {
+      return border.top.color;
+    }
+    return null;
+  }
+
+  Color? localeWarningIconColor(String text) {
+    final icon = localeWarningIcon(text);
+    if (icon.evaluate().isEmpty) {
+      return null;
+    }
+    final element = icon.evaluate().first;
+    final widget = element.widget;
+    if (widget is Icon && widget.color != null) {
+      return widget.color!;
+    }
+    return IconTheme.of(element).color;
+  }
+
+  String? localeWarningIconSemanticsLabel(String text) {
+    final icon = localeWarningIcon(text);
+    if (icon.evaluate().isEmpty) {
+      return null;
+    }
+    return tester.getSemantics(icon.first).label;
+  }
+
+  Finder actionButton(String label) {
+    final semanticsScope = find.bySemanticsLabel(
+      RegExp('^${RegExp.escape(label)}\$'),
+    );
+    final descendantButtons = find.descendant(
+      of: semanticsScope,
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    if (descendantButtons.evaluate().isNotEmpty) {
+      return _lowestButton(descendantButtons);
+    }
+
+    final textButtons = find.ancestor(
+      of: find.text(label),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    if (textButtons.evaluate().isNotEmpty) {
+      return _lowestButton(textButtons);
+    }
+
+    return _lowestButton(semanticsScope);
+  }
+
+  Future<void> tapActionButton(String label) async {
+    final button = actionButton(label);
+    await tester.ensureVisible(button);
+    await tester.tap(button, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  Future<bool> isTextFieldVisible(String label) async {
+    await tester.pump();
+    return _labeledTextField(label).evaluate().isNotEmpty;
+  }
+
+  Finder editorTitle(String title) => find.text(title);
+
+  Rect editorSurfaceRect(String title) {
+    final titleFinder = editorTitle(title);
+    final materialSurface = find.ancestor(
+      of: titleFinder,
+      matching: find.byType(Material),
+    );
+    if (materialSurface.evaluate().isNotEmpty) {
+      return tester.getRect(_smallestByArea(materialSurface));
+    }
+
+    final dialogSurface = find.ancestor(
+      of: titleFinder,
+      matching: find.byType(Dialog),
+    );
+    if (dialogSurface.evaluate().isNotEmpty) {
+      return tester.getRect(_smallestByArea(dialogSurface));
+    }
+
+    throw StateError('No settings editor surface found for "$title".');
+  }
+
   Finder providerControl(String label) => find.descendant(
     of: repositoryAccessSection,
+    matching: find.ancestor(
+      of: find.text(label),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    ),
+  );
+
+  Finder startupRecoveryActionButton(String label) => find.descendant(
+    of: startupRecoveryCallout,
     matching: find.ancestor(
       of: find.text(label),
       matching: find.bySubtype<ButtonStyleButton>(),
@@ -134,6 +388,46 @@ class SettingsScreenRobot {
   TrackStateColors colors() {
     final context = tester.element(find.byType(Scaffold).first);
     return context.ts;
+  }
+
+  Color? decoratedContainerBackgroundColor(Finder scope) {
+    final container = _decoratedContainerWithin(scope);
+    if (container == null) {
+      return null;
+    }
+    final decoration = container.decoration;
+    if (decoration is! BoxDecoration) {
+      return null;
+    }
+    return decoration.color;
+  }
+
+  Color? decoratedContainerBorderColor(Finder scope) {
+    final container = _decoratedContainerWithin(scope);
+    if (container == null) {
+      return null;
+    }
+    final decoration = container.decoration;
+    if (decoration is! BoxDecoration) {
+      return null;
+    }
+    final border = decoration.border;
+    if (border is Border) {
+      return border.top.color;
+    }
+    return null;
+  }
+
+  Color? trackStateIconColorWithin(Finder scope) {
+    final icons = find.descendant(
+      of: scope,
+      matching: find.byType(TrackStateIcon),
+    );
+    if (icons.evaluate().isEmpty) {
+      return null;
+    }
+    final widget = tester.widget<TrackStateIcon>(icons.first);
+    return widget.color;
   }
 
   Offset centerOf(Finder finder) => tester.getCenter(finder);
@@ -314,6 +608,11 @@ class SettingsScreenRobot {
     return tester.getSemantics(finder.first).label;
   }
 
+  bool isButtonEnabled(Finder finder) {
+    final widget = tester.widget<ButtonStyleButton>(finder.first);
+    return widget.enabled;
+  }
+
   Finder profileInitialsBadge(String initials) =>
       find.descendant(of: profileAvatar, matching: find.text(initials));
 
@@ -360,6 +659,42 @@ class SettingsScreenRobot {
     return rows.map((row) => row.label).toList();
   }
 
+  List<String> buttonLabelsWithin(Finder scope) {
+    final buttons = find.descendant(
+      of: scope,
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    final labels = <({String label, double top, double left})>[];
+    for (final element in buttons.evaluate()) {
+      final buttonFinder = find.byElementPredicate(
+        (candidate) => candidate == element,
+        description: 'button within $scope',
+      );
+      final texts = find.descendant(of: buttonFinder, matching: find.byType(Text));
+      String? label;
+      for (final textElement in texts.evaluate()) {
+        final widget = textElement.widget;
+        if (widget is Text && (widget.data?.trim().isNotEmpty ?? false)) {
+          label = widget.data!.trim();
+          break;
+        }
+      }
+      if (label == null) {
+        continue;
+      }
+      final rect = tester.getRect(buttonFinder);
+      labels.add((label: label, top: rect.top, left: rect.left));
+    }
+    labels.sort((left, right) {
+      final vertical = left.top.compareTo(right.top);
+      if (vertical != 0) {
+        return vertical;
+      }
+      return left.left.compareTo(right.left);
+    });
+    return labels.map((entry) => entry.label).toList();
+  }
+
   Finder topBarProviderControl(String label) =>
       _buttonControlWithText(label, requiresTrackStateIcon: true);
 
@@ -376,6 +711,42 @@ class SettingsScreenRobot {
 
   Finder _filledSettingsProviderButton(String label) {
     return _lowestButton(find.widgetWithText(FilledButton, label));
+  }
+
+  Finder _labeledTextField(String label) {
+    final decorationMatch = find.byWidgetPredicate((widget) {
+      if (widget is TextField) {
+        return widget.decoration?.labelText == label;
+      }
+      return false;
+    }, description: 'text field labeled $label');
+    if (decorationMatch.evaluate().isNotEmpty) {
+      return decorationMatch;
+    }
+    return find.descendant(
+      of: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is EditableText || widget is TextField,
+        description: 'editable control labeled $label',
+      ),
+    );
+  }
+
+  Container? _decoratedContainerWithin(Finder scope) {
+    for (final element in scope.evaluate()) {
+      final widget = element.widget;
+      if (widget is Container && widget.decoration is BoxDecoration) {
+        return widget;
+      }
+    }
+    final containers = find.descendant(of: scope, matching: find.byType(Container));
+    for (final element in containers.evaluate()) {
+      final widget = element.widget;
+      if (widget is Container && widget.decoration is BoxDecoration) {
+        return widget;
+      }
+    }
+    return null;
   }
 
   Finder _lowestButton(Finder buttons) {
@@ -422,6 +793,29 @@ class SettingsScreenRobot {
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .toList();
+  }
+
+  List<String> visibleSemanticsLabelsSnapshot() {
+    final root = tester.binding.pipelineOwner.semanticsOwner?.rootSemanticsNode;
+    if (root == null) {
+      return <String>[];
+    }
+
+    final labels = <String>[];
+    void visit(SemanticsNode node) {
+      final label = node.getSemanticsData().label.trim();
+      if (label.isNotEmpty) {
+        labels.add(label);
+      }
+      for (final child in node.debugListChildrenInOrder(
+        DebugSemanticsDumpOrder.traversalOrder,
+      )) {
+        visit(child);
+      }
+    }
+
+    visit(root);
+    return labels;
   }
 
   List<String> visibleConfigItems(String title) {
@@ -539,5 +933,59 @@ class SettingsScreenRobot {
 
     root.visitChildren(visit);
     return found;
+  }
+
+  Color _decoratedFieldTextColorWithin(Finder scope, String text) {
+    final decoratedFieldFinder = find.descendant(
+      of: scope,
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is TextField) {
+          return widget.decoration?.labelText == text ||
+              widget.decoration?.hintText == text;
+        }
+        if (widget is InputDecorator) {
+          return widget.decoration.labelText == text ||
+              widget.decoration.hintText == text;
+        }
+        return false;
+      }, description: 'decorated settings field for $text'),
+    );
+
+    final count = decoratedFieldFinder.evaluate().length;
+    for (var index = 0; index < count; index += 1) {
+      final candidate = decoratedFieldFinder.at(index);
+      final element = candidate.evaluate().single;
+      final decoration = _inputDecorationFor(element.widget);
+      if (decoration == null) {
+        continue;
+      }
+      final matchesHint = decoration.hintText == text;
+      final theme = Theme.of(element);
+      final explicitStyle = matchesHint
+          ? decoration.hintStyle
+          : decoration.labelStyle;
+      final themedStyle = matchesHint
+          ? theme.inputDecorationTheme.hintStyle
+          : theme.inputDecorationTheme.labelStyle;
+      final color =
+          explicitStyle?.color ??
+          themedStyle?.color ??
+          theme.textTheme.bodyMedium?.color;
+      if (color != null) {
+        return color;
+      }
+    }
+
+    throw StateError('No rendered field-label color found for "$text".');
+  }
+
+  InputDecoration? _inputDecorationFor(Widget widget) {
+    if (widget is TextField) {
+      return widget.decoration;
+    }
+    if (widget is InputDecorator) {
+      return widget.decoration;
+    }
+    return null;
   }
 }

@@ -36,6 +36,8 @@ class FocusedElementObservation:
 
 
 class WebAppSession(Protocol):
+    def set_viewport_size(self, *, width: int, height: int) -> None: ...
+
     def goto(
         self,
         url: str,
@@ -92,6 +94,16 @@ class WebAppSession(Protocol):
         timeout_ms: int = 30_000,
     ) -> None: ...
 
+    def click_and_set_files(
+        self,
+        selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None: ...
+
     def count(
         self,
         selector: str,
@@ -113,6 +125,16 @@ class WebAppSession(Protocol):
         selector: str,
         expected_count: int,
         *,
+        timeout_ms: int = 30_000,
+    ) -> None: ...
+
+    def click_and_choose_file(
+        self,
+        selector: str,
+        file_paths: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
         timeout_ms: int = 30_000,
     ) -> None: ...
 
@@ -190,6 +212,16 @@ class WebAppSession(Protocol):
         timeout_ms: int = 30_000,
     ) -> str: ...
 
+    def select_files_after_click(
+        self,
+        trigger_selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None: ...
+
     def screenshot(self, path: str) -> None: ...
 
     def bounding_box(
@@ -200,6 +232,8 @@ class WebAppSession(Protocol):
         index: int = 0,
         timeout_ms: int = 30_000,
     ) -> ElementBoundingBox: ...
+
+    def mouse_move(self, x: float, y: float) -> None: ...
 
     def mouse_click(self, x: float, y: float, *, delay_ms: int = 0) -> None: ...
 

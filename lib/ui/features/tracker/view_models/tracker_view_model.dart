@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -42,6 +44,8 @@ enum TrackerMessageKind {
   githubConnected,
   storedGitHubTokenInvalid,
 }
+
+enum IssueDeferredSection { detail, comments, attachments, history }
 
 class TrackerMessage {
   const TrackerMessage._(
@@ -268,14 +272,22 @@ class TrackerViewModel extends ChangeNotifier {
   );
   TrackStateIssue? _selectedIssue;
   final Map<String, List<IssueHistoryEntry>> _issueHistoryByKey = {};
+  final Map<String, Map<IssueDeferredSection, String>>
+  _issueDeferredErrorsByKey = {};
   final Set<String> _loadingIssueHistory = <String>{};
+  final Set<String> _loadingIssueDetails = <String>{};
+  final Set<String> _loadingIssueComments = <String>{};
+  final Set<String> _loadingIssueAttachments = <String>{};
   TrackerSection? _issueDetailReturnSection;
   bool _isLoading = false;
   bool _isSaving = false;
   TrackerMessage? _message;
+  TrackerStartupRecovery? _startupRecovery;
   bool _isConnected = false;
   RepositoryUser? _connectedUser;
   bool _isLoadingMoreSearchResults = false;
+  bool _didAutoResumeStartupRecoveryAfterAuthentication = false;
+  bool _hasLoadedInitialSearchResults = false;
 
   TrackerSnapshot? get snapshot => _snapshot;
   TrackerSection get section => _section;
@@ -288,10 +300,32 @@ class TrackerViewModel extends ChangeNotifier {
   TrackStateIssue? get selectedIssue => _selectedIssue;
   TrackerSection? get issueDetailReturnSection => _issueDetailReturnSection;
   bool get isLoading => _isLoading;
+  bool get hasLoadedInitialSearchResults => _hasLoadedInitialSearchResults;
+  bool get hasPublishedBootstrapSnapshot => _snapshot != null;
+  bool get isInitialSearchLoading =>
+      _isLoading && !_hasLoadedInitialSearchResults;
+  bool get showsInitialBootstrapPlaceholders =>
+      hasPublishedBootstrapSnapshot && isInitialSearchLoading;
+  bool get shouldUseBootstrapSearchFallback =>
+      hasPublishedBootstrapSnapshot && !_hasLoadedInitialSearchResults;
   bool get isSaving => _isSaving;
+  TrackerLoadState loadStateForDomain(TrackerDataDomain domain) =>
+      _snapshot?.readiness.domainState(domain) ?? TrackerLoadState.loading;
+  TrackerLoadState loadStateForSection(TrackerSection section) =>
+      _snapshot?.readiness.sectionState(_sectionKey(section)) ??
+      TrackerLoadState.loading;
   bool isIssueHistoryLoading(String issueKey) =>
       _loadingIssueHistory.contains(issueKey);
+  bool isIssueDetailLoading(String issueKey) =>
+      _loadingIssueDetails.contains(issueKey);
+  bool isIssueCommentsLoading(String issueKey) =>
+      _loadingIssueComments.contains(issueKey);
+  bool isIssueAttachmentsLoading(String issueKey) =>
+      _loadingIssueAttachments.contains(issueKey);
   TrackerMessage? get message => _message;
+  TrackerStartupRecovery? get startupRecovery =>
+      _snapshot?.startupRecovery ?? _startupRecovery;
+  bool get hasStartupRecovery => startupRecovery != null;
   bool get isConnected => _isConnected;
   RepositoryUser? get connectedUser => _connectedUser;
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
@@ -392,41 +426,59 @@ class TrackerViewModel extends ChangeNotifier {
 
   Future<void> load() async {
     _isLoading = true;
+    _searchPage = const TrackStateIssueSearchPage.empty(
+      maxResults: _searchPageSize,
+    );
+    _searchResults = const [];
+    _hasLoadedInitialSearchResults = false;
     _message = null;
+    _startupRecovery = null;
+    _didAutoResumeStartupRecoveryAfterAuthentication = false;
     notifyListeners();
     try {
-      _snapshot = await _repository.loadSnapshot();
-      if (_jql.contains('project = TRACK') && project?.key != 'TRACK') {
-        _jql = _jql.replaceFirst(
-          'project = TRACK',
-          'project = ${project!.key}',
-        );
-      }
-      _selectedIssue = issues.firstWhere(
-        (issue) => !issue.isEpic,
-        orElse: () => issues.first,
-      );
-      final searchPage = await _repository.searchIssuePage(
-        _jql,
-        maxResults: _searchPageSize,
-      );
-      _applySearchPage(searchPage);
+      await _loadSnapshotAndSearch();
       if (usesLocalPersistence) {
         await _loadLocalRepositoryUser();
       } else if (supportsGitHubAuth) {
         await _restoreGitHubConnection();
       }
-      if (_message == null && _snapshot!.loadWarnings.isNotEmpty) {
+      if (_message == null && _snapshot?.loadWarnings.isNotEmpty == true) {
         _message = TrackerMessage.repositoryConfigFallback(
           _snapshot!.loadWarnings.first,
         );
       }
+      if (hasStartupRecovery && _snapshot != null) {
+        _section = TrackerSection.settings;
+      }
     } on Object catch (error) {
-      _message = TrackerMessage.dataLoadFailed(error);
+      final recovery = _startupRecoveryFrom(error);
+      if (recovery == null) {
+        _message = TrackerMessage.dataLoadFailed(error);
+      } else {
+        _startupRecovery = recovery;
+        if (supportsGitHubAuth) {
+          await _restoreGitHubConnection();
+        }
+        if (_message == null && _snapshot?.loadWarnings.isNotEmpty == true) {
+          _message = TrackerMessage.repositoryConfigFallback(
+            _snapshot!.loadWarnings.first,
+          );
+        }
+        if (hasStartupRecovery && _snapshot != null) {
+          _section = TrackerSection.settings;
+        }
+      }
     } finally {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> retryStartupRecovery() async {
+    if (_isLoading) {
+      return;
+    }
+    await load();
   }
 
   @override
@@ -480,6 +532,10 @@ class TrackerViewModel extends ChangeNotifier {
     if (section != TrackerSection.search) {
       _issueDetailReturnSection = null;
     }
+    final issue = _selectedIssue;
+    if (section == TrackerSection.search && issue != null) {
+      unawaited(ensureIssueDetailLoaded(issue));
+    }
     notifyListeners();
   }
 
@@ -490,6 +546,7 @@ class TrackerViewModel extends ChangeNotifier {
         returnSection == null || returnSection == TrackerSection.search
         ? null
         : returnSection;
+    unawaited(ensureIssueDetailLoaded(issue));
     notifyListeners();
   }
 
@@ -505,6 +562,10 @@ class TrackerViewModel extends ChangeNotifier {
 
   List<IssueHistoryEntry> issueHistoryFor(String issueKey) =>
       _issueHistoryByKey[issueKey] ?? const <IssueHistoryEntry>[];
+  String? issueDeferredError(String issueKey, IssueDeferredSection section) =>
+      _issueDeferredErrorsByKey[issueKey]?[section];
+  bool hasIssueDeferredError(String issueKey, IssueDeferredSection section) =>
+      issueDeferredError(issueKey, section) != null;
 
   void toggleTheme() {
     _themePreference = _themePreference == ThemePreference.light
@@ -550,8 +611,10 @@ class TrackerViewModel extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final project = _snapshot?.project;
-    if (project == null) return;
+    final target = _connectionTarget();
+    if (target == null) {
+      return;
+    }
     final normalizedToken = token.trim();
     if (normalizedToken.isEmpty) {
       _message = TrackerMessage.tokenEmpty();
@@ -564,19 +627,20 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       final user = await _repository.connect(
         GitHubConnection(
-          repository: project.repository,
-          branch: project.branch,
+          repository: target.repository,
+          branch: target.branch,
           token: normalizedToken,
         ),
       );
       if (remember) {
-        await _authStore.saveToken(project.repository, normalizedToken);
+        await _authStore.saveToken(target.repository, normalizedToken);
       }
       _isConnected = true;
       _connectedUser = user;
+      await _resumeStartupRecoveryAfterAuthentication();
       _message = TrackerMessage.githubConnectedDragCards(
         login: user.login,
-        repository: project.repository,
+        repository: target.repository,
       );
     } on Object catch (error) {
       _message = TrackerMessage.githubConnectionFailed(error);
@@ -618,11 +682,7 @@ class TrackerViewModel extends ChangeNotifier {
 
     try {
       final saved = await _repository.updateIssueStatus(issue, status);
-      _snapshot = await _repository.loadSnapshot();
-      _selectedIssue = _snapshot!.issues.firstWhere(
-        (current) => current.key == saved.key,
-        orElse: () => saved,
-      );
+      _applyTargetedIssueRefresh(saved);
       await _refreshSearchResultsAfterMutation();
       _message = usesLocalPersistence
           ? TrackerMessage.localGitMoveCommitted(
@@ -713,10 +773,7 @@ class TrackerViewModel extends ChangeNotifier {
                   'The issue could not be created with the current repository session.',
             );
       _snapshot = await _repository.loadSnapshot();
-      _selectedIssue = _snapshot!.issues.firstWhere(
-        (issue) => issue.key == created.key,
-        orElse: () => created,
-      );
+      _selectIssueFromSnapshot(created);
       await _refreshSearchResultsAfterMutation();
       _section = TrackerSection.search;
       _issueDetailReturnSection =
@@ -970,12 +1027,9 @@ class TrackerViewModel extends ChangeNotifier {
         );
       }
       if (!usedInMemoryLocalFallback) {
-        _snapshot = await _repository.loadSnapshot();
+        _applyTargetedIssueRefresh(saved);
       }
-      _selectedIssue = _snapshot!.issues.firstWhere(
-        (current) => current.key == saved.key,
-        orElse: () => saved,
-      );
+      _selectIssueFromSnapshot(saved);
       await _refreshSearchResultsAfterMutation(
         preferLoadedSnapshot: usedInMemoryLocalFallback,
       );
@@ -1209,6 +1263,7 @@ class TrackerViewModel extends ChangeNotifier {
   void _applySearchPage(TrackStateIssueSearchPage page, {bool append = false}) {
     _searchPage = page;
     _searchResults = append ? [..._searchResults, ...page.issues] : page.issues;
+    _hasLoadedInitialSearchResults = true;
     if (_searchResults.isEmpty) {
       return;
     }
@@ -1271,11 +1326,7 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
     try {
       final saved = await _repository.addIssueComment(issue, normalizedBody);
-      _snapshot = await _repository.loadSnapshot();
-      _selectedIssue = _snapshot!.issues.firstWhere(
-        (current) => current.key == saved.key,
-        orElse: () => saved,
-      );
+      _applyTargetedIssueRefresh(saved);
       await _refreshSearchResultsAfterMutation();
       _issueHistoryByKey.remove(issue.key);
       return true;
@@ -1294,15 +1345,41 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     _loadingIssueHistory.add(issue.key);
+    _clearIssueDeferredError(issue.key, IssueDeferredSection.history);
     notifyListeners();
     try {
       _issueHistoryByKey[issue.key] = await _repository.loadIssueHistory(issue);
+      _clearIssueDeferredError(issue.key, IssueDeferredSection.history);
     } on Object catch (error) {
-      _message = TrackerMessage.issueSaveFailed(error);
+      _setIssueDeferredError(issue.key, IssueDeferredSection.history, '$error');
     } finally {
       _loadingIssueHistory.remove(issue.key);
       notifyListeners();
     }
+  }
+
+  Future<void> ensureIssueDetailLoaded(TrackStateIssue issue) async {
+    await _ensureIssueHydrated(
+      issue,
+      loadingSet: _loadingIssueDetails,
+      scope: IssueHydrationScope.detail,
+    );
+  }
+
+  Future<void> ensureIssueCommentsLoaded(TrackStateIssue issue) async {
+    await _ensureIssueHydrated(
+      issue,
+      loadingSet: _loadingIssueComments,
+      scope: IssueHydrationScope.comments,
+    );
+  }
+
+  Future<void> ensureIssueAttachmentsLoaded(TrackStateIssue issue) async {
+    await _ensureIssueHydrated(
+      issue,
+      loadingSet: _loadingIssueAttachments,
+      scope: IssueHydrationScope.attachments,
+    );
   }
 
   Future<void> downloadIssueAttachment(IssueAttachment attachment) async {
@@ -1395,11 +1472,7 @@ class TrackerViewModel extends ChangeNotifier {
         name: name,
         bytes: bytes,
       );
-      _snapshot = await _repository.loadSnapshot();
-      _selectedIssue = _snapshot!.issues.firstWhere(
-        (current) => current.key == saved.key,
-        orElse: () => saved,
-      );
+      _applyTargetedIssueRefresh(saved);
       await _refreshSearchResultsAfterMutation();
       _issueHistoryByKey.remove(issue.key);
       return true;
@@ -1446,11 +1519,11 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   Future<void> _restoreGitHubConnection() async {
-    final project = _snapshot?.project;
-    if (project == null || _isConnected) return;
+    final target = _connectionTarget();
+    if (target == null || _isConnected) return;
     final callbackToken = _callbackToken();
     final storedToken =
-        callbackToken ?? await _authStore.readToken(project.repository);
+        callbackToken ?? await _authStore.readToken(target.repository);
     if (storedToken == null || storedToken.isEmpty) {
       if (_callbackCode() != null) {
         _message = TrackerMessage.githubAuthorizationCodeReturned();
@@ -1460,23 +1533,24 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       final user = await _repository.connect(
         GitHubConnection(
-          repository: project.repository,
-          branch: project.branch,
+          repository: target.repository,
+          branch: target.branch,
           token: storedToken,
         ),
       );
       _connectedUser = user;
       _isConnected = true;
       if (callbackToken != null) {
-        await _authStore.saveToken(project.repository, callbackToken);
+        await _authStore.saveToken(target.repository, callbackToken);
       }
+      await _resumeStartupRecoveryAfterAuthentication();
       _message = TrackerMessage.githubConnected(
         login: user.login,
-        repository: project.repository,
+        repository: target.repository,
       );
     } on Object catch (error) {
       _message = TrackerMessage.storedGitHubTokenInvalid(error);
-      await _authStore.clearToken(project.repository);
+      await _authStore.clearToken(target.repository);
     } finally {
       _bindProviderSession();
     }
@@ -1493,6 +1567,219 @@ class TrackerViewModel extends ChangeNotifier {
       ),
     );
     _bindProviderSession();
+  }
+
+  Future<void> _ensureIssueHydrated(
+    TrackStateIssue issue, {
+    required Set<String> loadingSet,
+    required IssueHydrationScope scope,
+  }) async {
+    final repository = _repository;
+    if (repository is! ProviderBackedTrackStateRepository) {
+      return;
+    }
+    final snapshot = _snapshot;
+    final currentIssue = snapshot?.issues.firstWhere(
+      (candidate) => candidate.key == issue.key,
+      orElse: () => issue,
+    );
+    if (currentIssue == null || _isScopeLoaded(currentIssue, scope)) {
+      return;
+    }
+    if (loadingSet.contains(issue.key)) {
+      return;
+    }
+    loadingSet.add(issue.key);
+    _clearIssueDeferredError(issue.key, _deferredSectionForScope(scope));
+    notifyListeners();
+    try {
+      final hydrated = await repository.hydrateIssue(
+        currentIssue,
+        scopes: {scope},
+      );
+      _applyTargetedIssueRefresh(hydrated);
+      _clearIssueDeferredError(issue.key, _deferredSectionForScope(scope));
+      _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+    } on Object catch (error) {
+      _setIssueDeferredError(
+        issue.key,
+        _deferredSectionForScope(scope),
+        '$error',
+      );
+    } finally {
+      loadingSet.remove(issue.key);
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loadSnapshotAndSearch() async {
+    final snapshot = await _repository.loadSnapshot();
+    final previousSelectedKey = _selectedIssue?.key;
+    _snapshot = snapshot;
+    _startupRecovery = snapshot.startupRecovery;
+    if (_jql.contains('project = TRACK') && project?.key != 'TRACK') {
+      _jql = _jql.replaceFirst('project = TRACK', 'project = ${project!.key}');
+    }
+    _selectedIssue = _resolveSelectedIssue(
+      previousSelectedKey,
+      snapshot.issues,
+    );
+    notifyListeners();
+    final searchPage = await _repository.searchIssuePage(
+      _jql,
+      maxResults: _searchPageSize,
+    );
+    _applySearchPage(searchPage);
+  }
+
+  TrackStateIssue? _resolveSelectedIssue(
+    String? previousSelectedKey,
+    List<TrackStateIssue> issues,
+  ) {
+    if (issues.isEmpty) {
+      return null;
+    }
+    if (previousSelectedKey != null) {
+      for (final issue in issues) {
+        if (issue.key == previousSelectedKey) {
+          return issue;
+        }
+      }
+    }
+    for (final issue in issues) {
+      if (!issue.isEpic) {
+        return issue;
+      }
+    }
+    return issues.first;
+  }
+
+  TrackerStartupRecovery? _startupRecoveryFrom(Object error) {
+    if (error is! GitHubRateLimitException) {
+      return null;
+    }
+    return TrackerStartupRecovery(
+      kind: TrackerStartupRecoveryKind.githubRateLimit,
+      failedPath: error.requestPath,
+      retryAfter: error.retryAfter,
+    );
+  }
+
+  ({String repository, String branch})? _connectionTarget() {
+    final project = _snapshot?.project;
+    if (project != null) {
+      return (repository: project.repository, branch: project.branch);
+    }
+    return switch (_repository) {
+      ProviderBackedTrackStateRepository repository => (
+        repository: repository.providerAdapter.repositoryLabel,
+        branch: repository.providerAdapter.dataRef,
+      ),
+      _ => null,
+    };
+  }
+
+  Future<void> _resumeStartupRecoveryAfterAuthentication() async {
+    if (!hasStartupRecovery ||
+        _didAutoResumeStartupRecoveryAfterAuthentication) {
+      return;
+    }
+    _didAutoResumeStartupRecoveryAfterAuthentication = true;
+    try {
+      await _loadSnapshotAndSearch();
+    } on Object catch (error) {
+      _startupRecovery = _startupRecoveryFrom(error) ?? _startupRecovery;
+    }
+    if (hasStartupRecovery && _snapshot != null) {
+      _section = TrackerSection.settings;
+    }
+  }
+
+  void _mergeIssueIntoSnapshot(TrackStateIssue issue) {
+    final snapshot = _snapshot;
+    if (snapshot == null) {
+      return;
+    }
+    final updatedIssues = [
+      for (final candidate in snapshot.issues)
+        if (candidate.key == issue.key) issue else candidate,
+    ]..sort((left, right) => left.key.compareTo(right.key));
+    _snapshot = TrackerSnapshot(
+      project: snapshot.project,
+      issues: updatedIssues,
+      repositoryIndex: snapshot.repositoryIndex,
+      loadWarnings: snapshot.loadWarnings,
+      readiness: snapshot.readiness,
+      startupRecovery: snapshot.startupRecovery,
+    );
+  }
+
+  void _applyTargetedIssueRefresh(TrackStateIssue issue) {
+    final repository = _repository;
+    if (repository is ProviderBackedTrackStateRepository) {
+      final cachedSnapshot = repository.cachedSnapshot;
+      if (cachedSnapshot != null &&
+          cachedSnapshot.issues.any(
+            (candidate) => candidate.key == issue.key,
+          )) {
+        _snapshot = cachedSnapshot;
+        _selectIssueFromSnapshot(issue);
+        return;
+      }
+    }
+    _mergeIssueIntoSnapshot(issue);
+    _selectIssueFromSnapshot(issue);
+  }
+
+  void _selectIssueFromSnapshot(TrackStateIssue issue) {
+    final snapshot = _snapshot;
+    if (snapshot == null) {
+      _selectedIssue = issue;
+      return;
+    }
+    _selectedIssue = snapshot.issues.firstWhere(
+      (current) => current.key == issue.key,
+      orElse: () => issue,
+    );
+  }
+
+  bool _isScopeLoaded(TrackStateIssue issue, IssueHydrationScope scope) =>
+      switch (scope) {
+        IssueHydrationScope.detail => issue.hasDetailLoaded,
+        IssueHydrationScope.comments => issue.hasCommentsLoaded,
+        IssueHydrationScope.attachments => issue.hasAttachmentsLoaded,
+      };
+
+  IssueDeferredSection _deferredSectionForScope(IssueHydrationScope scope) =>
+      switch (scope) {
+        IssueHydrationScope.detail => IssueDeferredSection.detail,
+        IssueHydrationScope.comments => IssueDeferredSection.comments,
+        IssueHydrationScope.attachments => IssueDeferredSection.attachments,
+      };
+
+  void _setIssueDeferredError(
+    String issueKey,
+    IssueDeferredSection section,
+    String error,
+  ) {
+    final errors = {
+      ...(_issueDeferredErrorsByKey[issueKey] ?? const {}),
+      section: error,
+    };
+    _issueDeferredErrorsByKey[issueKey] = errors;
+  }
+
+  void _clearIssueDeferredError(String issueKey, IssueDeferredSection section) {
+    final current = _issueDeferredErrorsByKey[issueKey];
+    if (current == null || !current.containsKey(section)) {
+      return;
+    }
+    final updated = {...current}..remove(section);
+    if (updated.isEmpty) {
+      _issueDeferredErrorsByKey.remove(issueKey);
+      return;
+    }
+    _issueDeferredErrorsByKey[issueKey] = updated;
   }
 
   void _bindProviderSession() {
@@ -1516,6 +1803,14 @@ class TrackerViewModel extends ChangeNotifier {
 
   String? _callbackCode() => Uri.base.queryParameters['code'];
 }
+
+TrackerSectionKey _sectionKey(TrackerSection section) => switch (section) {
+  TrackerSection.dashboard => TrackerSectionKey.dashboard,
+  TrackerSection.board => TrackerSectionKey.board,
+  TrackerSection.search => TrackerSectionKey.search,
+  TrackerSection.hierarchy => TrackerSectionKey.hierarchy,
+  TrackerSection.settings => TrackerSectionKey.settings,
+};
 
 enum ThemePreference { light, dark }
 

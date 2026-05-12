@@ -73,6 +73,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Finder _globalAction(String label) =>
       find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
 
+  Finder _navigationControl(String label) => find.byWidgetPredicate(
+    (widget) =>
+        widget is Semantics &&
+        widget.properties.button == true &&
+        widget.properties.label == label,
+    description: 'navigation control labeled $label',
+  );
+
+  Finder get _navigationChrome =>
+      find.bySemanticsLabel(RegExp('^TrackState\\.AI navigation\$'));
+
   Finder _issueDetailEditor(String key) => find.descendant(
     of: _issueDetail(key),
     matching: find.byWidgetPredicate(
@@ -111,6 +122,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         widget.properties.label == label &&
         widget.properties.readOnly == true;
   }, description: 'read-only field labeled $label');
+
+  Finder get _dialogScope {
+    final alertDialog = find.byType(AlertDialog);
+    if (alertDialog.evaluate().isNotEmpty) {
+      return alertDialog.last;
+    }
+    final dialog = find.byType(Dialog);
+    if (dialog.evaluate().isNotEmpty) {
+      return dialog.last;
+    }
+    return alertDialog;
+  }
 
   Finder get _jqlSearchPanel => find.byWidgetPredicate(
     (widget) => widget is Semantics && widget.properties.label == 'JQL Search',
@@ -399,6 +422,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> isBlockingSearchLoaderVisible() async {
+    await tester.pump();
+    return find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
+  }
+
+  @override
   Future<void> expectIssueSearchResultVisible(
     String key,
     String summary,
@@ -424,6 +453,75 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       labels.add(label);
     }
     return labels;
+  }
+
+  Finder _issueSearchResultRow(String key, String summary) {
+    final summaryMatch = find.text(summary, findRichText: true);
+    final rowCandidates = find.ancestor(
+      of: summaryMatch,
+      matching: find.byType(Row),
+    );
+
+    Finder? best;
+    var smallestArea = double.infinity;
+    final matches = rowCandidates.evaluate().length;
+    for (var index = 0; index < matches; index++) {
+      final candidate = rowCandidates.at(index);
+      final hasKey = find
+          .descendant(
+            of: candidate,
+            matching: find.text(key, findRichText: true),
+          )
+          .evaluate()
+          .isNotEmpty;
+      if (!hasKey) {
+        continue;
+      }
+      final rect = tester.getRect(candidate);
+      final area = rect.width * rect.height;
+      if (area < smallestArea) {
+        smallestArea = area;
+        best = candidate;
+      }
+    }
+
+    return best ?? rowCandidates.first;
+  }
+
+  @override
+  Future<bool> isIssueSearchResultTextVisible(
+    String key,
+    String summary,
+    String text,
+  ) async {
+    await tester.pump();
+    final row = _issueSearchResultRow(key, summary);
+    if (row.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(of: row, matching: find.text(text, findRichText: true))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  List<String> issueSearchResultTextsSnapshot(String key, String summary) {
+    final row = _issueSearchResultRow(key, summary);
+    if (row.evaluate().isEmpty) {
+      return const <String>[];
+    }
+    final values = <String>[];
+    for (final widget in tester.widgetList<Text>(
+      find.descendant(of: row, matching: find.byType(Text)),
+    )) {
+      final value = widget.data?.trim();
+      if (value == null || value.isEmpty) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
   }
 
   @override
@@ -668,6 +766,140 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> isNavigationControlVisible(String label) async {
+    await tester.pump();
+    return _navigationControl(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<void> expectNavigationControlEnabled(String label) async {
+    final target = _navigationControl(label);
+    await tester.pump();
+    expect(
+      target,
+      findsOneWidget,
+      reason:
+          'Expected a visible navigation control labeled "$label". Visible '
+          'semantics: ${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
+    );
+
+    final semanticsData = tester.getSemantics(target.last).getSemanticsData();
+    final hasTapAction = semanticsData.hasAction(SemanticsAction.tap);
+    final isEnabled = semanticsData.hasFlag(SemanticsFlag.isEnabled);
+    expect(
+      hasTapAction || isEnabled,
+      isTrue,
+      reason:
+          'Expected "$label" navigation control to remain interactive. '
+          'Semantics label="${semanticsData.label}", hasTapAction='
+          '$hasTapAction, isEnabled=$isEnabled.',
+    );
+  }
+
+  @override
+  Future<bool> isNavigationChromeVisible() async {
+    await tester.pump();
+    return _navigationChrome.evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<List<String>> collectDisabledNavigationViolations({
+    required String label,
+    required String retainedText,
+    required List<String> disallowedTexts,
+  }) async {
+    final violations = <String>[];
+    final target = _navigationControl(label);
+    await tester.pump();
+
+    if (target.evaluate().isEmpty) {
+      violations.add(
+        'no visible navigation control labeled "$label" was rendered in the recovery shell.',
+      );
+      return violations;
+    }
+
+    final semanticsData = tester.getSemantics(target.last).getSemanticsData();
+    final hasTapAction = semanticsData.hasAction(SemanticsAction.tap);
+    final isEnabled = semanticsData.hasFlag(SemanticsFlag.isEnabled);
+
+    if (hasTapAction || isEnabled) {
+      violations.add(
+        'the "$label" navigation control remained enabled during mandatory bootstrap recovery. '
+        'Semantics label="${semanticsData.label}", hasTapAction=$hasTapAction, isEnabled=$isEnabled.',
+      );
+    }
+
+    await tester.tap(target.last, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    final visibleTexts = visibleTextsSnapshot();
+    final visibleSemantics = visibleSemanticsLabelsSnapshot();
+    if (!_snapshotContains(visibleTexts, retainedText) &&
+        !_snapshotContains(visibleSemantics, retainedText)) {
+      violations.add(
+        'tapping "$label" navigated away from Settings while recovery was active. '
+        'Visible texts: ${_formatSnapshot(visibleTexts)}. '
+        'Visible semantics: ${_formatSnapshot(visibleSemantics)}.',
+      );
+    }
+
+    for (final disallowedText in disallowedTexts) {
+      if (_snapshotContains(visibleTexts, disallowedText) ||
+          _snapshotContains(visibleSemantics, disallowedText)) {
+        violations.add(
+          'tapping "$label" surfaced "$disallowedText" while the recovery container was still active. '
+          'Visible texts: ${_formatSnapshot(visibleTexts)}. '
+          'Visible semantics: ${_formatSnapshot(visibleSemantics)}.',
+        );
+      }
+    }
+
+    return violations;
+  }
+
+  @override
+  Future<bool> isDialogTextVisible(String text) async {
+    await tester.pump();
+    final dialogScope = _dialogScope;
+    if (dialogScope.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(of: dialogScope, matching: _text(text))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  List<String> visibleDialogTextsSnapshot() {
+    final dialogScope = _dialogScope;
+    if (dialogScope.evaluate().isEmpty) {
+      return const <String>[];
+    }
+    return _textSnapshotWithin(dialogScope);
+  }
+
+  @override
+  Future<bool> tapDialogControl(String label) async {
+    final dialogScope = _dialogScope;
+    if (dialogScope.evaluate().isEmpty) {
+      return false;
+    }
+    return _tapControl(
+      label: label,
+      semanticsMatch: find.descendant(
+        of: dialogScope,
+        matching: _exactSemanticsLabel(label),
+      ),
+      textMatch: find.descendant(
+        of: dialogScope,
+        matching: find.text(label, findRichText: true),
+      ),
+    );
+  }
+
+  @override
   Future<bool> isTextFieldVisible(String label) async {
     await tester.pump();
     return _labeledTextField(label).evaluate().isNotEmpty;
@@ -866,19 +1098,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     String label, {
     required String text,
   }) async {
-    final field = _labeledTextField(label);
-    await tester.pump();
-    if (field.evaluate().isEmpty) {
-      fail(
-        'Expected a visible text field labeled "$label", but no matching '
-        'editable control was rendered.',
-      );
-    }
-    await tester.ensureVisible(field.first);
-    await tester.tap(field.first, warnIfMissed: false);
-    await tester.pump();
-    await tester.enterText(field.first, text);
-    await tester.pumpAndSettle();
+    final field = await _requireVisibleLabeledTextField(label);
+    await _enterTextField(field, text: text, settle: true);
+  }
+
+  @override
+  Future<void> enterLabeledTextFieldWithoutSettling(
+    String label, {
+    required String text,
+  }) async {
+    final field = await _requireVisibleLabeledTextField(label);
+    await _enterTextField(field, text: text, settle: false);
   }
 
   @override
@@ -894,6 +1124,34 @@ class TrackStateAppScreen implements TrackStateAppComponent {
           'Expected the visible text field labeled "$label" to expose a '
           'readable value, but no controller-backed editable widget was found.',
     );
+  }
+
+  Future<Finder> _requireVisibleLabeledTextField(String label) async {
+    final field = _labeledTextField(label);
+    await tester.pump();
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible text field labeled "$label", but no matching '
+        'editable control was rendered.',
+      );
+    }
+    return field.first;
+  }
+
+  Future<void> _enterTextField(
+    Finder field, {
+    required String text,
+    required bool settle,
+  }) async {
+    await tester.ensureVisible(field);
+    await tester.tap(field, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(field, text);
+    if (settle) {
+      await tester.pumpAndSettle();
+      return;
+    }
+    await tester.pump();
   }
 
   String? _readTextFieldValue(
@@ -959,6 +1217,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       return '<none>';
     }
     return snapshot.join(' | ');
+  }
+
+  bool _snapshotContains(List<String> values, String expected) {
+    for (final value in values) {
+      final trimmed = value.trim();
+      if (trimmed == expected ||
+          trimmed.startsWith(expected) ||
+          trimmed.contains(expected)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @override

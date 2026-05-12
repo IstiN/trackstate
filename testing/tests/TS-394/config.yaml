@@ -1,0 +1,8 @@
+test_id: TS-394
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies the Create issue form keeps working at 1440x400 after inline validation errors expand the form content.
+  - Confirms the summary-required validation text becomes visible, vertical scrolling adapts to the added height, and the Save/Cancel actions remain reachable without RenderFlex overflow exceptions.

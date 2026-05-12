@@ -127,13 +127,26 @@
   "branch": "Branch",
   "projectSettings": "Project Settings",
   "projectSettingsAdmin": "Project settings administration",
-  "projectSettingsDescription": "Manage repository-backed statuses, workflows, issue types, and fields with validation before Git writes.",
+  "projectSettingsDescription": "Manage repository-backed metadata catalogs, supported locales, and localized display labels before Git writes.",
   "issueTypes": "Issue Types",
   "statuses": "Statuses",
   "workflows": "Workflows",
   "workflow": "Workflow",
   "fields": "Fields",
+  "priorities": "Priorities",
+  "versions": "Versions",
+  "resolutions": "Resolutions",
+  "locales": "Locales",
   "language": "Language",
+  "defaultLocale": "Default locale",
+  "defaultLocaleChip": "{locale} (default)",
+  "@defaultLocaleChip": {
+    "placeholders": {
+      "locale": {
+        "type": "String"
+      }
+    }
+  },
   "resetSettings": "Reset",
   "saveSettings": "Save settings",
   "addStatus": "Add status",
@@ -148,6 +161,47 @@
   "addField": "Add field",
   "editField": "Edit field",
   "deleteField": "Delete field",
+  "addPriority": "Add priority",
+  "editPriority": "Edit priority",
+  "deletePriority": "Delete priority",
+  "addComponent": "Add component",
+  "editComponent": "Edit component",
+  "deleteComponent": "Delete component",
+  "addVersion": "Add version",
+  "editVersion": "Edit version",
+  "deleteVersion": "Delete version",
+  "addLocale": "Add locale",
+  "localeCode": "Locale code",
+  "localeCodeHelper": "Use stable locale identifiers such as en, fr, or pt-BR.",
+  "removeLocaleAction": "Remove locale",
+  "removeLocale": "Remove locale {locale}",
+  "@removeLocale": {
+    "placeholders": {
+      "locale": {
+        "type": "String"
+      }
+    }
+  },
+  "translationField": "Translation ({locale})",
+  "@translationField": {
+    "placeholders": {
+      "locale": {
+        "type": "String"
+      }
+    }
+  },
+  "translationFallbackWarning": "Missing translation. Using fallback \"{value}\" from {source}.",
+  "@translationFallbackWarning": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      },
+      "source": {
+        "type": "String"
+      }
+    }
+  },
+  "canonicalNameFallback": "canonical name",
   "catalogId": "ID",
   "catalogCategory": "Category",
   "catalogWorkflow": "Workflow",
@@ -174,6 +228,7 @@
   "lightTheme": "Light theme",
   "darkTheme": "Dark theme",
   "mobilePreview": "Mobile issue preview",
+  "loading": "Loading...",
   "noResults": "No issues match this query",
   "queryUpdated": "Query updated",
   "kanbanHint": "Drag-ready workflow columns backed by Git files",
@@ -193,6 +248,10 @@
   "repositoryAccessAttachmentLimitedTitle": "Some attachment uploads still require local Git",
   "repositoryAccessAttachmentLimitedMessage": "Issue edits, comments, and browser-supported attachment uploads can continue here. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.",
   "repositoryAccessSettingsHint": "Settings is the canonical place to review repository access and reconnect safely.",
+  "startupRecovery": "Startup recovery",
+  "startupRateLimitRecoveryTitle": "GitHub startup limit reached",
+  "startupRateLimitRecoveryBlockingMessage": "Hosted startup hit GitHub''s rate limit before TrackState finished loading the required repository data. Retry later or connect GitHub for a higher limit. TrackState will retry once after GitHub authentication succeeds.",
+  "startupRateLimitRecoveryShellMessage": "Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.",
   "repositoryPath": "Repository Path",
   "writeBranch": "Write Branch",
   "trackerDataNotFound": "TrackState data was not found.",
@@ -326,6 +385,7 @@
   "localGitRuntimeDescription": "Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.",
   "close": "Close",
   "connectGitHub": "Connect GitHub",
+  "retry": "Retry",
   "editIssue": "Edit issue",
   "optional": "Optional",
   "unassigned": "Unassigned",
