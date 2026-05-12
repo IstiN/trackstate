@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../components/factories/testing_dependencies.dart';
+import '../../core/interfaces/trackstate_app_component.dart';
 import '../../fixtures/settings/local_git_settings_screen_context.dart';
 import 'support/ts465_locale_removal_fixture.dart';
 
@@ -13,6 +15,8 @@ void main() {
     'TS-465 locale validation protects default and last remaining locales',
     (tester) async {
       final semantics = tester.ensureSemantics();
+      final TrackStateAppComponent screen = defaultTestingDependencies
+          .createTrackStateAppScreen(tester);
       final robot = createLocalGitSettingsScreenRobot(tester);
       Ts465LocaleRemovalFixture? fixture;
 
@@ -27,8 +31,8 @@ void main() {
 
         final failures = <String>[];
 
-        await robot.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
-        await robot.openSettings();
+        await screen.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
+        await screen.openSection('Settings');
         await robot.openLocalesTab();
 
         final initialTexts = _formatSnapshot(robot.visibleTexts());
@@ -50,7 +54,7 @@ void main() {
         }
 
         final removeEnButton = robot.removeLocaleButton('en');
-        final initialDefaultValue = robot.readDropdownFieldValue(
+        final initialDefaultValue = await screen.readDropdownFieldValue(
           'Default locale',
         );
         final initialSemantics = _formatSnapshot(
@@ -77,9 +81,9 @@ void main() {
           );
         }
 
-        await robot.selectDropdownOption('Default locale', optionText: 'de');
+        await screen.selectDropdownOption('Default locale', optionText: 'de');
         final afterDefaultSwitchTexts = _formatSnapshot(robot.visibleTexts());
-        final switchedDefaultValue = robot.readDropdownFieldValue(
+        final switchedDefaultValue = await screen.readDropdownFieldValue(
           'Default locale',
         );
         if (switchedDefaultValue != 'de') {

@@ -127,11 +127,6 @@ class SettingsScreenRobot {
 
   Finder localeChip(String label) => find.widgetWithText(ChoiceChip, label);
 
-  Finder dropdownField(String label) => find.byWidgetPredicate((widget) {
-    return widget is DropdownButtonFormField<String> &&
-        widget.decoration.labelText == label;
-  }, description: 'dropdown field labeled $label');
-
   Future<void> selectLocaleChip(String label) async {
     final chip = localeChip(label);
     await tester.ensureVisible(chip);
@@ -141,55 +136,6 @@ class SettingsScreenRobot {
 
   Finder removeLocaleButton(String locale) =>
       actionButton('Remove locale $locale');
-
-  Future<void> selectDropdownOption(
-    String label, {
-    required String optionText,
-  }) async {
-    final field = dropdownField(label);
-    if (field.evaluate().isEmpty) {
-      throw StateError('No dropdown field found for "$label".');
-    }
-    await tester.ensureVisible(field.first);
-    await tester.tap(field.first, warnIfMissed: false);
-    await tester.pumpAndSettle();
-
-    final option = find.text(optionText, findRichText: true);
-    if (option.evaluate().isEmpty) {
-      throw StateError(
-        'Dropdown "$label" did not expose the option "$optionText".',
-      );
-    }
-    await tester.ensureVisible(option.last);
-    await tester.tap(option.last, warnIfMissed: false);
-    await tester.pumpAndSettle();
-  }
-
-  String? readDropdownFieldValue(String label) {
-    final field = dropdownField(label);
-    if (field.evaluate().isEmpty) {
-      return null;
-    }
-    final dropdown = tester.widget<DropdownButtonFormField<String>>(
-      field.first,
-    );
-    final helperText = dropdown.decoration.helperText?.trim();
-    final hintText = dropdown.decoration.hintText?.trim();
-    for (final widget in tester.widgetList<Text>(
-      find.descendant(of: field.first, matching: find.byType(Text)),
-    )) {
-      final value = widget.data?.trim();
-      if (value == null ||
-          value.isEmpty ||
-          value == label ||
-          value == helperText ||
-          value == hintText) {
-        continue;
-      }
-      return value;
-    }
-    return null;
-  }
 
   Finder localeEntryFieldScope({required String locale, required String id}) =>
       find.byKey(ValueKey('locale-$locale-$id'));
