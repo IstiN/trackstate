@@ -8305,22 +8305,21 @@ class _AttachmentRow extends StatelessWidget {
               Semantics(
                 button: true,
                 label: downloadLabel,
-                child: ExcludeSemantics(
-                  child: IconButton(
-                    onPressed: () => onDownload(attachment),
-                    tooltip: downloadLabel,
-                    iconSize: 18,
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 32,
-                      minHeight: 32,
-                    ),
-                    icon: TrackStateIcon(
+                child: IconButton(
+                  onPressed: () => onDownload(attachment),
+                  tooltip: downloadLabel,
+                  iconSize: 18,
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
+                  icon: ExcludeSemantics(
+                    child: TrackStateIcon(
                       TrackStateIconGlyph.attachment,
                       size: 18,
                       color: colors.text,
-                      semanticLabel: downloadLabel,
                     ),
                   ),
                 ),
