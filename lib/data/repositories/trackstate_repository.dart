@@ -2519,6 +2519,9 @@ class ProviderBackedTrackStateRepository
       final createdCommit = history.isEmpty ? null : history.last;
       _snapshotArtifactRevisions[entry.path] = attachment.revision;
       final existing = attachmentsById[entry.path];
+      if (existing?.storageBackend == AttachmentStorageMode.githubReleases) {
+        continue;
+      }
       attachmentsById[entry.path] = IssueAttachment(
         id: existing?.id ?? entry.path,
         name: existing?.name ?? entry.path.split('/').last,

@@ -187,6 +187,110 @@ Issue with release-backed attachment metadata.
   );
 
   test(
+    'setup repository keeps release-backed metadata authoritative over legacy blobs at the same path',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'attachmentStorage': {
+              'mode': 'github-releases',
+              'githubReleases': {'tagPrefix': 'trackstate-attachments-'},
+            },
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+            {
+              'id': 'description',
+              'name': 'Description',
+              'type': 'markdown',
+              'required': false,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Release-backed attachment issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'priority': 'medium',
+              'labels': [],
+              'updated': '2026-05-05T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Release-backed attachment issue
+updated: 2026-05-05T00:00:00Z
+---
+
+# Description
+
+Issue with release-backed attachment metadata.
+''',
+          'DEMO/DEMO-1/attachments/design.png': 'legacy-binary',
+          'DEMO/DEMO-1/attachments.json': jsonEncode([
+            {
+              'id': 'DEMO/DEMO-1/attachments/design.png',
+              'name': 'design.png',
+              'mediaType': 'image/png',
+              'sizeBytes': 42,
+              'author': 'demo-user',
+              'createdAt': '2026-05-05T00:10:00Z',
+              'storagePath': 'DEMO/DEMO-1/attachments/design.png',
+              'revisionOrOid': 'release-asset-42',
+              'storageBackend': 'github-releases',
+              'githubReleaseTag': 'trackstate-attachments-DEMO-1',
+              'githubReleaseAssetName': 'design.png',
+            },
+          ]),
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot();
+      final issue = await repository.hydrateIssue(
+        snapshot.issues.single,
+        scopes: const {IssueHydrationScope.attachments},
+      );
+
+      expect(issue.attachments, hasLength(1));
+      expect(
+        issue.attachments.single.storageBackend,
+        AttachmentStorageMode.githubReleases,
+      );
+      expect(issue.attachments.single.revisionOrOid, 'release-asset-42');
+      expect(
+        issue.attachments.single.githubReleaseTag,
+        'trackstate-attachments-DEMO-1',
+      );
+      expect(issue.attachments.single.githubReleaseAssetName, 'design.png');
+      expect(issue.attachments.single.sizeBytes, 42);
+    },
+  );
+
+  test(
     'setup repository surfaces invalid github releases attachment config',
     () async {
       final repository = _mockSetupRepository(
