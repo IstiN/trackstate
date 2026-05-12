@@ -1,0 +1,9 @@
+test_id: TS-501
+type: api
+framework: python
+platform: dart-probe
+dependencies: []
+notes:
+  - Uses the stable live `DEMO-4` issue as an attachment-free first-upload precondition and reuses the current live `github-releases` project configuration from `DEMO/project.json`.
+  - Executes the real provider-backed attachment upload through a Dart probe that uses `ProviderBackedTrackStateRepository` and `GitHubTrackStateProvider` against the live repository.
+  - Verifies the upload creates one github-releases manifest entry, then checks the created release stays draft, targets the active write branch, and keeps the standardized machine-managed attachment-container note in the body.
