@@ -5,7 +5,9 @@ import platform
 import re
 import sys
 import traceback
-from datetime import datetime
+import urllib.error
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -17,15 +19,25 @@ from testing.components.pages.live_issue_detail_collaboration_page import (  # n
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveHostedIssueFixture,
+    LiveHostedRepositoryFile,
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
     create_live_tracker_app_with_stored_token,
 )
 
 TICKET_KEY = "TS-388"
 ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
+SEEDED_ATTACHMENT_NAME = "ts388-order-check.txt"
+SEEDED_ATTACHMENT_TEXT_PREFIX = (
+    "TS-388 seeded attachment used to verify newest-to-oldest ordering."
+)
+SEEDED_COMMENT_AUTHOR = "ai-teammate"
+SEEDED_COMMENT_BODY = (
+    "TS-388 seeded comment used to guarantee a newest visible comment row."
+)
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
@@ -35,6 +47,12 @@ BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts388_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts388_failure.png"
 TIMESTAMP_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)")
+
+
+@dataclass(frozen=True)
+class RepoMutation:
+    path: str
+    original_file: LiveHostedRepositoryFile | None
 
 
 def main() -> None:
@@ -52,7 +70,6 @@ def main() -> None:
     issue_fixture = service.fetch_issue_fixture(ISSUE_PATH)
 
     result: dict[str, object] = {
-        "status": "failed",
         "ticket": TICKET_KEY,
         "app_url": config.app_url,
         "repository": service.repository,
@@ -67,7 +84,20 @@ def main() -> None:
         "human_verification": [],
     }
 
+    scenario_error: Exception | None = None
+    cleanup_error: Exception | None = None
+    mutations: list[RepoMutation] = []
     try:
+        issue_fixture, fixture_setup, mutations = _ensure_fixture_preconditions(
+            service=service,
+            issue_fixture=issue_fixture,
+        )
+        result["issue_key"] = issue_fixture.key
+        result["issue_summary"] = issue_fixture.summary
+        result["comment_paths"] = list(issue_fixture.comment_paths)
+        result["attachment_paths"] = list(issue_fixture.attachment_paths)
+        result["comment_bodies"] = list(issue_fixture.comment_bodies)
+        result["fixture_setup"] = fixture_setup
         _assert_fixture_preconditions(issue_fixture)
         with create_live_tracker_app_with_stored_token(
             config,
@@ -170,7 +200,14 @@ def main() -> None:
 
                 attachment_rows = page.visible_timestamped_rows()
                 result["attachment_rows"] = list(attachment_rows)
-                _assert_attachment_order(attachment_rows, attachments_body)
+                _assert_attachment_order(
+                    attachment_rows,
+                    attachments_body,
+                    expected_top_fragment=str(
+                        fixture_setup.get("seeded_attachment_name", ""),
+                    )
+                    or None,
+                )
                 _record_step(
                     result,
                     step=5,
@@ -192,13 +229,12 @@ def main() -> None:
 
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
-                _write_pass_outputs(result)
-                return
             except Exception:
                 page.screenshot(str(FAILURE_SCREENSHOT_PATH))
                 result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
                 raise
     except Exception as error:
+        scenario_error = error
         failed_step = _extract_failed_step_number(str(error))
         if failed_step is not None and _step_status(result, failed_step) == "failed":
             _record_step(
@@ -210,8 +246,38 @@ def main() -> None:
             )
         result["error"] = f"{type(error).__name__}: {error}"
         result["traceback"] = traceback.format_exc()
+    finally:
+        try:
+            cleanup = _restore_fixture_preconditions(service=service, mutations=mutations)
+            result["cleanup"] = cleanup
+        except Exception as error:
+            cleanup_error = error
+            result["cleanup"] = {
+                "status": "failed",
+                "error": f"{type(error).__name__}: {error}",
+            }
+            if scenario_error is None:
+                scenario_error = error
+                result["error"] = f"{type(error).__name__}: {error}"
+                result["traceback"] = traceback.format_exc()
+
+    if scenario_error is not None:
+        if cleanup_error is not None and cleanup_error is not scenario_error:
+            result["traceback"] = (
+                str(result.get("traceback", ""))
+                + "\nCleanup error:\n"
+                + "".join(
+                    traceback.format_exception(
+                        type(cleanup_error),
+                        cleanup_error,
+                        cleanup_error.__traceback__,
+                    ),
+                )
+            )
         _write_failure_outputs(result)
-        raise
+        raise scenario_error
+
+    _write_pass_outputs(result)
 
 
 def _assert_fixture_preconditions(issue_fixture: LiveHostedIssueFixture) -> None:
@@ -229,6 +295,190 @@ def _assert_fixture_preconditions(issue_fixture: LiveHostedIssueFixture) -> None
             f"Issue path: {ISSUE_PATH}\n"
             f"Observed attachment paths: {issue_fixture.attachment_paths}",
         )
+
+
+def _ensure_fixture_preconditions(
+    *,
+    service: LiveSetupRepositoryService,
+    issue_fixture: LiveHostedIssueFixture,
+) -> tuple[LiveHostedIssueFixture, dict[str, object], list[RepoMutation]]:
+    mutations: list[RepoMutation] = []
+    setup: dict[str, object] = {
+        "initial_comment_count": len(issue_fixture.comment_paths),
+        "initial_attachment_count": len(issue_fixture.attachment_paths),
+        "seeded_comment_path": None,
+        "seeded_attachment_path": None,
+        "seeded_attachment_name": None,
+    }
+
+    if len(issue_fixture.comment_paths) < 2:
+        comment_path = _next_comment_path(issue_fixture)
+        original_comment = _fetch_repo_file_if_exists(service, comment_path)
+        service.write_repo_text(
+            comment_path,
+            content=_seed_comment_markdown(created_at=_iso_utc_now()),
+            message=f"{TICKET_KEY}: seed comment ordering precondition",
+        )
+        mutations.append(RepoMutation(path=comment_path, original_file=original_comment))
+        setup["seeded_comment_path"] = comment_path
+
+    if len(issue_fixture.attachment_paths) < 2:
+        attachment_path = f"{issue_fixture.path}/attachments/{SEEDED_ATTACHMENT_NAME}"
+        original_attachment = _fetch_repo_file_if_exists(service, attachment_path)
+        service.write_repo_text(
+            attachment_path,
+            content=_seed_attachment_text(created_at=_iso_utc_now()),
+            message=f"{TICKET_KEY}: seed attachment ordering precondition",
+        )
+        mutations.append(
+            RepoMutation(path=attachment_path, original_file=original_attachment),
+        )
+        setup["seeded_attachment_path"] = attachment_path
+        setup["seeded_attachment_name"] = SEEDED_ATTACHMENT_NAME
+
+    if not mutations:
+        setup["status"] = "already-valid"
+        return issue_fixture, setup, mutations
+
+    matched, refreshed_fixture = poll_until(
+        probe=lambda: service.fetch_issue_fixture(issue_fixture.path),
+        is_satisfied=lambda fixture: _fixture_seed_ready(
+            fixture=fixture,
+            seeded_comment_path=_optional_str(setup.get("seeded_comment_path")),
+            seeded_attachment_path=_optional_str(setup.get("seeded_attachment_path")),
+        ),
+        timeout_seconds=90,
+        interval_seconds=3,
+    )
+    setup["status"] = "seeded" if matched else "seed-timeout"
+    setup["final_comment_count"] = len(refreshed_fixture.comment_paths)
+    setup["final_attachment_count"] = len(refreshed_fixture.attachment_paths)
+    if not matched:
+        raise AssertionError(
+            "Precondition failed: the live issue fixture could not be prepared with at "
+            "least two comments and two attachments before the ordering scenario began.\n"
+            f"Issue path: {issue_fixture.path}\n"
+            f"Observed comment paths: {refreshed_fixture.comment_paths}\n"
+            f"Observed attachment paths: {refreshed_fixture.attachment_paths}",
+        )
+    return refreshed_fixture, setup, mutations
+
+
+def _restore_fixture_preconditions(
+    *,
+    service: LiveSetupRepositoryService,
+    mutations: list[RepoMutation],
+) -> dict[str, object]:
+    if not mutations:
+        return {"status": "not-needed"}
+
+    restored: list[dict[str, object]] = []
+    for mutation in reversed(mutations):
+        if mutation.original_file is None:
+            current_file = _fetch_repo_file_if_exists(service, mutation.path)
+            if current_file is None:
+                restored.append({"path": mutation.path, "status": "already-absent"})
+                continue
+            service.delete_repo_file(
+                mutation.path,
+                message=f"{TICKET_KEY}: remove seeded precondition file",
+            )
+            matched, _ = poll_until(
+                probe=lambda: _fetch_repo_file_if_exists(service, mutation.path),
+                is_satisfied=lambda file: file is None,
+                timeout_seconds=90,
+                interval_seconds=3,
+            )
+            restored.append(
+                {
+                    "path": mutation.path,
+                    "status": "deleted" if matched else "delete-pending",
+                },
+            )
+            continue
+
+        current_text = service.fetch_repo_text(mutation.path)
+        if current_text != mutation.original_file.content:
+            service.write_repo_text(
+                mutation.path,
+                content=mutation.original_file.content,
+                message=f"{TICKET_KEY}: restore precondition file",
+            )
+        matched, _ = poll_until(
+            probe=lambda: service.fetch_repo_text(mutation.path),
+            is_satisfied=lambda text: text == mutation.original_file.content,
+            timeout_seconds=90,
+            interval_seconds=3,
+        )
+        restored.append(
+            {
+                "path": mutation.path,
+                "status": "restored" if matched else "restore-pending",
+            },
+        )
+
+    return {"status": "completed", "operations": restored}
+
+
+def _fetch_repo_file_if_exists(
+    service: LiveSetupRepositoryService,
+    path: str,
+) -> LiveHostedRepositoryFile | None:
+    try:
+        return service.fetch_repo_file(path)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
+
+
+def _next_comment_path(issue_fixture: LiveHostedIssueFixture) -> str:
+    next_index = 1
+    for path in issue_fixture.comment_paths:
+        stem = Path(path).stem
+        if stem.isdigit():
+            next_index = max(next_index, int(stem) + 1)
+    return f"{issue_fixture.path}/comments/{next_index:04d}.md"
+
+
+def _seed_comment_markdown(*, created_at: str) -> str:
+    return (
+        "---\n"
+        f"author: {SEEDED_COMMENT_AUTHOR}\n"
+        f"created: {created_at}\n"
+        "---\n\n"
+        f"{SEEDED_COMMENT_BODY}\n"
+    )
+
+
+def _seed_attachment_text(*, created_at: str) -> str:
+    return f"{SEEDED_ATTACHMENT_TEXT_PREFIX}\nCreated: {created_at}\n"
+
+
+def _iso_utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _fixture_seed_ready(
+    *,
+    fixture: LiveHostedIssueFixture,
+    seeded_comment_path: str | None,
+    seeded_attachment_path: str | None,
+) -> bool:
+    if len(fixture.comment_paths) < 2 or len(fixture.attachment_paths) < 2:
+        return False
+    if seeded_comment_path is not None and seeded_comment_path not in fixture.comment_paths:
+        return False
+    if seeded_attachment_path is not None and seeded_attachment_path not in fixture.attachment_paths:
+        return False
+    return True
 
 
 def _assert_comment_order(
@@ -275,6 +525,8 @@ def _assert_comment_order(
 def _assert_attachment_order(
     attachment_rows: tuple[str, ...],
     attachments_body: str,
+    *,
+    expected_top_fragment: str | None = None,
 ) -> None:
     if len(attachment_rows) < 2:
         raise AssertionError(
@@ -290,6 +542,14 @@ def _assert_attachment_order(
             "Step 5 failed: the Attachments tab was not ordered from newest-to-oldest.\n"
             f"Observed rows: {list(attachment_rows)}\n"
             f"Observed timestamps: {[value.isoformat() for value in attachment_timestamps]}",
+        )
+    if expected_top_fragment is not None and expected_top_fragment not in attachment_rows[0]:
+        raise AssertionError(
+            "Step 5 failed: the freshly seeded newest attachment was not visible at the top "
+            "of the Attachments list.\n"
+            f"Expected top fragment: {expected_top_fragment!r}\n"
+            f"Top row: {attachment_rows[0]!r}\n"
+            f"All visible rows: {list(attachment_rows)}",
         )
 
 
@@ -525,6 +785,9 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    if _is_setup_failure(result):
+        return _setup_failure_bug_description(result)
+
     lines = [
         f"# {TICKET_KEY} - Attachments ordering cannot be verified in live issue detail",
         "",
@@ -589,6 +852,52 @@ def _bug_description(result: dict[str, object]) -> str:
         "```",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _setup_failure_bug_description(result: dict[str, object]) -> str:
+    lines = [
+        f"# {TICKET_KEY} - Live fixture setup failed before attachment ordering could be verified",
+        "",
+        "## Reproduction steps",
+        f"1. Run `python testing/tests/{TICKET_KEY}/test_ts_388.py` against `{result['app_url']}`.",
+        f"2. Resolve the live issue fixture at `{result['issue_path']}`.",
+        "3. Allow the test to seed any missing comment or attachment precondition files.",
+        "4. Observe the run fail before or during setup, before a real attachment-ordering defect is proven.",
+        "",
+        "## Expected result",
+        (
+            "The live fixture should expose at least two comments and two attachments so the "
+            "automation can verify AC2 and AC3 against the deployed UI."
+        ),
+        "",
+        "## Actual result",
+        str(result.get("error", "Unknown setup failure.")),
+        "",
+        "## Missing or broken capability",
+        (
+            "The required live fixture state was unavailable or could not be prepared in time, "
+            "so the automation could not reach a trustworthy attachment-ordering assertion."
+        ),
+        "",
+        "## Failing command/output",
+        "```text",
+        "python testing/tests/TS-388/test_ts_388.py",
+        str(result.get("traceback", result.get("error", ""))),
+        "```",
+        "",
+        "## Environment",
+        f"- URL: `{result['app_url']}`",
+        f"- Repository: `{result['repository']}` @ `{result['repository_ref']}`",
+        f"- Issue path: `{result['issue_path']}`",
+        f"- Fixture setup: `{result.get('fixture_setup', {})}`",
+        f"- Cleanup: `{result.get('cleanup', {})}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _is_setup_failure(result: dict[str, object]) -> bool:
+    error = str(result.get("error", ""))
+    return "Precondition failed:" in error or error.startswith("RuntimeError:")
 
 
 def _steps_lines(result: dict[str, object], *, jira: bool) -> list[str]:

@@ -5,10 +5,12 @@ Validates the deployed issue-detail collaboration ordering for the live
 
 The automation:
 1. opens the hosted tracker with a stored GitHub token
-2. navigates to the live `DEMO-2` issue detail
-3. verifies visible **Comments** rows stay oldest-to-newest
-4. verifies visible **Attachments** rows stay newest-to-oldest, or records the
+2. ensures the live `DEMO-2` fixture exposes the required comment and attachment history, seeding temporary repo-backed artifacts when needed
+3. navigates to the live `DEMO-2` issue detail
+4. verifies visible **Comments** rows stay oldest-to-newest
+5. verifies visible **Attachments** rows stay newest-to-oldest, or records the
    exact user-visible error if the attachment list cannot render
+6. restores any temporary fixture artifacts after the run
 
 ## Install dependencies
 
