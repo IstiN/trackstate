@@ -11,7 +11,8 @@ The automation:
 2. removes ambient GitHub credentials from the command environment
 3. runs the exact ticket command against `TS-475` with a real file payload
 4. checks the caller-visible CLI failure output for explicit
-   release-auth/configuration guidance
+   release-auth/configuration guidance, whether it is surfaced via plain text,
+   stderr, or a JSON-shaped error payload
 5. verifies no file was written to the local repository `attachments/` path and
    the repository stayed clean
 
@@ -37,8 +38,9 @@ python testing/tests/TS-500/test_ts_500.py
 ## Expected pass / fail behavior
 
 - **Pass:** the CLI fails immediately with explicit GitHub
-  auth/configuration or GitHub Releases guidance, and no local attachment file
-  is written under `TS/TS-475/attachments/test.txt`.
+  auth/configuration or GitHub Releases guidance in the visible user-facing
+  output, and no local attachment file is written under
+  `TS/TS-475/attachments/test.txt`.
 - **Fail:** the command succeeds, falls back to repository-path storage, leaves
   local repository changes behind, or returns only a generic repository error
   instead of explicit release-auth/configuration guidance.

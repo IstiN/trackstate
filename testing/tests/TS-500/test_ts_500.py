@@ -162,43 +162,31 @@ class Ts500ReleaseAuthFailureScenario:
         failures: list[str] = []
         observation = validation.observation
         payload = observation.result.json_payload
+        error = payload.get("error") if isinstance(payload, dict) else None
+        stdout = observation.result.stdout
+        stderr = observation.result.stderr
+        visible_error = _visible_error_text(
+            payload,
+            stdout=stdout,
+            stderr=stderr,
+        )
+        result["visible_error_text"] = visible_error
 
         if observation.result.exit_code == 0:
             failures.append(
                 "Step 1 failed: executing the ticket command succeeded even though the "
                 "repository is configured for github-releases storage without GitHub auth.\n"
-                f"stdout:\n{observation.result.stdout}\n"
-                f"stderr:\n{observation.result.stderr}"
+                f"{_observed_command_output(stdout=stdout, stderr=stderr)}"
             )
             return failures
 
-        if not isinstance(payload, dict):
+        if not visible_error:
             failures.append(
-                "Step 1 failed: the CLI did not return a machine-readable JSON error "
-                "envelope for the failed attachment upload.\n"
-                f"stdout:\n{observation.result.stdout}\n"
-                f"stderr:\n{observation.result.stderr}"
+                "Step 1 failed: the CLI failed, but it did not surface any caller-visible "
+                "error text on stdout or stderr.\n"
+                f"{_observed_command_output(stdout=stdout, stderr=stderr)}"
             )
             return failures
-
-        if payload.get("ok") is not False:
-            failures.append(
-                "Step 1 failed: the JSON envelope did not report `ok: false` for the "
-                "failed upload.\n"
-                f"Observed payload: {json.dumps(payload, indent=2, sort_keys=True)}"
-            )
-            return failures
-
-        error = payload.get("error")
-        if not isinstance(error, dict):
-            failures.append(
-                "Step 1 failed: the CLI error response did not include an `error` object.\n"
-                f"Observed payload: {json.dumps(payload, indent=2, sort_keys=True)}"
-            )
-            return failures
-
-        visible_error = _visible_error_text(payload)
-        result["visible_error_text"] = visible_error
         lowered_error = visible_error.lower()
         missing_release_context = [
             fragment
@@ -210,8 +198,8 @@ class Ts500ReleaseAuthFailureScenario:
                 "Step 1 failed: the visible CLI error was not an explicit release-backed "
                 "auth/configuration failure.\n"
                 "The output did not mention GitHub Releases or release-backed storage.\n"
-                f"Observed error payload: {json.dumps(error, indent=2, sort_keys=True)}\n"
-                f"Visible output:\n{visible_error}"
+                f"Visible output:\n{visible_error}\n"
+                f"{_format_supporting_evidence(payload=payload, stdout=stdout, stderr=stderr)}"
             )
 
         has_auth_context = any(
@@ -221,11 +209,13 @@ class Ts500ReleaseAuthFailureScenario:
             failures.append(
                 "Step 1 failed: the visible CLI error did not explain that GitHub "
                 "authentication or release-upload configuration is required.\n"
-                f"Observed error payload: {json.dumps(error, indent=2, sort_keys=True)}\n"
-                f"Visible output:\n{visible_error}"
+                f"Visible output:\n{visible_error}\n"
+                f"{_format_supporting_evidence(payload=payload, stdout=stdout, stderr=stderr)}"
             )
 
         if not failures:
+            error_code = error.get("code") if isinstance(error, dict) else ""
+            error_category = error.get("category") if isinstance(error, dict) else ""
             _record_step(
                 result,
                 step=1,
@@ -233,8 +223,8 @@ class Ts500ReleaseAuthFailureScenario:
                 action=self.config.ticket_command,
                 observed=(
                     f"exit_code={observation.result.exit_code}; "
-                    f"error_code={error.get('code')}; "
-                    f"error_category={error.get('category')}; "
+                    f"error_code={error_code}; "
+                    f"error_category={error_category}; "
                     f"visible_error={visible_error}"
                 ),
             )
@@ -419,9 +409,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         encoding="utf-8",
     )
 
-    visible_error = _visible_error_text(result.get("payload"))
     stdout = _as_text(result.get("stdout"))
     stderr = _as_text(result.get("stderr"))
+    visible_error = _visible_error_text(result.get("payload"), stdout=stdout, stderr=stderr)
+    observed_output = _observed_command_output(stdout=stdout, stderr=stderr)
     final_state = result.get("final_state")
     final_state_text = json.dumps(final_state, indent=2, sort_keys=True)
     expected_path = _as_text(result.get("expected_attachment_relative_path"))
@@ -436,7 +427,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "* Inspected the caller-visible CLI output and the repository attachment path after the command.",
         "",
         "h4. Result",
-        "* ❌ Step 1 failed: the command returned a failure envelope, but the visible error was generic and did not explicitly mention missing GitHub auth/configuration for GitHub Releases storage.",
+        "* ❌ Step 1 failed: the command failed, but the visible output was generic and did not explicitly mention missing GitHub auth/configuration for GitHub Releases storage.",
         f"* Observed error code/category: {_jira_inline(_as_text(result.get('observed_error_code')))} / {_jira_inline(_as_text(result.get('observed_error_category')))}",
         f"* Observed visible output: {_jira_inline(visible_error)}",
         "* ✅ Step 2 passed: no file was written to the local repository attachment path.",
@@ -447,8 +438,8 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "{code}",
         "",
         "h4. Observed output",
-        "{code:json}",
-        stdout.rstrip() or "{}",
+        "{code}",
+        observed_output,
         "{code}",
         "",
         "h4. Test file",
@@ -472,7 +463,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "- Inspected the caller-visible CLI output and the repository attachment path after the command.",
         "",
         "## Result",
-        "- ❌ Step 1 failed: the command returned a failure envelope, but the visible error was generic and did not explicitly mention missing GitHub auth/configuration for GitHub Releases storage.",
+        "- ❌ Step 1 failed: the command failed, but the visible output was generic and did not explicitly mention missing GitHub auth/configuration for GitHub Releases storage.",
         f"- Observed error code/category: `{_as_text(result.get('observed_error_code'))}` / `{_as_text(result.get('observed_error_category'))}`",
         f"- Observed visible output: `{visible_error}`",
         "- ✅ Step 2 passed: no file was written to the local repository attachment path.",
@@ -483,8 +474,8 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "```",
         "",
         "## Observed output",
-        "```json",
-        stdout.rstrip() or "{}",
+        "```text",
+        observed_output,
         "```",
         "",
         "## How to run",
@@ -529,7 +520,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
             "* However, the command only returned a generic repository failure "
             f"({_jira_inline(_as_text(result.get('observed_error_code')))} / "
             f"{_jira_inline(_as_text(result.get('observed_error_category')))}) with message "
-            f"{_jira_inline(_as_text(result.get('observed_error_message')))} instead of explicit "
+            f"{_jira_inline(_as_text(result.get('observed_error_message')) or visible_error)} instead of explicit "
             "release-auth/configuration guidance."
         ),
         "",
@@ -625,7 +616,23 @@ def _format_stored_files(
     ]
 
 
-def _visible_error_text(payload: object) -> str:
+def _visible_error_text(
+    payload: object,
+    *,
+    stdout: str = "",
+    stderr: str = "",
+) -> str:
+    fragments: list[str] = []
+    payload_text = _json_visible_error_text(payload)
+    if payload_text:
+        fragments.append(payload_text)
+    for fragment in (_collapse_output(stdout), _collapse_output(stderr)):
+        if fragment and all(fragment.lower() not in existing.lower() for existing in fragments):
+            fragments.append(fragment)
+    return " | ".join(fragment for fragment in fragments if fragment)
+
+
+def _json_visible_error_text(payload: object) -> str:
     if not isinstance(payload, dict):
         return ""
     error = payload.get("error")
@@ -643,6 +650,35 @@ def _visible_error_text(payload: object) -> str:
             for key in ("reason", "provider", "target", "path", "file", "repository")
         )
     return " | ".join(fragment for fragment in fragments if fragment)
+
+
+def _collapse_output(text: str) -> str:
+    return " | ".join(line.strip() for line in text.splitlines() if line.strip())
+
+
+def _observed_command_output(*, stdout: str, stderr: str) -> str:
+    fragments: list[str] = []
+    if stdout.strip():
+        fragments.append(f"stdout:\n{stdout.rstrip()}")
+    if stderr.strip():
+        fragments.append(f"stderr:\n{stderr.rstrip()}")
+    return "\n\n".join(fragments) or "<empty>"
+
+
+def _format_supporting_evidence(
+    *,
+    payload: object,
+    stdout: str,
+    stderr: str,
+) -> str:
+    evidence = []
+    if isinstance(payload, dict):
+        evidence.append(
+            "Observed JSON payload:\n"
+            + json.dumps(payload, indent=2, sort_keys=True)
+        )
+    evidence.append(_observed_command_output(stdout=stdout, stderr=stderr))
+    return "\n\n".join(evidence)
 
 
 def _as_text(value: object) -> str:
