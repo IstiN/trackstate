@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -932,6 +933,154 @@ void main() {
         containsAll(<String>['summary', 'description']),
       );
       expect(snapshot.issues, isNotEmpty);
+    },
+  );
+
+  test(
+    'local repository persists supported locales and localized catalogs',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+
+      final updatedSnapshot = await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog.copyWith(
+          defaultLocale: 'fr',
+          supportedLocales: const <String>['en', 'fr'],
+          statusDefinitions: const <TrackStateConfigEntry>[
+            TrackStateConfigEntry(
+              id: 'todo',
+              name: 'To Do',
+              category: 'new',
+              localizedLabels: <String, String>{'fr': 'A faire'},
+            ),
+            TrackStateConfigEntry(id: 'done', name: 'Done', category: 'done'),
+          ],
+          issueTypeDefinitions: const <TrackStateConfigEntry>[
+            TrackStateConfigEntry(
+              id: 'story',
+              name: 'Story',
+              localizedLabels: <String, String>{'fr': 'Recit'},
+            ),
+          ],
+          fieldDefinitions: const <TrackStateFieldDefinition>[
+            TrackStateFieldDefinition(
+              id: 'summary',
+              name: 'Summary',
+              type: 'string',
+              required: true,
+              localizedLabels: <String, String>{'fr': 'Resume'},
+            ),
+            TrackStateFieldDefinition(
+              id: 'description',
+              name: 'Description',
+              type: 'markdown',
+              required: false,
+            ),
+            TrackStateFieldDefinition(
+              id: 'acceptanceCriteria',
+              name: 'Acceptance Criteria',
+              type: 'markdown',
+              required: false,
+            ),
+            TrackStateFieldDefinition(
+              id: 'priority',
+              name: 'Priority',
+              type: 'option',
+              required: false,
+              options: <TrackStateFieldOption>[
+                TrackStateFieldOption(id: 'high', name: 'High'),
+              ],
+            ),
+            TrackStateFieldDefinition(
+              id: 'assignee',
+              name: 'Assignee',
+              type: 'user',
+              required: false,
+            ),
+            TrackStateFieldDefinition(
+              id: 'labels',
+              name: 'Labels',
+              type: 'array',
+              required: false,
+            ),
+            TrackStateFieldDefinition(
+              id: 'storyPoints',
+              name: 'Story Points',
+              type: 'number',
+              required: false,
+            ),
+          ],
+          priorityDefinitions: const <TrackStateConfigEntry>[
+            TrackStateConfigEntry(
+              id: 'high',
+              name: 'High',
+              localizedLabels: <String, String>{'fr': 'Haute'},
+            ),
+          ],
+          componentDefinitions: const <TrackStateConfigEntry>[
+            TrackStateConfigEntry(
+              id: 'tracker-core',
+              name: 'Tracker Core',
+              localizedLabels: <String, String>{'fr': 'Coeur Tracker'},
+            ),
+          ],
+          versionDefinitions: const <TrackStateConfigEntry>[
+            TrackStateConfigEntry(
+              id: 'mvp',
+              name: 'MVP',
+              localizedLabels: <String, String>{'fr': 'Version MVP'},
+            ),
+          ],
+          resolutionDefinitions: const <TrackStateConfigEntry>[
+            TrackStateConfigEntry(
+              id: 'done',
+              name: 'Done',
+              localizedLabels: <String, String>{'fr': 'Termine'},
+            ),
+          ],
+        ),
+      );
+
+      final projectJson =
+          jsonDecode(File('${repo.path}/DEMO/project.json').readAsStringSync())
+              as Map<String, Object?>;
+      final frLocaleJson =
+          jsonDecode(
+                File(
+                  '${repo.path}/DEMO/config/i18n/fr.json',
+                ).readAsStringSync(),
+              )
+              as Map<String, Object?>;
+      final reloaded = await repository.loadSnapshot();
+
+      expect(updatedSnapshot.project.defaultLocale, 'fr');
+      expect(updatedSnapshot.project.effectiveSupportedLocales, ['fr', 'en']);
+      expect(projectJson['defaultLocale'], 'fr');
+      expect(projectJson['supportedLocales'], ['fr', 'en']);
+      expect(frLocaleJson['statuses'], <String, Object?>{'todo': 'A faire'});
+      expect(frLocaleJson['issueTypes'], <String, Object?>{'story': 'Recit'});
+      expect(frLocaleJson['fields'], <String, Object?>{'summary': 'Resume'});
+      expect(frLocaleJson['priorities'], <String, Object?>{'high': 'Haute'});
+      expect(frLocaleJson['components'], <String, Object?>{
+        'tracker-core': 'Coeur Tracker',
+      });
+      expect(frLocaleJson['versions'], <String, Object?>{'mvp': 'Version MVP'});
+      expect(frLocaleJson['resolutions'], <String, Object?>{'done': 'Termine'});
+      expect(
+        reloaded.project
+            .fieldLabelResolution('summary', locale: 'fr')
+            .displayName,
+        'Resume',
+      );
+      expect(
+        reloaded.project
+            .componentLabelResolution('tracker-core', locale: 'fr')
+            .displayName,
+        'Coeur Tracker',
+      );
     },
   );
 
