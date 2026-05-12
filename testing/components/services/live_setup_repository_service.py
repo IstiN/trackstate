@@ -254,6 +254,34 @@ class LiveSetupRepositoryService:
                     f"GitHub write for {path} returned unexpected status {response.status}.",
                 )
 
+    def delete_repo_file(self, path: str, *, message: str) -> None:
+        existing = self.fetch_repo_file(path)
+        payload = {
+            "message": message,
+            "sha": existing.sha,
+            "branch": self.ref,
+        }
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{self.repository}/contents/{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            method="DELETE",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Content-Type": "application/json",
+                **(
+                    {"Authorization": f"Bearer {self.token}"}
+                    if self.token
+                    else {}
+                ),
+            },
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            if response.status not in (200, 202):
+                raise RuntimeError(
+                    f"GitHub delete for {path} returned unexpected status {response.status}.",
+                )
+
     def fetch_locale_payload(self, project_path: str, locale: str) -> dict[str, object]:
         try:
             payload = self._read_repo_json(f"{project_path}/config/i18n/{locale}.json")
@@ -406,6 +434,7 @@ class LiveSetupRepositoryService:
         while collected and not collected[0].strip():
             collected.pop(0)
         return collected
+
     def _read_json(self, path: str):
         request = urllib.request.Request(
             f"https://api.github.com{path}",
