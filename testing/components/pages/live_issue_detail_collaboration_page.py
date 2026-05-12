@@ -38,6 +38,14 @@ class AttachmentSelectionSummaryObservation:
     first_attachment_top: float | None
 
 
+@dataclass(frozen=True)
+class CommentComposerObservation:
+    field_label: str
+    field_enabled: bool
+    button_label: str
+    button_enabled: bool
+
+
 class LiveIssueDetailCollaborationPage:
     _button_selector = 'flt-semantics[role="button"]'
     _tab_button_selector = 'flt-semantics[role="button"][aria-current]'
@@ -1004,6 +1012,54 @@ class LiveIssueDetailCollaborationPage:
                 if payload["firstAttachmentTop"] is not None
                 else None
             ),
+        )
+
+    def wait_for_comment_composer(
+        self,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> CommentComposerObservation:
+        payload = self._session.wait_for_function(
+            """
+            () => {
+              const field =
+                document.querySelector('textarea[aria-label="Comments"]')
+                ?? document.querySelector('input[aria-label="Comments"]')
+                ?? document.querySelector('[role="textbox"][aria-label="Comments"]');
+              const button = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              ).find((element) => (element.getAttribute('aria-label') ?? '') === 'Post comment');
+              if (!field || !button) {
+                return null;
+              }
+              const fieldDisabled =
+                field.getAttribute('disabled') !== null
+                || field.getAttribute('aria-disabled') === 'true'
+                || field.disabled === true;
+              const buttonDisabled =
+                button.getAttribute('aria-disabled') === 'true'
+                || button.getAttribute('disabled') !== null;
+              return {
+                fieldLabel: field.getAttribute('aria-label') ?? '',
+                fieldEnabled: !fieldDisabled,
+                buttonLabel: button.getAttribute('aria-label') ?? '',
+                buttonEnabled: !buttonDisabled,
+              };
+            }
+            """,
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 2 failed: the Comments tab did not expose the visible comment "
+                "composer controls needed to prove commenting stays enabled.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return CommentComposerObservation(
+            field_label=str(payload.get("fieldLabel", "")),
+            field_enabled=bool(payload.get("fieldEnabled")),
+            button_label=str(payload.get("buttonLabel", "")),
+            button_enabled=bool(payload.get("buttonEnabled")),
         )
 
     def _is_connected(self, connected_banner: str) -> bool:
