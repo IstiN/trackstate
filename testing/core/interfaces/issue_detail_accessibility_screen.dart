@@ -78,6 +78,8 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
 
   bool showsAttachmentRow(String issueKey, String attachmentName);
 
+  bool attachmentRowIsVisibleInViewport(String issueKey, String attachmentName);
+
   bool attachmentRowIsBelowAttachmentsRestrictionCallout(
     String issueKey, {
     required String title,
@@ -98,6 +100,12 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
     required String message,
     required String actionLabel,
   });
+
+  bool issueDetailIsVerticallyScrollable(String issueKey);
+
+  Future<void> scrollIssueDetailToBottom(String issueKey);
+
+  Future<void> scrollIssueDetailToTop(String issueKey);
 
   String? commentComposerPlaceholderText(String issueKey);
 
