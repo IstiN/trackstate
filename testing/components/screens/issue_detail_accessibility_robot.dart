@@ -247,9 +247,9 @@ class IssueDetailAccessibilityRobot
     if (callout.evaluate().isEmpty || attachmentRow.evaluate().isEmpty) {
       return false;
     }
-    final calloutTop = tester.getTopLeft(callout.first).dy;
+    final calloutBottom = tester.getBottomLeft(callout.first).dy;
     final rowTop = tester.getTopLeft(attachmentRow.first).dy;
-    return rowTop > calloutTop;
+    return rowTop > calloutBottom;
   }
 
   @override
