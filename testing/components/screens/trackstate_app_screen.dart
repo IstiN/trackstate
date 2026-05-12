@@ -772,6 +772,31 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<void> expectNavigationControlEnabled(String label) async {
+    final target = _navigationControl(label);
+    await tester.pump();
+    expect(
+      target,
+      findsOneWidget,
+      reason:
+          'Expected a visible navigation control labeled "$label". Visible '
+          'semantics: ${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
+    );
+
+    final semanticsData = tester.getSemantics(target.last).getSemanticsData();
+    final hasTapAction = semanticsData.hasAction(SemanticsAction.tap);
+    final isEnabled = semanticsData.hasFlag(SemanticsFlag.isEnabled);
+    expect(
+      hasTapAction || isEnabled,
+      isTrue,
+      reason:
+          'Expected "$label" navigation control to remain interactive. '
+          'Semantics label="${semanticsData.label}", hasTapAction='
+          '$hasTapAction, isEnabled=$isEnabled.',
+    );
+  }
+
+  @override
   Future<bool> isNavigationChromeVisible() async {
     await tester.pump();
     return _navigationChrome.evaluate().isNotEmpty;
