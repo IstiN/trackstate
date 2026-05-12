@@ -1,0 +1,11 @@
+test_id: TS-375
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH for seeding a disposable Local Git repository
+notes:
+  - Executes the canonical `trackstate read ticket --key TS-20` command against a seeded disposable Local Git repository.
+  - Verifies stdout and the parsed JSON payload expose a single raw Jira issue object rooted at `id`, `key`, and `fields`.
+  - Confirms the response is not wrapped in the TrackState success envelope keys such as `ok`, `schemaVersion`, or `data`.
