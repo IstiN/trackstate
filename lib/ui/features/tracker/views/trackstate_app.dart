@@ -2048,6 +2048,7 @@ enum _SettingsCatalogTab {
   priorities,
   components,
   versions,
+  attachments,
   locales,
 }
 
@@ -2654,6 +2655,97 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     );
   }
 
+  Widget _buildAttachmentsTab(
+    AppLocalizations l10n,
+    ProjectSettingsCatalog settings,
+    bool canEdit,
+  ) {
+    final attachmentStorage = settings.attachmentStorage;
+    final githubReleases = attachmentStorage.githubReleases;
+    final tagPrefix =
+        githubReleases?.tagPrefix ??
+        GitHubReleasesAttachmentStorageSettings.defaultTagPrefix;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          l10n.attachments,
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
+        const SizedBox(height: 12),
+        Text(l10n.attachmentStorageDescription),
+        const SizedBox(height: 16),
+        DropdownButtonFormField<AttachmentStorageMode>(
+          key: const ValueKey('attachment-storage-mode-field'),
+          initialValue: attachmentStorage.mode,
+          decoration: InputDecoration(labelText: l10n.attachmentStorageMode),
+          items: [
+            DropdownMenuItem(
+              value: AttachmentStorageMode.repositoryPath,
+              child: Text(l10n.repositoryPath),
+            ),
+            DropdownMenuItem(
+              value: AttachmentStorageMode.githubReleases,
+              child: Text(l10n.githubReleases),
+            ),
+          ],
+          onChanged: !canEdit
+              ? null
+              : (value) {
+                  if (value == null) {
+                    return;
+                  }
+                  _replaceDraft(
+                    settings.copyWith(
+                      attachmentStorage: settings.attachmentStorage.copyWith(
+                        mode: value,
+                        githubReleases:
+                            value == AttachmentStorageMode.githubReleases
+                            ? (settings.attachmentStorage.githubReleases ??
+                                  const GitHubReleasesAttachmentStorageSettings(
+                                    tagPrefix:
+                                        GitHubReleasesAttachmentStorageSettings
+                                            .defaultTagPrefix,
+                                  ))
+                            : null,
+                      ),
+                    ),
+                  );
+                },
+        ),
+        const SizedBox(height: 16),
+        if (attachmentStorage.mode == AttachmentStorageMode.repositoryPath)
+          Text(l10n.attachmentRepositoryPathSummary)
+        else ...[
+          TextFormField(
+            key: const ValueKey('attachment-release-tag-prefix-field'),
+            initialValue: tagPrefix,
+            enabled: canEdit,
+            decoration: InputDecoration(
+              labelText: l10n.attachmentReleaseTagPrefix,
+              helperText: l10n.attachmentReleaseTagPrefixHelper,
+            ),
+            onChanged: (value) {
+              _replaceDraft(
+                settings.copyWith(
+                  attachmentStorage: settings.attachmentStorage.copyWith(
+                    githubReleases: GitHubReleasesAttachmentStorageSettings(
+                      tagPrefix: value,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          Text(l10n.attachmentReleaseMappingSummary(tagPrefix.trim())),
+        ],
+        const SizedBox(height: 12),
+        Text(l10n.attachmentStorageImmutableNote),
+      ],
+    );
+  }
+
   Widget _buildLocalesTab(
     AppLocalizations l10n,
     ProjectSettingsCatalog settings,
@@ -2700,9 +2792,8 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         onChanged: (id, value) {
           _updateConfigEntryTranslation(
             entries: settings.priorityDefinitions,
-            onChanged: (entries) => _replaceDraft(
-              settings.copyWith(priorityDefinitions: entries),
-            ),
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(priorityDefinitions: entries)),
             id: id,
             locale: selectedLocale,
             value: value,
@@ -2753,9 +2844,8 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         onChanged: (id, value) {
           _updateConfigEntryTranslation(
             entries: settings.componentDefinitions,
-            onChanged: (entries) => _replaceDraft(
-              settings.copyWith(componentDefinitions: entries),
-            ),
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(componentDefinitions: entries)),
             id: id,
             locale: selectedLocale,
             value: value,
@@ -2771,9 +2861,8 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         onChanged: (id, value) {
           _updateConfigEntryTranslation(
             entries: settings.issueTypeDefinitions,
-            onChanged: (entries) => _replaceDraft(
-              settings.copyWith(issueTypeDefinitions: entries),
-            ),
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(issueTypeDefinitions: entries)),
             id: id,
             locale: selectedLocale,
             value: value,
@@ -2873,9 +2962,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
                   Semantics(
                     container: true,
                     label: '$title ${l10n.locales}\nsummary',
-                    child: ExcludeSemantics(
-                      child: Chip(label: Text(title)),
-                    ),
+                    child: ExcludeSemantics(child: Chip(label: Text(title))),
                   ),
               ],
             ),
@@ -2915,6 +3002,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         Tab(text: l10n.priorities),
         Tab(text: l10n.components),
         Tab(text: l10n.versions),
+        Tab(text: l10n.attachments),
         Tab(text: l10n.locales),
       ],
     );
@@ -2987,6 +3075,11 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         ),
         onChanged: (entries) =>
             _replaceDraft(settings.copyWith(versionDefinitions: entries)),
+      ),
+      _SettingsCatalogTab.attachments => _buildAttachmentsTab(
+        l10n,
+        settings,
+        canEdit,
       ),
       _SettingsCatalogTab.locales => _buildLocalesTab(l10n, settings, canEdit),
     };
@@ -3985,6 +4078,9 @@ ProjectSettingsCatalog _cloneProjectSettings(ProjectSettingsCatalog settings) {
   return ProjectSettingsCatalog(
     defaultLocale: settings.defaultLocale,
     supportedLocales: [...settings.effectiveSupportedLocales],
+    attachmentStorage: settings.attachmentStorage.copyWith(
+      githubReleases: settings.attachmentStorage.githubReleases?.copyWith(),
+    ),
     statusDefinitions: [
       for (final status in settings.statusDefinitions) status.copyWith(),
     ],
@@ -4029,6 +4125,7 @@ ProjectSettingsCatalog _cloneProjectSettings(ProjectSettingsCatalog settings) {
 String _projectSettingsSignature(ProjectSettingsCatalog settings) {
   return [
     'locale:${settings.defaultLocale}:${settings.effectiveSupportedLocales.join(',')}',
+    'attachmentStorage:${settings.attachmentStorage.mode.persistedValue}:${settings.attachmentStorage.githubReleases?.tagPrefix ?? ''}',
     for (final status in settings.statusDefinitions)
       'status:${status.id}:${status.name}:${status.category ?? ''}:${status.localizedLabels}',
     for (final workflow in settings.workflowDefinitions)

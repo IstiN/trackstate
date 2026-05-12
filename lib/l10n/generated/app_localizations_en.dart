@@ -286,6 +286,36 @@ class AppLocalizationsEn extends AppLocalizations {
   String get locales => 'Locales';
 
   @override
+  String get githubReleases => 'GitHub Releases';
+
+  @override
+  String get attachmentStorageDescription =>
+      'Choose where new attachments are stored. Existing attachments keep the backend recorded when they were created.';
+
+  @override
+  String get attachmentStorageMode => 'Attachment storage mode';
+
+  @override
+  String get attachmentRepositoryPathSummary =>
+      'Repository-path mode keeps attachments in <issue-root>/attachments/<file> inside the project repository.';
+
+  @override
+  String get attachmentReleaseTagPrefix => 'Release tag prefix';
+
+  @override
+  String get attachmentReleaseTagPrefixHelper =>
+      'TrackState derives the issue release tag as <tagPrefix><ISSUE_KEY>.';
+
+  @override
+  String attachmentReleaseMappingSummary(String tagPrefix) {
+    return 'Each issue resolves to the release tag $tagPrefix<ISSUE_KEY>. Release title stays \"Attachments for <ISSUE_KEY>\", and the asset name is the sanitized file name.';
+  }
+
+  @override
+  String get attachmentStorageImmutableNote =>
+      'Switching project storage only affects new attachments. Existing attachments keep their original backend metadata.';
+
+  @override
   String get language => 'Language';
 
   @override

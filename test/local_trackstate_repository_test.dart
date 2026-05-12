@@ -99,6 +99,58 @@ void main() {
   );
 
   test(
+    'local repository writes attachment metadata for repository-path uploads',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+
+      final updated = await repository.uploadIssueAttachment(
+        issue: snapshot.issues.single,
+        name: 'release plan.txt',
+        bytes: Uint8List.fromList(utf8.encode('roadmap')),
+      );
+      final metadataJson =
+          jsonDecode(
+                File(
+                  '${repo.path}/DEMO/DEMO-1/attachments.json',
+                ).readAsStringSync(),
+              )
+              as List<Object?>;
+      final uploadedMetadata = metadataJson
+          .cast<Map<String, Object?>>()
+          .firstWhere((entry) => entry['name'] == 'release-plan.txt');
+      final reloaded = await repository.loadSnapshot();
+      final uploadedAttachment = reloaded.issues.single.attachments.firstWhere(
+        (attachment) => attachment.name == 'release-plan.txt',
+      );
+
+      expect(
+        updated.attachments.map((attachment) => attachment.name),
+        contains('release-plan.txt'),
+      );
+      expect(uploadedMetadata['storageBackend'], 'repository-path');
+      expect(
+        uploadedMetadata['repositoryPath'],
+        'DEMO/DEMO-1/attachments/release-plan.txt',
+      );
+      expect(
+        uploadedAttachment.storageBackend,
+        AttachmentStorageMode.repositoryPath,
+      );
+      expect(
+        uploadedAttachment.repositoryPath,
+        'DEMO/DEMO-1/attachments/release-plan.txt',
+      );
+    },
+  );
+
+  test(
     'local repository derives issue history entries from git commits',
     () async {
       final repo = await _createLocalRepository();
@@ -1080,6 +1132,164 @@ void main() {
             .componentLabelResolution('tracker-core', locale: 'fr')
             .displayName,
         'Coeur Tracker',
+      );
+    },
+  );
+
+  test(
+    'local repository persists attachment storage settings in project json',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+
+      final updatedSnapshot = await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog.copyWith(
+          fieldDefinitions: const <TrackStateFieldDefinition>[
+            TrackStateFieldDefinition(
+              id: 'summary',
+              name: 'Summary',
+              type: 'string',
+              required: true,
+            ),
+            TrackStateFieldDefinition(
+              id: 'description',
+              name: 'Description',
+              type: 'markdown',
+              required: false,
+            ),
+            TrackStateFieldDefinition(
+              id: 'acceptanceCriteria',
+              name: 'Acceptance Criteria',
+              type: 'markdown',
+              required: false,
+            ),
+            TrackStateFieldDefinition(
+              id: 'priority',
+              name: 'Priority',
+              type: 'option',
+              required: false,
+              options: <TrackStateFieldOption>[
+                TrackStateFieldOption(id: 'medium', name: 'Medium'),
+              ],
+            ),
+            TrackStateFieldDefinition(
+              id: 'assignee',
+              name: 'Assignee',
+              type: 'user',
+              required: false,
+            ),
+            TrackStateFieldDefinition(
+              id: 'labels',
+              name: 'Labels',
+              type: 'array',
+              required: false,
+            ),
+            TrackStateFieldDefinition(
+              id: 'storyPoints',
+              name: 'Story Points',
+              type: 'number',
+              required: false,
+            ),
+          ],
+          attachmentStorage: const ProjectAttachmentStorageSettings(
+            mode: AttachmentStorageMode.githubReleases,
+            githubReleases: GitHubReleasesAttachmentStorageSettings(
+              tagPrefix: 'trackstate-attachments-',
+            ),
+          ),
+        ),
+      );
+      final projectJson =
+          jsonDecode(File('${repo.path}/DEMO/project.json').readAsStringSync())
+              as Map<String, Object?>;
+
+      expect(
+        updatedSnapshot.project.attachmentStorage.mode,
+        AttachmentStorageMode.githubReleases,
+      );
+      expect(projectJson['attachmentStorage'], <String, Object?>{
+        'mode': 'github-releases',
+        'githubReleases': <String, Object?>{
+          'tagPrefix': 'trackstate-attachments-',
+        },
+      });
+    },
+  );
+
+  test(
+    'local repository rejects incomplete github releases attachment settings',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+
+      await expectLater(
+        () => repository.saveProjectSettings(
+          snapshot.project.settingsCatalog.copyWith(
+            fieldDefinitions: const <TrackStateFieldDefinition>[
+              TrackStateFieldDefinition(
+                id: 'summary',
+                name: 'Summary',
+                type: 'string',
+                required: true,
+              ),
+              TrackStateFieldDefinition(
+                id: 'description',
+                name: 'Description',
+                type: 'markdown',
+                required: false,
+              ),
+              TrackStateFieldDefinition(
+                id: 'acceptanceCriteria',
+                name: 'Acceptance Criteria',
+                type: 'markdown',
+                required: false,
+              ),
+              TrackStateFieldDefinition(
+                id: 'priority',
+                name: 'Priority',
+                type: 'option',
+                required: false,
+                options: <TrackStateFieldOption>[
+                  TrackStateFieldOption(id: 'medium', name: 'Medium'),
+                ],
+              ),
+              TrackStateFieldDefinition(
+                id: 'assignee',
+                name: 'Assignee',
+                type: 'user',
+                required: false,
+              ),
+              TrackStateFieldDefinition(
+                id: 'labels',
+                name: 'Labels',
+                type: 'array',
+                required: false,
+              ),
+              TrackStateFieldDefinition(
+                id: 'storyPoints',
+                name: 'Story Points',
+                type: 'number',
+                required: false,
+              ),
+            ],
+            attachmentStorage: const ProjectAttachmentStorageSettings(
+              mode: AttachmentStorageMode.githubReleases,
+            ),
+          ),
+        ),
+        throwsA(
+          isA<TrackStateProviderException>().having(
+            (error) => error.message,
+            'message',
+            contains('tag prefix'),
+          ),
+        ),
       );
     },
   );
