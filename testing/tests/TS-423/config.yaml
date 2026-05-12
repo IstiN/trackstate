@@ -1,0 +1,8 @@
+test_id: TS-423
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Launches the production TrackState app with a hosted bootstrap snapshot whose issue summaries remain in a delayed loading window.
+  - Verifies dashboard and board loading semantics, checks a partial issue detail panel where the summary is visible while the detail body still shows a loading placeholder, and measures rendered loading-banner contrast against the production theme.
