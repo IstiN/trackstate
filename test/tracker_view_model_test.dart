@@ -1485,6 +1485,7 @@ class _EditableSettingsRepository extends _LocalRuntimeRepository
         versionDefinitions: current.project.versionDefinitions,
         componentDefinitions: current.project.componentDefinitions,
         resolutionDefinitions: current.project.resolutionDefinitions,
+        attachmentStorage: settings.attachmentStorage,
       ),
       issues: current.issues,
       repositoryIndex: current.repositoryIndex,

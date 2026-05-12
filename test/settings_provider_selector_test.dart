@@ -272,6 +272,7 @@ void main() {
         expect(find.widgetWithText(Tab, 'Priorities'), findsOneWidget);
         expect(find.widgetWithText(Tab, 'Components'), findsOneWidget);
         expect(find.widgetWithText(Tab, 'Versions'), findsOneWidget);
+        expect(find.widgetWithText(Tab, 'Attachments'), findsOneWidget);
         expect(find.widgetWithText(Tab, 'Locales'), findsOneWidget);
 
         await tester.tap(find.widgetWithText(Tab, 'Fields'));
@@ -357,6 +358,54 @@ void main() {
   );
 
   testWidgets(
+    'settings attachments tab persists github releases attachment storage',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      final repository = _EditableSettingsWidgetRepository();
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        final attachmentsTab = find.widgetWithText(Tab, 'Attachments');
+        await tester.ensureVisible(attachmentsTab);
+        await tester.tap(attachmentsTab);
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.byKey(const ValueKey('attachment-storage-mode-field')),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('GitHub Releases').last);
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const ValueKey('attachment-release-tag-prefix-field')),
+          'custom-prefix-',
+        );
+
+        await tester.tap(find.text('Save settings'));
+        await tester.pumpAndSettle();
+
+        expect(
+          repository.savedSettings?.attachmentStorage.mode,
+          AttachmentStorageMode.githubReleases,
+        );
+        expect(
+          repository.savedSettings?.attachmentStorage.githubReleases?.tagPrefix,
+          'custom-prefix-',
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
     'settings locales keeps versions and resolutions visible after adding a locale',
     (tester) async {
       final semantics = tester.ensureSemantics();
@@ -386,7 +435,9 @@ void main() {
 
         final viewportHeight =
             tester.view.physicalSize.height / tester.view.devicePixelRatio;
-        final versionsSummary = find.bySemanticsLabel('Versions Locales\nsummary');
+        final versionsSummary = find.bySemanticsLabel(
+          'Versions Locales\nsummary',
+        );
         final resolutionsSummary = find.bySemanticsLabel(
           'Resolutions Locales\nsummary',
         );
@@ -522,6 +573,7 @@ class _EditableSettingsWidgetRepository
         versionDefinitions: settings.versionDefinitions,
         componentDefinitions: settings.componentDefinitions,
         resolutionDefinitions: settings.resolutionDefinitions,
+        attachmentStorage: settings.attachmentStorage,
       ),
       issues: current.issues,
       repositoryIndex: current.repositoryIndex,

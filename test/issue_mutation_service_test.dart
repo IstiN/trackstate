@@ -454,6 +454,98 @@ void main() {
     },
   );
 
+  test(
+    'service preserves attachment backend metadata when moving issue hierarchies',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => repo.delete(recursive: true));
+      await _writeFile(
+        repo,
+        'DEMO/DEMO-1/DEMO-2/attachments.json',
+        '${jsonEncode([
+          {'id': 'DEMO/DEMO-1/DEMO-2/attachments/design.png', 'name': 'design.png', 'mediaType': 'image/png', 'sizeBytes': 42, 'author': 'demo-user', 'createdAt': '2026-05-05T00:10:00Z', 'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/design.png', 'revisionOrOid': 'release-asset-42', 'storageBackend': 'github-releases', 'githubReleaseTag': 'trackstate-attachments-DEMO-2', 'githubReleaseAssetName': 'design.png'},
+          {'id': 'DEMO/DEMO-1/DEMO-2/attachments/spec.txt', 'name': 'spec.txt', 'mediaType': 'text/plain', 'sizeBytes': 9, 'author': 'demo-user', 'createdAt': '2026-05-05T00:11:00Z', 'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/spec.txt', 'revisionOrOid': 'repo-revision', 'storageBackend': 'repository-path', 'repositoryPath': 'DEMO/DEMO-1/DEMO-2/attachments/spec.txt'},
+        ])}\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/DEMO-1/DEMO-2/attachments/spec.txt',
+        'spec-data',
+      );
+      await _git(repo.path, ['add', '.']);
+      await _git(repo.path, ['commit', '-m', 'Add issue attachment metadata']);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final issue = await repository.hydrateIssue(
+        snapshot.issues.firstWhere((candidate) => candidate.key == 'DEMO-2'),
+        scopes: const {IssueHydrationScope.attachments},
+      );
+      final moved = await IssueMutationService(
+        repository: repository,
+      ).reassignIssue(issueKey: issue.key, epicKey: 'DEMO-10');
+
+      expect(moved.isSuccess, isTrue);
+      final movedReleaseAttachment = moved.value!.attachments.firstWhere(
+        (attachment) => attachment.name == 'design.png',
+      );
+      expect(
+        movedReleaseAttachment.storageBackend,
+        AttachmentStorageMode.githubReleases,
+      );
+      expect(
+        movedReleaseAttachment.githubReleaseTag,
+        'trackstate-attachments-DEMO-2',
+      );
+      expect(movedReleaseAttachment.githubReleaseAssetName, 'design.png');
+      expect(
+        movedReleaseAttachment.storagePath,
+        'DEMO/DEMO-10/DEMO-2/attachments/design.png',
+      );
+
+      final movedRepositoryAttachment = moved.value!.attachments.firstWhere(
+        (attachment) => attachment.name == 'spec.txt',
+      );
+      expect(
+        movedRepositoryAttachment.repositoryPath,
+        'DEMO/DEMO-10/DEMO-2/attachments/spec.txt',
+      );
+
+      final reloadedSnapshot = await repository.loadSnapshot();
+      final reloadedIssue = await repository.hydrateIssue(
+        reloadedSnapshot.issues.firstWhere(
+          (candidate) => candidate.key == 'DEMO-2',
+        ),
+        scopes: const {IssueHydrationScope.attachments},
+      );
+      final reloadedReleaseAttachment = reloadedIssue.attachments.firstWhere(
+        (attachment) => attachment.name == 'design.png',
+      );
+      expect(
+        reloadedReleaseAttachment.storageBackend,
+        AttachmentStorageMode.githubReleases,
+      );
+      expect(
+        reloadedReleaseAttachment.storagePath,
+        'DEMO/DEMO-10/DEMO-2/attachments/design.png',
+      );
+      expect(
+        reloadedReleaseAttachment.githubReleaseTag,
+        'trackstate-attachments-DEMO-2',
+      );
+      expect(reloadedReleaseAttachment.githubReleaseAssetName, 'design.png');
+      expect(
+        reloadedIssue.attachments
+            .firstWhere((attachment) => attachment.name == 'spec.txt')
+            .repositoryPath,
+        'DEMO/DEMO-10/DEMO-2/attachments/spec.txt',
+      );
+    },
+  );
+
   test('service archives issues through the hosted GitHub provider', () async {
     final harness = await _createHostedMutationHarness();
     final result = await harness.service.archiveIssue('DEMO-10');
