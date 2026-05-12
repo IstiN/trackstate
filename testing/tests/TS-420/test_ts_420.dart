@@ -1,5 +1,3 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -68,9 +66,9 @@ void main() {
 
         await screen.pump(repository);
 
-        _expectEnabledNavigationControl(tester, 'Dashboard');
-        _expectEnabledNavigationControl(tester, 'Settings');
-        _expectEnabledNavigationControl(tester, 'JQL Search');
+        await screen.expectNavigationControlEnabled('Dashboard');
+        await screen.expectNavigationControlEnabled('Settings');
+        await screen.expectNavigationControlEnabled('JQL Search');
 
         await screen.openSection('Settings');
         expect(
@@ -146,29 +144,6 @@ void main() {
       }
     },
     timeout: const Timeout(Duration(seconds: 20)),
-  );
-}
-
-void _expectEnabledNavigationControl(WidgetTester tester, String label) {
-  final control = find.byWidgetPredicate(
-    (widget) =>
-        widget is Semantics &&
-        widget.properties.button == true &&
-        widget.properties.label == label,
-    description: 'navigation control labeled $label',
-  );
-  expect(
-    control,
-    findsOneWidget,
-    reason: 'Expected a visible navigation control labeled "$label".',
-  );
-
-  final semantics = tester.getSemantics(control).getSemanticsData();
-  expect(
-    semantics.hasAction(SemanticsAction.tap),
-    isTrue,
-    reason:
-        'Expected "$label" navigation control to remain interactive when its readiness state allowed navigation.',
   );
 }
 
