@@ -28,7 +28,7 @@ void main() {
         for (final requiredText in const [
           'Project Settings',
           'Project settings administration',
-          'Manage repository-backed statuses, workflows, issue types, and fields with validation before Git writes.',
+          'Manage repository-backed metadata catalogs, supported locales, and localized display labels before Git writes.',
           'Statuses',
           'Workflows',
           'Issue Types',
@@ -117,6 +117,7 @@ void main() {
           await tester.tap(firstEditButton, warnIfMissed: false);
           await tester.pumpAndSettle();
 
+          final fieldEditorScope = _activeEditorScope(tester, 'Edit field');
           final fieldEditorTexts = robot.visibleTexts();
           for (final requiredText in const [
             'Edit field',
@@ -138,31 +139,48 @@ void main() {
             }
           }
 
-          for (final label in const [
+          final fieldEditorIssueTypeChips = _textLabelsWithin<FilterChip>(
+            tester,
+            fieldEditorScope,
+            labelOf: (chip) => switch (chip.label) {
+              final Text text => text.data,
+              _ => null,
+            },
+          );
+          for (final label in [
             'ID',
             'Name',
             'Type',
             'Required',
+            'Default value',
+            'Options',
+            'Applicable issue types',
             'Save',
             'Cancel',
+            ...fieldEditorIssueTypeChips,
           ]) {
-            final count = _countSemanticsLabelsContaining(label);
+            final count = _countSemanticsLabelsContainingWithin(
+              fieldEditorScope,
+              label,
+            );
             if (count == 0) {
               failures.add(
                 'Step 5 failed: the field editor drawer/modal did not expose a screen-reader semantics label containing "$label". '
-                'Visible semantics labels: ${_formatSnapshot(_allSemanticsLabels(tester))}.',
+                'Visible field-editor semantics labels: ${_formatSnapshot(_allSemanticsLabelsWithin(tester, fieldEditorScope))}.',
               );
             }
           }
 
-          final cancelButton = find.widgetWithText(TextButton, 'Cancel').last;
+          final cancelButton = find.descendant(
+            of: fieldEditorScope,
+            matching: find.widgetWithText(TextButton, 'Cancel'),
+          );
           await tester.ensureVisible(cancelButton);
           await tester.tap(cancelButton, warnIfMissed: false);
           await tester.pumpAndSettle();
         }
 
-        await tester.tap(robot.statusesTab);
-        await tester.pumpAndSettle();
+        await robot.openStatusesTab();
         final addStatusButton = find
             .descendant(
               of: robot.settingsAdminSection,
@@ -173,6 +191,7 @@ void main() {
         await tester.tap(addStatusButton, warnIfMissed: false);
         await tester.pumpAndSettle();
 
+        final statusEditorScope = _activeEditorScope(tester, 'Add status');
         final statusEditorTexts = robot.visibleTexts();
         for (final requiredText in const [
           'Add status',
@@ -190,12 +209,22 @@ void main() {
           }
         }
 
-        for (final label in const ['Category', 'Save', 'Cancel']) {
-          final count = _countSemanticsLabelsContaining(label);
+        for (final label in const [
+          'Add status',
+          'ID',
+          'Name',
+          'Category',
+          'Save',
+          'Cancel',
+        ]) {
+          final count = _countSemanticsLabelsContainingWithin(
+            statusEditorScope,
+            label,
+          );
           if (count == 0) {
             failures.add(
               'Step 5 failed: the status editor drawer/modal did not expose a semantics label containing "$label". '
-              'Visible semantics labels: ${_formatSnapshot(_allSemanticsLabels(tester))}.',
+              'Visible status-editor semantics labels: ${_formatSnapshot(_allSemanticsLabelsWithin(tester, statusEditorScope))}.',
             );
           }
         }
@@ -232,13 +261,6 @@ void main() {
 
           await tester.tap(find.text('Done').last);
           await tester.pumpAndSettle();
-        }
-
-        if (find.bySemanticsLabel(RegExp('^Add status\$')).evaluate().isEmpty) {
-          failures.add(
-            'Step 5 failed: the opened status editor did not expose any screen-reader label for the modal title "Add status". '
-            'Visible semantics labels: ${_formatSnapshot(_allSemanticsLabels(tester))}.',
-          );
         }
 
         if (failures.isNotEmpty) {
@@ -332,18 +354,13 @@ List<String> _semanticsTraversalWithin(WidgetTester tester, Finder scope) {
   return _dedupeConsecutive(labels);
 }
 
-List<String> _allSemanticsLabels(WidgetTester tester) {
-  final rootNode =
-      tester.binding.pipelineOwner.semanticsOwner?.rootSemanticsNode;
-  if (rootNode == null) {
-    return const <String>[];
-  }
-
+List<String> _allSemanticsLabelsWithin(WidgetTester tester, Finder scope) {
+  final rootNode = tester.getSemantics(scope.first);
   final labels = <String>[];
 
   void visit(SemanticsNode node) {
     final label = _normalizedLabel(node.label);
-    if (label.isNotEmpty) {
+    if (label.isNotEmpty && !node.isInvisible && !node.isMergedIntoParent) {
       labels.add(label);
     }
     for (final child in node.debugListChildrenInOrder(
@@ -355,6 +372,14 @@ List<String> _allSemanticsLabels(WidgetTester tester) {
 
   visit(rootNode);
   return _dedupeConsecutive(labels);
+}
+
+Finder _activeEditorScope(WidgetTester tester, String title) {
+  final materialAncestors = find.ancestor(
+    of: find.text(title).last,
+    matching: find.byType(Material),
+  );
+  return _smallestByArea(tester, materialAncestors);
 }
 
 bool _isInteractiveTarget(SemanticsNode node) {
@@ -392,32 +417,27 @@ List<String> _dedupeConsecutive(List<String> labels) {
   return deduped;
 }
 
+Finder _smallestByArea(WidgetTester tester, Finder candidates) {
+  final matches = candidates.evaluate().length;
+  if (matches == 0) {
+    return candidates;
+  }
+
+  var bestIndex = 0;
+  var bestArea = double.infinity;
+  for (var index = 0; index < matches; index += 1) {
+    final rect = tester.getRect(candidates.at(index));
+    final area = rect.width * rect.height;
+    if (area <= bestArea) {
+      bestArea = area;
+      bestIndex = index;
+    }
+  }
+  return candidates.at(bestIndex);
+}
+
 String _normalizedLabel(String? label) {
   return label?.replaceAll('\n', ' ').trim() ?? '';
-}
-
-int _countExactSemanticsLabel(String label) {
-  return find
-      .bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'))
-      .evaluate()
-      .length;
-}
-
-int _countSemanticsLabelsContaining(String label) {
-  return find
-      .bySemanticsLabel(RegExp('.*${RegExp.escape(label)}.*'))
-      .evaluate()
-      .length;
-}
-
-int _countExactSemanticsLabelWithin(Finder scope, String label) {
-  return find
-      .descendant(
-        of: scope,
-        matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
-      )
-      .evaluate()
-      .length;
 }
 
 int _countSemanticsLabelsContainingWithin(Finder scope, String label) {
@@ -428,6 +448,24 @@ int _countSemanticsLabelsContainingWithin(Finder scope, String label) {
       )
       .evaluate()
       .length;
+}
+
+List<String> _textLabelsWithin<T extends Widget>(
+  WidgetTester tester,
+  Finder scope, {
+  required String? Function(T widget) labelOf,
+}) {
+  final labels = <String>[];
+  for (final widget in tester.widgetList<T>(
+    find.descendant(of: scope, matching: find.byType(T)),
+  )) {
+    final label = labelOf(widget)?.trim();
+    if (label == null || label.isEmpty || labels.contains(label)) {
+      continue;
+    }
+    labels.add(label);
+  }
+  return labels;
 }
 
 String? _orderedSubsequenceFailure(
