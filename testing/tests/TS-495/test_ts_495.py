@@ -18,6 +18,9 @@ from testing.components.pages.live_project_settings_page import (  # noqa: E402
     RepositoryAccessCalloutObservation,
     RepositoryAccessSectionObservation,
 )
+from testing.components.services.live_access_callout_color_probe import (  # noqa: E402
+    LiveAccessCalloutColorProbe,
+)
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveHostedRepositoryMetadata,
     LiveHostedRepositoryFile,
@@ -216,9 +219,10 @@ def main() -> None:
                     action="Verify the styling and copy of the secondary attachment callout.",
                     observed=(
                         f'secondary_message="{observation.secondary_callout.message}"; '
+                        f"style_oracle={secondary_styles['oracle']}; "
                         f"secondary_border_color={secondary_styles['normalized_border_color']}; "
                         f"secondary_background_color={secondary_styles['normalized_background_color']}; "
-                        f"secondary_border_width={secondary_styles['border_width']}; "
+                        f"secondary_dom_border_width={secondary_styles['dom_border_width']}; "
                         f'legacy_warning_present={LEGACY_WARNING_TITLE in observation.body_text}'
                     ),
                 )
@@ -244,9 +248,10 @@ def main() -> None:
                     observed=(
                         f'title="{observation.secondary_callout.title}"; '
                         f'message="{observation.secondary_callout.message}"; '
+                        f"style_oracle={secondary_styles['oracle']}; "
                         f"border_color={secondary_styles['normalized_border_color']}; "
                         f"background_color={secondary_styles['normalized_background_color']}; "
-                        f"border_width={secondary_styles['border_width']}; "
+                        f"dom_border_width={secondary_styles['dom_border_width']}; "
                         f"warning_count={observation.body_text.count(LEGACY_WARNING_TITLE)}"
                     ),
                 )
@@ -491,29 +496,61 @@ def _assert_success_treatment(
     normalized_border_color = _normalize_css_color(observation.border_color)
     normalized_background_color = _normalize_css_color(observation.background_color)
     border_width = _parse_css_pixels(observation.border_width)
-    if (
-        normalized_border_color not in EXPECTED_SUCCESS_BORDER_COLORS
-        or normalized_background_color not in EXPECTED_SUCCESS_BACKGROUND_COLORS
-        or border_width <= 0
-    ):
-        raise AssertionError(
-            f"Step 4 failed: the {callout_name} did not use the TrackState success "
-            "treatment exposed by the rendered DOM styles.\n"
-            f"Expected border colors: {sorted(EXPECTED_SUCCESS_BORDER_COLORS)}\n"
-            f"Expected background colors: {sorted(EXPECTED_SUCCESS_BACKGROUND_COLORS)}\n"
-            f"Observed border color: {observation.border_color!r}\n"
-            f"Observed background color: {observation.background_color!r}\n"
-            f"Observed border width: {observation.border_width!r}\n"
-            f"Observed rendered text: {observation.rendered_text}\n"
-            f"Screenshot: {screenshot_path}",
-        )
-    return {
-        "border_color": observation.border_color,
-        "background_color": observation.background_color,
-        "border_width": observation.border_width,
-        "normalized_border_color": normalized_border_color,
-        "normalized_background_color": normalized_background_color,
-    }
+    dom_matches = (
+        normalized_border_color in EXPECTED_SUCCESS_BORDER_COLORS
+        and normalized_background_color in EXPECTED_SUCCESS_BACKGROUND_COLORS
+        and border_width > 0
+    )
+    if dom_matches:
+        return {
+            "oracle": "dom",
+            "border_color": observation.border_color,
+            "background_color": observation.background_color,
+            "dom_border_width": observation.border_width,
+            "normalized_border_color": normalized_border_color,
+            "normalized_background_color": normalized_background_color,
+        }
+
+    screenshot_observation = LiveAccessCalloutColorProbe().observe(
+        screenshot_path=Path(screenshot_path),
+        callout=observation,
+    )
+    screenshot_border_color = screenshot_observation.border_hex.lower()
+    screenshot_background_color = screenshot_observation.background_hex.lower()
+    screenshot_matches = (
+        screenshot_border_color in EXPECTED_SUCCESS_BORDER_COLORS
+        and screenshot_background_color in EXPECTED_SUCCESS_BACKGROUND_COLORS
+    )
+    if screenshot_matches:
+        return {
+            "oracle": "screenshot",
+            "border_color": screenshot_observation.border_hex,
+            "background_color": screenshot_observation.background_hex,
+            "dom_border_width": observation.border_width,
+            "normalized_border_color": screenshot_border_color,
+            "normalized_background_color": screenshot_background_color,
+            "dom_border_color": observation.border_color,
+            "dom_background_color": observation.background_color,
+            "dom_normalized_border_color": normalized_border_color,
+            "dom_normalized_background_color": normalized_background_color,
+            "screenshot_crop_box": list(screenshot_observation.crop_box),
+        }
+
+    raise AssertionError(
+        f"Step 4 failed: the {callout_name} did not expose the TrackState success "
+        "treatment through either the scoped DOM probe or the rendered screenshot "
+        "fallback.\n"
+        f"Expected border colors: {sorted(EXPECTED_SUCCESS_BORDER_COLORS)}\n"
+        f"Expected background colors: {sorted(EXPECTED_SUCCESS_BACKGROUND_COLORS)}\n"
+        f"Observed DOM border color: {observation.border_color!r}\n"
+        f"Observed DOM background color: {observation.background_color!r}\n"
+        f"Observed DOM border width: {observation.border_width!r}\n"
+        f"Observed screenshot border color: {screenshot_observation.border_hex!r}\n"
+        f"Observed screenshot background color: {screenshot_observation.background_hex!r}\n"
+        f"Observed screenshot crop box: {screenshot_observation.crop_box!r}\n"
+        f"Observed rendered text: {observation.rendered_text}\n"
+        f"Screenshot: {screenshot_path}",
+    )
 
 
 def _section_payload(

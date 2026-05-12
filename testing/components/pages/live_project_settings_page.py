@@ -260,6 +260,7 @@ class LiveProjectSettingsPage:
                 if (!element) {
                   return null;
                 }
+                const rect = element.getBoundingClientRect();
                 const style = window.getComputedStyle(element);
                 const hasVisibleBorder =
                   Number.parseFloat(style.borderTopWidth || '0') > 0
@@ -272,6 +273,7 @@ class LiveProjectSettingsPage:
                   return null;
                 }
                 return {
+                  rect,
                   borderColor: style.borderTopColor || null,
                   backgroundColor: style.backgroundColor || null,
                   borderWidth: style.borderTopWidth || null,
@@ -313,11 +315,63 @@ class LiveProjectSettingsPage:
                   }
                 }
 
-                for (const element of candidateElements) {
-                  const styles = extractVisibleStyles(element);
-                  if (styles) {
-                    return styles;
-                  }
+                const centerX = semantics.rect.left + semantics.rect.width / 2;
+                const centerY = semantics.rect.top + semantics.rect.height / 2;
+                const styledCandidates = candidateElements
+                  .map((element) => {
+                    const styles = extractVisibleStyles(element);
+                    if (!styles) {
+                      return null;
+                    }
+                    const rect = styles.rect;
+                    const overlapLeft = Math.max(rect.left, semantics.rect.left);
+                    const overlapTop = Math.max(rect.top, semantics.rect.top);
+                    const overlapRight = Math.min(rect.right, semantics.rect.right);
+                    const overlapBottom = Math.min(rect.bottom, semantics.rect.bottom);
+                    const overlapWidth = Math.max(0, overlapRight - overlapLeft);
+                    const overlapHeight = Math.max(0, overlapBottom - overlapTop);
+                    const overlapArea = overlapWidth * overlapHeight;
+                    const area = Math.max(rect.width, 0) * Math.max(rect.height, 0);
+                    const containsCenter =
+                      rect.left <= centerX
+                      && rect.right >= centerX
+                      && rect.top <= centerY
+                      && rect.bottom >= centerY;
+                    const containsSemantics =
+                      rect.left <= semantics.rect.left + 1
+                      && rect.top <= semantics.rect.top + 1
+                      && rect.right >= semantics.rect.right - 1
+                      && rect.bottom >= semantics.rect.bottom - 1;
+                    const insetPenalty =
+                      Math.abs(rect.left - semantics.rect.left)
+                      + Math.abs(rect.top - semantics.rect.top)
+                      + Math.abs(rect.right - semantics.rect.right)
+                      + Math.abs(rect.bottom - semantics.rect.bottom);
+                    return {
+                      styles,
+                      area,
+                      overlapArea,
+                      containsCenter,
+                      containsSemantics,
+                      insetPenalty,
+                    };
+                  })
+                  .filter((candidate) => candidate && candidate.overlapArea > 0 && candidate.containsCenter)
+                  .sort((left, right) => {
+                    if (left.containsSemantics !== right.containsSemantics) {
+                      return left.containsSemantics ? -1 : 1;
+                    }
+                    if (left.overlapArea !== right.overlapArea) {
+                      return right.overlapArea - left.overlapArea;
+                    }
+                    if (left.area !== right.area) {
+                      return left.area - right.area;
+                    }
+                    return left.insetPenalty - right.insetPenalty;
+                  });
+                if (styledCandidates.length > 0) {
+                  const { rect, ...styles } = styledCandidates[0].styles;
+                  return styles;
                 }
                 return {
                   borderColor: null,
