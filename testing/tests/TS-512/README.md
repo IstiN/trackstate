@@ -14,10 +14,7 @@ The automation:
 4. verifies the notice and recovery button expose meaningful semantics labels
    and that keyboard Tab traversal reaches **Open settings** before the
    attachment download action
-5. activates **Open settings** from the keyboard and verifies the user lands on
-   **Project Settings > Attachments** with the attachment storage controls still
-   visible
-6. measures the rendered warning-callout colors and text contrast against the
+5. measures the rendered warning-callout colors and text contrast against the
    TrackState accent token
 
 ## Install dependencies

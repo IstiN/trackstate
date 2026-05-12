@@ -6,6 +6,7 @@ import 'package:trackstate/ui/core/trackstate_icons.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 
 import '../../core/interfaces/issue_detail_accessibility_screen.dart';
+import '../../core/models/action_availability.dart';
 import '../../core/models/issue_detail_icon_observation.dart';
 import '../../core/models/issue_detail_row_style_observation.dart';
 import '../../core/models/issue_detail_theme_tokens.dart';
@@ -158,6 +159,15 @@ class IssueDetailAccessibilityRobot
   }
 
   @override
+  ActionAvailability attachmentAction(String issueKey, String label) {
+    final action = _issueDetailAction(issueKey, label);
+    final visible = action.evaluate().isNotEmpty;
+    final enabled =
+        visible && tester.widget<ButtonStyleButton>(action.first).enabled;
+    return ActionAvailability(label: label, visible: visible, enabled: enabled);
+  }
+
+  @override
   List<String> commentActionLabels(String issueKey) {
     final rootLabel = 'Issue detail $issueKey';
     final targets = _screenReaderTargets(issueKey, rootLabel);
@@ -172,6 +182,249 @@ class IssueDetailAccessibilityRobot
         .where((target) => target.isButton)
         .map((target) => target.label)
         .toList();
+  }
+
+  @override
+  bool showsAttachmentUploadRestrictionNotice(
+    String issueKey, {
+    required String storageLabel,
+    required String actionLabel,
+  }) {
+    final callout = _attachmentUploadRestrictionCallout(
+      issueKey,
+      storageLabel: storageLabel,
+    );
+    if (callout.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(
+          of: callout,
+          matching: find.text(actionLabel, findRichText: true),
+        )
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  bool attachmentUploadRestrictionNoticeIsInline(
+    String issueKey, {
+    required String tabLabel,
+    required String storageLabel,
+  }) {
+    final callout = _attachmentUploadRestrictionCallout(
+      issueKey,
+      storageLabel: storageLabel,
+    );
+    final tab = _collaborationTab(issueKey, tabLabel);
+    if (callout.evaluate().isEmpty || tab.evaluate().isEmpty) {
+      return false;
+    }
+    final tabBottom = tester.getBottomLeft(tab.first).dy;
+    final calloutTop = tester.getTopLeft(callout.first).dy;
+    return calloutTop > tabBottom;
+  }
+
+  @override
+  bool attachmentRowIsBelowAttachmentUploadRestrictionNotice(
+    String issueKey, {
+    required String storageLabel,
+    required String attachmentName,
+  }) {
+    final callout = _attachmentUploadRestrictionCallout(
+      issueKey,
+      storageLabel: storageLabel,
+    );
+    final attachmentRow = _attachmentRow(issueKey, attachmentName);
+    if (callout.evaluate().isEmpty || attachmentRow.evaluate().isEmpty) {
+      return false;
+    }
+    final calloutBottom = tester.getBottomLeft(callout.first).dy;
+    final rowTop = tester.getTopLeft(attachmentRow.first).dy;
+    return rowTop > calloutBottom;
+  }
+
+  @override
+  Future<void> tapAttachmentUploadRestrictionAction(
+    String issueKey, {
+    required String storageLabel,
+    required String actionLabel,
+  }) async {
+    final callout = _attachmentUploadRestrictionCallout(
+      issueKey,
+      storageLabel: storageLabel,
+    );
+    if (callout.evaluate().isEmpty) {
+      throw StateError(
+        'No upload restriction callout mentioning "$storageLabel" was rendered for issue detail $issueKey.',
+      );
+    }
+    final action = find.descendant(
+      of: callout,
+      matching: find.text(actionLabel, findRichText: true),
+    );
+    if (action.evaluate().isEmpty) {
+      throw StateError(
+        'No "$actionLabel" action was rendered inside the "$storageLabel" upload restriction callout for issue detail $issueKey.',
+      );
+    }
+    await tester.ensureVisible(action.first);
+    await tester.tap(action.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  bool showsAttachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+  }) => _attachmentsRestrictionCallout(
+    issueKey,
+    title: title,
+    message: message,
+  ).evaluate().isNotEmpty;
+
+  @override
+  bool attachmentsRestrictionCalloutShowsText(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String text,
+  }) {
+    final callout = _attachmentsRestrictionCallout(
+      issueKey,
+      title: title,
+      message: message,
+    );
+    if (callout.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(of: callout, matching: find.text(text, findRichText: true))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  bool attachmentsRestrictionCalloutIsInline(
+    String issueKey, {
+    required String tabLabel,
+    required String title,
+    required String message,
+  }) {
+    final callout = _attachmentsRestrictionCallout(
+      issueKey,
+      title: title,
+      message: message,
+    );
+    final tab = _collaborationTab(issueKey, tabLabel);
+    if (callout.evaluate().isEmpty || tab.evaluate().isEmpty) {
+      return false;
+    }
+    final tabBottom = tester.getBottomLeft(tab.first).dy;
+    final calloutTop = tester.getTopLeft(callout.first).dy;
+    return calloutTop > tabBottom;
+  }
+
+  @override
+  bool showsAttachmentRow(String issueKey, String attachmentName) =>
+      _attachmentRow(issueKey, attachmentName).evaluate().isNotEmpty;
+
+  @override
+  bool attachmentRowIsVisibleInViewport(
+    String issueKey,
+    String attachmentName,
+  ) {
+    final row = _attachmentRow(issueKey, attachmentName);
+    if (row.evaluate().isEmpty) {
+      return false;
+    }
+    return _isFinderVisibleInIssueDetailViewport(issueKey, row.first);
+  }
+
+  @override
+  bool attachmentRowIsBelowAttachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String attachmentName,
+  }) {
+    final callout = _attachmentsRestrictionCallout(
+      issueKey,
+      title: title,
+      message: message,
+    );
+    final attachmentRow = _attachmentRow(issueKey, attachmentName);
+    if (callout.evaluate().isEmpty || attachmentRow.evaluate().isEmpty) {
+      return false;
+    }
+    final calloutBottom = tester.getBottomLeft(callout.first).dy;
+    final rowTop = tester.getTopLeft(attachmentRow.first).dy;
+    return rowTop > calloutBottom;
+  }
+
+  @override
+  bool showsAttachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) {
+    final action = _attachmentsRestrictionAction(
+      issueKey,
+      title: title,
+      message: message,
+      actionLabel: actionLabel,
+    );
+    return action.evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<void> tapAttachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) async {
+    final action = _attachmentsRestrictionAction(
+      issueKey,
+      title: title,
+      message: message,
+      actionLabel: actionLabel,
+    );
+    if (action.evaluate().isEmpty) {
+      throw StateError(
+        'No "$actionLabel" action was rendered inside the "$title" restriction callout for issue detail $issueKey.',
+      );
+    }
+    await tester.ensureVisible(action.first);
+    await tester.tap(action.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
+  bool issueDetailIsVerticallyScrollable(String issueKey) {
+    final scrollable = _issueDetailScrollable(issueKey);
+    final state = tester.state<ScrollableState>(scrollable.first);
+    return state.position.maxScrollExtent > 0;
+  }
+
+  @override
+  Future<void> scrollIssueDetailToBottom(String issueKey) async {
+    final scrollable = _issueDetailScrollable(issueKey);
+    await _dragIssueDetailUntilSettled(
+      scrollable,
+      direction: _ScrollDirection.down,
+    );
+  }
+
+  @override
+  Future<void> scrollIssueDetailToTop(String issueKey) async {
+    final scrollable = _issueDetailScrollable(issueKey);
+    await _dragIssueDetailUntilSettled(
+      scrollable,
+      direction: _ScrollDirection.up,
+    );
   }
 
   @override
@@ -386,6 +639,184 @@ class IssueDetailAccessibilityRobot
     return field.first;
   }
 
+  Finder _attachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+  }) => find.ancestor(
+    of: find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.text(title, findRichText: true),
+    ),
+    matching: find.byWidgetPredicate((widget) {
+      if (widget is! Semantics) {
+        return false;
+      }
+      final label = widget.properties.label ?? '';
+      return label.contains(title) && label.contains(message);
+    }, description: 'attachments restriction callout "$title"'),
+  );
+
+  Finder _attachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) {
+    final callout = _attachmentsRestrictionCallout(
+      issueKey,
+      title: title,
+      message: message,
+    );
+    if (callout.evaluate().isEmpty) {
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing attachments restriction action "$actionLabel"',
+      );
+    }
+    final outlinedButton = find.descendant(
+      of: callout,
+      matching: find.widgetWithText(OutlinedButton, actionLabel),
+    );
+    if (outlinedButton.evaluate().isNotEmpty) {
+      return outlinedButton.first;
+    }
+    final filledButton = find.descendant(
+      of: callout,
+      matching: find.widgetWithText(FilledButton, actionLabel),
+    );
+    if (filledButton.evaluate().isNotEmpty) {
+      return filledButton.first;
+    }
+    return find.descendant(
+      of: callout,
+      matching: find.text(actionLabel, findRichText: true),
+    );
+  }
+
+  Finder _attachmentUploadRestrictionCallout(
+    String issueKey, {
+    required String storageLabel,
+  }) {
+    return find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! Semantics) {
+          return false;
+        }
+        final label = (widget.properties.label ?? '').trim();
+        return _containsReleaseUploadRestriction(label, storageLabel);
+      }, description: 'upload restriction callout for $storageLabel'),
+    );
+  }
+
+  Finder _issueDetailAction(String issueKey, String label) {
+    final button = find.descendant(
+      of: _issueDetail(issueKey),
+      matching: find.ancestor(
+        of: find.text(label, findRichText: true),
+        matching: find.bySubtype<ButtonStyleButton>(),
+      ),
+    );
+    return button.evaluate().isNotEmpty
+        ? button.first
+        : find.byWidgetPredicate(
+            (_) => false,
+            description: 'missing issue-detail action "$label"',
+          );
+  }
+
+  Finder _attachmentRow(String issueKey, String attachmentName) =>
+      find.descendant(
+        of: _issueDetail(issueKey),
+        matching: find.byWidgetPredicate((widget) {
+          if (widget is! Semantics) {
+            return false;
+          }
+          final label = widget.properties.label ?? '';
+          return label.contains(attachmentName);
+        }, description: 'attachment row for $attachmentName'),
+      );
+
+  Finder _issueDetailScrollable(String issueKey) {
+    final scrollables = find.ancestor(
+      of: _issueDetail(issueKey),
+      matching: find.byType(Scrollable),
+    );
+    if (scrollables.evaluate().isEmpty) {
+      throw StateError(
+        'No Scrollable ancestor was rendered for issue detail $issueKey.',
+      );
+    }
+
+    Finder? bestMatch;
+    double? smallestArea;
+    final matchCount = scrollables.evaluate().length;
+    for (var index = 0; index < matchCount; index += 1) {
+      final candidate = scrollables.at(index);
+      final state = tester.state<ScrollableState>(candidate);
+      if (axisDirectionToAxis(state.widget.axisDirection) != Axis.vertical) {
+        continue;
+      }
+      final area =
+          tester.getRect(candidate).size.longestSide *
+          tester.getRect(candidate).size.shortestSide;
+      if (smallestArea == null || area < smallestArea) {
+        smallestArea = area;
+        bestMatch = candidate;
+      }
+    }
+
+    if (bestMatch == null) {
+      throw StateError(
+        'No vertical Scrollable ancestor was rendered for issue detail $issueKey.',
+      );
+    }
+    return bestMatch;
+  }
+
+  bool _isFinderVisibleInIssueDetailViewport(String issueKey, Finder finder) {
+    final surfaceRect = tester.getRect(_issueDetailScrollable(issueKey).first);
+    return _isWithinSurface(surfaceRect, tester.getRect(finder));
+  }
+
+  bool _isWithinSurface(Rect surfaceRect, Rect candidateRect) {
+    return surfaceRect.overlaps(candidateRect) ||
+        surfaceRect.contains(candidateRect.center);
+  }
+
+  Future<void> _dragIssueDetailUntilSettled(
+    Finder scrollable, {
+    required _ScrollDirection direction,
+  }) async {
+    final state = tester.state<ScrollableState>(scrollable.first);
+    if (state.position.maxScrollExtent <= 0) {
+      await tester.pumpAndSettle();
+      return;
+    }
+
+    final rect = tester.getRect(scrollable.first);
+    final dragDistance = (rect.height * 0.6).clamp(120.0, 320.0);
+    final signedDistance = direction == _ScrollDirection.down
+        ? -dragDistance
+        : dragDistance;
+    var previousOffset = state.position.pixels;
+
+    for (var attempt = 0; attempt < 30; attempt += 1) {
+      await tester.drag(scrollable.first, Offset(0, signedDistance));
+      await tester.pumpAndSettle();
+
+      final currentOffset = state.position.pixels;
+      final reachedBoundary = direction == _ScrollDirection.down
+          ? currentOffset >= state.position.maxScrollExtent
+          : currentOffset <= state.position.minScrollExtent;
+      if (reachedBoundary || (currentOffset - previousOffset).abs() < 0.5) {
+        return;
+      }
+      previousOffset = currentOffset;
+    }
+  }
+
   InputDecoration _commentComposerDecoration(String issueKey) {
     final field = tester.widget<TextField>(_commentComposerField(issueKey));
     final decoration = field.decoration;
@@ -551,6 +982,20 @@ class IssueDetailAccessibilityRobot
     throw StateError('No rendered text "$text" found within $scope.');
   }
 
+  bool _containsReleaseUploadRestriction(String label, String storageLabel) {
+    final lowerLabel = label.toLowerCase();
+    final lowerStorageLabel = storageLabel.toLowerCase();
+    final mentionsUnavailable =
+        lowerLabel.contains('unavailable') ||
+        lowerLabel.contains('not available') ||
+        lowerLabel.contains('cannot complete');
+    final mentionsUpload =
+        lowerLabel.contains('upload') || lowerLabel.contains('transfer');
+    return lowerLabel.contains(lowerStorageLabel) &&
+        mentionsUnavailable &&
+        mentionsUpload;
+  }
+
   Color _renderedBadgeBackground(Finder scope) {
     return _renderedContainerBackground(scope);
   }
@@ -713,6 +1158,8 @@ class IssueDetailAccessibilityRobot
   String _normalizedLabel(String? label) =>
       (label ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
 }
+
+enum _ScrollDirection { up, down }
 
 class _SemanticsTarget {
   const _SemanticsTarget({required this.label, required this.isButton});

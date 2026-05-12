@@ -1,3 +1,4 @@
+import '../models/action_availability.dart';
 import '../models/issue_detail_icon_observation.dart';
 import '../models/issue_detail_row_style_observation.dart';
 import '../models/issue_detail_theme_tokens.dart';
@@ -27,7 +28,84 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
 
   List<String> buttonLabelsInIssueDetail(String issueKey);
 
+  ActionAvailability attachmentAction(String issueKey, String label);
+
   List<String> commentActionLabels(String issueKey);
+
+  bool showsAttachmentUploadRestrictionNotice(
+    String issueKey, {
+    required String storageLabel,
+    required String actionLabel,
+  });
+
+  bool attachmentUploadRestrictionNoticeIsInline(
+    String issueKey, {
+    required String tabLabel,
+    required String storageLabel,
+  });
+
+  bool attachmentRowIsBelowAttachmentUploadRestrictionNotice(
+    String issueKey, {
+    required String storageLabel,
+    required String attachmentName,
+  });
+
+  Future<void> tapAttachmentUploadRestrictionAction(
+    String issueKey, {
+    required String storageLabel,
+    required String actionLabel,
+  });
+
+  bool showsAttachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+  });
+
+  bool attachmentsRestrictionCalloutShowsText(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String text,
+  });
+
+  bool attachmentsRestrictionCalloutIsInline(
+    String issueKey, {
+    required String tabLabel,
+    required String title,
+    required String message,
+  });
+
+  bool showsAttachmentRow(String issueKey, String attachmentName);
+
+  bool attachmentRowIsVisibleInViewport(String issueKey, String attachmentName);
+
+  bool attachmentRowIsBelowAttachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String attachmentName,
+  });
+
+  bool showsAttachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  });
+
+  Future<void> tapAttachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  });
+
+  bool issueDetailIsVerticallyScrollable(String issueKey);
+
+  Future<void> scrollIssueDetailToBottom(String issueKey);
+
+  Future<void> scrollIssueDetailToTop(String issueKey);
 
   String? commentComposerPlaceholderText(String issueKey);
 

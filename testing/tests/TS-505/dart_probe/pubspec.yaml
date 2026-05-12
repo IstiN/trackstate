@@ -1,0 +1,9 @@
+name: ts505_github_release_upload_failure_probe
+publish_to: none
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  http:
+    path: packages/http
