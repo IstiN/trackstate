@@ -10,4 +10,4 @@ notes:
   - Seeds a temporary hosted `TS-123` issue inside the live `DEMO` project.
   - Switches attachment storage to `github-releases` with the default `trackstate-attachments-` prefix.
   - Runs the real hosted CLI upload flow twice with the same `design_v1.png` filename.
-  - Passes only when the release tag/title are deterministic, the public attachment identifier stays stable, and the second upload replaces the existing GitHub Release asset without creating duplicates.
+  - Passes only when the release tag/title are deterministic, the public attachment identifier stays stable, and the second upload replaces the existing GitHub Release asset without creating duplicates or serving stale bytes.

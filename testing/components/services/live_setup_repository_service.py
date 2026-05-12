@@ -361,10 +361,10 @@ class LiveSetupRepositoryService:
                 return None
             raise
         if not isinstance(payload, dict):
-             raise RuntimeError(
-                 f"GitHub response for release tag {tag_name} was not an object.",
-             )
-         return self._parse_release(payload, fallback_tag_name=tag_name)
+            raise RuntimeError(
+                f"GitHub response for release tag {tag_name} was not an object.",
+            )
+        return self._parse_release(payload, fallback_tag_name=tag_name)
 
     def fetch_releases_by_tag_any_state(
         self,

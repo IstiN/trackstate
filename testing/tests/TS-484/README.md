@@ -33,4 +33,5 @@ python3 testing/tests/TS-484/test_ts_484.py
     with title `Attachments for TS-123`
   - the public attachment id stays issue-scoped and backend-agnostic
   - the second upload keeps the same release container and logical attachment id
-    while the GitHub Release still exposes exactly one `design_v1.png` asset.
+    while the GitHub Release still exposes exactly one `design_v1.png` asset
+    whose downloaded bytes/hash match the replacement payload.

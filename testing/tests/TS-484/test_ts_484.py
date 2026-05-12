@@ -9,7 +9,6 @@ import sys
 import tempfile
 import traceback
 import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,7 +18,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveHostedRelease,
-    LiveHostedReleaseAsset,
     LiveHostedRepositoryFile,
     LiveSetupRepositoryService,
 )
@@ -49,6 +47,8 @@ SECOND_ATTACHMENT_BYTES = (
     b"\x89PNG\r\n\x1a\n"
     b"TS-484 replacement payload with different bytes\n"
 )
+FIRST_ATTACHMENT_SHA256 = hashlib.sha256(FIRST_ATTACHMENT_BYTES).hexdigest()
+SECOND_ATTACHMENT_SHA256 = hashlib.sha256(SECOND_ATTACHMENT_BYTES).hexdigest()
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -76,7 +76,7 @@ def main() -> None:
             "GitHub Releases attachment flow.",
         )
 
-    original_release = _fetch_release_by_tag_any_state(service, EXPECTED_RELEASE_TAG)
+    original_release = service.fetch_release_by_tag_any_state(EXPECTED_RELEASE_TAG)
     if original_release is not None:
         raise RuntimeError(
             f"TS-484 requires a clean hosted release tag `{EXPECTED_RELEASE_TAG}` but "
@@ -164,6 +164,8 @@ def main() -> None:
                         state=state,
                         expected_public_id=EXPECTED_PUBLIC_ID,
                         expected_revision_or_oid=str(first_upload["revision_or_oid"]),
+                        expected_asset_size_bytes=len(FIRST_ATTACHMENT_BYTES),
+                        expected_asset_sha256=FIRST_ATTACHMENT_SHA256,
                     ),
                     timeout_seconds=120,
                     interval_seconds=4,
@@ -239,6 +241,8 @@ def main() -> None:
                         state=state,
                         expected_public_id=EXPECTED_PUBLIC_ID,
                         expected_revision_or_oid=str(second_upload["revision_or_oid"]),
+                        expected_asset_size_bytes=len(SECOND_ATTACHMENT_BYTES),
+                        expected_asset_sha256=SECOND_ATTACHMENT_SHA256,
                     ),
                     timeout_seconds=120,
                     interval_seconds=4,
@@ -265,7 +269,9 @@ def main() -> None:
                         f"release_id={second_state['release_id']}; "
                         f"first_revision_or_oid={first_upload['revision_or_oid']}; "
                         f"second_revision_or_oid={second_upload['revision_or_oid']}; "
-                        f"asset_names={second_state['release_asset_names']}"
+                        f"asset_ids={second_state['release_asset_ids']}; "
+                        f"asset_names={second_state['release_asset_names']}; "
+                        f"downloaded_asset_sha256={second_state['release_asset_downloaded_sha256']}"
                     ),
                 )
                 _record_human_verification(
@@ -273,7 +279,8 @@ def main() -> None:
                     check=(
                         "Verified the second visible CLI JSON success output kept the same "
                         "public attachment id while the live GitHub Release still exposed "
-                        "exactly one `design_v1.png` asset in the same release container."
+                        "exactly one `design_v1.png` asset whose downloaded bytes matched "
+                        "the replacement payload."
                     ),
                     observed=(
                         f"stdout={second_upload['stdout']}\n"
@@ -447,7 +454,7 @@ def _seed_fixture(service: LiveSetupRepositoryService) -> dict[str, object]:
             f"{ISSUE_KEY} issue fixture within the timeout.\n"
             f"Observed payload: {issue_payload}",
         )
-    if _fetch_release_by_tag_any_state(service, EXPECTED_RELEASE_TAG) is not None:
+    if service.fetch_release_by_tag_any_state(EXPECTED_RELEASE_TAG) is not None:
         raise AssertionError(
             f"Precondition failed: release tag `{EXPECTED_RELEASE_TAG}` already exists "
             "before the first upload should create it.",
@@ -735,9 +742,24 @@ def _observe_remote_state(service: LiveSetupRepositoryService) -> dict[str, obje
         for entry in manifest_entries
         if isinstance(entry, dict) and str(entry.get("name", "")) == ATTACHMENT_NAME
     ]
-    release = _fetch_release_by_tag_any_state(service, EXPECTED_RELEASE_TAG)
+    release = service.fetch_release_by_tag_any_state(EXPECTED_RELEASE_TAG)
     release_asset_names = [asset.name for asset in release.assets] if release is not None else []
     release_asset_ids = [asset.id for asset in release.assets] if release is not None else []
+    downloaded_asset_id: int | None = None
+    downloaded_asset_size_bytes: int | None = None
+    downloaded_asset_sha256: str | None = None
+    downloaded_asset_error: str | None = None
+    if release is not None and len(release.assets) == 1:
+        downloaded_asset_id = release.assets[0].id
+        try:
+            asset_bytes = service.download_release_asset_bytes(downloaded_asset_id)
+        except urllib.error.HTTPError as error:
+            downloaded_asset_error = (
+                f"HTTP {error.code} while downloading release asset {downloaded_asset_id}"
+            )
+        else:
+            downloaded_asset_size_bytes = len(asset_bytes)
+            downloaded_asset_sha256 = hashlib.sha256(asset_bytes).hexdigest()
     return {
         "manifest_exists": manifest_file is not None,
         "manifest_sha": manifest_file.sha if manifest_file is not None else None,
@@ -749,6 +771,10 @@ def _observe_remote_state(service: LiveSetupRepositoryService) -> dict[str, obje
         "release_title": release.name if release is not None else None,
         "release_asset_names": release_asset_names,
         "release_asset_ids": release_asset_ids,
+        "release_asset_downloaded_id": downloaded_asset_id,
+        "release_asset_downloaded_size_bytes": downloaded_asset_size_bytes,
+        "release_asset_downloaded_sha256": downloaded_asset_sha256,
+        "release_asset_download_error": downloaded_asset_error,
     }
 
 
@@ -757,12 +783,17 @@ def _remote_state_matches_single_release_asset(
     state: dict[str, object],
     expected_public_id: str,
     expected_revision_or_oid: str,
+    expected_asset_size_bytes: int,
+    expected_asset_sha256: str,
 ) -> bool:
     entries = state.get("matching_manifest_entries")
     asset_names = state.get("release_asset_names")
+    asset_ids = state.get("release_asset_ids")
     if not isinstance(entries, list) or not isinstance(asset_names, list):
         return False
-    if len(entries) != 1 or len(asset_names) != 1:
+    if not isinstance(asset_ids, list):
+        return False
+    if len(entries) != 1 or len(asset_names) != 1 or len(asset_ids) != 1:
         return False
     if asset_names[0] != ATTACHMENT_NAME:
         return False
@@ -780,6 +811,9 @@ def _remote_state_matches_single_release_asset(
         and str(entry.get("githubReleaseTag", "")) == EXPECTED_RELEASE_TAG
         and str(entry.get("githubReleaseAssetName", "")) == ATTACHMENT_NAME
         and str(entry.get("revisionOrOid", "")) == expected_revision_or_oid
+        and state.get("release_asset_downloaded_id") == asset_ids[0]
+        and state.get("release_asset_downloaded_size_bytes") == expected_asset_size_bytes
+        and str(state.get("release_asset_downloaded_sha256", "")) == expected_asset_sha256
     )
 
 
@@ -788,11 +822,15 @@ def _remote_state_matches_replacement(
     state: dict[str, object],
     expected_public_id: str,
     expected_revision_or_oid: str,
+    expected_asset_size_bytes: int,
+    expected_asset_sha256: str,
 ) -> bool:
     return _remote_state_matches_single_release_asset(
         state=state,
         expected_public_id=expected_public_id,
         expected_revision_or_oid=expected_revision_or_oid,
+        expected_asset_size_bytes=expected_asset_size_bytes,
+        expected_asset_sha256=expected_asset_sha256,
     )
 
 
@@ -885,6 +923,19 @@ def _assert_replacement_behavior(
             f"Second entry: {json.dumps(second_entry, indent=2, sort_keys=True)}\n"
             f"Second upload: {json.dumps(second_upload, indent=2, sort_keys=True)}"
         )
+    if second_state["release_asset_downloaded_sha256"] != SECOND_ATTACHMENT_SHA256:
+        raise AssertionError(
+            "Step 5 failed: the live GitHub Release did not serve the replacement asset "
+            "bytes after re-uploading `design_v1.png`.\n"
+            f"Expected SHA-256: {SECOND_ATTACHMENT_SHA256}\n"
+            f"Observed remote state:\n{json.dumps(second_state, indent=2, sort_keys=True)}"
+        )
+    if second_state["release_asset_downloaded_size_bytes"] != len(SECOND_ATTACHMENT_BYTES):
+        raise AssertionError(
+            "Step 5 failed: the downloaded live GitHub Release asset size did not match "
+            "the replacement upload payload.\n"
+            f"Observed remote state:\n{json.dumps(second_state, indent=2, sort_keys=True)}"
+        )
     if second_upload["attachment_size_bytes"] != len(SECOND_ATTACHMENT_BYTES):
         raise AssertionError(
             "Step 5 failed: the second upload response did not expose the replacement "
@@ -921,7 +972,7 @@ def _restore_fixture(
             )
         restored_paths.append(mutation.path)
 
-    release_after_test = _fetch_release_by_tag_any_state(service, EXPECTED_RELEASE_TAG)
+    release_after_test = service.fetch_release_by_tag_any_state(EXPECTED_RELEASE_TAG)
     _delete_release_if_present(service, release_after_test)
     return {
         "status": "restored",
@@ -954,91 +1005,17 @@ def _delete_release_if_present(
         )
 
 
-def _fetch_release_by_tag_any_state(
-    service: LiveSetupRepositoryService,
-    tag_name: str,
-) -> LiveHostedRelease | None:
-    matches = _list_releases_by_tag_any_state(service, tag_name)
-    if matches:
-        return matches[0]
-    published = service.fetch_release_by_tag(tag_name)
-    if published is not None:
-        return published
-    return None
-
-
 def _delete_release_pass(
     service: LiveSetupRepositoryService,
     tag_name: str,
 ) -> list[int]:
-    matches = _list_releases_by_tag_any_state(service, tag_name)
+    matches = service.fetch_releases_by_tag_any_state(tag_name)
     for release in matches:
         for asset in release.assets:
             service.delete_release_asset(asset.id)
         service.delete_release(release.id)
-    remaining = _list_releases_by_tag_any_state(service, tag_name)
+    remaining = service.fetch_releases_by_tag_any_state(tag_name)
     return [release.id for release in remaining]
-
-
-def _list_releases_by_tag_any_state(
-    service: LiveSetupRepositoryService,
-    tag_name: str,
-) -> list[LiveHostedRelease]:
-    token = service.token
-    if not token:
-        return []
-    matches: list[LiveHostedRelease] = []
-    for page in range(1, 6):
-        request = urllib.request.Request(
-            (
-                f"https://api.github.com/repos/{service.repository}/releases"
-                f"?per_page=100&page={page}"
-            ),
-            headers={
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-                "Authorization": f"Bearer {token}",
-            },
-        )
-        with urllib.request.urlopen(request, timeout=60) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        if not isinstance(payload, list) or not payload:
-            break
-        for entry in payload:
-            if not isinstance(entry, dict):
-                continue
-            if str(entry.get("tag_name", "")).strip() != tag_name:
-                continue
-            release_id = int(entry.get("id", 0))
-            detail_request = urllib.request.Request(
-                f"https://api.github.com/repos/{service.repository}/releases/{release_id}",
-                headers={
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                    "Authorization": f"Bearer {token}",
-                },
-            )
-            with urllib.request.urlopen(detail_request, timeout=60) as response:
-                detail = json.loads(response.read().decode("utf-8"))
-            if not isinstance(detail, dict):
-                continue
-            matches.append(
-                LiveHostedRelease(
-                    id=int(detail.get("id", 0)),
-                    tag_name=str(detail.get("tag_name", "")).strip(),
-                    name=str(detail.get("name", "")).strip(),
-                    assets=[
-                        LiveHostedReleaseAsset(
-                            id=int(asset.get("id", 0)),
-                            name=str(asset.get("name", "")).strip(),
-                        )
-                        for asset in detail.get("assets", [])
-                        if isinstance(asset, dict)
-                    ],
-                )
-            )
-    unique_by_id: dict[int, LiveHostedRelease] = {release.id: release for release in matches}
-    return list(unique_by_id.values())
 
 
 def _write_repo_text_with_retry(
@@ -1213,9 +1190,9 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             f"file name {{{{{ATTACHMENT_NAME}}}}}."
         ),
         (
-            f"* Polled {{{{{MANIFEST_PATH}}}}} plus the GitHub Release "
-            f"{{{{{EXPECTED_RELEASE_TAG}}}}} to verify deterministic mapping and "
-            "duplicate-free replacement."
+            f"* Polled {{{{{MANIFEST_PATH}}}}}, inspected the GitHub Release "
+            f"{{{{{EXPECTED_RELEASE_TAG}}}}}, and downloaded the live release asset to "
+            "verify deterministic mapping and replace-in-place behavior."
         ),
         "",
         "*Observed result*",
@@ -1223,7 +1200,8 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             f"* Matched the expected result: the issue resolved to release tag "
             f"`{EXPECTED_RELEASE_TAG}` with title `{EXPECTED_RELEASE_TITLE}`, the public "
             f"identifier stayed {{{{{EXPECTED_PUBLIC_ID}}}}}, and the second upload kept "
-            "exactly one `design_v1.png` asset in the same release container."
+            "exactly one `design_v1.png` asset whose downloaded bytes matched the "
+            "replacement payload."
             if passed
             else "* Did not match the expected result."
         ),
@@ -1268,9 +1246,9 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             f"name `{ATTACHMENT_NAME}`."
         ),
         (
-            f"- Polled `{MANIFEST_PATH}` plus the GitHub Release "
-            f"`{EXPECTED_RELEASE_TAG}` to verify deterministic mapping and "
-            "duplicate-free replacement."
+            f"- Polled `{MANIFEST_PATH}`, inspected the GitHub Release "
+            f"`{EXPECTED_RELEASE_TAG}`, and downloaded the live release asset to verify "
+            "deterministic mapping and replace-in-place behavior."
         ),
         "",
         "### Observed result",
@@ -1278,7 +1256,8 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             f"- Matched the expected result: the issue resolved to release tag "
             f"`{EXPECTED_RELEASE_TAG}` with title `{EXPECTED_RELEASE_TITLE}`, the public "
             f"identifier stayed `{EXPECTED_PUBLIC_ID}`, and the second upload kept exactly "
-            "one `design_v1.png` asset in the same release container."
+            "one `design_v1.png` asset whose downloaded bytes matched the replacement "
+            "payload."
             if passed
             else "- Did not match the expected result."
         ),
@@ -1313,8 +1292,9 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         (
             "Ran the live hosted CLI attachment flow twice for `design_v1.png` and "
-            "checked the observable JSON output, `attachments.json`, and GitHub Release "
-            "state for deterministic release-backed mapping and duplicate-free replacement."
+            "checked the observable JSON output, `attachments.json`, the GitHub Release "
+            "state, and the downloaded release asset bytes for deterministic release-backed "
+            "mapping and replace-in-place behavior."
         ),
         "",
         "## Observed",
