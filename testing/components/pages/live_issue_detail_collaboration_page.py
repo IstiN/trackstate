@@ -39,6 +39,14 @@ class AttachmentSelectionSummaryObservation:
 
 
 @dataclass(frozen=True)
+class AttachmentUploadControlsObservation:
+    choose_button_count: int
+    choose_button_enabled: bool
+    upload_button_count: int
+    upload_button_enabled: bool
+
+
+@dataclass(frozen=True)
 class CommentComposerObservation:
     field_label: str
     field_enabled: bool
@@ -727,6 +735,64 @@ class LiveIssueDetailCollaborationPage:
 
     def visible_button_count(self, label: str) -> int:
         return self._session.count(self._button_selector, has_text=label)
+
+    def observe_attachment_upload_controls(self) -> AttachmentUploadControlsObservation:
+        payload = self._session.evaluate(
+            """
+            () => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+              };
+              const isEnabled = (element) =>
+                !!element &&
+                isVisible(element) &&
+                element.getAttribute('aria-disabled') !== 'true';
+              const countButtons = (fragment) => Array.from(
+                document.querySelectorAll('flt-semantics[role="button"][aria-label]')
+              ).filter((element) => {
+                const label = element.getAttribute('aria-label') || '';
+                return isVisible(element) && label.includes(fragment);
+              }).length;
+
+              const chooseButton = document.querySelector(
+                'flt-semantics[aria-label="Choose attachment"]'
+              );
+              const chooseTrigger = document.querySelector(
+                'flt-semantics[aria-label="Choose attachment"] flt-semantics'
+              );
+              const uploadButton = document.querySelector(
+                'flt-semantics[aria-label="Upload attachment"]'
+              );
+              const uploadTrigger = document.querySelector(
+                'flt-semantics[aria-label="Upload attachment"] flt-semantics'
+              );
+
+              return {
+                chooseButtonCount: countButtons('Choose attachment'),
+                chooseButtonEnabled:
+                  isEnabled(chooseTrigger) || isEnabled(chooseButton),
+                uploadButtonCount: countButtons('Upload attachment'),
+                uploadButtonEnabled:
+                  isEnabled(uploadTrigger) || isEnabled(uploadButton),
+              };
+            }
+            """,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 1 failed: unable to inspect the hosted attachment upload controls.\n"
+                f"Observed payload: {payload!r}",
+            )
+        return AttachmentUploadControlsObservation(
+            choose_button_count=int(payload.get("chooseButtonCount", 0)),
+            choose_button_enabled=bool(payload.get("chooseButtonEnabled")),
+            upload_button_count=int(payload.get("uploadButtonCount", 0)),
+            upload_button_enabled=bool(payload.get("uploadButtonEnabled")),
+        )
 
     def choose_attachment_file(self, file_path: str) -> None:
         self._session.click_and_set_files(
