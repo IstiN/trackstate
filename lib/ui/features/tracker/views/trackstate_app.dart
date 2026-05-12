@@ -1231,7 +1231,9 @@ class _RepositoryAccessBanner extends StatelessWidget {
             ? l10n.openSettings
             : _repositoryAccessPrimaryActionLabel(l10n, viewModel),
         onPrimaryAction: attachmentDownloadOnly
-            ? () => viewModel.selectSection(TrackerSection.settings)
+            ? () => viewModel.openProjectSettings(
+                tab: ProjectSettingsTab.attachments,
+              )
             : () => _showRepositoryAccessDialog(context, viewModel),
       ),
     );
@@ -2154,18 +2156,6 @@ class _SettingsState extends State<_Settings> {
 
 enum _SettingsProviderSelection { hosted, localGit }
 
-enum _SettingsCatalogTab {
-  statuses,
-  workflows,
-  issueTypes,
-  fields,
-  priorities,
-  components,
-  versions,
-  attachments,
-  locales,
-}
-
 class _ProjectSettingsAdmin extends StatefulWidget {
   const _ProjectSettingsAdmin({required this.viewModel});
 
@@ -2181,13 +2171,14 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
   ProjectSettingsCatalog? _draftSettings;
   String? _projectSignature;
   String? _selectedLocale;
+  int _handledProjectSettingsRequest = 0;
   final Map<String, FocusNode> _localeFocusNodes = {};
 
   @override
   void initState() {
     super.initState();
     _tabController =
-        TabController(length: _SettingsCatalogTab.values.length, vsync: this)
+        TabController(length: ProjectSettingsTab.values.length, vsync: this)
           ..addListener(() {
             if (_tabController.indexIsChanging) {
               return;
@@ -2238,6 +2229,20 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
 
   FocusNode _localeFocusNode(String key) =>
       _localeFocusNodes.putIfAbsent(key, FocusNode.new);
+
+  void _syncRequestedTab() {
+    final request = widget.viewModel.projectSettingsTabRequest;
+    if (request == 0 || request == _handledProjectSettingsRequest) {
+      return;
+    }
+    _handledProjectSettingsRequest = request;
+    final requestedTab =
+        widget.viewModel.projectSettingsTab ?? ProjectSettingsTab.statuses;
+    final requestedIndex = ProjectSettingsTab.values.indexOf(requestedTab);
+    if (_tabController.index != requestedIndex) {
+      _tabController.index = requestedIndex;
+    }
+  }
 
   Future<T?> _showSettingsEditor<T>({
     required String title,
@@ -3194,6 +3199,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
   Widget build(BuildContext context) {
     final project = widget.viewModel.project!;
     _syncDraft(project);
+    _syncRequestedTab();
     final l10n = AppLocalizations.of(context)!;
     final settings = _draftSettings!;
     final canEdit =
@@ -3215,20 +3221,20 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         Tab(text: l10n.locales),
       ],
     );
-    final content = switch (_SettingsCatalogTab.values[_tabController.index]) {
-      _SettingsCatalogTab.statuses => _buildStatusTab(l10n, settings, canEdit),
-      _SettingsCatalogTab.workflows => _buildWorkflowTab(
+    final content = switch (ProjectSettingsTab.values[_tabController.index]) {
+      ProjectSettingsTab.statuses => _buildStatusTab(l10n, settings, canEdit),
+      ProjectSettingsTab.workflows => _buildWorkflowTab(
         l10n,
         settings,
         canEdit,
       ),
-      _SettingsCatalogTab.issueTypes => _buildIssueTypeTab(
+      ProjectSettingsTab.issueTypes => _buildIssueTypeTab(
         l10n,
         settings,
         canEdit,
       ),
-      _SettingsCatalogTab.fields => _buildFieldTab(l10n, settings, canEdit),
-      _SettingsCatalogTab.priorities => _buildSimpleEntryTab(
+      ProjectSettingsTab.fields => _buildFieldTab(l10n, settings, canEdit),
+      ProjectSettingsTab.priorities => _buildSimpleEntryTab(
         l10n: l10n,
         title: l10n.priorities,
         addLabel: l10n.addPriority,
@@ -3247,7 +3253,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         onChanged: (entries) =>
             _replaceDraft(settings.copyWith(priorityDefinitions: entries)),
       ),
-      _SettingsCatalogTab.components => _buildSimpleEntryTab(
+      ProjectSettingsTab.components => _buildSimpleEntryTab(
         l10n: l10n,
         title: l10n.components,
         addLabel: l10n.addComponent,
@@ -3266,7 +3272,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         onChanged: (entries) =>
             _replaceDraft(settings.copyWith(componentDefinitions: entries)),
       ),
-      _SettingsCatalogTab.versions => _buildSimpleEntryTab(
+      ProjectSettingsTab.versions => _buildSimpleEntryTab(
         l10n: l10n,
         title: l10n.versions,
         addLabel: l10n.addVersion,
@@ -3285,12 +3291,12 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         onChanged: (entries) =>
             _replaceDraft(settings.copyWith(versionDefinitions: entries)),
       ),
-      _SettingsCatalogTab.attachments => _buildAttachmentsTab(
+      ProjectSettingsTab.attachments => _buildAttachmentsTab(
         l10n,
         settings,
         canEdit,
       ),
-      _SettingsCatalogTab.locales => _buildLocalesTab(l10n, settings, canEdit),
+      ProjectSettingsTab.locales => _buildLocalesTab(l10n, settings, canEdit),
     };
     return _SurfaceCard(
       semanticLabel: l10n.projectSettingsAdmin,
@@ -8126,7 +8132,9 @@ class _AttachmentsTab extends StatelessWidget {
                 ? l10n.openSettings
                 : null,
             onPrimaryAction: attachmentDownloadOnly
-                ? () => viewModel.selectSection(TrackerSection.settings)
+                ? () => viewModel.openProjectSettings(
+                    tab: ProjectSettingsTab.attachments,
+                  )
                 : null,
           ),
           const SizedBox(height: 12),
