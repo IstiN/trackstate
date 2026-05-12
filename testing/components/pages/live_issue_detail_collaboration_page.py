@@ -4,7 +4,10 @@ from dataclasses import dataclass
 
 from testing.components.pages.live_jql_search_page import LiveJqlSearchPage
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
-from testing.core.interfaces.web_app_session import FocusedElementObservation
+from testing.core.interfaces.web_app_session import (
+    FocusedElementObservation,
+    WebAppTimeoutError,
+)
 
 
 @dataclass(frozen=True)
@@ -68,14 +71,17 @@ class LiveIssueDetailCollaborationPage:
             has_text="Connect token",
             timeout_ms=30_000,
         )
+        connected_markers = [
+            connected_banner,
+            "GitHub connection failed:",
+            "Manage GitHub access",
+            user_login,
+        ]
         wait_match = self._session.wait_for_any_text(
-            [
-                connected_banner,
-                "GitHub connection failed:",
-            ],
+            connected_markers,
             timeout_ms=120_000,
         )
-        if wait_match.matched_text != connected_banner:
+        if wait_match.matched_text == "GitHub connection failed:":
             raise AssertionError(
                 "Step 1 failed: the hosted GitHub connection flow did not reach the "
                 "connected state required for TS-311.\n"
@@ -91,6 +97,25 @@ class LiveIssueDetailCollaborationPage:
 
     def open_issue(self, *, issue_key: str, issue_summary: str) -> None:
         self.open_jql_search()
+        self._session.click(
+            self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary),
+            timeout_ms=30_000,
+        )
+        self._session.wait_for_selector(
+            self._issue_detail_selector(issue_key),
+            timeout_ms=60_000,
+        )
+
+    def select_issue_from_visible_list(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str,
+    ) -> None:
+        self._session.wait_for_selector(
+            self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary),
+            timeout_ms=30_000,
+        )
         self._session.click(
             self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary),
             timeout_ms=30_000,
@@ -147,6 +172,25 @@ class LiveIssueDetailCollaborationPage:
 
     def issue_detail_count(self, issue_key: str) -> int:
         return self._session.count(self._issue_detail_selector(issue_key))
+
+    def issue_result_button_count(self, *, issue_key: str, issue_summary: str) -> int:
+        return self._session.count(
+            self._open_issue_selector(issue_key=issue_key, issue_summary=issue_summary),
+        )
+
+    def visible_issue_result_labels(self) -> tuple[str, ...]:
+        payload = self._session.evaluate(
+            """
+            () => Array.from(
+              document.querySelectorAll('flt-semantics[role="button"][aria-label^="Open "]')
+            )
+              .map((element) => element.getAttribute('aria-label') ?? '')
+              .filter((label) => label.length > 0)
+            """,
+        )
+        if not isinstance(payload, list):
+            return ()
+        return tuple(str(label) for label in payload)
 
     def tab_button_count(self, label: str) -> int:
         return self._session.count(self._tab_button_selector, has_text=label)
@@ -416,6 +460,58 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=timeout_ms,
         )
 
+    def wait_for_deferred_loading(
+        self,
+        section_label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        selector = self._deferred_loading_selector(section_label)
+        selector_probe_timeout = min(timeout_ms, 1_000)
+        try:
+            self._session.wait_for_selector(
+                selector,
+                timeout_ms=selector_probe_timeout,
+            )
+        except WebAppTimeoutError:
+            loading_fragment = f"{section_label} loading"
+            body_text = self._session.wait_for_function(
+                """
+                ({ loadingFragment }) => {
+                  const bodyText = document.body?.innerText ?? '';
+                  return bodyText.toLowerCase().includes(loadingFragment.toLowerCase())
+                    ? bodyText
+                    : null;
+                }
+                """,
+                arg={"loadingFragment": loading_fragment},
+                timeout_ms=timeout_ms,
+            )
+            if isinstance(body_text, str) and loading_fragment.lower() in body_text.lower():
+                return loading_fragment
+            return self.current_body_text()
+        payload = self._session.evaluate(
+            """
+            ({ selector }) => {
+              const element = document.querySelector(selector);
+              return element?.getAttribute('aria-label') ?? '';
+            }
+            """,
+            arg={"selector": selector},
+        )
+        label = str(payload).strip()
+        if not label:
+            raise AssertionError(
+                "Step 4 failed: the live issue detail did not expose an accessible "
+                f"loading label for {section_label!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return label
+
+    def accessible_label_count_containing(self, fragment: str) -> int:
+        selector = f'[aria-label*="{self._escape(fragment)}"]'
+        return self._session.count(selector)
+
     def wait_for_deferred_error_to_clear(
         self,
         section_label: str,
@@ -556,6 +652,13 @@ class LiveIssueDetailCollaborationPage:
                 f'[aria-label*="{LiveIssueDetailCollaborationPage._escape(expected_fragment)}"]'
             )
         return selector
+
+    @staticmethod
+    def _deferred_loading_selector(section_label: str) -> str:
+        return (
+            '[aria-label*="'
+            f'{LiveIssueDetailCollaborationPage._escape(section_label)} loading"]'
+        )
 
     @staticmethod
     def _escape(value: str) -> str:
