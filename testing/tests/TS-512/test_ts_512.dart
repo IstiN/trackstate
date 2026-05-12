@@ -17,7 +17,10 @@ const String _noticeTitle =
 const String _noticeMessage =
     'This project stores new attachments in GitHub Releases. Existing attachments remain available for download, but hosted release-backed uploads are not available in this browser session yet.';
 const String _openSettingsLabel = 'Open settings';
+const String _chooseAttachmentLabel = 'Choose attachment';
+const String _uploadAttachmentLabel = 'Upload attachment';
 const String _attachmentName = 'sync-sequence.svg';
+const String _downloadAttachmentLabel = 'Download sync-sequence.svg';
 
 const String _githubReleasesProjectJson = '''
 {
@@ -129,6 +132,29 @@ void main() {
               RegExp('^${RegExp.escape(_openSettingsLabel)}\$'),
             ),
           );
+          final attachmentRow = _smallestByArea(
+            tester,
+            find.ancestor(
+              of: find.text(_attachmentName),
+              matching: find.byWidgetPredicate(
+                (widget) =>
+                    widget is Container && widget.decoration is BoxDecoration,
+                description: 'decorated attachment row container',
+              ),
+            ),
+          );
+          final downloadAttachmentButton = find.descendant(
+            of: attachmentRow,
+            matching: find.byType(IconButton),
+          );
+          final chooseAttachmentButton = find.widgetWithText(
+            OutlinedButton,
+            _chooseAttachmentLabel,
+          );
+          final uploadAttachmentButton = find.widgetWithText(
+            FilledButton,
+            _uploadAttachmentLabel,
+          );
           if (openSettingsButton.evaluate().isEmpty) {
             failures.add(
               'Step 3 failed: the recovery control did not expose a semantics node labeled "${_openSettingsLabel}". '
@@ -205,10 +231,67 @@ void main() {
               'Step 2 failed: the Attachments tab did not expose the Open settings recovery action needed for keyboard verification. '
               'Visible issue-detail text: ${_formatSnapshot(visibleTexts)}.',
             );
+          } else if (downloadAttachmentButton.evaluate().isEmpty) {
+            failures.add(
+              'Step 2 failed: the Attachments tab did not expose a keyboard-focusable download action labeled "${_downloadAttachmentLabel}". '
+              'Observed issue-detail buttons: ${_formatSnapshot(screen.buttonLabelsInIssueDetail(_issueKey))}.',
+            );
           } else {
             await robot.clearFocus();
+            final focusSequence = <String>[];
+            final focusCandidates = <String, Finder>{
+              _openSettingsLabel: openSettingsButton,
+              _chooseAttachmentLabel: chooseAttachmentButton,
+              _uploadAttachmentLabel: uploadAttachmentButton,
+              _downloadAttachmentLabel: downloadAttachmentButton,
+            };
             var openSettingsReached = false;
-            for (var index = 0; index < 24; index += 1) {
+            var downloadReached = false;
+            for (var index = 0; index < 48; index += 1) {
+              await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+              await tester.pump();
+              final focusedLabel = robot.focusedLabel(focusCandidates);
+              if (focusedLabel == null) {
+                continue;
+              }
+              if (focusSequence.isEmpty || focusSequence.last != focusedLabel) {
+                focusSequence.add(focusedLabel);
+              }
+              if (focusedLabel == _openSettingsLabel) {
+                openSettingsReached = true;
+              } else if (focusedLabel == _downloadAttachmentLabel) {
+                downloadReached = true;
+                break;
+              }
+            }
+            if (!openSettingsReached) {
+              failures.add(
+                'Step 2 failed: keyboard Tab traversal never reached the visible Open settings recovery action from the Attachments tab. '
+                'Observed focus sequence: ${_formatSnapshot(focusSequence)}.',
+              );
+            } else if (!downloadReached) {
+              failures.add(
+                'Step 2 failed: keyboard Tab traversal never reached the visible "${_downloadAttachmentLabel}" action, so the required focus order could not be verified. '
+                'Observed focus sequence: ${_formatSnapshot(focusSequence)}.',
+              );
+            } else {
+              final openSettingsIndex = focusSequence.indexOf(
+                _openSettingsLabel,
+              );
+              final downloadIndex = focusSequence.indexOf(
+                _downloadAttachmentLabel,
+              );
+              if (downloadIndex < openSettingsIndex) {
+                failures.add(
+                  'Step 2 failed: keyboard Tab traversal reached "${_downloadAttachmentLabel}" before "${_openSettingsLabel}". '
+                  'Observed focus sequence: ${_formatSnapshot(focusSequence)}.',
+                );
+              }
+            }
+
+            await robot.clearFocus();
+            openSettingsReached = false;
+            for (var index = 0; index < 48; index += 1) {
               await tester.sendKeyEvent(LogicalKeyboardKey.tab);
               await tester.pump();
               if (robot.focusedLabel(<String, Finder>{
@@ -221,7 +304,7 @@ void main() {
             }
             if (!openSettingsReached) {
               failures.add(
-                'Step 2 failed: keyboard Tab traversal never reached the visible Open settings recovery action from the Attachments tab. '
+                'Step 2 failed: keyboard Tab traversal could not restore focus to the visible Open settings recovery action for activation after validating focus order. '
                 'Visible issue-detail text: ${_formatSnapshot(visibleTexts)}.',
               );
             }
@@ -235,12 +318,14 @@ void main() {
               );
             }
 
-            await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-            await tester.pumpAndSettle();
-            if (find.text('Project Settings').evaluate().isEmpty) {
-              failures.add(
-                'Human-style verification failed: activating the keyboard-focused Open settings action did not navigate to Project Settings.',
-              );
+            if (openSettingsReached) {
+              await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+              await tester.pumpAndSettle();
+              if (find.text('Project Settings').evaluate().isEmpty) {
+                failures.add(
+                  'Human-style verification failed: activating the keyboard-focused Open settings action did not navigate to Project Settings.',
+                );
+              }
             }
           }
         }
@@ -293,6 +378,24 @@ String _formatRect(Rect rect) {
       'top=${rect.top.toStringAsFixed(1)}, '
       'right=${rect.right.toStringAsFixed(1)}, '
       'bottom=${rect.bottom.toStringAsFixed(1)}';
+}
+
+Finder _smallestByArea(WidgetTester tester, Finder finder) {
+  Finder? smallest;
+  double? smallestArea;
+  for (final element in finder.evaluate()) {
+    final candidate = find.byElementPredicate(
+      (selected) => selected == element,
+      description: 'smallest match for $finder',
+    );
+    final rect = tester.getRect(candidate);
+    final area = rect.width * rect.height;
+    if (smallestArea == null || area < smallestArea) {
+      smallest = candidate;
+      smallestArea = area;
+    }
+  }
+  return smallest ?? finder;
 }
 
 String _rgbHex(Color color) {
