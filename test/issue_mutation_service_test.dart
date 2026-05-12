@@ -280,6 +280,34 @@ void main() {
     },
   );
 
+  test('service adds comments through the shared typed contract', () async {
+    final repo = await _createMutationRepository();
+    addTearDown(() => repo.delete(recursive: true));
+
+    final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+    await repository.loadSnapshot();
+    await repository.connect(
+      const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+    );
+    final service = IssueMutationService(repository: repository);
+
+    final result = await service.addComment(
+      issueKey: 'DEMO-2',
+      body: 'CLI parity keeps comments in the shared mutation layer.',
+    );
+
+    expect(result.isSuccess, isTrue);
+    expect(result.value!.comments, hasLength(1));
+    expect(
+      result.value!.comments.single.body,
+      'CLI parity keeps comments in the shared mutation layer.',
+    );
+    expect(
+      File('${repo.path}/DEMO/DEMO-1/DEMO-2/comments/0001.md').existsSync(),
+      isTrue,
+    );
+  });
+
   test('service archives issues through the shared typed contract', () async {
     final repo = await _createMutationRepository();
     addTearDown(() => repo.delete(recursive: true));
