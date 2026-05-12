@@ -49,6 +49,18 @@ abstract interface class RepositoryAttachmentStore {
   Future<bool> isLfsTracked(String path);
 }
 
+abstract interface class RepositoryReleaseAttachmentStore {
+  Future<RepositoryAttachment> readReleaseAttachment(
+    RepositoryReleaseAttachmentReadRequest request,
+  );
+  Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
+    RepositoryReleaseAttachmentWriteRequest request,
+  );
+  Future<void> deleteReleaseAttachment(
+    RepositoryReleaseAttachmentDeleteRequest request,
+  );
+}
+
 abstract interface class RepositoryHistoryReader {
   Future<List<RepositoryHistoryCommit>> listHistory({
     required String ref,
@@ -364,6 +376,64 @@ class RepositoryAttachmentWriteResult {
   final String path;
   final String branch;
   final String? revision;
+}
+
+class RepositoryReleaseAttachmentReadRequest {
+  const RepositoryReleaseAttachmentReadRequest({
+    required this.releaseTag,
+    required this.assetName,
+    this.assetId,
+  });
+
+  final String releaseTag;
+  final String assetName;
+  final String? assetId;
+}
+
+class RepositoryReleaseAttachmentWriteRequest {
+  const RepositoryReleaseAttachmentWriteRequest({
+    required this.issueKey,
+    required this.releaseTag,
+    required this.releaseTitle,
+    required this.assetName,
+    required this.bytes,
+    required this.mediaType,
+    required this.branch,
+    this.allowedAssetNames = const <String>{},
+  });
+
+  final String issueKey;
+  final String releaseTag;
+  final String releaseTitle;
+  final String assetName;
+  final Uint8List bytes;
+  final String mediaType;
+  final String branch;
+  final Set<String> allowedAssetNames;
+}
+
+class RepositoryReleaseAttachmentWriteResult {
+  const RepositoryReleaseAttachmentWriteResult({
+    required this.releaseTag,
+    required this.assetName,
+    required this.assetId,
+  });
+
+  final String releaseTag;
+  final String assetName;
+  final String assetId;
+}
+
+class RepositoryReleaseAttachmentDeleteRequest {
+  const RepositoryReleaseAttachmentDeleteRequest({
+    required this.releaseTag,
+    required this.assetId,
+    required this.assetName,
+  });
+
+  final String releaseTag;
+  final String assetId;
+  final String assetName;
 }
 
 enum RepositoryHistoryChangeType { added, modified, removed, renamed }

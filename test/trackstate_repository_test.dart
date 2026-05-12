@@ -1583,6 +1583,771 @@ size 6
       expect(putAttempted, isFalse);
     },
   );
+
+  test(
+    'setup repository uploads github release attachments and persists metadata',
+    () async {
+      Map<String, Object?>? metadataWriteBody;
+      final repository = SetupTrackStateRepository(
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path.endsWith('/git/trees/main')) {
+            final tree = _releaseAttachmentFixtureFiles().keys
+                .map((filePath) => {'path': filePath, 'type': 'blob'})
+                .toList(growable: false);
+            return http.Response(jsonEncode({'tree': tree}), 200);
+          }
+          if (path == '/repos/${SetupTrackStateRepository.repositoryName}' &&
+              request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response(
+              '{"login":"demo-user","name":"Demo User"}',
+              200,
+            );
+          }
+          final contentsPrefix =
+              '/repos/${SetupTrackStateRepository.repositoryName}/contents/';
+          if (path.startsWith(contentsPrefix) && request.method == 'GET') {
+            final filePath = path.substring(contentsPrefix.length);
+            final content = _releaseAttachmentFixtureFiles()[filePath];
+            if (content != null) {
+              return _contentResponse(content);
+            }
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/contents/DEMO/DEMO-1/attachments.json' &&
+              request.method == 'PUT') {
+            metadataWriteBody =
+                jsonDecode(request.body) as Map<String, Object?>;
+            return http.Response(
+              '{"content":{"sha":"attachments-meta-sha"}}',
+              200,
+            );
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            return http.Response('', 404);
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases' &&
+              request.method == 'POST') {
+            return http.Response(
+              jsonEncode({
+                'id': 21,
+                'tag_name': 'trackstate-attachments-DEMO-1',
+                'name': 'Attachments for DEMO-1',
+                'assets': const <Object?>[],
+              }),
+              201,
+            );
+          }
+          if (request.url.host == 'uploads.github.com' &&
+              path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases/21/assets' &&
+              request.method == 'POST') {
+            expect(request.url.queryParameters['name'], 'release-plan.txt');
+            expect(request.headers['content-type'], 'text/plain');
+            expect(
+              request.bodyBytes,
+              Uint8List.fromList(utf8.encode('roadmap')),
+            );
+            return http.Response(
+              jsonEncode({
+                'id': 84,
+                'name': 'release-plan.txt',
+                'size': 7,
+                'browser_download_url': 'https://example.test/release-plan.txt',
+              }),
+              201,
+            );
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: SetupTrackStateRepository.repositoryName,
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final updated = await repository.uploadIssueAttachment(
+        issue: snapshot.issues.single,
+        name: 'release plan.txt',
+        bytes: Uint8List.fromList(utf8.encode('roadmap')),
+      );
+
+      final uploaded = updated.attachments.single;
+      expect(uploaded.storageBackend, AttachmentStorageMode.githubReleases);
+      expect(uploaded.githubReleaseTag, 'trackstate-attachments-DEMO-1');
+      expect(uploaded.githubReleaseAssetName, 'release-plan.txt');
+      expect(uploaded.revisionOrOid, '84');
+      final encodedContent = metadataWriteBody?['content']?.toString();
+      expect(encodedContent, isNotNull);
+      final metadataJson =
+          jsonDecode(utf8.decode(base64Decode(encodedContent!)))
+              as List<Object?>;
+      expect(metadataJson, [
+        {
+          'id': 'DEMO/DEMO-1/attachments/release-plan.txt',
+          'name': 'release-plan.txt',
+          'mediaType': 'text/plain',
+          'sizeBytes': 7,
+          'author': 'demo-user',
+          'createdAt': uploaded.createdAt,
+          'storagePath': 'DEMO/DEMO-1/attachments/release-plan.txt',
+          'revisionOrOid': '84',
+          'storageBackend': 'github-releases',
+          'githubReleaseTag': 'trackstate-attachments-DEMO-1',
+          'githubReleaseAssetName': 'release-plan.txt',
+        },
+      ]);
+    },
+  );
+
+  test(
+    'setup repository downloads github release attachments from metadata',
+    () async {
+      final repository = SetupTrackStateRepository(
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path.endsWith('/git/trees/main')) {
+            final tree = _releaseAttachmentFixtureFiles().keys
+                .map((filePath) => {'path': filePath, 'type': 'blob'})
+                .toList(growable: false);
+            return http.Response(jsonEncode({'tree': tree}), 200);
+          }
+          if (path == '/repos/${SetupTrackStateRepository.repositoryName}' &&
+              request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response(
+              '{"login":"demo-user","name":"Demo User"}',
+              200,
+            );
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases/assets/84' &&
+              request.method == 'GET') {
+            expect(request.headers['accept'], 'application/octet-stream');
+            expect(request.headers['authorization'], 'Bearer token');
+            return http.Response(
+              '',
+              302,
+              headers: {'location': 'https://example.test/release-plan.txt'},
+            );
+          }
+          if (request.url.toString() ==
+              'https://example.test/release-plan.txt') {
+            return http.Response.bytes(utf8.encode('roadmap'), 200);
+          }
+          return http.Response('', 404);
+        }),
+      );
+      await repository.connect(
+        const RepositoryConnection(
+          repository: SetupTrackStateRepository.repositoryName,
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      final bytes = await repository.downloadAttachment(
+        const IssueAttachment(
+          id: 'DEMO/DEMO-1/attachments/release-plan.txt',
+          name: 'release-plan.txt',
+          mediaType: 'text/plain',
+          sizeBytes: 7,
+          author: 'demo-user',
+          createdAt: '2026-05-05T00:00:00Z',
+          storagePath: 'DEMO/DEMO-1/attachments/release-plan.txt',
+          revisionOrOid: '84',
+          storageBackend: AttachmentStorageMode.githubReleases,
+          githubReleaseTag: 'trackstate-attachments-DEMO-1',
+          githubReleaseAssetName: 'release-plan.txt',
+        ),
+      );
+
+      expect(utf8.decode(bytes), 'roadmap');
+    },
+  );
+
+  test(
+    'setup repository rolls back release asset uploads when metadata write fails',
+    () async {
+      var deletedAssetId = '';
+      final repository = SetupTrackStateRepository(
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path.endsWith('/git/trees/main')) {
+            final tree =
+                {
+                      ..._releaseAttachmentFixtureFiles(),
+                      'DEMO/DEMO-1/attachments.json': jsonEncode([
+                        {
+                          'id': 'DEMO/DEMO-1/attachments/release-plan.txt',
+                          'name': 'release-plan.txt',
+                          'mediaType': 'text/plain',
+                          'sizeBytes': 6,
+                          'author': 'demo-user',
+                          'createdAt': '2026-05-05T00:00:00Z',
+                          'storagePath':
+                              'DEMO/DEMO-1/attachments/release-plan.txt',
+                          'revisionOrOid': '1',
+                          'storageBackend': 'github-releases',
+                          'githubReleaseTag': 'trackstate-attachments-DEMO-1',
+                          'githubReleaseAssetName': 'release-plan.txt',
+                        },
+                      ]),
+                    }.keys
+                    .map((filePath) => {'path': filePath, 'type': 'blob'})
+                    .toList(growable: false);
+            return http.Response(jsonEncode({'tree': tree}), 200);
+          }
+          if (path == '/repos/${SetupTrackStateRepository.repositoryName}' &&
+              request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response(
+              '{"login":"demo-user","name":"Demo User"}',
+              200,
+            );
+          }
+          final contentsPrefix =
+              '/repos/${SetupTrackStateRepository.repositoryName}/contents/';
+          if (path.startsWith(contentsPrefix) && request.method == 'GET') {
+            final filePath = path.substring(contentsPrefix.length);
+            final content = _releaseAttachmentFixtureFiles()[filePath];
+            if (content != null) {
+              return _contentResponse(content);
+            }
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/contents/DEMO/DEMO-1/attachments.json' &&
+              request.method == 'PUT') {
+            return http.Response('{"message":"stale revision"}', 409);
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            return http.Response('', 404);
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases' &&
+              request.method == 'POST') {
+            return http.Response(
+              jsonEncode({
+                'id': 21,
+                'tag_name': 'trackstate-attachments-DEMO-1',
+                'name': 'Attachments for DEMO-1',
+                'assets': const <Object?>[],
+              }),
+              201,
+            );
+          }
+          if (request.url.host == 'uploads.github.com' &&
+              path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases/21/assets' &&
+              request.method == 'POST') {
+            return http.Response(
+              jsonEncode({'id': 84, 'name': 'release-plan.txt', 'size': 7}),
+              201,
+            );
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases/assets/84' &&
+              request.method == 'DELETE') {
+            deletedAssetId = '84';
+            return http.Response('', 204);
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: SetupTrackStateRepository.repositoryName,
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      await expectLater(
+        () => repository.uploadIssueAttachment(
+          issue: snapshot.issues.single,
+          name: 'release plan.txt',
+          bytes: Uint8List.fromList(utf8.encode('roadmap')),
+        ),
+        throwsA(isA<TrackStateProviderException>()),
+      );
+      expect(deletedAssetId, '84');
+    },
+  );
+
+  test(
+    'setup repository restores the previous release asset when overwrite metadata fails',
+    () async {
+      var currentReleaseAssetId = '1';
+      final repository = SetupTrackStateRepository(
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path.endsWith('/git/trees/main')) {
+            final tree =
+                {
+                      ..._releaseAttachmentFixtureFiles(),
+                      'DEMO/DEMO-1/attachments.json': jsonEncode([
+                        {
+                          'id': 'DEMO/DEMO-1/attachments/release-plan.txt',
+                          'name': 'release-plan.txt',
+                          'mediaType': 'text/plain',
+                          'sizeBytes': 6,
+                          'author': 'demo-user',
+                          'createdAt': '2026-05-05T00:00:00Z',
+                          'storagePath':
+                              'DEMO/DEMO-1/attachments/release-plan.txt',
+                          'revisionOrOid': '1',
+                          'storageBackend': 'github-releases',
+                          'githubReleaseTag': 'trackstate-attachments-DEMO-1',
+                          'githubReleaseAssetName': 'release-plan.txt',
+                        },
+                      ]),
+                    }.keys
+                    .map((filePath) => {'path': filePath, 'type': 'blob'})
+                    .toList(growable: false);
+            return http.Response(jsonEncode({'tree': tree}), 200);
+          }
+          if (path == '/repos/${SetupTrackStateRepository.repositoryName}' &&
+              request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response(
+              '{"login":"demo-user","name":"Demo User"}',
+              200,
+            );
+          }
+          final contentsPrefix =
+              '/repos/${SetupTrackStateRepository.repositoryName}/contents/';
+          if (path.startsWith(contentsPrefix) && request.method == 'GET') {
+            final filePath = path.substring(contentsPrefix.length);
+            final content = {
+              ..._releaseAttachmentFixtureFiles(),
+              'DEMO/DEMO-1/attachments.json': jsonEncode([
+                {
+                  'id': 'DEMO/DEMO-1/attachments/release-plan.txt',
+                  'name': 'release-plan.txt',
+                  'mediaType': 'text/plain',
+                  'sizeBytes': 6,
+                  'author': 'demo-user',
+                  'createdAt': '2026-05-05T00:00:00Z',
+                  'storagePath': 'DEMO/DEMO-1/attachments/release-plan.txt',
+                  'revisionOrOid': '1',
+                  'storageBackend': 'github-releases',
+                  'githubReleaseTag': 'trackstate-attachments-DEMO-1',
+                  'githubReleaseAssetName': 'release-plan.txt',
+                },
+              ]),
+            }[filePath];
+            if (content != null) {
+              return _contentResponse(content);
+            }
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/contents/DEMO/DEMO-1/attachments.json' &&
+              request.method == 'PUT') {
+            return http.Response('{"message":"stale revision"}', 409);
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases/assets/1' &&
+              request.method == 'GET') {
+            expect(request.headers['accept'], 'application/octet-stream');
+            expect(request.headers['authorization'], 'Bearer token');
+            return http.Response.bytes(utf8.encode('legacy'), 200);
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases/assets/1' &&
+              request.method == 'DELETE') {
+            currentReleaseAssetId = '';
+            return http.Response('', 204);
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            return http.Response(
+              jsonEncode({
+                'id': 21,
+                'tag_name': 'trackstate-attachments-DEMO-1',
+                'name': 'Attachments for DEMO-1',
+                'assets': currentReleaseAssetId.isEmpty
+                    ? const <Object?>[]
+                    : [
+                        {
+                          'id': currentReleaseAssetId,
+                          'name': 'release-plan.txt',
+                          'size': 6,
+                        },
+                      ],
+              }),
+              200,
+            );
+          }
+          if (request.url.host == 'uploads.github.com' &&
+              path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases/21/assets' &&
+              request.method == 'POST') {
+            final body = utf8.decode(request.bodyBytes);
+            if (body == 'roadmap') {
+              currentReleaseAssetId = '2';
+              return http.Response(
+                jsonEncode({'id': 2, 'name': 'release-plan.txt', 'size': 7}),
+                201,
+              );
+            }
+            if (body == 'legacy') {
+              currentReleaseAssetId = '3';
+              return http.Response(
+                jsonEncode({'id': 3, 'name': 'release-plan.txt', 'size': 6}),
+                201,
+              );
+            }
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases/assets/2' &&
+              request.method == 'DELETE') {
+            currentReleaseAssetId = '';
+            return http.Response('', 204);
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases/assets/3' &&
+              request.method == 'GET') {
+            expect(request.headers['accept'], 'application/octet-stream');
+            expect(request.headers['authorization'], 'Bearer token');
+            return http.Response.bytes(utf8.encode('legacy'), 200);
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: SetupTrackStateRepository.repositoryName,
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final issue = await repository.hydrateIssue(
+        snapshot.issues.single,
+        scopes: const {IssueHydrationScope.attachments},
+      );
+
+      await expectLater(
+        () => repository.uploadIssueAttachment(
+          issue: issue,
+          name: 'release plan.txt',
+          bytes: Uint8List.fromList(utf8.encode('roadmap')),
+        ),
+        throwsA(isA<TrackStateProviderException>()),
+      );
+
+      final restoredBytes = await repository.downloadAttachment(
+        issue.attachments.single,
+      );
+      expect(utf8.decode(restoredBytes), 'legacy');
+    },
+  );
+
+  test(
+    'github provider replaces same-name release assets deterministically',
+    () async {
+      var deletedAssetId = '';
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/IstiN/trackstate' && request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path ==
+                  '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            return http.Response(
+              jsonEncode({
+                'id': 10,
+                'tag_name': 'trackstate-attachments-DEMO-1',
+                'name': 'Attachments for DEMO-1',
+                'assets': [
+                  {'id': 1, 'name': 'design.png', 'size': 3},
+                ],
+              }),
+              200,
+            );
+          }
+          if (path == '/repos/IstiN/trackstate/releases/assets/1' &&
+              request.method == 'DELETE') {
+            deletedAssetId = '1';
+            return http.Response('', 204);
+          }
+          if (request.url.host == 'uploads.github.com' &&
+              path == '/repos/IstiN/trackstate/releases/10/assets' &&
+              request.method == 'POST') {
+            expect(request.url.queryParameters['name'], 'design.png');
+            return http.Response(
+              jsonEncode({'id': 2, 'name': 'design.png', 'size': 4}),
+              201,
+            );
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final result = await provider.writeReleaseAttachment(
+        RepositoryReleaseAttachmentWriteRequest(
+          issueKey: 'DEMO-1',
+          releaseTag: 'trackstate-attachments-DEMO-1',
+          releaseTitle: 'Attachments for DEMO-1',
+          assetName: 'design.png',
+          bytes: Uint8List.fromList(const [1, 2, 3, 4]),
+          mediaType: 'image/png',
+          branch: 'main',
+        ),
+      );
+
+      expect(deletedAssetId, '1');
+      expect(result.assetId, '2');
+    },
+  );
+
+  test(
+    'github provider rejects release containers with unexpected assets',
+    () async {
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/IstiN/trackstate' && request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path ==
+                  '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            return http.Response(
+              jsonEncode({
+                'id': 10,
+                'tag_name': 'trackstate-attachments-DEMO-1',
+                'name': 'Attachments for DEMO-1',
+                'assets': [
+                  {'id': 3, 'name': 'foreign.bin', 'size': 9},
+                ],
+              }),
+              200,
+            );
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      await expectLater(
+        () => provider.writeReleaseAttachment(
+          RepositoryReleaseAttachmentWriteRequest(
+            issueKey: 'DEMO-1',
+            releaseTag: 'trackstate-attachments-DEMO-1',
+            releaseTitle: 'Attachments for DEMO-1',
+            assetName: 'design.png',
+            bytes: Uint8List.fromList(const [1, 2, 3]),
+            mediaType: 'image/png',
+            branch: 'main',
+          ),
+        ),
+        throwsA(
+          isA<TrackStateProviderException>().having(
+            (error) => error.message,
+            'message',
+            contains('unexpected assets'),
+          ),
+        ),
+      );
+    },
+  );
+
+  test('github provider reports release identity conflicts explicitly', () async {
+    final provider = GitHubTrackStateProvider(
+      repositoryName: 'IstiN/trackstate',
+      dataRef: 'main',
+      client: MockClient((request) async {
+        final path = request.url.path;
+        if (path == '/repos/IstiN/trackstate' && request.method == 'GET') {
+          return http.Response(
+            '{"permissions":{"pull":true,"push":true,"admin":false}}',
+            200,
+          );
+        }
+        if (path == '/user' && request.method == 'GET') {
+          return http.Response('{"login":"octocat","name":"Mona"}', 200);
+        }
+        if (path ==
+                '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
+            request.method == 'GET') {
+          return http.Response(
+            jsonEncode({
+              'id': 10,
+              'tag_name': 'trackstate-attachments-DEMO-1',
+              'name': 'Attachments for DEMO-2',
+              'assets': const <Object?>[],
+            }),
+            200,
+          );
+        }
+        return http.Response('', 404);
+      }),
+    );
+
+    await provider.authenticate(
+      const RepositoryConnection(
+        repository: 'IstiN/trackstate',
+        branch: 'main',
+        token: 'token',
+      ),
+    );
+
+    await expectLater(
+      () => provider.writeReleaseAttachment(
+        RepositoryReleaseAttachmentWriteRequest(
+          issueKey: 'DEMO-1',
+          releaseTag: 'trackstate-attachments-DEMO-1',
+          releaseTitle: 'Attachments for DEMO-1',
+          assetName: 'design.png',
+          bytes: Uint8List.fromList(const [1, 2, 3]),
+          mediaType: 'image/png',
+          branch: 'main',
+        ),
+      ),
+      throwsA(
+        isA<TrackStateProviderException>().having(
+          (error) => error.message,
+          'message',
+          contains('requires manual cleanup'),
+        ),
+      ),
+    );
+  });
+
+  test(
+    'github provider falls back to release lookup when stored asset id is stale',
+    () async {
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/IstiN/trackstate' && request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path == '/repos/IstiN/trackstate/releases/assets/1' &&
+              request.method == 'GET') {
+            expect(request.headers['accept'], 'application/octet-stream');
+            return http.Response('', 404);
+          }
+          if (path ==
+                  '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            return http.Response(
+              jsonEncode({
+                'id': 10,
+                'tag_name': 'trackstate-attachments-DEMO-1',
+                'name': 'Attachments for DEMO-1',
+                'assets': [
+                  {'id': 3, 'name': 'design.png', 'size': 6},
+                ],
+              }),
+              200,
+            );
+          }
+          if (path == '/repos/IstiN/trackstate/releases/assets/3' &&
+              request.method == 'GET') {
+            expect(request.headers['accept'], 'application/octet-stream');
+            expect(request.headers['authorization'], 'Bearer token');
+            return http.Response.bytes(const [1, 2, 3, 4, 5, 6], 200);
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      final asset = await provider.readReleaseAttachment(
+        const RepositoryReleaseAttachmentReadRequest(
+          releaseTag: 'trackstate-attachments-DEMO-1',
+          assetName: 'design.png',
+          assetId: '1',
+        ),
+      );
+
+      expect(asset.revision, '3');
+      expect(asset.bytes, Uint8List.fromList(const [1, 2, 3, 4, 5, 6]));
+    },
+  );
 }
 
 SetupTrackStateRepository _mockSetupRepository({
@@ -1654,3 +2419,53 @@ Map<String, String> _fixtureFilesFromDisk(String rootPath) {
 
   return files;
 }
+
+Map<String, String> _releaseAttachmentFixtureFiles() => {
+  'DEMO/project.json': jsonEncode({
+    'key': 'DEMO',
+    'name': 'Demo Project',
+    'attachmentStorage': {
+      'mode': 'github-releases',
+      'githubReleases': {'tagPrefix': 'trackstate-attachments-'},
+    },
+  }),
+  'DEMO/config/statuses.json': jsonEncode([
+    {'id': 'todo', 'name': 'To Do'},
+  ]),
+  'DEMO/config/issue-types.json': jsonEncode([
+    {'id': 'story', 'name': 'Story'},
+  ]),
+  'DEMO/config/fields.json': jsonEncode([
+    {'id': 'summary', 'name': 'Summary', 'type': 'string', 'required': true},
+  ]),
+  'DEMO/.trackstate/index/issues.json': jsonEncode([
+    {
+      'key': 'DEMO-1',
+      'path': 'DEMO/DEMO-1/main.md',
+      'parent': null,
+      'epic': null,
+      'summary': 'Release-backed attachment issue',
+      'issueType': 'story',
+      'status': 'todo',
+      'labels': [],
+      'updated': '2026-05-05T00:00:00Z',
+      'children': [],
+      'archived': false,
+    },
+  ]),
+  'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+summary: Release-backed attachment issue
+updated: 2026-05-05T00:00:00Z
+---
+
+# Description
+
+Release-backed attachment issue.
+''',
+  'DEMO/DEMO-1/attachments.json': '[]\n',
+};
