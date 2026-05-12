@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import urllib.error
 from typing import Iterable
 import urllib.request
 from dataclasses import dataclass
@@ -43,6 +44,28 @@ class LiveHostedIssueFixture:
     attachment_paths: list[str]
     comment_paths: list[str]
     comment_bodies: list[str]
+
+
+@dataclass(frozen=True)
+class LiveHostedProjectLocaleConfiguration:
+    project_path: str
+    default_locale: str
+    supported_locales: list[str]
+
+
+@dataclass(frozen=True)
+class LiveHostedCatalogEntry:
+    id: str
+    name: str
+
+
+@dataclass(frozen=True)
+class LiveHostedLocaleState:
+    project_path: str
+    locale: str
+    supported_locales: list[str]
+    locale_present: bool
+    payload: dict[str, object]
 
 
 class LiveSetupRepositoryService:
@@ -129,6 +152,70 @@ class LiveSetupRepositoryService:
             ],
         )
 
+    def fetch_project_locale_configuration(
+        self,
+        project_path: str,
+    ) -> LiveHostedProjectLocaleConfiguration:
+        project = self._read_project_json(project_path)
+        supported_locales = [
+            str(value).strip()
+            for value in project.get("supportedLocales", [])
+            if str(value).strip()
+        ]
+        return LiveHostedProjectLocaleConfiguration(
+            project_path=project_path,
+            default_locale=str(project.get("defaultLocale", "en")),
+            supported_locales=supported_locales,
+        )
+
+    def fetch_catalog_entries(
+        self,
+        project_path: str,
+        catalog_name: str,
+    ) -> list[LiveHostedCatalogEntry]:
+        values = self._read_repo_json(f"{project_path}/config/{catalog_name}.json")
+        if not isinstance(values, list):
+            raise RuntimeError(
+                f"GitHub response for {project_path}/config/{catalog_name}.json was not a list.",
+            )
+        return [
+            LiveHostedCatalogEntry(id=entry_id, name=name)
+            for entry in values
+            if isinstance(entry, dict)
+            for entry_id, name in [
+                (
+                    str(entry.get("id", "")).strip(),
+                    str(entry.get("name", "")).strip(),
+                ),
+            ]
+            if entry_id and name
+        ]
+
+    def fetch_locale_payload(self, project_path: str, locale: str) -> dict[str, object]:
+        try:
+            payload = self._read_repo_json(f"{project_path}/config/i18n/{locale}.json")
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                return {}
+            raise
+        if not isinstance(payload, dict):
+            raise RuntimeError(
+                f"GitHub response for {project_path}/config/i18n/{locale}.json was not an object.",
+            )
+        return payload
+
+    def fetch_locale_state(self, project_path: str, locale: str) -> LiveHostedLocaleState:
+        locale_configuration = self.fetch_project_locale_configuration(project_path)
+        locale_present = locale in locale_configuration.supported_locales
+        payload = self.fetch_locale_payload(project_path, locale) if locale_present else {}
+        return LiveHostedLocaleState(
+            project_path=project_path,
+            locale=locale,
+            supported_locales=locale_configuration.supported_locales,
+            locale_present=locale_present,
+            payload=payload,
+        )
+
     def list_issue_paths(self, root_path: str = "DEMO") -> list[str]:
         issue_paths: list[str] = []
         pending_paths = [root_path]
@@ -156,6 +243,12 @@ class LiveSetupRepositoryService:
             for entry in values
             if isinstance(entry, dict) and str(entry.get("name", "")).strip()
         ]
+
+    def _read_project_json(self, project_path: str) -> dict[str, object]:
+        project = self._read_repo_json(f"{project_path}/project.json")
+        if not isinstance(project, dict):
+            raise RuntimeError(f"GitHub response for {project_path}/project.json was not an object.")
+        return project
 
     def _read_repo_directory(self, path: str) -> list[dict[str, object]]:
         response = self._read_json(
