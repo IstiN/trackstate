@@ -113,7 +113,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   Finder _labeledDropdownField(String label) =>
       find.byWidgetPredicate((widget) {
-        return widget is DropdownButtonFormField<String> &&
+        return widget is DropdownButtonFormField &&
             widget.decoration.labelText == label;
       }, description: 'dropdown field labeled $label');
 
@@ -1030,7 +1030,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     if (field.evaluate().isEmpty) {
       return null;
     }
-    final dropdown = tester.widget<DropdownButtonFormField<String>>(
+    final dropdown = tester.widget<DropdownButtonFormField<Object?>>(
       field.first,
     );
     final helperText = dropdown.decoration.helperText?.trim();
