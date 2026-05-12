@@ -17,6 +17,9 @@ from testing.tests.support.trackstate_cli_attachment_download_probe_factory impo
 
 class TrackStateCliAttachmentDownloadTest(unittest.TestCase):
     maxDiff = None
+    _FORBIDDEN_ATTACHMENT_PAYLOAD_KEYS = frozenset(
+        {"base64", "content", "contentBase64", "dataUrl", "payload"}
+    )
 
     def setUp(self) -> None:
         self.repository_root = Path(__file__).resolve().parents[3]
@@ -56,12 +59,13 @@ class TrackStateCliAttachmentDownloadTest(unittest.TestCase):
             f"Observed payload: {payload}",
         )
         assert isinstance(target, dict)
-        self.assertEqual(
-            list(target.keys()),
-            list(self.config.required_target_keys),
-            "Step 3 failed: the target metadata did not keep the canonical key "
-            "contract.\n"
-            f"Observed target: {target}",
+        self._assert_required_keys_present(
+            actual=target,
+            required_keys=self.config.required_target_keys,
+            failure_message=(
+                "Step 3 failed: the target metadata omitted required fields.\n"
+                f"Observed target: {target}"
+            ),
         )
         self.assertEqual(
             target["type"],
@@ -95,6 +99,15 @@ class TrackStateCliAttachmentDownloadTest(unittest.TestCase):
 
         data = payload["data"]
         assert isinstance(data, dict)
+        self._assert_required_keys_present(
+            actual=data,
+            required_keys=self.config.required_data_keys,
+            failure_message=(
+                "Step 3 failed: the success envelope omitted required metadata "
+                "fields.\n"
+                f"Observed data: {data}"
+            ),
+        )
         self.assertEqual(
             data["command"],
             self.config.expected_command_name,
@@ -159,12 +172,23 @@ class TrackStateCliAttachmentDownloadTest(unittest.TestCase):
             f"Observed payload: {payload}",
         )
         assert isinstance(attachment, dict)
-        self.assertEqual(
-            list(attachment.keys()),
-            list(self.config.required_attachment_keys),
-            "Expected result failed: the attachment metadata contract changed or "
-            "included extra fields that could leak binary content.\n"
-            f"Observed attachment: {attachment}",
+        self._assert_required_keys_present(
+            actual=attachment,
+            required_keys=self.config.required_attachment_keys,
+            failure_message=(
+                "Expected result failed: the attachment metadata omitted required "
+                "fields.\n"
+                f"Observed attachment: {attachment}"
+            ),
+        )
+        self._assert_forbidden_payload_keys_absent(
+            actual=attachment,
+            forbidden_keys=self._FORBIDDEN_ATTACHMENT_PAYLOAD_KEYS,
+            failure_message=(
+                "Expected result failed: the attachment metadata exposed payload "
+                "content instead of metadata only.\n"
+                f"Observed attachment: {attachment}"
+            ),
         )
         self.assertEqual(
             attachment["id"],
@@ -291,12 +315,14 @@ class TrackStateCliAttachmentDownloadTest(unittest.TestCase):
             f"stderr:\n{result.stderr}",
         )
         assert isinstance(payload, dict)
-        self.assertEqual(
-            list(payload.keys()),
-            list(self.config.required_top_level_keys),
-            f"{failure_prefix}: the success envelope did not keep the expected "
-            "top-level key order.\n"
-            f"Observed payload: {payload}",
+        self._assert_required_keys_present(
+            actual=payload,
+            required_keys=self.config.required_top_level_keys,
+            failure_message=(
+                f"{failure_prefix}: the success envelope omitted required "
+                "top-level fields.\n"
+                f"Observed payload: {payload}"
+            ),
         )
         self.assertTrue(
             payload["ok"],
@@ -311,13 +337,42 @@ class TrackStateCliAttachmentDownloadTest(unittest.TestCase):
             f"Observed payload: {payload}",
         )
         assert isinstance(data, dict)
-        self.assertEqual(
-            list(data.keys()),
-            list(self.config.required_data_keys),
-            f"{failure_prefix}: the envelope data object changed shape.\n"
-            f"Observed data: {data}",
+        self._assert_required_keys_present(
+            actual=data,
+            required_keys=self.config.required_data_keys,
+            failure_message=(
+                f"{failure_prefix}: the envelope data object omitted required "
+                "fields.\n"
+                f"Observed data: {data}"
+            ),
         )
         return payload
+
+    def _assert_required_keys_present(
+        self,
+        *,
+        actual: dict[str, object],
+        required_keys: tuple[str, ...],
+        failure_message: str,
+    ) -> None:
+        missing_keys = [key for key in required_keys if key not in actual]
+        self.assertFalse(
+            missing_keys,
+            f"{failure_message}\nMissing keys: {missing_keys}",
+        )
+
+    def _assert_forbidden_payload_keys_absent(
+        self,
+        *,
+        actual: dict[str, object],
+        forbidden_keys: frozenset[str],
+        failure_message: str,
+    ) -> None:
+        present_keys = sorted(forbidden_keys.intersection(actual))
+        self.assertFalse(
+            present_keys,
+            f"{failure_message}\nForbidden keys present: {present_keys}",
+        )
 
 
 if __name__ == "__main__":
