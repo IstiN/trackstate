@@ -56,6 +56,9 @@ abstract interface class RepositoryReleaseAttachmentStore {
   Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
     RepositoryReleaseAttachmentWriteRequest request,
   );
+  Future<void> deleteReleaseAttachment(
+    RepositoryReleaseAttachmentDeleteRequest request,
+  );
 }
 
 abstract interface class RepositoryHistoryReader {
@@ -379,10 +382,12 @@ class RepositoryReleaseAttachmentReadRequest {
   const RepositoryReleaseAttachmentReadRequest({
     required this.releaseTag,
     required this.assetName,
+    this.assetId,
   });
 
   final String releaseTag;
   final String assetName;
+  final String? assetId;
 }
 
 class RepositoryReleaseAttachmentWriteRequest {
@@ -417,6 +422,18 @@ class RepositoryReleaseAttachmentWriteResult {
   final String releaseTag;
   final String assetName;
   final String assetId;
+}
+
+class RepositoryReleaseAttachmentDeleteRequest {
+  const RepositoryReleaseAttachmentDeleteRequest({
+    required this.releaseTag,
+    required this.assetId,
+    required this.assetName,
+  });
+
+  final String releaseTag;
+  final String assetId;
+  final String assetName;
 }
 
 enum RepositoryHistoryChangeType { added, modified, removed, renamed }

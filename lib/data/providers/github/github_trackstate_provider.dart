@@ -406,42 +406,42 @@ class GitHubTrackStateProvider
     RepositoryReleaseAttachmentReadRequest request,
   ) async {
     final connection = _requireConnection();
+    final requestedAssetId = request.assetId?.trim() ?? '';
+    if (requestedAssetId.isNotEmpty) {
+      final directArtifact = await _downloadReleaseAsset(
+        repository: connection.repository,
+        releaseTag: request.releaseTag,
+        assetId: requestedAssetId,
+        assetName: request.assetName,
+        allowMissing: true,
+      );
+      if (directArtifact != null) {
+        return directArtifact;
+      }
+    }
     final release = (await _loadReleaseByTag(
       repository: connection.repository,
       releaseTag: request.releaseTag,
       issueKey: null,
       expectedTitle: null,
     ))!;
-    final asset = release.assets.where(
+    final matchingAssets = release.assets.where(
       (candidate) => candidate.name == request.assetName,
     );
-    final matchedAsset = asset.isEmpty ? null : asset.first;
+    final matchedAsset = matchingAssets.isEmpty ? null : matchingAssets.first;
     if (matchedAsset == null) {
       throw TrackStateProviderException(
         'GitHub release ${request.releaseTag} does not contain asset '
         '${request.assetName}.',
       );
     }
-    final response = await _http.get(
-      Uri.parse(matchedAsset.downloadUrl),
-      headers: _githubHeaders(connection.token),
-    );
-    if (response.statusCode != 200) {
-      _throwGitHubResponseException(
-        path:
-            '/repos/${connection.repository}/releases/assets/${matchedAsset.id}',
-        response: response,
-        prefix:
-            'Could not download GitHub release asset ${request.assetName} from '
-            '${request.releaseTag}',
-      );
-    }
-    return RepositoryAttachment(
-      path: request.assetName,
-      bytes: response.bodyBytes,
-      revision: matchedAsset.id,
-      declaredSizeBytes: matchedAsset.sizeBytes,
-    );
+    return (await _downloadReleaseAsset(
+      repository: connection.repository,
+      releaseTag: request.releaseTag,
+      assetId: matchedAsset.id,
+      assetName: request.assetName,
+      expectedSizeBytes: matchedAsset.sizeBytes,
+    ))!;
   }
 
   @override
@@ -505,7 +505,8 @@ class GitHubTrackStateProvider
       await _deleteReleaseAsset(
         repository: connection.repository,
         releaseTag: request.releaseTag,
-        asset: existingAsset.first,
+        assetId: existingAsset.first.id,
+        assetName: existingAsset.first.name,
       );
     }
     final assetId = await _uploadReleaseAsset(
@@ -520,6 +521,19 @@ class GitHubTrackStateProvider
       releaseTag: request.releaseTag,
       assetName: request.assetName,
       assetId: assetId,
+    );
+  }
+
+  @override
+  Future<void> deleteReleaseAttachment(
+    RepositoryReleaseAttachmentDeleteRequest request,
+  ) async {
+    final connection = _requireConnection();
+    await _deleteReleaseAsset(
+      repository: connection.repository,
+      releaseTag: request.releaseTag,
+      assetId: request.assetId,
+      assetName: request.assetName,
     );
   }
 
@@ -735,19 +749,19 @@ class GitHubTrackStateProvider
   Future<void> _deleteReleaseAsset({
     required String repository,
     required String releaseTag,
-    required _GitHubReleaseAsset asset,
+    required String assetId,
+    required String assetName,
   }) async {
     final response = await _http.delete(
-      _githubUri('/repos/$repository/releases/assets/${asset.id}'),
+      _githubUri('/repos/$repository/releases/assets/$assetId'),
       headers: _githubHeaders(_connection?.token),
     );
     if (response.statusCode != 204) {
       _throwGitHubResponseException(
-        path: '/repos/$repository/releases/assets/${asset.id}',
+        path: '/repos/$repository/releases/assets/$assetId',
         response: response,
         prefix:
-            'Could not replace GitHub release asset ${asset.name} in '
-            '$releaseTag',
+            'Could not replace GitHub release asset $assetName in $releaseTag',
       );
     }
   }
@@ -826,11 +840,7 @@ class GitHubTrackStateProvider
   _GitHubReleaseAsset _parseReleaseAsset(Map<String, Object?> json) {
     final assetId = json['id']?.toString();
     final name = json['name']?.toString().trim() ?? '';
-    final downloadUrl = json['browser_download_url']?.toString().trim() ?? '';
-    if (assetId == null ||
-        assetId.isEmpty ||
-        name.isEmpty ||
-        downloadUrl.isEmpty) {
+    if (assetId == null || assetId.isEmpty || name.isEmpty) {
       throw TrackStateProviderException(
         'GitHub release asset response was incomplete: $json',
       );
@@ -838,7 +848,6 @@ class GitHubTrackStateProvider
     return _GitHubReleaseAsset(
       id: assetId,
       name: name,
-      downloadUrl: downloadUrl,
       sizeBytes: switch (json['size']) {
         final num value => value.toInt(),
         final String value => int.tryParse(value) ?? 0,
@@ -849,6 +858,68 @@ class GitHubTrackStateProvider
 
   String _releaseBodyForIssue(String issueKey) =>
       'TrackState-managed attachment container for $issueKey.\n';
+
+  Future<RepositoryAttachment?> _downloadReleaseAsset({
+    required String repository,
+    required String releaseTag,
+    required String assetId,
+    required String assetName,
+    int? expectedSizeBytes,
+    bool allowMissing = false,
+  }) async {
+    final response = await _http.get(
+      _githubUri('/repos/$repository/releases/assets/$assetId'),
+      headers: {
+        ..._githubHeaders(_connection?.token),
+        'accept': 'application/octet-stream',
+      },
+    );
+    if (response.statusCode == 404 && allowMissing) {
+      return null;
+    }
+    if (_isRedirectStatus(response.statusCode)) {
+      final location = response.headers['location']?.trim() ?? '';
+      if (location.isEmpty) {
+        throw TrackStateProviderException(
+          'GitHub release asset download for $assetName did not return a redirect location.',
+        );
+      }
+      final redirected = await _http.get(Uri.parse(location));
+      if (redirected.statusCode == 404 && allowMissing) {
+        return null;
+      }
+      if (redirected.statusCode != 200) {
+        _throwGitHubResponseException(
+          path: location,
+          response: redirected,
+          prefix:
+              'Could not download GitHub release asset $assetName from '
+              '$releaseTag',
+        );
+      }
+      return RepositoryAttachment(
+        path: assetName,
+        bytes: redirected.bodyBytes,
+        revision: assetId,
+        declaredSizeBytes: expectedSizeBytes,
+      );
+    }
+    if (response.statusCode != 200) {
+      _throwGitHubResponseException(
+        path: '/repos/$repository/releases/assets/$assetId',
+        response: response,
+        prefix:
+            'Could not download GitHub release asset $assetName from '
+            '$releaseTag',
+      );
+    }
+    return RepositoryAttachment(
+      path: assetName,
+      bytes: response.bodyBytes,
+      revision: assetId,
+      declaredSizeBytes: expectedSizeBytes,
+    );
+  }
 
   Future<void> _ensureExpectedRevisionMatches({
     required String repository,
@@ -1276,12 +1347,17 @@ class _GitHubReleaseAsset {
   const _GitHubReleaseAsset({
     required this.id,
     required this.name,
-    required this.downloadUrl,
     required this.sizeBytes,
   });
 
   final String id;
   final String name;
-  final String downloadUrl;
   final int sizeBytes;
 }
+
+bool _isRedirectStatus(int statusCode) =>
+    statusCode == 301 ||
+    statusCode == 302 ||
+    statusCode == 303 ||
+    statusCode == 307 ||
+    statusCode == 308;
