@@ -1,5 +1,6 @@
 import '../models/issue_detail_icon_observation.dart';
 import '../models/issue_detail_row_style_observation.dart';
+import '../models/issue_detail_theme_tokens.dart';
 import '../models/issue_detail_text_contrast_observation.dart';
 import '../models/status_badge_contrast_observation.dart';
 
@@ -25,6 +26,8 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
   List<String> buttonLabelsInIssueDetail(String issueKey);
 
   List<String> commentActionLabels(String issueKey);
+
+  IssueDetailThemeTokens themeTokens(String issueKey);
 
   StatusBadgeContrastObservation observeStatusBadgeContrast(
     String issueKey,

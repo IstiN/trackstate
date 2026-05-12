@@ -8,6 +8,7 @@ import 'package:trackstate/ui/core/trackstate_theme.dart';
 import '../../core/interfaces/issue_detail_accessibility_screen.dart';
 import '../../core/models/issue_detail_icon_observation.dart';
 import '../../core/models/issue_detail_row_style_observation.dart';
+import '../../core/models/issue_detail_theme_tokens.dart';
 import '../../core/models/issue_detail_text_contrast_observation.dart';
 import '../../core/models/status_badge_contrast_observation.dart';
 import '../../core/utils/color_contrast.dart';
@@ -161,6 +162,18 @@ class IssueDetailAccessibilityRobot
         .where((target) => target.isButton)
         .map((target) => target.label)
         .toList();
+  }
+
+  @override
+  IssueDetailThemeTokens themeTokens(String issueKey) {
+    final colors = _trackStateColors(issueKey);
+    return IssueDetailThemeTokens(
+      textHex: _rgbHex(colors.text),
+      mutedHex: _rgbHex(colors.muted),
+      errorHex: _rgbHex(colors.error),
+      surfaceAltHex: _rgbHex(colors.surfaceAlt),
+      borderHex: _rgbHex(colors.border),
+    );
   }
 
   @override
