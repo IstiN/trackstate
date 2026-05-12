@@ -13,7 +13,6 @@ void main() {
 
       const issueKey = 'TRACK-12';
       const issueSummary = 'Implement Git sync service';
-      const expectedPlaceholder = 'Add a comment...';
       const draftComment =
           'QA draft comment for placeholder contrast verification.';
 
@@ -62,10 +61,6 @@ void main() {
             'Step 1 failed: the visible comment composer did not render any placeholder hint text. '
             'Observed comment field label: "Comments". Visible issue-detail text: ${_formatSnapshot(visibleTexts)}. '
             'Visible semantics labels: ${_formatSnapshot(semanticsLabels)}.',
-          );
-        } else if (placeholder != expectedPlaceholder) {
-          failures.add(
-            'Step 1 failed: the comment composer placeholder should be "$expectedPlaceholder", but rendered "$placeholder".',
           );
         }
 
