@@ -972,16 +972,10 @@ _AccessCalloutTone _repositoryAccessCalloutTone(TrackerViewModel viewModel) {
 }
 
 _AccessCalloutTone _attachmentStorageCalloutTone(TrackerViewModel viewModel) {
-  if (viewModel.usesGitHubReleasesAttachmentStorage) {
-    return viewModel.supportsHostedReleaseAttachmentWrites
-        ? _AccessCalloutTone.success
-        : _AccessCalloutTone.warning;
-  }
-  if (viewModel.hostedRepositoryAccessMode ==
-      HostedRepositoryAccessMode.attachmentRestricted) {
-    return _AccessCalloutTone.warning;
-  }
-  return _AccessCalloutTone.success;
+  return viewModel.hostedRepositoryAccessMode ==
+          HostedRepositoryAccessMode.writable
+      ? _AccessCalloutTone.success
+      : _AccessCalloutTone.warning;
 }
 
 String _attachmentStorageCalloutTitle(
@@ -999,17 +993,22 @@ String _attachmentStorageCalloutMessage(
 ) {
   if (viewModel.usesGitHubReleasesAttachmentStorage) {
     final tagPrefix = _attachmentReleaseTagPrefix(viewModel);
-    return viewModel.supportsHostedReleaseAttachmentWrites
+    return viewModel.hostedRepositoryAccessMode ==
+            HostedRepositoryAccessMode.writable
         ? l10n.attachmentStorageGitHubReleasesSupportedMessage(tagPrefix)
         : l10n.attachmentStorageGitHubReleasesRestrictedMessage(tagPrefix);
   }
-  if (viewModel.hostedRepositoryAccessMode ==
-      HostedRepositoryAccessMode.attachmentRestricted) {
-    return viewModel.canUploadIssueAttachments
-        ? l10n.attachmentStorageRepositoryPathLimitedMessage
-        : l10n.attachmentStorageRepositoryPathRestrictedMessage;
-  }
-  return l10n.attachmentStorageRepositoryPathSupportedMessage;
+  return switch (viewModel.hostedRepositoryAccessMode) {
+    HostedRepositoryAccessMode.writable =>
+      l10n.attachmentStorageRepositoryPathSupportedMessage,
+    HostedRepositoryAccessMode.attachmentRestricted =>
+      viewModel.canUploadIssueAttachments
+          ? l10n.attachmentStorageRepositoryPathLimitedMessage
+          : l10n.attachmentStorageRepositoryPathRestrictedMessage,
+    HostedRepositoryAccessMode.disconnected ||
+    HostedRepositoryAccessMode.readOnly =>
+      l10n.attachmentStorageRepositoryPathRestrictedMessage,
+  };
 }
 
 String _attachmentReleaseTagPrefix(TrackerViewModel viewModel) {

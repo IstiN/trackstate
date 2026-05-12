@@ -240,6 +240,90 @@ void main() {
   );
 
   testWidgets(
+    'settings repository-path callout stays restricted while disconnected',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(repository: ReactiveIssueDetailTrackStateRepository()),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Repository-path attachment storage'), findsOneWidget);
+        expect(
+          find.text(
+            'New attachments are stored in <issue-root>/attachments/<file>, but this hosted session cannot upload them in the browser.',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.text(
+            'New attachments are stored in <issue-root>/attachments/<file> inside the project repository, and this hosted session can upload them directly.',
+          ),
+          findsNothing,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets('settings repository-path callout stays restricted while read-only', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'trackstate.githubToken.trackstate.trackstate': 'read-only-token',
+    });
+    const readOnlyPermission = RepositoryPermission(
+      canRead: true,
+      canWrite: false,
+      isAdmin: false,
+      canCreateBranch: false,
+      canManageAttachments: false,
+      canCheckCollaborators: false,
+    );
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+
+    try {
+      await tester.pumpWidget(
+        TrackStateApp(
+          repository: ReactiveIssueDetailTrackStateRepository(
+            permission: readOnlyPermission,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Repository-path attachment storage'), findsOneWidget);
+      expect(
+        find.text(
+          'New attachments are stored in <issue-root>/attachments/<file>, but this hosted session cannot upload them in the browser.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'New attachments are stored in <issue-root>/attachments/<file> inside the project repository, and this hosted session can upload them directly.',
+        ),
+        findsNothing,
+      );
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    }
+  });
+
+  testWidgets(
     'release-backed hosted flow keeps attachments unavailable while explaining the missing hosted support',
     (tester) async {
       SharedPreferences.setMockInitialValues({
