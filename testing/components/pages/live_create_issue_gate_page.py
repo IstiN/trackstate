@@ -107,12 +107,20 @@ class LiveCreateIssueGatePage:
                     && label.includes(message);
                 },
               );
+              const isVisible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
               const buttonCount = (label) => Array.from(
                 document.querySelectorAll('flt-semantics[role="button"]'),
               ).filter((candidate) => {
                 const ariaLabel = candidate.getAttribute('aria-label') ?? '';
                 const text = candidate.innerText ?? '';
-                return ariaLabel.includes(label) || text.includes(label);
+                return isVisible(candidate) && (ariaLabel.includes(label) || text.includes(label));
               }).length;
               return {
                 bodyText,
@@ -147,22 +155,69 @@ class LiveCreateIssueGatePage:
         )
 
     def open_settings_from_gate(self, *, timeout_ms: int = 60_000) -> str:
-        self._session.click(
-            self._button_selector,
-            has_text="Open settings",
-            timeout_ms=timeout_ms,
-        )
-        self._session.wait_for_function(
+        payload = self._session.evaluate(
             """
             () => {
-              const bodyText = document.body?.innerText ?? '';
-              return bodyText.includes('Project Settings')
-                && bodyText.includes('Repository access');
+              const isVisible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const candidates = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .filter((element) => {
+                  const label = element.getAttribute('aria-label') ?? '';
+                  const text = element.innerText ?? '';
+                  return isVisible(element)
+                    && (label.includes('Open settings') || text.includes('Open settings'));
+                })
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    left: rect.left,
+                    centerX: rect.left + (rect.width / 2),
+                    centerY: rect.top + (rect.height / 2),
+                  };
+                })
+                .sort((left, right) => right.left - left.left);
+              return candidates[0] ?? null;
             }
             """,
-            timeout=timeout_ms,
         )
-        return self.current_body_text()
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 5 failed: the read-only gate did not expose a clickable `Open settings` "
+                "recovery action.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        self._session.mouse_click(
+            float(payload["centerX"]),
+            float(payload["centerY"]),
+        )
+        settings_snapshot = self._session.wait_for_function(
+            """
+            (requiredFragments) => {
+              const snapshot = Array.from(document.querySelectorAll('flt-semantics'))
+                .flatMap((element) => [
+                  element.getAttribute('aria-label') ?? '',
+                  element.innerText ?? '',
+                ])
+                .map((value) => value.trim())
+                .filter((value) => value.length > 0)
+                .join('\n');
+              return requiredFragments.every((fragment) => snapshot.includes(fragment))
+                ? snapshot
+                : null;
+            }
+            """,
+            arg=["Project Settings", "Repository access"],
+            timeout_ms=timeout_ms,
+        )
+        return str(settings_snapshot)
 
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()

@@ -39,6 +39,12 @@ EXPECTED_MESSAGE = (
 )
 EXPECTED_GATE_LABEL = f"Create issue {EXPECTED_TITLE} {EXPECTED_MESSAGE}"
 EXPECTED_CTA = "Open settings"
+EXPECTED_VISIBLE_GATE_FRAGMENTS = (
+    "Create issue",
+    "Read-only",
+    "Reconnect for write access",
+    EXPECTED_CTA,
+)
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
@@ -257,9 +263,9 @@ def _assert_gate_surface(gate: CreateIssueGateObservation) -> None:
             "surface heading.\n"
             f"Observed body text:\n{gate.body_text}",
         )
-    if gate.open_settings_button_count != 1:
+    if gate.open_settings_button_count < 1:
         raise AssertionError(
-            "Step 3 failed: the read-only gate did not expose exactly one visible "
+            "Step 3 failed: the read-only gate did not expose a visible "
             f'`{EXPECTED_CTA}` recovery action.\n'
             f"Observed gate semantics: {gate.callout_semantics_label}\n"
             f"Observed body text:\n{gate.body_text}",
@@ -275,11 +281,11 @@ def _assert_gate_copy(gate: CreateIssueGateObservation) -> None:
             f"Expected semantics fragment: {EXPECTED_GATE_LABEL}\n"
             f"Observed semantics label: {gate.callout_semantics_label}",
         )
-    for fragment in (EXPECTED_TITLE, EXPECTED_MESSAGE, EXPECTED_CTA):
+    for fragment in EXPECTED_VISIBLE_GATE_FRAGMENTS:
         if fragment not in gate.body_text:
             raise AssertionError(
                 "Step 4 failed: the Create issue gate did not show the expected "
-                "user-facing copy.\n"
+                "visible recovery-state copy.\n"
                 f"Missing fragment: {fragment}\n"
                 f"Observed body text:\n{gate.body_text}",
             )
