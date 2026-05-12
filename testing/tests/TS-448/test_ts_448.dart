@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -61,34 +60,31 @@ void main() {
             }
           }
 
-          if (_navigationFinder('Dashboard').evaluate().isEmpty ||
-              _navigationFinder('Board').evaluate().isEmpty ||
-              !_snapshotContains(
-                visibleSemantics,
-                'TrackState.AI navigation',
-              )) {
+          if (!await app.isNavigationControlVisible('Dashboard') ||
+              !await app.isNavigationControlVisible('Board') ||
+              !await app.isNavigationChromeVisible()) {
             failures.add(
               'Step 2 failed for $scenario: the navigation chrome was not rendered in the recovery shell after ${fixture.failingContentPath} failed. '
               'Visible texts: ${_formatSnapshot(visibleTexts)}. '
               'Visible semantics: ${_formatSnapshot(visibleSemantics)}.',
             );
           } else {
-            await _assertNavigationDisabled(
-              tester,
-              app,
-              failures: failures,
-              scenario: scenario,
-              label: 'Dashboard',
-              disallowedTexts: const ['Open Issues', 'Team Velocity'],
-            );
-            await _assertNavigationDisabled(
-              tester,
-              app,
-              failures: failures,
-              scenario: scenario,
-              label: 'Board',
-              disallowedTexts: const ['Kanban by workflow', 'To Do'],
-            );
+            for (final violation
+                in await app.collectDisabledNavigationViolations(
+                  label: 'Dashboard',
+                  retainedText: 'Project Settings',
+                  disallowedTexts: const ['Open Issues', 'Team Velocity'],
+                )) {
+              failures.add('Step 3 failed for $scenario: $violation');
+            }
+            for (final violation
+                in await app.collectDisabledNavigationViolations(
+                  label: 'Board',
+                  retainedText: 'Project Settings',
+                  disallowedTexts: const ['Kanban by workflow', 'To Do'],
+                )) {
+              failures.add('Step 3 failed for $scenario: $violation');
+            }
           }
 
           final retryTapped = await app.tapVisibleControl('Retry');
@@ -146,66 +142,6 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
-}
-
-Finder _navigationFinder(String label) => find.byWidgetPredicate(
-  (widget) =>
-      widget is Semantics &&
-      widget.properties.button == true &&
-      widget.properties.label == label,
-  description: 'navigation control labeled $label',
-);
-
-Future<void> _assertNavigationDisabled(
-  WidgetTester tester,
-  TrackStateAppComponent app, {
-  required List<String> failures,
-  required String scenario,
-  required String label,
-  required List<String> disallowedTexts,
-}) async {
-  final target = _navigationFinder(label);
-  if (target.evaluate().isEmpty) {
-    failures.add(
-      'Step 3 failed for $scenario: no visible navigation control labeled "$label" was rendered in the recovery shell.',
-    );
-    return;
-  }
-
-  final semanticsData = tester.getSemantics(target.last).getSemanticsData();
-  final hasTapAction = semanticsData.hasAction(SemanticsAction.tap);
-  final isEnabled = semanticsData.hasFlag(SemanticsFlag.isEnabled);
-
-  if (hasTapAction || isEnabled) {
-    failures.add(
-      'Step 3 failed for $scenario: the "$label" navigation control remained enabled during mandatory bootstrap recovery. '
-      'Semantics label="${semanticsData.label}", hasTapAction=$hasTapAction, isEnabled=$isEnabled.',
-    );
-  }
-
-  await tester.tap(target.last, warnIfMissed: false);
-  await tester.pumpAndSettle();
-
-  if (!_snapshotContains(app.visibleTextsSnapshot(), 'Project Settings')) {
-    failures.add(
-      'Step 3 failed for $scenario: tapping "$label" navigated away from Settings while recovery was active. '
-      'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
-    );
-  }
-
-  for (final disallowedText in disallowedTexts) {
-    if (_snapshotContains(app.visibleTextsSnapshot(), disallowedText) ||
-        _snapshotContains(
-          app.visibleSemanticsLabelsSnapshot(),
-          disallowedText,
-        )) {
-      failures.add(
-        'Step 3 failed for $scenario: tapping "$label" surfaced "$disallowedText" while the recovery container was still active. '
-        'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}. '
-        'Visible semantics: ${_formatSnapshot(app.visibleSemanticsLabelsSnapshot())}.',
-      );
-    }
-  }
 }
 
 Future<void> _waitForCondition(
