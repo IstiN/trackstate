@@ -60,6 +60,13 @@ class LiveHostedCatalogEntry:
 
 
 @dataclass(frozen=True)
+class LiveHostedRepositoryFile:
+    path: str
+    sha: str
+    content: str
+
+
+@dataclass(frozen=True)
 class LiveHostedLocaleState:
     project_path: str
     locale: str
@@ -190,6 +197,62 @@ class LiveSetupRepositoryService:
             ]
             if entry_id and name
         ]
+
+    def fetch_repo_file(self, path: str) -> LiveHostedRepositoryFile:
+        response = self._read_json(
+            f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
+        )
+        encoded = str(response.get("content", "")).replace("\n", "")
+        if not encoded:
+            raise RuntimeError(f"GitHub response for {path} did not include content.")
+        sha = str(response.get("sha", "")).strip()
+        if not sha:
+            raise RuntimeError(f"GitHub response for {path} did not include a blob SHA.")
+        return LiveHostedRepositoryFile(
+            path=path,
+            sha=sha,
+            content=base64.b64decode(encoded).decode("utf-8"),
+        )
+
+    def fetch_repo_text(self, path: str) -> str:
+        return self.fetch_repo_file(path).content
+
+    def write_repo_text(self, path: str, *, content: str, message: str) -> None:
+        sha: str | None = None
+        try:
+            sha = self.fetch_repo_file(path).sha
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise
+
+        payload: dict[str, object] = {
+            "message": message,
+            "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+            "branch": self.ref,
+        }
+        if sha is not None:
+            payload["sha"] = sha
+
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{self.repository}/contents/{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            method="PUT",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Content-Type": "application/json",
+                **(
+                    {"Authorization": f"Bearer {self.token}"}
+                    if self.token
+                    else {}
+                ),
+            },
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            if response.status not in (200, 201):
+                raise RuntimeError(
+                    f"GitHub write for {path} returned unexpected status {response.status}.",
+                )
 
     def fetch_locale_payload(self, project_path: str, locale: str) -> dict[str, object]:
         try:
