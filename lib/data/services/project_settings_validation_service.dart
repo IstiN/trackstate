@@ -66,6 +66,9 @@ class ProjectSettingsValidationService {
     return settings.copyWith(
       defaultLocale: normalizedDefaultLocale,
       supportedLocales: supportedLocales,
+      attachmentStorage: _normalizedAttachmentStorage(
+        settings.attachmentStorage,
+      ),
       statusDefinitions: [
         for (final status in settings.statusDefinitions)
           status.copyWith(
@@ -139,6 +142,7 @@ class ProjectSettingsValidationService {
 
   void validate(ProjectSettingsCatalog settings) {
     _validateLocales(settings);
+    _validateAttachmentStorage(settings.attachmentStorage);
     _validateStatuses(settings.statusDefinitions);
     _validateWorkflows(
       statuses: settings.statusDefinitions,
@@ -172,6 +176,37 @@ class ProjectSettingsValidationService {
       invalidEntryMessage: 'Resolutions must include both an ID and a name.',
       duplicateEntryMessage: 'Resolution ID "%s" is defined more than once.',
     );
+  }
+
+  ProjectAttachmentStorageSettings _normalizedAttachmentStorage(
+    ProjectAttachmentStorageSettings storage,
+  ) {
+    if (storage.mode == AttachmentStorageMode.repositoryPath) {
+      return const ProjectAttachmentStorageSettings(
+        mode: AttachmentStorageMode.repositoryPath,
+      );
+    }
+    final githubReleases = storage.githubReleases;
+    return ProjectAttachmentStorageSettings(
+      mode: storage.mode,
+      githubReleases: githubReleases?.copyWith(
+        tagPrefix: githubReleases.tagPrefix.trim(),
+      ),
+    );
+  }
+
+  void _validateAttachmentStorage(ProjectAttachmentStorageSettings storage) {
+    switch (storage.mode) {
+      case AttachmentStorageMode.repositoryPath:
+        return;
+      case AttachmentStorageMode.githubReleases:
+        final githubReleases = storage.githubReleases;
+        if (githubReleases == null || githubReleases.tagPrefix.trim().isEmpty) {
+          throw const TrackStateProviderException(
+            'GitHub Releases attachment storage requires a non-empty tag prefix.',
+          );
+        }
+    }
   }
 
   Map<String, String> _normalizedLocalizedLabels(

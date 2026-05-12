@@ -870,16 +870,42 @@ class ProviderBackedTrackStateRepository
     }
 
     final snapshot = _snapshot ?? await loadSnapshot();
-    final currentIssue = snapshot.issues.firstWhere(
+    var currentIssue = snapshot.issues.firstWhere(
       (candidate) => candidate.key == issue.key,
       orElse: () => issue,
     );
+    if (!currentIssue.hasAttachmentsLoaded) {
+      currentIssue = await hydrateIssue(
+        currentIssue,
+        scopes: const {IssueHydrationScope.attachments},
+      );
+    }
+    final attachmentStorage = snapshot.project.attachmentStorage;
+    if (attachmentStorage.mode == AttachmentStorageMode.githubReleases) {
+      final githubReleases = attachmentStorage.githubReleases;
+      if (githubReleases == null || githubReleases.tagPrefix.trim().isEmpty) {
+        throw const TrackStateRepositoryException(
+          'GitHub Releases attachment storage requires a non-empty tag prefix.',
+        );
+      }
+      throw const TrackStateRepositoryException(
+        'GitHub Releases attachment uploads are not implemented yet.',
+      );
+    }
     final writeBranch = await _provider.resolveWriteBranch();
     final attachmentPath = resolveIssueAttachmentPath(
       currentIssue,
       normalizedName,
     );
+    final attachmentMetadataPath = _attachmentMetadataPath(
+      _issueRoot(currentIssue.storagePath),
+    );
     final existingRevision = _snapshotArtifactRevisions[attachmentPath];
+    final metadataRevision = await _existingRevision(
+      path: attachmentMetadataPath,
+      ref: writeBranch,
+      blobPaths: _snapshotBlobPaths,
+    );
     final lfsTracked = await _provider.isLfsTracked(attachmentPath);
     if (lfsTracked &&
         permission.attachmentUploadMode == AttachmentUploadMode.noLfs) {
@@ -888,7 +914,9 @@ class ProviderBackedTrackStateRepository
       );
     }
 
-    final result = await _provider.writeAttachment(
+    final timestamp = DateTime.now().toUtc().toIso8601String();
+    final author = _defaultAuthor(_session.resolvedUserIdentity);
+    final attachmentWriteResult = await _provider.writeAttachment(
       RepositoryAttachmentWriteRequest(
         path: attachmentPath,
         bytes: bytes,
@@ -897,16 +925,10 @@ class ProviderBackedTrackStateRepository
         expectedRevision: existingRevision,
       ),
     );
-    _snapshotArtifactRevisions[attachmentPath] = result.revision;
-    final timestamp = DateTime.now().toUtc().toIso8601String();
-    final author = _defaultAuthor(_session.resolvedUserIdentity);
-    final revisionOrOid = _attachmentRevisionOrOid(
-      attachment: RepositoryAttachment(
-        path: attachmentPath,
-        bytes: bytes,
-        revision: result.revision,
-      ),
-      isLfsTracked: lfsTracked,
+    _snapshotArtifactRevisions[attachmentPath] = attachmentWriteResult.revision;
+    final persistedAttachmentArtifact = await _provider.readAttachment(
+      attachmentPath,
+      ref: writeBranch,
     );
     final updatedAttachment = IssueAttachment(
       id: attachmentPath,
@@ -916,21 +938,43 @@ class ProviderBackedTrackStateRepository
       author: author,
       createdAt: timestamp,
       storagePath: attachmentPath,
-      revisionOrOid: revisionOrOid,
+      revisionOrOid: _attachmentRevisionOrOid(
+        attachment: persistedAttachmentArtifact,
+        isLfsTracked: lfsTracked,
+      ),
+      storageBackend: AttachmentStorageMode.repositoryPath,
+      repositoryPath: attachmentPath,
     );
+    final updatedAttachments = [
+      for (final candidate in currentIssue.attachments)
+        if (candidate.storagePath == attachmentPath)
+          updatedAttachment
+        else
+          candidate,
+      if (!currentIssue.attachments.any(
+        (candidate) => candidate.storagePath == attachmentPath,
+      ))
+        updatedAttachment,
+    ]..sort(_sortAttachmentsNewestFirst);
+    final metadataWriteResult = await _provider.writeTextFile(
+      RepositoryWriteRequest(
+        path: attachmentMetadataPath,
+        content: '${jsonEncode(_attachmentMetadataJson(updatedAttachments))}\n',
+        message: 'Update attachment metadata for ${currentIssue.key}',
+        branch: writeBranch,
+        expectedRevision: metadataRevision,
+      ),
+    );
+    _snapshotArtifactRevisions[attachmentMetadataPath] =
+        metadataWriteResult.revision;
+    _snapshotBlobPaths = {
+      ..._snapshotBlobPaths,
+      attachmentPath,
+      attachmentMetadataPath,
+    };
     final updatedIssue = currentIssue.copyWith(
       hasAttachmentsLoaded: true,
-      attachments: [
-        for (final candidate in currentIssue.attachments)
-          if (candidate.storagePath == attachmentPath)
-            updatedAttachment
-          else
-            candidate,
-        if (!currentIssue.attachments.any(
-          (candidate) => candidate.storagePath == attachmentPath,
-        ))
-          updatedAttachment,
-      ]..sort(_sortAttachmentsNewestFirst),
+      attachments: updatedAttachments,
     );
     _replaceCachedIssue(updatedIssue);
     return updatedIssue;
@@ -938,8 +982,14 @@ class ProviderBackedTrackStateRepository
 
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) async {
+    if (attachment.storageBackend == AttachmentStorageMode.githubReleases) {
+      throw TrackStateRepositoryException(
+        'GitHub Releases attachment downloads are not implemented yet for '
+        '${attachment.name}.',
+      );
+    }
     final artifact = await _provider.readAttachment(
-      attachment.storagePath,
+      attachment.resolvedRepositoryPath,
       ref: _provider.dataRef,
     );
     return artifact.bytes;
@@ -1377,6 +1427,7 @@ class ProviderBackedTrackStateRepository
         await _getRepositoryJson(projectPath) as Map<String, Object?>;
     final configRoot = _resolveConfigRoot(projectJson, dataRoot);
     final defaultLocale = projectJson['defaultLocale']?.toString() ?? 'en';
+    final attachmentStorage = _resolveAttachmentStorage(projectJson);
     final supportedLocales = _resolveSupportedLocales(
       projectJson: projectJson,
       blobPaths: blobPaths,
@@ -1455,6 +1506,7 @@ class ProviderBackedTrackStateRepository
       versionDefinitions: versions,
       componentDefinitions: components,
       resolutionDefinitions: resolutions,
+      attachmentStorage: attachmentStorage,
     );
     if (!usesLocalPersistence) {
       final summaryIssues = _loadHostedBootstrapIssues(
@@ -1740,6 +1792,52 @@ class ProviderBackedTrackStateRepository
       return '$dataRoot/$normalizedPath';
     }
     return normalizedPath;
+  }
+
+  ProjectAttachmentStorageSettings _resolveAttachmentStorage(
+    Map<String, Object?> projectJson,
+  ) {
+    final rawAttachmentStorage = projectJson['attachmentStorage'];
+    if (rawAttachmentStorage == null) {
+      return const ProjectAttachmentStorageSettings();
+    }
+    if (rawAttachmentStorage is! Map) {
+      throw const TrackStateRepositoryException(
+        'project.json attachmentStorage must be a JSON object.',
+      );
+    }
+    final attachmentStorage = rawAttachmentStorage.cast<Object?, Object?>();
+    final mode = AttachmentStorageMode.tryParse(attachmentStorage['mode']);
+    if (mode == null) {
+      throw TrackStateRepositoryException(
+        'project.json attachmentStorage.mode must be one of: '
+        '${AttachmentStorageMode.values.map((value) => value.persistedValue).join(', ')}.',
+      );
+    }
+    if (mode == AttachmentStorageMode.repositoryPath) {
+      return const ProjectAttachmentStorageSettings(
+        mode: AttachmentStorageMode.repositoryPath,
+      );
+    }
+    final rawGitHubReleases = attachmentStorage['githubReleases'];
+    if (rawGitHubReleases is! Map) {
+      throw const TrackStateRepositoryException(
+        'project.json attachmentStorage.githubReleases must be present when mode is github-releases.',
+      );
+    }
+    final githubReleases = rawGitHubReleases.cast<Object?, Object?>();
+    final tagPrefix = githubReleases['tagPrefix']?.toString().trim() ?? '';
+    if (tagPrefix.isEmpty) {
+      throw const TrackStateRepositoryException(
+        'project.json attachmentStorage.githubReleases.tagPrefix is required when mode is github-releases.',
+      );
+    }
+    return ProjectAttachmentStorageSettings(
+      mode: AttachmentStorageMode.githubReleases,
+      githubReleases: GitHubReleasesAttachmentStorageSettings(
+        tagPrefix: tagPrefix,
+      ),
+    );
   }
 
   Future<String> _getRepositoryText(String path) async {
@@ -2205,7 +2303,27 @@ class ProviderBackedTrackStateRepository
     required String issueRoot,
   }) async {
     final attachmentPrefix = _joinPath(issueRoot, 'attachments/');
-    final attachments = <IssueAttachment>[];
+    final attachmentMetadataPath = _attachmentMetadataPath(issueRoot);
+    final attachmentsById = <String, IssueAttachment>{};
+    if (_snapshotBlobPaths.contains(attachmentMetadataPath)) {
+      final metadataJson = await _getRepositoryJson(attachmentMetadataPath);
+      if (metadataJson is! List) {
+        throw TrackStateRepositoryException(
+          'Attachment metadata in $attachmentMetadataPath must be a JSON array.',
+        );
+      }
+      for (final entry in metadataJson) {
+        if (entry is! Map) {
+          throw TrackStateRepositoryException(
+            'Attachment metadata in $attachmentMetadataPath must contain only objects.',
+          );
+        }
+        final attachment = _parseAttachmentMetadataEntry(
+          entry.cast<Object?, Object?>(),
+        );
+        attachmentsById[attachment.id] = attachment;
+      }
+    }
     final historyReader = switch (_provider) {
       final RepositoryHistoryReader supported => supported,
       _ => null,
@@ -2233,23 +2351,30 @@ class ProviderBackedTrackStateRepository
       }
       final createdCommit = history.isEmpty ? null : history.last;
       _snapshotArtifactRevisions[entry.path] = attachment.revision;
-      attachments.add(
-        IssueAttachment(
-          id: entry.path,
-          name: entry.path.split('/').last,
-          mediaType: _mediaTypeForPath(entry.path),
-          sizeBytes: attachment.declaredSizeBytes ?? attachment.bytes.length,
-          author: createdCommit?.author ?? 'unknown',
-          createdAt: createdCommit?.timestamp ?? 'from repo',
-          storagePath: entry.path,
-          revisionOrOid: _attachmentRevisionOrOid(
-            attachment: attachment,
-            isLfsTracked: attachment.lfsOid != null,
-          ),
+      final existing = attachmentsById[entry.path];
+      attachmentsById[entry.path] = IssueAttachment(
+        id: existing?.id ?? entry.path,
+        name: existing?.name ?? entry.path.split('/').last,
+        mediaType: existing?.mediaType ?? _mediaTypeForPath(entry.path),
+        sizeBytes:
+            existing?.sizeBytes ??
+            attachment.declaredSizeBytes ??
+            attachment.bytes.length,
+        author: existing?.author ?? createdCommit?.author ?? 'unknown',
+        createdAt:
+            existing?.createdAt ?? createdCommit?.timestamp ?? 'from repo',
+        storagePath: existing?.storagePath ?? entry.path,
+        revisionOrOid: _attachmentRevisionOrOid(
+          attachment: attachment,
+          isLfsTracked: attachment.lfsOid != null,
         ),
+        storageBackend: AttachmentStorageMode.repositoryPath,
+        repositoryPath: entry.path,
+        githubReleaseTag: existing?.githubReleaseTag,
+        githubReleaseAssetName: existing?.githubReleaseAssetName,
       );
     }
-    return attachments..sort(_sortAttachmentsNewestFirst);
+    return attachmentsById.values.toList()..sort(_sortAttachmentsNewestFirst);
   }
 
   Future<List<IssueHistoryEntry>> _normalizeIssueHistory({
@@ -3515,7 +3640,26 @@ Map<String, Object?> _settingsProjectJson(
   ...currentProjectJson,
   'defaultLocale': settings.defaultLocale,
   'supportedLocales': settings.effectiveSupportedLocales,
+  'attachmentStorage': _attachmentStorageProjectJson(
+    settings.attachmentStorage,
+  ),
 };
+
+Map<String, Object?> _attachmentStorageProjectJson(
+  ProjectAttachmentStorageSettings storage,
+) {
+  return switch (storage.mode) {
+    AttachmentStorageMode.repositoryPath => <String, Object?>{
+      'mode': AttachmentStorageMode.repositoryPath.persistedValue,
+    },
+    AttachmentStorageMode.githubReleases => <String, Object?>{
+      'mode': AttachmentStorageMode.githubReleases.persistedValue,
+      'githubReleases': <String, Object?>{
+        'tagPrefix': storage.githubReleases!.tagPrefix,
+      },
+    },
+  };
+}
 
 Map<String, Object?> _localizedLabelsJson(
   ProjectSettingsCatalog settings,
@@ -3873,6 +4017,92 @@ String sanitizeAttachmentName(String value) => value
     .replaceAll(RegExp(r'-+'), '-')
     .replaceAll(RegExp(r'^-|-$'), '')
     .ifEmpty('attachment.bin');
+
+String _attachmentMetadataPath(String issueRoot) =>
+    _joinPath(issueRoot, 'attachments.json');
+
+List<Map<String, Object?>> _attachmentMetadataJson(
+  List<IssueAttachment> attachments,
+) => [
+  for (final attachment in attachments)
+    <String, Object?>{
+      'id': attachment.id,
+      'name': attachment.name,
+      'mediaType': attachment.mediaType,
+      'sizeBytes': attachment.sizeBytes,
+      'author': attachment.author,
+      'createdAt': attachment.createdAt,
+      'storagePath': attachment.storagePath,
+      'revisionOrOid': attachment.revisionOrOid,
+      'storageBackend': attachment.storageBackend.persistedValue,
+      if (attachment.repositoryPath case final repositoryPath?)
+        'repositoryPath': repositoryPath,
+      if (attachment.githubReleaseTag case final githubReleaseTag?)
+        'githubReleaseTag': githubReleaseTag,
+      if (attachment.githubReleaseAssetName case final githubReleaseAssetName?)
+        'githubReleaseAssetName': githubReleaseAssetName,
+    },
+];
+
+IssueAttachment _parseAttachmentMetadataEntry(Map<Object?, Object?> entry) {
+  final storageBackend = AttachmentStorageMode.tryParse(
+    entry['storageBackend'],
+  );
+  if (storageBackend == null) {
+    throw TrackStateRepositoryException(
+      'Attachment metadata entry is missing a valid storageBackend: $entry',
+    );
+  }
+  final id = entry['id']?.toString().trim() ?? '';
+  final name = entry['name']?.toString().trim() ?? '';
+  final storagePath = entry['storagePath']?.toString().trim() ?? id;
+  if (id.isEmpty || name.isEmpty || storagePath.isEmpty) {
+    throw TrackStateRepositoryException(
+      'Attachment metadata entry must include id, name, and storagePath: $entry',
+    );
+  }
+  final githubReleaseTag = entry['githubReleaseTag']?.toString().trim();
+  final githubReleaseAssetName = entry['githubReleaseAssetName']
+      ?.toString()
+      .trim();
+  if (storageBackend == AttachmentStorageMode.githubReleases &&
+      ((githubReleaseTag ?? '').isEmpty ||
+          (githubReleaseAssetName ?? '').isEmpty)) {
+    throw TrackStateRepositoryException(
+      'GitHub Releases attachment metadata must include githubReleaseTag and githubReleaseAssetName: $entry',
+    );
+  }
+  return IssueAttachment(
+    id: id,
+    name: name,
+    mediaType:
+        entry['mediaType']?.toString().trim().ifEmpty(
+          _mediaTypeForPath(name),
+        ) ??
+        _mediaTypeForPath(name),
+    sizeBytes: switch (entry['sizeBytes']) {
+      final num value => value.toInt(),
+      final String value => int.tryParse(value) ?? 0,
+      _ => 0,
+    },
+    author: entry['author']?.toString() ?? 'unknown',
+    createdAt: entry['createdAt']?.toString() ?? 'from repo',
+    storagePath: storagePath,
+    revisionOrOid: entry['revisionOrOid']?.toString() ?? '',
+    storageBackend: storageBackend,
+    repositoryPath: (() {
+      final value = entry['repositoryPath']?.toString().trim() ?? '';
+      return value.isEmpty ? null : value;
+    })(),
+    githubReleaseTag: (githubReleaseTag == null || githubReleaseTag.isEmpty)
+        ? null
+        : githubReleaseTag,
+    githubReleaseAssetName:
+        (githubReleaseAssetName == null || githubReleaseAssetName.isEmpty)
+        ? null
+        : githubReleaseAssetName,
+  );
+}
 
 int _sortAttachmentsNewestFirst(IssueAttachment left, IssueAttachment right) {
   final leftCreated = DateTime.tryParse(left.createdAt);

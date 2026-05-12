@@ -610,6 +610,54 @@ abstract class AppLocalizations {
   /// **'Locales'**
   String get locales;
 
+  /// No description provided for @githubReleases.
+  ///
+  /// In en, this message translates to:
+  /// **'GitHub Releases'**
+  String get githubReleases;
+
+  /// No description provided for @attachmentStorageDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose where new attachments are stored. Existing attachments keep the backend recorded when they were created.'**
+  String get attachmentStorageDescription;
+
+  /// No description provided for @attachmentStorageMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachment storage mode'**
+  String get attachmentStorageMode;
+
+  /// No description provided for @attachmentRepositoryPathSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Repository-path mode keeps attachments in <issue-root>/attachments/<file> inside the project repository.'**
+  String get attachmentRepositoryPathSummary;
+
+  /// No description provided for @attachmentReleaseTagPrefix.
+  ///
+  /// In en, this message translates to:
+  /// **'Release tag prefix'**
+  String get attachmentReleaseTagPrefix;
+
+  /// No description provided for @attachmentReleaseTagPrefixHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'TrackState derives the issue release tag as <tagPrefix><ISSUE_KEY>.'**
+  String get attachmentReleaseTagPrefixHelper;
+
+  /// No description provided for @attachmentReleaseMappingSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Each issue resolves to the release tag {tagPrefix}<ISSUE_KEY>. Release title stays \"Attachments for <ISSUE_KEY>\", and the asset name is the sanitized file name.'**
+  String attachmentReleaseMappingSummary(String tagPrefix);
+
+  /// No description provided for @attachmentStorageImmutableNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Switching project storage only affects new attachments. Existing attachments keep their original backend metadata.'**
+  String get attachmentStorageImmutableNote;
+
   /// No description provided for @language.
   ///
   /// In en, this message translates to:
