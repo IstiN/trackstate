@@ -88,9 +88,17 @@ class PythonTrackStateCliCompiledLocalFramework:
         return path.read_text(encoding="utf-8")
 
     @staticmethod
-    def _git(repository_path: Path, *args: str) -> None:
+    def _git(
+        repository_path: Path,
+        *args: str,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        effective_env = os.environ.copy()
+        if env:
+            effective_env.update(env)
         completed = subprocess.run(
             ("git", "-C", str(repository_path), *args),
+            env=effective_env,
             capture_output=True,
             text=True,
             check=False,
