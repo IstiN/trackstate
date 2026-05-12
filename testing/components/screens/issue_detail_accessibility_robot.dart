@@ -5,8 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/ui/core/trackstate_icons.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 
+import 'settings_screen_robot.dart';
 import '../../core/interfaces/issue_detail_accessibility_screen.dart';
 import '../../core/models/action_availability.dart';
+import '../../core/models/issue_detail_focus_transition_observation.dart';
 import '../../core/models/issue_detail_icon_observation.dart';
 import '../../core/models/issue_detail_row_style_observation.dart';
 import '../../core/models/issue_detail_theme_tokens.dart';
@@ -331,6 +333,17 @@ class IssueDetailAccessibilityRobot
       _attachmentRow(issueKey, attachmentName).evaluate().isNotEmpty;
 
   @override
+  bool showsAttachmentAction(
+    String issueKey, {
+    required String attachmentName,
+    required String actionLabel,
+  }) => _attachmentAction(
+    issueKey,
+    attachmentName: attachmentName,
+    actionLabel: actionLabel,
+  ).evaluate().isNotEmpty;
+
+  @override
   bool attachmentRowIsBelowAttachmentsRestrictionCallout(
     String issueKey, {
     required String title,
@@ -349,6 +362,32 @@ class IssueDetailAccessibilityRobot
     final calloutBottom = tester.getBottomLeft(callout.first).dy;
     final rowTop = tester.getTopLeft(attachmentRow.first).dy;
     return rowTop > calloutBottom;
+  }
+
+  @override
+  bool attachmentActionIsBelowAttachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String attachmentName,
+    required String actionLabel,
+  }) {
+    final callout = _attachmentsRestrictionCallout(
+      issueKey,
+      title: title,
+      message: message,
+    );
+    final action = _attachmentAction(
+      issueKey,
+      attachmentName: attachmentName,
+      actionLabel: actionLabel,
+    );
+    if (callout.evaluate().isEmpty || action.evaluate().isEmpty) {
+      return false;
+    }
+    final calloutBottom = tester.getBottomLeft(callout.first).dy;
+    final actionTop = tester.getTopLeft(action.first).dy;
+    return actionTop > calloutBottom;
   }
 
   @override
@@ -388,6 +427,70 @@ class IssueDetailAccessibilityRobot
     await tester.ensureVisible(action.first);
     await tester.tap(action.first, warnIfMissed: false);
     await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<IssueDetailFocusTransitionObservation>
+  observeForwardFocusTransitionFromAttachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+    int maxTabs = 48,
+  }) async {
+    final settingsRobot = SettingsScreenRobot(tester);
+    await settingsRobot.clearFocus();
+
+    final focusSequence = <String>[];
+    var lastFocusedLabels = const <String>[];
+    final candidates = _attachmentsRestrictionFocusCandidates(
+      issueKey,
+      title: title,
+      message: message,
+      actionLabel: actionLabel,
+    );
+
+    for (var index = 0; index < maxTabs; index += 1) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+
+      lastFocusedLabels = _focusedSemanticsLabels();
+      final focusedLabel = settingsRobot.focusedLabel(candidates);
+      _appendFocusLabels(
+        focusSequence,
+        labels: lastFocusedLabels,
+        preferredLabel: focusedLabel,
+      );
+
+      if (focusedLabel != actionLabel) {
+        continue;
+      }
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+
+      lastFocusedLabels = _focusedSemanticsLabels();
+      final resolvedNextFocusedLabel = settingsRobot.focusedLabel(candidates);
+      final nextFocusedLabel = _appendFocusLabels(
+        focusSequence,
+        labels: lastFocusedLabels,
+        preferredLabel: resolvedNextFocusedLabel,
+      );
+      return IssueDetailFocusTransitionObservation(
+        targetLabel: actionLabel,
+        reachedTarget: true,
+        focusSequence: focusSequence,
+        lastFocusedLabels: lastFocusedLabels,
+        nextFocusedLabel: nextFocusedLabel,
+      );
+    }
+
+    return IssueDetailFocusTransitionObservation(
+      targetLabel: actionLabel,
+      reachedTarget: false,
+      focusSequence: focusSequence,
+      lastFocusedLabels: lastFocusedLabels,
+    );
   }
 
   @override
@@ -701,6 +804,102 @@ class IssueDetailAccessibilityRobot
         }, description: 'attachment row for $attachmentName'),
       );
 
+  Finder _decoratedAttachmentRow(String issueKey, String attachmentName) {
+    return _smallestByArea(
+      find.ancestor(
+        of: find.descendant(
+          of: _issueDetail(issueKey),
+          matching: find.text(attachmentName, findRichText: true),
+        ),
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Container && widget.decoration is BoxDecoration,
+          description: 'decorated attachment row container',
+        ),
+      ),
+    );
+  }
+
+  Finder _attachmentAction(
+    String issueKey, {
+    required String attachmentName,
+    required String actionLabel,
+  }) {
+    final row = _decoratedAttachmentRow(issueKey, attachmentName);
+    final exactSemantics = find.descendant(
+      of: row,
+      matching: find.bySemanticsLabel(
+        RegExp('^${RegExp.escape(actionLabel)}\$'),
+      ),
+    );
+    if (exactSemantics.evaluate().isNotEmpty) {
+      return exactSemantics.first;
+    }
+    final iconButton = find.descendant(
+      of: row,
+      matching: find.byType(IconButton),
+    );
+    return iconButton.evaluate().isNotEmpty ? iconButton.first : exactSemantics;
+  }
+
+  Finder _focusCandidate(String issueKey, String label) {
+    switch (label) {
+      case 'Detail':
+      case 'Comments':
+      case 'Attachments':
+      case 'History':
+        return _collaborationTab(issueKey, label);
+      case 'JQL Search':
+      case 'Settings':
+        return find.text(label);
+      default:
+        final semantics = find.descendant(
+          of: _issueDetail(issueKey),
+          matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
+        );
+        return semantics.evaluate().isNotEmpty
+            ? semantics.first
+            : _issueDetailAction(issueKey, label);
+    }
+  }
+
+  Map<String, Finder> _attachmentsRestrictionFocusCandidates(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) {
+    final candidates = <String, Finder>{
+      actionLabel: _attachmentsRestrictionAction(
+        issueKey,
+        title: title,
+        message: message,
+        actionLabel: actionLabel,
+      ),
+      'Choose attachment': find.widgetWithText(
+        OutlinedButton,
+        'Choose attachment',
+      ),
+      'Upload attachment': find.widgetWithText(
+        FilledButton,
+        'Upload attachment',
+      ),
+      'Detail': find.widgetWithText(Tab, 'Detail'),
+      'Comments': find.widgetWithText(Tab, 'Comments'),
+      'Attachments': find.widgetWithText(Tab, 'Attachments'),
+      'History': find.widgetWithText(Tab, 'History'),
+      'JQL Search': find.text('JQL Search'),
+      'Settings': find.text('Settings'),
+    };
+
+    for (final label in buttonLabelsInIssueDetail(issueKey)) {
+      if (!label.startsWith('Download ') || candidates.containsKey(label)) {
+        continue;
+      }
+      candidates[label] = _focusCandidate(issueKey, label);
+    }
+    return candidates;
+  }
+
   InputDecoration _commentComposerDecoration(String issueKey) {
     final field = tester.widget<TextField>(_commentComposerField(issueKey));
     final decoration = field.decoration;
@@ -773,6 +972,52 @@ class IssueDetailAccessibilityRobot
       }
     }
     return null;
+  }
+
+  List<String> _focusedSemanticsLabels() {
+    return find.semantics
+        .byPredicate(
+          (node) => node.getSemanticsData().flagsCollection.isFocused,
+          describeMatch: (_) => 'focused semantics node',
+        )
+        .evaluate()
+        .map((node) => _normalizedLabel(node.label))
+        .where((label) => label.isNotEmpty)
+        .toList();
+  }
+
+  String? _appendFocusLabels(
+    List<String> focusSequence, {
+    required List<String> labels,
+    String? preferredLabel,
+  }) {
+    final label = preferredLabel ?? (labels.isEmpty ? null : labels.first);
+    if (label == null) {
+      return null;
+    }
+    if (focusSequence.isEmpty || focusSequence.last != label) {
+      focusSequence.add(label);
+    }
+    return label;
+  }
+
+  Finder _smallestByArea(Finder candidates) {
+    final matches = candidates.evaluate().length;
+    if (matches == 0) {
+      return candidates;
+    }
+
+    var bestIndex = 0;
+    var bestArea = double.infinity;
+    for (var index = 0; index < matches; index += 1) {
+      final rect = tester.getRect(candidates.at(index));
+      final area = rect.width * rect.height;
+      if (area <= bestArea) {
+        bestArea = area;
+        bestIndex = index;
+      }
+    }
+    return candidates.at(bestIndex);
   }
 
   FinderBase<SemanticsNode> _semanticsFinderFor(Finder finder) {
