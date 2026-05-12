@@ -16,6 +16,10 @@ class LocaleCatalogEntryObservation:
     entry_id: str
     translation: str
     warning_text: str | None
+    warning_text_color: str | None
+    warning_border_color: str | None
+    warning_background_color: str | None
+    warning_border_width: str | None
     input_index: int
 
 
@@ -311,6 +315,7 @@ class LiveSettingsLocalesPage:
 
               const visibleTextNodes = Array.from(document.querySelectorAll('body *'))
                 .map((element) => ({
+                  element,
                   text: (element.innerText ?? '').trim(),
                   rect: element.getBoundingClientRect(),
                 }))
@@ -339,6 +344,42 @@ class LiveSettingsLocalesPage:
               }
 
               return inputEntries.map((entry) => {
+                const warningNode = dedupedNodes
+                  .filter(
+                    (candidate) =>
+                      candidate.text.startsWith('Missing translation.') &&
+                      candidate.rect.top >= entry.rect.bottom - 4 &&
+                      candidate.rect.top <= entry.rect.bottom + 96,
+                  )
+                  .sort((left, right) => left.rect.top - right.rect.top)[0] ?? null;
+
+                let warningTextColor = null;
+                let warningBorderColor = null;
+                let warningBackgroundColor = null;
+                let warningBorderWidth = null;
+                if (warningNode?.element) {
+                  warningTextColor = window.getComputedStyle(warningNode.element).color;
+                  let warningContainer = warningNode.element;
+                  while (warningContainer && warningContainer !== document.body) {
+                    const style = window.getComputedStyle(warningContainer);
+                    const borderWidth = Number.parseFloat(style.borderTopWidth || '0');
+                    const hasVisibleBorder =
+                      borderWidth > 0 &&
+                      style.borderTopColor !== 'transparent' &&
+                      style.borderTopColor !== 'rgba(0, 0, 0, 0)';
+                    const hasVisibleBackground =
+                      style.backgroundColor !== 'transparent' &&
+                      style.backgroundColor !== 'rgba(0, 0, 0, 0)';
+                    if (hasVisibleBorder || hasVisibleBackground) {
+                      warningBorderColor = style.borderTopColor;
+                      warningBackgroundColor = style.backgroundColor;
+                      warningBorderWidth = style.borderTopWidth;
+                      break;
+                    }
+                    warningContainer = warningContainer.parentElement;
+                  }
+                }
+
                 const rowLabel = dedupedNodes
                   .filter(
                     (candidate) =>
@@ -352,20 +393,15 @@ class LiveSettingsLocalesPage:
                       Math.abs(right.rect.top - entry.rect.top),
                   )[0]?.text ?? '';
 
-                const warningText = dedupedNodes
-                  .filter(
-                    (candidate) =>
-                      candidate.text.startsWith('Missing translation.') &&
-                      candidate.rect.top >= entry.rect.bottom - 4 &&
-                      candidate.rect.top <= entry.rect.bottom + 96,
-                  )
-                  .sort((left, right) => left.rect.top - right.rect.top)[0]?.text ?? null;
-
                 return {
                   inputIndex: entry.globalIndex,
                   rowLabel,
+                  warningBackgroundColor,
+                  warningBorderColor,
+                  warningBorderWidth,
+                  warningText: warningNode?.text ?? null,
+                  warningTextColor,
                   translation: entry.value,
-                  warningText,
                 };
               });
             }
@@ -394,6 +430,26 @@ class LiveSettingsLocalesPage:
                     warning_text=(
                         str(item["warningText"])
                         if item.get("warningText") is not None
+                        else None
+                    ),
+                    warning_text_color=(
+                        str(item["warningTextColor"])
+                        if item.get("warningTextColor") is not None
+                        else None
+                    ),
+                    warning_border_color=(
+                        str(item["warningBorderColor"])
+                        if item.get("warningBorderColor") is not None
+                        else None
+                    ),
+                    warning_background_color=(
+                        str(item["warningBackgroundColor"])
+                        if item.get("warningBackgroundColor") is not None
+                        else None
+                    ),
+                    warning_border_width=(
+                        str(item["warningBorderWidth"])
+                        if item.get("warningBorderWidth") is not None
                         else None
                     ),
                     input_index=int(item.get("inputIndex", 0)),

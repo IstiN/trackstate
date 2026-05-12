@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -34,6 +35,14 @@ EXPECTED_CATALOG_TITLES = [
     "Versions",
     "Resolutions",
 ]
+EXPECTED_WARNING_COLORS = {
+    "rgb(193, 179, 65)",
+    "rgb(247, 201, 102)",
+}
+EXPECTED_WARNING_BACKGROUND_COLORS = {
+    "rgb(241, 228, 213)",
+    "rgb(36, 40, 39)",
+}
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts466_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts466_success.png"
@@ -256,21 +265,18 @@ def main() -> None:
                     value="",
                 )
                 result["status_after_edit"] = _entry_payload(status_after)
-                if status_after.warning_text != expected_status_warning:
-                    raise AssertionError(
-                        "Step 7 failed: leaving the Status translation empty did not show "
-                        "the expected inline fallback warning in the live Locales editor.\n"
-                        f'Expected warning: "{expected_status_warning}"\n'
-                        f'Observed warning: "{status_after.warning_text}"\n'
-                        f"Observed row: {status_after.row_label}\n"
-                        f"Observed body text:\n{page.current_body_text()}",
-                    )
+                _assert_warning_state(
+                    step=7,
+                    entry=status_after,
+                    expected_warning_text=expected_status_warning,
+                    page_body_text=page.current_body_text(),
+                )
                 _record_step(
                     result,
                     step=7,
                     status="passed",
                     action=f'Leave Status ID {status_seed["id"]} empty and observe the inline warning state.',
-                    observed=status_after.warning_text or "",
+                    observed=_warning_state_summary(status_after),
                 )
 
                 page.save_settings()
@@ -314,14 +320,12 @@ def main() -> None:
                         f'Observed translation: "{priority_saved.translation}"\n'
                         f"Observed row: {priority_saved.row_label}",
                     )
-                if status_saved.warning_text != expected_status_warning:
-                    raise AssertionError(
-                        "Step 9 failed: after saving, the empty Status translation no "
-                        "longer showed the expected inline fallback warning.\n"
-                        f'Expected warning: "{expected_status_warning}"\n'
-                        f'Observed warning: "{status_saved.warning_text}"\n'
-                        f"Observed row: {status_saved.row_label}",
-                    )
+                _assert_warning_state(
+                    step=9,
+                    entry=status_saved,
+                    expected_warning_text=expected_status_warning,
+                    page_body_text=page.current_body_text(),
+                )
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
                 result["human_verification"] = {
@@ -330,12 +334,19 @@ def main() -> None:
                         f'the Priority row for ID {priority_seed["id"]}',
                         f'the Status row for ID {status_seed["id"]}',
                         "the inline fallback warning text shown under the empty Status field",
+                        "the warning pill styling for the empty Status field",
                     ],
                     "observed": {
                         "priority_row_label": priority_saved.row_label,
                         "priority_translation": priority_saved.translation,
                         "status_row_label": status_saved.row_label,
                         "status_warning": status_saved.warning_text,
+                        "status_warning_text_color": status_saved.warning_text_color,
+                        "status_warning_border_color": status_saved.warning_border_color,
+                        "status_warning_background_color": (
+                            status_saved.warning_background_color
+                        ),
+                        "status_warning_border_width": status_saved.warning_border_width,
                     },
                 }
                 _record_step(
@@ -345,7 +356,8 @@ def main() -> None:
                     action="Re-open the saved Locales screen and verify the persisted user-visible state.",
                     observed=(
                         f'Priority "{priority_saved.translation}" remained visible and '
-                        f'the Status warning stayed visible as "{status_saved.warning_text}".'
+                        f"the Status warning stayed visible with "
+                        f"{_warning_state_summary(status_saved)}."
                     ),
                 )
             except Exception:
@@ -663,8 +675,87 @@ def _entry_payload(entry) -> dict[str, object]:
         "entry_id": entry.entry_id,
         "translation": entry.translation,
         "warning_text": entry.warning_text,
+        "warning_text_color": entry.warning_text_color,
+        "warning_border_color": entry.warning_border_color,
+        "warning_background_color": entry.warning_background_color,
+        "warning_border_width": entry.warning_border_width,
         "input_index": entry.input_index,
     }
+
+
+def _assert_warning_state(
+    *,
+    step: int,
+    entry,
+    expected_warning_text: str,
+    page_body_text: str,
+) -> None:
+    if entry.warning_text != expected_warning_text:
+        raise AssertionError(
+            f"Step {step} failed: the empty Status translation did not show the "
+            "expected inline fallback warning in the live Locales editor.\n"
+            f'Expected warning: "{expected_warning_text}"\n'
+            f'Observed warning: "{entry.warning_text}"\n'
+            f"Observed row: {entry.row_label}\n"
+            f"Observed body text:\n{page_body_text}",
+        )
+
+    normalized_text_color = _normalize_css_color(entry.warning_text_color)
+    normalized_border_color = _normalize_css_color(entry.warning_border_color)
+    normalized_background_color = _normalize_css_color(entry.warning_background_color)
+    border_width = _parse_css_pixels(entry.warning_border_width)
+    if (
+        normalized_text_color not in EXPECTED_WARNING_COLORS
+        or normalized_border_color not in EXPECTED_WARNING_COLORS
+        or normalized_background_color not in EXPECTED_WARNING_BACKGROUND_COLORS
+        or border_width <= 0
+    ):
+        raise AssertionError(
+            f"Step {step} failed: the empty Status translation warning did not use "
+            "the TrackState warning treatment.\n"
+            f"Expected warning colors: {sorted(EXPECTED_WARNING_COLORS)}\n"
+            f"Expected warning background colors: "
+            f"{sorted(EXPECTED_WARNING_BACKGROUND_COLORS)}\n"
+            f"Observed warning text color: {entry.warning_text_color!r}\n"
+            f"Observed warning border color: {entry.warning_border_color!r}\n"
+            f"Observed warning background color: {entry.warning_background_color!r}\n"
+            f"Observed warning border width: {entry.warning_border_width!r}\n"
+            f"Observed row: {entry.row_label}\n"
+            f"Observed body text:\n{page_body_text}",
+        )
+
+
+def _warning_state_summary(entry) -> str:
+    return (
+        f'warning "{entry.warning_text}" '
+        f"(text color: {entry.warning_text_color}, "
+        f"border color: {entry.warning_border_color}, "
+        f"background color: {entry.warning_background_color}, "
+        f"border width: {entry.warning_border_width})"
+    )
+
+
+def _normalize_css_color(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = " ".join(value.strip().lower().split())
+    rgba_match = re.fullmatch(
+        r"rgba\((\d+), (\d+), (\d+), (1(?:\.0+)?)\)",
+        normalized,
+    )
+    if rgba_match:
+        red, green, blue, _ = rgba_match.groups()
+        return f"rgb({red}, {green}, {blue})"
+    return normalized
+
+
+def _parse_css_pixels(value: str | None) -> float:
+    if value is None:
+        return 0.0
+    match = re.fullmatch(r"\s*([0-9]+(?:\.[0-9]+)?)px\s*", value)
+    if not match:
+        return 0.0
+    return float(match.group(1))
 
 
 def _record_step(
