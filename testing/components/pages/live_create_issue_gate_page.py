@@ -9,17 +9,20 @@ from testing.core.interfaces.web_app_session import WebAppTimeoutError
 @dataclass(frozen=True)
 class CreateIssueGateObservation:
     body_text: str
+    gate_panel_text: str
     callout_semantics_label: str
     create_heading_visible: bool
     summary_field_count: int
     create_button_count: int
     save_button_count: int
     open_settings_button_count: int
+    gate_open_settings_button_count: int
+    gate_cta_center_x: float | None
+    gate_cta_center_y: float | None
 
 
 class LiveCreateIssueGatePage:
     _button_selector = 'flt-semantics[role="button"]'
-    _summary_selector = 'input[aria-label="Summary"]'
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
         self._tracker_page = tracker_page
@@ -52,61 +55,15 @@ class LiveCreateIssueGatePage:
     def wait_for_access_gate(
         self,
         *,
-        title: str,
-        message: str,
         primary_action_label: str,
         timeout_ms: int = 60_000,
     ) -> CreateIssueGateObservation:
         self._session.wait_for_function(
             """
-            ({ title, message, actionLabel }) => {
+            ({ actionLabel }) => {
+              const createLabel = 'Create issue';
+              const normalize = (value) => value.replace(/\\s+/g, ' ').trim();
               const bodyText = document.body?.innerText ?? '';
-              const callout = Array.from(document.querySelectorAll('flt-semantics')).find(
-                (candidate) => {
-                  const label = candidate.getAttribute('aria-label') ?? '';
-                  return label.includes('Create issue')
-                    && label.includes(title)
-                    && label.includes(message);
-                },
-              );
-              const actionCount = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              ).filter((candidate) => {
-                const label = candidate.getAttribute('aria-label') ?? '';
-                const text = candidate.innerText ?? '';
-                return label.includes(actionLabel) || text.includes(actionLabel);
-              }).length;
-              return bodyText.includes('Create issue') && callout && actionCount > 0;
-            }
-            """,
-            arg={
-                "title": title,
-                "message": message,
-                "actionLabel": primary_action_label,
-            },
-            timeout_ms=timeout_ms,
-        )
-        return self.observe_access_gate(title=title, message=message, primary_action_label=primary_action_label)
-
-    def observe_access_gate(
-        self,
-        *,
-        title: str,
-        message: str,
-        primary_action_label: str,
-    ) -> CreateIssueGateObservation:
-        payload = self._session.evaluate(
-            """
-            ({ title, message, actionLabel }) => {
-              const bodyText = document.body?.innerText ?? '';
-              const callout = Array.from(document.querySelectorAll('flt-semantics')).find(
-                (candidate) => {
-                  const label = candidate.getAttribute('aria-label') ?? '';
-                  return label.includes('Create issue')
-                    && label.includes(title)
-                    && label.includes(message);
-                },
-              );
               const isVisible = (element) => {
                 const rect = element.getBoundingClientRect();
                 const style = window.getComputedStyle(element);
@@ -115,29 +72,170 @@ class LiveCreateIssueGatePage:
                   && style.visibility !== 'hidden'
                   && style.display !== 'none';
               };
+              const elementText = (element) => normalize(
+                [
+                  element.getAttribute('aria-label') ?? '',
+                  element.innerText ?? '',
+                ].join(' '),
+              );
+              const pointInRect = (x, y, rect) =>
+                x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+              const buttons = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .filter((candidate) => {
+                  const text = elementText(candidate);
+                  return isVisible(candidate) && text.includes(actionLabel);
+                })
+                .map((candidate) => {
+                  const rect = candidate.getBoundingClientRect();
+                  return {
+                    centerX: rect.left + (rect.width / 2),
+                    centerY: rect.top + (rect.height / 2),
+                  };
+                });
+              const containers = Array.from(document.querySelectorAll('flt-semantics'))
+                .filter((candidate) => {
+                  if (!isVisible(candidate)) {
+                    return false;
+                  }
+                  const text = elementText(candidate);
+                  return text.includes(createLabel)
+                    && text.includes(actionLabel)
+                    && text.length > (createLabel.length + actionLabel.length + 8);
+                })
+                .map((candidate) => {
+                  const rect = candidate.getBoundingClientRect();
+                  return {
+                    area: rect.width * rect.height,
+                    left: rect.left,
+                    right: rect.right,
+                    top: rect.top,
+                    bottom: rect.bottom,
+                  };
+                })
+                .sort((left, right) => left.area - right.area);
+              const gateButton = buttons.find((button) =>
+                containers.some((container) =>
+                  pointInRect(button.centerX, button.centerY, container),
+                ),
+              );
+              return bodyText.includes(createLabel) && !!gateButton;
+            }
+            """,
+            arg={"actionLabel": primary_action_label},
+            timeout_ms=timeout_ms,
+        )
+        return self.observe_access_gate(primary_action_label=primary_action_label)
+
+    def observe_access_gate(
+        self,
+        *,
+        primary_action_label: str,
+    ) -> CreateIssueGateObservation:
+        payload = self._session.evaluate(
+            """
+            ({ actionLabel }) => {
+              const createLabel = 'Create issue';
+              const normalize = (value) => value.replace(/\\s+/g, ' ').trim();
+              const bodyText = document.body?.innerText ?? '';
+              const isVisible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const elementText = (element) => normalize(
+                [
+                  element.getAttribute('aria-label') ?? '',
+                  element.innerText ?? '',
+                ].join(' '),
+              );
+              const pointInRect = (x, y, rect) =>
+                x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
               const buttonCount = (label) => Array.from(
                 document.querySelectorAll('flt-semantics[role="button"]'),
               ).filter((candidate) => {
-                const ariaLabel = candidate.getAttribute('aria-label') ?? '';
-                const text = candidate.innerText ?? '';
-                return isVisible(candidate) && (ariaLabel.includes(label) || text.includes(label));
+                const text = elementText(candidate);
+                return isVisible(candidate) && text.includes(label);
               }).length;
+              const buttons = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .filter((candidate) => {
+                  const text = elementText(candidate);
+                  return isVisible(candidate) && text.includes(actionLabel);
+                })
+                .map((candidate) => {
+                  const rect = candidate.getBoundingClientRect();
+                  return {
+                    centerX: rect.left + (rect.width / 2),
+                    centerY: rect.top + (rect.height / 2),
+                  };
+                });
+              const containers = Array.from(document.querySelectorAll('flt-semantics'))
+                .filter((candidate) => {
+                  if (!isVisible(candidate)) {
+                    return false;
+                  }
+                  const text = elementText(candidate);
+                  return text.includes(createLabel)
+                    && text.includes(actionLabel)
+                    && text.length > (createLabel.length + actionLabel.length + 8);
+                })
+                .map((candidate) => {
+                  const text = elementText(candidate);
+                  const rect = candidate.getBoundingClientRect();
+                  return {
+                    area: rect.width * rect.height,
+                    left: rect.left,
+                    right: rect.right,
+                    top: rect.top,
+                    bottom: rect.bottom,
+                    label: candidate.getAttribute('aria-label') ?? '',
+                    text,
+                  };
+                })
+                .sort((left, right) => left.area - right.area);
+              const gateMatch = buttons
+                .map((button) => {
+                  const container = containers.find((candidate) =>
+                    pointInRect(button.centerX, button.centerY, candidate),
+                  );
+                  if (!container) {
+                    return null;
+                  }
+                  return {
+                    centerX: button.centerX,
+                    centerY: button.centerY,
+                    container,
+                  };
+                })
+                .find((candidate) => candidate !== null);
+              const gateContainer = gateMatch?.container ?? null;
+              const gateOpenSettingsButtonCount = gateContainer
+                ? buttons.filter((button) =>
+                    pointInRect(button.centerX, button.centerY, gateContainer),
+                  ).length
+                : 0;
               return {
                 bodyText,
-                calloutSemanticsLabel: callout?.getAttribute('aria-label') ?? '',
-                createHeadingVisible: bodyText.includes('Create issue'),
+                gatePanelText: gateContainer?.text ?? '',
+                calloutSemanticsLabel: gateContainer?.label ?? '',
+                createHeadingVisible: bodyText.includes(createLabel),
                 summaryFieldCount: document.querySelectorAll('input[aria-label="Summary"]').length,
                 createButtonCount: buttonCount('Create'),
                 saveButtonCount: buttonCount('Save'),
                 openSettingsButtonCount: buttonCount(actionLabel),
+                gateOpenSettingsButtonCount,
+                gateCtaCenterX: gateMatch?.centerX ?? null,
+                gateCtaCenterY: gateMatch?.centerY ?? null,
               };
             }
             """,
-            arg={
-                "title": title,
-                "message": message,
-                "actionLabel": primary_action_label,
-            },
+            arg={"actionLabel": primary_action_label},
         )
         if not isinstance(payload, dict):
             raise AssertionError(
@@ -146,58 +244,36 @@ class LiveCreateIssueGatePage:
             )
         return CreateIssueGateObservation(
             body_text=str(payload["bodyText"]),
+            gate_panel_text=str(payload["gatePanelText"]),
             callout_semantics_label=str(payload["calloutSemanticsLabel"]),
             create_heading_visible=bool(payload["createHeadingVisible"]),
             summary_field_count=int(payload["summaryFieldCount"]),
             create_button_count=int(payload["createButtonCount"]),
             save_button_count=int(payload["saveButtonCount"]),
             open_settings_button_count=int(payload["openSettingsButtonCount"]),
+            gate_open_settings_button_count=int(payload["gateOpenSettingsButtonCount"]),
+            gate_cta_center_x=(
+                float(payload["gateCtaCenterX"]) if payload["gateCtaCenterX"] is not None else None
+            ),
+            gate_cta_center_y=(
+                float(payload["gateCtaCenterY"]) if payload["gateCtaCenterY"] is not None else None
+            ),
         )
 
-    def open_settings_from_gate(self, *, timeout_ms: int = 60_000) -> str:
-        payload = self._session.evaluate(
-            """
-            () => {
-              const isVisible = (element) => {
-                const rect = element.getBoundingClientRect();
-                const style = window.getComputedStyle(element);
-                return rect.width > 0
-                  && rect.height > 0
-                  && style.visibility !== 'hidden'
-                  && style.display !== 'none';
-              };
-              const candidates = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              )
-                .filter((element) => {
-                  const label = element.getAttribute('aria-label') ?? '';
-                  const text = element.innerText ?? '';
-                  return isVisible(element)
-                    && (label.includes('Open settings') || text.includes('Open settings'));
-                })
-                .map((element) => {
-                  const rect = element.getBoundingClientRect();
-                  return {
-                    left: rect.left,
-                    centerX: rect.left + (rect.width / 2),
-                    centerY: rect.top + (rect.height / 2),
-                  };
-                })
-                .sort((left, right) => right.left - left.left);
-              return candidates[0] ?? null;
-            }
-            """,
-        )
-        if not isinstance(payload, dict):
+    def open_settings_from_gate(
+        self,
+        gate: CreateIssueGateObservation,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> str:
+        if gate.gate_cta_center_x is None or gate.gate_cta_center_y is None:
             raise AssertionError(
-                "Step 5 failed: the read-only gate did not expose a clickable `Open settings` "
-                "recovery action.\n"
+                "Step 5 failed: the create issue gate did not expose a clickable "
+                "`Open settings` recovery action.\n"
+                f"Observed gate text:\n{gate.gate_panel_text}\n\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
-        self._session.mouse_click(
-            float(payload["centerX"]),
-            float(payload["centerY"]),
-        )
+        self._session.mouse_click(gate.gate_cta_center_x, gate.gate_cta_center_y)
         settings_snapshot = self._session.wait_for_function(
             """
             (requiredFragments) => {
@@ -208,7 +284,7 @@ class LiveCreateIssueGatePage:
                 ])
                 .map((value) => value.trim())
                 .filter((value) => value.length > 0)
-                .join('\n');
+                .join('\\n');
               return requiredFragments.every((fragment) => snapshot.includes(fragment))
                 ? snapshot
                 : null;

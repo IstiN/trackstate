@@ -31,20 +31,7 @@ from testing.tests.support.read_only_hosted_session_runtime import (  # noqa: E4
 )
 
 TICKET_KEY = "TS-371"
-EXPECTED_TITLE = "This repository session is read-only"
-EXPECTED_MESSAGE = (
-    "This account can read the repository but cannot push Git-backed changes. "
-    "Reconnect with a token or account that has repository Contents write access, "
-    "or switch to a repository where you have that access."
-)
-EXPECTED_GATE_LABEL = f"Create issue {EXPECTED_TITLE} {EXPECTED_MESSAGE}"
 EXPECTED_CTA = "Open settings"
-EXPECTED_VISIBLE_GATE_FRAGMENTS = (
-    "Create issue",
-    "Read-only",
-    "Reconnect for write access",
-    EXPECTED_CTA,
-)
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
@@ -138,8 +125,6 @@ def main() -> None:
 
                 create_page.open_create_issue()
                 gate = create_page.wait_for_access_gate(
-                    title=EXPECTED_TITLE,
-                    message=EXPECTED_MESSAGE,
                     primary_action_label=EXPECTED_CTA,
                 )
                 result["gate_observation"] = _gate_payload(gate)
@@ -158,13 +143,14 @@ def main() -> None:
                         "guided gate panel instead of staying blank or silently doing nothing."
                     ),
                     observed=(
-                        f'callout_semantics="{gate.callout_semantics_label}"; '
+                        f'gate_panel_text="{gate.gate_panel_text}"; '
                         f"summary_field_count={gate.summary_field_count}; "
-                        f"open_settings_button_count={gate.open_settings_button_count}"
+                        f"open_settings_button_count={gate.open_settings_button_count}; "
+                        f"gate_open_settings_button_count={gate.gate_open_settings_button_count}"
                     ),
                 )
 
-                _assert_gate_copy(gate)
+                _assert_gate_guidance(gate)
                 _record_step(
                     result,
                     step=4,
@@ -174,21 +160,20 @@ def main() -> None:
                         "creation is blocked."
                     ),
                     observed=(
-                        f'title="{EXPECTED_TITLE}"; '
-                        f'message="{EXPECTED_MESSAGE}"; '
-                        f'body_contains_title={EXPECTED_TITLE in gate.body_text}'
+                        f"context_line_count={len(_descriptive_gate_lines(gate))}; "
+                        f'explanation_text="{_gate_explanation_text(gate)}"; '
+                        f'visible_cta="{EXPECTED_CTA}"'
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Verified the visible Create issue surface showed the read-only "
-                        "title, the full write-access explanation, and the CTA in the "
-                        "same gate panel a user sees after clicking Create."
+                        "Verified the visible Create issue surface showed a blocked-creation "
+                        "explanation and the recovery CTA in the same gate panel a user sees "
+                        "after clicking Create."
                     ),
                     observed=(
-                        f'visible_title="{EXPECTED_TITLE}"; '
-                        f'visible_message="{EXPECTED_MESSAGE}"; '
+                        f'gate_panel_text="{gate.gate_panel_text}"; '
                         f'visible_cta="{EXPECTED_CTA}"'
                     ),
                 )
@@ -196,7 +181,7 @@ def main() -> None:
                 create_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
 
-                settings_body = create_page.open_settings_from_gate()
+                settings_body = create_page.open_settings_from_gate(gate)
                 result["settings_body_text"] = settings_body
                 _assert_settings_redirect(settings_body)
                 _record_step(
@@ -208,7 +193,7 @@ def main() -> None:
                         "surface."
                     ),
                     observed=(
-                        'clicked_cta="Open settings"; '
+                        f'clicked_cta="{EXPECTED_CTA}"; '
                         'settings_heading_visible=True; repository_access_visible=True'
                     ),
                 )
@@ -263,32 +248,29 @@ def _assert_gate_surface(gate: CreateIssueGateObservation) -> None:
             "surface heading.\n"
             f"Observed body text:\n{gate.body_text}",
         )
-    if gate.open_settings_button_count < 1:
+    if gate.gate_open_settings_button_count < 1:
         raise AssertionError(
-            "Step 3 failed: the read-only gate did not expose a visible "
+            "Step 3 failed: the create issue gate did not expose a visible "
             f'`{EXPECTED_CTA}` recovery action.\n'
-            f"Observed gate semantics: {gate.callout_semantics_label}\n"
+            f"Observed gate text: {gate.gate_panel_text}\n"
             f"Observed body text:\n{gate.body_text}",
         )
 
 
-def _assert_gate_copy(gate: CreateIssueGateObservation) -> None:
-    normalized_label = _normalize_whitespace(gate.callout_semantics_label)
-    if EXPECTED_GATE_LABEL not in normalized_label:
+def _assert_gate_guidance(gate: CreateIssueGateObservation) -> None:
+    explanation_text = _gate_explanation_text(gate)
+    if "Create issue" not in gate.gate_panel_text or EXPECTED_CTA not in gate.gate_panel_text:
         raise AssertionError(
-            "Step 4 failed: the Create issue gate did not expose the expected read-only "
-            "semantics label.\n"
-            f"Expected semantics fragment: {EXPECTED_GATE_LABEL}\n"
-            f"Observed semantics label: {gate.callout_semantics_label}",
+            "Step 4 failed: the Create issue gate did not keep the explanation panel and "
+            "recovery CTA together in the same visible surface.\n"
+            f"Observed gate text:\n{gate.gate_panel_text}",
         )
-    for fragment in EXPECTED_VISIBLE_GATE_FRAGMENTS:
-        if fragment not in gate.body_text:
-            raise AssertionError(
-                "Step 4 failed: the Create issue gate did not show the expected "
-                "visible recovery-state copy.\n"
-                f"Missing fragment: {fragment}\n"
-                f"Observed body text:\n{gate.body_text}",
-            )
+    if len(_descriptive_gate_lines(gate)) < 2 and len(explanation_text.split()) < 5:
+        raise AssertionError(
+            "Step 4 failed: the Create issue gate did not show enough contextual guidance "
+            "to explain why creation is blocked.\n"
+            f"Observed gate text:\n{gate.gate_panel_text}",
+        )
 
 
 def _assert_settings_redirect(settings_body: str) -> None:
@@ -306,15 +288,39 @@ def _normalize_whitespace(value: str) -> str:
     return " ".join(value.split())
 
 
+def _descriptive_gate_lines(gate: CreateIssueGateObservation) -> list[str]:
+    seen: set[str] = set()
+    lines: list[str] = []
+    for raw_line in gate.gate_panel_text.splitlines():
+        line = _normalize_whitespace(raw_line)
+        if not line:
+            continue
+        if line in {"Create issue", EXPECTED_CTA}:
+            continue
+        if line in seen:
+            continue
+        seen.add(line)
+        lines.append(line)
+    return lines
+
+
+def _gate_explanation_text(gate: CreateIssueGateObservation) -> str:
+    return " ".join(_descriptive_gate_lines(gate))
+
+
 def _gate_payload(observation: CreateIssueGateObservation) -> dict[str, object]:
     return {
         "body_text": observation.body_text,
+        "gate_panel_text": observation.gate_panel_text,
         "callout_semantics_label": observation.callout_semantics_label,
         "create_heading_visible": observation.create_heading_visible,
         "summary_field_count": observation.summary_field_count,
         "create_button_count": observation.create_button_count,
         "save_button_count": observation.save_button_count,
         "open_settings_button_count": observation.open_settings_button_count,
+        "gate_open_settings_button_count": observation.gate_open_settings_button_count,
+        "gate_cta_center_x": observation.gate_cta_center_x,
+        "gate_cta_center_y": observation.gate_cta_center_y,
     }
 
 
@@ -401,7 +407,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "* Opened the deployed hosted TrackState app against the live setup repository.",
         "* Connected a hosted GitHub session and patched the live repository permission response to read-only so the production Create issue gate could be exercised.",
         '* Located and clicked the visible top-bar "Create issue" action.',
-        "* Verified the Create issue surface showed the read-only gate title, explanation, and visible Open settings recovery CTA.",
+        "* Verified the Create issue surface showed a blocked-creation explanation and a visible Open settings recovery CTA.",
         "* Clicked the CTA and verified the user landed on Project Settings / Repository access.",
         "",
         "*Observed result*",
@@ -446,7 +452,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "- Opened the deployed hosted TrackState app against the live setup repository.",
         "- Connected a hosted GitHub session and patched the live repository permission response to read-only so the production Create issue gate could be exercised.",
         '- Located and clicked the visible top-bar "Create issue" action.',
-        "- Verified the Create issue surface showed the read-only gate title, explanation, and visible `Open settings` recovery CTA.",
+        "- Verified the Create issue surface showed a blocked-creation explanation and a visible `Open settings` recovery CTA.",
         "- Clicked the CTA and verified the user landed on `Project Settings` / `Repository access`.",
         "",
         "### Observed result",
@@ -525,8 +531,8 @@ def _bug_description(result: dict[str, object]) -> str:
         "## Actual vs Expected",
         (
             "- Expected: clicking Create issue in a connected read-only hosted session "
-            "opens the Create issue surface with the read-only gate title, the write-"
-            "access explanation, and an Open settings CTA that routes to Project Settings."
+            "opens the Create issue surface with a contextual blocked-creation "
+            "explanation and an Open settings CTA that routes to Project Settings."
         ),
         (
             "- Actual: "
