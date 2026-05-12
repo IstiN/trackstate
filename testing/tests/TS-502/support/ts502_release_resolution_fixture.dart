@@ -2,15 +2,16 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
-import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
-import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
+
+import '../../../components/services/issue_attachment_upload_service.dart';
+import '../../../core/interfaces/issue_attachment_upload_port.dart';
+import '../../../frameworks/api/github/github_issue_attachment_upload_framework.dart';
 
 class Ts502ReleaseResolutionFixture {
   Ts502ReleaseResolutionFixture._({
-    required this.repository,
+    required this.attachmentUploadPort,
     required this.issue,
     required List<RecordedGitHubExchange> exchanges,
   }) : _exchanges = exchanges;
@@ -28,36 +29,31 @@ class Ts502ReleaseResolutionFixture {
   static const String releaseTag = '${tagPrefix}TS-200';
   static const String releaseTitle = 'Attachments for TS-200';
 
-  final ProviderBackedTrackStateRepository repository;
+  final IssueAttachmentUploadPort attachmentUploadPort;
   final TrackStateIssue issue;
   final List<RecordedGitHubExchange> _exchanges;
 
   static Future<Ts502ReleaseResolutionFixture> create() async {
     final exchanges = <RecordedGitHubExchange>[];
-    final provider = GitHubTrackStateProvider(
-      repositoryName: repositoryName,
-      dataRef: branch,
-      client: MockClient((request) async {
-        final recorded = await RecordedGitHubExchange.fromRequest(request);
-        final response = _responseFor(recorded);
-        exchanges.add(recorded.withResponseStatusCode(response.statusCode));
-        return response;
-      }),
-    );
-    final repository = ProviderBackedTrackStateRepository(provider: provider);
-    await repository.connect(
-      const RepositoryConnection(
-        repository: repositoryName,
+    final attachmentUploadPort = IssueAttachmentUploadService(
+      attachmentDriver: await GitHubIssueAttachmentUploadFramework.create(
+        repositoryName: repositoryName,
         branch: branch,
         token: 'test-token',
+        responder: (request) async {
+          final recorded = await RecordedGitHubExchange.fromRequest(request);
+          final response = _responseFor(recorded);
+          exchanges.add(recorded.withResponseStatusCode(response.statusCode));
+          return response;
+        },
       ),
     );
-    repository.replaceCachedState(
+    attachmentUploadPort.replaceCachedState(
       snapshot: TrackerSnapshot(project: _projectConfig, issues: [_seedIssue]),
       tree: const <RepositoryTreeEntry>[],
     );
     return Ts502ReleaseResolutionFixture._(
-      repository: repository,
+      attachmentUploadPort: attachmentUploadPort,
       issue: _seedIssue,
       exchanges: exchanges,
     );
@@ -68,14 +64,14 @@ class Ts502ReleaseResolutionFixture {
       utf8.encode('TS-502 synthetic release auto-repair payload\n'),
     );
     try {
-      final updatedIssue = await repository.uploadIssueAttachment(
+      final updatedIssue = await attachmentUploadPort.uploadIssueAttachment(
         issue: issue,
         name: attachmentName,
         bytes: uploadBytes,
       );
       return Ts502ReleaseResolutionRun(
         updatedIssue: updatedIssue,
-        cachedSnapshot: repository.cachedSnapshot,
+        cachedSnapshot: attachmentUploadPort.cachedSnapshot,
         recordedExchanges: List<RecordedGitHubExchange>.unmodifiable(
           _exchanges,
         ),
@@ -85,7 +81,7 @@ class Ts502ReleaseResolutionFixture {
       return Ts502ReleaseResolutionRun(
         error: error,
         stackTrace: stackTrace,
-        cachedSnapshot: repository.cachedSnapshot,
+        cachedSnapshot: attachmentUploadPort.cachedSnapshot,
         recordedExchanges: List<RecordedGitHubExchange>.unmodifiable(
           _exchanges,
         ),
