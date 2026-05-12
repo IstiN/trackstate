@@ -7,6 +7,11 @@ class Ts467LocaleResolutionFixture {
 
   static const issueKey = 'DEMO-2';
   static const issueSummary = 'Explore the locale-aware issue list';
+  static const defaultLocale = 'en';
+  static const viewerLocale = 'de';
+  static const canonicalInProgressStatus = 'In Progress';
+  static const defaultLocaleInProgressStatus = 'In Progress (default locale)';
+  static const viewerLocaleInProgressStatus = 'In Bearbeitung';
 
   final LocalGitRepositoryFixture _repositoryFixture;
 
@@ -30,15 +35,15 @@ class Ts467LocaleResolutionFixture {
       '${jsonEncode({
         'key': 'DEMO',
         'name': 'Viewer locale resolution demo',
-        'defaultLocale': 'en',
-        'supportedLocales': ['en', 'de'],
+        'defaultLocale': defaultLocale,
+        'supportedLocales': [defaultLocale, viewerLocale],
       })}\n',
     );
     await _repositoryFixture.writeFile(
       'DEMO/config/statuses.json',
       '${jsonEncode([
         {'id': 'todo', 'name': 'To Do', 'category': 'new'},
-        {'id': 'in-progress', 'name': 'In Progress', 'category': 'indeterminate'},
+        {'id': 'in-progress', 'name': canonicalInProgressStatus, 'category': 'indeterminate'},
         {'id': 'done', 'name': 'Done', 'category': 'done'},
       ])}\n',
     );
@@ -80,16 +85,16 @@ class Ts467LocaleResolutionFixture {
     await _repositoryFixture.writeFile(
       'DEMO/config/i18n/en.json',
       '${jsonEncode({
-        'statuses': {'todo': 'To Do', 'in-progress': 'In Progress', 'done': 'Done'},
+        'statuses': {'todo': 'To Do', 'in-progress': defaultLocaleInProgressStatus, 'done': 'Done'},
       })}\n',
     );
     await _repositoryFixture.writeFile(
       'DEMO/config/i18n/de.json',
       '${jsonEncode({
-        'statuses': {'in-progress': 'In Bearbeitung'},
+        'statuses': {'in-progress': viewerLocaleInProgressStatus},
       })}\n',
     );
-    await _repositoryFixture.writeFile('DEMO/${issueKey}/main.md', '''
+    await _repositoryFixture.writeFile('DEMO/$issueKey/main.md', '''
 ---
 key: $issueKey
 project: DEMO
