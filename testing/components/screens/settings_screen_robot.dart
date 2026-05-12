@@ -455,6 +455,18 @@ class SettingsScreenRobot {
   bool isVisibleText(String text) =>
       find.text(text, findRichText: true).evaluate().isNotEmpty;
 
+  bool showsModalDialog() => settingsEditorDialog.evaluate().isNotEmpty;
+
+  bool showsProjectSettingsSurface() =>
+      isVisibleText('Project Settings') &&
+      projectSettingsHeading.evaluate().isNotEmpty;
+
+  bool showsProjectSettingsTab(String label) =>
+      showsProjectSettingsSurface() && tabByLabel(label).evaluate().isNotEmpty;
+
+  bool showsAttachmentStorageModeSetting() =>
+      isVisibleText('Attachment storage mode');
+
   bool statusSummaryVisible({
     required String name,
     required String id,

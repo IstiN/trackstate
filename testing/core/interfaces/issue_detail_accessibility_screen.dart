@@ -29,6 +29,49 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
 
   List<String> commentActionLabels(String issueKey);
 
+  bool showsAttachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+  });
+
+  bool attachmentsRestrictionCalloutShowsText(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String text,
+  });
+
+  bool attachmentsRestrictionCalloutIsInline(
+    String issueKey, {
+    required String tabLabel,
+    required String title,
+    required String message,
+  });
+
+  bool showsAttachmentRow(String issueKey, String attachmentName);
+
+  bool attachmentRowIsBelowAttachmentsRestrictionCallout(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String attachmentName,
+  });
+
+  bool showsAttachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  });
+
+  Future<void> tapAttachmentsRestrictionAction(
+    String issueKey, {
+    required String title,
+    required String message,
+    required String actionLabel,
+  });
+
   String? commentComposerPlaceholderText(String issueKey);
 
   String? readCommentComposerText(String issueKey);
