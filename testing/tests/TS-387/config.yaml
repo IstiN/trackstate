@@ -1,0 +1,10 @@
+test_id: TS-387
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+notes:
+  - Executes the exact ticket command from a seeded local TrackState repository with two existing source files.
+  - Passes only when the CLI rejects duplicate --file inputs with a validation error and leaves the repository without uploaded attachment artifacts or extra commits.
