@@ -1,0 +1,10 @@
+test_id: TS-452
+type: web
+framework: playwright
+platform: chrome
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Exercises the deployed app at the hosted TrackState demo.
+  - Injects a deterministic delay only for DEMO-2 comment artifact fetches so the live Comments skeleton remains observable while the surrounding Search/Detail UI stays interactive.
