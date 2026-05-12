@@ -93,6 +93,12 @@ class Ts500ReleaseAuthFailureScenario:
             "observed_error_category": error_dict.get("category")
             if isinstance(error_dict, dict)
             else None,
+            "observed_provider": payload_dict.get("provider")
+            if isinstance(payload_dict, dict)
+            else None,
+            "observed_output_format": payload_dict.get("output")
+            if isinstance(payload_dict, dict)
+            else None,
             "observed_error_message": error_dict.get("message")
             if isinstance(error_dict, dict)
             else None,
@@ -188,32 +194,20 @@ class Ts500ReleaseAuthFailureScenario:
             )
             return failures
         lowered_error = visible_error.lower()
-        missing_release_context = [
-            fragment
+        has_release_context = any(
+            fragment in lowered_error
             for fragment in self.config.expected_release_fragments
-            if fragment not in lowered_error
-        ]
-        if len(missing_release_context) == len(self.config.expected_release_fragments):
-            failures.append(
-                "Step 1 failed: the visible CLI error was not an explicit release-backed "
-                "auth/configuration failure.\n"
-                "The output did not mention GitHub Releases or release-backed storage.\n"
-                f"Visible output:\n{visible_error}\n"
-                f"{_format_supporting_evidence(payload=payload, stdout=stdout, stderr=stderr)}"
-            )
-
+        )
         has_auth_context = any(
             fragment in lowered_error for fragment in self.config.expected_auth_fragments
         )
-        if not has_auth_context:
-            failures.append(
-                "Step 1 failed: the visible CLI error did not explain that GitHub "
-                "authentication or release-upload configuration is required.\n"
-                f"Visible output:\n{visible_error}\n"
-                f"{_format_supporting_evidence(payload=payload, stdout=stdout, stderr=stderr)}"
-            )
+        has_provider_capability_context = any(
+            fragment in lowered_error
+            for fragment in self.config.provider_capability_fragments
+        )
 
-        if not failures:
+        if has_release_context and has_auth_context:
+            result["failure_mode"] = "none"
             error_code = error.get("code") if isinstance(error, dict) else ""
             error_category = error.get("category") if isinstance(error, dict) else ""
             _record_step(
@@ -236,6 +230,45 @@ class Ts500ReleaseAuthFailureScenario:
                     "or fallback-shaped result."
                 ),
                 observed=visible_error,
+            )
+            return failures
+
+        if has_provider_capability_context:
+            observed_provider = _as_text(result.get("observed_provider")) or "local provider"
+            result["failure_mode"] = "local_provider_capability_gate"
+            result["product_gap"] = (
+                "The exact `trackstate attachment upload --target local` path is still "
+                "blocked by a local-provider attachment capability gate before GitHub "
+                "Releases auth/configuration handling is consulted."
+            )
+            failures.append(
+                "Step 1 failed: the exact `--target local` path did not reach the "
+                "missing-auth contract.\n"
+                f"It failed earlier through the `{observed_provider}` provider with "
+                "the generic capability-gate message "
+                "`This repository session does not allow attachment uploads.`\n"
+                f"Visible output:\n{visible_error}\n"
+                "This means the command still cannot surface the explicit GitHub "
+                "Releases auth/configuration guidance required by TS-500.\n"
+                f"{_format_supporting_evidence(payload=payload, stdout=stdout, stderr=stderr)}"
+            )
+            return failures
+
+        result["failure_mode"] = "missing_release_auth_guidance"
+        if not has_release_context:
+            failures.append(
+                "Step 1 failed: the visible CLI error was not an explicit release-backed "
+                "auth/configuration failure.\n"
+                "The output did not mention GitHub Releases or release-backed storage.\n"
+                f"Visible output:\n{visible_error}\n"
+                f"{_format_supporting_evidence(payload=payload, stdout=stdout, stderr=stderr)}"
+            )
+        if not has_auth_context:
+            failures.append(
+                "Step 1 failed: the visible CLI error did not explain that GitHub "
+                "authentication or release-upload configuration is required.\n"
+                f"Visible output:\n{visible_error}\n"
+                f"{_format_supporting_evidence(payload=payload, stdout=stdout, stderr=stderr)}"
             )
         return failures
 
@@ -416,6 +449,43 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     final_state = result.get("final_state")
     final_state_text = json.dumps(final_state, indent=2, sort_keys=True)
     expected_path = _as_text(result.get("expected_attachment_relative_path"))
+    failure_mode = _as_text(result.get("failure_mode"))
+    product_gap = _as_text(result.get("product_gap"))
+    observed_provider = _as_text(result.get("observed_provider")) or "local-git"
+    if failure_mode == "local_provider_capability_gate":
+        step_one_summary = (
+            "the exact `--target local` path failed earlier at the local-provider "
+            "capability gate, so the command never reached missing-auth handling"
+        )
+        human_summary = (
+            "Human-style verification observed a real terminal failure and no local "
+            "attachment file, but the failure was the generic local-provider "
+            "capability gate rather than explicit GitHub Releases auth/configuration guidance."
+        )
+        actual_result_line = (
+            "* However, the command failed earlier through the generic "
+            f"{_jira_inline(observed_provider)} provider path with message "
+            f"{_jira_inline(_as_text(result.get('observed_error_message')) or visible_error)}. "
+            "That means the exact local runtime path never reached GitHub "
+            "Releases auth/configuration handling."
+        )
+    else:
+        step_one_summary = (
+            "the command failed, but the visible output was generic and did not "
+            "explicitly mention missing GitHub auth/configuration for GitHub Releases storage"
+        )
+        human_summary = (
+            "Human-style verification observed a terminal error and no local attachment "
+            "file, but the visible error text did not match the expected explicit "
+            "release-auth/configuration guidance."
+        )
+        actual_result_line = (
+            "* However, the command only returned a generic repository failure "
+            f"({_jira_inline(_as_text(result.get('observed_error_code')))} / "
+            f"{_jira_inline(_as_text(result.get('observed_error_category')))}) with message "
+            f"{_jira_inline(_as_text(result.get('observed_error_message')) or visible_error)} instead of explicit "
+            "release-auth/configuration guidance."
+        )
     jira_lines = [
         "h3. Test Automation Result",
         "",
@@ -427,11 +497,13 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "* Inspected the caller-visible CLI output and the repository attachment path after the command.",
         "",
         "h4. Result",
-        "* ❌ Step 1 failed: the command failed, but the visible output was generic and did not explicitly mention missing GitHub auth/configuration for GitHub Releases storage.",
+        f"* ❌ Step 1 failed: {step_one_summary}.",
         f"* Observed error code/category: {_jira_inline(_as_text(result.get('observed_error_code')))} / {_jira_inline(_as_text(result.get('observed_error_category')))}",
+        f"* Observed provider/output: {_jira_inline(observed_provider)} / {_jira_inline(_as_text(result.get('observed_output_format')))}",
         f"* Observed visible output: {_jira_inline(visible_error)}",
         "* ✅ Step 2 passed: no file was written to the local repository attachment path.",
-        "* Human-style verification observed a terminal error and no local attachment file, but the visible error text did not match the expected explicit release-auth/configuration guidance.",
+        f"* {human_summary}",
+        *([f"* Product gap: {product_gap}"] if product_gap else []),
         "* Observed repository state:",
         "{code:json}",
         final_state_text,
@@ -463,11 +535,13 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "- Inspected the caller-visible CLI output and the repository attachment path after the command.",
         "",
         "## Result",
-        "- ❌ Step 1 failed: the command failed, but the visible output was generic and did not explicitly mention missing GitHub auth/configuration for GitHub Releases storage.",
+        f"- ❌ Step 1 failed: {step_one_summary}.",
         f"- Observed error code/category: `{_as_text(result.get('observed_error_code'))}` / `{_as_text(result.get('observed_error_category'))}`",
+        f"- Observed provider/output: `{observed_provider}` / `{_as_text(result.get('observed_output_format'))}`",
         f"- Observed visible output: `{visible_error}`",
         "- ✅ Step 2 passed: no file was written to the local repository attachment path.",
-        "- Human-style verification observed a terminal error and no local attachment file, but the visible error text did not match the expected explicit release-auth/configuration guidance.",
+        f"- {human_summary}",
+        *([f"- Product gap: {product_gap}"] if product_gap else []),
         "- Observed repository state:",
         "```json",
         final_state_text,
@@ -516,13 +590,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "h4. Actual Result",
         "* The file was not written locally, so repository-path fallback did not occur.",
-        (
-            "* However, the command only returned a generic repository failure "
-            f"({_jira_inline(_as_text(result.get('observed_error_code')))} / "
-            f"{_jira_inline(_as_text(result.get('observed_error_category')))}) with message "
-            f"{_jira_inline(_as_text(result.get('observed_error_message')) or visible_error)} instead of explicit "
-            "release-auth/configuration guidance."
-        ),
+        actual_result_line,
         "",
         "h4. Logs / Error Output",
         "{code}",
@@ -530,6 +598,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "{code}",
         "",
         "h4. Notes",
+        *([f"* Missing/broken production capability: {product_gap}"] if product_gap else []),
         "* Full stdout:",
         "{code:json}",
         stdout.rstrip() or "{}",
@@ -626,7 +695,12 @@ def _visible_error_text(
     payload_text = _json_visible_error_text(payload)
     if payload_text:
         fragments.append(payload_text)
-    for fragment in (_collapse_output(stdout), _collapse_output(stderr)):
+    text_fragments = []
+    if not (payload_text and _looks_like_json(stdout)):
+        text_fragments.append(_collapse_output(stdout))
+    if not (payload_text and _looks_like_json(stderr)):
+        text_fragments.append(_collapse_output(stderr))
+    for fragment in text_fragments:
         if fragment and all(fragment.lower() not in existing.lower() for existing in fragments):
             fragments.append(fragment)
     return " | ".join(fragment for fragment in fragments if fragment)
@@ -654,6 +728,11 @@ def _json_visible_error_text(payload: object) -> str:
 
 def _collapse_output(text: str) -> str:
     return " | ".join(line.strip() for line in text.splitlines() if line.strip())
+
+
+def _looks_like_json(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.startswith("{") or stripped.startswith("[")
 
 
 def _observed_command_output(*, stdout: str, stderr: str) -> str:

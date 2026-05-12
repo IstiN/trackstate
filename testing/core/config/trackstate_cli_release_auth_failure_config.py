@@ -24,6 +24,7 @@ class TrackStateCliReleaseAuthFailureConfig:
     expected_attachment_relative_path: str
     expected_release_fragments: tuple[str, ...]
     expected_auth_fragments: tuple[str, ...]
+    provider_capability_fragments: tuple[str, ...]
 
     @property
     def source_file_bytes(self) -> bytes:
@@ -101,6 +102,11 @@ class TrackStateCliReleaseAuthFailureConfig:
                 "expected_auth_fragments",
                 path,
             ),
+            provider_capability_fragments=cls._optional_string_list(
+                runtime_inputs,
+                "provider_capability_fragments",
+                path,
+            ),
         )
 
     @staticmethod
@@ -120,6 +126,29 @@ class TrackStateCliReleaseAuthFailureConfig:
         if not isinstance(value, list) or not value:
             raise ValueError(
                 f"TS-500 config runtime_inputs.{key} must be a non-empty list in {path}."
+            )
+        items = []
+        for index, item in enumerate(value):
+            if not isinstance(item, str) or not item:
+                raise ValueError(
+                    "TS-500 config runtime_inputs."
+                    f"{key}[{index}] must be a non-empty string in {path}."
+                )
+            items.append(item)
+        return tuple(items)
+
+    @staticmethod
+    def _optional_string_list(
+        payload: dict[str, Any],
+        key: str,
+        path: Path,
+    ) -> tuple[str, ...]:
+        value = payload.get(key)
+        if value is None:
+            return ()
+        if not isinstance(value, list):
+            raise ValueError(
+                f"TS-500 config runtime_inputs.{key} must be a list in {path}."
             )
         items = []
         for index, item in enumerate(value):

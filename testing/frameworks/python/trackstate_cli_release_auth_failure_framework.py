@@ -99,7 +99,8 @@ class PythonTrackStateCliReleaseAuthFailureFramework(
             fallback_reason=(
                 "Pinned execution to a temporary executable compiled from this checkout "
                 "and stripped GitHub credentials from the environment so TS-500 runs "
-                "the exact local command without ambient auth."
+                "the exact local command without ambient auth. The current local "
+                "provider path may still fail before GitHub auth is consulted."
             ),
             repository_path=str(repository_path),
             compiled_binary_path=str(executable_path),

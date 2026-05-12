@@ -7,7 +7,7 @@ dependencies:
   - git CLI available on PATH
 notes:
   - Executes the exact TS-500 local attachment upload command from a disposable TrackState repository configured for github-releases attachment storage.
-  - Removes ambient GitHub credentials from the runtime environment and verifies the command surfaces an explicit release-auth/configuration failure instead of writing to repository-path storage.
+  - Removes ambient GitHub credentials from the runtime environment for determinism, while still treating the exact local-provider capability gate as a real product-visible failure if the command does not reach auth-specific guidance.
 runtime_inputs:
   ticket_command: trackstate attachment upload --issue TS-475 --file test.txt --target local
   requested_command:
@@ -44,3 +44,6 @@ runtime_inputs:
     - authentication
     - credential
     - configuration
+  provider_capability_fragments:
+    - does not allow attachment uploads
+    - repository session
