@@ -422,6 +422,27 @@ class PlaywrightWebAppSession(WebAppSession):
             ) from error
         return download.suggested_filename
 
+    def select_files_after_click(
+        self,
+        trigger_selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(trigger_selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_file_chooser(timeout=timeout_ms) as file_chooser_info:
+                locator.click(timeout=timeout_ms)
+            file_chooser = file_chooser_info.value
+            file_chooser.set_files(list(files), timeout=timeout_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out selecting files after clicking selector "{trigger_selector}".',
+            ) from error
+
     def screenshot(self, path: str) -> None:
         self._page.screenshot(path=path, full_page=True)
 
