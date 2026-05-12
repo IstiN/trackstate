@@ -339,7 +339,7 @@ class IssueDetailAccessibilityRobot
     if (row.evaluate().isEmpty) {
       return false;
     }
-    return _isFinderVisibleInViewport(row.first);
+    return _isFinderVisibleInIssueDetailViewport(issueKey, row.first);
   }
 
   @override
@@ -412,17 +412,19 @@ class IssueDetailAccessibilityRobot
   @override
   Future<void> scrollIssueDetailToBottom(String issueKey) async {
     final scrollable = _issueDetailScrollable(issueKey);
-    final state = tester.state<ScrollableState>(scrollable.first);
-    state.position.jumpTo(state.position.maxScrollExtent);
-    await tester.pumpAndSettle();
+    await _dragIssueDetailUntilSettled(
+      scrollable,
+      direction: _ScrollDirection.down,
+    );
   }
 
   @override
   Future<void> scrollIssueDetailToTop(String issueKey) async {
     final scrollable = _issueDetailScrollable(issueKey);
-    final state = tester.state<ScrollableState>(scrollable.first);
-    state.position.jumpTo(0);
-    await tester.pumpAndSettle();
+    await _dragIssueDetailUntilSettled(
+      scrollable,
+      direction: _ScrollDirection.up,
+    );
   }
 
   @override
@@ -773,15 +775,46 @@ class IssueDetailAccessibilityRobot
     return bestMatch;
   }
 
-  bool _isFinderVisibleInViewport(Finder finder) {
-    final rect = tester.getRect(finder);
-    final viewport = Rect.fromLTWH(
-      0,
-      0,
-      tester.view.physicalSize.width / tester.view.devicePixelRatio,
-      tester.view.physicalSize.height / tester.view.devicePixelRatio,
-    );
-    return rect.overlaps(viewport);
+  bool _isFinderVisibleInIssueDetailViewport(String issueKey, Finder finder) {
+    final surfaceRect = tester.getRect(_issueDetailScrollable(issueKey).first);
+    return _isWithinSurface(surfaceRect, tester.getRect(finder));
+  }
+
+  bool _isWithinSurface(Rect surfaceRect, Rect candidateRect) {
+    return surfaceRect.overlaps(candidateRect) ||
+        surfaceRect.contains(candidateRect.center);
+  }
+
+  Future<void> _dragIssueDetailUntilSettled(
+    Finder scrollable, {
+    required _ScrollDirection direction,
+  }) async {
+    final state = tester.state<ScrollableState>(scrollable.first);
+    if (state.position.maxScrollExtent <= 0) {
+      await tester.pumpAndSettle();
+      return;
+    }
+
+    final rect = tester.getRect(scrollable.first);
+    final dragDistance = (rect.height * 0.6).clamp(120.0, 320.0);
+    final signedDistance = direction == _ScrollDirection.down
+        ? -dragDistance
+        : dragDistance;
+    var previousOffset = state.position.pixels;
+
+    for (var attempt = 0; attempt < 30; attempt += 1) {
+      await tester.drag(scrollable.first, Offset(0, signedDistance));
+      await tester.pumpAndSettle();
+
+      final currentOffset = state.position.pixels;
+      final reachedBoundary = direction == _ScrollDirection.down
+          ? currentOffset >= state.position.maxScrollExtent
+          : currentOffset <= state.position.minScrollExtent;
+      if (reachedBoundary || (currentOffset - previousOffset).abs() < 0.5) {
+        return;
+      }
+      previousOffset = currentOffset;
+    }
   }
 
   InputDecoration _commentComposerDecoration(String issueKey) {
@@ -1125,6 +1158,8 @@ class IssueDetailAccessibilityRobot
   String _normalizedLabel(String? label) =>
       (label ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
 }
+
+enum _ScrollDirection { up, down }
 
 class _SemanticsTarget {
   const _SemanticsTarget({required this.label, required this.isButton});
