@@ -48,6 +48,12 @@ void main() {
         await screen.pumpLocalGitApp(repositoryPath: fixture!.repositoryPath);
         screen.expectLocalRuntimeChrome();
 
+        await screen.openSection('Board');
+        expect(
+          screen.visibleSemanticsLabelsSnapshot(),
+          contains('$initialStatus column'),
+        );
+
         await screen.openSection('JQL Search');
         await screen.searchIssues(query);
         await screen.expectIssueSearchResultVisible(
@@ -99,6 +105,12 @@ void main() {
           editedStatus,
         );
 
+        await screen.openSection('Board');
+        expect(
+          screen.visibleSemanticsLabelsSnapshot(),
+          contains('$editedStatus column'),
+        );
+
         await screen.openSection('JQL Search');
         expect(
           await screen.isIssueSearchResultTextVisible(
@@ -128,6 +140,12 @@ void main() {
         await settingsRobot.tapSaveSettingsButton();
         await screen.waitWithoutInteraction(const Duration(milliseconds: 300));
 
+        await screen.openSection('Board');
+        expect(
+          screen.visibleSemanticsLabelsSnapshot(),
+          contains('$fallbackStatus column'),
+        );
+
         await screen.openSection('JQL Search');
         expect(
           await screen.isIssueSearchResultTextVisible(
@@ -148,6 +166,12 @@ void main() {
         );
         await settingsRobot.tapSaveSettingsButton();
         await screen.waitWithoutInteraction(const Duration(milliseconds: 300));
+
+        await screen.openSection('Board');
+        expect(
+          screen.visibleSemanticsLabelsSnapshot(),
+          contains('$canonicalStatus column'),
+        );
 
         await screen.openSection('JQL Search');
         expect(

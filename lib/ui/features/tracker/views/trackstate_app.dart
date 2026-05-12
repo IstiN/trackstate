@@ -1486,6 +1486,8 @@ class _Board extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final grouped = viewModel.issuesByStatus;
+    final project = viewModel.project;
+    final metadataLocale = _projectMetadataLocale(context, project);
     final showBootstrapHint = viewModel.showsInitialBootstrapPlaceholders;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1502,8 +1504,11 @@ class _Board extends StatelessWidget {
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 900;
             final columns = IssueStatus.values.map((status) {
+              final title =
+                  project?.statusLabel(status.id, locale: metadataLocale) ??
+                  _statusLabel(l10n, status);
               return _BoardColumn(
-                title: _statusLabel(l10n, status),
+                title: title,
                 targetStatus: status,
                 issues: grouped[status]!,
                 onSelect: (issue) => viewModel.selectIssue(
@@ -4888,7 +4893,13 @@ class _BoardColumn extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(title, style: Theme.of(context).textTheme.titleMedium),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleMedium,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     _TinyCount('${issues.length}'),
                   ],
