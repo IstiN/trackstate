@@ -369,6 +369,68 @@ class LiveIssueDetailCollaborationPage:
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
 
+    def wait_for_collaboration_section_to_settle(
+        self,
+        section_label: str,
+        *,
+        timeout_ms: int = 120_000,
+    ) -> str:
+        payload = self._session.wait_for_function(
+            """
+            ({ sectionLabel }) => {
+              const bodyText = document.body?.innerText ?? '';
+              const loadingFragments = [
+                `${sectionLabel} loading`,
+                `${sectionLabel} Loading...`,
+              ];
+              return loadingFragments.some((fragment) => bodyText.includes(fragment))
+                ? null
+                : bodyText;
+            }
+            """,
+            arg={"sectionLabel": section_label},
+            timeout_ms=timeout_ms,
+        )
+        body_text = str(payload).strip()
+        if not body_text:
+            raise AssertionError(
+                "Step 2 failed: the live issue detail did not expose a readable "
+                f"body snapshot after {section_label!r} finished loading.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return body_text
+
+    def visible_timestamped_rows(self) -> tuple[str, ...]:
+        payload = self._session.evaluate(
+            """
+            () => {
+              const timestampPattern =
+                /\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z/;
+              const seen = new Set();
+              return Array.from(document.querySelectorAll('flt-semantics, flt-semantics-img'))
+                .map((element) => (element.innerText || element.getAttribute('aria-label') || '').trim())
+                .filter((text) =>
+                  text.length > 0 &&
+                  !text.includes('\\n') &&
+                  timestampPattern.test(text),
+                )
+                .filter((text) => {
+                  if (seen.has(text)) {
+                    return false;
+                  }
+                  seen.add(text);
+                  return true;
+                });
+            }
+            """,
+        )
+        if not isinstance(payload, list):
+            raise AssertionError(
+                "The live issue detail did not expose a readable collaboration row list.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return tuple(str(item).strip() for item in payload if str(item).strip())
+
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
 
