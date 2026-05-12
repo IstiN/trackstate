@@ -1,9 +1,10 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../components/factories/testing_dependencies.dart';
-import '../../core/interfaces/trackstate_app_component.dart';
-import '../../core/utils/color_contrast.dart';
+import '../../components/screens/readiness_state_accessibility_robot.dart';
+import '../../components/screens/readiness_state_accessibility_screen.dart';
+import '../../core/interfaces/readiness_state_accessibility_screen.dart';
+import '../../core/models/loading_banner_theme_observation.dart';
 import 'support/ts423_readiness_accessibility_fixture.dart';
 
 void main() {
@@ -12,6 +13,7 @@ void main() {
     (tester) async {
       final semantics = tester.ensureSemantics();
       Ts423ReadinessAccessibilityFixture? fixture;
+      ReadinessStateAccessibilityScreenHandle? screen;
 
       try {
         fixture = await tester.runAsync(
@@ -21,9 +23,12 @@ void main() {
           throw StateError('TS-423 fixture creation did not complete.');
         }
 
-        final TrackStateAppComponent app = defaultTestingDependencies
-            .createTrackStateAppScreen(tester);
-        await app.pump(fixture.repository);
+        screen = ReadinessStateAccessibilityScreen(
+          app: defaultTestingDependencies.createTrackStateAppScreen(tester),
+          robot: ReadinessStateAccessibilityRobot(tester),
+          repository: fixture.repository,
+        );
+        await screen.launch();
         await _pumpUntil(
           tester,
           condition: () => fixture!.repository.initialSearchStarted,
@@ -33,8 +38,8 @@ void main() {
         );
 
         final failures = <String>[];
-        final dashboardTexts = app.visibleTextsSnapshot();
-        final dashboardSemantics = app.visibleSemanticsLabelsSnapshot();
+        final dashboardTexts = screen.visibleTexts();
+        final dashboardSemantics = screen.visibleSemanticsLabels();
 
         if (fixture.repository.initialSearchCompleted) {
           failures.add(
@@ -63,21 +68,17 @@ void main() {
           }
         }
 
-        final dashboardBannerContrast = _observeLoadingBannerContrast(
-          tester,
-          semanticLabel: 'Dashboard Loading...',
+        _verifyLoadingBanner(
+          failures,
+          observation: screen.observeLoadingBanner('Dashboard Loading...'),
+          context: 'dashboard loading banner',
         );
-        if (dashboardBannerContrast < 4.5) {
-          failures.add(
-            'Step 5 failed: the dashboard loading banner contrast was ${dashboardBannerContrast.toStringAsFixed(2)}:1, below the required WCAG AA 4.5:1 threshold.',
-          );
-        }
 
-        await app.openSection('Board');
-        await app.waitWithoutInteraction(const Duration(milliseconds: 150));
+        await screen.openSection('Board');
+        await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
 
-        final boardTexts = app.visibleTextsSnapshot();
-        final boardSemantics = app.visibleSemanticsLabelsSnapshot();
+        final boardTexts = screen.visibleTexts();
+        final boardSemantics = screen.visibleSemanticsLabels();
         for (final requiredText in const [
           'Board',
           'Loading...',
@@ -97,29 +98,23 @@ void main() {
           );
         }
 
-        final boardBannerContrast = _observeLoadingBannerContrast(
-          tester,
-          semanticLabel: 'Board Loading...',
+        _verifyLoadingBanner(
+          failures,
+          observation: screen.observeLoadingBanner('Board Loading...'),
+          context: 'board loading banner',
         );
-        if (boardBannerContrast < 4.5) {
-          failures.add(
-            'Step 5 failed: the board loading banner contrast was ${boardBannerContrast.toStringAsFixed(2)}:1, below the required WCAG AA 4.5:1 threshold.',
-          );
-        }
 
-        await app.openIssue(
+        await screen.openIssue(
           Ts423ReadinessAccessibilityFixture.issueKey,
           Ts423ReadinessAccessibilityFixture.issueSummary,
         );
-        await app.waitWithoutInteraction(const Duration(milliseconds: 150));
+        await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
 
-        final issueDetail = _issueDetail(
+        final issueDetailTexts = screen.visibleTextsWithinIssueDetail(
           Ts423ReadinessAccessibilityFixture.issueKey,
         );
-        final issueDetailTexts = _visibleTextsWithin(tester, issueDetail);
-        final issueDetailSemantics = _visibleSemanticsWithin(
-          tester,
-          issueDetail,
+        final issueDetailSemantics = screen.visibleSemanticsWithinIssueDetail(
+          Ts423ReadinessAccessibilityFixture.issueKey,
         );
 
         for (final requiredText in const [
@@ -153,26 +148,43 @@ void main() {
           );
         }
 
-        final detailBannerContrast = _observeLoadingBannerContrast(
-          tester,
-          semanticLabel: 'Detail Loading...',
-          within: issueDetail,
+        _verifyLoadingBanner(
+          failures,
+          observation: screen.observeIssueDetailLoadingBanner(
+            Ts423ReadinessAccessibilityFixture.issueKey,
+            semanticLabel: 'Detail Loading...',
+          ),
+          context: 'partial issue detail loading banner',
         );
-        if (detailBannerContrast < 4.5) {
-          failures.add(
-            'Step 5 failed: the partial issue detail loading banner contrast was ${detailBannerContrast.toStringAsFixed(2)}:1, below the required WCAG AA 4.5:1 threshold.',
-          );
-        }
 
         if (failures.isNotEmpty) {
           fail(failures.join('\n'));
         }
       } finally {
+        screen?.dispose();
         semantics.dispose();
       }
     },
     timeout: const Timeout(Duration(seconds: 20)),
   );
+}
+
+void _verifyLoadingBanner(
+  List<String> failures, {
+  required LoadingBannerThemeObservation observation,
+  required String context,
+}) {
+  if (!observation.usesExpectedTokens) {
+    failures.add(
+      'Expected Result failed: the $context did not use the TrackStateTheme loading tokens. '
+      'Observed ${observation.describeTheme()}.',
+    );
+  }
+  if (observation.contrastRatio < 4.5) {
+    failures.add(
+      'Step 5 failed: the $context contrast was ${observation.describeContrast()}, below the required WCAG AA 4.5:1 threshold.',
+    );
+  }
 }
 
 Future<void> _pumpUntil(
@@ -191,120 +203,6 @@ Future<void> _pumpUntil(
   if (!condition()) {
     fail(failureMessage);
   }
-}
-
-Finder _issueDetail(String key) =>
-    find.bySemanticsLabel(RegExp('Issue detail ${RegExp.escape(key)}'));
-
-Finder _semanticsScope(String label, {Finder? within}) {
-  final finder = find.byWidgetPredicate((widget) {
-    return widget is Semantics && widget.properties.label == label;
-  }, description: 'Semantics widget labeled $label');
-  return within == null
-      ? finder
-      : find.descendant(of: within, matching: finder);
-}
-
-double _observeLoadingBannerContrast(
-  WidgetTester tester, {
-  required String semanticLabel,
-  Finder? within,
-}) {
-  final scope = _semanticsScope(semanticLabel, within: within);
-  expect(
-    scope,
-    findsAtLeastNWidgets(1),
-    reason: 'Expected to find a loading banner labeled "$semanticLabel".',
-  );
-  final foreground = _renderedTextColorWithin(
-    tester,
-    scope.first,
-    'Loading...',
-  );
-  final background = _largestColoredContainerBackground(tester, scope.first);
-  return contrastRatio(foreground, background);
-}
-
-Color _renderedTextColorWithin(WidgetTester tester, Finder scope, String text) {
-  final richTextFinder = find.descendant(
-    of: scope,
-    matching: find.byType(RichText),
-  );
-  for (final element in richTextFinder.evaluate()) {
-    final widget = element.widget as RichText;
-    if (widget.text.toPlainText().trim() != text) {
-      continue;
-    }
-    final color =
-        widget.text.style?.color ?? DefaultTextStyle.of(element).style.color;
-    if (color != null) {
-      return color;
-    }
-  }
-
-  final textFinder = find.descendant(
-    of: scope,
-    matching: find.text(text, findRichText: true),
-  );
-  for (final element in textFinder.evaluate()) {
-    final widget = element.widget;
-    if (widget is! Text) {
-      continue;
-    }
-    final color =
-        widget.style?.color ?? DefaultTextStyle.of(element).style.color;
-    if (color != null) {
-      return color;
-    }
-  }
-
-  throw StateError('No rendered text "$text" found within $scope.');
-}
-
-Color _largestColoredContainerBackground(WidgetTester tester, Finder scope) {
-  final containers = find.descendant(
-    of: scope,
-    matching: find.byType(Container),
-  );
-  Color? bestColor;
-  double bestArea = -1;
-  for (var index = 0; index < containers.evaluate().length; index += 1) {
-    final widget = tester.widget<Container>(containers.at(index));
-    final decoration = widget.decoration;
-    if (decoration is! BoxDecoration || decoration.color == null) {
-      continue;
-    }
-    final rect = tester.getRect(containers.at(index));
-    final area = rect.width * rect.height;
-    if (area > bestArea) {
-      bestArea = area;
-      bestColor = decoration.color;
-    }
-  }
-  if (bestColor == null) {
-    throw StateError('No colored container was found within $scope.');
-  }
-  return bestColor;
-}
-
-List<String> _visibleTextsWithin(WidgetTester tester, Finder scope) {
-  return tester
-      .widgetList<Text>(find.descendant(of: scope, matching: find.byType(Text)))
-      .map((widget) => widget.data?.trim())
-      .whereType<String>()
-      .where((value) => value.isNotEmpty)
-      .toList();
-}
-
-List<String> _visibleSemanticsWithin(WidgetTester tester, Finder scope) {
-  return tester
-      .widgetList<Semantics>(
-        find.descendant(of: scope, matching: find.byType(Semantics)),
-      )
-      .map((widget) => widget.properties.label?.trim())
-      .whereType<String>()
-      .where((value) => value.isNotEmpty)
-      .toList();
 }
 
 bool _snapshotContains(List<String> snapshot, String expected) {
