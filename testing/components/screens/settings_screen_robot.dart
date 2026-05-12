@@ -476,6 +476,48 @@ class SettingsScreenRobot {
       isVisibleText('Project Settings') &&
       projectSettingsHeading.evaluate().isNotEmpty;
 
+  bool showsHostedReleaseUploadRestriction({required String storageLabel}) {
+    final snapshot = repositoryAccessSnapshot().toLowerCase();
+    final lowerStorageLabel = storageLabel.toLowerCase();
+    return snapshot.contains(lowerStorageLabel) &&
+        (snapshot.contains('unavailable') ||
+            snapshot.contains('not available') ||
+            snapshot.contains('cannot complete')) &&
+        (snapshot.contains('upload') || snapshot.contains('transfer'));
+  }
+
+  bool showsReleaseAttachmentStorageConfiguration({
+    required String storageLabel,
+    required String tagPrefix,
+  }) {
+    final snapshot = repositoryAccessSnapshot().toLowerCase();
+    return snapshot.contains(storageLabel.toLowerCase()) &&
+        snapshot.contains(tagPrefix.toLowerCase());
+  }
+
+  bool suggestsHostedReleaseUploadSupport({required String tagPrefix}) {
+    final snapshot = repositoryAccessSnapshot().toLowerCase();
+    final mentionsSupportedUpload =
+        snapshot.contains('can complete release-backed uploads') ||
+        snapshot.contains(
+          'hosted session can complete release-backed uploads',
+        ) ||
+        snapshot.contains('uploads are available') ||
+        snapshot.contains('release-backed uploads are supported');
+    final mentionsUnavailableUpload =
+        snapshot.contains('cannot complete release-backed uploads') ||
+        snapshot.contains('uploads are unavailable') ||
+        snapshot.contains('unavailable in the browser');
+    return snapshot.contains(tagPrefix.toLowerCase()) &&
+        mentionsSupportedUpload &&
+        !mentionsUnavailableUpload;
+  }
+
+  String repositoryAccessSnapshot() => [
+    ..._textsWithin(repositoryAccessSection),
+    ..._semanticsLabelsWithin(repositoryAccessSection),
+  ].join(' | ');
+
   bool showsProjectSettingsTab(String label) =>
       showsProjectSettingsSurface() && tabByLabel(label).evaluate().isNotEmpty;
 
@@ -1012,6 +1054,28 @@ class SettingsScreenRobot {
     return tester
         .widgetList<Text>(find.byType(Text))
         .map((widget) => widget.data?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
+
+  List<String> _textsWithin(Finder scope) {
+    return tester
+        .widgetList<Text>(
+          find.descendant(of: scope, matching: find.byType(Text)),
+        )
+        .map((widget) => widget.data?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
+
+  List<String> _semanticsLabelsWithin(Finder scope) {
+    return tester
+        .widgetList<Semantics>(
+          find.descendant(of: scope, matching: find.byType(Semantics)),
+        )
+        .map((widget) => widget.properties.label?.trim())
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .toList();
