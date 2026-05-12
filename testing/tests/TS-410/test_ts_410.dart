@@ -118,7 +118,10 @@ void main() {
           await tester.pumpAndSettle();
 
           final fieldEditorScope = _activeEditorScope(tester, 'Edit field');
-          final fieldEditorTexts = robot.visibleTexts();
+          final fieldEditorTexts = _visibleTextsWithin(
+            tester,
+            fieldEditorScope,
+          );
           for (final requiredText in const [
             'Edit field',
             'ID',
@@ -192,7 +195,10 @@ void main() {
         await tester.pumpAndSettle();
 
         final statusEditorScope = _activeEditorScope(tester, 'Add status');
-        final statusEditorTexts = robot.visibleTexts();
+        final statusEditorTexts = _visibleTextsWithin(
+          tester,
+          statusEditorScope,
+        );
         for (final requiredText in const [
           'Add status',
           'ID',
@@ -371,6 +377,20 @@ List<String> _allSemanticsLabelsWithin(WidgetTester tester, Finder scope) {
   }
 
   visit(rootNode);
+  return _dedupeConsecutive(labels);
+}
+
+List<String> _visibleTextsWithin(WidgetTester tester, Finder scope) {
+  final labels = <String>[];
+  for (final widget in tester.widgetList<Text>(
+    find.descendant(of: scope, matching: find.byType(Text)),
+  )) {
+    final label = widget.data?.trim();
+    if (label == null || label.isEmpty) {
+      continue;
+    }
+    labels.add(label);
+  }
   return _dedupeConsecutive(labels);
 }
 
