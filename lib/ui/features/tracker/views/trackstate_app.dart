@@ -3291,7 +3291,7 @@ class _IssueDetailState extends State<_IssueDetail> {
   void initState() {
     super.initState();
     _commentController = TextEditingController();
-    _ensureActiveIssueDataLoaded();
+    _scheduleActiveIssueDataLoad();
   }
 
   @override
@@ -3303,9 +3303,20 @@ class _IssueDetailState extends State<_IssueDetail> {
       _selectedAttachment = null;
       _attachmentUploadNotice = null;
     }
-    if (issueChanged || !_activeTabDataLoaded(widget.issue)) {
-      _ensureActiveIssueDataLoaded();
+    if (issueChanged ||
+        (!_activeTabDataLoaded(widget.issue) &&
+            !_activeTabHasDeferredError(widget.issue))) {
+      _scheduleActiveIssueDataLoad();
     }
+  }
+
+  void _scheduleActiveIssueDataLoad() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _ensureActiveIssueDataLoaded();
+    });
   }
 
   void _ensureActiveIssueDataLoaded() {
@@ -3331,6 +3342,16 @@ class _IssueDetailState extends State<_IssueDetail> {
       2 => issue.hasAttachmentsLoaded,
       _ => true,
     };
+  }
+
+  bool _activeTabHasDeferredError(TrackStateIssue issue) {
+    final section = switch (_selectedCollaborationTab) {
+      0 => IssueDeferredSection.detail,
+      1 => IssueDeferredSection.comments,
+      2 => IssueDeferredSection.attachments,
+      _ => IssueDeferredSection.history,
+    };
+    return widget.viewModel.hasIssueDeferredError(issue.key, section);
   }
 
   @override
@@ -3451,6 +3472,20 @@ class _IssueDetailState extends State<_IssueDetail> {
     required AppLocalizations l10n,
     required TrackStateColors colors,
   }) {
+    final errorText = widget.viewModel.issueDeferredError(
+      issue.key,
+      IssueDeferredSection.detail,
+    );
+    if (errorText != null) {
+      return _DeferredSectionStateCard(
+        semanticLabel: '${l10n.detail} error',
+        title: l10n.detail,
+        message: errorText,
+        tone: _DeferredSectionTone.error,
+        actionLabel: l10n.retry,
+        onAction: () => widget.viewModel.ensureIssueDetailLoaded(issue),
+      );
+    }
     if (widget.viewModel.isIssueDetailLoading(issue.key) ||
         !issue.hasDetailLoaded) {
       return _SectionContentPlaceholder(
@@ -3582,6 +3617,28 @@ class _IssueDetailState extends State<_IssueDetail> {
           _IssueDetailTabs(
             selectedIndex: _selectedCollaborationTab,
             tabs: [l10n.detail, l10n.comments, l10n.attachments, l10n.history],
+            failedTabIndexes: {
+              if (widget.viewModel.hasIssueDeferredError(
+                issue.key,
+                IssueDeferredSection.detail,
+              ))
+                0,
+              if (widget.viewModel.hasIssueDeferredError(
+                issue.key,
+                IssueDeferredSection.comments,
+              ))
+                1,
+              if (widget.viewModel.hasIssueDeferredError(
+                issue.key,
+                IssueDeferredSection.attachments,
+              ))
+                2,
+              if (widget.viewModel.hasIssueDeferredError(
+                issue.key,
+                IssueDeferredSection.history,
+              ))
+                3,
+            },
             onSelected: (index) {
               setState(() {
                 _selectedCollaborationTab = index;
@@ -3608,8 +3665,13 @@ class _IssueDetailState extends State<_IssueDetail> {
               controller: _commentController,
               isSaving: widget.viewModel.isSaving,
               isLoading: widget.viewModel.isIssueCommentsLoading(issue.key),
+              errorText: widget.viewModel.issueDeferredError(
+                issue.key,
+                IssueDeferredSection.comments,
+              ),
               writeBlocked: hasBlockedWriteAccess,
               onSave: canUseWriteActions ? _saveComment : null,
+              onRetry: () => widget.viewModel.ensureIssueCommentsLoaded(issue),
             )
           else if (_selectedCollaborationTab == 2)
             _AttachmentsTab(
@@ -3620,6 +3682,10 @@ class _IssueDetailState extends State<_IssueDetail> {
               uploadNotice: _attachmentUploadNotice,
               isSaving: widget.viewModel.isSaving,
               isLoading: widget.viewModel.isIssueAttachmentsLoading(issue.key),
+              errorText: widget.viewModel.issueDeferredError(
+                issue.key,
+                IssueDeferredSection.attachments,
+              ),
               onChooseAttachment: _chooseAttachment,
               onClearSelection: () {
                 setState(() {
@@ -3628,11 +3694,18 @@ class _IssueDetailState extends State<_IssueDetail> {
                 });
               },
               onUpload: _uploadAttachment,
+              onRetry: () =>
+                  widget.viewModel.ensureIssueAttachmentsLoaded(issue),
             )
           else
             _HistoryTab(
               entries: widget.viewModel.issueHistoryFor(issue.key),
               isLoading: widget.viewModel.isIssueHistoryLoading(issue.key),
+              errorText: widget.viewModel.issueDeferredError(
+                issue.key,
+                IssueDeferredSection.history,
+              ),
+              onRetry: () => widget.viewModel.ensureIssueHistoryLoaded(issue),
             ),
         ],
       ),
@@ -6471,11 +6544,13 @@ class _IssueDetailTabs extends StatelessWidget {
   const _IssueDetailTabs({
     required this.selectedIndex,
     required this.tabs,
+    this.failedTabIndexes = const <int>{},
     required this.onSelected,
   });
 
   final int selectedIndex;
   final List<String> tabs;
+  final Set<int> failedTabIndexes;
   final ValueChanged<int> onSelected;
 
   @override
@@ -6488,6 +6563,7 @@ class _IssueDetailTabs extends StatelessWidget {
           _IssueDetailTabChip(
             label: tabs[index],
             selected: index == selectedIndex,
+            showFailureIndicator: failedTabIndexes.contains(index),
             onPressed: () => onSelected(index),
           ),
       ],
@@ -6499,11 +6575,13 @@ class _IssueDetailTabChip extends StatelessWidget {
   const _IssueDetailTabChip({
     required this.label,
     required this.selected,
+    required this.showFailureIndicator,
     required this.onPressed,
   });
 
   final String label;
   final bool selected;
+  final bool showFailureIndicator;
   final VoidCallback onPressed;
 
   @override
@@ -6527,9 +6605,29 @@ class _IssueDetailTabChip extends StatelessWidget {
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Text(
-                label,
-                style: TextStyle(color: selected ? colors.page : colors.text),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: selected ? colors.page : colors.text,
+                    ),
+                  ),
+                  if (showFailureIndicator) ...[
+                    const SizedBox(width: 8),
+                    ExcludeSemantics(
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: selected ? colors.page : colors.error,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ),
@@ -6546,8 +6644,10 @@ class _CommentsTab extends StatelessWidget {
     required this.controller,
     required this.isSaving,
     required this.isLoading,
+    required this.errorText,
     required this.writeBlocked,
     required this.onSave,
+    required this.onRetry,
   });
 
   final TrackStateIssue issue;
@@ -6555,8 +6655,10 @@ class _CommentsTab extends StatelessWidget {
   final TextEditingController controller;
   final bool isSaving;
   final bool isLoading;
+  final String? errorText;
   final bool writeBlocked;
   final VoidCallback? onSave;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -6600,11 +6702,21 @@ class _CommentsTab extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        if (isLoading || !issue.hasCommentsLoaded)
-          _SectionContentPlaceholder(
-            semanticLabel: '${l10n.comments} ${l10n.loading}',
-            lineWidths: const [.96, .88, .72],
-            blockCount: 2,
+        if (errorText != null)
+          _DeferredSectionStateCard(
+            semanticLabel: '${l10n.comments} error',
+            title: l10n.comments,
+            message: errorText!,
+            tone: _DeferredSectionTone.error,
+            actionLabel: l10n.retry,
+            onAction: onRetry,
+          )
+        else if (isLoading || !issue.hasCommentsLoaded)
+          _DeferredSectionStateCard(
+            semanticLabel: '${l10n.comments} loading',
+            title: l10n.comments,
+            message: l10n.loading,
+            tone: _DeferredSectionTone.loading,
           )
         else if (issue.comments.isEmpty)
           Text(l10n.noResults, style: TextStyle(color: colors.muted))
@@ -6625,9 +6737,11 @@ class _AttachmentsTab extends StatelessWidget {
     required this.uploadNotice,
     required this.isSaving,
     required this.isLoading,
+    required this.errorText,
     required this.onChooseAttachment,
     required this.onClearSelection,
     required this.onUpload,
+    required this.onRetry,
   });
 
   final TrackStateIssue issue;
@@ -6637,9 +6751,11 @@ class _AttachmentsTab extends StatelessWidget {
   final String? uploadNotice;
   final bool isSaving;
   final bool isLoading;
+  final String? errorText;
   final VoidCallback onChooseAttachment;
   final VoidCallback onClearSelection;
   final VoidCallback onUpload;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -6754,11 +6870,21 @@ class _AttachmentsTab extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        if (isLoading || !issue.hasAttachmentsLoaded)
-          _SectionContentPlaceholder(
-            semanticLabel: '${l10n.attachments} ${l10n.loading}',
-            lineWidths: const [.58, .42],
-            blockCount: 2,
+        if (errorText != null)
+          _DeferredSectionStateCard(
+            semanticLabel: '${l10n.attachments} error',
+            title: l10n.attachments,
+            message: errorText!,
+            tone: _DeferredSectionTone.error,
+            actionLabel: l10n.retry,
+            onAction: onRetry,
+          )
+        else if (isLoading || !issue.hasAttachmentsLoaded)
+          _DeferredSectionStateCard(
+            semanticLabel: '${l10n.attachments} loading',
+            title: l10n.attachments,
+            message: l10n.loading,
+            tone: _DeferredSectionTone.loading,
           )
         else if (issue.attachments.isEmpty)
           Text(l10n.noResults, style: TextStyle(color: colors.muted))
@@ -6864,20 +6990,38 @@ class _AttachmentRow extends StatelessWidget {
 }
 
 class _HistoryTab extends StatelessWidget {
-  const _HistoryTab({required this.entries, required this.isLoading});
+  const _HistoryTab({
+    required this.entries,
+    required this.isLoading,
+    required this.errorText,
+    required this.onRetry,
+  });
 
   final List<IssueHistoryEntry> entries;
   final bool isLoading;
+  final String? errorText;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
+    if (errorText != null) {
+      return _DeferredSectionStateCard(
+        semanticLabel: '${l10n.history} error',
+        title: l10n.history,
+        message: errorText!,
+        tone: _DeferredSectionTone.error,
+        actionLabel: l10n.retry,
+        onAction: onRetry,
+      );
+    }
     if (isLoading) {
-      return _SectionContentPlaceholder(
-        semanticLabel: '${l10n.history} ${l10n.loading}',
-        lineWidths: const [.9, .76],
-        blockCount: 3,
+      return _DeferredSectionStateCard(
+        semanticLabel: '${l10n.history} loading',
+        title: l10n.history,
+        message: l10n.loading,
+        tone: _DeferredSectionTone.loading,
       );
     }
     if (entries.isEmpty) {
@@ -6885,6 +7029,72 @@ class _HistoryTab extends StatelessWidget {
     }
     return Column(
       children: [for (final entry in entries) _HistoryRow(entry: entry)],
+    );
+  }
+}
+
+enum _DeferredSectionTone { loading, error }
+
+class _DeferredSectionStateCard extends StatelessWidget {
+  const _DeferredSectionStateCard({
+    required this.semanticLabel,
+    required this.title,
+    required this.message,
+    required this.tone,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final String semanticLabel;
+  final String title;
+  final String message;
+  final _DeferredSectionTone tone;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final accentColor = switch (tone) {
+      _DeferredSectionTone.loading => colors.info,
+      _DeferredSectionTone.error => colors.error,
+    };
+    return Semantics(
+      container: true,
+      label: semanticLabel,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colors.surfaceAlt,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (tone == _DeferredSectionTone.loading) ...[
+              const LinearProgressIndicator(minHeight: 2),
+              const SizedBox(height: 12),
+            ],
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(color: accentColor),
+            ),
+            const SizedBox(height: 8),
+            Text(message),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 12),
+              _IssueDetailActionButton(
+                label: actionLabel!,
+                onPressed: onAction,
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
