@@ -233,12 +233,14 @@ class AttachmentUploadInspection {
     required this.storagePath,
     required this.resolvedName,
     required this.isLfsTracked,
+    required this.requiresLocalGitUpload,
     this.existingAttachment,
   });
 
   final String storagePath;
   final String resolvedName;
   final bool isLfsTracked;
+  final bool requiresLocalGitUpload;
   final IssueAttachment? existingAttachment;
 }
 
@@ -1439,6 +1441,10 @@ class TrackerViewModel extends ChangeNotifier {
     String name,
   ) async {
     final storagePath = _repository.resolveIssueAttachmentPath(issue, name);
+    final isLfsTracked = await _repository.isIssueAttachmentLfsTracked(
+      issue,
+      name,
+    );
     IssueAttachment? existingAttachment;
     for (final candidate in issue.attachments) {
       if (candidate.storagePath == storagePath) {
@@ -1449,7 +1455,11 @@ class TrackerViewModel extends ChangeNotifier {
     return AttachmentUploadInspection(
       storagePath: storagePath,
       resolvedName: storagePath.split('/').last,
-      isLfsTracked: await _repository.isIssueAttachmentLfsTracked(issue, name),
+      isLfsTracked: isLfsTracked,
+      requiresLocalGitUpload:
+          !usesGitHubReleasesAttachmentStorage &&
+          hasAttachmentUploadRestriction &&
+          isLfsTracked,
       existingAttachment: existingAttachment,
     );
   }

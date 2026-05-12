@@ -1206,7 +1206,7 @@ RepositoryPermission _permissionFromRepoJson(Map<String, Object?> json) {
     attachmentUploadMode: canWrite
         ? AttachmentUploadMode.noLfs
         : AttachmentUploadMode.none,
-    supportsReleaseAttachmentWrites: false,
+    supportsReleaseAttachmentWrites: canWrite,
   );
 }
 

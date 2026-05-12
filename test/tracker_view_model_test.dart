@@ -906,7 +906,49 @@ void main() {
       expect(viewModel.canUploadIssueAttachments, isTrue);
       expect(viewModel.hasAttachmentUploadRestriction, isTrue);
       expect(inspection.isLfsTracked, isTrue);
+      expect(inspection.requiresLocalGitUpload, isTrue);
       expect(inspection.resolvedName, 'release-notes.pdf');
+    },
+  );
+
+  test(
+    'view model skips local Git warnings for LFS-tracked names when release-backed uploads are enabled',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
+      });
+      const releaseSupportedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        supportsReleaseAttachmentWrites: true,
+        canCheckCollaborators: false,
+      );
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(
+          permission: releaseSupportedPermission,
+          lfsTrackedPaths: {'TRACK-12/attachments/release-notes.pdf'},
+          textFixtures: _githubReleasesProjectTextFixtures(),
+        ),
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+      final inspection = await viewModel.inspectIssueAttachmentUpload(
+        issue,
+        'release notes.pdf',
+      );
+
+      expect(viewModel.usesGitHubReleasesAttachmentStorage, isTrue);
+      expect(viewModel.canUploadIssueAttachments, isTrue);
+      expect(viewModel.hasAttachmentUploadRestriction, isFalse);
+      expect(inspection.isLfsTracked, isTrue);
+      expect(inspection.requiresLocalGitUpload, isFalse);
     },
   );
 
