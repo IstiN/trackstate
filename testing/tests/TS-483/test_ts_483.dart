@@ -256,40 +256,23 @@ void main() {
         await robot.selectAttachmentStorageMode('GitHub Releases');
         await robot.enterAttachmentReleaseTagPrefix(releasePrefixValue);
 
-        await robot.clearFocus();
-        final attachmentFocusOrder = _dedupeConsecutive(
-          await robot.collectFocusOrder(
-            candidates: {
-              'Attachment storage mode': find.bySemanticsLabel(
-                RegExp('Attachment storage mode'),
-              ),
-              'Release tag prefix': find.bySemanticsLabel(
-                RegExp('Release tag prefix'),
-              ),
-              'Reset': robot.actionButton('Reset'),
-              'Save settings': robot.saveSettingsButton,
-            },
-            tabs: 64,
+        final attachmentFocusCandidates = <String, Finder>{
+          'Attachment storage mode': find.bySemanticsLabel(
+            RegExp('Attachment storage mode'),
           ),
-        );
-        if (!containsAllInOrder([
-          'Attachment storage mode',
-          'Release tag prefix',
-          'Reset',
-          'Save settings',
-        ]).matches(attachmentFocusOrder, <dynamic, dynamic>{})) {
-          failures.add(
-            'Step 6 failed: keyboard Tab traversal did not preserve the logical Attachments focus order [Attachment storage mode, Release tag prefix, Reset, Save settings]. '
-            'Observed candidate focus order: $attachmentFocusOrder.',
-          );
-        }
+          'Release tag prefix': find.bySemanticsLabel(
+            RegExp('Release tag prefix'),
+          ),
+          'Reset': robot.actionButton('Reset'),
+          'Save settings': robot.saveSettingsButton,
+        };
 
         await robot.clearFocus();
         final keyboardReachedStorageSelector = await _focusByTab(
           tester,
           robot: robot,
           label: 'Attachment storage mode',
-          finder: find.bySemanticsLabel(RegExp('Attachment storage mode')),
+          finder: attachmentFocusCandidates['Attachment storage mode']!,
           maxTabs: 24,
         );
         if (!keyboardReachedStorageSelector) {
@@ -297,31 +280,73 @@ void main() {
             'Step 6 failed: keyboard Tab traversal did not reach the Attachment storage mode selector.',
           );
         } else {
-          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-          await tester.pumpAndSettle();
-          final overlayScope = _activeMenuOverlayScope(
+          final attachmentFocusTrace = await _collectFocusTraceFromCurrent(
             tester,
-            requiredTexts: const ['Repository Path', 'GitHub Releases'],
+            robot: robot,
+            candidates: attachmentFocusCandidates,
+            tabSteps: 3,
           );
-          if (overlayScope == null) {
+          final attachmentFocusOrder = <String>[
+            for (final step in attachmentFocusTrace) step.candidateLabel,
+          ];
+          final focusOrderFailure = _exactFocusOrderFailure(
+            attachmentFocusOrder,
+            expectedOrder: const <String>[
+              'Attachment storage mode',
+              'Release tag prefix',
+              'Reset',
+              'Save settings',
+            ],
+          );
+          if (focusOrderFailure != null) {
             failures.add(
-              'Step 6 failed: pressing Enter on the focused Attachment storage mode selector did not open the visible storage-mode menu.',
+              'Step 6 failed: keyboard Tab traversal did not preserve one Attachments-tab focus cycle [Attachment storage mode, Release tag prefix, Reset, Save settings]. '
+              '$focusOrderFailure Observed focus cycle: ${_formatFocusTrace(attachmentFocusTrace)}.',
+            );
+          }
+
+          await robot.clearFocus();
+          final refocusedStorageSelector = await _focusByTab(
+            tester,
+            robot: robot,
+            label: 'Attachment storage mode',
+            finder: attachmentFocusCandidates['Attachment storage mode']!,
+            maxTabs: 24,
+          );
+          if (!refocusedStorageSelector) {
+            failures.add(
+              'Step 6 failed: keyboard Tab traversal could not refocus the Attachment storage mode selector before opening its menu.',
             );
           } else {
-            final overlayTexts = _visibleTextsWithin(tester, overlayScope);
-            for (final option in const ['Repository Path', 'GitHub Releases']) {
-              if (!overlayTexts.contains(option)) {
-                failures.add(
-                  'Step 6 failed: the opened storage-mode selector did not show the visible "$option" option. '
-                  'Visible menu texts: ${_formatSnapshot(overlayTexts)}.',
-                );
-              }
-            }
-            await tester.tap(
-              find.text('GitHub Releases').last,
-              warnIfMissed: false,
-            );
+            await tester.sendKeyEvent(LogicalKeyboardKey.enter);
             await tester.pumpAndSettle();
+            final overlayScope = _activeMenuOverlayScope(
+              tester,
+              requiredTexts: const ['Repository Path', 'GitHub Releases'],
+            );
+            if (overlayScope == null) {
+              failures.add(
+                'Step 6 failed: pressing Enter on the focused Attachment storage mode selector did not open the visible storage-mode menu.',
+              );
+            } else {
+              final overlayTexts = _visibleTextsWithin(tester, overlayScope);
+              for (final option in const [
+                'Repository Path',
+                'GitHub Releases',
+              ]) {
+                if (!overlayTexts.contains(option)) {
+                  failures.add(
+                    'Step 6 failed: the opened storage-mode selector did not show the visible "$option" option. '
+                    'Visible menu texts: ${_formatSnapshot(overlayTexts)}.',
+                  );
+                }
+              }
+              await tester.tap(
+                find.text('GitHub Releases').last,
+                warnIfMissed: false,
+              );
+              await tester.pumpAndSettle();
+            }
           }
         }
 
@@ -381,6 +406,32 @@ Future<bool> _focusByTab(
     }
   }
   return false;
+}
+
+Future<List<({String candidateLabel, List<String> focusedSemanticsLabels})>>
+_collectFocusTraceFromCurrent(
+  WidgetTester tester, {
+  required SettingsScreenRobot robot,
+  required Map<String, Finder> candidates,
+  required int tabSteps,
+}) async {
+  final order =
+      <({String candidateLabel, List<String> focusedSemanticsLabels})>[
+        (
+          candidateLabel:
+              robot.focusedLabel(candidates) ?? '<outside candidates>',
+          focusedSemanticsLabels: _focusedSemanticsLabels(tester),
+        ),
+      ];
+  for (var index = 0; index < tabSteps; index += 1) {
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    order.add((
+      candidateLabel: robot.focusedLabel(candidates) ?? '<outside candidates>',
+      focusedSemanticsLabels: _focusedSemanticsLabels(tester),
+    ));
+  }
+  return order;
 }
 
 List<String> _semanticsTraversalWithin(WidgetTester tester, Finder scope) {
@@ -686,6 +737,59 @@ String? _orderedSubsequenceFailureByFragment(
     previousIndex = index;
   }
   return null;
+}
+
+String? _exactFocusOrderFailure(
+  List<String> observed, {
+  required List<String> expectedOrder,
+}) {
+  if (observed.length != expectedOrder.length) {
+    return 'the captured cycle had ${observed.length} focus stops instead of ${expectedOrder.length}.';
+  }
+
+  for (var index = 0; index < expectedOrder.length; index += 1) {
+    if (observed[index] == expectedOrder[index]) {
+      continue;
+    }
+    return 'focus stop ${index + 1} was "${observed[index]}" instead of "${expectedOrder[index]}".';
+  }
+
+  return null;
+}
+
+List<String> _focusedSemanticsLabels(WidgetTester tester) {
+  final root = tester.binding.pipelineOwner.semanticsOwner?.rootSemanticsNode;
+  if (root == null) {
+    return const <String>['<no semantics tree>'];
+  }
+
+  final labels = <String>[];
+  void visit(SemanticsNode node) {
+    final data = node.getSemanticsData();
+    if (data.flagsCollection.isFocused) {
+      final label = data.label.trim();
+      labels.add(label.isEmpty ? '<empty label>' : label);
+    }
+    for (final child in node.debugListChildrenInOrder(
+      DebugSemanticsDumpOrder.traversalOrder,
+    )) {
+      visit(child);
+    }
+  }
+
+  visit(root);
+  return labels.isEmpty ? const <String>['<no focused semantics>'] : labels;
+}
+
+String _formatFocusTrace(
+  List<({String candidateLabel, List<String> focusedSemanticsLabels})> trace,
+) {
+  return trace
+      .map(
+        (step) =>
+            '${step.candidateLabel} [${step.focusedSemanticsLabels.join(' | ')}]',
+      )
+      .join(' -> ');
 }
 
 List<String> _dedupeConsecutive(List<String> labels) {
