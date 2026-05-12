@@ -331,6 +331,18 @@ class IssueDetailAccessibilityRobot
       _attachmentRow(issueKey, attachmentName).evaluate().isNotEmpty;
 
   @override
+  bool attachmentRowIsVisibleInViewport(
+    String issueKey,
+    String attachmentName,
+  ) {
+    final row = _attachmentRow(issueKey, attachmentName);
+    if (row.evaluate().isEmpty) {
+      return false;
+    }
+    return _isFinderVisibleInIssueDetailViewport(issueKey, row.first);
+  }
+
+  @override
   bool attachmentRowIsBelowAttachmentsRestrictionCallout(
     String issueKey, {
     required String title,
@@ -388,6 +400,31 @@ class IssueDetailAccessibilityRobot
     await tester.ensureVisible(action.first);
     await tester.tap(action.first, warnIfMissed: false);
     await tester.pumpAndSettle();
+  }
+
+  @override
+  bool issueDetailIsVerticallyScrollable(String issueKey) {
+    final scrollable = _issueDetailScrollable(issueKey);
+    final state = tester.state<ScrollableState>(scrollable.first);
+    return state.position.maxScrollExtent > 0;
+  }
+
+  @override
+  Future<void> scrollIssueDetailToBottom(String issueKey) async {
+    final scrollable = _issueDetailScrollable(issueKey);
+    await _dragIssueDetailUntilSettled(
+      scrollable,
+      direction: _ScrollDirection.down,
+    );
+  }
+
+  @override
+  Future<void> scrollIssueDetailToTop(String issueKey) async {
+    final scrollable = _issueDetailScrollable(issueKey);
+    await _dragIssueDetailUntilSettled(
+      scrollable,
+      direction: _ScrollDirection.up,
+    );
   }
 
   @override
@@ -700,6 +737,85 @@ class IssueDetailAccessibilityRobot
           return label.contains(attachmentName);
         }, description: 'attachment row for $attachmentName'),
       );
+
+  Finder _issueDetailScrollable(String issueKey) {
+    final scrollables = find.ancestor(
+      of: _issueDetail(issueKey),
+      matching: find.byType(Scrollable),
+    );
+    if (scrollables.evaluate().isEmpty) {
+      throw StateError(
+        'No Scrollable ancestor was rendered for issue detail $issueKey.',
+      );
+    }
+
+    Finder? bestMatch;
+    double? smallestArea;
+    final matchCount = scrollables.evaluate().length;
+    for (var index = 0; index < matchCount; index += 1) {
+      final candidate = scrollables.at(index);
+      final state = tester.state<ScrollableState>(candidate);
+      if (axisDirectionToAxis(state.widget.axisDirection) != Axis.vertical) {
+        continue;
+      }
+      final area =
+          tester.getRect(candidate).size.longestSide *
+          tester.getRect(candidate).size.shortestSide;
+      if (smallestArea == null || area < smallestArea) {
+        smallestArea = area;
+        bestMatch = candidate;
+      }
+    }
+
+    if (bestMatch == null) {
+      throw StateError(
+        'No vertical Scrollable ancestor was rendered for issue detail $issueKey.',
+      );
+    }
+    return bestMatch;
+  }
+
+  bool _isFinderVisibleInIssueDetailViewport(String issueKey, Finder finder) {
+    final surfaceRect = tester.getRect(_issueDetailScrollable(issueKey).first);
+    return _isWithinSurface(surfaceRect, tester.getRect(finder));
+  }
+
+  bool _isWithinSurface(Rect surfaceRect, Rect candidateRect) {
+    return surfaceRect.overlaps(candidateRect) ||
+        surfaceRect.contains(candidateRect.center);
+  }
+
+  Future<void> _dragIssueDetailUntilSettled(
+    Finder scrollable, {
+    required _ScrollDirection direction,
+  }) async {
+    final state = tester.state<ScrollableState>(scrollable.first);
+    if (state.position.maxScrollExtent <= 0) {
+      await tester.pumpAndSettle();
+      return;
+    }
+
+    final rect = tester.getRect(scrollable.first);
+    final dragDistance = (rect.height * 0.6).clamp(120.0, 320.0);
+    final signedDistance = direction == _ScrollDirection.down
+        ? -dragDistance
+        : dragDistance;
+    var previousOffset = state.position.pixels;
+
+    for (var attempt = 0; attempt < 30; attempt += 1) {
+      await tester.drag(scrollable.first, Offset(0, signedDistance));
+      await tester.pumpAndSettle();
+
+      final currentOffset = state.position.pixels;
+      final reachedBoundary = direction == _ScrollDirection.down
+          ? currentOffset >= state.position.maxScrollExtent
+          : currentOffset <= state.position.minScrollExtent;
+      if (reachedBoundary || (currentOffset - previousOffset).abs() < 0.5) {
+        return;
+      }
+      previousOffset = currentOffset;
+    }
+  }
 
   InputDecoration _commentComposerDecoration(String issueKey) {
     final field = tester.widget<TextField>(_commentComposerField(issueKey));
@@ -1042,6 +1158,8 @@ class IssueDetailAccessibilityRobot
   String _normalizedLabel(String? label) =>
       (label ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
 }
+
+enum _ScrollDirection { up, down }
 
 class _SemanticsTarget {
   const _SemanticsTarget({required this.label, required this.isButton});
