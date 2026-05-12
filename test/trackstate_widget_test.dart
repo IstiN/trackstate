@@ -330,6 +330,51 @@ void main() {
   );
 
   testWidgets(
+    'issue detail keeps deferred load failures inside the active tab with a local retry action',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final semantics = tester.ensureSemantics();
+      try {
+        tester.view.physicalSize = const Size(1440, 960);
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              failingTextPaths: {'TRACK-12/main.md'},
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find
+              .bySemanticsLabel(
+                RegExp('Open TRACK-12 Implement Git sync service'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Detail'), findsWidgets);
+        expect(
+          find.textContaining('Deferred read failed for TRACK-12/main.md'),
+          findsOneWidget,
+        );
+        expect(find.text('Retry'), findsOneWidget);
+        expect(find.bySemanticsLabel('Comments'), findsWidgets);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'hosted issue detail keeps the header visible while tab hydration loads in place',
     (tester) async {
       final semantics = tester.ensureSemantics();
