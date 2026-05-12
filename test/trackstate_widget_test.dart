@@ -482,6 +482,28 @@ void main() {
     },
   );
 
+  testWidgets('edit issue dialog localizes component and fix version chips', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final screen = defaultTestingDependencies.createTrackStateAppScreen(tester);
+    try {
+      await screen.pump(
+        const _LocalizedEditIssueFieldsLocalRuntimeRepository(),
+      );
+
+      await screen.openSection('Search');
+      await screen.openIssue('TRACK-12', 'Implement Git sync service');
+      await screen.tapIssueDetailAction('TRACK-12', label: 'Edit');
+
+      await screen.expectTextVisible('Tracker Core Localized');
+      await screen.expectTextVisible('MVP Release');
+    } finally {
+      screen.resetView();
+      semantics.dispose();
+    }
+  });
+
   testWidgets('local runtime shows repository access instead of GitHub auth', (
     tester,
   ) async {
@@ -1268,6 +1290,51 @@ class _EditIssueFieldsLocalRuntimeRepository extends _LocalRuntimeRepository {
           TrackStateConfigEntry(id: 'done', name: 'Done'),
           TrackStateConfigEntry(id: 'wont-fix', name: "Won't Fix"),
         ],
+      ),
+      issues: snapshot.issues,
+      repositoryIndex: snapshot.repositoryIndex,
+      loadWarnings: snapshot.loadWarnings,
+    );
+  }
+}
+
+class _LocalizedEditIssueFieldsLocalRuntimeRepository
+    extends _EditIssueFieldsLocalRuntimeRepository {
+  const _LocalizedEditIssueFieldsLocalRuntimeRepository();
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    final snapshot = await super.loadSnapshot();
+    return TrackerSnapshot(
+      project: ProjectConfig(
+        key: snapshot.project.key,
+        name: snapshot.project.name,
+        repository: snapshot.project.repository,
+        branch: snapshot.project.branch,
+        defaultLocale: 'en',
+        supportedLocales: const ['en', 'fr'],
+        issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+        statusDefinitions: snapshot.project.statusDefinitions,
+        fieldDefinitions: snapshot.project.fieldDefinitions,
+        workflowDefinitions: snapshot.project.workflowDefinitions,
+        priorityDefinitions: snapshot.project.priorityDefinitions,
+        versionDefinitions: [
+          for (final version in snapshot.project.versionDefinitions)
+            if (version.id == 'mvp')
+              version.copyWith(localizedLabels: const {'en': 'MVP Release'})
+            else
+              version,
+        ],
+        componentDefinitions: [
+          for (final component in snapshot.project.componentDefinitions)
+            if (component.id == 'tracker-core')
+              component.copyWith(
+                localizedLabels: const {'en': 'Tracker Core Localized'},
+              )
+            else
+              component,
+        ],
+        resolutionDefinitions: snapshot.project.resolutionDefinitions,
       ),
       issues: snapshot.issues,
       repositoryIndex: snapshot.repositoryIndex,
