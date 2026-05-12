@@ -366,6 +366,63 @@ class LiveSetupRepositoryService:
             )
         return self._parse_release(payload, fallback_tag_name=tag_name)
 
+    def fetch_releases_by_tag_any_state(
+        self,
+        tag_name: str,
+        *,
+        max_pages: int = 5,
+    ) -> list[LiveHostedRelease]:
+        matches_by_id: dict[int, LiveHostedRelease] = {}
+        for page in range(1, max_pages + 1):
+            releases = self._read_json(
+                f"/repos/{self.repository}/releases?per_page=100&page={page}",
+            )
+            if not isinstance(releases, list):
+                raise RuntimeError("GitHub response for repository releases was not a list.")
+            if not releases:
+                break
+            for candidate in releases:
+                if not isinstance(candidate, dict):
+                    continue
+                if str(candidate.get("tag_name", "")).strip() != tag_name:
+                    continue
+                release_id = int(candidate.get("id", 0))
+                if release_id <= 0 or release_id in matches_by_id:
+                    continue
+                detail = self._read_json(f"/repos/{self.repository}/releases/{release_id}")
+                matches_by_id[release_id] = self._parse_release(
+                    detail,
+                    context=f"release {release_id}",
+                )
+        return list(matches_by_id.values())
+
+    def fetch_release_by_tag_any_state(self, tag_name: str) -> LiveHostedRelease | None:
+        matches = self.fetch_releases_by_tag_any_state(tag_name)
+        if matches:
+            return matches[0]
+        return self.fetch_release_by_tag(tag_name)
+
+    def download_release_asset_bytes(self, asset_id: int) -> bytes:
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{self.repository}/releases/assets/{asset_id}",
+            headers={
+                "Accept": "application/octet-stream",
+                "X-GitHub-Api-Version": "2022-11-28",
+                **(
+                    {"Authorization": f"Bearer {self.token}"}
+                    if self.token
+                    else {}
+                ),
+            },
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            if response.status != 200:
+                raise RuntimeError(
+                    f"GitHub release asset download for {asset_id} returned unexpected "
+                    f"status {response.status}.",
+                )
+            return response.read()
+
     def delete_release_asset(self, asset_id: int) -> None:
         request = urllib.request.Request(
             f"https://api.github.com/repos/{self.repository}/releases/assets/{asset_id}",
@@ -439,6 +496,7 @@ class LiveSetupRepositoryService:
             method="PATCH",
         )
         return self._parse_release(payload, context=f"update release {release_id}")
+
     def upload_release_asset(
         self,
         *,
