@@ -81,6 +81,43 @@ class SettingsScreenRobot {
     ),
   );
 
+  Finder accessCallout(String title, {String? message}) => _smallestByArea(
+    find.ancestor(
+      of: find.text(title),
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! Semantics) {
+          return false;
+        }
+        final label = widget.properties.label;
+        if (label == null || label.isEmpty) {
+          return false;
+        }
+        if (message != null && !label.contains(message)) {
+          return false;
+        }
+        return label.contains(title);
+      }, description: 'access callout "$title"'),
+    ),
+  );
+
+  Finder semanticsNode(String label) =>
+      find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
+
+  Finder semanticsNodeContaining(String label) =>
+      find.bySemanticsLabel(RegExp(RegExp.escape(label)));
+
+  Finder labeledTextField(String label) => _labeledTextField(label);
+
+  Finder checkboxTile(String label) => _smallestByArea(
+    find.ancestor(
+      of: semanticsNodeContaining(label),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is CheckboxListTile,
+        description: 'checkbox tile "$label"',
+      ),
+    ),
+  );
+
   Future<void> pumpApp({
     required TrackStateRepository repository,
     Map<String, Object> sharedPreferences = const {},
@@ -354,6 +391,13 @@ class SettingsScreenRobot {
     await tester.pump();
     await tester.enterText(field.first, text);
     await tester.pumpAndSettle();
+  }
+
+  Future<void> focusTextField(String label) async {
+    final field = _labeledTextField(label);
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pump();
   }
 
   String textFieldValue(String label) {
