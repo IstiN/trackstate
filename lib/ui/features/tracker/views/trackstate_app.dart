@@ -907,7 +907,9 @@ String _repositoryAccessTitle(
     HostedRepositoryAccessMode.readOnly => l10n.repositoryAccessReadOnlyTitle,
     HostedRepositoryAccessMode.writable => l10n.repositoryAccessConnected,
     HostedRepositoryAccessMode.attachmentRestricted =>
-      viewModel.canUploadIssueAttachments
+      viewModel.usesGitHubReleasesAttachmentStorage
+          ? l10n.repositoryAccessReleaseRestrictedTitle
+          : viewModel.canUploadIssueAttachments
           ? l10n.repositoryAccessAttachmentLimitedTitle
           : l10n.repositoryAccessAttachmentRestrictedTitle,
   };
@@ -921,12 +923,23 @@ String _repositoryAccessMessage(
     HostedRepositoryAccessMode.disconnected =>
       l10n.repositoryAccessDisconnectedMessage,
     HostedRepositoryAccessMode.readOnly => l10n.repositoryAccessReadOnlyMessage,
-    HostedRepositoryAccessMode.writable => l10n.githubConnected(
-      viewModel.connectedUser?.login ?? '',
-      viewModel.project?.repository ?? l10n.configuredRepositoryFallback,
-    ),
+    HostedRepositoryAccessMode.writable =>
+      viewModel.usesGitHubReleasesAttachmentStorage
+          ? l10n.repositoryAccessConnectedGitHubReleasesMessage(
+              viewModel.connectedUser?.login ?? '',
+              viewModel.project?.repository ??
+                  l10n.configuredRepositoryFallback,
+              _attachmentReleaseTagPrefix(viewModel),
+            )
+          : l10n.repositoryAccessConnectedRepositoryPathMessage(
+              viewModel.connectedUser?.login ?? '',
+              viewModel.project?.repository ??
+                  l10n.configuredRepositoryFallback,
+            ),
     HostedRepositoryAccessMode.attachmentRestricted =>
-      viewModel.canUploadIssueAttachments
+      viewModel.usesGitHubReleasesAttachmentStorage
+          ? l10n.repositoryAccessReleaseRestrictedMessage
+          : viewModel.canUploadIssueAttachments
           ? l10n.repositoryAccessAttachmentLimitedMessage
           : l10n.repositoryAccessAttachmentRestrictedMessage,
   };
@@ -943,10 +956,72 @@ String _attachmentsAccessMessage(
       l10n.attachmentsAccessMessageReadOnly,
     HostedRepositoryAccessMode.writable => '',
     HostedRepositoryAccessMode.attachmentRestricted =>
-      viewModel.canUploadIssueAttachments
+      viewModel.usesGitHubReleasesAttachmentStorage
+          ? l10n.attachmentsGitHubReleasesUnsupportedMessage
+          : viewModel.canUploadIssueAttachments
           ? l10n.attachmentsLimitedUploadMessage
           : l10n.attachmentsDownloadOnlyMessage,
   };
+}
+
+_AccessCalloutTone _repositoryAccessCalloutTone(TrackerViewModel viewModel) {
+  return viewModel.hostedRepositoryAccessMode ==
+          HostedRepositoryAccessMode.writable
+      ? _AccessCalloutTone.success
+      : _AccessCalloutTone.warning;
+}
+
+_AccessCalloutTone _attachmentStorageCalloutTone(TrackerViewModel viewModel) {
+  return viewModel.hostedRepositoryAccessMode ==
+          HostedRepositoryAccessMode.writable
+      ? _AccessCalloutTone.success
+      : _AccessCalloutTone.warning;
+}
+
+String _attachmentStorageCalloutTitle(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  return viewModel.usesGitHubReleasesAttachmentStorage
+      ? l10n.attachmentStorageGitHubReleasesCalloutTitle
+      : l10n.attachmentStorageRepositoryPathCalloutTitle;
+}
+
+String _attachmentStorageCalloutMessage(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  if (viewModel.usesGitHubReleasesAttachmentStorage) {
+    final tagPrefix = _attachmentReleaseTagPrefix(viewModel);
+    return viewModel.hostedRepositoryAccessMode ==
+            HostedRepositoryAccessMode.writable
+        ? l10n.attachmentStorageGitHubReleasesSupportedMessage(tagPrefix)
+        : l10n.attachmentStorageGitHubReleasesRestrictedMessage(tagPrefix);
+  }
+  return switch (viewModel.hostedRepositoryAccessMode) {
+    HostedRepositoryAccessMode.writable =>
+      l10n.attachmentStorageRepositoryPathSupportedMessage,
+    HostedRepositoryAccessMode.attachmentRestricted =>
+      viewModel.canUploadIssueAttachments
+          ? l10n.attachmentStorageRepositoryPathLimitedMessage
+          : l10n.attachmentStorageRepositoryPathRestrictedMessage,
+    HostedRepositoryAccessMode.disconnected ||
+    HostedRepositoryAccessMode.readOnly =>
+      l10n.attachmentStorageRepositoryPathRestrictedMessage,
+  };
+}
+
+String _attachmentReleaseTagPrefix(TrackerViewModel viewModel) {
+  final configuredTagPrefix = viewModel
+      .project
+      ?.attachmentStorage
+      .githubReleases
+      ?.tagPrefix
+      .trim();
+  if (configuredTagPrefix != null && configuredTagPrefix.isNotEmpty) {
+    return configuredTagPrefix;
+  }
+  return GitHubReleasesAttachmentStorageSettings.defaultTagPrefix;
 }
 
 String _profileInitials(AppLocalizations l10n, TrackerViewModel viewModel) {
@@ -1168,6 +1243,7 @@ class _AccessCallout extends StatelessWidget {
     required this.semanticLabel,
     required this.title,
     required this.message,
+    this.tone = _AccessCalloutTone.warning,
     this.primaryActionLabel,
     this.onPrimaryAction,
     this.secondaryActionLabel,
@@ -1177,6 +1253,7 @@ class _AccessCallout extends StatelessWidget {
   final String semanticLabel;
   final String title;
   final String message;
+  final _AccessCalloutTone tone;
   final String? primaryActionLabel;
   final VoidCallback? onPrimaryAction;
   final String? secondaryActionLabel;
@@ -1185,6 +1262,10 @@ class _AccessCallout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final accentColor = switch (tone) {
+      _AccessCalloutTone.warning => colors.accent,
+      _AccessCalloutTone.success => colors.success,
+    };
     return Semantics(
       container: true,
       label: '$semanticLabel $title $message',
@@ -1192,9 +1273,9 @@ class _AccessCallout extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: colors.accent.withValues(alpha: .12),
+          color: accentColor.withValues(alpha: .12),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: colors.accent),
+          border: Border.all(color: accentColor),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1205,7 +1286,7 @@ class _AccessCallout extends StatelessWidget {
                 TrackStateIcon(
                   TrackStateIconGlyph.gitBranch,
                   size: 18,
-                  color: colors.accent,
+                  color: accentColor,
                   semanticLabel: title,
                 ),
                 const SizedBox(width: 10),
@@ -1237,7 +1318,7 @@ class _AccessCallout extends StatelessWidget {
                         onPressed: onPrimaryAction,
                         style: OutlinedButton.styleFrom(
                           foregroundColor: colors.text,
-                          side: BorderSide(color: colors.accent),
+                          side: BorderSide(color: accentColor),
                         ),
                         child: Text(primaryActionLabel!),
                       ),
@@ -1260,6 +1341,8 @@ class _AccessCallout extends StatelessWidget {
     );
   }
 }
+
+enum _AccessCalloutTone { warning, success }
 
 class _StartupRecoveryView extends StatelessWidget {
   const _StartupRecoveryView({required this.viewModel});
@@ -5593,6 +5676,14 @@ class _HostedProviderConfigurationState
           message:
               '${_repositoryAccessMessage(l10n, viewModel)} '
               '${l10n.repositoryAccessSettingsHint}',
+          tone: _repositoryAccessCalloutTone(viewModel),
+        ),
+        const SizedBox(height: 12),
+        _AccessCallout(
+          semanticLabel: l10n.attachments,
+          title: _attachmentStorageCalloutTitle(l10n, viewModel),
+          message: _attachmentStorageCalloutMessage(l10n, viewModel),
+          tone: _attachmentStorageCalloutTone(viewModel),
         ),
         const SizedBox(height: 12),
         TextFormField(
