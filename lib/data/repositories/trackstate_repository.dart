@@ -92,6 +92,7 @@ class ProviderBackedTrackStateRepository
         canCreateBranch: false,
         canManageAttachments: false,
         attachmentUploadMode: AttachmentUploadMode.none,
+        supportsReleaseAttachmentWrites: false,
         canCheckCollaborators: false,
       );
 
@@ -111,6 +112,8 @@ class ProviderBackedTrackStateRepository
          canCreateBranch: _restrictedPermission.canCreateBranch,
          canManageAttachments: _restrictedPermission.canManageAttachments,
          attachmentUploadMode: _restrictedPermission.attachmentUploadMode,
+         supportsReleaseAttachmentWrites:
+             _restrictedPermission.supportsReleaseAttachmentWrites,
          canCheckCollaborators: _restrictedPermission.canCheckCollaborators,
        );
 
@@ -1872,6 +1875,8 @@ class ProviderBackedTrackStateRepository
       canCreateBranch: permission.canCreateBranch,
       canManageAttachments: permission.canManageAttachments,
       attachmentUploadMode: permission.attachmentUploadMode,
+      supportsReleaseAttachmentWrites:
+          permission.supportsReleaseAttachmentWrites,
       canCheckCollaborators: permission.canCheckCollaborators,
     );
     return _session;

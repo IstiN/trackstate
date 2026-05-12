@@ -42,6 +42,7 @@ void main() {
       expect(session.canWrite, isTrue);
       expect(session.canCreateBranch, isTrue);
       expect(session.canManageAttachments, isTrue);
+      expect(session.supportsReleaseAttachmentWrites, isFalse);
       expect(session.canCheckCollaborators, isFalse);
     },
   );
@@ -77,6 +78,7 @@ void main() {
       expect(session.canWrite, isFalse);
       expect(session.canCreateBranch, isFalse);
       expect(session.canManageAttachments, isFalse);
+      expect(session.supportsReleaseAttachmentWrites, isFalse);
       expect(session.canCheckCollaborators, isFalse);
     },
   );
@@ -120,6 +122,7 @@ void main() {
       expect(initialSession.canWrite, isFalse);
       expect(initialSession.canCreateBranch, isFalse);
       expect(initialSession.canManageAttachments, isFalse);
+      expect(initialSession.supportsReleaseAttachmentWrites, isFalse);
       expect(initialSession.canCheckCollaborators, isFalse);
 
       provider.updatePermission(
@@ -129,6 +132,7 @@ void main() {
           isAdmin: false,
           canCreateBranch: true,
           canManageAttachments: true,
+          supportsReleaseAttachmentWrites: true,
           canCheckCollaborators: false,
         ),
       );
@@ -145,6 +149,7 @@ void main() {
       expect(finalSession.canWrite, isTrue);
       expect(finalSession.canCreateBranch, isTrue);
       expect(finalSession.canManageAttachments, isTrue);
+      expect(finalSession.supportsReleaseAttachmentWrites, isTrue);
       expect(finalSession.canCheckCollaborators, isFalse);
     },
   );
@@ -193,6 +198,7 @@ void main() {
           isAdmin: false,
           canCreateBranch: true,
           canManageAttachments: true,
+          supportsReleaseAttachmentWrites: true,
           canCheckCollaborators: false,
         ),
       );
@@ -211,10 +217,12 @@ void main() {
       expect(capturedSession.resolvedUserIdentity, 'mock-user');
       expect(capturedSession.canCreateBranch, isTrue);
       expect(capturedSession.canManageAttachments, isTrue);
+      expect(capturedSession.supportsReleaseAttachmentWrites, isTrue);
       expect(latestSession.connectionState, ProviderConnectionState.connected);
       expect(latestSession.resolvedUserIdentity, 'mock-user');
       expect(latestSession.canCreateBranch, isTrue);
       expect(latestSession.canManageAttachments, isTrue);
+      expect(latestSession.supportsReleaseAttachmentWrites, isTrue);
     },
   );
 
@@ -250,6 +258,7 @@ void main() {
       expect(initialSession.canWrite, isFalse);
       expect(initialSession.canCreateBranch, isFalse);
       expect(initialSession.canManageAttachments, isFalse);
+      expect(initialSession.supportsReleaseAttachmentWrites, isFalse);
       expect(initialSession.canCheckCollaborators, isFalse);
 
       final connectFuture = repository.connect(
@@ -287,10 +296,7 @@ void main() {
         connectedSession.connectionState,
         ProviderConnectionState.connected,
       );
-      expect(
-        initialSession.connectionState,
-        ProviderConnectionState.connected,
-      );
+      expect(initialSession.connectionState, ProviderConnectionState.connected);
     },
   );
 }

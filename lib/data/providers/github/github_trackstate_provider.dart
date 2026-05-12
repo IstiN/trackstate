@@ -352,6 +352,7 @@ class GitHubTrackStateProvider
         canRead: true,
         canWrite: false,
         isAdmin: false,
+        supportsReleaseAttachmentWrites: false,
       );
     }
     final repoJson =
@@ -1122,6 +1123,7 @@ RepositoryPermission _permissionFromRepoJson(Map<String, Object?> json) {
       canRead: true,
       canWrite: false,
       isAdmin: false,
+      supportsReleaseAttachmentWrites: false,
     );
   }
   final canRead = permissions['pull'] == true || permissions['push'] == true;
@@ -1133,6 +1135,7 @@ RepositoryPermission _permissionFromRepoJson(Map<String, Object?> json) {
     attachmentUploadMode: canWrite
         ? AttachmentUploadMode.noLfs
         : AttachmentUploadMode.none,
+    supportsReleaseAttachmentWrites: false,
   );
 }
 

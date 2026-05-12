@@ -95,6 +95,7 @@ class ProviderSession {
     required this.canCreateBranch,
     required this.canManageAttachments,
     required this.attachmentUploadMode,
+    required this.supportsReleaseAttachmentWrites,
     required this.canCheckCollaborators,
   });
 
@@ -106,6 +107,7 @@ class ProviderSession {
   bool canCreateBranch;
   bool canManageAttachments;
   AttachmentUploadMode attachmentUploadMode;
+  bool supportsReleaseAttachmentWrites;
   bool canCheckCollaborators;
   final Set<ProviderSessionListener> _listeners = <ProviderSessionListener>{};
 
@@ -135,6 +137,7 @@ class ProviderSession {
     required bool canCreateBranch,
     required bool canManageAttachments,
     required AttachmentUploadMode attachmentUploadMode,
+    required bool supportsReleaseAttachmentWrites,
     required bool canCheckCollaborators,
   }) {
     final changed =
@@ -146,6 +149,8 @@ class ProviderSession {
         this.canCreateBranch != canCreateBranch ||
         this.canManageAttachments != canManageAttachments ||
         this.attachmentUploadMode != attachmentUploadMode ||
+        this.supportsReleaseAttachmentWrites !=
+            supportsReleaseAttachmentWrites ||
         this.canCheckCollaborators != canCheckCollaborators;
     if (!changed) {
       return;
@@ -158,6 +163,7 @@ class ProviderSession {
     this.canCreateBranch = canCreateBranch;
     this.canManageAttachments = canManageAttachments;
     this.attachmentUploadMode = attachmentUploadMode;
+    this.supportsReleaseAttachmentWrites = supportsReleaseAttachmentWrites;
     this.canCheckCollaborators = canCheckCollaborators;
     _notifyListeners();
   }
@@ -304,6 +310,7 @@ class RepositoryPermission {
     bool? canCreateBranch,
     bool? canManageAttachments,
     AttachmentUploadMode? attachmentUploadMode,
+    this.supportsReleaseAttachmentWrites = false,
     bool? canCheckCollaborators,
   }) : canCreateBranch = canCreateBranch ?? canWrite,
        canManageAttachments = canManageAttachments ?? canWrite,
@@ -320,6 +327,7 @@ class RepositoryPermission {
   final bool canCreateBranch;
   final bool canManageAttachments;
   final AttachmentUploadMode attachmentUploadMode;
+  final bool supportsReleaseAttachmentWrites;
   final bool canCheckCollaborators;
 }
 

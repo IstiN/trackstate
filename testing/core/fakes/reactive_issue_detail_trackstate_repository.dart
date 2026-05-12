@@ -61,6 +61,8 @@ class ReactiveIssueDetailTrackStateRepository
       canCreateBranch: readOnlyPermission.canCreateBranch,
       canManageAttachments: readOnlyPermission.canManageAttachments,
       attachmentUploadMode: readOnlyPermission.attachmentUploadMode,
+      supportsReleaseAttachmentWrites:
+          readOnlyPermission.supportsReleaseAttachmentWrites,
       canCheckCollaborators: readOnlyPermission.canCheckCollaborators,
     );
   }
@@ -93,6 +95,8 @@ class ReactiveIssueDetailTrackStateRepository
       canCreateBranch: attachmentRestrictedPermission.canCreateBranch,
       canManageAttachments: attachmentRestrictedPermission.canManageAttachments,
       attachmentUploadMode: attachmentRestrictedPermission.attachmentUploadMode,
+      supportsReleaseAttachmentWrites:
+          attachmentRestrictedPermission.supportsReleaseAttachmentWrites,
       canCheckCollaborators:
           attachmentRestrictedPermission.canCheckCollaborators,
     );
