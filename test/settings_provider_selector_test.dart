@@ -269,6 +269,10 @@ void main() {
         expect(find.widgetWithText(Tab, 'Workflows'), findsOneWidget);
         expect(find.widgetWithText(Tab, 'Issue Types'), findsOneWidget);
         expect(find.widgetWithText(Tab, 'Fields'), findsOneWidget);
+        expect(find.widgetWithText(Tab, 'Priorities'), findsOneWidget);
+        expect(find.widgetWithText(Tab, 'Components'), findsOneWidget);
+        expect(find.widgetWithText(Tab, 'Versions'), findsOneWidget);
+        expect(find.widgetWithText(Tab, 'Locales'), findsOneWidget);
 
         await tester.tap(find.widgetWithText(Tab, 'Fields'));
         await tester.pumpAndSettle();
@@ -300,6 +304,51 @@ void main() {
           ),
           contains('blocked'),
         );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'settings locale admin adds a locale and persists supported locales',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      final repository = _EditableSettingsWidgetRepository();
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        final localesTab = find.widgetWithText(Tab, 'Locales');
+        await tester.ensureVisible(localesTab);
+        await tester.tap(localesTab);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Add locale'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Locale code'),
+          'fr',
+        );
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('fr'), findsWidgets);
+        expect(find.textContaining('Missing translation.'), findsWidgets);
+
+        await tester.tap(find.text('Save settings'));
+        await tester.pumpAndSettle();
+
+        expect(repository.savedSettings?.defaultLocale, 'en');
+        expect(repository.savedSettings?.effectiveSupportedLocales, [
+          'en',
+          'fr',
+        ]);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
@@ -413,15 +462,16 @@ class _EditableSettingsWidgetRepository
         name: current.project.name,
         repository: current.project.repository,
         branch: current.project.branch,
-        defaultLocale: current.project.defaultLocale,
+        defaultLocale: settings.defaultLocale,
+        supportedLocales: settings.effectiveSupportedLocales,
         issueTypeDefinitions: settings.issueTypeDefinitions,
         statusDefinitions: settings.statusDefinitions,
         fieldDefinitions: settings.fieldDefinitions,
         workflowDefinitions: settings.workflowDefinitions,
-        priorityDefinitions: current.project.priorityDefinitions,
-        versionDefinitions: current.project.versionDefinitions,
-        componentDefinitions: current.project.componentDefinitions,
-        resolutionDefinitions: current.project.resolutionDefinitions,
+        priorityDefinitions: settings.priorityDefinitions,
+        versionDefinitions: settings.versionDefinitions,
+        componentDefinitions: settings.componentDefinitions,
+        resolutionDefinitions: settings.resolutionDefinitions,
       ),
       issues: current.issues,
       repositoryIndex: current.repositoryIndex,
