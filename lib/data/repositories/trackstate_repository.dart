@@ -854,8 +854,15 @@ class ProviderBackedTrackStateRepository
         'This issue has no repository file path and cannot receive attachments.',
       );
     }
+    final snapshot = _snapshot ?? await loadSnapshot();
     final permission = await _provider.getPermission();
-    if (!permission.canManageAttachments) {
+    final attachmentStorage = snapshot.project.attachmentStorage;
+    final canUploadAttachment = switch (attachmentStorage.mode) {
+      AttachmentStorageMode.githubReleases =>
+        permission.supportsReleaseAttachmentWrites,
+      _ => permission.canManageAttachments,
+    };
+    if (!canUploadAttachment) {
       throw const TrackStateRepositoryException(
         'This repository session does not allow attachment uploads.',
       );
@@ -872,7 +879,6 @@ class ProviderBackedTrackStateRepository
       );
     }
 
-    final snapshot = _snapshot ?? await loadSnapshot();
     var currentIssue = snapshot.issues.firstWhere(
       (candidate) => candidate.key == issue.key,
       orElse: () => issue,
@@ -883,7 +889,6 @@ class ProviderBackedTrackStateRepository
         scopes: const {IssueHydrationScope.attachments},
       );
     }
-    final attachmentStorage = snapshot.project.attachmentStorage;
     if (attachmentStorage.mode == AttachmentStorageMode.githubReleases) {
       final githubReleases = attachmentStorage.githubReleases;
       if (githubReleases == null || githubReleases.tagPrefix.trim().isEmpty) {
@@ -2519,6 +2524,9 @@ class ProviderBackedTrackStateRepository
       final createdCommit = history.isEmpty ? null : history.last;
       _snapshotArtifactRevisions[entry.path] = attachment.revision;
       final existing = attachmentsById[entry.path];
+      if (existing?.storageBackend == AttachmentStorageMode.githubReleases) {
+        continue;
+      }
       attachmentsById[entry.path] = IssueAttachment(
         id: existing?.id ?? entry.path,
         name: existing?.name ?? entry.path.split('/').last,

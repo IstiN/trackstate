@@ -187,6 +187,110 @@ Issue with release-backed attachment metadata.
   );
 
   test(
+    'setup repository keeps release-backed metadata authoritative over legacy blobs at the same path',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'attachmentStorage': {
+              'mode': 'github-releases',
+              'githubReleases': {'tagPrefix': 'trackstate-attachments-'},
+            },
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+            {
+              'id': 'description',
+              'name': 'Description',
+              'type': 'markdown',
+              'required': false,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Release-backed attachment issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'priority': 'medium',
+              'labels': [],
+              'updated': '2026-05-05T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Release-backed attachment issue
+updated: 2026-05-05T00:00:00Z
+---
+
+# Description
+
+Issue with release-backed attachment metadata.
+''',
+          'DEMO/DEMO-1/attachments/design.png': 'legacy-binary',
+          'DEMO/DEMO-1/attachments.json': jsonEncode([
+            {
+              'id': 'DEMO/DEMO-1/attachments/design.png',
+              'name': 'design.png',
+              'mediaType': 'image/png',
+              'sizeBytes': 42,
+              'author': 'demo-user',
+              'createdAt': '2026-05-05T00:10:00Z',
+              'storagePath': 'DEMO/DEMO-1/attachments/design.png',
+              'revisionOrOid': 'release-asset-42',
+              'storageBackend': 'github-releases',
+              'githubReleaseTag': 'trackstate-attachments-DEMO-1',
+              'githubReleaseAssetName': 'design.png',
+            },
+          ]),
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot();
+      final issue = await repository.hydrateIssue(
+        snapshot.issues.single,
+        scopes: const {IssueHydrationScope.attachments},
+      );
+
+      expect(issue.attachments, hasLength(1));
+      expect(
+        issue.attachments.single.storageBackend,
+        AttachmentStorageMode.githubReleases,
+      );
+      expect(issue.attachments.single.revisionOrOid, 'release-asset-42');
+      expect(
+        issue.attachments.single.githubReleaseTag,
+        'trackstate-attachments-DEMO-1',
+      );
+      expect(issue.attachments.single.githubReleaseAssetName, 'design.png');
+      expect(issue.attachments.single.sizeBytes, 42);
+    },
+  );
+
+  test(
     'setup repository surfaces invalid github releases attachment config',
     () async {
       final repository = _mockSetupRepository(
@@ -1373,6 +1477,42 @@ README.md -filter
   );
 
   test(
+    'github provider reports release-backed writes for writable sessions',
+    () async {
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/IstiN/trackstate' && request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final permission = await provider.getPermission();
+
+      expect(permission.canWrite, isTrue);
+      expect(permission.canManageAttachments, isTrue);
+      expect(permission.supportsReleaseAttachmentWrites, isTrue);
+    },
+  );
+
+  test(
     'github provider reads non-LFS binary attachments without UTF-8 decoding',
     () async {
       final bytes = Uint8List.fromList(const [
@@ -1710,6 +1850,62 @@ size 6
           'githubReleaseAssetName': 'release-plan.txt',
         },
       ]);
+    },
+  );
+
+  test(
+    'provider-backed repository allows release-backed uploads when release writes are available without generic attachment management',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: false,
+          attachmentUploadMode: AttachmentUploadMode.none,
+          supportsReleaseAttachmentWrites: true,
+          canCheckCollaborators: false,
+        ),
+        files: _releaseAttachmentFixtureFiles(),
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final updated = await repository.uploadIssueAttachment(
+        issue: snapshot.issues.single,
+        name: 'release plan.txt',
+        bytes: Uint8List.fromList(utf8.encode('roadmap')),
+      );
+
+      expect(
+        updated.attachments.single.storageBackend,
+        AttachmentStorageMode.githubReleases,
+      );
+      expect(updated.attachments.single.revisionOrOid, '84');
+      final metadata =
+          jsonDecode(provider.files['DEMO/DEMO-1/attachments.json']!)
+              as List<Object?>;
+      expect(metadata.single, {
+        'id': 'DEMO/DEMO-1/attachments/release-plan.txt',
+        'name': 'release-plan.txt',
+        'mediaType': 'text/plain',
+        'sizeBytes': 7,
+        'author': 'demo-user',
+        'createdAt': updated.attachments.single.createdAt,
+        'storagePath': 'DEMO/DEMO-1/attachments/release-plan.txt',
+        'revisionOrOid': '84',
+        'storageBackend': 'github-releases',
+        'githubReleaseTag': 'trackstate-attachments-DEMO-1',
+        'githubReleaseAssetName': 'release-plan.txt',
+      });
     },
   );
 
@@ -2403,6 +2599,128 @@ http.Response _binaryContentResponse(Uint8List content, {String? downloadUrl}) {
     }),
     200,
   );
+}
+
+class _FakeReleaseAttachmentProvider
+    implements TrackStateProviderAdapter, RepositoryReleaseAttachmentStore {
+  _FakeReleaseAttachmentProvider({
+    required this.permission,
+    required Map<String, String> files,
+  }) : files = {...files};
+
+  final RepositoryPermission permission;
+  final Map<String, String> files;
+  RepositoryConnection? _connection;
+
+  @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
+  String get repositoryLabel => _connection?.repository ?? 'IstiN/trackstate';
+
+  @override
+  String get dataRef => 'main';
+
+  @override
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    _connection = connection;
+    return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+  }
+
+  @override
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async {
+    return [
+      for (final path in files.keys)
+        RepositoryTreeEntry(path: path, type: 'blob'),
+    ];
+  }
+
+  @override
+  Future<RepositoryTextFile> readTextFile(
+    String path, {
+    required String ref,
+  }) async {
+    final content = files[path];
+    if (content == null) {
+      throw TrackStateProviderException('File not found: $path');
+    }
+    return RepositoryTextFile(path: path, content: content, revision: 'abc123');
+  }
+
+  @override
+  Future<String> resolveWriteBranch() async => _connection?.branch ?? dataRef;
+
+  @override
+  Future<RepositoryBranch> getBranch(String name) async =>
+      RepositoryBranch(name: name, exists: true, isCurrent: name == dataRef);
+
+  @override
+  Future<RepositoryWriteResult> writeTextFile(
+    RepositoryWriteRequest request,
+  ) async {
+    files[request.path] = request.content;
+    return RepositoryWriteResult(
+      path: request.path,
+      branch: request.branch,
+      revision: 'metadata-sha',
+    );
+  }
+
+  @override
+  Future<RepositoryCommitResult> createCommit(
+    RepositoryCommitRequest request,
+  ) async => RepositoryCommitResult(
+    branch: request.branch,
+    message: request.message,
+    revision: 'commit-sha',
+  );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
+  Future<RepositoryPermission> getPermission() async => permission;
+
+  @override
+  Future<RepositoryAttachment> readAttachment(
+    String path, {
+    required String ref,
+  }) async {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<RepositoryAttachmentWriteResult> writeAttachment(
+    RepositoryAttachmentWriteRequest request,
+  ) async {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<bool> isLfsTracked(String path) async => false;
+
+  @override
+  Future<RepositoryAttachment> readReleaseAttachment(
+    RepositoryReleaseAttachmentReadRequest request,
+  ) async {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
+    RepositoryReleaseAttachmentWriteRequest request,
+  ) async {
+    return RepositoryReleaseAttachmentWriteResult(
+      releaseTag: request.releaseTag,
+      assetName: request.assetName,
+      assetId: '84',
+    );
+  }
+
+  @override
+  Future<void> deleteReleaseAttachment(
+    RepositoryReleaseAttachmentDeleteRequest request,
+  ) async {}
 }
 
 Map<String, String> _fixtureFilesFromDisk(String rootPath) {
