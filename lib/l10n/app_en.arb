@@ -137,6 +137,21 @@
   "versions": "Versions",
   "resolutions": "Resolutions",
   "locales": "Locales",
+  "githubReleases": "GitHub Releases",
+  "attachmentStorageDescription": "Choose where new attachments are stored. Existing attachments keep the backend recorded when they were created.",
+  "attachmentStorageMode": "Attachment storage mode",
+  "attachmentRepositoryPathSummary": "Repository-path mode keeps attachments in <issue-root>/attachments/<file> inside the project repository.",
+  "attachmentReleaseTagPrefix": "Release tag prefix",
+  "attachmentReleaseTagPrefixHelper": "TrackState derives the issue release tag as <tagPrefix><ISSUE_KEY>.",
+  "attachmentReleaseMappingSummary": "Each issue resolves to the release tag {tagPrefix}<ISSUE_KEY>. Release title stays \"Attachments for <ISSUE_KEY>\", and the asset name is the sanitized file name.",
+  "@attachmentReleaseMappingSummary": {
+    "placeholders": {
+      "tagPrefix": {
+        "type": "String"
+      }
+    }
+  },
+  "attachmentStorageImmutableNote": "Switching project storage only affects new attachments. Existing attachments keep their original backend metadata.",
   "language": "Language",
   "defaultLocale": "Default locale",
   "defaultLocaleChip": "{locale} (default)",

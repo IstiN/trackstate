@@ -25,6 +25,10 @@ void main() {
       expect(snapshot.project.statusLabel('in-progress'), 'In Progress');
       expect(snapshot.project.fieldLabel('storyPoints'), 'Story Points');
       expect(
+        snapshot.project.attachmentStorage.mode,
+        AttachmentStorageMode.repositoryPath,
+      );
+      expect(
         snapshot.repositoryIndex.pathForKey('TRACK-12'),
         'TRACK/TRACK-1/TRACK-12/main.md',
       );
@@ -36,6 +40,262 @@ void main() {
       expect(issue.customFields['storyPoints'], 8);
       expect(issue.links.single.targetKey, 'TRACK-41');
       expect(issue.attachments.single.mediaType, 'image/svg+xml');
+    },
+  );
+
+  test(
+    'setup repository resolves github releases attachment storage and metadata',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'attachmentStorage': {
+              'mode': 'github-releases',
+              'githubReleases': {'tagPrefix': 'trackstate-attachments-'},
+            },
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+            {
+              'id': 'description',
+              'name': 'Description',
+              'type': 'markdown',
+              'required': false,
+            },
+            {
+              'id': 'acceptanceCriteria',
+              'name': 'Acceptance Criteria',
+              'type': 'markdown',
+              'required': false,
+            },
+            {
+              'id': 'priority',
+              'name': 'Priority',
+              'type': 'option',
+              'required': false,
+              'options': [
+                {'id': 'medium', 'name': 'Medium'},
+              ],
+            },
+            {
+              'id': 'assignee',
+              'name': 'Assignee',
+              'type': 'user',
+              'required': false,
+            },
+            {
+              'id': 'labels',
+              'name': 'Labels',
+              'type': 'array',
+              'required': false,
+            },
+            {
+              'id': 'storyPoints',
+              'name': 'Story Points',
+              'type': 'number',
+              'required': false,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Release-backed attachment issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'priority': 'medium',
+              'labels': [],
+              'updated': '2026-05-05T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Release-backed attachment issue
+updated: 2026-05-05T00:00:00Z
+---
+
+# Description
+
+Issue with release-backed attachment metadata.
+''',
+          'DEMO/DEMO-1/attachments.json': jsonEncode([
+            {
+              'id': 'DEMO/DEMO-1/attachments/design.png',
+              'name': 'design.png',
+              'mediaType': 'image/png',
+              'sizeBytes': 42,
+              'author': 'demo-user',
+              'createdAt': '2026-05-05T00:10:00Z',
+              'storagePath': 'DEMO/DEMO-1/attachments/design.png',
+              'revisionOrOid': 'release-asset-42',
+              'storageBackend': 'github-releases',
+              'githubReleaseTag': 'trackstate-attachments-DEMO-1',
+              'githubReleaseAssetName': 'design.png',
+            },
+          ]),
+        },
+      );
+
+      final snapshot = await repository.loadSnapshot();
+      final issue = await repository.hydrateIssue(
+        snapshot.issues.single,
+        scopes: const {IssueHydrationScope.attachments},
+      );
+
+      expect(
+        snapshot.project.attachmentStorage.mode,
+        AttachmentStorageMode.githubReleases,
+      );
+      expect(
+        snapshot.project.attachmentStorage.githubReleases?.releaseTagForIssue(
+          issue.key,
+        ),
+        'trackstate-attachments-DEMO-1',
+      );
+      expect(
+        issue.attachments.single.storageBackend,
+        AttachmentStorageMode.githubReleases,
+      );
+      expect(
+        issue.attachments.single.githubReleaseTag,
+        'trackstate-attachments-DEMO-1',
+      );
+      expect(issue.attachments.single.githubReleaseAssetName, 'design.png');
+    },
+  );
+
+  test(
+    'setup repository surfaces invalid github releases attachment config',
+    () async {
+      final repository = _mockSetupRepository(
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'attachmentStorage': {
+              'mode': 'github-releases',
+              'githubReleases': {'tagPrefix': ''},
+            },
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+            {
+              'id': 'description',
+              'name': 'Description',
+              'type': 'markdown',
+              'required': false,
+            },
+            {
+              'id': 'acceptanceCriteria',
+              'name': 'Acceptance Criteria',
+              'type': 'markdown',
+              'required': false,
+            },
+            {
+              'id': 'priority',
+              'name': 'Priority',
+              'type': 'option',
+              'required': false,
+              'options': [
+                {'id': 'medium', 'name': 'Medium'},
+              ],
+            },
+            {
+              'id': 'assignee',
+              'name': 'Assignee',
+              'type': 'user',
+              'required': false,
+            },
+            {
+              'id': 'labels',
+              'name': 'Labels',
+              'type': 'array',
+              'required': false,
+            },
+            {
+              'id': 'storyPoints',
+              'name': 'Story Points',
+              'type': 'number',
+              'required': false,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'priority': 'medium',
+              'labels': [],
+              'updated': '2026-05-05T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+priority: medium
+summary: Invalid attachment config issue
+updated: 2026-05-05T00:00:00Z
+---
+
+# Description
+
+Invalid configuration fixture.
+''',
+        },
+      );
+
+      await expectLater(
+        repository.loadSnapshot,
+        throwsA(
+          isA<TrackStateRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            contains('tagPrefix'),
+          ),
+        ),
+      );
     },
   );
 
