@@ -652,6 +652,76 @@ void main() {
   );
 
   test(
+    'view model keeps release-backed hosted sessions restricted when release writes are unavailable',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
+      });
+      const releaseRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        attachmentUploadMode: AttachmentUploadMode.full,
+        supportsReleaseAttachmentWrites: false,
+        canCheckCollaborators: false,
+      );
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(
+          permission: releaseRestrictedPermission,
+          textFixtures: _githubReleasesProjectTextFixtures(),
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.usesGitHubReleasesAttachmentStorage, isTrue);
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.attachmentRestricted,
+      );
+      expect(viewModel.canUploadIssueAttachments, isFalse);
+      expect(viewModel.hasAttachmentUploadRestriction, isTrue);
+    },
+  );
+
+  test(
+    'view model reports release-backed hosted sessions writable when release writes are supported',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
+      });
+      const releaseSupportedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        attachmentUploadMode: AttachmentUploadMode.full,
+        supportsReleaseAttachmentWrites: true,
+        canCheckCollaborators: false,
+      );
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(
+          permission: releaseSupportedPermission,
+          textFixtures: _githubReleasesProjectTextFixtures(),
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.usesGitHubReleasesAttachmentStorage, isTrue);
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.writable,
+      );
+      expect(viewModel.canUploadIssueAttachments, isTrue);
+      expect(viewModel.hasAttachmentUploadRestriction, isFalse);
+    },
+  );
+
+  test(
     'view model blocks hosted create mutations until GitHub write access is available',
     () async {
       final viewModel = TrackerViewModel(
@@ -1272,6 +1342,25 @@ TrackerSnapshot _snapshotWithResolutions(
     loadWarnings: snapshot.loadWarnings,
   );
 }
+
+Map<String, String> _githubReleasesProjectTextFixtures() => const {
+  'project.json': '''
+{
+  "key": "TRACK",
+  "name": "TrackState.AI",
+  "defaultLocale": "en",
+  "issueKeyPattern": "TRACK-{number}",
+  "dataModel": "nested-tree",
+  "configPath": "config",
+  "attachmentStorage": {
+    "mode": "github-releases",
+    "githubReleases": {
+      "tagPrefix": "browser-assets-"
+    }
+  }
+}
+''',
+};
 
 class _LocalRuntimeRepository implements TrackStateRepository {
   const _LocalRuntimeRepository();

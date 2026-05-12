@@ -128,6 +128,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.';
 
   @override
+  String get attachmentsGitHubReleasesUnsupportedMessage =>
+      'This project stores new attachments in GitHub Releases. Existing attachments remain available for download, but hosted release-backed uploads are not available in this browser session yet.';
+
+  @override
   String get attachmentsAccessMessageDisconnected =>
       'Connect GitHub with repository write access to enable Git-backed attachment changes. Existing attachments remain available for download.';
 
@@ -314,6 +318,36 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get attachmentStorageImmutableNote =>
       'Switching project storage only affects new attachments. Existing attachments keep their original backend metadata.';
+
+  @override
+  String get attachmentStorageRepositoryPathCalloutTitle =>
+      'Repository-path attachment storage';
+
+  @override
+  String get attachmentStorageRepositoryPathSupportedMessage =>
+      'New attachments are stored in <issue-root>/attachments/<file> inside the project repository, and this hosted session can upload them directly.';
+
+  @override
+  String get attachmentStorageRepositoryPathLimitedMessage =>
+      'New attachments are stored in <issue-root>/attachments/<file>. Browser uploads work for repository files, but Git LFS attachments still need a local Git runtime.';
+
+  @override
+  String get attachmentStorageRepositoryPathRestrictedMessage =>
+      'New attachments are stored in <issue-root>/attachments/<file>, but this hosted session cannot upload them in the browser.';
+
+  @override
+  String get attachmentStorageGitHubReleasesCalloutTitle =>
+      'GitHub Releases attachment storage';
+
+  @override
+  String attachmentStorageGitHubReleasesSupportedMessage(String tagPrefix) {
+    return 'New attachments resolve to release tag $tagPrefix<ISSUE_KEY>, and this hosted session can complete release-backed uploads in the browser.';
+  }
+
+  @override
+  String attachmentStorageGitHubReleasesRestrictedMessage(String tagPrefix) {
+    return 'New attachments resolve to release tag $tagPrefix<ISSUE_KEY>, but this hosted session cannot complete release-backed uploads in the browser yet.';
+  }
 
   @override
   String get language => 'Language';
@@ -571,6 +605,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'Issue edits, comments, and browser-supported attachment uploads can continue here. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.';
 
   @override
+  String get repositoryAccessReleaseRestrictedTitle =>
+      'GitHub Releases uploads are unavailable in the browser';
+
+  @override
+  String get repositoryAccessReleaseRestrictedMessage =>
+      'Issue edits and comments can continue, but this project stores new attachments in GitHub Releases and this hosted session cannot complete release-backed uploads yet.';
+
+  @override
   String get repositoryAccessSettingsHint =>
       'Settings is the canonical place to review repository access and reconnect safely.';
 
@@ -678,6 +720,23 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String githubConnected(String login, String repository) {
     return 'Connected as $login to $repository.';
+  }
+
+  @override
+  String repositoryAccessConnectedRepositoryPathMessage(
+    String login,
+    String repository,
+  ) {
+    return 'Connected as $login to $repository. New attachments use repository-path storage in this repository.';
+  }
+
+  @override
+  String repositoryAccessConnectedGitHubReleasesMessage(
+    String login,
+    String repository,
+    String tagPrefix,
+  ) {
+    return 'Connected as $login to $repository. New attachments use GitHub Releases tags derived as $tagPrefix<ISSUE_KEY>.';
   }
 
   @override
