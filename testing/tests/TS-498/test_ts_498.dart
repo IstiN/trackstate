@@ -62,8 +62,8 @@ void main() {
           );
         } else {
           await robot.selectTab('Attachments');
-          await _selectAttachmentStorageMode(tester, 'GitHub Releases');
-          await _enterReleaseTagPrefix(tester, _releaseTagPrefix);
+          await robot.selectAttachmentStorageMode('GitHub Releases');
+          await robot.enterAttachmentReleaseTagPrefix(_releaseTagPrefix);
           await robot.tapActionButton('Save settings');
           await tester.pumpAndSettle();
           await tester.ensureVisible(robot.repositoryAccessSection);
@@ -86,10 +86,7 @@ void main() {
             tone: _Ts498CalloutTone.success,
           );
 
-          final tagPrefixField = find.byKey(
-            const ValueKey('attachment-release-tag-prefix-field'),
-          );
-          if (tagPrefixField.evaluate().isEmpty) {
+          if (!await robot.showsAttachmentReleaseTagPrefixField()) {
             failures.add(
               'Human-style verification failed: after switching to GitHub Releases, the visible Release tag prefix field disappeared before the user could confirm the saved configuration.',
             );
@@ -175,7 +172,10 @@ Future<void> _verifyAccessArea({
     }
   }
 
-  final statusCallout = robot.accessCallout(statusTitle, message: statusMessage);
+  final statusCallout = robot.accessCallout(
+    statusTitle,
+    message: statusMessage,
+  );
   final attachmentCallout = robot.accessCallout(
     attachmentTitle,
     message: attachmentMessage,
@@ -309,27 +309,6 @@ void _verifyCalloutStyle({
       'Step 3 failed for $scenarioName: the $context icon used ${_rgbHex(iconColor)} instead of ${_rgbHex(accentColor)}.',
     );
   }
-}
-
-Future<void> _selectAttachmentStorageMode(
-  WidgetTester tester,
-  String label,
-) async {
-  final field = find.byKey(const ValueKey('attachment-storage-mode-field'));
-  await tester.ensureVisible(field);
-  await tester.tap(field, warnIfMissed: false);
-  await tester.pumpAndSettle();
-  await tester.tap(find.text(label).last, warnIfMissed: false);
-  await tester.pumpAndSettle();
-}
-
-Future<void> _enterReleaseTagPrefix(WidgetTester tester, String value) async {
-  final field = find.byKey(const ValueKey('attachment-release-tag-prefix-field'));
-  await tester.ensureVisible(field);
-  await tester.tap(field, warnIfMissed: false);
-  await tester.pump();
-  await tester.enterText(field, value);
-  await tester.pumpAndSettle();
 }
 
 List<String> _normalizedSnapshot(List<String> values) {
