@@ -199,21 +199,42 @@ class SettingsScreenRobot {
   Finder removeLocaleButton(String locale) =>
       actionButton('Remove locale $locale');
 
-  Finder localeEntryFieldScope({required String locale, required String id}) =>
-      find.byKey(ValueKey('locale-$locale-$id'));
+  Finder localeEntryFieldScope({
+    required String locale,
+    required String id,
+    String? section,
+  }) {
+    if (section != null) {
+      return find.byKey(ValueKey('locale-$locale-$section-$id'));
+    }
+    return find.byWidgetPredicate((widget) {
+      final key = widget.key;
+      return key is ValueKey<String> &&
+          key.value.startsWith('locale-$locale-') &&
+          key.value.endsWith('-$id');
+    }, description: 'locale entry scope for $locale/$id');
+  }
 
-  Finder localeEntryTextField({required String locale, required String id}) =>
-      find.descendant(
-        of: localeEntryFieldScope(locale: locale, id: id),
-        matching: find.byType(EditableText),
-      );
+  Finder localeEntryTextField({
+    required String locale,
+    required String id,
+    String? section,
+  }) => find.descendant(
+    of: localeEntryFieldScope(locale: locale, id: id, section: section),
+    matching: find.byType(EditableText),
+  );
 
   Future<void> enterLocaleTranslation({
     required String locale,
     required String id,
     required String text,
+    String? section,
   }) async {
-    final field = localeEntryTextField(locale: locale, id: id);
+    final field = localeEntryTextField(
+      locale: locale,
+      id: id,
+      section: section,
+    );
     await tester.ensureVisible(field.first);
     await tester.tap(field.first, warnIfMissed: false);
     await tester.pump();
@@ -224,8 +245,13 @@ class SettingsScreenRobot {
   String localeTranslationFieldValue({
     required String locale,
     required String id,
+    String? section,
   }) {
-    final field = localeEntryTextField(locale: locale, id: id);
+    final field = localeEntryTextField(
+      locale: locale,
+      id: id,
+      section: section,
+    );
     if (field.evaluate().isEmpty) {
       throw StateError(
         'No locale translation field found for locale "$locale" and id "$id".',
@@ -237,8 +263,13 @@ class SettingsScreenRobot {
   Future<void> focusLocaleTranslationField({
     required String locale,
     required String id,
+    String? section,
   }) async {
-    final field = localeEntryTextField(locale: locale, id: id);
+    final field = localeEntryTextField(
+      locale: locale,
+      id: id,
+      section: section,
+    );
     await tester.ensureVisible(field.first);
     await tester.tap(field.first, warnIfMissed: false);
     await tester.pumpAndSettle();
@@ -247,8 +278,13 @@ class SettingsScreenRobot {
   String localeTranslationFieldSemanticsLabel({
     required String locale,
     required String id,
+    String? section,
   }) {
-    final field = localeEntryTextField(locale: locale, id: id);
+    final field = localeEntryTextField(
+      locale: locale,
+      id: id,
+      section: section,
+    );
     if (field.evaluate().isEmpty) {
       throw StateError(
         'No locale translation field found for locale "$locale" and id "$id".',
@@ -260,9 +296,10 @@ class SettingsScreenRobot {
   Color localeTranslationFieldPlaceholderColor({
     required String locale,
     required String id,
+    String? section,
   }) {
     return _decoratedFieldTextColorWithin(
-      localeEntryFieldScope(locale: locale, id: id),
+      localeEntryFieldScope(locale: locale, id: id, section: section),
       'Translation ($locale)',
     );
   }
