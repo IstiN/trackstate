@@ -4640,8 +4640,7 @@ class _IssueDetailState extends State<_IssueDetail> {
     if (!mounted) {
       return;
     }
-    if (widget.viewModel.hasAttachmentUploadRestriction &&
-        inspection.isLfsTracked) {
+    if (inspection.requiresLocalGitUpload) {
       setState(() {
         _attachmentUploadNotice = l10n.attachmentRequiresLocalGitUpload(
           inspection.resolvedName,
