@@ -438,6 +438,75 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     return labels;
   }
 
+  Finder _issueSearchResultRow(String key, String summary) {
+    final summaryMatch = find.text(summary, findRichText: true);
+    final rowCandidates = find.ancestor(
+      of: summaryMatch,
+      matching: find.byType(Row),
+    );
+
+    Finder? best;
+    var smallestArea = double.infinity;
+    final matches = rowCandidates.evaluate().length;
+    for (var index = 0; index < matches; index++) {
+      final candidate = rowCandidates.at(index);
+      final hasKey = find
+          .descendant(
+            of: candidate,
+            matching: find.text(key, findRichText: true),
+          )
+          .evaluate()
+          .isNotEmpty;
+      if (!hasKey) {
+        continue;
+      }
+      final rect = tester.getRect(candidate);
+      final area = rect.width * rect.height;
+      if (area < smallestArea) {
+        smallestArea = area;
+        best = candidate;
+      }
+    }
+
+    return best ?? rowCandidates.first;
+  }
+
+  @override
+  Future<bool> isIssueSearchResultTextVisible(
+    String key,
+    String summary,
+    String text,
+  ) async {
+    await tester.pump();
+    final row = _issueSearchResultRow(key, summary);
+    if (row.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(of: row, matching: find.text(text, findRichText: true))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  List<String> issueSearchResultTextsSnapshot(String key, String summary) {
+    final row = _issueSearchResultRow(key, summary);
+    if (row.evaluate().isEmpty) {
+      return const <String>[];
+    }
+    final values = <String>[];
+    for (final widget in tester.widgetList<Text>(
+      find.descendant(of: row, matching: find.byType(Text)),
+    )) {
+      final value = widget.data?.trim();
+      if (value == null || value.isEmpty) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
+  }
+
   @override
   Future<void> expectIssueDetailVisible(String key) async {
     final detail = _issueDetail(key);
