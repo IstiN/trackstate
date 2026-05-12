@@ -26,6 +26,11 @@ from testing.components.services.live_setup_repository_service import (
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config
+from testing.core.models.cli_command_result import CliCommandResult
+from testing.core.utils.polling import poll_until
+from testing.tests.support.hosted_trackstate_session_cli_probe_factory import (
+    create_hosted_trackstate_session_cli_probe,
+)
 from testing.tests.support.github_repository_file_page_factory import (
     create_github_repository_file_page,
 )
@@ -62,7 +67,9 @@ def main() -> None:
         branch=config.ref,
         token=token,
     )
-    cli_service = HostedTrackStateSessionCliService(REPO_ROOT)
+    cli_service = HostedTrackStateSessionCliService(
+        create_hosted_trackstate_session_cli_probe(REPO_ROOT)
+    )
     user = live_service.fetch_authenticated_user()
     baseline_statuses = repository_service.fetch_file(STATUSES_PATH, ref=config.ref)
     baseline_workflows = repository_service.fetch_file(WORKFLOWS_PATH, ref=config.ref)
@@ -409,42 +416,45 @@ def _run_session_until_project_config(
     status_marker: str,
     workflow_marker: str,
     attempts: int = 5,
-) -> object:
-    last_result = None
-    for _ in range(attempts):
-        last_result = cli_service.run_session(
+    interval_seconds: float = 3.0,
+) -> CliCommandResult:
+    matched, last_result = poll_until(
+        probe=lambda: cli_service.run_session(
             repository=repository,
             branch=branch,
+        ),
+        is_satisfied=lambda result: _session_result_has_project_config_markers(
+            result,
+            status_marker=status_marker,
+            workflow_marker=workflow_marker,
+        ),
+        timeout_seconds=attempts * interval_seconds,
+        interval_seconds=interval_seconds,
+    )
+    if matched:
+        return last_result
+    if not last_result.succeeded:
+        raise AssertionError(
+            "Step 5 failed: `trackstate session` did not complete successfully "
+            "against the hosted repository after the Settings save.\n"
+            f"Command: {last_result.command_text}\n"
+            f"Exit code: {last_result.exit_code}\n"
+            f"stdout:\n{last_result.stdout}\n"
+            f"stderr:\n{last_result.stderr}",
         )
-        if not last_result.succeeded:
-            raise AssertionError(
-                "Step 5 failed: `trackstate session` did not complete successfully "
-                "against the hosted repository after the Settings save.\n"
-                f"Command: {last_result.command_text}\n"
-                f"Exit code: {last_result.exit_code}\n"
-                f"stdout:\n{last_result.stdout}\n"
-                f"stderr:\n{last_result.stderr}",
-            )
-        payload = last_result.json_payload
-        if not isinstance(payload, dict):
-            raise AssertionError(
-                "Step 5 failed: `trackstate session` did not emit a JSON object.\n"
-                f"stdout:\n{last_result.stdout}\n"
-                f"stderr:\n{last_result.stderr}",
-            )
-        data = payload.get("data")
-        if not isinstance(data, dict):
-            raise AssertionError(
-                "Step 5 failed: the session payload did not expose a `data` object.\n"
-                f"Observed payload: {json.dumps(payload, indent=2)}",
-            )
-        project_config = data.get("projectConfig")
-        if not isinstance(project_config, dict):
-            continue
-        project_config_text = json.dumps(project_config, sort_keys=True)
-        if status_marker in project_config_text and workflow_marker in project_config_text:
-            return last_result
-    assert last_result is not None
+    payload = last_result.json_payload
+    if not isinstance(payload, dict):
+        raise AssertionError(
+            "Step 5 failed: `trackstate session` did not emit a JSON object.\n"
+            f"stdout:\n{last_result.stdout}\n"
+            f"stderr:\n{last_result.stderr}",
+        )
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise AssertionError(
+            "Step 5 failed: the session payload did not expose a `data` object.\n"
+            f"Observed payload: {json.dumps(payload, indent=2)}",
+        )
     payload = (
         last_result.json_payload
         if isinstance(last_result.json_payload, dict)
@@ -457,6 +467,27 @@ def _run_session_until_project_config(
         f"Expected workflow marker: {workflow_marker}\n"
         f"Observed payload: {json.dumps(payload, indent=2)}",
     )
+
+
+def _session_result_has_project_config_markers(
+    result: CliCommandResult,
+    *,
+    status_marker: str,
+    workflow_marker: str,
+) -> bool:
+    if not result.succeeded:
+        return False
+    payload = result.json_payload
+    if not isinstance(payload, dict):
+        return False
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return False
+    project_config = data.get("projectConfig")
+    if not isinstance(project_config, dict):
+        return False
+    project_config_text = json.dumps(project_config, sort_keys=True)
+    return status_marker in project_config_text and workflow_marker in project_config_text
 
 
 def _ui_observation_to_dict(observation: ProjectSettingsUiObservation) -> dict[str, object]:
