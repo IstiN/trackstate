@@ -25,8 +25,11 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Finder get goldenTarget => find.byKey(_goldenTargetKey);
 
-  Finder get repositoryAccessButton =>
-      find.bySemanticsLabel(RegExp(r'^(Local Git|Connect GitHub|Connected)$'));
+  Finder get repositoryAccessButton => find.bySemanticsLabel(
+    RegExp(
+      r'^(Local Git|Connect GitHub|Connected|Read-only|Attachments limited)$',
+    ),
+  );
 
   Finder get localGitAccessButton => find.bySemanticsLabel(RegExp('Local Git'));
 

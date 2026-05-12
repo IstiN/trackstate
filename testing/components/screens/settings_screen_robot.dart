@@ -45,8 +45,14 @@ class SettingsScreenRobot {
       topBarProviderControl('Connect GitHub');
   Finder get connectGitHubSettingsControl =>
       settingsProviderControl('Connect GitHub');
+  Finder get readOnlyTopBarControl => topBarProviderControl('Read-only');
+  Finder get readOnlySettingsControl => settingsProviderControl('Read-only');
   Finder get connectedTopBarControl => topBarProviderControl('Connected');
   Finder get connectedSettingsControl => settingsProviderControl('Connected');
+  Finder get attachmentsLimitedTopBarControl =>
+      topBarProviderControl('Attachments limited');
+  Finder get attachmentsLimitedSettingsControl =>
+      settingsProviderControl('Attachments limited');
   Finder get profileAvatar =>
       find.descendant(of: topBar, matching: find.byType(CircleAvatar));
   Finder get localGitControl => providerControl('Local Git');
@@ -670,7 +676,10 @@ class SettingsScreenRobot {
         (candidate) => candidate == element,
         description: 'button within $scope',
       );
-      final texts = find.descendant(of: buttonFinder, matching: find.byType(Text));
+      final texts = find.descendant(
+        of: buttonFinder,
+        matching: find.byType(Text),
+      );
       String? label;
       for (final textElement in texts.evaluate()) {
         final widget = textElement.widget;
@@ -739,7 +748,10 @@ class SettingsScreenRobot {
         return widget;
       }
     }
-    final containers = find.descendant(of: scope, matching: find.byType(Container));
+    final containers = find.descendant(
+      of: scope,
+      matching: find.byType(Container),
+    );
     for (final element in containers.evaluate()) {
       final widget = element.widget;
       if (widget is Container && widget.decoration is BoxDecoration) {
@@ -905,7 +917,13 @@ class SettingsScreenRobot {
   }
 
   Finder _currentTopBarControl() {
-    for (final label in const ['Connected', 'Connect GitHub', 'Local Git']) {
+    for (final label in const [
+      'Connected',
+      'Read-only',
+      'Attachments limited',
+      'Connect GitHub',
+      'Local Git',
+    ]) {
       final control = topBarProviderControl(label);
       if (control.evaluate().isNotEmpty) {
         return control;
