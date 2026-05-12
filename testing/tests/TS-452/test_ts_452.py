@@ -20,7 +20,7 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.tests.support.deferred_comments_delay_runtime import (  # noqa: E402
-    DeferredCommentsDelayRuntime,
+    DeferredIssueHydrationDelayRuntime,
 )
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 
@@ -52,9 +52,14 @@ def main() -> None:
     secondary_issue = service.fetch_issue_fixture(SECONDARY_ISSUE_PATH)
     _assert_preconditions(primary_issue=primary_issue, secondary_issue=secondary_issue)
 
-    runtime = DeferredCommentsDelayRuntime(
+    delayed_detail_paths = [
+        f"{primary_issue.path}/main.md",
+        f"{primary_issue.path}/acceptance_criteria.md",
+    ]
+    runtime = DeferredIssueHydrationDelayRuntime(
         repository=service.repository,
         token=token,
+        delayed_detail_paths=delayed_detail_paths,
         delayed_comment_paths=primary_issue.comment_paths,
         delay_ms=DELAY_MS,
     )
@@ -69,6 +74,7 @@ def main() -> None:
         "primary_issue_summary": primary_issue.summary,
         "secondary_issue_key": secondary_issue.key,
         "secondary_issue_summary": secondary_issue.summary,
+        "delayed_detail_paths": delayed_detail_paths,
         "delayed_comment_paths": list(primary_issue.comment_paths),
         "delay_ms": DELAY_MS,
         "steps": [],
@@ -151,32 +157,103 @@ def main() -> None:
                     issue_key=primary_issue.key,
                     issue_summary=primary_issue.summary,
                 )
+                detail_loading_label = page.wait_for_deferred_loading(
+                    "Detail",
+                    timeout_ms=30_000,
+                )
+                detail_delay_state = _delay_state_payload(session)
+                result["detail_loading_label"] = detail_loading_label
+                result["delay_state_during_detail_loading"] = detail_delay_state
+                result["visible_issue_result_labels_during_detail_loading"] = list(
+                    page.visible_issue_result_labels(),
+                )
                 primary_detail_label = page.issue_detail_accessible_label(
                     primary_issue.key,
                     expected_fragment=primary_issue.summary,
                     timeout_ms=30_000,
                 )
-                result["primary_detail_before_comments"] = primary_detail_label
+                result["primary_detail_during_detail_loading"] = primary_detail_label
+                if "Detail loading" not in detail_loading_label:
+                    raise AssertionError(
+                        "Step 4 failed: selecting the not-yet-hydrated live issue did not "
+                        "expose the initial Detail loading skeleton required by TS-452.\n"
+                        f"Observed loading label:\n{detail_loading_label}",
+                    )
+                if _delay_group_active_count(detail_delay_state, "detail") < 1:
+                    raise AssertionError(
+                        "Step 4 failed: the synthetic detail delay never left a live initial "
+                        "issue-detail request in flight, so the first hydration path was not "
+                        "exercised.\n"
+                        f"Observed delay state: {detail_delay_state}",
+                    )
+                if _delay_group_active_count(detail_delay_state, "comments") != 0:
+                    raise AssertionError(
+                        "Step 4 failed: Comments hydration started while the test was proving "
+                        "the initial Detail-only loading state.\n"
+                        f"Observed delay state: {detail_delay_state}",
+                    )
+                if page.text_fragment_count("Comments loading") != 0:
+                    raise AssertionError(
+                        "Step 4 failed: the Comments section showed a loading skeleton before "
+                        "the Comments tab was opened.\n"
+                        f"Observed body text:\n{page.current_body_text()}",
+                    )
                 for expected_fragment in (
+                    primary_issue.key,
                     primary_issue.summary,
-                    "Status",
-                    "Priority",
+                    "In Progress",
+                    "High",
                 ):
                     if expected_fragment not in primary_detail_label:
                         raise AssertionError(
-                            "Step 4 failed: selecting the not-yet-hydrated live issue did not "
-                            "leave the selected issue header and detail summary visible before "
-                            "Comments hydration began.\n"
+                        "Step 4 failed: selecting the not-yet-hydrated live issue did not "
+                            "leave the selected issue header and badges visible while the "
+                            "detail body was still hydrating.\n"
                             f"Missing fragment: {expected_fragment}\n"
                             f"Observed detail label:\n{primary_detail_label}",
                         )
+                _assert_visible_issue_row(
+                    page=page,
+                    issue=secondary_issue,
+                    step=4,
+                )
                 _record_step(
                     result,
                     step=4,
                     status="passed",
-                    action="Select the seeded issue that still needs deferred Comments hydration.",
-                    observed=primary_detail_label,
+                    action=(
+                        "Select the seeded issue and verify the initial Detail skeleton leaves "
+                        "the selected header and issue list context visible."
+                    ),
+                    observed=(
+                        f"detail_loading_label={detail_loading_label}\n"
+                        f"detail_label={primary_detail_label}\n"
+                        f"visible_results={page.visible_issue_result_labels()}"
+                    ),
                 )
+                _record_human_verification(
+                    result,
+                    check=(
+                        'Verified the user could still read the selected issue heading, status, '
+                        "priority, and the adjacent issue list while only the Detail panel was "
+                        "loading."
+                    ),
+                    observed=(
+                        f"detail_label={primary_detail_label}\n"
+                        f"loading_label={detail_loading_label}"
+                    ),
+                )
+
+                _wait_for_delay_completion(
+                    session,
+                    group_name="detail",
+                    timeout_ms=DELAY_MS + 15_000,
+                )
+                page.wait_for_text_fragment_to_disappear(
+                    "Detail loading",
+                    timeout_ms=30_000,
+                )
+                result["delay_state_after_detail_completion"] = _delay_state_payload(session)
 
                 page.open_collaboration_tab("Comments")
                 comments_loading_label = page.wait_for_deferred_loading(
@@ -202,10 +279,16 @@ def main() -> None:
                         "expected Comments-only loading skeleton label.\n"
                         f"Observed loading label:\n{comments_loading_label}",
                     )
-                if loading_delay_state["activeCount"] < 1:
+                if _delay_group_active_count(loading_delay_state, "comments") < 1:
                     raise AssertionError(
                         "Step 5 failed: the synthetic comments delay never left a live deferred "
                         "Comments request in flight, so the loading state was not exercised.\n"
+                        f"Observed delay state: {loading_delay_state}",
+                    )
+                if _delay_group_active_count(loading_delay_state, "detail") != 0:
+                    raise AssertionError(
+                        "Step 5 failed: the initial Detail hydration was still active when the "
+                        "test expected a Comments-only loading state.\n"
                         f"Observed delay state: {loading_delay_state}",
                     )
                 if page.text_fragment_count("Detail loading") != 0:
@@ -294,7 +377,7 @@ def main() -> None:
                         "still hydrating.\n"
                         f"Observed detail label:\n{secondary_detail_label}",
                     )
-                if delay_state_after_switch["activeCount"] < 1:
+                if _delay_group_active_count(delay_state_after_switch, "comments") < 1:
                     raise AssertionError(
                         "Step 6 failed: the issue switch finished only after the delayed "
                         "Comments request had already completed, so the list was not proven "
@@ -328,13 +411,9 @@ def main() -> None:
                     ),
                 )
 
-                session.wait_for_function(
-                    """
-                    () => {
-                      const state = window.__ts452DelayState;
-                      return !!state && state.activeCount === 0 && state.completedUrls.length > 0;
-                    }
-                    """,
+                _wait_for_delay_completion(
+                    session,
+                    group_name="comments",
                     timeout_ms=DELAY_MS + 15_000,
                 )
                 result["delay_state_after_completion"] = _delay_state_payload(session)
@@ -360,9 +439,10 @@ def main() -> None:
     else:
         result["status"] = "passed"
         result["summary"] = (
-            "Verified the hosted Search/Detail experience keeps the issue list and selected "
-            "issue header interactive during deferred Comments hydration, shows a "
-            "Comments-only skeleton, and allows switching issues before hydration finishes."
+            "Verified the hosted Search/Detail experience keeps the issue header and visible "
+            "issue list interactive during initial Detail hydration, then shows a "
+            "Comments-only skeleton and allows switching issues before Comments hydration "
+            "finishes."
         )
         _write_result_if_requested(result)
         print(json.dumps(result, indent=2))
@@ -434,13 +514,11 @@ def _delay_state_payload(session) -> dict[str, object]:
             return null;
           }
           return {
-            trackedPaths: Array.isArray(state.trackedPaths) ? [...state.trackedPaths] : [],
             delayMs: state.delayMs ?? null,
             activeCount: state.activeCount ?? 0,
-            startedUrls: Array.isArray(state.startedUrls) ? [...state.startedUrls] : [],
-            completedUrls: Array.isArray(state.completedUrls) ? [...state.completedUrls] : [],
             lastDelayStartedAt: state.lastDelayStartedAt ?? null,
             lastDelayCompletedAt: state.lastDelayCompletedAt ?? null,
+            groups: state.groups ?? {},
           };
         }
         """,
@@ -451,6 +529,34 @@ def _delay_state_payload(session) -> dict[str, object]:
             "browser session.",
         )
     return payload
+
+
+def _delay_group_active_count(
+    delay_state: dict[str, object],
+    group_name: str,
+) -> int:
+    groups = delay_state.get("groups")
+    if not isinstance(groups, dict):
+        return 0
+    group_state = groups.get(group_name)
+    if not isinstance(group_state, dict):
+        return 0
+    active_count = group_state.get("activeCount")
+    return int(active_count) if isinstance(active_count, int) else 0
+
+
+def _wait_for_delay_completion(session, *, group_name: str, timeout_ms: int) -> None:
+    session.wait_for_function(
+        """
+        ({ groupName }) => {
+          const state = window.__ts452DelayState;
+          const group = state?.groups?.[groupName];
+          return !!group && group.activeCount === 0 && group.completedUrls.length > 0;
+        }
+        """,
+        arg={"groupName": group_name},
+        timeout_ms=timeout_ms,
+    )
 
 
 def _record_step(
