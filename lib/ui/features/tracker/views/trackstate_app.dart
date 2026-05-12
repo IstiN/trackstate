@@ -1486,6 +1486,8 @@ class _Board extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final grouped = viewModel.issuesByStatus;
+    final project = viewModel.project;
+    final metadataLocale = _projectMetadataLocale(context, project);
     final showBootstrapHint = viewModel.showsInitialBootstrapPlaceholders;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1502,8 +1504,11 @@ class _Board extends StatelessWidget {
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 900;
             final columns = IssueStatus.values.map((status) {
+              final title =
+                  project?.statusLabel(status.id, locale: metadataLocale) ??
+                  _statusLabel(l10n, status);
               return _BoardColumn(
-                title: _statusLabel(l10n, status),
+                title: title,
                 targetStatus: status,
                 issues: grouped[status]!,
                 onSelect: (issue) => viewModel.selectIssue(
@@ -1678,16 +1683,42 @@ String _projectFieldLabel(
 }
 
 String _projectMetadataLocale(BuildContext context, ProjectConfig? project) {
-  final locale = Localizations.maybeLocaleOf(context);
-  final normalized = switch ((locale?.languageCode, locale?.countryCode)) {
-    (final String languageCode?, final String countryCode?)
-        when languageCode.isNotEmpty && countryCode.isNotEmpty =>
-      '$languageCode-${countryCode.toUpperCase()}',
-    (final String languageCode?, _) when languageCode.isNotEmpty =>
-      languageCode,
-    _ => project?.defaultLocale ?? 'en',
-  };
-  return normalized;
+  final locales = <Locale>[
+    WidgetsBinding.instance.platformDispatcher.locale,
+    ...WidgetsBinding.instance.platformDispatcher.locales,
+    if (Localizations.maybeLocaleOf(context) case final locale?) locale,
+  ];
+  for (final locale in locales) {
+    final normalized = switch ((locale.languageCode, locale.countryCode)) {
+      (final String languageCode, final String countryCode?)
+          when languageCode.isNotEmpty && countryCode.isNotEmpty =>
+        '$languageCode-${countryCode.toUpperCase()}',
+      (final String languageCode, _) when languageCode.isNotEmpty =>
+        languageCode,
+      _ => '',
+    };
+    if (normalized.isNotEmpty) {
+      return normalized;
+    }
+  }
+  return project?.defaultLocale ?? 'en';
+}
+
+String _resolvedIssueStatusLabel(
+  BuildContext context,
+  ProjectConfig? project,
+  TrackStateIssue issue,
+) {
+  final resolved = project?.statusLabel(
+    issue.statusId,
+    locale: _projectMetadataLocale(context, project),
+  );
+  if (resolved == null ||
+      resolved.trim().isEmpty ||
+      resolved == issue.statusId) {
+    return issue.status.label;
+  }
+  return resolved;
 }
 
 class _CreateIssuePrefill {
@@ -2700,9 +2731,8 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         onChanged: (id, value) {
           _updateConfigEntryTranslation(
             entries: settings.priorityDefinitions,
-            onChanged: (entries) => _replaceDraft(
-              settings.copyWith(priorityDefinitions: entries),
-            ),
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(priorityDefinitions: entries)),
             id: id,
             locale: selectedLocale,
             value: value,
@@ -2753,9 +2783,8 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         onChanged: (id, value) {
           _updateConfigEntryTranslation(
             entries: settings.componentDefinitions,
-            onChanged: (entries) => _replaceDraft(
-              settings.copyWith(componentDefinitions: entries),
-            ),
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(componentDefinitions: entries)),
             id: id,
             locale: selectedLocale,
             value: value,
@@ -2771,9 +2800,8 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         onChanged: (id, value) {
           _updateConfigEntryTranslation(
             entries: settings.issueTypeDefinitions,
-            onChanged: (entries) => _replaceDraft(
-              settings.copyWith(issueTypeDefinitions: entries),
-            ),
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(issueTypeDefinitions: entries)),
             id: id,
             locale: selectedLocale,
             value: value,
@@ -2873,9 +2901,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
                   Semantics(
                     container: true,
                     label: '$title ${l10n.locales}\nsummary',
-                    child: ExcludeSemantics(
-                      child: Chip(label: Text(title)),
-                    ),
+                    child: ExcludeSemantics(child: Chip(label: Text(title))),
                   ),
               ],
             ),
@@ -4370,7 +4396,14 @@ class _IssueDetailState extends State<_IssueDetail> {
           ),
         const SizedBox(height: 18),
         _SectionTitle(l10n.details),
-        _DetailGrid(issue: issue),
+        _DetailGrid(
+          issue: issue,
+          statusLabel: _resolvedIssueStatusLabel(
+            context,
+            widget.viewModel.project,
+            issue,
+          ),
+        ),
       ],
     );
   }
@@ -4458,7 +4491,14 @@ class _IssueDetailState extends State<_IssueDetail> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _StatusBadge(status: issue.status),
+              _StatusBadge(
+                status: issue.status,
+                label: _resolvedIssueStatusLabel(
+                  context,
+                  widget.viewModel.project,
+                  issue,
+                ),
+              ),
               _PriorityBadge(priority: issue.priority),
               for (final label in issue.labels) _Chip(label: label),
             ],
@@ -4678,6 +4718,7 @@ class _IssueList extends StatelessWidget {
                 order: NumericFocusOrder(index + 2.0),
                 child: _IssueListRow(
                   issue: visibleResults[index],
+                  project: viewModel.project,
                   onSelect: viewModel.selectIssue,
                   trailingAction: showSearchBootstrapLoading
                       ? _LoadingPill(
@@ -4852,7 +4893,13 @@ class _BoardColumn extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(title, style: Theme.of(context).textTheme.titleMedium),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleMedium,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     _TinyCount('${issues.length}'),
                   ],
@@ -4979,11 +5026,13 @@ class _IssueListRow extends StatelessWidget {
   const _IssueListRow({
     required this.issue,
     required this.onSelect,
+    this.project,
     this.trailingAction,
   });
 
   final TrackStateIssue issue;
   final ValueChanged<TrackStateIssue> onSelect;
+  final ProjectConfig? project;
   final Widget? trailingAction;
 
   @override
@@ -5020,7 +5069,14 @@ class _IssueListRow extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         Expanded(child: Text(issue.summary)),
-                        _StatusBadge(status: issue.status),
+                        _StatusBadge(
+                          status: issue.status,
+                          label: _resolvedIssueStatusLabel(
+                            context,
+                            project,
+                            issue,
+                          ),
+                        ),
                         const SizedBox(width: 8),
                         _Avatar(name: issue.assignee),
                       ],
@@ -7383,9 +7439,10 @@ class _GitInfoCard extends StatelessWidget {
 }
 
 class _DetailGrid extends StatelessWidget {
-  const _DetailGrid({required this.issue});
+  const _DetailGrid({required this.issue, required this.statusLabel});
 
   final TrackStateIssue issue;
+  final String statusLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -7394,7 +7451,7 @@ class _DetailGrid extends StatelessWidget {
       spacing: 12,
       runSpacing: 12,
       children: [
-        _KeyValue(label: l10n.status, value: issue.status.label),
+        _KeyValue(label: l10n.status, value: statusLabel),
         _KeyValue(label: l10n.priority, value: issue.priority.label),
         _KeyValue(label: l10n.assignee, value: issue.assignee),
         _KeyValue(label: l10n.reporter, value: issue.reporter),
@@ -8168,9 +8225,10 @@ String _formatAttachmentFileSize(int sizeBytes) {
 }
 
 class _StatusBadge extends StatelessWidget {
-  const _StatusBadge({required this.status});
+  const _StatusBadge({required this.status, required this.label});
 
   final IssueStatus status;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -8187,7 +8245,7 @@ class _StatusBadge extends StatelessWidget {
       IssueStatus.inReview => colors.primary,
       IssueStatus.done => colors.secondary,
     };
-    return _Pill(label: status.label, background: bg, foreground: fg);
+    return _Pill(label: label, background: bg, foreground: fg);
   }
 }
 

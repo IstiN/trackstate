@@ -364,6 +364,16 @@ class ProviderBackedTrackStateRepository
             )
             as Map<String, Object?>;
     final configRoot = _resolveConfigRoot(projectJson, dataRoot);
+    final persistedSettings = normalizedSettings.copyWith(
+      fieldDefinitions: _persistedFieldDefinitions(
+        normalizedSettings.fieldDefinitions,
+        persistedFieldIds: await _persistedFieldIds(
+          path: _joinPath(configRoot, 'fields.json'),
+          ref: writeBranch,
+          blobPaths: blobPaths,
+        ),
+      ),
+    );
     final existingSupportedLocales = _resolveSupportedLocales(
       projectJson: projectJson,
       blobPaths: blobPaths,
@@ -374,7 +384,7 @@ class ProviderBackedTrackStateRepository
       RepositoryTextFileChange(
         path: projectPath,
         content:
-            '${jsonEncode(_settingsProjectJson(projectJson, normalizedSettings))}\n',
+            '${jsonEncode(_settingsProjectJson(projectJson, persistedSettings))}\n',
         expectedRevision: await _existingRevision(
           path: projectPath,
           ref: writeBranch,
@@ -384,7 +394,7 @@ class ProviderBackedTrackStateRepository
       RepositoryTextFileChange(
         path: _joinPath(configRoot, 'statuses.json'),
         content:
-            '${jsonEncode(_settingsStatusesJson(normalizedSettings.statusDefinitions))}\n',
+            '${jsonEncode(_settingsStatusesJson(persistedSettings.statusDefinitions))}\n',
         expectedRevision: await _existingRevision(
           path: _joinPath(configRoot, 'statuses.json'),
           ref: writeBranch,
@@ -394,7 +404,7 @@ class ProviderBackedTrackStateRepository
       RepositoryTextFileChange(
         path: _joinPath(configRoot, 'issue-types.json'),
         content:
-            '${jsonEncode(_settingsIssueTypesJson(normalizedSettings.issueTypeDefinitions))}\n',
+            '${jsonEncode(_settingsIssueTypesJson(persistedSettings.issueTypeDefinitions))}\n',
         expectedRevision: await _existingRevision(
           path: _joinPath(configRoot, 'issue-types.json'),
           ref: writeBranch,
@@ -404,7 +414,7 @@ class ProviderBackedTrackStateRepository
       RepositoryTextFileChange(
         path: _joinPath(configRoot, 'fields.json'),
         content:
-            '${jsonEncode(_settingsFieldsJson(normalizedSettings.fieldDefinitions))}\n',
+            '${jsonEncode(_settingsFieldsJson(persistedSettings.fieldDefinitions))}\n',
         expectedRevision: await _existingRevision(
           path: _joinPath(configRoot, 'fields.json'),
           ref: writeBranch,
@@ -414,7 +424,7 @@ class ProviderBackedTrackStateRepository
       RepositoryTextFileChange(
         path: _joinPath(configRoot, 'workflows.json'),
         content:
-            '${jsonEncode(_settingsWorkflowsJson(normalizedSettings.workflowDefinitions))}\n',
+            '${jsonEncode(_settingsWorkflowsJson(persistedSettings.workflowDefinitions))}\n',
         expectedRevision: await _existingRevision(
           path: _joinPath(configRoot, 'workflows.json'),
           ref: writeBranch,
@@ -424,7 +434,7 @@ class ProviderBackedTrackStateRepository
       RepositoryTextFileChange(
         path: _joinPath(configRoot, 'priorities.json'),
         content:
-            '${jsonEncode(_settingsConfigEntriesJson(normalizedSettings.priorityDefinitions))}\n',
+            '${jsonEncode(_settingsConfigEntriesJson(persistedSettings.priorityDefinitions))}\n',
         expectedRevision: await _existingRevision(
           path: _joinPath(configRoot, 'priorities.json'),
           ref: writeBranch,
@@ -434,7 +444,7 @@ class ProviderBackedTrackStateRepository
       RepositoryTextFileChange(
         path: _joinPath(configRoot, 'versions.json'),
         content:
-            '${jsonEncode(_settingsConfigEntriesJson(normalizedSettings.versionDefinitions))}\n',
+            '${jsonEncode(_settingsConfigEntriesJson(persistedSettings.versionDefinitions))}\n',
         expectedRevision: await _existingRevision(
           path: _joinPath(configRoot, 'versions.json'),
           ref: writeBranch,
@@ -444,7 +454,7 @@ class ProviderBackedTrackStateRepository
       RepositoryTextFileChange(
         path: _joinPath(configRoot, 'components.json'),
         content:
-            '${jsonEncode(_settingsConfigEntriesJson(normalizedSettings.componentDefinitions))}\n',
+            '${jsonEncode(_settingsConfigEntriesJson(persistedSettings.componentDefinitions))}\n',
         expectedRevision: await _existingRevision(
           path: _joinPath(configRoot, 'components.json'),
           ref: writeBranch,
@@ -454,7 +464,7 @@ class ProviderBackedTrackStateRepository
       RepositoryTextFileChange(
         path: _joinPath(configRoot, 'resolutions.json'),
         content:
-            '${jsonEncode(_settingsConfigEntriesJson(normalizedSettings.resolutionDefinitions))}\n',
+            '${jsonEncode(_settingsConfigEntriesJson(persistedSettings.resolutionDefinitions))}\n',
         expectedRevision: await _existingRevision(
           path: _joinPath(configRoot, 'resolutions.json'),
           ref: writeBranch,
@@ -468,7 +478,7 @@ class ProviderBackedTrackStateRepository
         RepositoryTextFileChange(
           path: path,
           content:
-              '${jsonEncode(_localizedLabelsJson(normalizedSettings, locale))}\n',
+              '${jsonEncode(_localizedLabelsJson(persistedSettings, locale))}\n',
           expectedRevision: await _existingRevision(
             path: path,
             ref: writeBranch,
@@ -1740,6 +1750,30 @@ class ProviderBackedTrackStateRepository
 
   Future<Object?> _getRepositoryJson(String path) async =>
       jsonDecode(await _getRepositoryText(path));
+
+  Future<Set<String>> _persistedFieldIds({
+    required String path,
+    required String ref,
+    required Set<String> blobPaths,
+  }) async {
+    if (!blobPaths.contains(path)) {
+      return const <String>{};
+    }
+    try {
+      final json = jsonDecode(
+        (await _provider.readTextFile(path, ref: ref)).content,
+      );
+      if (json is! List) {
+        return const <String>{};
+      }
+      return {
+        for (final entry in json.whereType<Map>())
+          if (_persistedFieldId(entry) case final id? when id.isNotEmpty) id,
+      };
+    } on FormatException {
+      return const <String>{};
+    }
+  }
 
   List<String> _resolveSupportedLocales({
     required Map<String, Object?> projectJson,
@@ -3447,6 +3481,14 @@ List<Map<String, Object?>> _settingsFieldsJson(
     },
 ];
 
+List<TrackStateFieldDefinition> _persistedFieldDefinitions(
+  List<TrackStateFieldDefinition> fields, {
+  required Set<String> persistedFieldIds,
+}) => [
+  for (final field in fields)
+    if (!field.reserved || persistedFieldIds.contains(field.id.trim())) field,
+];
+
 Map<String, Object?> _settingsWorkflowsJson(
   List<TrackStateWorkflowDefinition> workflows,
 ) => {
@@ -3519,6 +3561,15 @@ Map<String, Object?> _fieldLocalizedLabelsJson(
         when label.trim().isNotEmpty)
       field.id.trim(): label.trim(),
 };
+
+String? _persistedFieldId(Map entry) {
+  final explicitId = entry['id']?.toString().trim();
+  if (explicitId != null && explicitId.isNotEmpty) {
+    return explicitId;
+  }
+  final canonicalId = _canonicalConfigId(entry['name']?.toString());
+  return canonicalId.isEmpty ? null : canonicalId;
+}
 
 List<TrackStateConfigEntry> _configEntriesFromJson(
   Object? json, {
