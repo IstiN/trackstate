@@ -1,0 +1,12 @@
+test_id: TS-468
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+notes:
+  - Compiles a temporary `trackstate` executable from this checkout and runs it from a seeded Local Git repository.
+  - Verifies `trackstate read components` keeps canonical metadata by default.
+  - Verifies `--locale fr` adds localized `displayName` values without fallback.
+  - Verifies `--locale de` preserves `displayName` and marks a missing translation with `usedFallback: true`.
