@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -32,6 +35,16 @@ void main() {
 
         final updatedSnapshot = await (repository as ProjectSettingsRepository)
             .saveProjectSettings(settings);
+        final persistedFieldsJson = File(
+          '${fixture.repositoryPath}/DEMO/config/fields.json',
+        ).readAsStringSync();
+        final persistedDefaultLocaleJson =
+            jsonDecode(
+                  File(
+                    '${fixture.repositoryPath}/DEMO/config/i18n/${Ts467LocaleResolutionFixture.defaultLocale}.json',
+                  ).readAsStringSync(),
+                )
+                as Map<String, Object?>;
 
         expect(
           updatedSnapshot.project.statusLabel(
@@ -47,6 +60,11 @@ void main() {
           ),
           'WIP',
         );
+        expect(
+          persistedFieldsJson,
+          '[{"id":"summary","name":"Summary","type":"string","required":true},{"id":"description","name":"Description","type":"markdown","required":false}]\n',
+        );
+        expect(persistedDefaultLocaleJson['fields'], isEmpty);
       } finally {
         await fixture.dispose();
       }
