@@ -45,6 +45,8 @@ class LiveIssueDetailCollaborationPage:
     _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
+    _choose_attachment_button_selector = '[aria-label*="Choose attachment"]'
+    _upload_attachment_button_selector = '[aria-label*="Upload attachment"]'
     _selected_button_selector = _active_tab_button_selector
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
@@ -584,6 +586,27 @@ class LiveIssueDetailCollaborationPage:
         selector = f'[aria-label*="{self._escape(fragment)}"]'
         return self._session.count(selector)
 
+    def wait_for_accessible_label_fragment(
+        self,
+        fragment: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        selector = f'[aria-label*="{self._escape(fragment)}"]'
+        self._session.wait_for_selector(selector, timeout_ms=timeout_ms)
+        payload = self._session.evaluate(
+            """
+            ({ selector }) => {
+              return Array.from(document.querySelectorAll(selector))
+                .map((element) => element.getAttribute('aria-label') ?? '')
+                .filter((label) => label.length > 0)
+                .sort((left, right) => right.length - left.length)[0] ?? '';
+            }
+            """,
+            arg={"selector": selector},
+        )
+        return str(payload).strip()
+
     def wait_for_deferred_error_to_clear(
         self,
         section_label: str,
@@ -661,6 +684,19 @@ class LiveIssueDetailCollaborationPage:
 
     def press_key(self, key: str) -> None:
         self._session.press_key(key, timeout_ms=30_000)
+
+    def choose_attachment(self, file_path: str) -> None:
+        self._session.click_and_choose_file(
+            self._choose_attachment_button_selector,
+            [file_path],
+            timeout_ms=30_000,
+        )
+
+    def upload_attachment(self) -> None:
+        self._session.click(
+            self._upload_attachment_button_selector,
+            timeout_ms=30_000,
+        )
 
     def attachment_download_button_count(self, attachment_name: str) -> int:
         return self._session.count(
