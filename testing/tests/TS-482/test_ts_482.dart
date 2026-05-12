@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -87,9 +86,8 @@ void main() {
           }
         }
 
-        final initialMode = _readDropdownFieldValue(
-          tester,
-          label: _attachmentModeLabel,
+        final initialMode = await screen.readDropdownFieldValue(
+          _attachmentModeLabel,
         );
         if (initialMode != _repositoryPathLabel) {
           failures.add(
@@ -104,9 +102,8 @@ void main() {
         }
 
         await settingsRobot.selectAttachmentStorageMode(_githubReleasesLabel);
-        final selectedMode = _readDropdownFieldValue(
-          tester,
-          label: _attachmentModeLabel,
+        final selectedMode = await screen.readDropdownFieldValue(
+          _attachmentModeLabel,
         );
         if (selectedMode != _githubReleasesLabel) {
           failures.add(
@@ -241,9 +238,8 @@ void main() {
           }
         }
 
-        final finalMode = _readDropdownFieldValue(
-          tester,
-          label: _attachmentModeLabel,
+        final finalMode = await screen.readDropdownFieldValue(
+          _attachmentModeLabel,
         );
         final finalTagPrefix = await screen.readLabeledTextFieldValue(
           _releaseTagPrefixLabel,
@@ -270,33 +266,6 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 45)),
   );
-}
-
-String? _readDropdownFieldValue(WidgetTester tester, {required String label}) {
-  final field = find.byWidgetPredicate((widget) {
-    return widget is DropdownButtonFormField &&
-        widget.decoration?.labelText == label;
-  }, description: 'dropdown field labeled $label');
-  if (field.evaluate().isEmpty) {
-    return null;
-  }
-  final dropdown = tester.widget<DropdownButtonFormField<Object?>>(field.first);
-  final helperText = dropdown.decoration?.helperText?.trim();
-  final hintText = dropdown.decoration?.hintText?.trim();
-  for (final widget in tester.widgetList<Text>(
-    find.descendant(of: field.first, matching: find.byType(Text)),
-  )) {
-    final value = widget.data?.trim();
-    if (value == null ||
-        value.isEmpty ||
-        value == label ||
-        value == helperText ||
-        value == hintText) {
-      continue;
-    }
-    return value;
-  }
-  return null;
 }
 
 String _formatSnapshot(List<String> values, {int limit = 24}) {
