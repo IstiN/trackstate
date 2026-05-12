@@ -23,8 +23,13 @@ class IssueTypeSettingsRobot {
   Finder get editorSaveButton => find.widgetWithText(FilledButton, 'Save');
   Finder get editorCancelButton => find.widgetWithText(TextButton, 'Cancel');
 
-  Finder issueTypeTile(String issueTypeName) =>
-      find.ancestor(of: find.text(issueTypeName), matching: find.byType(ListTile));
+  Finder issueTypeTile(String issueTypeName) => find.descendant(
+    of: settingsRobot.settingsAdminSection,
+    matching: find.ancestor(
+      of: find.text(issueTypeName),
+      matching: find.byType(ListTile),
+    ),
+  );
 
   Finder editIssueTypeButton(String issueTypeName) => find.descendant(
     of: issueTypeTile(issueTypeName),
@@ -57,7 +62,9 @@ class IssueTypeSettingsRobot {
   }
 
   Future<void> openIssueTypeEditor(String issueTypeName) async {
-    await tester.tap(editIssueTypeButton(issueTypeName));
+    final button = editIssueTypeButton(issueTypeName);
+    await tester.ensureVisible(button.first);
+    await tester.tap(button.first, warnIfMissed: false);
     await tester.pumpAndSettle();
   }
 
@@ -128,5 +135,85 @@ class IssueTypeSettingsRobot {
       descriptions.add('dropdown field x$iconDropdownCount');
     }
     return descriptions;
+  }
+
+  Future<bool> openIconPicker() async {
+    final dropdown = dropdownField('Icon');
+    if (dropdown.evaluate().isNotEmpty) {
+      await tester.ensureVisible(dropdown.first);
+      await tester.tap(dropdown.first, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      return true;
+    }
+
+    final field = textField('Icon');
+    if (field.evaluate().isNotEmpty) {
+      await tester.ensureVisible(field.first);
+      await tester.tap(field.first, warnIfMissed: false);
+      await tester.pumpAndSettle();
+    }
+
+    return false;
+  }
+
+  List<String> readDropdownOptions(String label) {
+    final field = dropdownField(label);
+    if (field.evaluate().isEmpty) {
+      return const [];
+    }
+
+    final dropdownButton = find.descendant(
+      of: field.first,
+      matching: find.byType(DropdownButton<String>),
+    );
+    if (dropdownButton.evaluate().isEmpty) {
+      return const [];
+    }
+
+    final dropdown = tester.widget<DropdownButton<String>>(
+      dropdownButton.first,
+    );
+    final optionTexts = <String>[];
+    for (final item in dropdown.items ?? const <DropdownMenuItem<String>>[]) {
+      final text = _widgetText(item.child);
+      if (text == null || optionTexts.contains(text)) {
+        continue;
+      }
+      optionTexts.add(text);
+    }
+    return optionTexts;
+  }
+
+  String? _widgetText(Widget? widget) {
+    if (widget == null) {
+      return null;
+    }
+    if (widget is Text) {
+      final text = widget.data?.trim() ?? widget.textSpan?.toPlainText().trim();
+      return text == null || text.isEmpty ? null : text;
+    }
+    if (widget is RichText) {
+      final text = widget.text.toPlainText().trim();
+      return text.isEmpty ? null : text;
+    }
+    if (widget is Semantics) {
+      final label = widget.properties.label?.trim();
+      if (label != null && label.isNotEmpty) {
+        return label;
+      }
+      return _widgetText(widget.child);
+    }
+    if (widget is SingleChildRenderObjectWidget) {
+      return _widgetText(widget.child);
+    }
+    if (widget is MultiChildRenderObjectWidget) {
+      for (final child in widget.children) {
+        final text = _widgetText(child);
+        if (text != null) {
+          return text;
+        }
+      }
+    }
+    return null;
   }
 }

@@ -25,12 +25,17 @@ void main() {
           throw StateError('TS-407 fixture creation did not complete.');
         }
 
-        await settingsRobot.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
+        await settingsRobot.pumpLocalGitApp(
+          repositoryPath: fixture.repositoryPath,
+        );
         await settingsRobot.openSettings();
         settingsRobot.expectVisibleSettingsContent();
         await issueTypeRobot.openIssueTypesTab();
 
-        if (issueTypeRobot.issueTypeTile(Ts407IssueTypeAdminFixture.storyName).evaluate().isEmpty) {
+        if (issueTypeRobot
+            .issueTypeTile(Ts407IssueTypeAdminFixture.storyName)
+            .evaluate()
+            .isEmpty) {
           failures.add(
             'Step 1 failed: Settings > Issue Types did not show the existing '
             '"${Ts407IssueTypeAdminFixture.storyName}" entry. Visible texts: '
@@ -102,6 +107,25 @@ void main() {
           }
 
           await issueTypeRobot.saveSettings();
+          await _waitForCondition(
+            tester,
+            () async {
+              final savedIssueTypes = await tester.runAsync(
+                fixture!.readIssueTypeEntries,
+              );
+              if (savedIssueTypes == null) {
+                return false;
+              }
+              final savedStory = savedIssueTypes.singleWhere(
+                (entry) => entry['id'] == Ts407IssueTypeAdminFixture.storyId,
+              );
+              return savedStory['hierarchyLevel'] == 1;
+            },
+            failureMessage:
+                'Step 3 failed: Save settings did not persist Story hierarchy '
+                'level 1 to DEMO/config/issue-types.json.',
+          );
+
           final persistedIssueTypes = await tester.runAsync(
             fixture.readIssueTypeEntries,
           );
@@ -124,22 +148,60 @@ void main() {
             }
           }
 
-          await issueTypeRobot.openIssueTypeEditor(
+          await issueTypeRobot.openIssueTypesTab();
+          final reopenedStoryTile = issueTypeRobot.issueTypeTile(
             Ts407IssueTypeAdminFixture.storyName,
           );
-          final iconControlDescriptions = issueTypeRobot
-              .describeIconInputControls();
-          final showsPickerControl =
-              issueTypeRobot.dropdownField('Icon').evaluate().isNotEmpty;
-          if (!showsPickerControl) {
+          if (reopenedStoryTile.evaluate().isEmpty) {
             failures.add(
-              'Step 4 failed: the Icon control should open a picker limited to '
-              'the supported TrackState outline glyph set, but the editor '
-              'exposed '
-              '${iconControlDescriptions.isEmpty ? 'no discoverable Icon picker control' : iconControlDescriptions.join(', ')} '
-              'instead. Visible dialog texts: '
+              'Step 4 failed: after Save settings, re-entering Settings > Issue '
+              'Types did not show the Story row again, so the test could not '
+              'reopen the visible admin flow. Visible texts: '
               '${issueTypeRobot.visibleTextSnapshot()}.',
             );
+          } else {
+            final reopenedEditButton = issueTypeRobot.editIssueTypeButton(
+              Ts407IssueTypeAdminFixture.storyName,
+            );
+            if (reopenedEditButton.evaluate().isEmpty) {
+              failures.add(
+                'Step 4 failed: after Save settings, the visible Story row in '
+                'Settings > Issue Types did not expose an Edit action, so the '
+                'test could not reopen the editor from the user-visible admin '
+                'surface. Visible texts: ${issueTypeRobot.visibleTextSnapshot()}.',
+              );
+            } else {
+              await issueTypeRobot.openIssueTypeEditor(
+                Ts407IssueTypeAdminFixture.storyName,
+              );
+
+              final iconPickerOpened = await issueTypeRobot.openIconPicker();
+              final iconControlDescriptions = issueTypeRobot
+                  .describeIconInputControls();
+              if (!iconPickerOpened) {
+                failures.add(
+                  'Step 4 failed: reopening Story showed the Icon control as '
+                  '${iconControlDescriptions.isEmpty ? 'no discoverable picker surface' : iconControlDescriptions.join(', ')} '
+                  'instead of a user-visible picker for the supported '
+                  'TrackState outline glyphs '
+                  '(${IssueTypeSettingsRobot.iconPickerLabels.join(', ')}).',
+                );
+              } else {
+                final iconOptions = issueTypeRobot.readDropdownOptions('Icon');
+                final missingIconOptions = IssueTypeSettingsRobot
+                    .iconPickerLabels
+                    .where((label) => !iconOptions.contains(label))
+                    .toList(growable: false);
+                if (missingIconOptions.isNotEmpty) {
+                  failures.add(
+                    'Step 4 failed: the opened Icon picker did not expose the '
+                    'supported TrackState glyph choices '
+                    '${missingIconOptions.map((label) => '"$label"').join(', ')}. '
+                    'Observed options: ${iconOptions.isEmpty ? '<none>' : iconOptions.join(', ')}.',
+                  );
+                }
+              }
+            }
           }
 
           final forbiddenUploadTexts = <String>[
@@ -178,4 +240,21 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
+}
+
+Future<void> _waitForCondition(
+  WidgetTester tester,
+  Future<bool> Function() condition, {
+  required String failureMessage,
+  Duration timeout = const Duration(seconds: 5),
+  Duration step = const Duration(milliseconds: 100),
+}) async {
+  final end = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(end)) {
+    await tester.pump(step);
+    if (await condition()) {
+      return;
+    }
+  }
+  fail(failureMessage);
 }
