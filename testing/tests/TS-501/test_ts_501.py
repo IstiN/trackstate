@@ -20,9 +20,15 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
-from testing.core.interfaces.dart_probe_runtime import DartProbeExecution  # noqa: E402
+from testing.core.interfaces.ts501_release_lifecycle_probe import (  # noqa: E402
+    Ts501ReleaseLifecycleProbe,
+    Ts501ReleaseLifecycleProbeRequest,
+    Ts501ReleaseLifecycleProbeResult,
+)
 from testing.core.utils.polling import poll_until  # noqa: E402
-from testing.frameworks.python.dart_probe_runtime import PythonDartProbeRuntime  # noqa: E402
+from testing.tests.support.ts501_release_lifecycle_probe_factory import (  # noqa: E402
+    create_ts501_release_lifecycle_probe,
+)
 
 TICKET_KEY = "TS-501"
 PROJECT_PATH = "DEMO"
@@ -35,9 +41,6 @@ ATTACHMENT_TEXT = (
     "TS-501 release lifecycle verification payload.\n"
     "This attachment exists only to force creation of the per-issue release container.\n"
 )
-PROBE_ROOT = REPO_ROOT / "testing/tests/TS-501/dart_probe"
-PROBE_ENTRYPOINT = Path("bin/ts501_release_lifecycle_probe.dart")
-
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
@@ -67,7 +70,7 @@ def main() -> None:
         service,
         (MANIFEST_PATH,),
     )
-    runtime = PythonDartProbeRuntime(REPO_ROOT)
+    probe = create_ts501_release_lifecycle_probe(REPO_ROOT)
 
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
@@ -104,7 +107,11 @@ def main() -> None:
         }
         result["fixture_setup"] = fixture_setup
 
-        execution = _run_probe(runtime=runtime, service=service, release_tag_prefix=release_tag_prefix)
+        execution = _run_probe(
+            probe=probe,
+            service=service,
+            release_tag_prefix=release_tag_prefix,
+        )
         result["probe_analyze_output"] = execution.analyze_output
         result["probe_run_output"] = execution.run_output
         payload = execution.session_payload or {}
@@ -250,40 +257,24 @@ def _current_release_tag_prefix(service: LiveSetupRepositoryService) -> str:
 
 def _run_probe(
     *,
-    runtime: PythonDartProbeRuntime,
+    probe: Ts501ReleaseLifecycleProbe,
     service: LiveSetupRepositoryService,
     release_tag_prefix: str,
-) -> DartProbeExecution:
-    original_values = {
-        key: os.environ.get(key)
-        for key in (
-            "TS501_REPOSITORY",
-            "TS501_REF",
-            "TS501_TOKEN",
-            "TS501_ISSUE_KEY",
-            "TS501_ATTACHMENT_NAME",
-            "TS501_ATTACHMENT_TEXT",
-            "TS501_RELEASE_TAG_PREFIX",
-        )
-    }
-    os.environ["TS501_REPOSITORY"] = service.repository
-    os.environ["TS501_REF"] = service.ref
+) -> Ts501ReleaseLifecycleProbeResult:
     token = service.token or os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
     if not token:
         raise RuntimeError("TS-501 requires GH_TOKEN or GITHUB_TOKEN for the Dart probe.")
-    os.environ["TS501_TOKEN"] = token
-    os.environ["TS501_ISSUE_KEY"] = ISSUE_KEY
-    os.environ["TS501_ATTACHMENT_NAME"] = ATTACHMENT_NAME
-    os.environ["TS501_ATTACHMENT_TEXT"] = ATTACHMENT_TEXT
-    os.environ["TS501_RELEASE_TAG_PREFIX"] = release_tag_prefix
-    try:
-        return runtime.execute(probe_root=PROBE_ROOT, entrypoint=PROBE_ENTRYPOINT)
-    finally:
-        for key, value in original_values.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+    return probe.execute(
+        request=Ts501ReleaseLifecycleProbeRequest(
+            repository=service.repository,
+            ref=service.ref,
+            token=token,
+            issue_key=ISSUE_KEY,
+            attachment_name=ATTACHMENT_NAME,
+            attachment_text=ATTACHMENT_TEXT,
+            release_tag_prefix=release_tag_prefix,
+        ),
+    )
 
 
 def _build_failures(
