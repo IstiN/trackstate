@@ -1,0 +1,8 @@
+test_id: TS-407
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies Settings > Issue Types lets an admin edit an existing hierarchy level.
+  - Expects the issue type icon control to open a supported TrackState glyph picker rather than arbitrary image upload.
