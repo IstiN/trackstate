@@ -274,8 +274,47 @@ class IssueAttachment {
   final String? githubReleaseTag;
   final String? githubReleaseAssetName;
 
+  IssueAttachment copyWith({
+    String? id,
+    String? name,
+    String? mediaType,
+    int? sizeBytes,
+    String? author,
+    String? createdAt,
+    String? storagePath,
+    String? revisionOrOid,
+    AttachmentStorageMode? storageBackend,
+    Object? repositoryPath = _issueAttachmentUnset,
+    Object? githubReleaseTag = _issueAttachmentUnset,
+    Object? githubReleaseAssetName = _issueAttachmentUnset,
+  }) {
+    return IssueAttachment(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      mediaType: mediaType ?? this.mediaType,
+      sizeBytes: sizeBytes ?? this.sizeBytes,
+      author: author ?? this.author,
+      createdAt: createdAt ?? this.createdAt,
+      storagePath: storagePath ?? this.storagePath,
+      revisionOrOid: revisionOrOid ?? this.revisionOrOid,
+      storageBackend: storageBackend ?? this.storageBackend,
+      repositoryPath: identical(repositoryPath, _issueAttachmentUnset)
+          ? this.repositoryPath
+          : repositoryPath as String?,
+      githubReleaseTag: identical(githubReleaseTag, _issueAttachmentUnset)
+          ? this.githubReleaseTag
+          : githubReleaseTag as String?,
+      githubReleaseAssetName:
+          identical(githubReleaseAssetName, _issueAttachmentUnset)
+          ? this.githubReleaseAssetName
+          : githubReleaseAssetName as String?,
+    );
+  }
+
   String get resolvedRepositoryPath => repositoryPath ?? storagePath;
 }
+
+const Object _issueAttachmentUnset = Object();
 
 enum AttachmentStorageMode {
   repositoryPath('repository-path'),

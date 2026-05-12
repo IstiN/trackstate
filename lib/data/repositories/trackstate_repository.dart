@@ -906,13 +906,19 @@ class ProviderBackedTrackStateRepository
 
     final timestamp = DateTime.now().toUtc().toIso8601String();
     final author = _defaultAuthor(_session.resolvedUserIdentity);
-    final revisionOrOid = _attachmentRevisionOrOid(
-      attachment: RepositoryAttachment(
+    final attachmentWriteResult = await _provider.writeAttachment(
+      RepositoryAttachmentWriteRequest(
         path: attachmentPath,
         bytes: bytes,
-        revision: existingRevision,
+        message: 'Upload attachment to ${currentIssue.key}',
+        branch: writeBranch,
+        expectedRevision: existingRevision,
       ),
-      isLfsTracked: lfsTracked,
+    );
+    _snapshotArtifactRevisions[attachmentPath] = attachmentWriteResult.revision;
+    final persistedAttachmentArtifact = await _provider.readAttachment(
+      attachmentPath,
+      ref: writeBranch,
     );
     final updatedAttachment = IssueAttachment(
       id: attachmentPath,
@@ -922,7 +928,10 @@ class ProviderBackedTrackStateRepository
       author: author,
       createdAt: timestamp,
       storagePath: attachmentPath,
-      revisionOrOid: revisionOrOid,
+      revisionOrOid: _attachmentRevisionOrOid(
+        attachment: persistedAttachmentArtifact,
+        isLfsTracked: lfsTracked,
+      ),
       storageBackend: AttachmentStorageMode.repositoryPath,
       repositoryPath: attachmentPath,
     );
@@ -937,57 +946,17 @@ class ProviderBackedTrackStateRepository
       ))
         updatedAttachment,
     ]..sort(_sortAttachmentsNewestFirst);
-    final metadataContent =
-        '${jsonEncode(_attachmentMetadataJson(updatedAttachments))}\n';
-    final mutator = switch (_provider) {
-      final RepositoryFileMutator supported => supported,
-      _ => null,
-    };
-    if (mutator == null) {
-      final attachmentWriteResult = await _provider.writeAttachment(
-        RepositoryAttachmentWriteRequest(
-          path: attachmentPath,
-          bytes: bytes,
-          message: 'Upload attachment to ${currentIssue.key}',
-          branch: writeBranch,
-          expectedRevision: existingRevision,
-        ),
-      );
-      _snapshotArtifactRevisions[attachmentPath] =
-          attachmentWriteResult.revision;
-      final metadataWriteResult = await _provider.writeTextFile(
-        RepositoryWriteRequest(
-          path: attachmentMetadataPath,
-          content: metadataContent,
-          message: 'Update attachment metadata for ${currentIssue.key}',
-          branch: writeBranch,
-          expectedRevision: metadataRevision,
-        ),
-      );
-      _snapshotArtifactRevisions[attachmentMetadataPath] =
-          metadataWriteResult.revision;
-    } else {
-      await mutator.applyFileChanges(
-        RepositoryFileChangeRequest(
-          branch: writeBranch,
-          message: 'Upload attachment to ${currentIssue.key}',
-          changes: [
-            RepositoryBinaryFileChange(
-              path: attachmentPath,
-              bytes: bytes,
-              expectedRevision: existingRevision,
-            ),
-            RepositoryTextFileChange(
-              path: attachmentMetadataPath,
-              content: metadataContent,
-              expectedRevision: metadataRevision,
-            ),
-          ],
-        ),
-      );
-      _snapshotArtifactRevisions.remove(attachmentPath);
-      _snapshotArtifactRevisions.remove(attachmentMetadataPath);
-    }
+    final metadataWriteResult = await _provider.writeTextFile(
+      RepositoryWriteRequest(
+        path: attachmentMetadataPath,
+        content: '${jsonEncode(_attachmentMetadataJson(updatedAttachments))}\n',
+        message: 'Update attachment metadata for ${currentIssue.key}',
+        branch: writeBranch,
+        expectedRevision: metadataRevision,
+      ),
+    );
+    _snapshotArtifactRevisions[attachmentMetadataPath] =
+        metadataWriteResult.revision;
     _snapshotBlobPaths = {
       ..._snapshotBlobPaths,
       attachmentPath,

@@ -139,6 +139,16 @@ void main() {
         uploadedMetadata['repositoryPath'],
         'DEMO/DEMO-1/attachments/release-plan.txt',
       );
+      final updatedAttachment = updated.attachments.firstWhere(
+        (attachment) => attachment.name == 'release-plan.txt',
+      );
+
+      expect(uploadedMetadata['revisionOrOid'], isNotEmpty);
+      expect(updatedAttachment.revisionOrOid, isNotEmpty);
+      expect(
+        uploadedMetadata['revisionOrOid'],
+        updatedAttachment.revisionOrOid,
+      );
       expect(
         uploadedAttachment.storageBackend,
         AttachmentStorageMode.repositoryPath,
@@ -147,6 +157,57 @@ void main() {
         uploadedAttachment.repositoryPath,
         'DEMO/DEMO-1/attachments/release-plan.txt',
       );
+      expect(
+        uploadedAttachment.revisionOrOid,
+        uploadedMetadata['revisionOrOid'],
+      );
+    },
+  );
+
+  test(
+    'local repository refreshes attachment revisions after overwriting uploads',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+
+      final firstUpload = await repository.uploadIssueAttachment(
+        issue: snapshot.issues.single,
+        name: 'release plan.txt',
+        bytes: Uint8List.fromList(utf8.encode('roadmap v1')),
+      );
+      final firstRevision = firstUpload.attachments
+          .firstWhere((attachment) => attachment.name == 'release-plan.txt')
+          .revisionOrOid;
+
+      final secondUpload = await repository.uploadIssueAttachment(
+        issue: firstUpload,
+        name: 'release plan.txt',
+        bytes: Uint8List.fromList(utf8.encode('roadmap v2')),
+      );
+      final secondAttachment = secondUpload.attachments.firstWhere(
+        (attachment) => attachment.name == 'release-plan.txt',
+      );
+      final metadataJson =
+          jsonDecode(
+                File(
+                  '${repo.path}/DEMO/DEMO-1/attachments.json',
+                ).readAsStringSync(),
+              )
+              as List<Object?>;
+      final uploadedMetadata = metadataJson
+          .cast<Map<String, Object?>>()
+          .firstWhere((entry) => entry['name'] == 'release-plan.txt');
+
+      expect(firstRevision, isNotEmpty);
+      expect(secondAttachment.revisionOrOid, isNotEmpty);
+      expect(secondAttachment.revisionOrOid, isNot(firstRevision));
+      expect(uploadedMetadata['revisionOrOid'], secondAttachment.revisionOrOid);
     },
   );
 

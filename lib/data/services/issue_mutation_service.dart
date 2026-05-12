@@ -815,6 +815,24 @@ class IssueMutationService {
                 snapshotIssue.updatedLabel,
             resolutionId: snapshotIssue.resolutionId,
           );
+        } else if (_isAttachmentMetadataPath(path)) {
+          final file = await provider.readTextFile(path, ref: writeBranch);
+          changes.add(
+            RepositoryTextFileChange(
+              path: newPath,
+              content: _rebaseAttachmentMetadataContent(
+                file.content,
+                oldRoot: _issueRoot(path),
+                newRoot: _issueRoot(newPath),
+              ),
+              expectedRevision: await _existingTextRevision(
+                provider,
+                path: newPath,
+                ref: writeBranch,
+                blobPaths: blobPaths,
+              ),
+            ),
+          );
         } else if (_isTextArtifactPath(path)) {
           final file = await provider.readTextFile(path, ref: writeBranch);
           changes.add(
@@ -1438,15 +1456,12 @@ TrackStateIssue _retargetIssueForHierarchyMove(
     links: issue.links,
     attachments: [
       for (final attachment in issue.attachments)
-        IssueAttachment(
+        attachment.copyWith(
           id: rebaseArtifactPath(attachment.id),
-          name: attachment.name,
-          mediaType: attachment.mediaType,
-          sizeBytes: attachment.sizeBytes,
-          author: attachment.author,
-          createdAt: attachment.createdAt,
           storagePath: rebaseArtifactPath(attachment.storagePath),
-          revisionOrOid: attachment.revisionOrOid,
+          repositoryPath: attachment.repositoryPath == null
+              ? null
+              : rebaseArtifactPath(attachment.repositoryPath!),
         ),
     ],
     isArchived: issue.isArchived,
@@ -1751,6 +1766,36 @@ bool _isTextArtifactPath(String path) {
       normalized.endsWith('.txt') ||
       normalized.endsWith('.yaml') ||
       normalized.endsWith('.yml');
+}
+
+bool _isAttachmentMetadataPath(String path) =>
+    path.toLowerCase().endsWith('/attachments.json');
+
+String _rebaseAttachmentMetadataContent(
+  String content, {
+  required String oldRoot,
+  required String newRoot,
+}) {
+  final json = jsonDecode(content);
+  if (json is! List) {
+    return content;
+  }
+
+  String rebasePathValue(Object? value) {
+    final path = value?.toString() ?? '';
+    if (path.isEmpty || !path.startsWith(oldRoot)) {
+      return path;
+    }
+    return '$newRoot${path.substring(oldRoot.length)}';
+  }
+
+  return '${jsonEncode([
+    for (final entry in json)
+      if (entry is Map) {for (final mapEntry in entry.entries) mapEntry.key.toString(): switch (mapEntry.key.toString()) {
+            'id' || 'storagePath' || 'repositoryPath' => rebasePathValue(mapEntry.value),
+            _ => mapEntry.value,
+          }} else entry,
+  ])}\n';
 }
 
 Future<String?> _existingTextRevision(
