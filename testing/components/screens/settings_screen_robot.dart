@@ -175,6 +175,21 @@ class SettingsScreenRobot {
 
   Future<void> openStatusesTab() => selectTab('Statuses');
 
+  Future<void> selectAttachmentStorageMode(String optionText) {
+    return _selectDropdownOption(
+      'Attachment storage mode',
+      optionText: optionText,
+    );
+  }
+
+  Future<void> enterAttachmentReleaseTagPrefix(String value) {
+    return enterTextField('Release tag prefix', value);
+  }
+
+  Future<bool> showsAttachmentReleaseTagPrefixField() {
+    return isTextFieldVisible('Release tag prefix');
+  }
+
   Future<void> openProjectStatuses() async {
     await openSettings();
     expectVisibleSettingsContent();
@@ -460,6 +475,48 @@ class SettingsScreenRobot {
   bool showsProjectSettingsSurface() =>
       isVisibleText('Project Settings') &&
       projectSettingsHeading.evaluate().isNotEmpty;
+
+  bool showsHostedReleaseUploadRestriction({required String storageLabel}) {
+    final snapshot = repositoryAccessSnapshot().toLowerCase();
+    final lowerStorageLabel = storageLabel.toLowerCase();
+    return snapshot.contains(lowerStorageLabel) &&
+        (snapshot.contains('unavailable') ||
+            snapshot.contains('not available') ||
+            snapshot.contains('cannot complete')) &&
+        (snapshot.contains('upload') || snapshot.contains('transfer'));
+  }
+
+  bool showsReleaseAttachmentStorageConfiguration({
+    required String storageLabel,
+    required String tagPrefix,
+  }) {
+    final snapshot = repositoryAccessSnapshot().toLowerCase();
+    return snapshot.contains(storageLabel.toLowerCase()) &&
+        snapshot.contains(tagPrefix.toLowerCase());
+  }
+
+  bool suggestsHostedReleaseUploadSupport({required String tagPrefix}) {
+    final snapshot = repositoryAccessSnapshot().toLowerCase();
+    final mentionsSupportedUpload =
+        snapshot.contains('can complete release-backed uploads') ||
+        snapshot.contains(
+          'hosted session can complete release-backed uploads',
+        ) ||
+        snapshot.contains('uploads are available') ||
+        snapshot.contains('release-backed uploads are supported');
+    final mentionsUnavailableUpload =
+        snapshot.contains('cannot complete release-backed uploads') ||
+        snapshot.contains('uploads are unavailable') ||
+        snapshot.contains('unavailable in the browser');
+    return snapshot.contains(tagPrefix.toLowerCase()) &&
+        mentionsSupportedUpload &&
+        !mentionsUnavailableUpload;
+  }
+
+  String repositoryAccessSnapshot() => [
+    ..._textsWithin(repositoryAccessSection),
+    ..._semanticsLabelsWithin(repositoryAccessSection),
+  ].join(' | ');
 
   bool showsProjectSettingsTab(String label) =>
       showsProjectSettingsSurface() && tabByLabel(label).evaluate().isNotEmpty;
@@ -900,6 +957,42 @@ class SettingsScreenRobot {
     );
   }
 
+  Finder _labeledDropdownField(String label) =>
+      find.byWidgetPredicate((widget) {
+        if (widget is DropdownButtonFormField) {
+          return widget.decoration?.labelText == label;
+        }
+        return false;
+      }, description: 'dropdown field labeled $label');
+
+  Future<void> _selectDropdownOption(
+    String label, {
+    required String optionText,
+  }) async {
+    await tester.pump();
+    final field = _labeledDropdownField(label);
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible dropdown field labeled "$label", but no matching '
+        'control was rendered.',
+      );
+    }
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    final option = find.text(optionText, findRichText: true);
+    if (option.evaluate().isEmpty) {
+      fail(
+        'Expected the "$label" dropdown to expose the option "$optionText", '
+        'but it was not visible after opening the menu.',
+      );
+    }
+    await tester.ensureVisible(option.last);
+    await tester.tap(option.last, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
   Container? _decoratedContainerWithin(Finder scope) {
     for (final element in scope.evaluate()) {
       final widget = element.widget;
@@ -961,6 +1054,28 @@ class SettingsScreenRobot {
     return tester
         .widgetList<Text>(find.byType(Text))
         .map((widget) => widget.data?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
+
+  List<String> _textsWithin(Finder scope) {
+    return tester
+        .widgetList<Text>(
+          find.descendant(of: scope, matching: find.byType(Text)),
+        )
+        .map((widget) => widget.data?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
+
+  List<String> _semanticsLabelsWithin(Finder scope) {
+    return tester
+        .widgetList<Semantics>(
+          find.descendant(of: scope, matching: find.byType(Semantics)),
+        )
+        .map((widget) => widget.properties.label?.trim())
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .toList();
