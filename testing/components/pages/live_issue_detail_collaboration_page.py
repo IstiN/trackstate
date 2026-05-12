@@ -15,6 +15,16 @@ class ScreenRect:
     height: float
 
 
+@dataclass(frozen=True)
+class TabChipObservation:
+    label: str
+    is_selected: bool
+    left: float
+    top: float
+    width: float
+    height: float
+
+
 class LiveIssueDetailCollaborationPage:
     _button_selector = 'flt-semantics[role="button"]'
     _tab_button_selector = 'flt-semantics[role="button"][aria-current]'
@@ -306,6 +316,164 @@ class LiveIssueDetailCollaborationPage:
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
 
+    def issue_detail_accessible_label(
+        self,
+        issue_key: str,
+        *,
+        expected_fragment: str | None = None,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        selector = self._issue_detail_selector(issue_key)
+        self._session.wait_for_selector(selector, timeout_ms=timeout_ms)
+        if expected_fragment is not None:
+            self._session.wait_for_function(
+                """
+                ({ selector, expectedFragment }) => {
+                  return Array.from(document.querySelectorAll(selector))
+                    .map((element) => element.getAttribute('aria-label') ?? '')
+                    .some((label) => label.includes(expectedFragment));
+                }
+                """,
+                arg={
+                    "selector": selector,
+                    "expectedFragment": expected_fragment,
+                },
+                timeout_ms=timeout_ms,
+            )
+        payload = self._session.evaluate(
+            """
+            ({ selector }) => {
+              return Array.from(document.querySelectorAll(selector))
+                .map((element) => element.getAttribute('aria-label') ?? '')
+                .filter((label) => label.length > 0)
+                .sort((left, right) => right.length - left.length)[0] ?? '';
+            }
+            """,
+            arg={"selector": selector},
+        )
+        label = str(payload).strip()
+        if not label:
+            raise AssertionError(
+                "Step 5 failed: the live issue detail did not expose an accessible "
+                f"label for {issue_key!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return label
+
+    def observe_tab_chip(self, label: str) -> TabChipObservation:
+        payload = self._session.evaluate(
+            """
+            (expectedLabel) => {
+              const candidate = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"][aria-current]')
+              ).find((element) => (element.innerText || '').trim() === expectedLabel);
+              if (!candidate) {
+                return null;
+              }
+              const rect = candidate.getBoundingClientRect();
+              return {
+                label: (candidate.innerText || '').trim(),
+                isSelected: candidate.getAttribute('aria-current') === 'true',
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height,
+              };
+            }
+            """,
+            arg=label,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 3 failed: the live issue detail did not expose the expected "
+                f"tab chip for {label!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return TabChipObservation(
+            label=str(payload["label"]),
+            is_selected=bool(payload["isSelected"]),
+            left=float(payload["left"]),
+            top=float(payload["top"]),
+            width=float(payload["width"]),
+            height=float(payload["height"]),
+        )
+
+    def wait_for_deferred_error(
+        self,
+        section_label: str,
+        *,
+        expected_fragment: str | None = None,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        selector = self._deferred_error_selector(
+            section_label,
+            expected_fragment=expected_fragment,
+        )
+        self._session.wait_for_selector(selector, timeout_ms=timeout_ms)
+        return self.deferred_error_label(
+            section_label,
+            expected_fragment=expected_fragment,
+            timeout_ms=timeout_ms,
+        )
+
+    def wait_for_deferred_error_to_clear(
+        self,
+        section_label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> int:
+        selector = self._deferred_error_selector(section_label)
+        self._session.wait_for_function(
+            """
+            ({ selector }) => document.querySelectorAll(selector).length === 0
+            """,
+            arg={"selector": selector},
+            timeout_ms=timeout_ms,
+        )
+        return self._session.count(selector)
+
+    def deferred_error_label(
+        self,
+        section_label: str,
+        *,
+        expected_fragment: str | None = None,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        selector = self._deferred_error_selector(
+            section_label,
+            expected_fragment=expected_fragment,
+        )
+        self._session.wait_for_selector(selector, timeout_ms=timeout_ms)
+        payload = self._session.evaluate(
+            """
+            ({ selector }) => {
+              const element = document.querySelector(selector);
+              return element?.getAttribute('aria-label') ?? '';
+            }
+            """,
+            arg={"selector": selector},
+        )
+        label = str(payload).strip()
+        if not label:
+            raise AssertionError(
+                "Step 4 failed: the live issue detail did not expose an accessible "
+                f"error label for {section_label!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return label
+
+    def click_deferred_retry(
+        self,
+        section_label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        selector = (
+            self._deferred_error_selector(section_label, expected_fragment="Retry")
+            + ' flt-semantics[role="button"]'
+        )
+        self._session.click(selector, timeout_ms=timeout_ms)
+
     def focus_collaboration_tab(self, label: str) -> None:
         if self._session.count(self._tab_button_selector, has_text=label) > 0:
             self._session.focus(
@@ -372,6 +540,22 @@ class LiveIssueDetailCollaborationPage:
     @staticmethod
     def _download_button_label(attachment_name: str) -> str:
         return f"Download {attachment_name}"
+
+    @staticmethod
+    def _deferred_error_selector(
+        section_label: str,
+        *,
+        expected_fragment: str | None = None,
+    ) -> str:
+        selector = (
+            'flt-semantics[role="button"]'
+            f'[aria-label*="{LiveIssueDetailCollaborationPage._escape(section_label)} error"]'
+        )
+        if expected_fragment:
+            selector += (
+                f'[aria-label*="{LiveIssueDetailCollaborationPage._escape(expected_fragment)}"]'
+            )
+        return selector
 
     @staticmethod
     def _escape(value: str) -> str:
