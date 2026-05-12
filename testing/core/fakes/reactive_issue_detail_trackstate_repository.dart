@@ -19,10 +19,16 @@ class ReactiveIssueDetailTrackStateRepository
       canCheckCollaborators: false,
     ),
     Set<String> lfsTrackedPaths = const <String>{},
+    Set<String> failingTextPaths = const <String>{},
+    Map<String, String> textFixtures = const <String, String>{},
+    Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
   }) => ReactiveIssueDetailTrackStateRepository._(
     MutableIssueDetailTrackStateProvider(
       permission: permission,
       lfsTrackedPaths: lfsTrackedPaths,
+      failingTextPaths: failingTextPaths,
+      textFixtures: textFixtures,
+      binaryFixtures: binaryFixtures,
     ),
   );
 
@@ -94,7 +100,7 @@ class ReactiveIssueDetailTrackStateRepository
 }
 
 class MutableIssueDetailTrackStateProvider
-    implements TrackStateProviderAdapter {
+    implements TrackStateProviderAdapter, RepositoryFileMutator {
   MutableIssueDetailTrackStateProvider({
     RepositoryPermission permission = const RepositoryPermission(
       canRead: true,
@@ -105,11 +111,24 @@ class MutableIssueDetailTrackStateProvider
       canCheckCollaborators: false,
     ),
     Set<String> lfsTrackedPaths = const <String>{},
+    Set<String> failingTextPaths = const <String>{},
+    Map<String, String> textFixtures = const <String, String>{},
+    Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
   }) : _permission = permission,
-       _lfsTrackedPaths = lfsTrackedPaths;
+       _lfsTrackedPaths = lfsTrackedPaths,
+       _failingTextPaths = failingTextPaths,
+       _textFiles = Map<String, String>.from(_textFixtures)
+         ..addAll(textFixtures),
+       _binaryFiles = <String, Uint8List>{
+         for (final entry in _binaryFixtures.entries)
+           entry.key: Uint8List.fromList(entry.value),
+         for (final entry in binaryFixtures.entries)
+           entry.key: Uint8List.fromList(entry.value),
+       };
 
   RepositoryPermission _permission;
   final Set<String> _lfsTrackedPaths;
+  final Set<String> _failingTextPaths;
 
   static const String _revision = 'reactive-read-only-test-revision';
 
@@ -150,6 +169,46 @@ class MutableIssueDetailTrackStateProvider
   {"id": "assignee", "name": "Assignee", "type": "user", "required": false},
   {"id": "labels", "name": "Labels", "type": "array", "required": false}
 ]
+''',
+    'config/priorities.json': '''
+[
+  {"id": "highest", "name": "Highest"},
+  {"id": "high", "name": "High"},
+  {"id": "medium", "name": "Medium"}
+]
+''',
+    'TRACK/config/priorities.json': '''
+[
+  {"id": "highest", "name": "Highest"},
+  {"id": "high", "name": "High"},
+  {"id": "medium", "name": "Medium"}
+]
+''',
+    'config/workflows.json': '''
+{
+  "default": {
+    "name": "Default Workflow",
+    "statuses": ["todo", "in-progress", "in-review", "done"],
+    "transitions": [
+      {"id": "start", "name": "Start", "from": "todo", "to": "in-progress"},
+      {"id": "review", "name": "Review", "from": "in-progress", "to": "in-review"},
+      {"id": "finish", "name": "Finish", "from": "in-review", "to": "done"}
+    ]
+  }
+}
+''',
+    'TRACK/config/workflows.json': '''
+{
+  "default": {
+    "name": "Default Workflow",
+    "statuses": ["todo", "in-progress", "in-review", "done"],
+    "transitions": [
+      {"id": "start", "name": "Start", "from": "todo", "to": "in-progress"},
+      {"id": "review", "name": "Review", "from": "in-progress", "to": "in-review"},
+      {"id": "finish", "name": "Finish", "from": "in-review", "to": "done"}
+    ]
+  }
+}
 ''',
     '.trackstate/index/issues.json': '''
 [
@@ -237,14 +296,13 @@ Read and write tracker files through GitHub Contents API.
 ''',
   };
 
-  final Map<String, String> _textFiles = Map<String, String>.from(
-    _textFixtures,
-  );
-  final Map<String, Uint8List> _binaryFiles = <String, Uint8List>{
+  static final Map<String, Uint8List> _binaryFixtures = <String, Uint8List>{
     'TRACK-12/attachments/sync-sequence.svg': Uint8List.fromList(
       '<svg />'.codeUnits,
     ),
   };
+  final Map<String, String> _textFiles;
+  final Map<String, Uint8List> _binaryFiles;
 
   void updatePermission(RepositoryPermission permission) {
     _permission = permission;
@@ -289,18 +347,26 @@ Read and write tracker files through GitHub Contents API.
     required String ref,
   }) async {
     final binary = _binaryFiles[path];
-    if (binary == null) {
-      throw TrackStateProviderException(
-        'Missing attachment fixture for $path.',
+    if (binary != null) {
+      return RepositoryAttachment(
+        path: path,
+        bytes: binary,
+        revision: _revision,
+        declaredSizeBytes: binary.length,
+        lfsOid: _lfsTrackedPaths.contains(path) ? 'reactive-lfs-oid' : null,
       );
     }
-    return RepositoryAttachment(
-      path: path,
-      bytes: binary,
-      revision: _revision,
-      declaredSizeBytes: binary.length,
-      lfsOid: _lfsTrackedPaths.contains(path) ? 'reactive-lfs-oid' : null,
-    );
+    final text = _textFiles[path];
+    if (text != null) {
+      final bytes = Uint8List.fromList(text.codeUnits);
+      return RepositoryAttachment(
+        path: path,
+        bytes: bytes,
+        revision: _revision,
+        declaredSizeBytes: bytes.length,
+      );
+    }
+    throw TrackStateProviderException('Missing attachment fixture for $path.');
   }
 
   @override
@@ -308,6 +374,9 @@ Read and write tracker files through GitHub Contents API.
     String path, {
     required String ref,
   }) async {
+    if (_failingTextPaths.contains(path)) {
+      throw TrackStateProviderException('Deferred read failed for $path.');
+    }
     final content = _textFiles[path];
     if (content == null) {
       throw TrackStateProviderException('Missing fixture for $path.');
@@ -333,18 +402,51 @@ Read and write tracker files through GitHub Contents API.
 
   @override
   Future<void> ensureCleanWorktree() async {}
+
+  @override
   Future<RepositoryWriteResult> writeTextFile(
     RepositoryWriteRequest request,
   ) async {
-    throw const TrackStateProviderException(
-      'TS-104 should not attempt to write issue files while verifying capability sync.',
-    );
+    _textFiles[request.path] = request.content;
+    return const RepositoryWriteResult(
+      path: '',
+      branch: '',
+      revision: _revision,
+    ).copyWith(path: request.path, branch: request.branch);
+  }
+
+  @override
+  Future<RepositoryCommitResult> applyFileChanges(
+    RepositoryFileChangeRequest request,
+  ) async {
+    for (final change in request.changes) {
+      switch (change) {
+        case RepositoryTextFileChange():
+          _textFiles[change.path] = change.content;
+        case RepositoryBinaryFileChange():
+          _binaryFiles[change.path] = Uint8List.fromList(change.bytes);
+        case RepositoryDeleteFileChange():
+          _textFiles.remove(change.path);
+          _binaryFiles.remove(change.path);
+      }
+    }
+    return const RepositoryCommitResult(
+      branch: '',
+      message: '',
+      revision: _revision,
+    ).copyWith(branch: request.branch, message: request.message);
   }
 
   @override
   Future<RepositoryAttachmentWriteResult> writeAttachment(
     RepositoryAttachmentWriteRequest request,
   ) async {
+    final existing = _binaryFiles[request.path];
+    if (existing != null && request.expectedRevision != _revision) {
+      throw TrackStateProviderException(
+        'Expected revision ${request.expectedRevision} does not match ${request.path}.',
+      );
+    }
     _binaryFiles[request.path] = Uint8List.fromList(request.bytes);
     return const RepositoryAttachmentWriteResult(
       path: '',
@@ -377,6 +479,34 @@ extension on RepositoryAttachmentWriteResult {
     return RepositoryAttachmentWriteResult(
       path: path ?? this.path,
       branch: branch ?? this.branch,
+      revision: revision ?? this.revision,
+    );
+  }
+}
+
+extension on RepositoryWriteResult {
+  RepositoryWriteResult copyWith({
+    String? path,
+    String? branch,
+    String? revision,
+  }) {
+    return RepositoryWriteResult(
+      path: path ?? this.path,
+      branch: branch ?? this.branch,
+      revision: revision ?? this.revision,
+    );
+  }
+}
+
+extension on RepositoryCommitResult {
+  RepositoryCommitResult copyWith({
+    String? branch,
+    String? message,
+    String? revision,
+  }) {
+    return RepositoryCommitResult(
+      branch: branch ?? this.branch,
+      message: message ?? this.message,
       revision: revision ?? this.revision,
     );
   }

@@ -447,13 +447,15 @@ class IssueMutationService {
         message: 'Update $issueKey fields',
         changes: changes,
       );
-      final refreshed = await providerRepository.loadSnapshot();
+      final refreshed = await providerRepository.hydrateIssue(
+        issue,
+        scopes: const {IssueHydrationScope.detail},
+        force: true,
+      );
       return IssueMutationResult.success(
         operation: operation,
         issueKey: issueKey,
-        value: refreshed.issues.firstWhere(
-          (candidate) => candidate.key == issueKey,
-        ),
+        value: refreshed,
         revision: commitResult.revision,
       );
     } catch (error) {
@@ -628,13 +630,15 @@ class IssueMutationService {
           ),
         ],
       );
-      final refreshed = await providerRepository.loadSnapshot();
+      final refreshed = await providerRepository.hydrateIssue(
+        issue,
+        scopes: const {IssueHydrationScope.detail},
+        force: true,
+      );
       return IssueMutationResult.success(
         operation: operation,
         issueKey: issueKey,
-        value: refreshed.issues.firstWhere(
-          (candidate) => candidate.key == issueKey,
-        ),
+        value: refreshed,
         revision: writeResult.revision,
       );
     } catch (error) {
@@ -747,6 +751,7 @@ class IssueMutationService {
       }
 
       final movedStateByKey = <String, _IssueIndexState>{};
+      final updatedMarkdownByKey = <String, String>{};
       final changes = <RepositoryFileChange>[];
       final newEpicForSubtree = issue.isEpic ? issue.key : hierarchy.epicKey;
       for (final path in subtreePaths) {
@@ -769,13 +774,15 @@ class IssueMutationService {
             frontmatter['epic'] = null;
           }
           frontmatter['updated'] = DateTime.now().toUtc().toIso8601String();
+          final updatedMarkdown = _writeIssueMarkdown(
+            frontmatter: frontmatter,
+            body: document.body,
+          );
+          updatedMarkdownByKey[currentKey] = updatedMarkdown;
           changes.add(
             RepositoryTextFileChange(
               path: newPath,
-              content: _writeIssueMarkdown(
-                frontmatter: frontmatter,
-                body: document.body,
-              ),
+              content: updatedMarkdown,
               expectedRevision: await _existingTextRevision(
                 provider,
                 path: newPath,
@@ -803,8 +810,24 @@ class IssueMutationService {
             priorityId: snapshotIssue.priorityId,
             assignee: snapshotIssue.assignee,
             labels: snapshotIssue.labels,
-            updatedLabel: snapshotIssue.updatedLabel,
+            updatedLabel:
+                frontmatter['updated']?.toString() ??
+                snapshotIssue.updatedLabel,
             resolutionId: snapshotIssue.resolutionId,
+          );
+        } else if (_isTextArtifactPath(path)) {
+          final file = await provider.readTextFile(path, ref: writeBranch);
+          changes.add(
+            RepositoryTextFileChange(
+              path: newPath,
+              content: file.content,
+              expectedRevision: await _existingTextRevision(
+                provider,
+                path: newPath,
+                ref: writeBranch,
+                blobPaths: blobPaths,
+              ),
+            ),
           );
         } else {
           final attachment = await provider.readAttachment(
@@ -863,11 +886,39 @@ class IssueMutationService {
           changes: changes,
         ),
       );
-      final refreshed = await providerRepository.loadSnapshot();
+      final pathByKey = {
+        for (final state in updatedIndexStates) state.key: state.storagePath,
+      };
+      final updatedIssues = [
+        for (final candidate in snapshot.issues)
+          if (movedStateByKey.containsKey(candidate.key))
+            _retargetIssueForHierarchyMove(
+              candidate,
+              state: movedStateByKey[candidate.key]!,
+              pathByKey: pathByKey,
+              rawMarkdown: updatedMarkdownByKey[candidate.key],
+            )
+          else
+            candidate,
+      ]..sort((left, right) => left.key.compareTo(right.key));
+      providerRepository.replaceCachedState(
+        snapshot: TrackerSnapshot(
+          project: snapshot.project,
+          issues: updatedIssues,
+          repositoryIndex: _deriveRepositoryIndex(
+            updatedIssues,
+            snapshot.repositoryIndex.deleted,
+          ),
+          loadWarnings: snapshot.loadWarnings,
+          readiness: snapshot.readiness,
+          startupRecovery: snapshot.startupRecovery,
+        ),
+        tree: await provider.listTree(ref: writeBranch),
+      );
       return IssueMutationResult.success(
         operation: operation,
         issueKey: issueKey,
-        value: refreshed.issues.firstWhere(
+        value: updatedIssues.firstWhere(
           (candidate) => candidate.key == issueKey,
         ),
         revision: commitResult.revision,
@@ -1101,7 +1152,8 @@ class IssueMutationService {
     String issueKey,
     String operation,
   ) async {
-    final snapshot = await repository.loadSnapshot();
+    final snapshot =
+        repository.cachedSnapshot ?? await repository.loadSnapshot();
     final matches = snapshot.issues.where(
       (candidate) => candidate.key == issueKey,
     );
@@ -1277,6 +1329,126 @@ class _IssueIndexState {
   final List<String> labels;
   final String updatedLabel;
   final String? resolutionId;
+}
+
+TrackStateIssue _retargetIssueForHierarchyMove(
+  TrackStateIssue issue, {
+  required _IssueIndexState state,
+  required Map<String, String> pathByKey,
+  String? rawMarkdown,
+}) {
+  final oldRoot = _issueRoot(issue.storagePath);
+  final newRoot = _issueRoot(state.storagePath);
+
+  String rebaseArtifactPath(String path) {
+    if (path.isEmpty || !path.startsWith(oldRoot)) {
+      return path;
+    }
+    return '$newRoot${path.substring(oldRoot.length)}';
+  }
+
+  return TrackStateIssue(
+    key: issue.key,
+    project: issue.project,
+    issueType: issue.issueType,
+    issueTypeId: issue.issueTypeId,
+    status: issue.status,
+    statusId: issue.statusId,
+    priority: issue.priority,
+    priorityId: issue.priorityId,
+    summary: issue.summary,
+    description: issue.description,
+    assignee: issue.assignee,
+    reporter: issue.reporter,
+    labels: issue.labels,
+    components: issue.components,
+    fixVersionIds: issue.fixVersionIds,
+    watchers: issue.watchers,
+    customFields: issue.customFields,
+    parentKey: state.parentKey,
+    epicKey: state.epicKey,
+    parentPath: state.parentKey == null ? null : pathByKey[state.parentKey!],
+    epicPath: state.epicKey == null ? null : pathByKey[state.epicKey!],
+    progress: issue.progress,
+    updatedLabel: state.updatedLabel,
+    acceptanceCriteria: issue.acceptanceCriteria,
+    comments: [
+      for (final comment in issue.comments)
+        IssueComment(
+          id: comment.id,
+          author: comment.author,
+          body: comment.body,
+          updatedLabel: comment.updatedLabel,
+          createdAt: comment.createdAt,
+          updatedAt: comment.updatedAt,
+          storagePath: rebaseArtifactPath(comment.storagePath),
+        ),
+    ],
+    links: issue.links,
+    attachments: [
+      for (final attachment in issue.attachments)
+        IssueAttachment(
+          id: rebaseArtifactPath(attachment.id),
+          name: attachment.name,
+          mediaType: attachment.mediaType,
+          sizeBytes: attachment.sizeBytes,
+          author: attachment.author,
+          createdAt: attachment.createdAt,
+          storagePath: rebaseArtifactPath(attachment.storagePath),
+          revisionOrOid: attachment.revisionOrOid,
+        ),
+    ],
+    isArchived: issue.isArchived,
+    hasDetailLoaded: issue.hasDetailLoaded,
+    hasCommentsLoaded: issue.hasCommentsLoaded,
+    hasAttachmentsLoaded: issue.hasAttachmentsLoaded,
+    resolutionId: issue.resolutionId,
+    storagePath: state.storagePath,
+    rawMarkdown: rawMarkdown ?? issue.rawMarkdown,
+  );
+}
+
+RepositoryIndex _deriveRepositoryIndex(
+  List<TrackStateIssue> issues,
+  List<DeletedIssueTombstone> deleted,
+) {
+  final pathByKey = {for (final issue in issues) issue.key: issue.storagePath};
+  final childrenByKey = <String, List<String>>{};
+  for (final issue in issues) {
+    final relationshipParent = issue.parentKey ?? issue.epicKey;
+    if (relationshipParent == null) {
+      continue;
+    }
+    childrenByKey
+        .putIfAbsent(relationshipParent, () => <String>[])
+        .add(issue.key);
+  }
+  final entries = [
+    for (final issue in issues)
+      RepositoryIssueIndexEntry(
+        key: issue.key,
+        path: issue.storagePath,
+        parentKey: issue.parentKey,
+        epicKey: issue.epicKey,
+        parentPath: issue.parentKey == null
+            ? null
+            : pathByKey[issue.parentKey!],
+        epicPath: issue.epicKey == null ? null : pathByKey[issue.epicKey!],
+        childKeys: [...(childrenByKey[issue.key] ?? const <String>[])]..sort(),
+        isArchived: issue.isArchived,
+        summary: issue.summary,
+        issueTypeId: issue.issueTypeId,
+        statusId: issue.statusId,
+        priorityId: issue.priorityId,
+        assignee: _normalizeNullableString(issue.assignee),
+        labels: issue.labels,
+        updatedLabel: issue.updatedLabel,
+        progress: issue.progress,
+        resolutionId: issue.resolutionId,
+        revision: null,
+      ),
+  ]..sort((left, right) => left.key.compareTo(right.key));
+  return RepositoryIndex(entries: entries, deleted: deleted);
 }
 
 class _CreateIssueFields {
@@ -1520,6 +1692,15 @@ Future<Set<String>> _blobPaths(
 ) async => (await provider.listTree(
   ref: ref,
 )).where((entry) => entry.type == 'blob').map((entry) => entry.path).toSet();
+
+bool _isTextArtifactPath(String path) {
+  final normalized = path.toLowerCase();
+  return normalized.endsWith('.md') ||
+      normalized.endsWith('.json') ||
+      normalized.endsWith('.txt') ||
+      normalized.endsWith('.yaml') ||
+      normalized.endsWith('.yml');
+}
 
 Future<String?> _existingTextRevision(
   TrackStateProviderAdapter provider, {
