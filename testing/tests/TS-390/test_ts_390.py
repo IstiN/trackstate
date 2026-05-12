@@ -72,7 +72,8 @@ def main() -> None:
     gitattributes_text = service.fetch_repo_text(".gitattributes")
     extension = _pick_lfs_extension(gitattributes_text)
     upload_name = f"ts390-hosted-lfs-guidance.{extension}"
-    expected_upload_path = f"{issue_fixture.path}/attachments/{upload_name}"
+    issue_attachments_directory = f"{issue_fixture.path}/attachments"
+    expected_upload_path = f"{issue_attachments_directory}/{upload_name}"
     expected_specific_message = (
         f"{upload_name} follows the Git LFS attachment path and must be uploaded "
         "from a local Git runtime. Existing attachments remain available for "
@@ -86,7 +87,7 @@ def main() -> None:
     )
 
     upload_observation = Ts390AttachmentUploadAttemptObservation(
-        expected_upload_path=expected_upload_path,
+        issue_attachments_directory=issue_attachments_directory,
     )
     runtime = Ts390AttachmentUploadGuardRuntime(
         repository=service.repository,
@@ -250,11 +251,17 @@ def main() -> None:
                     )
 
                     page.upload_attachment()
-                    final_body_text = _wait_for_accessible_fragments(
+                    final_accessible_text = _wait_for_accessible_fragments(
                         page,
                         expected_specific_message_fragments,
                         timeout_ms=60_000,
                     )
+                    page.wait_for_text_absent(
+                        GENERIC_LFS_ERROR_FRAGMENT,
+                        timeout_ms=60_000,
+                    )
+                    final_body_text = page.current_body_text()
+                    result["final_accessible_text"] = final_accessible_text
                     result["final_body_text"] = final_body_text
                     result["attempted_upload_urls"] = list(
                         upload_observation.attempted_upload_urls,
