@@ -13,6 +13,18 @@ import '../../../../domain/models/trackstate_models.dart';
 
 enum TrackerSection { dashboard, board, search, hierarchy, settings }
 
+enum ProjectSettingsTab {
+  statuses,
+  workflows,
+  issueTypes,
+  fields,
+  priorities,
+  components,
+  versions,
+  attachments,
+  locales,
+}
+
 enum RepositoryAccessState { localGit, connected, connectGitHub }
 
 enum HostedRepositoryAccessMode {
@@ -281,6 +293,8 @@ class TrackerViewModel extends ChangeNotifier {
   final Set<String> _loadingIssueComments = <String>{};
   final Set<String> _loadingIssueAttachments = <String>{};
   TrackerSection? _issueDetailReturnSection;
+  ProjectSettingsTab? _projectSettingsTab;
+  int _projectSettingsTabRequest = 0;
   bool _isLoading = false;
   bool _isSaving = false;
   TrackerMessage? _message;
@@ -301,6 +315,8 @@ class TrackerViewModel extends ChangeNotifier {
   bool get isLoadingMoreSearchResults => _isLoadingMoreSearchResults;
   TrackStateIssue? get selectedIssue => _selectedIssue;
   TrackerSection? get issueDetailReturnSection => _issueDetailReturnSection;
+  ProjectSettingsTab? get projectSettingsTab => _projectSettingsTab;
+  int get projectSettingsTabRequest => _projectSettingsTabRequest;
   bool get isLoading => _isLoading;
   bool get hasLoadedInitialSearchResults => _hasLoadedInitialSearchResults;
   bool get hasPublishedBootstrapSnapshot => _snapshot != null;
@@ -569,6 +585,14 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void openProjectSettings({ProjectSettingsTab? tab}) {
+    _projectSettingsTab = tab;
+    _projectSettingsTabRequest += 1;
+    _section = TrackerSection.settings;
+    _issueDetailReturnSection = null;
+    notifyListeners();
+  }
+
   void selectIssue(TrackStateIssue issue, {TrackerSection? returnSection}) {
     _selectedIssue = issue;
     _section = TrackerSection.search;
@@ -609,6 +633,8 @@ class TrackerViewModel extends ChangeNotifier {
     _themePreference = previous._themePreference;
     _jql = previous._jql;
     _issueDetailReturnSection = previous._issueDetailReturnSection;
+    _projectSettingsTab = previous._projectSettingsTab;
+    _projectSettingsTabRequest = previous._projectSettingsTabRequest;
   }
 
   void dismissMessage() {
