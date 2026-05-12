@@ -238,4 +238,139 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'release-backed hosted flow keeps attachments unavailable while explaining the missing hosted support',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
+      });
+      const releaseRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        attachmentUploadMode: AttachmentUploadMode.full,
+        supportsReleaseAttachmentWrites: false,
+        canCheckCollaborators: false,
+      );
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: releaseRestrictedPermission,
+              textFixtures: _githubReleasesProjectTextFixtures(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('^JQL Search\$')).first);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(
+          find.bySemanticsLabel(RegExp('^Attachments\$')).first,
+        );
+        await tester.tap(find.bySemanticsLabel(RegExp('^Attachments\$')).first);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('GitHub Releases uploads are unavailable in the browser'),
+          findsAtLeastNWidgets(1),
+        );
+        expect(
+          find.textContaining(
+            'this project stores new attachments in GitHub Releases',
+          ),
+          findsWidgets,
+        );
+        final chooseAttachment = tester.widget<OutlinedButton>(
+          find.widgetWithText(OutlinedButton, 'Choose attachment'),
+        );
+        final uploadAttachment = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Upload attachment'),
+        );
+        expect(chooseAttachment.onPressed, isNull);
+        expect(uploadAttachment.onPressed, isNull);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'settings hosted callouts show release-backed success messaging when hosted release writes are supported',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
+      });
+      const releaseSupportedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        attachmentUploadMode: AttachmentUploadMode.full,
+        supportsReleaseAttachmentWrites: true,
+        canCheckCollaborators: false,
+      );
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: releaseSupportedPermission,
+              textFixtures: _githubReleasesProjectTextFixtures(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Attachments limited'), findsNothing);
+        expect(
+          find.textContaining(
+            'New attachments use GitHub Releases tags derived as browser-assets-<ISSUE_KEY>',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.text(
+            'New attachments resolve to release tag browser-assets-<ISSUE_KEY>, and this hosted session can complete release-backed uploads in the browser.',
+          ),
+          findsOneWidget,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
 }
+
+Map<String, String> _githubReleasesProjectTextFixtures() => const {
+  'project.json': '''
+{
+  "key": "TRACK",
+  "name": "TrackState.AI",
+  "defaultLocale": "en",
+  "issueKeyPattern": "TRACK-{number}",
+  "dataModel": "nested-tree",
+  "configPath": "config",
+  "attachmentStorage": {
+    "mode": "github-releases",
+    "githubReleases": {
+      "tagPrefix": "browser-assets-"
+    }
+  }
+}
+''',
+};
