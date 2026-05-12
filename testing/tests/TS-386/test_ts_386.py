@@ -47,7 +47,8 @@ class TrackStateCliAttachmentDiscoveryTest(unittest.TestCase):
                 fragment,
                 root_help,
                 "Step 1 failed: the TrackState root help text did not keep the "
-                "attachment command discoverable from the top-level CLI entry point.\n"
+                "attachment upload/download flow discoverable from the top-level "
+                "CLI entry point.\n"
                 f"Missing fragment: {fragment}\n"
                 f"Observed root help:\n{root_help}",
             )

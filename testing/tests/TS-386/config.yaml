@@ -6,4 +6,4 @@ dependencies:
   - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
 notes:
   - Executes the live TrackState CLI help commands from this checkout and falls back to `dart run trackstate ... --help` when a standalone `trackstate` binary is not installed on PATH.
-  - Verifies the root help exposes the attachment command entry point, the upload help documents the required `--issue` and `--file` flags, and the Jira alias help resolves to the same canonical attachment upload help text with `--issueKey` documented as the compatibility alias.
+  - Verifies the root help keeps both `trackstate attachment upload` and `trackstate attachment download` discoverable, the upload help documents the required `--issue` and `--file` flags, and the Jira alias help resolves to the same canonical attachment upload help text with `--issueKey` documented as the compatibility alias.

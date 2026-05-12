@@ -50,7 +50,8 @@ class TrackStateCliAttachmentDiscoveryConfig:
             ),
             required_root_fragments=(
                 "attachment Upload or download one attachment.",
-                "trackstate attachment upload --target local --issue TRACK-1 --file ./design.png",
+                "trackstate attachment upload",
+                "trackstate attachment download",
                 'Use "trackstate <command> --help" for command-specific options.',
             ),
             required_attachment_upload_fragments=(
