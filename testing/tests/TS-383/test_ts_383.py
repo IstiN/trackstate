@@ -139,6 +139,7 @@ def _assert_runtime_expectations(
 
     result["observed_error_code"] = error.get("code")
     result["observed_error_category"] = error.get("category")
+    result["observed_error_exit_code"] = error.get("exitCode")
     result["observed_error_message"] = error.get("message")
     result["observed_error_details"] = error.get("details")
 
@@ -151,6 +152,14 @@ def _assert_runtime_expectations(
             f"Observed payload: {payload}\n"
             f"stdout:\n{observation.result.stdout}\n"
             f"stderr:\n{observation.result.stderr}"
+        )
+    if error.get("exitCode") != config.expected_exit_code:
+        raise AssertionError(
+            "Step 2 failed: the hosted LFS upload error object did not return the "
+            "expected machine-readable exit code.\n"
+            f"Expected error.exitCode: {config.expected_exit_code}\n"
+            f"Observed error.exitCode: {error.get('exitCode')}\n"
+            f"Observed payload: {payload}"
         )
 
     if error.get("code") not in config.accepted_error_codes:
@@ -332,6 +341,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         f"*Command:* {{{result['requested_command']}}}",
         f"*Observed error code:* {{{result.get('observed_error_code')}}}",
         f"*Observed error category:* {{{result.get('observed_error_category')}}}",
+        f"*Observed error exit code:* {{{result.get('observed_error_exit_code')}}}",
         "",
         "*Automation checks*",
         "# Verified the hosted repository already tracked `*.zip` via Git LFS in `.gitattributes`.",
@@ -352,6 +362,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         f"- **Command:** `{result['requested_command']}`",
         f"- **Observed error code:** `{result.get('observed_error_code')}`",
         f"- **Observed error category:** `{result.get('observed_error_category')}`",
+        f"- **Observed error exit code:** `{result.get('observed_error_exit_code')}`",
         "",
         "### Automation",
         "1. Verified the hosted repo `.gitattributes` already tracked `*.zip` through Git LFS.",
@@ -400,6 +411,7 @@ def _write_failure_outputs(
     observed_payload = {
         "code": result.get("observed_error_code"),
         "category": result.get("observed_error_category"),
+        "exitCode": result.get("observed_error_exit_code"),
         "message": result.get("observed_error_message"),
         "details": result.get("observed_error_details"),
     }

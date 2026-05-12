@@ -63,7 +63,7 @@ class PythonTrackStateCliHostedLfsRestrictionFramework(
                 path=path,
                 original_file=self._fetch_repo_file_if_exists(service, path),
             )
-            for path in config.fixture_repo_paths
+            for path in config.cleanup_repo_paths
         )
         setup_actions: list[str] = []
         cleanup_actions: list[str] = []

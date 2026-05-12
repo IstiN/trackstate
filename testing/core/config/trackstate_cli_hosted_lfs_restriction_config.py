@@ -42,6 +42,13 @@ class TrackStateCliHostedLfsRestrictionConfig:
             self.issue_main_path,
         )
 
+    @property
+    def cleanup_repo_paths(self) -> tuple[str, ...]:
+        return (
+            *self.fixture_repo_paths,
+            self.attachment_repo_path,
+        )
+
     @classmethod
     def from_env(cls) -> "TrackStateCliHostedLfsRestrictionConfig":
         live_setup = load_live_setup_test_config()
