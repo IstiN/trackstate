@@ -248,25 +248,50 @@ void main() {
           await tester.tap(categoryDropdown.first);
           await tester.pumpAndSettle();
 
-          for (final option in const ['New', 'In progress', 'Done']) {
-            if (!robot.visibleTexts().contains(option)) {
-              failures.add(
-                'Step 4 failed: the Category selector did not show the visible "$option" option after opening the status editor dropdown. '
-                'Visible text: ${_formatSnapshot(robot.visibleTexts())}.',
+          final categoryOptions = const ['New', 'In progress', 'Done'];
+          final categoryMenuScope = _activeMenuOverlayScope(
+            tester,
+            requiredTexts: categoryOptions,
+          );
+          if (categoryMenuScope == null) {
+            failures.add(
+              'Step 4 failed: opening the Category selector did not expose a dropdown/menu overlay containing ${categoryOptions.join(', ')}. '
+              'Visible text: ${_formatSnapshot(robot.visibleTexts(), limit: 60)}.',
+            );
+          } else {
+            final categoryMenuTexts = _visibleTextsWithin(
+              tester,
+              categoryMenuScope,
+            );
+            for (final option in categoryOptions) {
+              if (!categoryMenuTexts.contains(option)) {
+                failures.add(
+                  'Step 4 failed: the Category selector did not show the visible "$option" option inside the opened dropdown/menu overlay. '
+                  'Visible dropdown text: ${_formatSnapshot(categoryMenuTexts)}.',
+                );
+                continue;
+              }
+
+              final contrast = _contrastForVisibleTextWithin(
+                tester,
+                categoryMenuScope,
+                option,
               );
-              continue;
+              if (contrast < 4.5) {
+                failures.add(
+                  'Step 4 failed: the visible "$option" category option contrast inside the opened dropdown/menu overlay was ${contrast.toStringAsFixed(2)}:1, below the required WCAG AA 4.5:1 threshold.',
+                );
+              }
             }
 
-            final contrast = _contrastForVisibleText(tester, option);
-            if (contrast < 4.5) {
-              failures.add(
-                'Step 4 failed: the visible "$option" category option contrast was ${contrast.toStringAsFixed(2)}:1, below the required WCAG AA 4.5:1 threshold.',
-              );
-            }
+            final doneOption = find.descendant(
+              of: categoryMenuScope,
+              matching: find.text('Done', findRichText: true),
+            );
+            await tester.ensureVisible(doneOption.last);
+            await tester.tap(doneOption.last, warnIfMissed: false);
+            await tester.pumpAndSettle();
           }
-
-          await tester.tap(find.text('Done').last);
-          await tester.pumpAndSettle();
         }
 
         if (failures.isNotEmpty) {
@@ -400,6 +425,31 @@ Finder _activeEditorScope(WidgetTester tester, String title) {
     matching: find.byType(Material),
   );
   return _smallestByArea(tester, materialAncestors);
+}
+
+Finder? _activeMenuOverlayScope(
+  WidgetTester tester, {
+  required List<String> requiredTexts,
+}) {
+  Finder? bestMatch;
+  var bestArea = double.infinity;
+  final materialCandidates = find.byType(Material);
+  final count = materialCandidates.evaluate().length;
+  for (var index = 0; index < count; index += 1) {
+    final candidate = materialCandidates.at(index);
+    final visibleTexts = _visibleTextsWithin(tester, candidate);
+    if (!requiredTexts.every(visibleTexts.contains)) {
+      continue;
+    }
+
+    final rect = tester.getRect(candidate);
+    final area = rect.width * rect.height;
+    if (area <= bestArea) {
+      bestArea = area;
+      bestMatch = candidate;
+    }
+  }
+  return bestMatch;
 }
 
 bool _isInteractiveTarget(SemanticsNode node) {
@@ -542,10 +592,20 @@ int _indexOfLabelContaining(List<String> labels, String expected) {
   return -1;
 }
 
-double _contrastForVisibleText(WidgetTester tester, String text) {
-  final textFinder = find.text(text).last;
-  final foreground = _renderedTextColor(tester, textFinder);
-  final background = _backgroundColorForText(tester, textFinder);
+double _contrastForVisibleTextWithin(
+  WidgetTester tester,
+  Finder scope,
+  String text,
+) {
+  final textFinder = find.descendant(
+    of: scope,
+    matching: find.text(text, findRichText: true),
+  );
+  if (textFinder.evaluate().isEmpty) {
+    throw StateError('No visible "$text" text found within $scope.');
+  }
+  final foreground = _renderedTextColor(tester, textFinder.last);
+  final background = _backgroundColorForText(tester, textFinder.last);
   return contrastRatio(foreground, background);
 }
 
