@@ -14,6 +14,9 @@ if str(REPO_ROOT) not in sys.path:
 from testing.components.pages.live_settings_locales_page import (  # noqa: E402
     LiveSettingsLocalesPage,
 )
+from testing.components.services.live_locale_warning_visual_probe import (  # noqa: E402
+    LiveLocaleWarningVisualProbe,
+)
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveHostedCatalogEntry,
     LiveSetupRepositoryService,
@@ -44,6 +47,7 @@ EXPECTED_WARNING_BACKGROUND_COLORS = {
     "rgb(241, 228, 213)",
     "rgb(36, 40, 39)",
 }
+WARNING_MIN_CONTRAST_RATIO = 4.5
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts466_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts466_success.png"
@@ -54,6 +58,7 @@ def main() -> None:
 
     config = load_live_setup_test_config()
     service = LiveSetupRepositoryService(config=config)
+    warning_visual_probe = LiveLocaleWarningVisualProbe()
     token = service.token
     if not token:
         raise RuntimeError(
@@ -267,12 +272,15 @@ def main() -> None:
                     value="",
                 )
                 result["status_after_edit"] = _entry_payload(status_after)
-                _assert_warning_state(
+                status_after_warning_visual = _assert_warning_state(
+                    page=page,
                     step=7,
                     entry=status_after,
                     expected_warning_text=expected_status_warning,
                     page_body_text=page.current_body_text(),
+                    warning_visual_probe=warning_visual_probe,
                 )
+                result["status_after_edit_warning_visual"] = status_after_warning_visual
                 _record_step(
                     result,
                     step=7,
@@ -322,12 +330,15 @@ def main() -> None:
                         f'Observed translation: "{priority_saved.translation}"\n'
                         f"Observed row: {priority_saved.row_label}",
                     )
-                _assert_warning_state(
+                status_after_save_warning_visual = _assert_warning_state(
+                    page=page,
                     step=9,
                     entry=status_saved,
                     expected_warning_text=expected_status_warning,
                     page_body_text=page.current_body_text(),
+                    warning_visual_probe=warning_visual_probe,
                 )
+                result["status_after_save_warning_visual"] = status_after_save_warning_visual
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
                 result["human_verification"] = {
@@ -657,16 +668,24 @@ def _entry_payload(entry) -> dict[str, object]:
         "warning_background_color": entry.warning_background_color,
         "warning_border_width": entry.warning_border_width,
         "input_index": entry.input_index,
+        "input_rect": {
+            "left": entry.input_rect.left,
+            "top": entry.input_rect.top,
+            "width": entry.input_rect.width,
+            "height": entry.input_rect.height,
+        },
     }
 
 
 def _assert_warning_state(
     *,
+    page: LiveSettingsLocalesPage,
     step: int,
     entry,
     expected_warning_text: str,
     page_body_text: str,
-) -> None:
+    warning_visual_probe: LiveLocaleWarningVisualProbe,
+) -> dict[str, object] | None:
     if entry.warning_text != expected_warning_text:
         raise AssertionError(
             f"Step {step} failed: the empty Status translation did not show the "
@@ -681,6 +700,38 @@ def _assert_warning_state(
     normalized_border_color = _normalize_css_color(entry.warning_border_color)
     normalized_background_color = _normalize_css_color(entry.warning_background_color)
     border_width = _parse_css_pixels(entry.warning_border_width)
+    if (
+        normalized_text_color is None
+        or normalized_border_color is None
+        or normalized_background_color is None
+        or border_width <= 0
+    ):
+        warning_screenshot_path = OUTPUTS_DIR / f"ts466_warning_step_{step}.png"
+        page.screenshot(str(warning_screenshot_path))
+        visual_observation = warning_visual_probe.observe(
+            screenshot_path=warning_screenshot_path,
+            input_rect=entry.input_rect,
+        )
+        if visual_observation.foreground_contrast_ratio < WARNING_MIN_CONTRAST_RATIO:
+            raise AssertionError(
+                f"Step {step} failed: the visible warning pill did not keep enough "
+                "foreground contrast for the fallback warning.\n"
+                f"Observed warning visual: {visual_observation.describe()}\n"
+                f"Minimum contrast: {WARNING_MIN_CONTRAST_RATIO:.1f}:1\n"
+                f"Observed body text:\n{page_body_text}",
+            )
+        return {
+            "background_hex": visual_observation.background_hex,
+            "expected_background_hex": visual_observation.expected_background_hex,
+            "foreground_hex": visual_observation.foreground_hex,
+            "foreground_contrast_ratio": round(
+                visual_observation.foreground_contrast_ratio,
+                2,
+            ),
+            "screenshot_path": visual_observation.screenshot_path,
+            "crop_box": visual_observation.crop_box,
+            "warning_box": visual_observation.warning_box,
+        }
     if (
         normalized_text_color not in EXPECTED_WARNING_COLORS
         or normalized_border_color not in EXPECTED_WARNING_COLORS
@@ -697,9 +748,15 @@ def _assert_warning_state(
             f"Observed warning border color: {entry.warning_border_color!r}\n"
             f"Observed warning background color: {entry.warning_background_color!r}\n"
             f"Observed warning border width: {entry.warning_border_width!r}\n"
-            f"Observed row: {entry.row_label}\n"
-            f"Observed body text:\n{page_body_text}",
-        )
+                f"Observed row: {entry.row_label}\n"
+                f"Observed body text:\n{page_body_text}",
+            )
+    return {
+        "text_color": normalized_text_color,
+        "border_color": normalized_border_color,
+        "background_color": normalized_background_color,
+        "border_width": border_width,
+    }
 
 
 def _warning_state_summary(entry) -> str:
