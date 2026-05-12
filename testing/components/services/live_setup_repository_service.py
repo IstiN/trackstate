@@ -69,6 +69,20 @@ class LiveHostedLocaleState:
     payload: dict[str, object]
 
 
+@dataclass(frozen=True)
+class LiveHostedReleaseAsset:
+    id: int
+    name: str
+
+
+@dataclass(frozen=True)
+class LiveHostedRelease:
+    id: int
+    tag_name: str
+    name: str
+    assets: list[LiveHostedReleaseAsset]
+
+
 class LiveSetupRepositoryService:
     def __init__(
         self,
@@ -320,6 +334,75 @@ class LiveSetupRepositoryService:
                     pending_paths.append(str(entry["path"]))
 
         return sorted(issue_paths)
+
+    def fetch_release_by_tag(self, tag_name: str) -> LiveHostedRelease | None:
+        try:
+            payload = self._read_json(
+                f"/repos/{self.repository}/releases/tags/{tag_name}",
+            )
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                return None
+            raise
+        if not isinstance(payload, dict):
+            raise RuntimeError(
+                f"GitHub response for release tag {tag_name} was not an object.",
+            )
+        return LiveHostedRelease(
+            id=int(payload.get("id", 0)),
+            tag_name=str(payload.get("tag_name", "")).strip(),
+            name=str(payload.get("name", "")).strip(),
+            assets=[
+                LiveHostedReleaseAsset(
+                    id=int(asset.get("id", 0)),
+                    name=str(asset.get("name", "")).strip(),
+                )
+                for asset in payload.get("assets", [])
+                if isinstance(asset, dict)
+            ],
+        )
+
+    def delete_release_asset(self, asset_id: int) -> None:
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{self.repository}/releases/assets/{asset_id}",
+            method="DELETE",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                **(
+                    {"Authorization": f"Bearer {self.token}"}
+                    if self.token
+                    else {}
+                ),
+            },
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            if response.status != 204:
+                raise RuntimeError(
+                    "GitHub delete for release asset "
+                    f"{asset_id} returned unexpected status {response.status}.",
+                )
+
+    def delete_release(self, release_id: int) -> None:
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{self.repository}/releases/{release_id}",
+            method="DELETE",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                **(
+                    {"Authorization": f"Bearer {self.token}"}
+                    if self.token
+                    else {}
+                ),
+            },
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            if response.status != 204:
+                raise RuntimeError(
+                    f"GitHub delete for release {release_id} returned unexpected status "
+                    f"{response.status}.",
+                )
 
     def _read_config_names(self, path: str) -> list[str]:
         values = self._read_repo_json(path)
