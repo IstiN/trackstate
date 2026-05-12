@@ -338,6 +338,29 @@ class TrackerViewModel extends ChangeNotifier {
   };
   bool get exposesHostedAccessGates =>
       !usesLocalPersistence && providerSession != null;
+  ProjectAttachmentStorageSettings get attachmentStorageSettings =>
+      project?.attachmentStorage ?? const ProjectAttachmentStorageSettings();
+  bool get usesGitHubReleasesAttachmentStorage =>
+      attachmentStorageSettings.mode == AttachmentStorageMode.githubReleases;
+  bool get supportsHostedReleaseAttachmentWrites =>
+      !usesLocalPersistence &&
+      (providerSession?.supportsReleaseAttachmentWrites ?? false);
+  bool get hasFullySupportedHostedAttachmentWrites {
+    if (usesLocalPersistence || !exposesHostedAccessGates) {
+      return true;
+    }
+    final session = providerSession;
+    if (session == null ||
+        session.connectionState != ProviderConnectionState.connected ||
+        !session.canWrite) {
+      return false;
+    }
+    if (usesGitHubReleasesAttachmentStorage) {
+      return session.supportsReleaseAttachmentWrites;
+    }
+    return session.attachmentUploadMode == AttachmentUploadMode.full;
+  }
+
   HostedRepositoryAccessMode get hostedRepositoryAccessMode {
     if (usesLocalPersistence) {
       return HostedRepositoryAccessMode.writable;
@@ -350,7 +373,7 @@ class TrackerViewModel extends ChangeNotifier {
     if (!session.canWrite) {
       return HostedRepositoryAccessMode.readOnly;
     }
-    if (session.attachmentUploadMode != AttachmentUploadMode.full) {
+    if (!hasFullySupportedHostedAttachmentWrites) {
       return HostedRepositoryAccessMode.attachmentRestricted;
     }
     return HostedRepositoryAccessMode.writable;
@@ -365,10 +388,15 @@ class TrackerViewModel extends ChangeNotifier {
       return true;
     }
     final session = providerSession;
-    return session != null &&
-        session.connectionState == ProviderConnectionState.connected &&
-        session.canWrite &&
-        session.canManageAttachments;
+    if (session == null ||
+        session.connectionState != ProviderConnectionState.connected ||
+        !session.canWrite) {
+      return false;
+    }
+    if (usesGitHubReleasesAttachmentStorage) {
+      return session.supportsReleaseAttachmentWrites;
+    }
+    return session.canManageAttachments;
   }
 
   bool get hasBlockedWriteAccess =>

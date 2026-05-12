@@ -322,6 +322,12 @@ abstract class AppLocalizations {
   /// **'Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.'**
   String get attachmentsLimitedUploadMessage;
 
+  /// No description provided for @attachmentsGitHubReleasesUnsupportedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This project stores new attachments in GitHub Releases. Existing attachments remain available for download, but hosted release-backed uploads are not available in this browser session yet.'**
+  String get attachmentsGitHubReleasesUnsupportedMessage;
+
   /// No description provided for @attachmentsAccessMessageDisconnected.
   ///
   /// In en, this message translates to:
@@ -657,6 +663,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Switching project storage only affects new attachments. Existing attachments keep their original backend metadata.'**
   String get attachmentStorageImmutableNote;
+
+  /// No description provided for @attachmentStorageRepositoryPathCalloutTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Repository-path attachment storage'**
+  String get attachmentStorageRepositoryPathCalloutTitle;
+
+  /// No description provided for @attachmentStorageRepositoryPathSupportedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'New attachments are stored in <issue-root>/attachments/<file> inside the project repository, and this hosted session can upload them directly.'**
+  String get attachmentStorageRepositoryPathSupportedMessage;
+
+  /// No description provided for @attachmentStorageRepositoryPathLimitedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'New attachments are stored in <issue-root>/attachments/<file>. Browser uploads work for repository files, but Git LFS attachments still need a local Git runtime.'**
+  String get attachmentStorageRepositoryPathLimitedMessage;
+
+  /// No description provided for @attachmentStorageRepositoryPathRestrictedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'New attachments are stored in <issue-root>/attachments/<file>, but this hosted session cannot upload them in the browser.'**
+  String get attachmentStorageRepositoryPathRestrictedMessage;
+
+  /// No description provided for @attachmentStorageGitHubReleasesCalloutTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'GitHub Releases attachment storage'**
+  String get attachmentStorageGitHubReleasesCalloutTitle;
+
+  /// No description provided for @attachmentStorageGitHubReleasesSupportedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'New attachments resolve to release tag {tagPrefix}<ISSUE_KEY>, and this hosted session can complete release-backed uploads in the browser.'**
+  String attachmentStorageGitHubReleasesSupportedMessage(String tagPrefix);
+
+  /// No description provided for @attachmentStorageGitHubReleasesRestrictedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'New attachments resolve to release tag {tagPrefix}<ISSUE_KEY>, but this hosted session cannot complete release-backed uploads in the browser yet.'**
+  String attachmentStorageGitHubReleasesRestrictedMessage(String tagPrefix);
 
   /// No description provided for @language.
   ///
@@ -1132,6 +1180,18 @@ abstract class AppLocalizations {
   /// **'Issue edits, comments, and browser-supported attachment uploads can continue here. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.'**
   String get repositoryAccessAttachmentLimitedMessage;
 
+  /// No description provided for @repositoryAccessReleaseRestrictedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'GitHub Releases uploads are unavailable in the browser'**
+  String get repositoryAccessReleaseRestrictedTitle;
+
+  /// No description provided for @repositoryAccessReleaseRestrictedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Issue edits and comments can continue, but this project stores new attachments in GitHub Releases and this hosted session cannot complete release-backed uploads yet.'**
+  String get repositoryAccessReleaseRestrictedMessage;
+
   /// No description provided for @repositoryAccessSettingsHint.
   ///
   /// In en, this message translates to:
@@ -1285,6 +1345,25 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Connected as {login} to {repository}.'**
   String githubConnected(String login, String repository);
+
+  /// No description provided for @repositoryAccessConnectedRepositoryPathMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected as {login} to {repository}. New attachments use repository-path storage in this repository.'**
+  String repositoryAccessConnectedRepositoryPathMessage(
+    String login,
+    String repository,
+  );
+
+  /// No description provided for @repositoryAccessConnectedGitHubReleasesMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected as {login} to {repository}. New attachments use GitHub Releases tags derived as {tagPrefix}<ISSUE_KEY>.'**
+  String repositoryAccessConnectedGitHubReleasesMessage(
+    String login,
+    String repository,
+    String tagPrefix,
+  );
 
   /// No description provided for @storedGitHubTokenInvalid.
   ///
