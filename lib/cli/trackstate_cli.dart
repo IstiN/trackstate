@@ -2582,7 +2582,11 @@ class TrackStateCli {
           );
         }
         return _ReadResponse(
-          text: _ticketText(issue: issue, project: snapshot.project),
+          text: _ticketText(
+            issue: issue,
+            project: snapshot.project,
+            locale: locale,
+          ),
           jsonPayload: _jiraTicketPayload(
             issue: issue,
             project: snapshot.project,
@@ -2596,7 +2600,15 @@ class TrackStateCli {
           text: _listText(
             title: 'Fields',
             values: snapshot.project.fieldDefinitions.map(
-              (field) => field.name,
+              (field) => _metadataTextLabel(
+                canonicalName: field.name,
+                locale: locale,
+                localizedName: (requestedLocale) =>
+                    snapshot.project.fieldLabel(
+                      field.id,
+                      locale: requestedLocale,
+                    ),
+              ),
             ),
           ),
           jsonPayload: [
@@ -2616,7 +2628,15 @@ class TrackStateCli {
           text: _listText(
             title: 'Statuses',
             values: snapshot.project.statusDefinitions.map(
-              (status) => status.name,
+              (status) => _metadataTextLabel(
+                canonicalName: status.name,
+                locale: locale,
+                localizedName: (requestedLocale) =>
+                    snapshot.project.statusLabel(
+                      status.id,
+                      locale: requestedLocale,
+                    ),
+              ),
             ),
           ),
           jsonPayload: [
@@ -2651,7 +2671,15 @@ class TrackStateCli {
           text: _listText(
             title: 'Issue types',
             values: snapshot.project.issueTypeDefinitions.map(
-              (item) => item.name,
+              (item) => _metadataTextLabel(
+                canonicalName: item.name,
+                locale: locale,
+                localizedName: (requestedLocale) =>
+                    snapshot.project.issueTypeLabel(
+                      item.id,
+                      locale: requestedLocale,
+                    ),
+              ),
             ),
           ),
           jsonPayload: [
@@ -2671,7 +2699,15 @@ class TrackStateCli {
           text: _listText(
             title: 'Components',
             values: snapshot.project.componentDefinitions.map(
-              (item) => item.name,
+              (item) => _metadataTextLabel(
+                canonicalName: item.name,
+                locale: locale,
+                localizedName: (requestedLocale) =>
+                    snapshot.project.componentLabel(
+                      item.id,
+                      locale: requestedLocale,
+                    ),
+              ),
             ),
           ),
           jsonPayload: [
@@ -2691,7 +2727,15 @@ class TrackStateCli {
           text: _listText(
             title: 'Versions',
             values: snapshot.project.versionDefinitions.map(
-              (item) => item.name,
+              (item) => _metadataTextLabel(
+                canonicalName: item.name,
+                locale: locale,
+                localizedName: (requestedLocale) =>
+                    snapshot.project.versionLabel(
+                      item.id,
+                      locale: requestedLocale,
+                    ),
+              ),
             ),
           ),
           jsonPayload: [
@@ -5205,12 +5249,35 @@ class TrackStateCli {
   String _ticketText({
     required TrackStateIssue issue,
     required ProjectConfig project,
+    String? locale,
   }) => [
     '${issue.key}: ${issue.summary}',
     'Project: ${project.key}',
-    'Type: ${project.issueTypeLabel(issue.issueTypeId)}',
-    'Status: ${project.statusLabel(issue.statusId)}',
-    'Priority: ${project.priorityLabel(issue.priorityId)}',
+    'Type: ${_metadataTextLabel(
+      canonicalName: _findConfigEntry(
+        project.issueTypeDefinitions,
+        issue.issueTypeId,
+      ).name,
+      locale: locale,
+      localizedName: (requestedLocale) =>
+          project.issueTypeLabel(issue.issueTypeId, locale: requestedLocale),
+    )}',
+    'Status: ${_metadataTextLabel(
+      canonicalName: _findConfigEntry(project.statusDefinitions, issue.statusId)
+          .name,
+      locale: locale,
+      localizedName: (requestedLocale) =>
+          project.statusLabel(issue.statusId, locale: requestedLocale),
+    )}',
+    'Priority: ${_metadataTextLabel(
+      canonicalName: _findConfigEntry(
+        project.priorityDefinitions,
+        issue.priorityId,
+      ).name,
+      locale: locale,
+      localizedName: (requestedLocale) =>
+          project.priorityLabel(issue.priorityId, locale: requestedLocale),
+    )}',
   ].join('\n');
 
   String _listText({required String title, required Iterable<String> values}) {
@@ -5219,6 +5286,18 @@ class TrackStateCli {
       return '$title\nNo entries found.';
     }
     return [title, ...items].join('\n');
+  }
+
+  String _metadataTextLabel({
+    required String canonicalName,
+    required String? locale,
+    required String Function(String locale) localizedName,
+  }) {
+    final requestedLocale = locale?.trim();
+    if (requestedLocale == null || requestedLocale.isEmpty) {
+      return canonicalName;
+    }
+    return localizedName(requestedLocale);
   }
 
   String _userText({
