@@ -404,6 +404,38 @@ class LiveSetupRepositoryService:
                     f"{response.status}.",
                 )
 
+    def create_release(
+        self,
+        *,
+        tag_name: str,
+        name: str,
+        body: str = "",
+        target_commitish: str | None = None,
+        draft: bool = True,
+        prerelease: bool = False,
+    ) -> LiveHostedRelease:
+        payload = self._write_json(
+            f"/repos/{self.repository}/releases",
+            payload={
+                "tag_name": tag_name,
+                "name": name,
+                "body": body,
+                "target_commitish": target_commitish or self.ref,
+                "draft": draft,
+                "prerelease": prerelease,
+            },
+            method="POST",
+        )
+        return self._parse_release(payload, context=f"create release {tag_name}")
+
+    def update_release_name(self, release_id: int, *, name: str) -> LiveHostedRelease:
+        payload = self._write_json(
+            f"/repos/{self.repository}/releases/{release_id}",
+            payload={"name": name},
+            method="PATCH",
+        )
+        return self._parse_release(payload, context=f"update release {release_id}")
+
     def _read_config_names(self, path: str) -> list[str]:
         values = self._read_repo_json(path)
         return [
@@ -527,6 +559,42 @@ class LiveSetupRepositoryService:
         )
         with urllib.request.urlopen(request, timeout=60) as response:
             return json.loads(response.read().decode("utf-8"))
+
+    def _write_json(self, path: str, *, payload: dict[str, object], method: str):
+        request = urllib.request.Request(
+            f"https://api.github.com{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            method=method,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Content-Type": "application/json",
+                **(
+                    {"Authorization": f"Bearer {self.token}"}
+                    if self.token
+                    else {}
+                ),
+            },
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def _parse_release(self, payload: object, *, context: str) -> LiveHostedRelease:
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"GitHub response for {context} was not an object.")
+        return LiveHostedRelease(
+            id=int(payload.get("id", 0)),
+            tag_name=str(payload.get("tag_name", "")).strip(),
+            name=str(payload.get("name", "")).strip(),
+            assets=[
+                LiveHostedReleaseAsset(
+                    id=int(asset.get("id", 0)),
+                    name=str(asset.get("name", "")).strip(),
+                )
+                for asset in payload.get("assets", [])
+                if isinstance(asset, dict)
+            ],
+        )
 
 
 LiveHostedRepositoryFile = HostedRepositoryFile
