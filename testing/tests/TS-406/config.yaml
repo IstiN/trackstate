@@ -1,0 +1,8 @@
+test_id: TS-406
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Exercises the hosted tracker settings administration flow at https://istin.github.io/trackstate-setup/.
+  - Creates the project-level Bug Workflow when absent, assigns it to the Bug issue type, and verifies persistence from the live UI and repository config.
