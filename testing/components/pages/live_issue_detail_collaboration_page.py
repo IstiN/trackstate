@@ -284,6 +284,18 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=timeout_ms,
         )
 
+    def click_button_via_semantics_center(
+        self,
+        label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        self.wait_for_text(label, timeout_ms=timeout_ms)
+        rect = self.find_semantics_rect_containing_text(label)
+        self._session.mouse_click(
+            rect.left + (rect.width / 2),
+            rect.top + (rect.height / 2),
+        )
     def wait_for_text_fragment(
         self,
         fragment: str,
@@ -743,6 +755,35 @@ class LiveIssueDetailCollaborationPage:
         selector = f'[aria-label*="{self._escape(fragment)}"]'
         return self._session.count(selector)
 
+    def visible_accessible_label_count_containing(self, fragment: str) -> int:
+        payload = self._session.evaluate(
+            """
+            ({ fragment }) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  return false;
+                }
+                const style = window.getComputedStyle(element);
+                return style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const hasVisibleSurface = (element) =>
+                isVisible(element)
+                || Array.from(element.querySelectorAll('*')).some(isVisible);
+              return Array.from(document.querySelectorAll('[aria-label]')).filter(
+                (element) =>
+                  (element.getAttribute('aria-label') ?? '').includes(fragment)
+                  && hasVisibleSurface(element),
+              ).length;
+            }
+            """,
+            arg={"fragment": fragment},
+        )
+        return int(payload) if isinstance(payload, int) else 0
+
     def wait_for_accessible_label_fragment(
         self,
         fragment: str,
@@ -761,6 +802,51 @@ class LiveIssueDetailCollaborationPage:
             }
             """,
             arg={"selector": selector},
+        )
+        return str(payload).strip()
+
+    def wait_for_visible_accessible_label_fragment(
+        self,
+        fragment: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        payload = self._session.wait_for_function(
+            """
+            ({ fragment }) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  return false;
+                }
+                const style = window.getComputedStyle(element);
+                return style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const hasVisibleSurface = (element) =>
+                isVisible(element)
+                || Array.from(element.querySelectorAll('*')).some(isVisible);
+              const seen = new Set();
+              const matches = Array.from(document.querySelectorAll('[aria-label]'))
+                .map((element) => ({
+                  label: element.getAttribute('aria-label') ?? '',
+                  visible: hasVisibleSurface(element),
+                }))
+                .filter((candidate) =>
+                  candidate.visible
+                  && candidate.label.includes(fragment)
+                  && !seen.has(candidate.label)
+                  && seen.add(candidate.label),
+                )
+                .map((candidate) => candidate.label)
+                .sort((left, right) => right.length - left.length);
+              return matches[0] ?? null;
+            }
+            """,
+            arg={"fragment": fragment},
+            timeout_ms=timeout_ms,
         )
         return str(payload).strip()
 

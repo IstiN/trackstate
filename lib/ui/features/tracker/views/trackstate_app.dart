@@ -1313,26 +1313,18 @@ class _AccessCallout extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   if (primaryActionLabel != null && onPrimaryAction != null)
-                    Semantics(
-                      button: true,
-                      label: primaryActionLabel,
-                      child: OutlinedButton(
-                        onPressed: onPrimaryAction,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: colors.text,
-                          side: BorderSide(color: accentColor),
-                        ),
-                        child: Text(primaryActionLabel!),
+                    OutlinedButton(
+                      onPressed: onPrimaryAction,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: colors.text,
+                        side: BorderSide(color: accentColor),
                       ),
+                      child: Text(primaryActionLabel!),
                     ),
                   if (secondaryActionLabel != null && onSecondaryAction != null)
-                    Semantics(
-                      button: true,
-                      label: secondaryActionLabel,
-                      child: FilledButton(
-                        onPressed: onSecondaryAction,
-                        child: Text(secondaryActionLabel!),
-                      ),
+                    FilledButton(
+                      onPressed: onSecondaryAction,
+                      child: Text(secondaryActionLabel!),
                     ),
                 ],
               ),

@@ -1,0 +1,44 @@
+test_id: TS-553
+type: cli
+framework: python
+platform: local-git
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+  - GH_TOKEN or GITHUB_TOKEN with release upload access to the hosted setup repository
+notes:
+  - Seeds a disposable local TrackState repository configured for github-releases attachment storage and pointed at the live setup repository as origin.
+  - Pre-creates a GitHub Release containing doc.pdf and a matching local attachments.json entry for TS-123.
+  - Executes the exact local CLI command `trackstate attachment upload --issue TS-123 --file doc.pdf --target local`.
+  - Passes only when the old release asset is replaced deterministically, the release still exposes exactly one doc.pdf asset, and attachments.json updates to the new asset identifier.
+runtime_inputs:
+  ticket_command: trackstate attachment upload --issue TS-123 --file doc.pdf --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - upload
+    - --issue
+    - TS-123
+    - --file
+    - doc.pdf
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-553 Project
+  issue_key: TS-123
+  issue_summary: TS-553 deterministic replacement fixture
+  source_file_name: doc.pdf
+  source_file_text: |-
+    %PDF-1.4
+    TS-553 replacement attachment payload with updated bytes
+  expected_attachment_name: doc.pdf
+  release_tag_prefix_base: ts553-assets-
+  seeded_attachment_text: |-
+    %PDF-1.4
+    TS-553 seeded release asset payload
+  seeded_attachment_created_at: "2026-05-13T07:00:00Z"
+  attachment_media_type: application/pdf
+  manifest_poll_timeout_seconds: 120
+  manifest_poll_interval_seconds: 4
+  release_poll_timeout_seconds: 120
+  release_poll_interval_seconds: 4

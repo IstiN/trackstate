@@ -213,7 +213,10 @@ def main() -> None:
                     observed=_normalize_whitespace(attachments_body),
                 )
 
-                issue_page.click_button(EXPECTED_OPEN_SETTINGS_LABEL, timeout_ms=30_000)
+                issue_page.click_button_via_semantics_center(
+                    EXPECTED_OPEN_SETTINGS_LABEL,
+                    timeout_ms=30_000,
+                )
                 matched_navigation, navigation_state = poll_until(
                     probe=settings_page.navigation_state,
                     is_satisfied=lambda state: (

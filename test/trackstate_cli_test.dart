@@ -568,6 +568,37 @@ void main() {
     );
 
     test(
+      'search command forwards the shared HTTP client to local repositories',
+      () async {
+        final repository = _FakeSearchRepository(
+          snapshot: _sampleSnapshot(),
+          page: const TrackStateIssueSearchPage.empty(),
+        );
+        final repositoryFactory = _FakeTrackStateCliRepositoryFactory(
+          localRepository: repository,
+        );
+        final client = http.Client();
+        addTearDown(client.close);
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: repositoryFactory,
+          httpClient: client,
+        );
+
+        final result = await cli.run(const <String>[
+          'search',
+          '--jql',
+          'project = TRACK',
+        ]);
+
+        expect(result.exitCode, 0);
+        expect(repositoryFactory.lastLocalClient, same(client));
+      },
+    );
+
+    test(
       'returns Jira-shaped ticket JSON from the canonical read command',
       () async {
         final cli = TrackStateCli(
@@ -1138,6 +1169,98 @@ void main() {
         expect(attachment['sizeBytes'], 4);
         expect(repository.lastUploadIssue?.key, 'TRACK-1');
         expect(repository.lastUploadName, 'design.png');
+      },
+    );
+
+    test(
+      'local release-backed attachment uploads forward optional GitHub credentials',
+      () async {
+        final uploadFile = File(
+          '${Directory.systemTemp.path}/trackstate-cli-local-release-upload.txt',
+        );
+        addTearDown(() async {
+          if (await uploadFile.exists()) {
+            await uploadFile.delete();
+          }
+        });
+        await uploadFile.writeAsString('release payload');
+        final snapshot = _sampleSnapshot();
+        final releaseSnapshot = TrackerSnapshot(
+          project: ProjectConfig(
+            key: snapshot.project.key,
+            name: snapshot.project.name,
+            repository: snapshot.project.repository,
+            branch: snapshot.project.branch,
+            defaultLocale: snapshot.project.defaultLocale,
+            supportedLocales: snapshot.project.supportedLocales,
+            issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+            statusDefinitions: snapshot.project.statusDefinitions,
+            fieldDefinitions: snapshot.project.fieldDefinitions,
+            workflowDefinitions: snapshot.project.workflowDefinitions,
+            priorityDefinitions: snapshot.project.priorityDefinitions,
+            versionDefinitions: snapshot.project.versionDefinitions,
+            componentDefinitions: snapshot.project.componentDefinitions,
+            resolutionDefinitions: snapshot.project.resolutionDefinitions,
+            attachmentStorage: const ProjectAttachmentStorageSettings(
+              mode: AttachmentStorageMode.githubReleases,
+              githubReleases: GitHubReleasesAttachmentStorageSettings(
+                tagPrefix: 'trackstate-attachments-',
+              ),
+            ),
+          ),
+          repositoryIndex: snapshot.repositoryIndex,
+          issues: snapshot.issues,
+        );
+        final repository = _FakeSearchRepository(
+          snapshot: releaseSnapshot,
+          requiredUploadToken: 'env-token',
+        );
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+            environment: const <String, String>{
+              trackStateCliTokenEnvironmentVariable: 'env-token',
+            },
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          '/workspace/repo',
+          '--issue',
+          'TRACK-1',
+          '--file',
+          uploadFile.path,
+        ]);
+        expect(result.exitCode, 0, reason: result.stdout);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+
+        expect(data['authSource'], 'env');
+        expect(repository.connection?.token, 'env-token');
       },
     );
 
@@ -1833,6 +1956,7 @@ class _FakeTrackStateCliRepositoryFactory
   final TrackStateRepository? hostedRepository;
   String? lastRepositoryPath;
   String? lastDataRef;
+  http.Client? lastLocalClient;
   String? lastHostedRepository;
   String? lastHostedBranch;
   String? lastHostedProvider;
@@ -1841,9 +1965,11 @@ class _FakeTrackStateCliRepositoryFactory
   TrackStateRepository createLocal({
     required String repositoryPath,
     required String dataRef,
+    http.Client? client,
   }) {
     lastRepositoryPath = repositoryPath;
     lastDataRef = dataRef;
+    lastLocalClient = client;
     final repository = localRepository;
     if (repository == null) {
       throw StateError('Expected a fake local repository.');
@@ -1890,6 +2016,7 @@ class _FakeSearchRepository implements TrackStateRepository {
     this.downloadBytes = const <String, List<int>>{},
     this.uploadedAttachmentNameBuilder,
     this.sortUploadedAttachmentsByName = false,
+    this.requiredUploadToken,
   }) : user =
            user ??
            connectedUser ??
@@ -1906,6 +2033,7 @@ class _FakeSearchRepository implements TrackStateRepository {
   final Map<String, List<int>> downloadBytes;
   final String Function(String name)? uploadedAttachmentNameBuilder;
   final bool sortUploadedAttachmentsByName;
+  final String? requiredUploadToken;
   String? lastJql;
   int? lastStartAt;
   int? lastMaxResults;
@@ -1987,6 +2115,12 @@ class _FakeSearchRepository implements TrackStateRepository {
     required String name,
     required Uint8List bytes,
   }) async {
+    final requiredUploadToken = this.requiredUploadToken;
+    if (requiredUploadToken != null && connection?.token != requiredUploadToken) {
+      throw const TrackStateRepositoryException(
+        'GitHub release uploads require an authenticated repository connection.',
+      );
+    }
     lastUploadIssue = issue;
     lastUploadName = name;
     final storedName = uploadedAttachmentNameBuilder?.call(name) ?? name;
