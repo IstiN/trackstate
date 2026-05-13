@@ -3161,6 +3161,7 @@ class TrackStateCli {
     required String attachmentName,
     required List<int> bytes,
   }) async {
+    final credential = await _resolveOptionalLocalCredential();
     final branch = await _resolveLocalBranch(target);
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
@@ -3172,7 +3173,7 @@ class TrackStateCli {
         RepositoryConnection(
           repository: target.value,
           branch: branch,
-          token: '',
+          token: credential?.token ?? '',
         ),
       );
       final snapshot = await repository.loadSnapshot();
@@ -3190,7 +3191,7 @@ class TrackStateCli {
         output: output,
         data: <String, Object?>{
           'command': 'attachment-upload',
-          'authSource': 'none',
+          'authSource': credential?.source ?? 'none',
           'issue': issue.key,
           'attachment': _attachmentPayload(attachment),
         },
@@ -3264,6 +3265,7 @@ class TrackStateCli {
     required String attachmentId,
     required String resolvedOutPath,
   }) async {
+    final credential = await _resolveOptionalLocalCredential();
     final branch = await _resolveLocalBranch(target);
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
@@ -3275,7 +3277,7 @@ class TrackStateCli {
         RepositoryConnection(
           repository: target.value,
           branch: branch,
-          token: '',
+          token: credential?.token ?? '',
         ),
       );
       final snapshot = await repository.loadSnapshot();
@@ -3291,7 +3293,7 @@ class TrackStateCli {
         output: output,
         data: <String, Object?>{
           'command': 'attachment-download',
-          'authSource': 'none',
+          'authSource': credential?.source ?? 'none',
           'issue': resolvedAttachment.issue.key,
           'savedFile': resolvedOutPath,
           'attachment': _attachmentPayload(resolvedAttachment.attachment),
@@ -3480,8 +3482,15 @@ class TrackStateCli {
         'provider': target.provider,
         'repository': target.value,
       },
-    );
+      );
   }
+
+  Future<TrackStateCliCredential?> _resolveOptionalLocalCredential() =>
+      _credentialResolver.resolve(
+        explicitToken: '',
+        environment: _environment.environment,
+        readGhToken: _environment.readGhAuthToken,
+      );
 
   TrackStateIssue _findIssue(TrackerSnapshot snapshot, String issueKey) {
     try {
@@ -3731,6 +3740,7 @@ class TrackStateCli {
     _ResolvedTarget target,
     TrackStateCliOutput output,
   ) async {
+    final credential = await _resolveOptionalLocalCredential();
     final provider = _providerFactory.createLocal(
       repositoryPath: target.value,
       dataRef: 'HEAD',
@@ -3744,7 +3754,7 @@ class TrackStateCli {
         RepositoryConnection(
           repository: target.value,
           branch: branch,
-          token: '',
+          token: credential?.token ?? '',
         ),
       );
       final permission = await provider.getPermission();
@@ -3752,7 +3762,7 @@ class TrackStateCli {
         'command': 'session',
         'provider': target.provider,
         'branch': branch,
-        'authSource': 'none',
+        'authSource': credential?.source ?? 'none',
         'user': <String, Object?>{
           'login': user.login,
           'displayName': user.displayName,

@@ -3,11 +3,20 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../../../domain/models/trackstate_models.dart';
+import '../github/github_trackstate_provider.dart';
 import '../trackstate_provider.dart';
+
+typedef LocalGitHostedProviderFactory =
+    TrackStateProviderAdapter Function({
+      required String repository,
+      required String branch,
+      required String dataRef,
+    });
 
 class LocalGitTrackStateProvider
     implements
         TrackStateProviderAdapter,
+        RepositoryReleaseAttachmentStore,
         RepositoryFileMutator,
         RepositoryHistoryReader,
         RepositoryGitHubIdentityResolver {
@@ -15,10 +24,15 @@ class LocalGitTrackStateProvider
     required this.repositoryPath,
     this.dataRef = 'HEAD',
     GitProcessRunner? processRunner,
-  }) : _processRunner = processRunner ?? const IoGitProcessRunner();
+    LocalGitHostedProviderFactory? hostedProviderFactory,
+  }) : _processRunner = processRunner ?? const IoGitProcessRunner(),
+       _hostedProviderFactory =
+           hostedProviderFactory ?? _defaultLocalGitHostedProviderFactory;
 
   final String repositoryPath;
   final GitProcessRunner _processRunner;
+  final LocalGitHostedProviderFactory _hostedProviderFactory;
+  RepositoryConnection? _connection;
 
   @override
   final String dataRef;
@@ -37,6 +51,7 @@ class LocalGitTrackStateProvider
         'Local branch ${connection.branch} was not found in $repositoryPath.',
       );
     }
+    _connection = connection;
     final name = await _gitConfigValue('user.name');
     final email = await _gitConfigValue('user.email');
     return RepositoryUser(
@@ -228,14 +243,58 @@ class LocalGitTrackStateProvider
   Future<RepositoryPermission> getPermission() async {
     final branch = await resolveWriteBranch();
     final exists = await getBranch(branch);
-    final releaseAttachmentWriteFailureReason =
-        await _releaseAttachmentWriteFailureReason();
+    final releaseAttachmentCapability = await _releaseAttachmentCapability(
+      branch: branch,
+    );
     return RepositoryPermission(
       canRead: exists.exists,
       canWrite: exists.exists,
       isAdmin: false,
-      releaseAttachmentWriteFailureReason: releaseAttachmentWriteFailureReason,
+      supportsReleaseAttachmentWrites:
+          releaseAttachmentCapability.supportsReleaseAttachmentWrites,
+      releaseAttachmentWriteFailureReason:
+          releaseAttachmentCapability.failureReason,
     );
+  }
+
+  @override
+  Future<RepositoryAttachment> readReleaseAttachment(
+    RepositoryReleaseAttachmentReadRequest request,
+  ) async {
+    final remoteIdentity = await _resolveGitHubRepositoryIdentity();
+    if (remoteIdentity == null) {
+      throw TrackStateProviderException(await _gitRemoteFailureReason());
+    }
+    final provider = _hostedProviderFactory(
+      repository: remoteIdentity,
+      branch: dataRef,
+      dataRef: dataRef,
+    );
+    if (provider case final GitHubTrackStateProvider githubProvider) {
+      return githubProvider.readReleaseAttachmentForRepository(
+        repository: remoteIdentity,
+        request: request,
+        token: _connection?.token,
+      );
+    }
+    final store = await _resolveReleaseAttachmentStore(branch: dataRef);
+    return store.readReleaseAttachment(request);
+  }
+
+  @override
+  Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
+    RepositoryReleaseAttachmentWriteRequest request,
+  ) async {
+    final store = await _resolveReleaseAttachmentStore(branch: request.branch);
+    return store.writeReleaseAttachment(request);
+  }
+
+  @override
+  Future<void> deleteReleaseAttachment(
+    RepositoryReleaseAttachmentDeleteRequest request,
+  ) async {
+    final store = await _resolveReleaseAttachmentStore(branch: dataRef);
+    await store.deleteReleaseAttachment(request);
   }
 
   @override
@@ -350,7 +409,117 @@ class LocalGitTrackStateProvider
   Future<String> _gitConfigValue(String key) async =>
       (await _tryGit(['config', '--local', key]))?.stdout.trim() ?? '';
 
-  Future<String?> _releaseAttachmentWriteFailureReason() async {
+  Future<_LocalReleaseAttachmentCapability> _releaseAttachmentCapability({
+    required String branch,
+  }) async {
+    final remoteIdentity = await _resolveGitHubRepositoryIdentity();
+    if (remoteIdentity == null) {
+      return _LocalReleaseAttachmentCapability.unsupported(
+        await _gitRemoteFailureReason(),
+      );
+    }
+    final connection = _connection;
+    if (connection == null || connection.token.trim().isEmpty) {
+      return const _LocalReleaseAttachmentCapability.unsupported(
+        'GitHub Releases attachment storage requires GitHub authentication. '
+        'Set TRACKSTATE_TOKEN or authenticate with gh before using '
+        'release-backed attachments from a local repository.',
+      );
+    }
+    try {
+      final provider = await _createHostedReleaseProvider(
+        repository: remoteIdentity,
+        branch: branch,
+      );
+      final permission = await provider.getPermission();
+      if (permission.supportsReleaseAttachmentWrites) {
+        return const _LocalReleaseAttachmentCapability.supported();
+      }
+      return _LocalReleaseAttachmentCapability.unsupported(
+        permission.releaseAttachmentWriteFailureReason?.trim().isNotEmpty == true
+            ? permission.releaseAttachmentWriteFailureReason!.trim()
+            : 'GitHub authentication for $remoteIdentity does not permit '
+                  'GitHub Release uploads.',
+      );
+    } on TrackStateProviderException catch (error) {
+      return _LocalReleaseAttachmentCapability.unsupported(error.message);
+    }
+  }
+
+  Future<RepositoryReleaseAttachmentStore> _resolveReleaseAttachmentStore({
+    required String branch,
+  }) async {
+    final remoteIdentity = await _resolveGitHubRepositoryIdentity();
+    if (remoteIdentity == null) {
+      throw TrackStateProviderException(await _gitRemoteFailureReason());
+    }
+    final connection = _connection;
+    if (connection == null || connection.token.trim().isEmpty) {
+      throw const TrackStateProviderException(
+        'GitHub Releases attachment storage requires GitHub authentication. '
+        'Set TRACKSTATE_TOKEN or authenticate with gh before using '
+        'release-backed attachments from a local repository.',
+      );
+    }
+    final provider = await _createHostedReleaseProvider(
+      repository: remoteIdentity,
+      branch: branch,
+    );
+    if (provider case final RepositoryReleaseAttachmentStore store) {
+      return store;
+    }
+    throw TrackStateProviderException(
+      'GitHub release uploads are not supported for $remoteIdentity.',
+    );
+  }
+
+  Future<TrackStateProviderAdapter> _createHostedReleaseProvider({
+    required String repository,
+    required String branch,
+  }) async {
+    final connection = _connection;
+    if (connection == null) {
+      throw const TrackStateProviderException(
+        'GitHub Releases attachment storage requires a connected repository session.',
+      );
+    }
+    final provider = _hostedProviderFactory(
+      repository: repository,
+      branch: branch,
+      dataRef: branch,
+    );
+    await provider.authenticate(
+      RepositoryConnection(
+        repository: repository,
+        branch: branch,
+        token: connection.token,
+      ),
+    );
+    return provider;
+  }
+
+  Future<String?> _resolveGitHubRepositoryIdentity() async {
+    final remoteNamesResult = await _tryGit(['remote']);
+    final remoteNames = remoteNamesResult == null
+        ? const <String>[]
+        : LineSplitter.split(remoteNamesResult.stdout)
+              .map((line) => line.trim())
+              .where((line) => line.isNotEmpty)
+              .toList(growable: false);
+    for (final remoteName in remoteNames) {
+      final remoteUrl = (await _tryGit(['remote', 'get-url', remoteName]))
+              ?.stdout
+              .trim() ??
+          '';
+      final identity = _githubRepositoryIdentityFromRemoteUrl(remoteUrl);
+      if (identity != null) {
+        return identity;
+      }
+    }
+    return null;
+  }
+
+  Future<String> _gitRemoteFailureReason() async {
     final remoteNamesResult = await _tryGit(['remote']);
     final remoteNames = remoteNamesResult == null
         ? const <String>[]
@@ -361,14 +530,6 @@ class LocalGitTrackStateProvider
     if (remoteNames.isEmpty) {
       return 'GitHub repository identity cannot be resolved from the local Git '
           'configuration because no remote is configured.';
-    }
-    for (final remoteName in remoteNames) {
-      final remoteUrl =
-          (await _tryGit(['remote', 'get-url', remoteName]))?.stdout.trim() ??
-          '';
-      if (_githubRepositoryIdentityFromRemoteUrl(remoteUrl) != null) {
-        return null;
-      }
     }
     return 'GitHub repository identity cannot be resolved from the local Git '
         'configuration because no GitHub remote is configured.';
@@ -397,7 +558,8 @@ class LocalGitTrackStateProvider
 
   @override
   Future<String?> releaseAttachmentIdentityFailureReason() async =>
-      _releaseAttachmentWriteFailureReason();
+      (await _releaseAttachmentCapability(branch: await resolveWriteBranch()))
+          .failureReason;
 
   String? _githubRepositoryIdentityFromRemoteUrl(String remoteUrl) {
     final normalized = remoteUrl.trim();
@@ -600,6 +762,28 @@ class LocalGitTrackStateProvider
     }
     return commits;
   }
+}
+
+TrackStateProviderAdapter _defaultLocalGitHostedProviderFactory({
+  required String repository,
+  required String branch,
+  required String dataRef,
+}) => GitHubTrackStateProvider(
+  repositoryName: repository,
+  sourceRef: branch,
+  dataRef: dataRef,
+);
+
+class _LocalReleaseAttachmentCapability {
+  const _LocalReleaseAttachmentCapability.supported()
+    : supportsReleaseAttachmentWrites = true,
+      failureReason = null;
+
+  const _LocalReleaseAttachmentCapability.unsupported(this.failureReason)
+    : supportsReleaseAttachmentWrites = false;
+
+  final bool supportsReleaseAttachmentWrites;
+  final String? failureReason;
 }
 
 _LfsPointerInfo? _parseLfsPointer(String content) {
