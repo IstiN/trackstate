@@ -37,10 +37,14 @@ class PythonTrackStateCliReleaseDownloadAuthFailureFramework(
         *,
         config: TrackStateCliReleaseDownloadAuthFailureConfig,
     ) -> TrackStateCliReleaseDownloadAuthFailureValidationResult:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-522-bin-") as bin_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-release-download-auth-bin-"
+        ) as bin_dir:
             executable_path = Path(bin_dir) / "trackstate"
             self._compile_executable(executable_path)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-522-repo-") as temp_dir:
+            with tempfile.TemporaryDirectory(
+                prefix="trackstate-release-download-auth-repo-"
+            ) as temp_dir:
                 repository_path = Path(temp_dir)
                 self._seed_local_repository(repository_path, config=config)
                 initial_state = self._capture_repository_state(
@@ -79,27 +83,29 @@ class PythonTrackStateCliReleaseDownloadAuthFailureFramework(
             for variable in ("GH_TOKEN", "GITHUB_TOKEN", "TRACKSTATE_TOKEN")
             if env.pop(variable, None) is not None
         )
-        sandbox_home = repository_path / ".ts522-home"
-        sandbox_home.mkdir(parents=True, exist_ok=True)
-        env["HOME"] = str(sandbox_home)
-        env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
-        env["GH_CONFIG_DIR"] = str(sandbox_home / ".config" / "gh")
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        completed = subprocess.run(
-            executed_command,
-            cwd=repository_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-release-download-auth-home-"
+        ) as home_dir:
+            sandbox_home = Path(home_dir)
+            env["HOME"] = str(sandbox_home)
+            env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
+            env["GH_CONFIG_DIR"] = str(sandbox_home / ".config" / "gh")
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            completed = subprocess.run(
+                executed_command,
+                cwd=repository_path,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
         observation = TrackStateCliCommandObservation(
             requested_command=requested_command,
             executed_command=executed_command,
             fallback_reason=(
                 "Pinned execution to a temporary executable compiled from this checkout "
-                "and stripped GitHub credentials from the environment so TS-522 runs "
-                "the exact local download command without ambient auth."
+                "and stripped GitHub credentials from the environment so the "
+                "release-backed local download scenario runs without ambient auth."
             ),
             repository_path=str(repository_path),
             compiled_binary_path=str(executable_path),
@@ -162,7 +168,7 @@ updated: 2026-05-12T00:00:00Z
 
 # Description
 
-TS-522 local github-releases attachment download fixture.
+{config.project_name} local github-releases attachment download fixture.
 """,
         )
         self._write_file(
@@ -188,17 +194,23 @@ TS-522 local github-releases attachment download fixture.
             + "\n",
         )
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-522 Tester")
+        self._git(
+            repository_path,
+            "config",
+            "--local",
+            "user.name",
+            "Release Download Auth Tester",
+        )
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "ts522@example.com",
+            "release-download-auth@example.com",
         )
         self._git(repository_path, "remote", "add", "origin", config.remote_origin_url)
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-522 fixture")
+        self._git(repository_path, "commit", "-m", f"Seed {config.project_key} fixture")
 
     def _capture_repository_state(
         self,
