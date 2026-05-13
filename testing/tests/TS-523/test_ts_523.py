@@ -1,14 +1,36 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import sys
 import traceback
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
+if str(WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE_ROOT))
+
+SOURCE_ROOT_ENV = "TRACKSTATE_TS523_SOURCE_ROOT"
+
+
+def _resolve_source_root() -> Path:
+    configured_root = os.environ.get(SOURCE_ROOT_ENV)
+    if not configured_root:
+        return WORKSPACE_ROOT
+    candidate = Path(configured_root).expanduser()
+    if not candidate.is_absolute():
+        candidate = (WORKSPACE_ROOT / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+    if not candidate.is_dir():
+        raise ValueError(
+            f"{SOURCE_ROOT_ENV} must point to an existing TrackState checkout: {candidate}"
+        )
+    return candidate
+
+
+SOURCE_ROOT = _resolve_source_root()
 
 from testing.components.services.trackstate_cli_release_identity_missing_remote_validator import (  # noqa: E402
     TrackStateCliReleaseIdentityMissingRemoteValidator,
@@ -33,7 +55,7 @@ TICKET_SUMMARY = (
     "Local runtime upload without remote repository — explicit identity error "
     "for release-backed storage"
 )
-OUTPUTS_DIR = REPO_ROOT / "outputs"
+OUTPUTS_DIR = WORKSPACE_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
@@ -45,14 +67,15 @@ RUN_COMMAND = "python testing/tests/TS-523/test_ts_523.py"
 
 class Ts523ReleaseIdentityMissingRemoteScenario:
     def __init__(self) -> None:
-        self.repository_root = REPO_ROOT
-        self.config_path = self.repository_root / "testing/tests/TS-523/config.yaml"
+        self.workspace_root = WORKSPACE_ROOT
+        self.source_root = SOURCE_ROOT
+        self.config_path = self.workspace_root / "testing/tests/TS-523/config.yaml"
         self.config = TrackStateCliReleaseIdentityMissingRemoteConfig.from_file(
             self.config_path
         )
         self.validator = TrackStateCliReleaseIdentityMissingRemoteValidator(
             probe=create_trackstate_cli_release_identity_missing_remote_probe(
-                self.repository_root
+                self.source_root
             )
         )
 
@@ -94,6 +117,7 @@ class Ts523ReleaseIdentityMissingRemoteScenario:
             "requested_command": validation.observation.requested_command_text,
             "executed_command": validation.observation.executed_command_text,
             "compiled_binary_path": validation.observation.compiled_binary_path,
+            "source_root": str(self.source_root),
             "repository_path": validation.observation.repository_path,
             "config_path": str(self.config_path),
             "os": platform.system(),
