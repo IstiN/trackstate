@@ -1,0 +1,11 @@
+test_id: TS-648
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Flutter SDK available on PATH
+  - git CLI available on PATH
+notes:
+  - Reuses the existing disposable Local Git inverse-link CLI harness from TS-629.
+  - Creates Issue A and Issue B, then runs `trackstate jira-link-issues --type "is blocked by"` against the disposable Local Git repository.
+  - Verifies the user-visible JSON response payload reports canonical normalized relationship metadata for the Jira-compatible command entry point.
