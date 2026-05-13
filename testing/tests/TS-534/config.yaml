@@ -12,6 +12,28 @@ notes:
   - Executes the exact local CLI command `trackstate attachment upload --issue TS-100 --file "Report #2026 (Final)!.pdf" --target local`.
   - Verifies the local attachment manifest stores the sanitized GitHub release asset name and that `gh release view` shows the same sanitized asset on the live release container.
 runtime_inputs:
+  ticket_command: 'trackstate attachment upload --issue TS-100 --file "Report #2026 (Final)!.pdf" --target local'
+  requested_command:
+    - trackstate
+    - attachment
+    - upload
+    - --issue
+    - TS-100
+    - --file
+    - 'Report #2026 (Final)!.pdf'
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-534 Project
   issue_key: TS-100
-  source_file_name: Report #2026 (Final)!.pdf
+  issue_summary: TS-534 release asset sanitization fixture
+  source_file_name: 'Report #2026 (Final)!.pdf'
+  source_file_text: |-
+    TS-534 upload payload
+    Verifies special characters normalize before GitHub Release asset upload.
+  release_tag_prefix_base: ts534-assets-
   expected_sanitized_asset_name: Report-2026-Final-.pdf
+  manifest_poll_timeout_seconds: 120
+  manifest_poll_interval_seconds: 4
+  release_poll_timeout_seconds: 120
+  release_poll_interval_seconds: 4

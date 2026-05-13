@@ -4,6 +4,11 @@ Validates that a local `trackstate attachment upload --target local` run uploads
 special-character filenames to GitHub Releases using the repository's
 attachment-name sanitization rules.
 
+The ticket entrypoint is intentionally thin. The scenario now runs through a
+dedicated probe interface, support factory, validator, and Python framework so
+CLI compilation, local repository seeding, release observation, and `gh`
+inspection stay out of the test file.
+
 The automation:
 1. creates a disposable local TrackState repository configured for
    `attachmentStorage.mode = github-releases`
