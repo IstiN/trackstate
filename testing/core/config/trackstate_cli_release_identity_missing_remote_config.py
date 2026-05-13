@@ -19,8 +19,11 @@ class TrackStateCliReleaseIdentityMissingRemoteConfig:
     source_file_text: str
     attachment_tag_prefix: str
     expected_attachment_relative_path: str
+    origin_remote_name: str | None
+    origin_remote_url: str | None
     expected_identity_fragments: tuple[str, ...]
     generic_release_auth_fragments: tuple[str, ...]
+    provider_capability_fragments: tuple[str, ...]
 
     @property
     def source_file_bytes(self) -> bytes:
@@ -42,6 +45,23 @@ class TrackStateCliReleaseIdentityMissingRemoteConfig:
             raise ValueError(
                 "Release identity missing-remote config runtime_inputs must deserialize "
                 f"to a mapping: {path}"
+            )
+
+        origin_remote_name = cls._optional_string(
+            runtime_inputs,
+            "origin_remote_name",
+            path,
+        )
+        origin_remote_url = cls._optional_string(
+            runtime_inputs,
+            "origin_remote_url",
+            path,
+        )
+        if (origin_remote_name is None) != (origin_remote_url is None):
+            raise ValueError(
+                "Release identity missing-remote config must define both "
+                "runtime_inputs.origin_remote_name and runtime_inputs.origin_remote_url "
+                f"together in {path}."
             )
 
         return cls(
@@ -75,6 +95,8 @@ class TrackStateCliReleaseIdentityMissingRemoteConfig:
                 "expected_attachment_relative_path",
                 path,
             ),
+            origin_remote_name=origin_remote_name,
+            origin_remote_url=origin_remote_url,
             expected_identity_fragments=cls._require_lower_string_list(
                 runtime_inputs,
                 "expected_identity_fragments",
@@ -83,6 +105,11 @@ class TrackStateCliReleaseIdentityMissingRemoteConfig:
             generic_release_auth_fragments=cls._optional_lower_string_list(
                 runtime_inputs,
                 "generic_release_auth_fragments",
+                path,
+            ),
+            provider_capability_fragments=cls._optional_lower_string_list(
+                runtime_inputs,
+                "provider_capability_fragments",
                 path,
             ),
         )
@@ -94,6 +121,18 @@ class TrackStateCliReleaseIdentityMissingRemoteConfig:
             raise ValueError(
                 "Release identity missing-remote config runtime_inputs."
                 f"{key} must be a string in {path}."
+            )
+        return value
+
+    @staticmethod
+    def _optional_string(payload: dict[str, Any], key: str, path: Path) -> str | None:
+        value = payload.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value:
+            raise ValueError(
+                "Release identity missing-remote config runtime_inputs."
+                f"{key} must be a non-empty string in {path}."
             )
         return value
 
