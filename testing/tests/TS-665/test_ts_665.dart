@@ -1,26 +1,23 @@
 import 'dart:convert';
+import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trackstate/data/repositories/trackstate_repository.dart';
-import 'package:trackstate/data/services/trackstate_auth_store.dart';
-import 'package:trackstate/data/services/workspace_profile_service.dart';
-import 'package:trackstate/domain/models/workspace_profile_models.dart';
-import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
+
+import '../../core/interfaces/legacy_hosted_workspace_migration_probe.dart';
+import 'support/ts665_legacy_hosted_workspace_migration_probe.dart';
 
 const String _ticketKey = 'TS-665';
+const String _ticketSummary =
+    'First-run migration converts a legacy hosted context into one active workspace with scoped credentials';
+const String _testFilePath = 'testing/tests/TS-665/test_ts_665.dart';
+const String _runCommand =
+    'flutter test testing/tests/TS-665/test_ts_665.dart --reporter expanded';
 const String _activeRepository = 'trackstate/trackstate';
 const String _unrelatedRepository = 'other/repository';
 const String _defaultBranch = 'main';
 const String _activeLegacyToken = 'ts665-active-legacy-token';
 const String _unrelatedLegacyToken = 'ts665-unrelated-legacy-token';
-const String _workspaceStateKey = 'trackstate.workspaceProfiles.state';
 const String _workspaceTokenPrefix = 'trackstate.githubToken.workspace.';
-const String _activeLegacyTokenKey =
-    'trackstate.githubToken.trackstate.trackstate';
-const String _unrelatedLegacyTokenKey =
-    'trackstate.githubToken.other.repository';
 const String _expectedWorkspaceId = 'hosted:trackstate/trackstate@main';
 const String _expectedWorkspaceDisplayName = 'trackstate/trackstate';
 const String _expectedLogin = 'demo-user';
@@ -30,233 +27,372 @@ const String _expectedInitials = 'DU';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUp(() {
-    SharedPreferences.setMockInitialValues(const <String, Object>{});
-  });
-
   testWidgets(
-    'TS-665 first-run migration converts the active legacy hosted context into one scoped workspace',
+    'TS-665 migrates the legacy hosted context during first app launch',
     (tester) async {
-      tester.view.physicalSize = const Size(1440, 960);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(() {
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
-      });
+      final result = <String, Object?>{
+        'ticket': _ticketKey,
+        'ticket_summary': _ticketSummary,
+        'environment': 'flutter test',
+        'os': Platform.operatingSystem,
+        'steps': <Map<String, Object?>>[],
+        'human_verification': <Map<String, Object?>>[],
+        'review_fixes': <String>[
+          'Launches TrackStateApp with repository unset so the real first-run migration path executes during startup.',
+          'Moves SharedPreferences/auth-store orchestration into a layered testing probe under testing/core, testing/components, and testing/frameworks.',
+          'Mocks the hosted GitHub backend at the HTTP layer so the migrated hosted session remains connected through the same public startup flow.',
+        ],
+      };
 
-      final failures = <String>[];
-      final workspaceProfileService = SharedPreferencesWorkspaceProfileService(
-        now: () => DateTime.utc(2026, 5, 13, 22, 0, 40),
-      );
-      const authStore = SharedPreferencesTrackStateAuthStore();
+      final LegacyHostedWorkspaceMigrationProbe probe =
+          createTs665LegacyHostedWorkspaceMigrationProbe(tester);
 
-      SharedPreferences.setMockInitialValues(const <String, Object>{
-        _activeLegacyTokenKey: _activeLegacyToken,
-        _unrelatedLegacyTokenKey: _unrelatedLegacyToken,
-      });
-
-      final migratedWorkspace = await workspaceProfileService
-          .ensureLegacyContextMigrated(
-            const WorkspaceProfileInput(
-              targetType: WorkspaceProfileTargetType.hosted,
-              target: _activeRepository,
-              defaultBranch: _defaultBranch,
-            ),
-          );
-
-      final workspaceState = await workspaceProfileService.loadState();
-      final preferences = await SharedPreferences.getInstance();
-      final migratedWorkspaceToken = await authStore.readToken(
-        workspaceId: _expectedWorkspaceId,
-      );
-      final leftoverActiveLegacyToken = await authStore.readToken(
-        repository: _activeRepository,
-      );
-      final unrelatedLegacyTokenAfterMigration = await authStore.readToken(
-        repository: _unrelatedRepository,
-      );
-      final workspaceScopedKeys = preferences.getKeys().where((key) {
-        return key.startsWith(_workspaceTokenPrefix);
-      }).toList()..sort();
-      final expectedWorkspaceTokenKey =
-          '$_workspaceTokenPrefix${Uri.encodeComponent(_expectedWorkspaceId)}';
-      final rawWorkspaceState = preferences.getString(_workspaceStateKey);
-      final decodedWorkspaceState = rawWorkspaceState == null
-          ? null
-          : jsonDecode(rawWorkspaceState) as Map<String, Object?>;
-
-      if (migratedWorkspace == null) {
-        failures.add(
-          'Step 2 failed: WorkspaceMigrationCoordinator did not return a seeded workspace for the valid hosted legacy context.',
+      try {
+        final observation = await probe.runScenario(
+          activeRepository: _activeRepository,
+          defaultBranch: _defaultBranch,
+          activeLegacyToken: _activeLegacyToken,
+          unrelatedRepository: _unrelatedRepository,
+          unrelatedLegacyToken: _unrelatedLegacyToken,
+          expectedDisplayName: _expectedDisplayName,
+          expectedLogin: _expectedLogin,
+          expectedInitials: _expectedInitials,
         );
-      } else {
-        if (migratedWorkspace.id != _expectedWorkspaceId) {
+        final failures = <String>[];
+        final expectedWorkspaceTokenKey =
+            '$_workspaceTokenPrefix${Uri.encodeComponent(_expectedWorkspaceId)}';
+        final workspaceIds = observation.workspaceState.profiles
+            .map((profile) => profile.id)
+            .toList(growable: false);
+
+        result['workspace_id'] = observation.workspaceState.activeWorkspaceId;
+        result['workspace_ids'] = workspaceIds;
+        result['workspace_scoped_keys'] = observation.workspaceScopedKeys;
+        result['visible_texts'] = observation.visibleTexts;
+        result['raw_workspace_state'] =
+            observation.rawWorkspaceState ?? '<missing>';
+
+        final step1Observed =
+            'active_workspace_id=${observation.workspaceState.activeWorkspaceId}; '
+            'workspace_ids=${workspaceIds.join(', ')}; '
+            'migration_complete=${observation.workspaceState.migrationComplete}; '
+            'display_name=${observation.workspaceState.activeWorkspace?.displayName ?? '<none>'}';
+        if (observation.workspaceState.profiles.length != 1 ||
+            observation.workspaceState.activeWorkspaceId !=
+                _expectedWorkspaceId ||
+            !observation.workspaceState.migrationComplete ||
+            observation.workspaceState.activeWorkspace?.displayName !=
+                _expectedWorkspaceDisplayName) {
+          _recordStep(
+            result,
+            step: 1,
+            status: 'failed',
+            action:
+                'Launch the production app from an empty workspace-profile store while legacy hosted credentials already exist in SharedPreferences.',
+            observed: step1Observed,
+          );
           failures.add(
-            'Step 2 failed: the seeded workspace id was "${migratedWorkspace.id}" instead of "$_expectedWorkspaceId".',
+            'Step 1 failed: first launch did not persist exactly one active hosted workspace for $_expectedWorkspaceId.\n'
+            'Observed workspace ids: ${workspaceIds.join(', ')}\n'
+            'Observed active workspace id: ${observation.workspaceState.activeWorkspaceId}\n'
+            'Observed display name: ${observation.workspaceState.activeWorkspace?.displayName ?? '<none>'}\n'
+            'Observed migrationComplete: ${observation.workspaceState.migrationComplete}',
+          );
+        } else {
+          _recordStep(
+            result,
+            step: 1,
+            status: 'passed',
+            action:
+                'Launch the production app from an empty workspace-profile store while legacy hosted credentials already exist in SharedPreferences.',
+            observed: step1Observed,
           );
         }
-        if (migratedWorkspace.displayName != _expectedWorkspaceDisplayName) {
+
+        final step2Observed =
+            'stored_profile_count=${observation.storedProfileCount}; '
+            'stored_active_workspace_id=${observation.storedActiveWorkspaceId}; '
+            'stored_migration_complete=${observation.storedMigrationComplete}; '
+            'raw_workspace_state=${observation.rawWorkspaceState ?? '<missing>'}';
+        if (observation.storedProfileCount != 1 ||
+            observation.storedActiveWorkspaceId != _expectedWorkspaceId ||
+            !observation.storedMigrationComplete) {
+          _recordStep(
+            result,
+            step: 2,
+            status: 'failed',
+            action:
+                'Observe the persisted workspace-profile store after startup completes.',
+            observed: step2Observed,
+          );
           failures.add(
-            'Step 2 failed: the seeded workspace display name was "${migratedWorkspace.displayName}" instead of "$_expectedWorkspaceDisplayName".',
+            'Step 2 failed: the stored workspace-profile JSON was not normalized to one active migrated workspace.\n'
+            'Observed raw state: ${observation.rawWorkspaceState ?? '<missing>'}',
+          );
+        } else {
+          _recordStep(
+            result,
+            step: 2,
+            status: 'passed',
+            action:
+                'Observe the persisted workspace-profile store after startup completes.',
+            observed: step2Observed,
           );
         }
-      }
 
-      if (workspaceState.profiles.length != 1) {
-        failures.add(
-          'Step 3 failed: WorkspaceProfileStore persisted ${workspaceState.profiles.length} workspaces instead of exactly one.\n'
-          'Observed profiles: ${workspaceState.profiles.map((profile) => profile.toJson()).toList()}',
-        );
-      }
-      if (workspaceState.activeWorkspaceId != _expectedWorkspaceId) {
-        failures.add(
-          'Step 3 failed: WorkspaceProfileStore activeWorkspaceId was "${workspaceState.activeWorkspaceId}" instead of "$_expectedWorkspaceId".',
-        );
-      }
-      if (!workspaceState.migrationComplete) {
-        failures.add(
-          'Step 3 failed: WorkspaceProfileStore did not mark migrationComplete=true after first-run migration.',
-        );
-      }
-      if (workspaceState.activeWorkspace?.displayName !=
-          _expectedWorkspaceDisplayName) {
-        failures.add(
-          'Step 3 failed: the active workspace display name was "${workspaceState.activeWorkspace?.displayName}" instead of "$_expectedWorkspaceDisplayName".',
-        );
-      }
+        final step3Observed =
+            'workspace_token=${observation.workspaceToken ?? '<missing>'}; '
+            'legacy_active_repository_token=${observation.leftoverActiveLegacyRepositoryToken ?? '<missing>'}; '
+            'unrelated_legacy_repository_token=${observation.unrelatedLegacyRepositoryToken ?? '<missing>'}; '
+            'workspace_scoped_keys=${observation.workspaceScopedKeys.join(', ')}';
+        if (observation.workspaceToken != _activeLegacyToken ||
+            observation.leftoverActiveLegacyRepositoryToken != null ||
+            observation.unrelatedLegacyRepositoryToken !=
+                _unrelatedLegacyToken ||
+            observation.workspaceScopedKeys.length != 1 ||
+            observation.workspaceScopedKeys.single !=
+                expectedWorkspaceTokenKey) {
+          _recordStep(
+            result,
+            step: 3,
+            status: 'failed',
+            action:
+                'Observe the credential stores after startup migration moves the active hosted token into workspace scope.',
+            observed: step3Observed,
+          );
+          failures.add(
+            'Step 3 failed: credential migration did not move only the active repository token into workspace scope.\n'
+            'Observed workspace token: ${observation.workspaceToken ?? '<missing>'}\n'
+            'Observed leftover active repository token: ${observation.leftoverActiveLegacyRepositoryToken ?? '<missing>'}\n'
+            'Observed unrelated repository token: ${observation.unrelatedLegacyRepositoryToken ?? '<missing>'}\n'
+            'Observed workspace-scoped keys: ${observation.workspaceScopedKeys.join(', ')}',
+          );
+        } else {
+          _recordStep(
+            result,
+            step: 3,
+            status: 'passed',
+            action:
+                'Observe the credential stores after startup migration moves the active hosted token into workspace scope.',
+            observed: step3Observed,
+          );
+        }
 
-      final decodedProfiles =
-          decodedWorkspaceState?['profiles'] as List<Object?>? ??
-          const <Object?>[];
-      if (decodedProfiles.length != 1) {
-        failures.add(
-          'Step 3 failed: the raw WorkspaceProfileStore JSON kept ${decodedProfiles.length} profiles instead of one.\n'
-          'Raw state: ${rawWorkspaceState ?? '<missing>'}',
-        );
-      }
-      if (decodedWorkspaceState?['activeWorkspaceId'] != _expectedWorkspaceId) {
-        failures.add(
-          'Step 3 failed: the raw WorkspaceProfileStore JSON did not preserve "$_expectedWorkspaceId" as activeWorkspaceId.\n'
-          'Raw state: ${rawWorkspaceState ?? '<missing>'}',
-        );
-      }
-      if (decodedWorkspaceState?['migrationComplete'] != true) {
-        failures.add(
-          'Step 3 failed: the raw WorkspaceProfileStore JSON did not persist migrationComplete=true.\n'
-          'Raw state: ${rawWorkspaceState ?? '<missing>'}',
-        );
-      }
+        final step4Observed =
+            'connected_visible=${observation.connectedVisible}; '
+            'display_name_visible=${observation.displayNameVisible}; '
+            'login_visible=${observation.loginVisible}; '
+            'initials_visible=${observation.initialsVisible}; '
+            'visible_texts=${observation.visibleTexts.join(' | ')}';
+        if (!observation.connectedVisible ||
+            !observation.displayNameVisible ||
+            !observation.loginVisible ||
+            !observation.initialsVisible) {
+          _recordStep(
+            result,
+            step: 4,
+            status: 'failed',
+            action:
+                'Observe the visible hosted identity in the app chrome after first-run migration completes.',
+            observed: step4Observed,
+          );
+          failures.add(
+            'Step 4 failed: the first-run app experience did not keep the hosted session visibly connected.\n'
+            'Visible texts: ${observation.visibleTexts.join(' | ')}',
+          );
+        } else {
+          _recordStep(
+            result,
+            step: 4,
+            status: 'passed',
+            action:
+                'Observe the visible hosted identity in the app chrome after first-run migration completes.',
+            observed: step4Observed,
+          );
+        }
 
-      if (migratedWorkspaceToken != _activeLegacyToken) {
-        failures.add(
-          'Step 4 failed: WorkspaceCredentialStore saved "${migratedWorkspaceToken ?? '<missing>'}" under the workspace-scoped key instead of "$_activeLegacyToken".',
+        _recordHumanVerification(
+          result,
+          check:
+              'Opened the app exactly through the user-visible first-run startup path, then observed the migrated hosted session in the chrome.',
+          observed:
+              'connected=${observation.connectedVisible}; display_name=${observation.displayNameVisible}; login=${observation.loginVisible}; initials=${observation.initialsVisible}',
         );
-      }
-      if (leftoverActiveLegacyToken != null) {
-        failures.add(
-          'Step 4 failed: the active legacy repository token still remained under "$_activeLegacyTokenKey" after migration.\n'
-          'Observed token: $leftoverActiveLegacyToken',
-        );
-      }
-      if (unrelatedLegacyTokenAfterMigration != _unrelatedLegacyToken) {
-        failures.add(
-          'Expected result failed: the unrelated legacy token was "${unrelatedLegacyTokenAfterMigration ?? '<missing>'}" instead of staying "$_unrelatedLegacyToken".',
-        );
-      }
-      if (workspaceScopedKeys.length != 1 ||
-          workspaceScopedKeys.single != expectedWorkspaceTokenKey) {
-        failures.add(
-          'Expected result failed: credential migration created the wrong workspace-scoped keys.\n'
-          'Expected only: $expectedWorkspaceTokenKey\n'
-          'Observed: $workspaceScopedKeys',
-        );
-      }
-      if (preferences.getString(expectedWorkspaceTokenKey) !=
-          _activeLegacyToken) {
-        failures.add(
-          'Step 4 failed: SharedPreferences did not persist "$_activeLegacyToken" at "$expectedWorkspaceTokenKey".',
-        );
-      }
-      if (preferences.getString(_unrelatedLegacyTokenKey) !=
-          _unrelatedLegacyToken) {
-        failures.add(
-          'Expected result failed: the unrelated legacy SharedPreferences token changed unexpectedly.\n'
-          'Observed value: ${preferences.getString(_unrelatedLegacyTokenKey) ?? '<missing>'}',
-        );
-      }
 
-      await tester.pumpWidget(
-        TrackStateApp(
-          repository: const DemoTrackStateRepository(),
-          workspaceProfileService: workspaceProfileService,
-        ),
-      );
-      await tester.pumpAndSettle();
+        if (failures.isNotEmpty) {
+          throw AssertionError(failures.join('\n\n'));
+        }
 
-      final connectedStateVisible =
-          find.text('Connected').evaluate().isNotEmpty ||
-          find.bySemanticsLabel(RegExp('^Connected\$')).evaluate().isNotEmpty;
-      final visibleTexts = _visibleTexts(tester);
-      if (!connectedStateVisible) {
-        failures.add(
-          'Human-style verification failed: after migration, the app chrome did not show the visible Connected state a hosted user should see.\n'
-          'Visible texts: ${_formatSnapshot(visibleTexts)}',
-        );
-      }
-      if (find.text(_expectedDisplayName).evaluate().isEmpty) {
-        failures.add(
-          'Human-style verification failed: the top bar did not show the migrated user display name "$_expectedDisplayName".\n'
-          'Visible texts: ${_formatSnapshot(visibleTexts)}',
-        );
-      }
-      if (!_containsTextFragment(visibleTexts, _expectedLogin)) {
-        failures.add(
-          'Human-style verification failed: the top bar did not show the migrated user login "$_expectedLogin".\n'
-          'Visible texts: ${_formatSnapshot(visibleTexts)}',
-        );
-      }
-      if (find.text(_expectedInitials).evaluate().isEmpty) {
-        failures.add(
-          'Human-style verification failed: the top bar did not show the migrated user initials "$_expectedInitials".\n'
-          'Visible texts: ${_formatSnapshot(visibleTexts)}',
-        );
-      }
-
-      if (failures.isNotEmpty) {
-        fail(failures.join('\n'));
+        _writePassOutputs(result);
+      } catch (error, stackTrace) {
+        result['error'] = '${error.runtimeType}: $error';
+        result['traceback'] = stackTrace.toString();
+        _writeFailureOutputs(result);
+        Error.throwWithStackTrace(error, stackTrace);
       }
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
 }
 
-List<String> _visibleTexts(WidgetTester tester) {
-  final snapshot = <String>[];
-  for (final widget in tester.widgetList<Text>(find.byType(Text))) {
-    final value = widget.data?.trim();
-    if (value == null || value.isEmpty || snapshot.contains(value)) {
-      continue;
-    }
-    snapshot.add(value);
-  }
-  return snapshot;
+Directory get _outputsDir => Directory('${Directory.current.path}/outputs');
+File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
+File get _responseFile => File('${_outputsDir.path}/response.md');
+File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
+File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
+
+void _recordStep(
+  Map<String, Object?> result, {
+  required int step,
+  required String status,
+  required String action,
+  required String observed,
+}) {
+  final steps = result.putIfAbsent('steps', () => <Map<String, Object?>>[]);
+  (steps as List<Map<String, Object?>>).add(<String, Object?>{
+    'step': step,
+    'status': status,
+    'action': action,
+    'observed': observed,
+  });
 }
 
-String _formatSnapshot(List<String> values, {int limit = 24}) {
-  if (values.isEmpty) {
-    return '<none>';
-  }
-  if (values.length <= limit) {
-    return values.join(' | ');
-  }
-  return values.take(limit).join(' | ');
+void _recordHumanVerification(
+  Map<String, Object?> result, {
+  required String check,
+  required String observed,
+}) {
+  final checks = result.putIfAbsent(
+    'human_verification',
+    () => <Map<String, Object?>>[],
+  );
+  (checks as List<Map<String, Object?>>).add(<String, Object?>{
+    'check': check,
+    'observed': observed,
+  });
 }
 
-bool _containsTextFragment(List<String> values, String fragment) {
-  for (final value in values) {
-    if (value.contains(fragment)) {
-      return true;
-    }
+void _writePassOutputs(Map<String, Object?> result) {
+  _outputsDir.createSync(recursive: true);
+  if (_bugDescriptionFile.existsSync()) {
+    _bugDescriptionFile.deleteSync();
   }
-  return false;
+  _resultFile.writeAsStringSync(
+    '${jsonEncode(const <String, Object>{'status': 'passed', 'passed': 1, 'failed': 0, 'skipped': 0, 'summary': '1 passed, 0 failed'})}\n',
+  );
+  _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
+  _responseFile.writeAsStringSync(_responseSummary(passed: true));
+}
+
+void _writeFailureOutputs(Map<String, Object?> result) {
+  _outputsDir.createSync(recursive: true);
+  final error = '${result['error'] ?? 'AssertionError: unknown failure'}';
+  _resultFile.writeAsStringSync(
+    '${jsonEncode(<String, Object>{'status': 'failed', 'passed': 0, 'failed': 1, 'skipped': 0, 'summary': '0 passed, 1 failed', 'error': error})}\n',
+  );
+  _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
+  _responseFile.writeAsStringSync(_responseSummary(passed: false));
+  _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
+}
+
+String _responseSummary({required bool passed}) {
+  return passed
+      ? '# TS-665\n\nReworked the test to drive `TrackStateApp` through first-run startup, moved the SharedPreferences/auth assertions behind a layered testing probe, and verified the migrated hosted session stays visibly connected.\n\nResult: `1 passed, 0 failed`.\n'
+      : '# TS-665\n\nReworked the test to use the first-run startup path and layered testing probe, but the product-visible scenario still failed.\n\nResult: `0 passed, 1 failed`.\n';
+}
+
+String _prBody(Map<String, Object?> result, {required bool passed}) {
+  final reviewFixes =
+      (result['review_fixes'] as List<Object?>?)?.cast<String>() ?? const [];
+  final lines = <String>[
+    '## TS-665 Rework',
+    '',
+    '### Review fixes addressed',
+    for (final fix in reviewFixes) '- $fix',
+    '',
+    '### Result',
+    passed
+        ? '- Passed: first launch migrated the legacy hosted context into one active workspace, re-scoped only the active token, and preserved the visible connected identity.'
+        : '- Failed: the first-run app path still does not satisfy the expected hosted migration behavior.',
+    '',
+    '### Step results',
+    ..._markdownStepLines(result),
+    '',
+    '### Human-style verification',
+    ..._markdownHumanVerificationLines(result),
+    '',
+    '### Test file',
+    '```text',
+    _testFilePath,
+    '```',
+    '',
+    '### How to run',
+    '```bash',
+    _runCommand,
+    '```',
+  ];
+
+  if (!passed) {
+    lines.addAll(<String>[
+      '',
+      '### Exact error',
+      '```text',
+      '${result['error'] ?? '<missing>'}',
+      '',
+      '${result['traceback'] ?? '<missing>'}',
+      '```',
+    ]);
+  }
+
+  return '${lines.join('\n')}\n';
+}
+
+List<String> _markdownStepLines(Map<String, Object?> result) {
+  final steps = (result['steps'] as List<Object?>?) ?? const [];
+  return [
+    for (final entry in steps.cast<Map<String, Object?>>())
+      '- Step ${entry['step']}: **${entry['status']}** — ${entry['action']}\n'
+          '  - Observed: ${entry['observed']}',
+  ];
+}
+
+List<String> _markdownHumanVerificationLines(Map<String, Object?> result) {
+  final checks = (result['human_verification'] as List<Object?>?) ?? const [];
+  return [
+    for (final entry in checks.cast<Map<String, Object?>>())
+      '- ${entry['check']}\n  - Observed: ${entry['observed']}',
+  ];
+}
+
+String _bugDescription(Map<String, Object?> result) {
+  final lines = <String>[
+    'h2. TS-665 First-run hosted workspace migration failed',
+    '',
+    'h3. Reproduction steps',
+    '# Seed SharedPreferences with a legacy hosted token for {code}trackstate/trackstate{code} and an unrelated second legacy repository token.',
+    '# Launch the production app through {code}TrackStateApp(){code} with {code}repository{code} unset so startup uses the real first-run migration path.',
+    '# Wait for startup to finish and inspect the persisted workspace state, credential scopes, and visible hosted identity.',
+    '',
+    'h3. Expected result',
+    'The app should create exactly one active hosted workspace {code}hosted:trackstate/trackstate@main{code}, mark migration complete, move only the active repository token into workspace scope, keep the unrelated legacy token untouched, and still show the hosted session as connected with {code}Demo User{code} / {code}demo-user{code} / {code}DU{code}.',
+    '',
+    'h3. Actual result',
+    '${result['error'] ?? '<missing>'}',
+    '',
+    'h3. Missing or broken production capability',
+    'The production first-run startup flow did not expose the migrated hosted workspace state and connected hosted identity in the expected observable way when exercised entirely through the public app launch path.',
+    '',
+    'h3. Failing command',
+    '{code:bash}',
+    _runCommand,
+    '{code}',
+    '',
+    'h3. Raw output',
+    '{noformat}',
+    '${result['error'] ?? '<missing>'}',
+    '',
+    '${result['traceback'] ?? '<missing>'}',
+    '{noformat}',
+  ];
+  return '${lines.join('\n')}\n';
 }

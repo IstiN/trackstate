@@ -5,5 +5,6 @@ platform: widget
 dependencies: []
 notes:
   - Seeds legacy SharedPreferences data for a hosted repository token plus an active hosted repository context.
-  - Exercises the production workspace migration flow through SharedPreferencesWorkspaceProfileService.ensureLegacyContextMigrated().
+  - Launches TrackStateApp with repository unset so startup exercises the production first-run migration path instead of pre-running the service.
+  - Uses layered testing abstractions under testing/core, testing/components, and testing/frameworks to hide SharedPreferences/auth-store details from the ticket test.
   - Verifies exactly one active workspace is stored, only the active repository token moves to the workspace-scoped key, and the migrated state restores a connected hosted session in the app chrome.
