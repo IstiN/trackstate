@@ -857,12 +857,22 @@ class ProviderBackedTrackStateRepository
     final snapshot = _snapshot ?? await loadSnapshot();
     final permission = await _provider.getPermission();
     final attachmentStorage = snapshot.project.attachmentStorage;
-    final canUploadAttachment = switch (attachmentStorage.mode) {
-      AttachmentStorageMode.githubReleases =>
-        permission.supportsReleaseAttachmentWrites,
-      _ => permission.canManageAttachments,
-    };
-    if (!canUploadAttachment) {
+    if (attachmentStorage.mode == AttachmentStorageMode.githubReleases) {
+      final githubReleases = attachmentStorage.githubReleases;
+      if (githubReleases == null || githubReleases.tagPrefix.trim().isEmpty) {
+        throw const TrackStateRepositoryException(
+          'GitHub Releases attachment storage requires a non-empty tag prefix.',
+        );
+      }
+      if (!permission.supportsReleaseAttachmentWrites) {
+        throw const TrackStateRepositoryException(
+          'GitHub Releases attachment storage requires GitHub '
+          'authentication/configuration that supports release uploads. '
+          'This repository session cannot upload release-backed '
+          'attachments.',
+        );
+      }
+    } else if (!permission.canManageAttachments) {
       throw const TrackStateRepositoryException(
         'This repository session does not allow attachment uploads.',
       );
@@ -890,12 +900,7 @@ class ProviderBackedTrackStateRepository
       );
     }
     if (attachmentStorage.mode == AttachmentStorageMode.githubReleases) {
-      final githubReleases = attachmentStorage.githubReleases;
-      if (githubReleases == null || githubReleases.tagPrefix.trim().isEmpty) {
-        throw const TrackStateRepositoryException(
-          'GitHub Releases attachment storage requires a non-empty tag prefix.',
-        );
-      }
+      final githubReleases = attachmentStorage.githubReleases!;
       final releaseStore = switch (_provider) {
         final RepositoryReleaseAttachmentStore supported => supported,
         _ => throw const TrackStateRepositoryException(
