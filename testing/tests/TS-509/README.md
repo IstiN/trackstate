@@ -34,6 +34,9 @@ python testing/tests/TS-509/test_ts_509.py
 - It selects a file that matches a real Git LFS-tracked extension from the live
   repository `.gitattributes`, uploads it through the browser UI, and verifies
   the attachment manifest plus GitHub Release asset state.
+- It waits for the live Attachments panel to finish hydrating after the project
+  config change before interacting with the upload controls, and it captures the
+  visible panel state on failure.
 - A passing result means the user never sees the hosted local-Git/LFS warning,
   the upload controls stay enabled, and the upload lands in the release-backed
   attachment flow.

@@ -39,6 +39,10 @@ PROJECT_JSON_PATH = "DEMO/project.json"
 MANIFEST_PATH = f"{ISSUE_PATH}/attachments.json"
 RELEASE_TAG_PREFIX_BASE = "ts509-release-bypass-"
 UPLOAD_SIZE_BYTES = 2_500_000
+ATTACHMENTS_PANEL_TIMEOUT_SECONDS = 180
+ATTACHMENTS_PANEL_POLL_INTERVAL_SECONDS = 4
+UPLOAD_PERSIST_TIMEOUT_SECONDS = 180
+UPLOAD_PERSIST_POLL_INTERVAL_SECONDS = 4
 
 HOSTED_LIMITED_UPLOAD_TITLE = "Some attachment uploads still require local Git"
 HOSTED_LIMITED_UPLOAD_FRAGMENTS = (
@@ -47,6 +51,8 @@ HOSTED_LIMITED_UPLOAD_FRAGMENTS = (
     "local Git runtime.",
 )
 GENERIC_LFS_ERROR_FRAGMENT = "download-only for Git LFS attachments"
+GENERIC_ATTACHMENT_LIMITED_LABEL = "Attachments limited"
+GENERIC_SETTINGS_RECOVERY_LABEL = "Open settings"
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -62,6 +68,17 @@ FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts509_failure.png"
 class RepoMutation:
     path: str
     original_file: LiveHostedRepositoryFile | None
+
+
+@dataclass(frozen=True)
+class AttachmentPanelObservation:
+    body_text: str
+    choose_button_count: int
+    choose_button_enabled: bool
+    upload_button_count: int
+    upload_button_enabled: bool
+    loading_visible: bool
+    open_settings_count: int
 
 
 def main() -> None:
@@ -159,155 +176,224 @@ def main() -> None:
                             f"Observed body text:\n{page.current_body_text()}",
                         )
 
-                    page.open_collaboration_tab("Attachments")
-                    page.wait_for_attachment_picker_ready(timeout_ms=60_000)
-                    attachments_text = page.current_body_text()
-                    result["attachments_text_before_upload"] = attachments_text
-                    _assert_no_lfs_restriction(
-                        page=page,
-                        body_text=attachments_text,
-                        step_number=1,
-                    )
-                    upload_controls = page.observe_attachment_upload_controls()
-                    _assert_attachment_upload_controls(
-                        upload_controls,
-                        attachments_text,
-                    )
-                    result["choose_button_count"] = upload_controls.choose_button_count
-                    result["choose_button_enabled"] = (
-                        upload_controls.choose_button_enabled
-                    )
-                    result["upload_button_count"] = upload_controls.upload_button_count
-                    result["upload_button_enabled"] = (
-                        upload_controls.upload_button_enabled
-                    )
-                    _record_step(
-                        result,
-                        step=1,
-                        status="passed",
-                        action="Open the Issue Detail Attachments tab for the hosted issue.",
-                        observed=(
-                            "attachment_picker_ready=true; "
-                            f"choose_button_count={upload_controls.choose_button_count}; "
-                            f"choose_button_enabled={upload_controls.choose_button_enabled}; "
-                            f"upload_button_count={upload_controls.upload_button_count}; "
-                            f"upload_button_enabled={upload_controls.upload_button_enabled}; "
-                            "no_local_git_warning=true"
-                        ),
-                    )
-                    _record_human_verification(
-                        result,
-                        check=(
-                            "Verified the visible Attachments panel did not show the amber "
-                            "local-Git or Git-LFS restriction copy before file selection."
-                        ),
-                        observed=attachments_text,
-                    )
+                    try:
+                        page.open_collaboration_tab("Attachments")
+                        attachment_panel = _wait_for_attachment_panel(page)
+                        _store_attachment_panel_observation(
+                            result,
+                            attachment_panel,
+                            result_key="attachments_text_before_upload",
+                        )
+                        _assert_no_lfs_restriction(
+                            page=page,
+                            body_text=attachment_panel.body_text,
+                            step_number=1,
+                        )
+                        _assert_attachment_upload_controls(
+                            attachment_panel,
+                        )
+                        _record_step(
+                            result,
+                            step=1,
+                            status="passed",
+                            action="Open the Issue Detail Attachments tab for the hosted issue.",
+                            observed=(
+                                "attachments_loaded=true; "
+                                f"{_attachment_panel_summary(attachment_panel)}; "
+                                "no_local_git_warning=true"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the visible Attachments panel finished loading and "
+                                "did not show the amber local-Git or Git-LFS restriction copy "
+                                "before file selection."
+                            ),
+                            observed=attachment_panel.body_text,
+                        )
+                    except Exception as error:
+                        attachment_panel = _observe_attachment_panel(page)
+                        _store_attachment_panel_observation(
+                            result,
+                            attachment_panel,
+                            result_key="attachments_text_before_upload",
+                        )
+                        _record_step(
+                            result,
+                            step=1,
+                            status="failed",
+                            action="Open the Issue Detail Attachments tab for the hosted issue.",
+                            observed=(
+                                f"{error}\n"
+                                f"{_attachment_panel_summary(attachment_panel)}\n"
+                                f"Observed body text:\n{attachment_panel.body_text}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Observed the Attachments panel state exactly as a hosted user "
+                                "would see it before any file selection."
+                            ),
+                            observed=attachment_panel.body_text,
+                        )
+                        raise
 
-                    page.choose_attachment(
-                        str(upload_file_path),
-                        timeout_ms=30_000,
-                    )
-                    selection_summary = page.wait_for_attachment_selection_summary(
-                        file_name=upload_name,
-                        timeout_ms=60_000,
-                    )
-                    result["selection_summary"] = _selection_summary_payload(
-                        selection_summary,
-                    )
-                    _assert_selection_summary(selection_summary, upload_name)
-                    selected_text = page.current_body_text()
-                    result["attachments_text_after_selection"] = selected_text
-                    _assert_no_lfs_restriction(
-                        page=page,
-                        body_text=selected_text,
-                        step_number=2,
-                    )
-                    _record_step(
-                        result,
-                        step=2,
-                        status="passed",
-                        action=(
-                            "Select a file that matches a Git LFS-tracked extension and "
-                            "review the pending upload state."
-                        ),
-                        observed=_selection_summary_text(selection_summary),
-                    )
-                    _record_human_verification(
-                        result,
-                        check=(
-                            "Verified the selected-file summary showed the exact file name, "
-                            "a visible size label, and an enabled Upload attachment action."
-                        ),
-                        observed=_selection_summary_text(selection_summary),
-                    )
+                    try:
+                        page.choose_attachment(
+                            str(upload_file_path),
+                            timeout_ms=30_000,
+                        )
+                        selection_summary = page.wait_for_attachment_selection_summary(
+                            file_name=upload_name,
+                            timeout_ms=60_000,
+                        )
+                        result["selection_summary"] = _selection_summary_payload(
+                            selection_summary,
+                        )
+                        _assert_selection_summary(selection_summary, upload_name)
+                        selected_text = page.current_body_text()
+                        result["attachments_text_after_selection"] = selected_text
+                        _assert_no_lfs_restriction(
+                            page=page,
+                            body_text=selected_text,
+                            step_number=2,
+                        )
+                        _record_step(
+                            result,
+                            step=2,
+                            status="passed",
+                            action=(
+                                "Select a file that matches a Git LFS-tracked extension and "
+                                "review the pending upload state."
+                            ),
+                            observed=_selection_summary_text(selection_summary),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the selected-file summary showed the exact file "
+                                "name, a visible size label, and an enabled Upload "
+                                "attachment action."
+                            ),
+                            observed=_selection_summary_text(selection_summary),
+                        )
+                    except Exception as error:
+                        selected_text = page.current_body_text()
+                        result["attachments_text_after_selection"] = selected_text
+                        _record_step(
+                            result,
+                            step=2,
+                            status="failed",
+                            action=(
+                                "Select a file that matches a Git LFS-tracked extension and "
+                                "review the pending upload state."
+                            ),
+                            observed=(
+                                f"{error}\nObserved body text:\n{selected_text}"
+                            ),
+                        )
+                        raise
 
-                    page.upload_attachment()
-                    matched_manifest, manifest_observation = poll_until(
-                        probe=lambda: _observe_manifest_state(
+                    try:
+                        page.upload_attachment()
+                        matched_manifest, manifest_observation = poll_until(
+                            probe=lambda: _observe_manifest_state(
+                                service,
+                                attachment_name=upload_name,
+                                expected_release_tag=expected_release_tag,
+                            ),
+                            is_satisfied=lambda state: state["single_entry_is_release"] is True,
+                            timeout_seconds=UPLOAD_PERSIST_TIMEOUT_SECONDS,
+                            interval_seconds=UPLOAD_PERSIST_POLL_INTERVAL_SECONDS,
+                        )
+                        result["manifest_after_upload"] = manifest_observation["manifest_text"]
+                        result["matching_manifest_entries"] = manifest_observation[
+                            "matching_entries"
+                        ]
+                        result["release_asset_names_after_upload"] = manifest_observation[
+                            "release_asset_names"
+                        ]
+                        if not matched_manifest:
+                            raise AssertionError(
+                                "Step 3 failed: the hosted upload did not create a single "
+                                "github-releases manifest entry for the selected LFS-tracked "
+                                "file within the timeout.\n"
+                                f"Observed manifest text:\n{manifest_observation['manifest_text']}\n"
+                                f"Observed release assets: {manifest_observation['release_asset_names']}",
+                            )
+
+                        upload_visible_text = page.wait_for_text(upload_name, timeout_ms=60_000)
+                        result["attachments_text_after_upload"] = upload_visible_text
+                        _assert_no_lfs_restriction(
+                            page=page,
+                            body_text=upload_visible_text,
+                            step_number=3,
+                        )
+                        visible_download_count = page.attachment_download_button_count(upload_name)
+                        result["visible_download_count_after_upload"] = visible_download_count
+                        if visible_download_count != 1:
+                            raise AssertionError(
+                                "Step 3 failed: the hosted Attachments tab did not show "
+                                "exactly one visible download row for the newly uploaded "
+                                "release-backed attachment.\n"
+                                f"Observed download control count: {visible_download_count}\n"
+                                f"Observed body text:\n{upload_visible_text}",
+                            )
+                        _record_step(
+                            result,
+                            step=3,
+                            status="passed",
+                            action=(
+                                "Upload the selected file and verify the browser routes it "
+                                "to the GitHub Release-backed attachment flow."
+                            ),
+                            observed=(
+                                f"release_tag={expected_release_tag}; "
+                                f"manifest_entry={json.dumps(manifest_observation['matching_entries'][0], sort_keys=True)}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the uploaded file appeared as a visible attachment "
+                                "row in the hosted UI after submission, without any local-"
+                                "Git/LFS warning replacing the success state."
+                            ),
+                            observed=upload_visible_text,
+                        )
+                    except Exception as error:
+                        manifest_observation = _observe_manifest_state(
                             service,
                             attachment_name=upload_name,
                             expected_release_tag=expected_release_tag,
-                        ),
-                        is_satisfied=lambda state: state["single_entry_is_release"] is True,
-                        timeout_seconds=120,
-                        interval_seconds=4,
-                    )
-                    result["manifest_after_upload"] = manifest_observation["manifest_text"]
-                    result["matching_manifest_entries"] = manifest_observation[
-                        "matching_entries"
-                    ]
-                    result["release_asset_names_after_upload"] = manifest_observation[
-                        "release_asset_names"
-                    ]
-                    if not matched_manifest:
-                        raise AssertionError(
-                            "Step 3 failed: the hosted upload did not create a single "
-                            "github-releases manifest entry for the selected LFS-tracked "
-                            "file within the timeout.\n"
-                            f"Observed manifest text:\n{manifest_observation['manifest_text']}\n"
-                            f"Observed release assets: {manifest_observation['release_asset_names']}",
                         )
-
-                    upload_visible_text = page.wait_for_text(upload_name, timeout_ms=60_000)
-                    result["attachments_text_after_upload"] = upload_visible_text
-                    _assert_no_lfs_restriction(
-                        page=page,
-                        body_text=upload_visible_text,
-                        step_number=3,
-                    )
-                    visible_download_count = page.attachment_download_button_count(upload_name)
-                    result["visible_download_count_after_upload"] = visible_download_count
-                    if visible_download_count != 1:
-                        raise AssertionError(
-                            "Step 3 failed: the hosted Attachments tab did not show exactly "
-                            "one visible download row for the newly uploaded release-backed "
-                            "attachment.\n"
-                            f"Observed download control count: {visible_download_count}\n"
-                            f"Observed body text:\n{upload_visible_text}",
+                        result["manifest_after_upload"] = manifest_observation["manifest_text"]
+                        result["matching_manifest_entries"] = manifest_observation[
+                            "matching_entries"
+                        ]
+                        result["release_asset_names_after_upload"] = manifest_observation[
+                            "release_asset_names"
+                        ]
+                        upload_visible_text = page.current_body_text()
+                        result["attachments_text_after_upload"] = upload_visible_text
+                        _record_step(
+                            result,
+                            step=3,
+                            status="failed",
+                            action=(
+                                "Upload the selected file and verify the browser routes it "
+                                "to the GitHub Release-backed attachment flow."
+                            ),
+                            observed=(
+                                f"{error}\n"
+                                f"Observed manifest text:\n{manifest_observation['manifest_text']}\n"
+                                f"Observed release assets: {manifest_observation['release_asset_names']}\n"
+                                f"Observed body text:\n{upload_visible_text}"
+                            ),
                         )
-                    _record_step(
-                        result,
-                        step=3,
-                        status="passed",
-                        action=(
-                            "Upload the selected file and verify the browser routes it to "
-                            "the GitHub Release-backed attachment flow."
-                        ),
-                        observed=(
-                            f"release_tag={expected_release_tag}; "
-                            f"manifest_entry={json.dumps(manifest_observation['matching_entries'][0], sort_keys=True)}"
-                        ),
-                    )
-                    _record_human_verification(
-                        result,
-                        check=(
-                            "Verified the uploaded file appeared as a visible attachment row "
-                            "in the hosted UI after submission, without any local-Git/LFS "
-                            "warning replacing the success state."
-                        ),
-                        observed=upload_visible_text,
-                    )
+                        raise
 
                     page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                     result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
@@ -403,6 +489,68 @@ def _build_release_tag_prefix() -> str:
 
 def _expected_release_tag(release_tag_prefix: str) -> str:
     return f"{release_tag_prefix}{ISSUE_KEY}"
+
+
+def _observe_attachment_panel(
+    page: LiveIssueDetailCollaborationPage,
+) -> AttachmentPanelObservation:
+    controls = page.observe_attachment_upload_controls()
+    body_text = page.current_body_text()
+    return AttachmentPanelObservation(
+        body_text=body_text,
+        choose_button_count=controls.choose_button_count,
+        choose_button_enabled=controls.choose_button_enabled,
+        upload_button_count=controls.upload_button_count,
+        upload_button_enabled=controls.upload_button_enabled,
+        loading_visible="Attachments loading" in body_text
+        or "Attachments Loading..." in body_text,
+        open_settings_count=page.button_label_fragment_count("Open settings"),
+    )
+
+
+def _wait_for_attachment_panel(
+    page: LiveIssueDetailCollaborationPage,
+) -> AttachmentPanelObservation:
+    matched, observation = poll_until(
+        probe=lambda: _observe_attachment_panel(page),
+        is_satisfied=lambda current: not current.loading_visible,
+        timeout_seconds=ATTACHMENTS_PANEL_TIMEOUT_SECONDS,
+        interval_seconds=ATTACHMENTS_PANEL_POLL_INTERVAL_SECONDS,
+    )
+    if not matched:
+        raise AssertionError(
+            "Step 1 failed: the hosted Attachments tab never finished loading after "
+            "switching the live project to github-releases within the timeout.\n"
+            f"{_attachment_panel_summary(observation)}\n"
+            f"Observed body text:\n{observation.body_text}"
+        )
+    return observation
+
+
+def _store_attachment_panel_observation(
+    result: dict[str, object],
+    observation: AttachmentPanelObservation,
+    *,
+    result_key: str,
+) -> None:
+    result[result_key] = observation.body_text
+    result["choose_button_count"] = observation.choose_button_count
+    result["choose_button_enabled"] = observation.choose_button_enabled
+    result["upload_button_count"] = observation.upload_button_count
+    result["upload_button_enabled"] = observation.upload_button_enabled
+    result["open_settings_count"] = observation.open_settings_count
+    result["attachments_loading_visible"] = observation.loading_visible
+
+
+def _attachment_panel_summary(observation: AttachmentPanelObservation) -> str:
+    return (
+        f"choose_button_count={observation.choose_button_count}; "
+        f"choose_button_enabled={observation.choose_button_enabled}; "
+        f"upload_button_count={observation.upload_button_count}; "
+        f"upload_button_enabled={observation.upload_button_enabled}; "
+        f"open_settings_count={observation.open_settings_count}; "
+        f"attachments_loading_visible={observation.loading_visible}"
+    )
 
 
 def _seed_fixture(
@@ -577,6 +725,20 @@ def _assert_no_lfs_restriction(
     body_text: str,
     step_number: int,
 ) -> None:
+    if GENERIC_ATTACHMENT_LIMITED_LABEL in body_text:
+        raise AssertionError(
+            f"Step {step_number} failed: the hosted Attachments tab still exposed the "
+            "generic limited-upload hosted state instead of a ready browser-upload "
+            "flow for the github-releases project.\n"
+            f"Observed body text:\n{body_text}",
+        )
+    if page.button_label_fragment_count(GENERIC_SETTINGS_RECOVERY_LABEL) > 0:
+        raise AssertionError(
+            f"Step {step_number} failed: the hosted Attachments tab still exposed the "
+            f'visible "{GENERIC_SETTINGS_RECOVERY_LABEL}" recovery action instead of '
+            "the direct upload flow required by TS-509.\n"
+            f"Observed body text:\n{body_text}",
+        )
     if HOSTED_LIMITED_UPLOAD_TITLE in body_text:
         raise AssertionError(
             f"Step {step_number} failed: the hosted Attachments tab still displayed the "
@@ -632,29 +794,22 @@ def _assert_selection_summary(
 
 
 def _assert_attachment_upload_controls(
-    controls: AttachmentUploadControlsObservation,
-    attachments_text: str,
+    panel: AttachmentPanelObservation,
 ) -> None:
-    if controls.choose_button_count != 1 or controls.upload_button_count != 1:
+    if panel.choose_button_count != 1 or panel.upload_button_count != 1:
         raise AssertionError(
             "Step 1 failed: the hosted Attachments tab did not expose exactly one visible "
             "`Choose attachment` control and one visible `Upload attachment` control "
             "before file selection.\n"
-            f"Observed choose button count: {controls.choose_button_count}\n"
-            f"Observed upload button count: {controls.upload_button_count}\n"
-            f"Observed choose button enabled: {controls.choose_button_enabled}\n"
-            f"Observed upload button enabled: {controls.upload_button_enabled}\n"
-            f"Observed body text:\n{attachments_text}",
+            f"{_attachment_panel_summary(panel)}\n"
+            f"Observed body text:\n{panel.body_text}",
         )
-    if not controls.choose_button_enabled:
+    if not panel.choose_button_enabled:
         raise AssertionError(
             "Step 1 failed: the hosted Attachments tab did not keep the visible "
             "`Choose attachment` browser-upload affordance enabled before file selection.\n"
-            f"Observed choose button count: {controls.choose_button_count}\n"
-            f"Observed upload button count: {controls.upload_button_count}\n"
-            f"Observed choose button enabled: {controls.choose_button_enabled}\n"
-            f"Observed upload button enabled: {controls.upload_button_enabled}\n"
-            f"Observed body text:\n{attachments_text}",
+            f"{_attachment_panel_summary(panel)}\n"
+            f"Observed body text:\n{panel.body_text}",
         )
 
 
@@ -754,24 +909,11 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
     status = "PASSED" if passed else "FAILED"
     screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
-    release_tag = str(result.get("release_tag", ""))
     lines = [
         f"h3. {TICKET_KEY} {status}",
         "",
         "*Automation coverage*",
-        (
-            f"* Switched {{{{{PROJECT_JSON_PATH}}}}} to `attachmentStorage.mode = "
-            "github-releases` with a ticket-specific release tag prefix."
-        ),
-        (
-            "* Opened the deployed hosted TrackState app, connected GitHub, selected a "
-            "Git LFS-tracked file through the real browser file picker, and submitted "
-            "the upload from the Attachments tab."
-        ),
-        (
-            f"* Polled {{{{{MANIFEST_PATH}}}}} plus the GitHub Release {{{{{release_tag}}}}} "
-            "to verify the upload was routed to release-backed storage."
-        ),
+        *_automation_coverage_lines(result, jira=True),
         "",
         "*Observed result*",
         (
@@ -810,24 +952,11 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
 def _pr_body(result: dict[str, object], *, passed: bool) -> str:
     status = "Passed" if passed else "Failed"
     screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
-    release_tag = str(result.get("release_tag", ""))
     lines = [
         f"## {TICKET_KEY} {status}",
         "",
         "### Automation",
-        (
-            f"- Switched `{PROJECT_JSON_PATH}` to `attachmentStorage.mode = "
-            "`github-releases` with a ticket-specific release tag prefix."
-        ),
-        (
-            "- Opened the deployed hosted TrackState app, connected GitHub, selected a "
-            "Git LFS-tracked file through the real browser file picker, and submitted "
-            "the upload from the Attachments tab."
-        ),
-        (
-            f"- Polled `{MANIFEST_PATH}` plus the GitHub Release `{release_tag}` "
-            "to verify the upload was routed to release-backed storage."
-        ),
+        *_automation_coverage_lines(result, jira=False),
         "",
         "### Observed result",
         (
@@ -869,9 +998,9 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         f"# {TICKET_KEY} {status}",
         "",
         (
-            "Ran the live hosted browser upload flow for a Git LFS-tracked file after "
-            "switching the project to `github-releases`, then checked the visible "
-            "Attachments state plus `attachments.json` and the GitHub Release asset list."
+            "Ran the live hosted TS-509 scenario after switching the project to "
+            "`github-releases`, then captured the visible Attachments state and any "
+            "manifest / GitHub Release evidence reached by the flow."
         ),
         "",
         "## Observed",
@@ -973,6 +1102,43 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- Cleanup error: `{result.get('cleanup_error', '')}`",
         ],
     ) + "\n"
+
+
+def _automation_coverage_lines(
+    result: dict[str, object],
+    *,
+    jira: bool,
+) -> list[str]:
+    bullet = "*" if jira else "-"
+    release_tag = str(result.get("release_tag", ""))
+    lines = [
+        (
+            f"{bullet} Switched `{PROJECT_JSON_PATH}` to `attachmentStorage.mode = "
+            "github-releases` with a ticket-specific release tag prefix."
+        )
+    ]
+    if _step_status(result, 1) in {"passed", "failed"}:
+        lines.append(
+            f"{bullet} Opened the deployed hosted TrackState app, connected GitHub, "
+            "and navigated to the seeded issue's Attachments tab."
+        )
+    if _step_status(result, 2) == "passed":
+        lines.append(
+            f"{bullet} Selected the Git LFS-tracked `{result.get('upload_name', '')}` "
+            "fixture through the real browser file picker and observed the pending "
+            "upload state."
+        )
+    elif _step_status(result, 2) == "failed":
+        lines.append(
+            f"{bullet} Attempted to select the Git LFS-tracked "
+            f"`{result.get('upload_name', '')}` fixture through the real browser file picker."
+        )
+    if _step_status(result, 3) in {"passed", "failed"}:
+        lines.append(
+            f"{bullet} Polled `{MANIFEST_PATH}` plus the GitHub Release `{release_tag}` "
+            "to verify whether the upload was routed to release-backed storage."
+        )
+    return lines
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
