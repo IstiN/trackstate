@@ -277,6 +277,13 @@ class LiveIssueDetailCollaborationPage:
     def wait_for_text_absent(self, text: str, *, timeout_ms: int = 60_000) -> str:
         return self._session.wait_for_text_absent(text, timeout_ms=timeout_ms)
 
+    def click_button(self, label: str, *, timeout_ms: int = 30_000) -> None:
+        self._session.click(
+            self._button_selector,
+            has_text=label,
+            timeout_ms=timeout_ms,
+        )
+
     def wait_for_text_fragment(
         self,
         fragment: str,
