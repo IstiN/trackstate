@@ -1,5 +1,7 @@
 export 'dart:typed_data' show Uint8List;
 
+const bool kIsWeb = bool.fromEnvironment('dart.library.js_util');
+
 typedef VoidCallback = void Function();
 
 abstract interface class Listenable {

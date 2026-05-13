@@ -83,20 +83,22 @@ class PythonTrackStateCliReleaseIdentityMissingRemoteFramework(
             for variable in ("GH_TOKEN", "GITHUB_TOKEN", "TRACKSTATE_TOKEN")
             if env.pop(variable, None) is not None
         )
-        sandbox_home = repository_path / ".release-identity-home"
-        sandbox_home.mkdir(parents=True, exist_ok=True)
-        env["HOME"] = str(sandbox_home)
-        env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
-        env["GH_CONFIG_DIR"] = str(sandbox_home / ".config" / "gh")
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        completed = subprocess.run(
-            executed_command,
-            cwd=repository_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-release-identity-home-"
+        ) as sandbox_home_dir:
+            sandbox_home = Path(sandbox_home_dir)
+            env["HOME"] = str(sandbox_home)
+            env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
+            env["GH_CONFIG_DIR"] = str(sandbox_home / ".config" / "gh")
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            completed = subprocess.run(
+                executed_command,
+                cwd=repository_path,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
         observation = TrackStateCliCommandObservation(
             requested_command=requested_command,
             executed_command=executed_command,
