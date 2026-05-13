@@ -490,7 +490,10 @@ void main() {
         'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
       });
       final repository = _HostedMutableEditRepository(
-        textFixtures: _hostedHierarchyTextFixtures(),
+        textFixtures: {
+          ..._repositoryPathProjectTextFixtures(),
+          ..._hostedHierarchyTextFixtures(),
+        },
         binaryFixtures: _hostedHierarchyBinaryFixtures(),
       );
       final viewModel = TrackerViewModel(repository: repository);
@@ -531,7 +534,10 @@ void main() {
     'hosted hierarchy moves preserve attachment revisions for same-name overwrites',
     () async {
       final repository = _HostedMutableEditRepository(
-        textFixtures: _hostedHierarchyTextFixtures(),
+        textFixtures: {
+          ..._repositoryPathProjectTextFixtures(),
+          ..._hostedHierarchyTextFixtures(),
+        },
         binaryFixtures: _hostedHierarchyBinaryFixtures(),
       );
       await repository.loadSnapshot();
@@ -605,7 +611,9 @@ void main() {
     'view model treats hosted browser mode as disconnected until GitHub auth is connected',
     () async {
       final viewModel = TrackerViewModel(
-        repository: ReactiveIssueDetailTrackStateRepository(),
+        repository: ReactiveIssueDetailTrackStateRepository(
+          textFixtures: _repositoryPathProjectTextFixtures(),
+        ),
       );
 
       await viewModel.load();
@@ -652,7 +660,7 @@ void main() {
   );
 
   test(
-    'view model keeps release-backed hosted sessions restricted when release writes are unavailable',
+    'view model keeps release-backed hosted sessions upload-attempt ready while release writes remain restricted',
     () async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
@@ -681,7 +689,7 @@ void main() {
         viewModel.hostedRepositoryAccessMode,
         HostedRepositoryAccessMode.attachmentRestricted,
       );
-      expect(viewModel.canUploadIssueAttachments, isFalse);
+      expect(viewModel.canUploadIssueAttachments, isTrue);
       expect(viewModel.hasAttachmentUploadRestriction, isTrue);
     },
   );
@@ -848,7 +856,9 @@ void main() {
         'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
       });
       final viewModel = TrackerViewModel(
-        repository: ReactiveIssueDetailTrackStateRepository(),
+        repository: ReactiveIssueDetailTrackStateRepository(
+          textFixtures: _repositoryPathProjectTextFixtures(),
+        ),
       );
 
       await viewModel.load();
@@ -890,6 +900,7 @@ void main() {
       final viewModel = TrackerViewModel(
         repository: ReactiveIssueDetailTrackStateRepository(
           permission: attachmentRestrictedPermission,
+          textFixtures: _repositoryPathProjectTextFixtures(),
           lfsTrackedPaths: {'TRACK-12/attachments/release-notes.pdf'},
         ),
       );
@@ -1384,6 +1395,22 @@ TrackerSnapshot _snapshotWithResolutions(
     loadWarnings: snapshot.loadWarnings,
   );
 }
+
+Map<String, String> _repositoryPathProjectTextFixtures() => const {
+  'project.json': '''
+{
+  "key": "TRACK",
+  "name": "TrackState.AI",
+  "defaultLocale": "en",
+  "issueKeyPattern": "TRACK-{number}",
+  "dataModel": "nested-tree",
+  "configPath": "config",
+  "attachmentStorage": {
+    "mode": "repository-path"
+  }
+}
+''',
+};
 
 Map<String, String> _githubReleasesProjectTextFixtures() => const {
   'project.json': '''

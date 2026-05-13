@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../../../domain/models/trackstate_models.dart';
+import '../foundation_compat.dart' show kIsWeb;
 import '../trackstate_provider.dart';
 
 class GitHubTrackStateProvider
@@ -34,12 +35,13 @@ class GitHubTrackStateProvider
   );
 
   final http.Client? _client;
+  late final http.Client _ownedClient = http.Client();
   final String repositoryName;
   final String sourceRef;
 
   RepositoryConnection? _connection;
 
-  http.Client get _http => _client ?? http.Client();
+  http.Client get _http => _client ?? _ownedClient;
 
   @override
   ProviderType get providerType => ProviderType.github;
@@ -404,15 +406,25 @@ class GitHubTrackStateProvider
   @override
   Future<RepositoryAttachment> readReleaseAttachment(
     RepositoryReleaseAttachmentReadRequest request,
-  ) async {
-    final connection = _requireConnection();
+  ) async => readReleaseAttachmentForRepository(
+    repository: _requireConnection().repository,
+    request: request,
+    token: _connection?.token,
+  );
+
+  Future<RepositoryAttachment> readReleaseAttachmentForRepository({
+    required String repository,
+    required RepositoryReleaseAttachmentReadRequest request,
+    String? token,
+  }) async {
     final requestedAssetId = request.assetId?.trim() ?? '';
     if (requestedAssetId.isNotEmpty) {
       final directArtifact = await _downloadReleaseAsset(
-        repository: connection.repository,
+        repository: repository,
         releaseTag: request.releaseTag,
         assetId: requestedAssetId,
         assetName: request.assetName,
+        token: token,
         allowMissing: true,
       );
       if (directArtifact != null) {
@@ -420,10 +432,11 @@ class GitHubTrackStateProvider
       }
     }
     final release = (await _loadReleaseByTag(
-      repository: connection.repository,
+      repository: repository,
       releaseTag: request.releaseTag,
       issueKey: null,
       expectedTitle: null,
+      token: token,
     ))!;
     final matchingAssets = release.assets.where(
       (candidate) => candidate.name == request.assetName,
@@ -436,11 +449,12 @@ class GitHubTrackStateProvider
       );
     }
     return (await _downloadReleaseAsset(
-      repository: connection.repository,
+      repository: repository,
       releaseTag: request.releaseTag,
       assetId: matchedAsset.id,
       assetName: request.assetName,
       expectedSizeBytes: matchedAsset.sizeBytes,
+      token: token,
     ))!;
   }
 
@@ -646,13 +660,23 @@ class GitHubTrackStateProvider
     required String releaseTag,
     required String? issueKey,
     required String? expectedTitle,
+    String? token,
     bool allowMissing = false,
   }) async {
     final response = await _http.get(
       _githubUri('/repos/$repository/releases/tags/$releaseTag'),
-      headers: _githubHeaders(_connection?.token),
+      headers: _githubHeaders(token ?? _connection?.token),
     );
     if (response.statusCode == 404) {
+      final listedRelease = await _loadReleaseFromList(
+        repository: repository,
+        releaseTag: releaseTag,
+        issueKey: issueKey,
+        expectedTitle: expectedTitle,
+      );
+      if (listedRelease != null) {
+        return listedRelease;
+      }
       if (allowMissing) {
         return null;
       }
@@ -670,7 +694,61 @@ class GitHubTrackStateProvider
       );
     }
     final json = jsonDecode(response.body) as Map<String, Object?>;
-    final release = _parseReleaseSummary(json, fallbackTagName: releaseTag);
+    return _validateReleaseIdentity(
+      _parseReleaseSummary(json, fallbackTagName: releaseTag),
+      releaseTag: releaseTag,
+      issueKey: issueKey,
+      expectedTitle: expectedTitle,
+    );
+  }
+
+  Future<_GitHubReleaseSummary?> _loadReleaseFromList({
+    required String repository,
+    required String releaseTag,
+    required String? issueKey,
+    required String? expectedTitle,
+  }) async {
+    for (var page = 1; page <= 10; page++) {
+      final json =
+          await _getGitHubJson(
+                '/repos/$repository/releases',
+                queryParameters: {'per_page': '100', 'page': '$page'},
+              )
+              as List<Object?>;
+      final matching =
+          [
+                for (final entry in json.whereType<Map<String, Object?>>())
+                  _parseReleaseSummary(entry, fallbackTagName: releaseTag),
+              ]
+              .where((release) => release.tagName == releaseTag)
+              .toList(growable: false);
+      if (matching.length > 1) {
+        throw TrackStateProviderException(
+          'GitHub release $releaseTag maps to multiple release containers and '
+          'requires manual cleanup.',
+        );
+      }
+      if (matching.length == 1) {
+        return _validateReleaseIdentity(
+          matching.single,
+          releaseTag: releaseTag,
+          issueKey: issueKey,
+          expectedTitle: expectedTitle,
+        );
+      }
+      if (json.length < 100) {
+        break;
+      }
+    }
+    return null;
+  }
+
+  _GitHubReleaseSummary _validateReleaseIdentity(
+    _GitHubReleaseSummary release, {
+    required String releaseTag,
+    required String? issueKey,
+    required String? expectedTitle,
+  }) {
     if (expectedTitle != null && release.title != expectedTitle) {
       throw TrackStateProviderException(
         'GitHub release $releaseTag does not match issue '
@@ -864,13 +942,14 @@ class GitHubTrackStateProvider
     required String releaseTag,
     required String assetId,
     required String assetName,
+    String? token,
     int? expectedSizeBytes,
     bool allowMissing = false,
   }) async {
     final response = await _http.get(
       _githubUri('/repos/$repository/releases/assets/$assetId'),
       headers: {
-        ..._githubHeaders(_connection?.token),
+        ..._githubHeaders(token ?? _connection?.token),
         'accept': 'application/octet-stream',
       },
     );
@@ -1206,7 +1285,7 @@ RepositoryPermission _permissionFromRepoJson(Map<String, Object?> json) {
     attachmentUploadMode: canWrite
         ? AttachmentUploadMode.noLfs
         : AttachmentUploadMode.none,
-    supportsReleaseAttachmentWrites: canWrite,
+    supportsReleaseAttachmentWrites: canWrite && !kIsWeb,
   );
 }
 

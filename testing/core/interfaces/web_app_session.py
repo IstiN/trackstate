@@ -35,6 +35,13 @@ class FocusedElementObservation:
     outer_html: str
 
 
+@dataclass(frozen=True)
+class NewPageObservation:
+    url: str
+    page_count_before: int
+    page_count_after: int
+
+
 class WebAppSession(Protocol):
     def set_viewport_size(self, *, width: int, height: int) -> None: ...
 
@@ -75,6 +82,17 @@ class WebAppSession(Protocol):
         has_text: str | None = None,
         index: int = 0,
         timeout_ms: int = 30_000,
+    ) -> None: ...
+
+    def type_text(
+        self,
+        selector: str,
+        value: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+        delay_ms: int = 50,
     ) -> None: ...
 
     def press(
@@ -211,6 +229,28 @@ class WebAppSession(Protocol):
         *,
         timeout_ms: int = 30_000,
     ) -> str: ...
+
+    def wait_for_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str: ...
+
+    def wait_for_new_page_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> NewPageObservation: ...
+
+    def wait_for_new_page_after_active_element_click(
+        self,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> NewPageObservation: ...
 
     def select_files_after_click(
         self,

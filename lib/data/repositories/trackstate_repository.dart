@@ -100,8 +100,10 @@ class ProviderBackedTrackStateRepository
     required TrackStateProviderAdapter provider,
     this.usesLocalPersistence = false,
     this.supportsGitHubAuth = true,
+    http.Client? githubClient,
     JqlSearchService searchService = const JqlSearchService(),
   }) : _provider = provider,
+       _githubClient = githubClient,
        _searchService = searchService,
        _session = ProviderSession(
          providerType: provider.providerType,
@@ -118,6 +120,7 @@ class ProviderBackedTrackStateRepository
        );
 
   final TrackStateProviderAdapter _provider;
+  final http.Client? _githubClient;
   final JqlSearchService _searchService;
   final ProjectSettingsValidationService _projectSettingsValidationService =
       const ProjectSettingsValidationService();
@@ -857,12 +860,25 @@ class ProviderBackedTrackStateRepository
     final snapshot = _snapshot ?? await loadSnapshot();
     final permission = await _provider.getPermission();
     final attachmentStorage = snapshot.project.attachmentStorage;
-    final canUploadAttachment = switch (attachmentStorage.mode) {
-      AttachmentStorageMode.githubReleases =>
-        permission.supportsReleaseAttachmentWrites,
-      _ => permission.canManageAttachments,
-    };
-    if (!canUploadAttachment) {
+    if (attachmentStorage.mode == AttachmentStorageMode.githubReleases) {
+      final githubReleases = attachmentStorage.githubReleases;
+      if (githubReleases == null || githubReleases.tagPrefix.trim().isEmpty) {
+        throw const TrackStateRepositoryException(
+          'GitHub Releases attachment storage requires a non-empty tag prefix.',
+        );
+      }
+      if (!permission.supportsReleaseAttachmentWrites) {
+        throw TrackStateRepositoryException(
+          permission.releaseAttachmentWriteFailureReason?.trim().isNotEmpty ==
+                  true
+              ? permission.releaseAttachmentWriteFailureReason!.trim()
+              : 'GitHub Releases attachment storage requires GitHub '
+                    'authentication/configuration that supports release '
+                    'uploads. This repository session cannot upload '
+                    'release-backed attachments.',
+        );
+      }
+    } else if (!permission.canManageAttachments) {
       throw const TrackStateRepositoryException(
         'This repository session does not allow attachment uploads.',
       );
@@ -890,12 +906,7 @@ class ProviderBackedTrackStateRepository
       );
     }
     if (attachmentStorage.mode == AttachmentStorageMode.githubReleases) {
-      final githubReleases = attachmentStorage.githubReleases;
-      if (githubReleases == null || githubReleases.tagPrefix.trim().isEmpty) {
-        throw const TrackStateRepositoryException(
-          'GitHub Releases attachment storage requires a non-empty tag prefix.',
-        );
-      }
+      final githubReleases = attachmentStorage.githubReleases!;
       final releaseStore = switch (_provider) {
         final RepositoryReleaseAttachmentStore supported => supported,
         _ => throw const TrackStateRepositoryException(
@@ -961,8 +972,8 @@ class ProviderBackedTrackStateRepository
       );
       final updatedAttachment = IssueAttachment(
         id: attachmentPath,
-        name: assetName,
-        mediaType: _mediaTypeForPath(assetName),
+        name: normalizedName,
+        mediaType: _mediaTypeForPath(normalizedName),
         sizeBytes: bytes.length,
         author: author,
         createdAt: timestamp,
@@ -1142,20 +1153,46 @@ class ProviderBackedTrackStateRepository
           '${attachment.name}.',
         );
       }
-      final releaseStore = switch (_provider) {
-        final RepositoryReleaseAttachmentStore supported => supported,
+      final request = RepositoryReleaseAttachmentReadRequest(
+        releaseTag: releaseTag,
+        assetName: assetName,
+        assetId: attachment.revisionOrOid,
+      );
+      final artifact = switch (_provider) {
+        final RepositoryReleaseAttachmentStore supported =>
+          await supported.readReleaseAttachment(request),
+        final RepositoryGitHubIdentityResolver identityResolver =>
+          await () async {
+            final failureReason = await identityResolver
+                .releaseAttachmentIdentityFailureReason();
+            if (failureReason?.trim().isNotEmpty == true) {
+              throw TrackStateRepositoryException(failureReason!.trim());
+            }
+            final repository = await identityResolver
+                .resolveGitHubRepositoryIdentity();
+            if (repository == null || repository.trim().isEmpty) {
+              final reason = await identityResolver
+                  .releaseAttachmentIdentityFailureReason();
+              throw TrackStateRepositoryException(
+                reason?.trim().isNotEmpty == true
+                    ? reason!.trim()
+                    : 'This repository provider does not support GitHub Releases '
+                          'attachment downloads.',
+              );
+            }
+            return GitHubTrackStateProvider(
+              client: _githubClient,
+              repositoryName: repository,
+            ).readReleaseAttachmentForRepository(
+              repository: repository,
+              request: request,
+            );
+          }(),
         _ => throw const TrackStateRepositoryException(
           'This repository provider does not support GitHub Releases '
           'attachment downloads.',
         ),
       };
-      final artifact = await releaseStore.readReleaseAttachment(
-        RepositoryReleaseAttachmentReadRequest(
-          releaseTag: releaseTag,
-          assetName: assetName,
-          assetId: attachment.revisionOrOid,
-        ),
-      );
       return artifact.bytes;
     }
     final artifact = await _provider.readAttachment(
@@ -1971,7 +2008,15 @@ class ProviderBackedTrackStateRepository
   ) {
     final rawAttachmentStorage = projectJson['attachmentStorage'];
     if (rawAttachmentStorage == null) {
-      return const ProjectAttachmentStorageSettings();
+      return usesLocalPersistence
+          ? const ProjectAttachmentStorageSettings()
+          : const ProjectAttachmentStorageSettings(
+              mode: AttachmentStorageMode.githubReleases,
+              githubReleases: GitHubReleasesAttachmentStorageSettings(
+                tagPrefix:
+                    GitHubReleasesAttachmentStorageSettings.defaultTagPrefix,
+              ),
+            );
     }
     if (rawAttachmentStorage is! Map) {
       throw const TrackStateRepositoryException(

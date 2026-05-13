@@ -1,0 +1,8 @@
+test_id: TS-517
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Exercises the production issue-detail Attachments tab with a hosted github-releases configuration, a connected browser session, and 12 seeded attachments.
+  - Verifies the inline restriction notice stays at the top of the Attachments content, the issue-detail surface scrolls to the bottom attachment row, and the notice still returns above the list when scrolled back to the top.

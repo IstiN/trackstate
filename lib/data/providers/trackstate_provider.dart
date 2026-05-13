@@ -61,6 +61,11 @@ abstract interface class RepositoryReleaseAttachmentStore {
   );
 }
 
+abstract interface class RepositoryGitHubIdentityResolver {
+  Future<String?> resolveGitHubRepositoryIdentity();
+  Future<String?> releaseAttachmentIdentityFailureReason();
+}
+
 abstract interface class RepositoryHistoryReader {
   Future<List<RepositoryHistoryCommit>> listHistory({
     required String ref,
@@ -314,6 +319,7 @@ class RepositoryPermission {
     bool? canManageAttachments,
     AttachmentUploadMode? attachmentUploadMode,
     this.supportsReleaseAttachmentWrites = false,
+    this.releaseAttachmentWriteFailureReason,
     bool? canCheckCollaborators,
   }) : canCreateBranch = canCreateBranch ?? canWrite,
        canManageAttachments = canManageAttachments ?? canWrite,
@@ -331,6 +337,7 @@ class RepositoryPermission {
   final bool canManageAttachments;
   final AttachmentUploadMode attachmentUploadMode;
   final bool supportsReleaseAttachmentWrites;
+  final String? releaseAttachmentWriteFailureReason;
   final bool canCheckCollaborators;
 }
 

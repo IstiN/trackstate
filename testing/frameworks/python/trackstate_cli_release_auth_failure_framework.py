@@ -37,10 +37,14 @@ class PythonTrackStateCliReleaseAuthFailureFramework(
         *,
         config: TrackStateCliReleaseAuthFailureConfig,
     ) -> TrackStateCliReleaseAuthFailureValidationResult:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-500-bin-") as bin_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-release-auth-bin-"
+        ) as bin_dir:
             executable_path = Path(bin_dir) / "trackstate"
             self._compile_executable(executable_path)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-500-repo-") as temp_dir:
+            with tempfile.TemporaryDirectory(
+                prefix="trackstate-release-auth-repo-"
+            ) as temp_dir:
                 repository_path = Path(temp_dir)
                 self._seed_local_repository(repository_path, config=config)
                 initial_state = self._capture_repository_state(
@@ -48,6 +52,7 @@ class PythonTrackStateCliReleaseAuthFailureFramework(
                     config=config,
                 )
                 observation, stripped_environment_variables = self._observe_command(
+                    config=config,
                     requested_command=config.requested_command,
                     repository_path=repository_path,
                     executable_path=executable_path,
@@ -66,12 +71,19 @@ class PythonTrackStateCliReleaseAuthFailureFramework(
     def _observe_command(
         self,
         *,
+        config: TrackStateCliReleaseAuthFailureConfig,
         requested_command: tuple[str, ...],
         repository_path: Path,
         executable_path: Path,
     ) -> tuple[TrackStateCliCommandObservation, tuple[str, ...]]:
         executed_command = (str(executable_path), *requested_command[1:])
         env = os.environ.copy()
+        token_source_name = config.token_source_environment_variable
+        injected_token = (
+            env.get(token_source_name)
+            if isinstance(token_source_name, str) and token_source_name
+            else None
+        )
         env.setdefault("CI", "true")
         env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
         stripped = tuple(
@@ -79,28 +91,44 @@ class PythonTrackStateCliReleaseAuthFailureFramework(
             for variable in ("GH_TOKEN", "GITHUB_TOKEN", "TRACKSTATE_TOKEN")
             if env.pop(variable, None) is not None
         )
-        sandbox_home = repository_path / ".ts500-home"
-        sandbox_home.mkdir(parents=True, exist_ok=True)
-        env["HOME"] = str(sandbox_home)
-        env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
-        env["GH_CONFIG_DIR"] = str(sandbox_home / ".config" / "gh")
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        completed = subprocess.run(
-            executed_command,
-            cwd=repository_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        if token_source_name:
+            if not injected_token:
+                raise ValueError(
+                    "Configured token source environment variable is missing or empty: "
+                    f"{token_source_name}"
+                )
+            env["TRACKSTATE_TOKEN"] = injected_token
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-release-auth-home-"
+        ) as home_dir:
+            sandbox_home = Path(home_dir)
+            env["HOME"] = str(sandbox_home)
+            env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
+            env["GH_CONFIG_DIR"] = str(sandbox_home / ".config" / "gh")
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            completed = subprocess.run(
+                executed_command,
+                cwd=repository_path,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
         observation = TrackStateCliCommandObservation(
             requested_command=requested_command,
             executed_command=executed_command,
             fallback_reason=(
                 "Pinned execution to a temporary executable compiled from this checkout "
-                "and stripped GitHub credentials from the environment so TS-500 runs "
-                "the exact local command without ambient auth. The current local "
-                "provider path may still fail before GitHub auth is consulted."
+                + (
+                    "and injected a GitHub token from "
+                    f"{token_source_name} into TRACKSTATE_TOKEN for a deterministic "
+                    "permission-checked upload attempt."
+                    if token_source_name
+                    else "and stripped GitHub credentials from the environment so the "
+                    "test runs the exact local command without ambient auth."
+                )
+                + " The current local provider path may still fail before GitHub auth "
+                "is consulted."
             ),
             repository_path=str(repository_path),
             compiled_binary_path=str(executable_path),
@@ -163,7 +191,7 @@ updated: 2026-05-12T00:00:00Z
 
 # Description
 
-TS-500 local github-releases attachment fixture.
+{config.issue_summary}
 """,
         )
         self._write_binary_file(
@@ -171,17 +199,23 @@ TS-500 local github-releases attachment fixture.
             config.source_file_bytes,
         )
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-500 Tester")
+        self._git(
+            repository_path,
+            "config",
+            "--local",
+            "user.name",
+            "TrackState Release Auth Tester",
+        )
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "ts500@example.com",
+            "trackstate-release-auth@example.com",
         )
         self._git(repository_path, "remote", "add", "origin", config.remote_origin_url)
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-500 fixture")
+        self._git(repository_path, "commit", "-m", "Seed release auth fixture")
 
     def _capture_repository_state(
         self,

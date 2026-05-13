@@ -19,6 +19,7 @@ class TrackStateCliReleaseAuthFailureConfig:
     source_file_text: str
     attachment_tag_prefix: str
     remote_origin_url: str
+    token_source_environment_variable: str | None
     expected_issue_key: str
     expected_attachment_name: str
     expected_attachment_relative_path: str
@@ -77,6 +78,11 @@ class TrackStateCliReleaseAuthFailureConfig:
                 "remote_origin_url",
                 path,
             ),
+            token_source_environment_variable=cls._optional_string(
+                runtime_inputs,
+                "token_source_environment_variable",
+                path,
+            ),
             expected_issue_key=cls._require_string(
                 runtime_inputs,
                 "expected_issue_key",
@@ -112,6 +118,15 @@ class TrackStateCliReleaseAuthFailureConfig:
     @staticmethod
     def _require_string(payload: dict[str, Any], key: str, path: Path) -> str:
         value = payload.get(key)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"TS-500 config runtime_inputs.{key} must be a string in {path}.")
+        return value
+
+    @staticmethod
+    def _optional_string(payload: dict[str, Any], key: str, path: Path) -> str | None:
+        value = payload.get(key)
+        if value is None:
+            return None
         if not isinstance(value, str) or not value:
             raise ValueError(f"TS-500 config runtime_inputs.{key} must be a string in {path}.")
         return value

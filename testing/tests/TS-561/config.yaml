@@ -1,0 +1,48 @@
+test_id: TS-561
+type: cli
+framework: python
+platform: local-git
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+  - gh CLI available on PATH
+  - GH_TOKEN or GITHUB_TOKEN with release access to the live setup repository
+notes:
+  - Executes the exact local CLI command from a disposable TrackState repository configured with github-releases attachment storage.
+  - Points the local Git origin at the live setup repository, seeds the target GitHub Release with a foreign asset, and verifies the upload fails with the expected conflict instead of mutating local or remote state.
+runtime_inputs:
+  ticket_command: trackstate attachment upload --issue TS-123 --file trackstate-file.txt --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - upload
+    - --issue
+    - TS-123
+    - --file
+    - trackstate-file.txt
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-561 Project
+  issue_key: TS-123
+  issue_summary: TS-561 foreign release asset conflict fixture
+  source_file_name: trackstate-file.txt
+  source_file_text: |
+    TS-561 upload payload
+    This text file must not be uploaded because the release already contains a foreign asset.
+  seeded_manifest_text: |
+    []
+  release_tag_prefix_base: ts561-assets-
+  foreign_asset_name: external-file.zip
+  expected_release_title: Attachments for TS-123
+  expected_exit_code: 4
+  expected_error_code: REPOSITORY_OPEN_FAILED
+  expected_error_category: repository
+  required_reason_fragments:
+    - contains unexpected assets
+    - manual cleanup
+    - external-file.zip
+  release_poll_timeout_seconds: 120
+  release_poll_interval_seconds: 4
+  gh_poll_timeout_seconds: 120
+  gh_poll_interval_seconds: 4

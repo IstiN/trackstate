@@ -2295,6 +2295,7 @@ class TrackStateCli {
       final repository = _repositoryFactory.createLocal(
         repositoryPath: target.value,
         dataRef: branch,
+        client: _httpClient,
       );
       await repository.connect(
         RepositoryConnection(
@@ -2448,6 +2449,7 @@ class TrackStateCli {
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
       dataRef: branch,
+      client: _httpClient,
     );
     try {
       final response = await _buildReadResponse(
@@ -2603,11 +2605,10 @@ class TrackStateCli {
               (field) => _metadataTextLabel(
                 canonicalName: field.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.fieldLabel(
-                      field.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project.fieldLabel(
+                  field.id,
+                  locale: requestedLocale,
+                ),
               ),
             ),
           ),
@@ -2631,11 +2632,8 @@ class TrackStateCli {
               (status) => _metadataTextLabel(
                 canonicalName: status.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.statusLabel(
-                      status.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project
+                    .statusLabel(status.id, locale: requestedLocale),
               ),
             ),
           ),
@@ -2674,11 +2672,8 @@ class TrackStateCli {
               (item) => _metadataTextLabel(
                 canonicalName: item.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.issueTypeLabel(
-                      item.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project
+                    .issueTypeLabel(item.id, locale: requestedLocale),
               ),
             ),
           ),
@@ -2702,11 +2697,8 @@ class TrackStateCli {
               (item) => _metadataTextLabel(
                 canonicalName: item.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.componentLabel(
-                      item.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project
+                    .componentLabel(item.id, locale: requestedLocale),
               ),
             ),
           ),
@@ -2730,11 +2722,8 @@ class TrackStateCli {
               (item) => _metadataTextLabel(
                 canonicalName: item.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.versionLabel(
-                      item.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project
+                    .versionLabel(item.id, locale: requestedLocale),
               ),
             ),
           ),
@@ -3163,6 +3152,7 @@ class TrackStateCli {
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
       dataRef: branch,
+      client: _httpClient,
     );
     try {
       await repository.connect(
@@ -3173,6 +3163,20 @@ class TrackStateCli {
         ),
       );
       final snapshot = await repository.loadSnapshot();
+      final credential =
+          snapshot.project.attachmentStorage.mode ==
+              AttachmentStorageMode.githubReleases
+          ? await _resolveLocalReleaseAttachmentCredential(repository)
+          : null;
+      if (credential != null) {
+        await repository.connect(
+          RepositoryConnection(
+            repository: target.value,
+            branch: branch,
+            token: credential.token,
+          ),
+        );
+      }
       final issue = _findIssue(snapshot, issueKey);
       final updatedIssue = await repository.uploadIssueAttachment(
         issue: issue,
@@ -3187,7 +3191,7 @@ class TrackStateCli {
         output: output,
         data: <String, Object?>{
           'command': 'attachment-upload',
-          'authSource': 'none',
+          'authSource': credential?.source ?? 'none',
           'issue': issue.key,
           'attachment': _attachmentPayload(attachment),
         },
@@ -3265,6 +3269,7 @@ class TrackStateCli {
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
       dataRef: branch,
+      client: _httpClient,
     );
     try {
       await repository.connect(
@@ -3276,6 +3281,20 @@ class TrackStateCli {
       );
       final snapshot = await repository.loadSnapshot();
       final resolvedAttachment = _findAttachment(snapshot, attachmentId);
+      final credential =
+          resolvedAttachment.attachment.storageBackend ==
+              AttachmentStorageMode.githubReleases
+          ? await _resolveLocalReleaseAttachmentCredential(repository)
+          : null;
+      if (credential != null) {
+        await repository.connect(
+          RepositoryConnection(
+            repository: target.value,
+            branch: branch,
+            token: credential.token,
+          ),
+        );
+      }
       final bytes = await repository.downloadAttachment(
         resolvedAttachment.attachment,
       );
@@ -3287,7 +3306,7 @@ class TrackStateCli {
         output: output,
         data: <String, Object?>{
           'command': 'attachment-download',
-          'authSource': 'none',
+          'authSource': credential?.source ?? 'none',
           'issue': resolvedAttachment.issue.key,
           'savedFile': resolvedOutPath,
           'attachment': _attachmentPayload(resolvedAttachment.attachment),
@@ -3365,6 +3384,7 @@ class TrackStateCli {
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
       dataRef: branch,
+      client: _httpClient,
     );
     try {
       await repository.connect(
@@ -3476,6 +3496,31 @@ class TrackStateCli {
         'repository': target.value,
       },
     );
+  }
+
+  Future<TrackStateCliCredential?> _resolveOptionalLocalCredential() =>
+      _credentialResolver.resolve(
+        explicitToken: '',
+        environment: _environment.environment,
+        readGhToken: _environment.readGhAuthToken,
+      );
+
+  Future<TrackStateCliCredential?> _resolveLocalReleaseAttachmentCredential(
+    TrackStateRepository repository,
+  ) async {
+    if (repository
+        case final ProviderBackedTrackStateRepository providerBacked) {
+      final provider = providerBacked.providerAdapter;
+      if (provider
+          case final RepositoryGitHubIdentityResolver identityResolver) {
+        final repositoryIdentity = await identityResolver
+            .resolveGitHubRepositoryIdentity();
+        if (repositoryIdentity == null || repositoryIdentity.trim().isEmpty) {
+          return null;
+        }
+      }
+    }
+    return _resolveOptionalLocalCredential();
   }
 
   TrackStateIssue _findIssue(TrackerSnapshot snapshot, String issueKey) {
@@ -3670,6 +3715,22 @@ class TrackStateCli {
       return _mapCompatibilityError(error);
     }
     if (error is TrackStateProviderException) {
+      if (_looksLikeAuthenticationFailure(error.message)) {
+        return _TrackStateCliException(
+          code: 'AUTHENTICATION_FAILED',
+          category: TrackStateCliErrorCategory.auth,
+          message: 'Authentication is required for the selected provider.',
+          exitCode: 3,
+          details: <String, Object?>{
+            if (target.type == TrackStateCliTargetType.local)
+              'path': target.value
+            else
+              'repository': target.value,
+            'provider': target.provider,
+            'reason': error.message,
+          },
+        );
+      }
       return target.type == TrackStateCliTargetType.hosted
           ? _mapHostedProviderError(error, target)
           : _TrackStateCliException(
@@ -3726,6 +3787,7 @@ class TrackStateCli {
     _ResolvedTarget target,
     TrackStateCliOutput output,
   ) async {
+    final credential = await _resolveOptionalLocalCredential();
     final provider = _providerFactory.createLocal(
       repositoryPath: target.value,
       dataRef: 'HEAD',
@@ -3739,7 +3801,7 @@ class TrackStateCli {
         RepositoryConnection(
           repository: target.value,
           branch: branch,
-          token: '',
+          token: credential?.token ?? '',
         ),
       );
       final permission = await provider.getPermission();
@@ -3747,7 +3809,7 @@ class TrackStateCli {
         'command': 'session',
         'provider': target.provider,
         'branch': branch,
-        'authSource': 'none',
+        'authSource': credential?.source ?? 'none',
         'user': <String, Object?>{
           'login': user.login,
           'displayName': user.displayName,
@@ -3854,6 +3916,7 @@ class TrackStateCli {
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
       dataRef: target.branch.ifEmpty('HEAD'),
+      client: _httpClient,
     );
     try {
       final page = await repository.searchIssuePage(
@@ -5254,29 +5317,19 @@ class TrackStateCli {
     '${issue.key}: ${issue.summary}',
     'Project: ${project.key}',
     'Type: ${_metadataTextLabel(
-      canonicalName: _findConfigEntry(
-        project.issueTypeDefinitions,
-        issue.issueTypeId,
-      ).name,
+      canonicalName: _findConfigEntry(project.issueTypeDefinitions, issue.issueTypeId).name,
       locale: locale,
-      localizedName: (requestedLocale) =>
-          project.issueTypeLabel(issue.issueTypeId, locale: requestedLocale),
+      localizedName: (requestedLocale) => project.issueTypeLabel(issue.issueTypeId, locale: requestedLocale),
     )}',
     'Status: ${_metadataTextLabel(
-      canonicalName: _findConfigEntry(project.statusDefinitions, issue.statusId)
-          .name,
+      canonicalName: _findConfigEntry(project.statusDefinitions, issue.statusId).name,
       locale: locale,
-      localizedName: (requestedLocale) =>
-          project.statusLabel(issue.statusId, locale: requestedLocale),
+      localizedName: (requestedLocale) => project.statusLabel(issue.statusId, locale: requestedLocale),
     )}',
     'Priority: ${_metadataTextLabel(
-      canonicalName: _findConfigEntry(
-        project.priorityDefinitions,
-        issue.priorityId,
-      ).name,
+      canonicalName: _findConfigEntry(project.priorityDefinitions, issue.priorityId).name,
       locale: locale,
-      localizedName: (requestedLocale) =>
-          project.priorityLabel(issue.priorityId, locale: requestedLocale),
+      localizedName: (requestedLocale) => project.priorityLabel(issue.priorityId, locale: requestedLocale),
     )}',
   ].join('\n');
 
@@ -5316,11 +5369,7 @@ class TrackStateCli {
     _ResolvedTarget target,
   ) {
     final message = error.message;
-    final isAuthenticationFailure =
-        message.contains('(401)') ||
-        message.contains('(403)') ||
-        message.toLowerCase().contains('bad credentials') ||
-        message.toLowerCase().contains('write access first');
+    final isAuthenticationFailure = _looksLikeAuthenticationFailure(message);
     if (isAuthenticationFailure) {
       return _TrackStateCliException(
         code: 'AUTHENTICATION_FAILED',
@@ -5409,6 +5458,18 @@ class TrackStateCli {
         },
       }),
     );
+  }
+
+  bool _looksLikeAuthenticationFailure(String message) {
+    final normalized = message.toLowerCase();
+    return message.contains('(401)') ||
+        message.contains('(403)') ||
+        normalized.contains('bad credentials') ||
+        normalized.contains('write access first') ||
+        normalized.contains('authentication') ||
+        normalized.contains('authenticate with gh') ||
+        normalized.contains('trackstate_token') ||
+        normalized.contains('credential');
   }
 
   Map<String, Object?> _permissionJson(RepositoryPermission permission) =>
@@ -6165,6 +6226,7 @@ abstract interface class TrackStateCliRepositoryFactory {
   TrackStateRepository createLocal({
     required String repositoryPath,
     required String dataRef,
+    http.Client? client,
   });
 
   TrackStateRepository createHosted({
@@ -6185,6 +6247,7 @@ class _ProviderBackedTrackStateCliRepositoryFactory
   TrackStateRepository createLocal({
     required String repositoryPath,
     required String dataRef,
+    http.Client? client,
   }) => ProviderBackedTrackStateRepository(
     provider: providerFactory.createLocal(
       repositoryPath: repositoryPath,
@@ -6192,6 +6255,7 @@ class _ProviderBackedTrackStateCliRepositoryFactory
     ),
     usesLocalPersistence: true,
     supportsGitHubAuth: false,
+    githubClient: client,
   );
 
   @override

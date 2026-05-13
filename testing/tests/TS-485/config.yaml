@@ -5,9 +5,11 @@ platform: local
 dependencies:
   - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
   - git CLI available on PATH
+  - GH_TOKEN or GITHUB_TOKEN with release upload access to the hosted setup repository
 notes:
-  - Seeds a disposable local TrackState repository with a legacy repository-path attachment while project settings are set to github-releases.
+  - Seeds a disposable local TrackState repository with a legacy repository-path attachment while project settings are set to github-releases and the repository origin points at the live setup repository.
   - Runs the exact CLI upload and download flows needed to verify immutable attachment backend resolution from attachments.json metadata.
+  - Uses a unique GitHub Release tag prefix per run and deletes the temporary release after validation.
 runtime_inputs:
   ticket_command_upload: trackstate attachment upload --issue TS-10 --file new.png --name new.png --target local
   ticket_command_download: trackstate attachment download --attachment-id TS/TS-10/attachments/old.pdf --out ./downloads/old.pdf --target local

@@ -1,7 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
+import 'package:trackstate/ui/features/tracker/services/attachment_picker.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
@@ -108,7 +111,7 @@ void main() {
   );
 
   testWidgets(
-    'attachment-restricted hosted flow keeps issue edits available while explaining download-only attachments',
+    'attachment-restricted hosted flow keeps issue edits available while explaining default release-backed attachment restrictions',
     (tester) async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'attachment-token',
@@ -144,12 +147,12 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          find.text('Attachments stay download-only in the browser'),
+          find.text('GitHub Releases uploads are unavailable in the browser'),
           findsAtLeastNWidgets(1),
         );
         expect(
           find.textContaining(
-            'Issue edits and comments can continue, but attachment upload is unavailable',
+            'Issue edits and comments can continue, but this project stores new attachments in GitHub Releases',
           ),
           findsOneWidget,
         );
@@ -174,7 +177,7 @@ void main() {
   );
 
   testWidgets(
-    'attachment-restricted hosted flow keeps browser-supported uploads enabled when attachment permission is available',
+    'attachment-restricted hosted flow keeps default release-backed uploads unavailable when hosted release writes are missing',
     (tester) async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'attachment-token',
@@ -210,20 +213,15 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          find.text('Some attachment uploads still require local Git'),
+          find.text('GitHub Releases uploads are unavailable in the browser'),
           findsAtLeastNWidgets(1),
         );
         expect(
           find.textContaining(
-            'browser-supported attachment uploads can continue here',
+            'This project stores new attachments in GitHub Releases',
           ),
           findsOneWidget,
         );
-        expect(
-          find.text('Attachments stay download-only in the browser'),
-          findsNothing,
-        );
-
         final chooseAttachment = tester.widget<OutlinedButton>(
           find.widgetWithText(OutlinedButton, 'Choose attachment'),
         );
@@ -240,7 +238,7 @@ void main() {
   );
 
   testWidgets(
-    'settings repository-path callout stays restricted while disconnected',
+    'settings hosted default callout stays release-backed while disconnected',
     (tester) async {
       tester.view.physicalSize = const Size(1440, 960);
       tester.view.devicePixelRatio = 1;
@@ -254,16 +252,16 @@ void main() {
         await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
         await tester.pumpAndSettle();
 
-        expect(find.text('Repository-path attachment storage'), findsOneWidget);
+        expect(find.text('GitHub Releases attachment storage'), findsOneWidget);
         expect(
           find.text(
-            'New attachments are stored in <issue-root>/attachments/<file>, but this hosted session cannot upload them in the browser.',
+            'New attachments resolve to release tag trackstate-attachments-<ISSUE_KEY>, but browser-based GitHub Release asset uploads are not supported in this hosted session (uploads.github.com does not allow browser requests). Use the desktop app or CLI to upload attachments.',
           ),
           findsOneWidget,
         );
         expect(
           find.text(
-            'New attachments are stored in <issue-root>/attachments/<file> inside the project repository, and this hosted session can upload them directly.',
+            'New attachments resolve to release tag trackstate-attachments-<ISSUE_KEY>, and this hosted session can complete release-backed uploads in the browser.',
           ),
           findsNothing,
         );
@@ -274,7 +272,7 @@ void main() {
     },
   );
 
-  testWidgets('settings repository-path callout stays restricted while read-only', (
+  testWidgets('settings hosted default callout stays release-backed while read-only', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({
@@ -304,16 +302,16 @@ void main() {
       await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
       await tester.pumpAndSettle();
 
-      expect(find.text('Repository-path attachment storage'), findsOneWidget);
+      expect(find.text('GitHub Releases attachment storage'), findsOneWidget);
       expect(
         find.text(
-          'New attachments are stored in <issue-root>/attachments/<file>, but this hosted session cannot upload them in the browser.',
+          'New attachments resolve to release tag trackstate-attachments-<ISSUE_KEY>, but browser-based GitHub Release asset uploads are not supported in this hosted session (uploads.github.com does not allow browser requests). Use the desktop app or CLI to upload attachments.',
         ),
         findsOneWidget,
       );
       expect(
         find.text(
-          'New attachments are stored in <issue-root>/attachments/<file> inside the project repository, and this hosted session can upload them directly.',
+          'New attachments resolve to release tag trackstate-attachments-<ISSUE_KEY>, and this hosted session can complete release-backed uploads in the browser.',
         ),
         findsNothing,
       );
@@ -324,7 +322,7 @@ void main() {
   });
 
   testWidgets(
-    'release-backed hosted flow keeps attachments unavailable while explaining the missing hosted support',
+    'release-backed hosted flow keeps upload controls available and shows a runtime failure when hosted release writes are unavailable',
     (tester) async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
@@ -341,6 +339,10 @@ void main() {
       );
       tester.view.physicalSize = const Size(1440, 960);
       tester.view.devicePixelRatio = 1;
+      Future<PickedAttachment?> pickAttachment() async => PickedAttachment(
+        name: 'release notes.pdf',
+        bytes: Uint8List.fromList(<int>[1, 2, 3, 4]),
+      );
 
       try {
         await tester.pumpWidget(
@@ -349,6 +351,7 @@ void main() {
               permission: releaseRestrictedPermission,
               textFixtures: _githubReleasesProjectTextFixtures(),
             ),
+            attachmentPicker: pickAttachment,
           ),
         );
         await tester.pumpAndSettle();
@@ -377,8 +380,46 @@ void main() {
         final uploadAttachment = tester.widget<FilledButton>(
           find.widgetWithText(FilledButton, 'Upload attachment'),
         );
-        expect(chooseAttachment.onPressed, isNull);
+        expect(chooseAttachment.onPressed, isNotNull);
         expect(uploadAttachment.onPressed, isNull);
+
+        final chooseAttachmentAction = find.bySemanticsLabel(
+          RegExp('^Choose attachment\$'),
+        );
+        await tester.ensureVisible(chooseAttachmentAction);
+        await tester.tap(chooseAttachmentAction);
+        await tester.pumpAndSettle();
+
+        expect(find.text('release notes.pdf'), findsOneWidget);
+        expect(find.text('4 B'), findsOneWidget);
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.widgetWithText(FilledButton, 'Upload attachment'),
+              )
+              .onPressed,
+          isNotNull,
+        );
+
+        final uploadAttachmentAction = find.bySemanticsLabel(
+          RegExp('^Upload attachment\$'),
+        );
+        await tester.ensureVisible(uploadAttachmentAction);
+        await tester.tap(uploadAttachmentAction);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.textContaining(
+            'Save failed: GitHub Releases attachment storage requires GitHub authentication/configuration that supports release uploads.',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.textContaining(
+            'This repository session cannot upload release-backed attachments.',
+          ),
+          findsOneWidget,
+        );
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
