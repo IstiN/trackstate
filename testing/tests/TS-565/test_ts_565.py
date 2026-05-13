@@ -85,6 +85,7 @@ class Ts565DownloadValidationSequenceScenario:
                     f"issue_main_exists={validation.initial_state.issue_main_exists}; "
                     f"attachments_metadata_exists={validation.initial_state.attachments_metadata_exists}; "
                     f"remote_names={list(validation.initial_state.remote_names)}; "
+                    f"manifest_text={validation.initial_state.manifest_text!r}; "
                     f"metadata_attachment_ids={list(validation.initial_state.metadata_attachment_ids)}"
                 ),
             )
@@ -347,10 +348,10 @@ class Ts565DownloadValidationSequenceScenario:
                 "though repository identity could not be resolved.\n"
                 f"Observed state:\n{_describe_state(final_state)}"
             )
-        if final_state.metadata_attachment_ids != initial_state.metadata_attachment_ids:
+        if final_state.manifest_text != initial_state.manifest_text:
             failures.append(
-                "Step 2 failed: attachments.json metadata changed even though the failed "
-                "download should leave the local manifest unchanged.\n"
+                "Step 2 failed: the full attachments.json manifest changed even though the "
+                "failed download should leave the local manifest unchanged.\n"
                 f"Initial state:\n{_describe_state(initial_state)}\n"
                 f"Final state:\n{_describe_state(final_state)}"
             )
@@ -381,6 +382,7 @@ class Ts565DownloadValidationSequenceScenario:
                     f"downloads_directory_exists={final_state.downloads_directory_exists}; "
                     f"git_status={list(final_state.git_status_lines)}; "
                     f"remote_names={list(final_state.remote_names)}; "
+                    f"manifest_text={final_state.manifest_text!r}; "
                     f"metadata_attachment_ids={list(final_state.metadata_attachment_ids)}"
                 ),
             )
@@ -394,7 +396,7 @@ class Ts565DownloadValidationSequenceScenario:
                 observed=(
                     f"expected_output_exists={final_state.expected_output_exists}; "
                     f"downloads_directory_exists={final_state.downloads_directory_exists}; "
-                    f"metadata_attachment_ids={list(final_state.metadata_attachment_ids)}"
+                    f"manifest_text={final_state.manifest_text!r}"
                 ),
             )
         return failures
@@ -694,7 +696,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         (
             f"4. ✅ Inspect the command output and local filesystem path `{expected_output_path}`. "
             "Observed: no file was created, stdout/stderr are captured below, and the manifest "
-            "attachment ids remained unchanged."
+            "text remained unchanged."
         ),
         "",
         "## Expected result",
@@ -768,6 +770,7 @@ def _state_to_dict(
     return {
         "issue_main_exists": state.issue_main_exists,
         "attachments_metadata_exists": state.attachments_metadata_exists,
+        "manifest_text": state.manifest_text,
         "metadata_attachment_ids": list(state.metadata_attachment_ids),
         "expected_output_exists": state.expected_output_exists,
         "expected_output_size_bytes": state.expected_output_size_bytes,

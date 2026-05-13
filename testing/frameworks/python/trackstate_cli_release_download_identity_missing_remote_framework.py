@@ -214,6 +214,11 @@ TS-543 local github-releases attachment download fixture with no Git remotes.
         attachments_metadata_path = (
             repository_path / config.project_key / config.issue_key / "attachments.json"
         )
+        manifest_text = (
+            attachments_metadata_path.read_text(encoding="utf-8")
+            if attachments_metadata_path.is_file()
+            else None
+        )
         metadata_attachment_ids = self._metadata_attachment_ids(attachments_metadata_path)
         expected_output = repository_path / config.expected_output_relative_path
         downloads_directory = expected_output.parent
@@ -225,6 +230,7 @@ TS-543 local github-releases attachment download fixture with no Git remotes.
         return TrackStateCliReleaseDownloadIdentityMissingRemoteRepositoryState(
             issue_main_exists=issue_main.is_file(),
             attachments_metadata_exists=attachments_metadata_path.is_file(),
+            manifest_text=manifest_text,
             metadata_attachment_ids=metadata_attachment_ids,
             expected_output_exists=expected_output.is_file(),
             expected_output_size_bytes=(
