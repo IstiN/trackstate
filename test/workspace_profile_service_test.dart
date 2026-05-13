@@ -10,44 +10,58 @@ void main() {
   });
 
   test(
-    'createProfile allows distinct write branches and rejects exact duplicates',
+    'createProfile rejects duplicate target and default branch even when writeBranch differs',
     () async {
       final service = SharedPreferencesWorkspaceProfileService(
         authStore: _MemoryAuthStore(),
       );
 
-      final featureA = await service.createProfile(
+      final mainWorkspace = await service.createProfile(
         const WorkspaceProfileInput(
           targetType: WorkspaceProfileTargetType.local,
           target: '/tmp/trackstate',
           defaultBranch: 'main',
-          writeBranch: 'feature/ts-632',
         ),
       );
-      final featureB = await service.createProfile(
-        const WorkspaceProfileInput(
-          targetType: WorkspaceProfileTargetType.local,
-          target: '/tmp/trackstate',
-          defaultBranch: 'main',
-          writeBranch: 'other-branch',
-        ),
-        select: false,
-      );
+      expect(mainWorkspace.id, 'local:/tmp/trackstate@main');
 
-      expect(featureA.id, 'local:/tmp/trackstate@main:feature/ts-632');
-      expect(featureB.id, 'local:/tmp/trackstate@main:other-branch');
-
-      expect(
-        () => service.createProfile(
+      await expectLater(
+        service.createProfile(
           const WorkspaceProfileInput(
             targetType: WorkspaceProfileTargetType.local,
             target: '/tmp/trackstate',
             defaultBranch: 'main',
-            writeBranch: 'feature/ts-632',
+            writeBranch: 'other-branch',
           ),
         ),
-        throwsA(isA<WorkspaceProfileException>()),
+        throwsA(
+          isA<WorkspaceProfileException>().having(
+            (error) => error.message,
+            'message',
+            contains('/tmp/trackstate on main'),
+          ),
+        ),
       );
+
+      final developWorkspace = await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate',
+          defaultBranch: 'develop',
+        ),
+        select: false,
+      );
+      final state = await service.loadState();
+
+      expect(developWorkspace.id, 'local:/tmp/trackstate@develop');
+      expect(
+        state.profiles.map((profile) => profile.id).toList(),
+        containsAll(<String>[
+          'local:/tmp/trackstate@main',
+          'local:/tmp/trackstate@develop',
+        ]),
+      );
+      expect(state.profiles, hasLength(2));
     },
   );
 
@@ -206,39 +220,42 @@ void main() {
   );
 
   test(
-    'display names include the write branch when the default branch is shared',
+    'display names include the write branch when legacy profiles share a default branch',
     () async {
-      final service = SharedPreferencesWorkspaceProfileService(
-        authStore: _MemoryAuthStore(),
-      );
-
-      final mainWorkspace = await service.createProfile(
-        const WorkspaceProfileInput(
+      final profiles = resolveWorkspaceDisplayNames(const <WorkspaceProfile>[
+        WorkspaceProfile(
+          id: 'hosted:trackstate/trackstate@main',
+          displayName: '',
           targetType: WorkspaceProfileTargetType.hosted,
           target: 'trackstate/trackstate',
           defaultBranch: 'main',
+          writeBranch: 'main',
         ),
-      );
-      final featureWorkspace = await service.createProfile(
-        const WorkspaceProfileInput(
+        WorkspaceProfile(
+          id: 'hosted:trackstate/trackstate@main:feature/ts-632',
+          displayName: '',
           targetType: WorkspaceProfileTargetType.hosted,
           target: 'trackstate/trackstate',
           defaultBranch: 'main',
           writeBranch: 'feature/ts-632',
         ),
-        select: false,
-      );
-      final state = await service.loadState();
+      ]);
 
       expect(
-        state.profiles
-            .firstWhere((profile) => profile.id == mainWorkspace.id)
+        profiles
+            .firstWhere(
+              (profile) => profile.id == 'hosted:trackstate/trackstate@main',
+            )
             .displayName,
         'trackstate/trackstate (main)',
       );
       expect(
-        state.profiles
-            .firstWhere((profile) => profile.id == featureWorkspace.id)
+        profiles
+            .firstWhere(
+              (profile) =>
+                  profile.id ==
+                  'hosted:trackstate/trackstate@main:feature/ts-632',
+            )
             .displayName,
         'trackstate/trackstate (main -> feature/ts-632)',
       );
