@@ -41,8 +41,8 @@ python testing/tests/TS-557/test_ts_557.py
 
 - **Pass:** the CLI fails immediately with explicit GitHub repository-identity
   guidance explaining that local Git configuration cannot resolve the GitHub
-  repository, and the visible error does not prioritize generic release-upload
-  authentication/configuration messaging.
+  repository because no remote is configured, and the visible error does not
+  prioritize generic release-upload authentication/configuration messaging.
 - **Fail:** the command succeeds, writes a local attachment file, leaves local
   repository changes behind, or surfaces generic release-upload auth guidance
   ahead of the missing-remote repository-identity explanation.
