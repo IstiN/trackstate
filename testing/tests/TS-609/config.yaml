@@ -1,0 +1,60 @@
+test_id: TS-609
+type: cli
+framework: python
+platform: local-git
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+  - GH_TOKEN or GITHUB_TOKEN with release access to the live setup repository
+notes:
+  - Seeds a disposable local TrackState repository configured for github-releases attachment storage.
+  - Pre-creates a GitHub Release containing data.csv and a matching local attachments.json entry for TS-123.
+  - Mocks the release-tag lookup seen by the CLI so the existing asset is hidden from the replacement logic.
+  - Forces the GitHub asset upload endpoint to return HTTP 422 already_exists and verifies the CLI reports the collision without mutating attachments.json.
+runtime_inputs:
+  ticket_command: trackstate attachment upload --issue TS-123 --file data.csv --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - upload
+    - --issue
+    - TS-123
+    - --file
+    - data.csv
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-609 Project
+  issue_key: TS-123
+  issue_summary: TS-609 upload collision fixture
+  source_file_name: data.csv
+  source_file_text: |-
+    id,value
+    1,ts-609-reupload
+    2,new-bytes
+  expected_attachment_name: data.csv
+  release_tag_prefix_base: ts609-assets-
+  seeded_attachment_text: |-
+    id,value
+    1,ts-609-seeded
+  seeded_attachment_created_at: "2026-05-13T08:00:00Z"
+  attachment_media_type: text/csv
+  manifest_poll_timeout_seconds: 120
+  manifest_poll_interval_seconds: 4
+  release_poll_timeout_seconds: 120
+  release_poll_interval_seconds: 4
+  override_release_tag_lookup_without_assets: true
+  upload_release_asset_override_status_code: 422
+  upload_release_asset_override_body: |-
+    {
+      "message": "Validation Failed",
+      "errors": [
+        {
+          "resource": "ReleaseAsset",
+          "code": "already_exists",
+          "field": "name"
+        }
+      ],
+      "documentation_url": "https://docs.github.com/rest/releases/assets#upload-a-release-asset",
+      "status": "422"
+    }

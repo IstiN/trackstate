@@ -97,6 +97,8 @@ class PythonTrackStateCliReleaseReplacementFramework(
                     repository_path=repository_path,
                     executable_path=executable_path,
                     access_token=self._repository_client.token,
+                    expected_release_tag=expected_release_tag,
+                    seeded_release=seeded_release,
                 )
                 final_state = self._capture_repository_state(
                     repository_path=repository_path,
@@ -309,6 +311,8 @@ Release replacement fixture.
         repository_path: Path,
         executable_path: Path,
         access_token: str,
+        expected_release_tag: str,
+        seeded_release: TrackStateCliReleaseReplacementSeededRelease,
     ) -> TrackStateCliCommandObservation:
         executed_command = (str(executable_path), *requested_command[1:])
         env = os.environ.copy()
@@ -332,6 +336,30 @@ Release replacement fixture.
             if config.delete_release_asset_override_body is not None:
                 env["TRACKSTATE_CLI_FAIL_RELEASE_ASSET_DELETE_BODY"] = (
                     config.delete_release_asset_override_body
+                )
+        if config.override_release_tag_lookup_without_assets:
+            env["TRACKSTATE_CLI_OVERRIDE_RELEASE_TAG_LOOKUP_STATUS"] = "200"
+            env["TRACKSTATE_CLI_OVERRIDE_RELEASE_TAG_LOOKUP_PATH"] = (
+                f"/repos/{self._repository_client.repository}/releases/tags/"
+                f"{expected_release_tag}"
+            )
+            env["TRACKSTATE_CLI_OVERRIDE_RELEASE_TAG_LOOKUP_BODY"] = json.dumps(
+                {
+                    "id": seeded_release.release_id,
+                    "tag_name": expected_release_tag,
+                    "name": config.expected_release_title,
+                    "draft": True,
+                    "prerelease": False,
+                    "assets": [],
+                },
+            )
+        if config.upload_release_asset_override_status_code is not None:
+            env["TRACKSTATE_CLI_FAIL_RELEASE_ASSET_UPLOAD_STATUS"] = str(
+                config.upload_release_asset_override_status_code,
+            )
+            if config.upload_release_asset_override_body is not None:
+                env["TRACKSTATE_CLI_FAIL_RELEASE_ASSET_UPLOAD_BODY"] = (
+                    config.upload_release_asset_override_body
                 )
         result = self._run(executed_command, cwd=repository_path, env=env)
         return TrackStateCliCommandObservation(

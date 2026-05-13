@@ -39,7 +39,7 @@ void main() {
     );
 
     final arguments = await _readArguments(argsFile);
-    final execution = await runWithOptionalReleaseAssetDeleteFailure(
+    final execution = await runWithOptionalGitHubHttpOverrides(
       () => cli.run(arguments),
     );
 

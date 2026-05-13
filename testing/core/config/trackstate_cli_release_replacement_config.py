@@ -32,6 +32,9 @@ class TrackStateCliReleaseReplacementConfig:
     release_poll_interval_seconds: int
     delete_release_asset_override_status_code: int | None
     delete_release_asset_override_body: str | None
+    upload_release_asset_override_status_code: int | None
+    upload_release_asset_override_body: str | None
+    override_release_tag_lookup_without_assets: bool
 
     @property
     def issue_path(self) -> str:
@@ -149,6 +152,20 @@ class TrackStateCliReleaseReplacementConfig:
                 runtime_inputs,
                 "delete_release_asset_override_body",
             ),
+            upload_release_asset_override_status_code=cls._optional_int(
+                runtime_inputs,
+                "upload_release_asset_override_status_code",
+                path,
+            ),
+            upload_release_asset_override_body=cls._optional_string(
+                runtime_inputs,
+                "upload_release_asset_override_body",
+            ),
+            override_release_tag_lookup_without_assets=cls._optional_bool(
+                runtime_inputs,
+                "override_release_tag_lookup_without_assets",
+                path,
+            ),
         )
 
     @staticmethod
@@ -172,6 +189,18 @@ class TrackStateCliReleaseReplacementConfig:
             raise ValueError(
                 "Release replacement config runtime_inputs."
                 f"{key} must be an integer in {path}.",
+            )
+        return value
+
+    @staticmethod
+    def _optional_bool(payload: dict[str, Any], key: str, path: Path) -> bool:
+        value = payload.get(key)
+        if value is None:
+            return False
+        if not isinstance(value, bool):
+            raise ValueError(
+                "Release replacement config runtime_inputs."
+                f"{key} must be a boolean in {path}.",
             )
         return value
 
