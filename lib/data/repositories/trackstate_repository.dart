@@ -1163,6 +1163,11 @@ class ProviderBackedTrackStateRepository
           await supported.readReleaseAttachment(request),
         final RepositoryGitHubIdentityResolver identityResolver =>
           await () async {
+            final failureReason = await identityResolver
+                .releaseAttachmentIdentityFailureReason();
+            if (failureReason?.trim().isNotEmpty == true) {
+              throw TrackStateRepositoryException(failureReason!.trim());
+            }
             final repository = await identityResolver
                 .resolveGitHubRepositoryIdentity();
             if (repository == null || repository.trim().isEmpty) {
