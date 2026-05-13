@@ -2,8 +2,8 @@ import 'dart:convert';
 import '../../../fixtures/local_git_link_storage_fixture.dart';
 import '../../../fixtures/provider_backed_local_git_link_storage_fixture.dart';
 
-class Ts627NonCanonicalLinkStorageFixture {
-  Ts627NonCanonicalLinkStorageFixture._(this._fixture);
+class Ts655CanonicalLinkStorageFixture {
+  Ts655CanonicalLinkStorageFixture._(this._fixture);
 
   final LocalGitLinkStorageFixture _fixture;
 
@@ -16,36 +16,37 @@ class Ts627NonCanonicalLinkStorageFixture {
   static const sourceIssuePath = 'DEMO/DEMO-1/DEMO-2/main.md';
   static const targetIssuePath = 'DEMO/DEMO-10/main.md';
   static const sourceLinksPath = 'DEMO/DEMO-1/DEMO-2/links.json';
-  static const writeMessage = 'Attempt non-canonical link storage for TS-627';
-  static const Map<String, String> invalidLinkRecord = <String, String>{
+  static const writeMessage =
+      'Persist canonical outward link storage for TS-655';
+  static const Map<String, String> validLinkRecord = <String, String>{
     'type': 'blocks',
     'target': targetIssueKey,
-    'direction': 'inward',
+    'direction': 'outward',
   };
 
   String get repositoryPath => _fixture.repositoryPath;
 
-  String get invalidLinksJsonContent =>
-      _fixture.encodeLinksJson(<Map<String, String>>[invalidLinkRecord]);
+  String get validLinksJsonContent =>
+      _fixture.encodeLinksJson(<Map<String, String>>[validLinkRecord]);
 
-  static Future<Ts627NonCanonicalLinkStorageFixture> create() async {
-    return Ts627NonCanonicalLinkStorageFixture._(
+  static Future<Ts655CanonicalLinkStorageFixture> create() async {
+    return Ts655CanonicalLinkStorageFixture._(
       await createProviderBackedLocalGitLinkStorageFixture(
         config: const LocalGitLinkStorageFixtureConfig(
-          ticketKey: 'TS-627',
-          tempDirectoryPrefix: 'trackstate-ts-627-',
-          seedCommitMessage: 'Seed non-canonical link fixture for TS-627',
+          ticketKey: 'TS-655',
+          tempDirectoryPrefix: 'trackstate-ts-655-',
+          seedCommitMessage: 'Seed canonical link fixture for TS-655',
           projectKey: projectKey,
           projectName: 'Mutation Demo',
           epicKey: epicKey,
           sourceIssueKey: sourceIssueKey,
           sourceIssueSummary: sourceIssueSummary,
           sourceIssueDescription:
-              'Issue used as the source issue for TS-627 invalid link storage attempts.',
+              'Issue used as the source issue for TS-655 canonical link storage attempts.',
           targetIssueKey: targetIssueKey,
           targetIssueSummary: targetIssueSummary,
           targetIssueDescription:
-              'Issue used as the linked target for TS-627 invalid link storage attempts.',
+              'Issue used as the linked target for TS-655 canonical link storage attempts.',
           sourceIssuePath: sourceIssuePath,
           targetIssuePath: targetIssuePath,
           sourceLinksPath: sourceLinksPath,
@@ -56,17 +57,17 @@ class Ts627NonCanonicalLinkStorageFixture {
 
   Future<void> dispose() => _fixture.dispose();
 
-  Future<Ts627RepositoryObservation> observeRepositoryState() async {
+  Future<Ts655RepositoryObservation> observeRepositoryState() async {
     return _fixture.observeRepositoryState();
   }
 
-  Future<Ts627StorageAttemptObservation> attemptInvalidLinksWrite() async {
+  Future<Ts655StorageAttemptObservation> attemptCanonicalLinksWrite() async {
     return _fixture.attemptLinksWrite(
-      content: invalidLinksJsonContent,
+      content: validLinksJsonContent,
       message: writeMessage,
     );
   }
 }
 
-typedef Ts627RepositoryObservation = LocalGitLinkStorageRepositoryObservation;
-typedef Ts627StorageAttemptObservation = LocalGitLinkStorageAttemptObservation;
+typedef Ts655RepositoryObservation = LocalGitLinkStorageRepositoryObservation;
+typedef Ts655StorageAttemptObservation = LocalGitLinkStorageAttemptObservation;
