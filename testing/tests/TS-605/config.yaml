@@ -1,0 +1,8 @@
+test_id: TS-605
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Pumps the production hosted Settings repository-access surface with remembered-token sessions in both fully available and limited attachment-upload states.
+  - Verifies keyboard Tab traversal starts on the Fine-grained token field and advances sequentially to Remember on this browser and Connect token without skipping either control.
