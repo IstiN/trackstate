@@ -4,7 +4,9 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 
-import '../../components/services/workspace_profile_duplicate_target_validator.dart';
+import '../../core/interfaces/workspace_profile_duplicate_target_probe.dart';
+import '../../core/models/workspace_profile_duplicate_target_observation.dart';
+import 'support/ts666_workspace_profile_probe.dart';
 
 const String _ticketKey = 'TS-666';
 const String _ticketSummary =
@@ -26,10 +28,11 @@ void main() {
         'human_verification': <Map<String, Object?>>[],
       };
 
-      final validator = WorkspaceProfileDuplicateTargetValidator();
+      final WorkspaceProfileDuplicateTargetProbe probe =
+          createWorkspaceProfileDuplicateTargetProbe();
 
       try {
-        final observation = await validator.runScenario();
+        final observation = await probe.runScenario();
         final seededIds = _sortedProfileIds(observation.seededState);
         final afterDuplicateIds = _sortedProfileIds(
           observation.afterDuplicateState,
@@ -47,6 +50,10 @@ void main() {
             observation.duplicateAttempt.errorType;
         result['duplicate_attempt_error_message'] =
             observation.duplicateAttempt.errorMessage;
+        result['duplicate_attempt_matched_duplicate_signal'] =
+            _isDuplicateTargetDefaultBranchRejection(
+              observation.duplicateAttempt,
+            );
         result['after_duplicate_profiles'] = afterDuplicateIds.join(', ');
         result['different_default_profile_id'] =
             observation.differentDefaultBranchAttempt.profile?.id ?? '<none>';
@@ -75,8 +82,10 @@ void main() {
             'created_profile=${observation.duplicateAttempt.profile?.id ?? '<none>'}; '
             'error_type=${observation.duplicateAttempt.errorType}; '
             'error_message=${observation.duplicateAttempt.errorMessage}';
-        if (observation.duplicateAttempt.succeeded ||
-            observation.duplicateAttempt.error is! WorkspaceProfileException) {
+        final duplicateSignalMatched = _isDuplicateTargetDefaultBranchRejection(
+          observation.duplicateAttempt,
+        );
+        if (observation.duplicateAttempt.succeeded || !duplicateSignalMatched) {
           _recordStep(
             result,
             step: 1,
@@ -87,7 +96,10 @@ void main() {
           );
           failures.add(
             'Step 1 failed: creating /user/projects/ts on main with writeBranch feature-x should be rejected as a duplicate, '
-            'but the service returned ${observation.duplicateAttempt.profile?.id ?? observation.duplicateAttempt.errorType}.',
+            'with an explicit duplicate-target/default-branch signal that mentions the existing /user/projects/ts workspace on main.\n'
+            'Observed result: ${observation.duplicateAttempt.profile?.id ?? observation.duplicateAttempt.errorType}\n'
+            'Observed duplicate signal match: $duplicateSignalMatched\n'
+            'Observed error message: ${observation.duplicateAttempt.errorMessage}',
           );
         } else {
           _recordStep(
@@ -203,6 +215,19 @@ File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
+
+bool _isDuplicateTargetDefaultBranchRejection(
+  WorkspaceProfileCreateAttempt attempt,
+) {
+  final error = attempt.error;
+  if (error is! WorkspaceProfileException) {
+    return false;
+  }
+  final message = error.message.toLowerCase();
+  return message.contains('already exists') &&
+      message.contains('/user/projects/ts') &&
+      message.contains('main');
+}
 
 void _recordStep(
   Map<String, Object?> result, {

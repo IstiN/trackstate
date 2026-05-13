@@ -1,15 +1,16 @@
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 
-class WorkspaceProfileDuplicateTargetValidator {
-  WorkspaceProfileDuplicateTargetValidator({WorkspaceProfileService? service})
-    : _service =
-          service ??
-          SharedPreferencesWorkspaceProfileService(
-            authStore: _MemoryAuthStore(),
-          );
+import '../../core/interfaces/workspace_profile_duplicate_target_probe.dart';
+import '../../core/models/workspace_profile_duplicate_target_observation.dart';
+
+class WorkspaceProfileDuplicateTargetValidator
+    implements WorkspaceProfileDuplicateTargetProbe {
+  WorkspaceProfileDuplicateTargetValidator({
+    required WorkspaceProfileService service,
+    required Future<void> Function() resetState,
+  }) : _service = service,
+       _resetState = resetState;
 
   static const WorkspaceProfileInput existingProfileInput =
       WorkspaceProfileInput(
@@ -34,9 +35,11 @@ class WorkspaceProfileDuplicateTargetValidator {
       );
 
   final WorkspaceProfileService _service;
+  final Future<void> Function() _resetState;
 
+  @override
   Future<WorkspaceProfileDuplicateTargetObservation> runScenario() async {
-    SharedPreferences.setMockInitialValues(<String, Object>{});
+    await _resetState();
 
     final seededProfile = await _service.createProfile(existingProfileInput);
     final seededState = await _service.loadState();
@@ -77,66 +80,4 @@ class WorkspaceProfileDuplicateTargetValidator {
       );
     }
   }
-}
-
-class WorkspaceProfileDuplicateTargetObservation {
-  const WorkspaceProfileDuplicateTargetObservation({
-    required this.seededProfile,
-    required this.seededState,
-    required this.duplicateAttempt,
-    required this.afterDuplicateState,
-    required this.differentDefaultBranchAttempt,
-    required this.finalState,
-  });
-
-  final WorkspaceProfile seededProfile;
-  final WorkspaceProfilesState seededState;
-  final WorkspaceProfileCreateAttempt duplicateAttempt;
-  final WorkspaceProfilesState afterDuplicateState;
-  final WorkspaceProfileCreateAttempt differentDefaultBranchAttempt;
-  final WorkspaceProfilesState finalState;
-}
-
-class WorkspaceProfileCreateAttempt {
-  const WorkspaceProfileCreateAttempt({
-    this.profile,
-    this.error,
-    this.stackTrace,
-  });
-
-  final WorkspaceProfile? profile;
-  final Object? error;
-  final StackTrace? stackTrace;
-
-  bool get succeeded => profile != null;
-  String get errorType => error?.runtimeType.toString() ?? '<none>';
-  String get errorMessage => error?.toString() ?? '<none>';
-}
-
-class _MemoryAuthStore implements TrackStateAuthStore {
-  @override
-  Future<void> clearToken({String? repository, String? workspaceId}) async {}
-
-  @override
-  Future<String?> migrateLegacyRepositoryToken({
-    required String repository,
-    required String workspaceId,
-  }) async => null;
-
-  @override
-  Future<void> moveToken({
-    required String fromWorkspaceId,
-    required String toWorkspaceId,
-  }) async {}
-
-  @override
-  Future<String?> readToken({String? repository, String? workspaceId}) async =>
-      null;
-
-  @override
-  Future<void> saveToken(
-    String token, {
-    String? repository,
-    String? workspaceId,
-  }) async {}
 }
