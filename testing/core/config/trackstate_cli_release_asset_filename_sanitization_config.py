@@ -43,12 +43,15 @@ class TrackStateCliReleaseAssetFilenameSanitizationConfig:
     ) -> "TrackStateCliReleaseAssetFilenameSanitizationConfig":
         payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         if not isinstance(payload, dict):
-            raise ValueError(f"TS-534 config must deserialize to a mapping: {path}")
+            raise ValueError(
+                f"Release asset sanitization config must deserialize to a mapping: {path}",
+            )
 
         runtime_inputs = payload.get("runtime_inputs") or {}
         if not isinstance(runtime_inputs, dict):
             raise ValueError(
-                f"TS-534 config runtime_inputs must deserialize to a mapping: {path}",
+                "Release asset sanitization config runtime_inputs must deserialize "
+                f"to a mapping: {path}",
             )
 
         live_setup = load_live_setup_test_config()
@@ -108,7 +111,9 @@ class TrackStateCliReleaseAssetFilenameSanitizationConfig:
         if value is None:
             return None
         if not isinstance(value, str):
-            raise ValueError(f"TS-534 config runtime_inputs.{key} must be a string.")
+            raise ValueError(
+                f"Release asset sanitization config runtime_inputs.{key} must be a string.",
+            )
         normalized = value.strip()
         return normalized or None
 
@@ -117,7 +122,8 @@ class TrackStateCliReleaseAssetFilenameSanitizationConfig:
         value = payload.get(key)
         if not isinstance(value, str) or not value:
             raise ValueError(
-                f"TS-534 config runtime_inputs.{key} must be a string in {path}.",
+                "Release asset sanitization config runtime_inputs."
+                f"{key} must be a string in {path}.",
             )
         return value
 
@@ -126,7 +132,8 @@ class TrackStateCliReleaseAssetFilenameSanitizationConfig:
         value = payload.get(key)
         if not isinstance(value, int):
             raise ValueError(
-                f"TS-534 config runtime_inputs.{key} must be an integer in {path}.",
+                "Release asset sanitization config runtime_inputs."
+                f"{key} must be an integer in {path}.",
             )
         return value
 
@@ -139,13 +146,14 @@ class TrackStateCliReleaseAssetFilenameSanitizationConfig:
         value = payload.get(key)
         if not isinstance(value, list) or not value:
             raise ValueError(
-                f"TS-534 config runtime_inputs.{key} must be a non-empty list in {path}.",
+                "Release asset sanitization config runtime_inputs."
+                f"{key} must be a non-empty list in {path}.",
             )
         items: list[str] = []
         for index, item in enumerate(value):
             if not isinstance(item, str) or not item:
                 raise ValueError(
-                    "TS-534 config runtime_inputs."
+                    "Release asset sanitization config runtime_inputs."
                     f"{key}[{index}] must be a non-empty string in {path}.",
                 )
             items.append(item)
