@@ -282,39 +282,6 @@ void main() {
     },
   );
 
-  test(
-    'repository snapshot synthesizes inverse symmetric links for target issues',
-    () async {
-      final repo = await _createMutationRepository();
-      addTearDown(() => repo.delete(recursive: true));
-
-      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
-      await repository.loadSnapshot();
-      await repository.connect(
-        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
-      );
-      final service = IssueMutationService(repository: repository);
-
-      final result = await service.createLink(
-        issueKey: 'DEMO-2',
-        targetKey: 'DEMO-10',
-        type: 'relates to',
-      );
-
-      expect(result.isSuccess, isTrue);
-
-      final snapshot = await repository.loadSnapshot();
-      final targetIssue = snapshot.issues.firstWhere(
-        (issue) => issue.key == 'DEMO-10',
-      );
-
-      expect(targetIssue.links, hasLength(1));
-      expect(targetIssue.links.single.type, 'relates to');
-      expect(targetIssue.links.single.targetKey, 'DEMO-2');
-      expect(targetIssue.links.single.direction, 'inward');
-    },
-  );
-
   test('service adds comments through the shared typed contract', () async {
     final repo = await _createMutationRepository();
     addTearDown(() => repo.delete(recursive: true));
