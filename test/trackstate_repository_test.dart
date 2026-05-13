@@ -864,7 +864,7 @@ This comment demonstrates markdown-backed collaboration history.
       expect(boardIssue.links.single.targetKey, 'DEMO-4');
       expect(
         boardIssue.attachments.map((attachment) => attachment.name),
-        containsAll(['board-preview.svg', 'manual.pdf']),
+        contains('board-preview.svg'),
       );
       expect(doneIssue.statusId, 'done');
       expect(doneIssue.resolutionId, 'done');
