@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -50,13 +51,13 @@ class PythonTrackStateCliStandaloneCompileFramework(
         env = os.environ.copy()
         env.setdefault("CI", "true")
         env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
-
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-596-bin-") as temp_dir:
-            output_path = Path(temp_dir) / config.output_file_name
+        output_path = self._repository_root / requested_command[-1]
+        backup_path = self._backup_preexisting_output(output_path)
+        try:
             executed_command = (
                 dart_bin,
                 *requested_command[1:-1],
-                str(output_path),
+                requested_command[-1],
             )
             completed = subprocess.run(
                 executed_command,
@@ -69,11 +70,7 @@ class PythonTrackStateCliStandaloneCompileFramework(
             observation = TrackStateCliCommandObservation(
                 requested_command=requested_command,
                 executed_command=executed_command,
-                fallback_reason=(
-                    "Redirected the compiler output path to a temporary executable so "
-                    "TS-596 exercises the exact standalone Dart compile flow without "
-                    "writing build artifacts into the repository checkout."
-                ),
+                fallback_reason=None,
                 repository_path=str(self._repository_root),
                 compiled_binary_path=str(output_path),
                 result=CliCommandResult(
@@ -92,7 +89,16 @@ class PythonTrackStateCliStandaloneCompileFramework(
                 output_exists=output_exists,
                 output_size_bytes=output_size_bytes,
                 output_is_executable=output_is_executable,
+                preexisting_output_backup_path=(
+                    str(backup_path) if backup_path is not None else None
+                ),
             )
+        except Exception:
+            self.restore_output_path(
+                output_path=output_path,
+                backup_path=backup_path,
+            )
+            raise
 
     @staticmethod
     def _dart_version(dart_bin: str) -> str:
@@ -108,3 +114,28 @@ class PythonTrackStateCliStandaloneCompileFramework(
             if fragment.strip()
         ).strip()
         return version_text or "<unknown>"
+
+    @staticmethod
+    def _backup_preexisting_output(output_path: Path) -> Path | None:
+        if not output_path.exists():
+            return None
+        backup_dir = Path(tempfile.mkdtemp(prefix="trackstate-ts-596-backup-"))
+        backup_path = backup_dir / output_path.name
+        shutil.move(str(output_path), str(backup_path))
+        return backup_path
+
+    @staticmethod
+    def restore_output_path(*, output_path: Path, backup_path: Path | None) -> None:
+        if output_path.is_symlink() or output_path.is_file():
+            output_path.unlink()
+        elif output_path.is_dir():
+            shutil.rmtree(output_path)
+
+        if backup_path is None:
+            return
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(backup_path), str(output_path))
+        backup_dir = backup_path.parent
+        if backup_dir.exists():
+            backup_dir.rmdir()

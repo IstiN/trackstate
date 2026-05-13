@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Protocol
 
 from testing.core.config.trackstate_cli_standalone_compile_config import (
@@ -16,3 +17,10 @@ class TrackStateCliStandaloneCompileProbe(Protocol):
         *,
         config: TrackStateCliStandaloneCompileConfig,
     ) -> TrackStateCliStandaloneCompileValidationResult: ...
+
+    def restore_output_path(
+        self,
+        *,
+        output_path: Path,
+        backup_path: Path | None,
+    ) -> None: ...

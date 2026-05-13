@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import shutil
 import sys
 import traceback
 from pathlib import Path
@@ -73,11 +74,14 @@ class Ts596StandaloneCompileScenario:
     def execute(self) -> tuple[dict[str, object], list[str]]:
         validation = self.validator.validate(config=self.config)
         result = self._build_result(validation)
-        failures: list[str] = []
-        failures.extend(self._validate_preconditions(result))
-        failures.extend(self._validate_compiler_outcome(validation, result))
-        failures.extend(self._validate_generated_binary(validation, result))
-        return result, failures
+        try:
+            failures: list[str] = []
+            failures.extend(self._validate_preconditions(result))
+            failures.extend(self._validate_compiler_outcome(validation, result))
+            failures.extend(self._validate_generated_binary(validation, result))
+            return result, failures
+        finally:
+            result["cleanup_note"] = self._cleanup_output_artifact(validation)
 
     def _build_result(
         self,
@@ -105,6 +109,28 @@ class Ts596StandaloneCompileScenario:
             "steps": [],
             "human_verification": [],
         }
+
+    def _cleanup_output_artifact(
+        self,
+        validation: TrackStateCliStandaloneCompileValidationResult,
+    ) -> str:
+        compiled_binary_path = Path(validation.observation.compiled_binary_path or "")
+        backup_path_text = validation.preexisting_output_backup_path
+        backup_path = Path(backup_path_text) if backup_path_text else None
+        if backup_path is None:
+            if compiled_binary_path.is_symlink() or compiled_binary_path.is_file():
+                compiled_binary_path.unlink()
+                return f"Removed generated artifact at {compiled_binary_path}."
+            if compiled_binary_path.is_dir():
+                shutil.rmtree(compiled_binary_path)
+                return f"Removed generated directory artifact at {compiled_binary_path}."
+            return f"No cleanup was needed for {compiled_binary_path}."
+
+        self.validator.restore_output_path(
+            output_path=compiled_binary_path,
+            backup_path=backup_path,
+        )
+        return f"Restored pre-existing path at {compiled_binary_path} after verification."
 
     def _validate_preconditions(self, result: dict[str, object]) -> list[str]:
         failures: list[str] = []
@@ -288,7 +314,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     compiled_binary_path = _as_text(result.get("compiled_binary_path"))
     output_size_bytes = _as_text(result.get("output_size_bytes"))
     dart_version = _as_text(result.get("dart_version"))
-    fallback_reason = _as_text(result.get("fallback_reason"))
+    cleanup_note = _as_text(result.get("cleanup_note"))
     dart_ui_text = _jira_inline("dart:ui")
 
     jira_lines = [
@@ -303,7 +329,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
             f"for {_jira_inline(_as_text(result.get('source_entrypoint')))}."
         ),
         f"* Ticket command: {_jira_inline(_as_text(result.get('ticket_command')))}",
-        f"* Executed equivalent command: {_jira_inline(executed_command)}",
+        f"* Executed command: {_jira_inline(executed_command)}",
         f"* Verified exit code 0, absence of {dart_ui_text} platform errors, and creation of {_jira_inline(compiled_binary_path)}.",
         "",
         "h4. Human-style verification",
@@ -319,11 +345,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         "h4. Environment",
         f"* OS: {_jira_inline(platform.system())}",
         f"* Dart SDK: {_jira_inline(dart_version)}",
-        *(
-            [f"* Execution note: {_jira_inline(fallback_reason)}"]
-            if fallback_reason
-            else []
-        ),
+        *([f"* Cleanup note: {_jira_inline(cleanup_note)}"] if cleanup_note else []),
         "",
         "h4. Test file",
         "{code}",
@@ -348,7 +370,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
             f"for `{_as_text(result.get('source_entrypoint'))}`."
         ),
         f"- Ticket command: `{_as_text(result.get('ticket_command'))}`",
-        f"- Executed equivalent command: `{executed_command}`",
+        f"- Executed command: `{executed_command}`",
         (
             f"- Verified exit code `0`, absence of `dart:ui` platform errors, and "
             f"creation of `{compiled_binary_path}`."
@@ -363,7 +385,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         "## Environment",
         f"- OS: `{platform.system()}`",
         f"- Dart SDK: `{dart_version}`",
-        *([f"- Execution note: `{fallback_reason}`"] if fallback_reason else []),
+        *([f"- Cleanup note: `{cleanup_note}`"] if cleanup_note else []),
         "",
         "## How to run",
         "```bash",
@@ -417,7 +439,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "h4. What was tested",
         f"* Ticket command: {_jira_inline(_as_text(result.get('ticket_command')))}",
-        f"* Executed equivalent command: {_jira_inline(executed_command)}",
+        f"* Executed command: {_jira_inline(executed_command)}",
         f"* Checked the compiler exit status, visible output, and generated executable path {_jira_inline(compiled_binary_path)}.",
         "",
         "h4. Result",
@@ -456,7 +478,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "## What was automated",
         f"- Ticket command: `{_as_text(result.get('ticket_command'))}`",
-        f"- Executed equivalent command: `{executed_command}`",
+        f"- Executed command: `{executed_command}`",
         (
             f"- Checked the compiler exit status, visible output, and generated "
             f"executable path `{compiled_binary_path}`."
@@ -491,7 +513,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "## Environment",
         f"- Source checkout: `{_as_text(result.get('source_root'))}`",
         f"- Requested ticket command: `{_as_text(result.get('ticket_command'))}`",
-        f"- Executed equivalent command: `{executed_command}`",
+        f"- Executed command: `{executed_command}`",
         f"- Source entrypoint: `{_as_text(result.get('source_entrypoint'))}`",
         f"- Generated binary path: `{compiled_binary_path}`",
         f"- OS: `{platform.system()}`",
@@ -505,7 +527,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         ),
         (
             f"2. ❌ Execute the compiler command `{_as_text(result.get('ticket_command'))}`. "
-            f"Observed: equivalent automation command `{executed_command}` exited with code "
+            f"Observed: command `{executed_command}` exited with code "
             f"`{_as_text(result.get('exit_code'))}` and showed `{visible_output}`."
         ),
         (

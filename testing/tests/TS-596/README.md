@@ -6,9 +6,9 @@ availability error.
 
 The automation:
 1. starts in the repository root
-2. runs the ticket compile flow against `bin/trackstate.dart`
-3. redirects the output binary to a temporary path so the checkout stays clean
-4. checks the compiler exit code, visible output, and generated executable
+2. runs the exact ticket compile command against `bin/trackstate.dart`
+3. validates the generated `bin/trackstate_cli` executable
+4. removes `bin/trackstate_cli` after verification so the checkout stays clean
 
 ## Run this test
 

@@ -14,3 +14,4 @@ class TrackStateCliStandaloneCompileValidationResult:
     output_exists: bool
     output_size_bytes: int | None
     output_is_executable: bool
+    preexisting_output_backup_path: str | None = None

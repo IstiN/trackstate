@@ -6,7 +6,8 @@ dependencies:
   - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
 notes:
   - Executes the standalone Dart AOT compile flow for `bin/trackstate.dart`.
-  - Redirects the output binary to a temporary directory so the repository checkout stays clean while the compile path remains identical.
+  - Runs the exact ticket command with `-o bin/trackstate_cli`.
+  - Removes `bin/trackstate_cli` after verification so the repository checkout stays clean.
   - Verifies exit code 0, no `dart:ui` platform-availability error is surfaced, and a standalone executable is produced.
 runtime_inputs:
   ticket_command: dart compile exe bin/trackstate.dart -o bin/trackstate_cli
