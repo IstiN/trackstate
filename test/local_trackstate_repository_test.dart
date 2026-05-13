@@ -281,16 +281,17 @@ void main() {
       final repository = ProviderBackedTrackStateRepository(
         provider: LocalGitTrackStateProvider(
           repositoryPath: repo.path,
-          hostedProviderFactory: ({
-            required String repository,
-            required String branch,
-            required String dataRef,
-          }) {
-            hostedProvider.repositoryName = repository;
-            hostedProvider.branch = branch;
-            hostedProvider.dataRefOverride = dataRef;
-            return hostedProvider;
-          },
+          hostedProviderFactory:
+              ({
+                required String repository,
+                required String branch,
+                required String dataRef,
+              }) {
+                hostedProvider.repositoryName = repository;
+                hostedProvider.branch = branch;
+                hostedProvider.dataRefOverride = dataRef;
+                return hostedProvider;
+              },
         ),
         usesLocalPersistence: true,
         supportsGitHubAuth: false,
@@ -319,20 +320,19 @@ void main() {
                 ).readAsStringSync(),
               )
               as List<Object?>;
-      final metadataEntry =
-          metadataJson.cast<Map<String, Object?>>().firstWhere(
-            (entry) => entry['name'] == 'Report #2026 (Final)!.pdf',
-          );
+      final metadataEntry = metadataJson
+          .cast<Map<String, Object?>>()
+          .firstWhere((entry) => entry['name'] == 'Report #2026 (Final)!.pdf');
 
       expect(hostedProvider.connection?.repository, 'octo/releases-demo');
       expect(hostedProvider.connection?.token, 'env-token');
-      expect(hostedProvider.lastWriteRequest?.assetName, 'Report-2026-Final-.pdf');
+      expect(
+        hostedProvider.lastWriteRequest?.assetName,
+        'Report-2026-Final-.pdf',
+      );
       expect(uploaded.storageBackend, AttachmentStorageMode.githubReleases);
       expect(uploaded.githubReleaseAssetName, 'Report-2026-Final-.pdf');
-      expect(
-        uploaded.githubReleaseTag,
-        'trackstate-attachments-DEMO-1',
-      );
+      expect(uploaded.githubReleaseTag, 'trackstate-attachments-DEMO-1');
       expect(metadataEntry['storageBackend'], 'github-releases');
       expect(metadataEntry['githubReleaseAssetName'], 'Report-2026-Final-.pdf');
     },
@@ -451,6 +451,58 @@ void main() {
       ),
     );
   });
+
+  test(
+    'local provider rejects non-canonical inward standardized links writes',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+      final provider = LocalGitTrackStateProvider(repositoryPath: repo.path);
+      final branch = await provider.resolveWriteBranch();
+      final headBefore = (await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ])).stdout.toString().trim();
+
+      await expectLater(
+        () => provider.writeTextFile(
+          RepositoryWriteRequest(
+            path: 'DEMO/DEMO-1/links.json',
+            content:
+                '[{"type":"blocks","target":"DEMO-99","direction":"inward"}]\n',
+            message: 'Persist non-canonical link',
+            branch: branch,
+          ),
+        ),
+        throwsA(
+          isA<TrackStateProviderException>().having(
+            (error) => error.message,
+            'message',
+            allOf(
+              contains('Validation failed'),
+              contains('links.json'),
+              contains('canonical outward'),
+              contains('blocks'),
+              contains('inward'),
+            ),
+          ),
+        ),
+      );
+
+      expect(File('${repo.path}/DEMO/DEMO-1/links.json').existsSync(), isFalse);
+      expect(
+        (await Process.run('git', [
+          '-C',
+          repo.path,
+          'rev-parse',
+          'HEAD',
+        ])).stdout.toString().trim(),
+        headBefore,
+      );
+    },
+  );
 
   test(
     'local repository rejects issue creation when the worktree is dirty',
@@ -1775,12 +1827,13 @@ class _FakeHostedReleaseTrackStateProvider
   }
 
   @override
-  Future<RepositoryPermission> getPermission() async => const RepositoryPermission(
-    canRead: true,
-    canWrite: true,
-    isAdmin: false,
-    supportsReleaseAttachmentWrites: true,
-  );
+  Future<RepositoryPermission> getPermission() async =>
+      const RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        supportsReleaseAttachmentWrites: true,
+      );
 
   @override
   Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
@@ -1826,8 +1879,9 @@ class _FakeHostedReleaseTrackStateProvider
       RepositoryBranch(name: name, exists: true, isCurrent: name == branch);
 
   @override
-  Future<RepositoryWriteResult> writeTextFile(RepositoryWriteRequest request) async =>
-      throw UnimplementedError();
+  Future<RepositoryWriteResult> writeTextFile(
+    RepositoryWriteRequest request,
+  ) async => throw UnimplementedError();
 
   @override
   Future<RepositoryCommitResult> createCommit(
