@@ -1,0 +1,46 @@
+test_id: TS-593
+type: cli
+framework: python
+platform: local-git
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+  - GH_TOKEN or GITHUB_TOKEN with release access to the live setup repository
+notes:
+  - Executes the exact local CLI command from a disposable TrackState repository configured with github-releases attachment storage.
+  - Uses a new local branch named feature-unpushed that is intentionally not pushed to the configured GitHub remote.
+  - Verifies the user-visible failure surfaces the explicit GitHub API target_commitish validation instead of a generic provider failure.
+runtime_inputs:
+  ticket_command: trackstate attachment upload --issue TS-101 --file report.pdf --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - upload
+    - --issue
+    - TS-101
+    - --file
+    - report.pdf
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-593 Project
+  issue_key: TS-101
+  issue_summary: TS-593 unpushed branch release creation fixture
+  base_branch: main
+  unpushed_branch: feature-unpushed
+  release_tag_prefix: ts593-unpushed-
+  source_file_name: report.pdf
+  source_file_text: |
+    TS-593 upload payload
+    This file must not be uploaded when target_commitish cannot be resolved remotely.
+  expected_attachment_relative_path: TS/TS-101/attachments/report.pdf
+  required_visible_fragments:
+    - "422"
+    - target_commitish
+  required_any_visible_fragments:
+    - validation failed
+    - unprocessable entity
+  prohibited_visible_fragments:
+    - does not allow attachment uploads
+    - repository_open_failed
+    - repository session does not allow attachment uploads
