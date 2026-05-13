@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 
 from testing.core.models.cli_command_result import CliCommandResult
@@ -14,74 +13,41 @@ class PythonTrackStateCliCompiledLocalFramework:
         self._repository_root = Path(repository_root)
 
     def _compile_executable(self, destination: Path) -> None:
-        env = os.environ.copy()
-        env.setdefault("CI", "true")
-        env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
-        env.setdefault("NO_AT_BRIDGE", "1")
-        build_dir = self._repository_root / "build" / "linux" / "x64" / "release"
-        target = "testing/frameworks/flutter/trackstate_cli_linux_entrypoint.dart"
-        build_completed = subprocess.run(
-            (
-                "flutter",
-                "build",
-                "linux",
-                "--release",
-                "-t",
-                target,
-            ),
-            cwd=self._repository_root,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if build_completed.returncode != 0:
-            raise AssertionError(
-                "Failed to build the temporary Flutter Linux TrackState CLI bundle.\n"
-                "Command: flutter build linux --release "
-                f"-t {target}\n"
-                f"Exit code: {build_completed.returncode}\n"
-                f"stdout:\n{build_completed.stdout}\n"
-                f"stderr:\n{build_completed.stderr}"
-            )
-
-        install_root = destination.parent / "trackstate_linux_install_root"
-        shutil.rmtree(install_root, ignore_errors=True)
-        install_completed = subprocess.run(
-            ("cmake", "--install", str(build_dir)),
-            cwd=self._repository_root,
-            env={**env, "DESTDIR": str(install_root)},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if install_completed.returncode != 0:
-            raise AssertionError(
-                "Failed to install the temporary Flutter Linux TrackState CLI bundle.\n"
-                f"Command: DESTDIR={install_root} cmake --install {build_dir}\n"
-                f"Exit code: {install_completed.returncode}\n"
-                f"stdout:\n{install_completed.stdout}\n"
-                f"stderr:\n{install_completed.stderr}"
-            )
-
-        bundle_root = install_root / str(
-            (build_dir / "bundle").relative_to(self._repository_root.anchor)
-        )
-        bundle_executable = bundle_root / "trackstate"
-        if not bundle_executable.is_file():
-            raise AssertionError(
-                "Installed Flutter Linux TrackState CLI bundle is missing the executable.\n"
-                f"Expected bundle executable: {bundle_executable}\n"
-                f"Build directory: {build_dir}\n"
-                f"Install root: {install_root}"
-            )
-
         destination.write_text(
             "\n".join(
                 (
                     "#!/usr/bin/env bash",
                     "set -euo pipefail",
-                    f'exec xvfb-run -a "{bundle_executable}" "$@"',
+                    f'repo_root="{self._repository_root}"',
+                    'working_directory="$PWD"',
+                    'temp_dir="$(mktemp -d)"',
+                    'cleanup() {',
+                    '  rm -rf "$temp_dir"',
+                    '}',
+                    'trap cleanup EXIT',
+                    'args_file="$temp_dir/args.bin"',
+                    'stdout_file="$temp_dir/stdout.txt"',
+                    'exit_code_file="$temp_dir/exit_code.txt"',
+                    'log_file="$temp_dir/flutter-test.log"',
+                    'printf "%s\\0" "$@" > "$args_file"',
+                    'cd "$repo_root"',
+                    'TRACKSTATE_CLI_ARGS_FILE="$args_file" \\',
+                    'TRACKSTATE_CLI_STDOUT_FILE="$stdout_file" \\',
+                    'TRACKSTATE_CLI_EXIT_CODE_FILE="$exit_code_file" \\',
+                    'TRACKSTATE_CLI_WORKING_DIRECTORY="$working_directory" \\',
+                    'flutter test testing/frameworks/flutter/trackstate_cli_test_harness.dart >"$log_file" 2>&1 || {',
+                    '  cat "$log_file" >&2',
+                    "  exit 1",
+                    '}',
+                    'if [[ -f "$stdout_file" ]]; then',
+                    '  cat "$stdout_file"',
+                    'fi',
+                    'if [[ -f "$exit_code_file" ]]; then',
+                    '  exit "$(cat "$exit_code_file")"',
+                    'fi',
+                    'echo "TrackState CLI harness did not produce an exit code." >&2',
+                    'cat "$log_file" >&2',
+                    'exit 1',
                     "",
                 )
             ),

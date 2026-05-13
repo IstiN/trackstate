@@ -87,6 +87,8 @@ class Ts564ReleaseDownloadAuthContractScenario:
     ) -> dict[str, object]:
         payload = validation.observation.result.json_payload
         payload_dict = payload if isinstance(payload, dict) else None
+        target = payload_dict.get("target") if isinstance(payload_dict, dict) else None
+        target_dict = target if isinstance(target, dict) else None
         error = payload_dict.get("error") if isinstance(payload_dict, dict) else None
         error_dict = error if isinstance(error, dict) else None
         return {
@@ -118,6 +120,12 @@ class Ts564ReleaseDownloadAuthContractScenario:
             else None,
             "observed_provider": payload_dict.get("provider")
             if isinstance(payload_dict, dict)
+            else None,
+            "observed_target_type": target_dict.get("type")
+            if isinstance(target_dict, dict)
+            else None,
+            "observed_target_value": target_dict.get("value")
+            if isinstance(target_dict, dict)
             else None,
             "observed_output_format": payload_dict.get("output")
             if isinstance(payload_dict, dict)
@@ -237,6 +245,35 @@ class Ts564ReleaseDownloadAuthContractScenario:
                 "the ticket scenario.\n"
                 f"Observed payload:\n{json.dumps(payload_dict, indent=2, sort_keys=True)}"
             )
+        if payload_dict.get("provider") != "local-git":
+            failures.append(
+                "Step 2 failed: the JSON envelope did not stay on the local-git provider "
+                "path required by TS-564.\n"
+                f"Observed payload:\n{json.dumps(payload_dict, indent=2, sort_keys=True)}"
+            )
+
+        target = payload_dict.get("target")
+        target_dict = target if isinstance(target, dict) else None
+        if not isinstance(target_dict, dict):
+            failures.append(
+                "Step 2 failed: the JSON envelope did not expose target metadata as an "
+                "object for the local download scenario.\n"
+                f"Observed payload:\n{json.dumps(payload_dict, indent=2, sort_keys=True)}"
+            )
+        else:
+            if target_dict.get("type") != "local":
+                failures.append(
+                    "Step 2 failed: the JSON envelope did not identify a local target for "
+                    "the TS-564 command path.\n"
+                    f"Observed target:\n{json.dumps(target_dict, indent=2, sort_keys=True)}"
+                )
+            if target_dict.get("value") != observation.repository_path:
+                failures.append(
+                    "Step 2 failed: the JSON envelope target value did not match the "
+                    "disposable local repository used for TS-564.\n"
+                    f"Expected target value: {observation.repository_path}\n"
+                    f"Observed target:\n{json.dumps(target_dict, indent=2, sort_keys=True)}"
+                )
 
         if not isinstance(error_dict, dict):
             failures.append(
@@ -303,6 +340,9 @@ class Ts564ReleaseDownloadAuthContractScenario:
                 status="passed",
                 action="Inspect the JSON error fields `category` and `exitCode`.",
                 observed=(
+                    f"payload.provider={_as_text(payload_dict.get('provider'))}; "
+                    f"target.type={_as_text(result.get('observed_target_type'))}; "
+                    f"target.value={_as_text(result.get('observed_target_value'))}; "
                     f"payload.output={_as_text(payload_dict.get('output'))}; "
                     f"error.category={observed_category}; "
                     f"error.exitCode={observed_error_exit_code}"
