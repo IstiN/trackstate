@@ -8117,6 +8117,11 @@ class _AttachmentsTab extends StatelessWidget {
         (viewModel.hostedRepositoryAccessMode ==
                 HostedRepositoryAccessMode.attachmentRestricted &&
             !viewModel.canUploadIssueAttachments);
+    final showSettingsAction =
+        attachmentDownloadOnly ||
+        (viewModel.hostedRepositoryAccessMode ==
+                HostedRepositoryAccessMode.attachmentRestricted &&
+            viewModel.usesGitHubReleasesAttachmentStorage);
     final canChooseAttachment =
         !attachmentDownloadOnly &&
         !isSaving &&
@@ -8132,10 +8137,8 @@ class _AttachmentsTab extends StatelessWidget {
             semanticLabel: l10n.attachments,
             title: accessTitle,
             message: accessMessage,
-            primaryActionLabel: attachmentDownloadOnly
-                ? l10n.openSettings
-                : null,
-            onPrimaryAction: attachmentDownloadOnly
+            primaryActionLabel: showSettingsAction ? l10n.openSettings : null,
+            onPrimaryAction: showSettingsAction
                 ? () => viewModel.openProjectSettings(
                     tab: ProjectSettingsTab.attachments,
                   )
