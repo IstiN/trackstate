@@ -1,0 +1,11 @@
+test_id: TS-658
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Flutter SDK available on PATH
+  - git CLI available on PATH
+notes:
+  - Reuses the existing disposable Local Git CLI invalid-link harness from TS-645.
+  - Creates Issue A and Issue B, then runs `trackstate ticket link --type "unsupported-relationship-type"` against the live CLI implementation.
+  - Verifies the CLI returns a controlled JSON validation error and leaves the disposable repository without any persisted relationship data.
