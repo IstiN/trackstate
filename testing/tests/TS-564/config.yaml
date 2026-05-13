@@ -23,7 +23,6 @@ runtime_inputs:
     - local
     - --output
     - json
-  compiled_source_ref: origin/main
   project_key: TS
   project_name: TS-564 Project
   issue_key: TS-123

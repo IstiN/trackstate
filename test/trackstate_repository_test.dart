@@ -45,6 +45,80 @@ void main() {
   );
 
   test(
+    'provider-backed repository defaults missing attachmentStorage to repository-path',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Repository-path default issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-13T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+summary: Repository-path default issue
+updated: 2026-05-13T00:00:00Z
+---
+
+# Description
+
+Hosted projects without explicit attachmentStorage should keep repository-path attachments by default.
+''',
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+
+      expect(
+        snapshot.project.attachmentStorage.mode,
+        AttachmentStorageMode.repositoryPath,
+      );
+      expect(snapshot.project.attachmentStorage.githubReleases, isNull);
+    },
+  );
+
+  test(
     'setup repository resolves github releases attachment storage and metadata',
     () async {
       final repository = _mockSetupRepository(
@@ -2533,6 +2607,7 @@ Nested release-backed attachment issue.
     'github provider replaces same-name release assets deterministically',
     () async {
       var deletedAssetId = '';
+      var deletionCommitted = false;
       final provider = GitHubTrackStateProvider(
         repositoryName: 'IstiN/trackstate',
         dataRef: 'main',
@@ -2550,14 +2625,20 @@ Nested release-backed attachment issue.
           if (path ==
                   '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
               request.method == 'GET') {
+            final assets = deletedAssetId.isEmpty || !deletionCommitted
+                ? [
+                    {'id': 1, 'name': 'design.png', 'size': 3},
+                  ]
+                : const <Object?>[];
+            if (deletedAssetId.isNotEmpty) {
+              deletionCommitted = true;
+            }
             return http.Response(
               jsonEncode({
                 'id': 10,
                 'tag_name': 'trackstate-attachments-DEMO-1',
                 'name': 'Attachments for DEMO-1',
-                'assets': [
-                  {'id': 1, 'name': 'design.png', 'size': 3},
-                ],
+                'assets': assets,
               }),
               200,
             );
@@ -2600,6 +2681,103 @@ Nested release-backed attachment issue.
       );
 
       expect(deletedAssetId, '1');
+      expect(result.assetId, '2');
+    },
+  );
+
+  test(
+    'github provider waits for release deletion visibility before re-uploading same-name assets',
+    () async {
+      var deletedAssetId = '';
+      var releaseReadsAfterDelete = 0;
+      var deletionCommitted = false;
+      var uploadAttemptCount = 0;
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/IstiN/trackstate' && request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path ==
+                  '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            final assets = deletedAssetId.isEmpty || !deletionCommitted
+                ? [
+                    {'id': 1, 'name': 'design.png', 'size': 3},
+                  ]
+                : const <Object?>[];
+            if (deletedAssetId.isNotEmpty && !deletionCommitted) {
+              releaseReadsAfterDelete += 1;
+              if (releaseReadsAfterDelete >= 2) {
+                deletionCommitted = true;
+              }
+            }
+            return http.Response(
+              jsonEncode({
+                'id': 10,
+                'tag_name': 'trackstate-attachments-DEMO-1',
+                'name': 'Attachments for DEMO-1',
+                'assets': assets,
+              }),
+              200,
+            );
+          }
+          if (path == '/repos/IstiN/trackstate/releases/assets/1' &&
+              request.method == 'DELETE') {
+            deletedAssetId = '1';
+            return http.Response('', 204);
+          }
+          if (request.url.host == 'uploads.github.com' &&
+              path == '/repos/IstiN/trackstate/releases/10/assets' &&
+              request.method == 'POST') {
+            expect(request.url.queryParameters['name'], 'design.png');
+            uploadAttemptCount += 1;
+            expect(
+              deletionCommitted,
+              isTrue,
+              reason:
+                  'provider must wait for the deleted asset to disappear '
+                  'before re-uploading the replacement',
+            );
+            return http.Response(
+              jsonEncode({'id': 2, 'name': 'design.png', 'size': 4}),
+              201,
+            );
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final result = await provider.writeReleaseAttachment(
+        RepositoryReleaseAttachmentWriteRequest(
+          issueKey: 'DEMO-1',
+          releaseTag: 'trackstate-attachments-DEMO-1',
+          releaseTitle: 'Attachments for DEMO-1',
+          assetName: 'design.png',
+          bytes: Uint8List.fromList(const [1, 2, 3, 4]),
+          mediaType: 'image/png',
+          branch: 'main',
+        ),
+      );
+
+      expect(deletedAssetId, '1');
+      expect(releaseReadsAfterDelete, greaterThanOrEqualTo(2));
+      expect(uploadAttemptCount, 1);
       expect(result.assetId, '2');
     },
   );
@@ -2867,6 +3045,63 @@ Nested release-backed attachment issue.
           ),
         ),
       );
+    },
+  );
+
+  test(
+    'provider-backed repository surfaces local release auth guidance before hosted upload attempts',
+    () async {
+      var requestCount = 0;
+      final provider = _FakeRemoteIdentityProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          releaseAttachmentWriteFailureReason:
+              'GitHub Releases attachment storage requires GitHub authentication. '
+              'Set TRACKSTATE_TOKEN or authenticate with gh before using '
+              'release-backed attachments from a local repository.',
+          canCheckCollaborators: false,
+        ),
+        repository: 'cli/cli',
+        files: _releaseAttachmentFixtureFiles(),
+      );
+      final repository = ProviderBackedTrackStateRepository(
+        provider: provider,
+        githubClient: MockClient((request) async {
+          requestCount += 1;
+          return http.Response('', 404);
+        }),
+      );
+
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: 'cli/cli',
+          branch: 'main',
+          token: '',
+        ),
+      );
+
+      await expectLater(
+        () => repository.uploadIssueAttachment(
+          issue: snapshot.issues.single,
+          name: 'release plan.txt',
+          bytes: Uint8List.fromList(utf8.encode('roadmap')),
+        ),
+        throwsA(
+          isA<TrackStateRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            contains(
+              'GitHub Releases attachment storage requires GitHub authentication.',
+            ),
+          ),
+        ),
+      );
+      expect(requestCount, 0);
     },
   );
 

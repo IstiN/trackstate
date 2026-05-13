@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -605,25 +606,50 @@ class _TopBar extends StatelessWidget {
                   ),
                 ),
               ] else ...[
-                _SyncPill(label: l10n.syncStatus),
+                _SyncPill(
+                  label: l10n.syncStatus,
+                  height: _desktopTopBarControlHeight,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Semantics(
-                    label: l10n.searchIssues,
-                    textField: true,
-                    child: TextField(
-                      controller: TextEditingController(text: viewModel.jql),
-                      onSubmitted: viewModel.updateQuery,
-                      decoration: InputDecoration(
-                        prefixIcon: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: TrackStateIcon(
-                            TrackStateIconGlyph.search,
-                            color: colors.muted,
-                            semanticLabel: l10n.searchIssues,
+                  child: SizedBox(
+                    height: _desktopTopBarControlHeight,
+                    child: Semantics(
+                      label: l10n.searchIssues,
+                      textField: true,
+                      child: TextField(
+                        controller: TextEditingController(text: viewModel.jql),
+                        onSubmitted: viewModel.updateQuery,
+                        maxLines: 1,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.copyWith(height: 1),
+                        textAlignVertical: TextAlignVertical.center,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          isCollapsed: true,
+                          constraints: const BoxConstraints.tightFor(
+                            height: _desktopTopBarControlHeight,
                           ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          prefixIcon: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: TrackStateIcon(
+                              TrackStateIconGlyph.search,
+                              color: colors.muted,
+                              size: _desktopTopBarIconSize,
+                              semanticLabel: l10n.searchIssues,
+                            ),
+                          ),
+                          prefixIconConstraints: const BoxConstraints.tightFor(
+                            width: _desktopTopBarControlHeight,
+                            height: _desktopTopBarControlHeight,
+                          ),
+                          hintText: l10n.jqlPlaceholder,
                         ),
-                        hintText: l10n.jqlPlaceholder,
                       ),
                     ),
                   ),
@@ -635,12 +661,14 @@ class _TopBar extends StatelessWidget {
                   label: l10n.createIssue,
                   glyph: TrackStateIconGlyph.plus,
                   onPressed: openCreateIssue,
+                  size: compact ? null : _desktopTopBarControlHeight,
                 )
               else
                 _PrimaryButton(
                   label: l10n.createIssue,
                   icon: TrackStateIconGlyph.plus,
                   onPressed: openCreateIssue,
+                  height: _desktopTopBarControlHeight,
                 ),
               const SizedBox(width: 8),
               if (iconOnlyActions)
@@ -650,6 +678,7 @@ class _TopBar extends StatelessWidget {
                   onPressed: viewModel.isSaving
                       ? null
                       : () => _showRepositoryAccessDialog(context, viewModel),
+                  size: compact ? null : _desktopTopBarControlHeight,
                 )
               else
                 _PrimaryButton(
@@ -658,6 +687,7 @@ class _TopBar extends StatelessWidget {
                   onPressed: viewModel.isSaving
                       ? null
                       : () => _showRepositoryAccessDialog(context, viewModel),
+                  height: _desktopTopBarControlHeight,
                 ),
               const SizedBox(width: 8),
               _IconButtonSurface(
@@ -668,65 +698,55 @@ class _TopBar extends StatelessWidget {
                     ? TrackStateIconGlyph.sun
                     : TrackStateIconGlyph.moon,
                 onPressed: viewModel.toggleTheme,
+                size: compact ? null : _desktopTopBarControlHeight,
               ),
               const SizedBox(width: 8),
-              if (_hasVisibleProfileIdentity(viewModel) &&
-                  !compact &&
-                  !condensedDesktop) ...[
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 180),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Semantics(
-                        container: true,
-                        label: _profileDisplayName(viewModel),
-                        child: ExcludeSemantics(
-                          child: Text(
-                            _profileDisplayName(viewModel),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelLarge
-                                ?.copyWith(
-                                  color: colors.text,
-                                  fontWeight: FontWeight.w600,
-                                ),
+              Semantics(
+                container: true,
+                label: _profileDisplayName(viewModel),
+                child: ExcludeSemantics(
+                  child: SizedBox(
+                    height: compact ? null : _desktopTopBarControlHeight,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        if (_hasVisibleProfileIdentity(viewModel) &&
+                            !compact &&
+                            !condensedDesktop) ...[
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 180),
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: Text(
+                                _profileDisplayName(viewModel),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelLarge
+                                    ?.copyWith(
+                                      color: colors.text,
+                                      fontWeight: FontWeight.w600,
+                                      height: 1,
+                                    ),
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                      if (_profileLogin(viewModel) case final login?)
-                        Semantics(
-                          container: true,
-                          label: login,
-                          child: ExcludeSemantics(
-                            child: Text(
-                              login,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: colors.muted),
+                          const SizedBox(width: 8),
+                        ],
+                        CircleAvatar(
+                          radius: compact ? 18 : _desktopTopBarAvatarRadius,
+                          backgroundColor: colors.primarySoft,
+                          child: Text(
+                            _profileInitials(l10n, viewModel),
+                            style: TextStyle(
+                              color: colors.text,
+                              fontWeight: FontWeight.w700,
+                              fontSize: compact ? null : 12,
+                              height: 1,
                             ),
                           ),
                         ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
-              Semantics(
-                label: _profileDisplayName(viewModel),
-                image: true,
-                child: ExcludeSemantics(
-                  child: CircleAvatar(
-                    radius: 18,
-                    backgroundColor: colors.primarySoft,
-                    child: Text(
-                      _profileInitials(l10n, viewModel),
-                      style: TextStyle(
-                        color: colors.text,
-                        fontWeight: FontWeight.w700,
-                      ),
+                      ],
                     ),
                   ),
                 ),
@@ -738,6 +758,10 @@ class _TopBar extends StatelessWidget {
     );
   }
 }
+
+const double _desktopTopBarControlHeight = 32;
+const double _desktopTopBarIconSize = 14;
+const double _desktopTopBarAvatarRadius = _desktopTopBarControlHeight / 2;
 
 Future<void> _showRepositoryAccessDialog(
   BuildContext context,
@@ -1246,6 +1270,7 @@ class _AccessCallout extends StatelessWidget {
     required this.title,
     required this.message,
     this.tone = _AccessCalloutTone.warning,
+    this.sortOrder,
     this.primaryActionLabel,
     this.onPrimaryAction,
     this.secondaryActionLabel,
@@ -1256,6 +1281,7 @@ class _AccessCallout extends StatelessWidget {
   final String title;
   final String message;
   final _AccessCalloutTone tone;
+  final double? sortOrder;
   final String? primaryActionLabel;
   final VoidCallback? onPrimaryAction;
   final String? secondaryActionLabel;
@@ -1270,6 +1296,9 @@ class _AccessCallout extends StatelessWidget {
     };
     return Semantics(
       container: true,
+      focusable: true,
+      readOnly: true,
+      sortKey: sortOrder == null ? null : OrdinalSortKey(sortOrder!),
       label: '$semanticLabel $title $message',
       child: Container(
         width: double.infinity,
@@ -1282,28 +1311,29 @@ class _AccessCallout extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TrackStateIcon(
-                  TrackStateIconGlyph.gitBranch,
-                  size: 18,
-                  color: accentColor,
-                  semanticLabel: title,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+            ExcludeSemantics(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TrackStateIcon(
+                    TrackStateIconGlyph.gitBranch,
+                    size: 18,
+                    color: accentColor,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 8),
-            Text(message),
+            ExcludeSemantics(child: Text(message)),
             if ((primaryActionLabel != null && onPrimaryAction != null) ||
                 (secondaryActionLabel != null &&
                     onSecondaryAction != null)) ...[
@@ -2793,67 +2823,73 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         const SizedBox(height: 12),
         Text(l10n.attachmentStorageDescription),
         const SizedBox(height: 16),
-        DropdownButtonFormField<AttachmentStorageMode>(
-          key: const ValueKey('attachment-storage-mode-field'),
-          initialValue: attachmentStorage.mode,
-          decoration: InputDecoration(labelText: l10n.attachmentStorageMode),
-          items: [
-            DropdownMenuItem(
-              value: AttachmentStorageMode.repositoryPath,
-              child: Text(l10n.repositoryPath),
-            ),
-            DropdownMenuItem(
-              value: AttachmentStorageMode.githubReleases,
-              child: Text(l10n.githubReleases),
-            ),
-          ],
-          onChanged: !canEdit
-              ? null
-              : (value) {
-                  if (value == null) {
-                    return;
-                  }
-                  _replaceDraft(
-                    settings.copyWith(
-                      attachmentStorage: settings.attachmentStorage.copyWith(
-                        mode: value,
-                        githubReleases:
-                            value == AttachmentStorageMode.githubReleases
-                            ? (settings.attachmentStorage.githubReleases ??
-                                  const GitHubReleasesAttachmentStorageSettings(
-                                    tagPrefix:
-                                        GitHubReleasesAttachmentStorageSettings
-                                            .defaultTagPrefix,
-                                  ))
-                            : null,
+        FocusTraversalOrder(
+          order: const NumericFocusOrder(1),
+          child: DropdownButtonFormField<AttachmentStorageMode>(
+            key: const ValueKey('attachment-storage-mode-field'),
+            initialValue: attachmentStorage.mode,
+            decoration: InputDecoration(labelText: l10n.attachmentStorageMode),
+            items: [
+              DropdownMenuItem(
+                value: AttachmentStorageMode.repositoryPath,
+                child: Text(l10n.repositoryPath),
+              ),
+              DropdownMenuItem(
+                value: AttachmentStorageMode.githubReleases,
+                child: Text(l10n.githubReleases),
+              ),
+            ],
+            onChanged: !canEdit
+                ? null
+                : (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    _replaceDraft(
+                      settings.copyWith(
+                        attachmentStorage: settings.attachmentStorage.copyWith(
+                          mode: value,
+                          githubReleases:
+                              value == AttachmentStorageMode.githubReleases
+                              ? (settings.attachmentStorage.githubReleases ??
+                                    const GitHubReleasesAttachmentStorageSettings(
+                                      tagPrefix:
+                                          GitHubReleasesAttachmentStorageSettings
+                                              .defaultTagPrefix,
+                                    ))
+                              : null,
+                        ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+          ),
         ),
         const SizedBox(height: 16),
         if (attachmentStorage.mode == AttachmentStorageMode.repositoryPath)
           Text(l10n.attachmentRepositoryPathSummary)
         else ...[
-          TextFormField(
-            key: const ValueKey('attachment-release-tag-prefix-field'),
-            initialValue: tagPrefix,
-            enabled: canEdit,
-            decoration: InputDecoration(
-              labelText: l10n.attachmentReleaseTagPrefix,
-              helperText: l10n.attachmentReleaseTagPrefixHelper,
-            ),
-            onChanged: (value) {
-              _replaceDraft(
-                settings.copyWith(
-                  attachmentStorage: settings.attachmentStorage.copyWith(
-                    githubReleases: GitHubReleasesAttachmentStorageSettings(
-                      tagPrefix: value,
+          FocusTraversalOrder(
+            order: const NumericFocusOrder(2),
+            child: TextFormField(
+              key: const ValueKey('attachment-release-tag-prefix-field'),
+              initialValue: tagPrefix,
+              enabled: canEdit,
+              decoration: InputDecoration(
+                labelText: l10n.attachmentReleaseTagPrefix,
+                helperText: l10n.attachmentReleaseTagPrefixHelper,
+              ),
+              onChanged: (value) {
+                _replaceDraft(
+                  settings.copyWith(
+                    attachmentStorage: settings.attachmentStorage.copyWith(
+                      githubReleases: GitHubReleasesAttachmentStorageSettings(
+                        tagPrefix: value,
+                      ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
           const SizedBox(height: 12),
           Text(l10n.attachmentReleaseMappingSummary(tagPrefix.trim())),
@@ -3187,6 +3223,25 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     );
   }
 
+  Widget _orderedSettingsAction({
+    required Widget child,
+    required ProjectSettingsTab activeTab,
+    required ProjectSettingsCatalog settings,
+    required bool emphasized,
+  }) {
+    if (activeTab != ProjectSettingsTab.attachments) {
+      return child;
+    }
+    final resetOrder =
+        settings.attachmentStorage.mode == AttachmentStorageMode.githubReleases
+        ? 3.0
+        : 2.0;
+    return FocusTraversalOrder(
+      order: NumericFocusOrder(emphasized ? resetOrder + 1 : resetOrder),
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final project = widget.viewModel.project!;
@@ -3194,26 +3249,30 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     _syncRequestedTab();
     final l10n = AppLocalizations.of(context)!;
     final settings = _draftSettings!;
+    final activeTab = ProjectSettingsTab.values[_tabController.index];
     final canEdit =
         widget.viewModel.supportsProjectSettingsAdmin &&
         !widget.viewModel.hasBlockedWriteAccess &&
         !widget.viewModel.isSaving;
-    final tabBar = TabBar(
-      controller: _tabController,
-      isScrollable: true,
-      tabs: [
-        Tab(text: l10n.statuses),
-        Tab(text: l10n.workflows),
-        Tab(text: l10n.issueTypes),
-        Tab(text: l10n.fields),
-        Tab(text: l10n.priorities),
-        Tab(text: l10n.components),
-        Tab(text: l10n.versions),
-        Tab(text: l10n.attachments),
-        Tab(text: l10n.locales),
-      ],
+    final tabBar = FocusTraversalOrder(
+      order: const NumericFocusOrder(0),
+      child: TabBar(
+        controller: _tabController,
+        isScrollable: true,
+        tabs: [
+          Tab(text: l10n.statuses),
+          Tab(text: l10n.workflows),
+          Tab(text: l10n.issueTypes),
+          Tab(text: l10n.fields),
+          Tab(text: l10n.priorities),
+          Tab(text: l10n.components),
+          Tab(text: l10n.versions),
+          Tab(text: l10n.attachments),
+          Tab(text: l10n.locales),
+        ],
+      ),
     );
-    final content = switch (ProjectSettingsTab.values[_tabController.index]) {
+    final content = switch (activeTab) {
       ProjectSettingsTab.statuses => _buildStatusTab(l10n, settings, canEdit),
       ProjectSettingsTab.workflows => _buildWorkflowTab(
         l10n,
@@ -3293,47 +3352,60 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     return _SurfaceCard(
       semanticLabel: l10n.projectSettingsAdmin,
       explicitChildNodes: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _SectionTitle(l10n.projectSettingsAdmin),
+                      const SizedBox(height: 4),
+                      Text(l10n.projectSettingsDescription),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    _SectionTitle(l10n.projectSettingsAdmin),
-                    const SizedBox(height: 4),
-                    Text(l10n.projectSettingsDescription),
+                    _orderedSettingsAction(
+                      activeTab: activeTab,
+                      settings: settings,
+                      emphasized: false,
+                      child: _IssueDetailActionButton(
+                        label: l10n.resetSettings,
+                        onPressed: widget.viewModel.isSaving
+                            ? null
+                            : () => _resetDraft(project),
+                      ),
+                    ),
+                    _orderedSettingsAction(
+                      activeTab: activeTab,
+                      settings: settings,
+                      emphasized: true,
+                      child: _IssueDetailActionButton(
+                        label: l10n.saveSettings,
+                        emphasized: true,
+                        onPressed: canEdit ? _saveSettings : null,
+                      ),
+                    ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _IssueDetailActionButton(
-                    label: l10n.resetSettings,
-                    onPressed: widget.viewModel.isSaving
-                        ? null
-                        : () => _resetDraft(project),
-                  ),
-                  _IssueDetailActionButton(
-                    label: l10n.saveSettings,
-                    emphasized: true,
-                    onPressed: canEdit ? _saveSettings : null,
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          tabBar,
-          const SizedBox(height: 16),
-          content,
-        ],
+              ],
+            ),
+            const SizedBox(height: 16),
+            tabBar,
+            const SizedBox(height: 16),
+            content,
+          ],
+        ),
       ),
     );
   }
@@ -5781,7 +5853,7 @@ class _SettingsProviderButton extends StatelessWidget {
 
   ButtonStyle _connectedStyle(BuildContext context, TrackStateColors colors) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final foreground = isDark ? colors.page : colors.text;
+    final foreground = isDark ? colors.page : colors.page;
 
     return FilledButton.styleFrom(
       backgroundColor: colors.success,
@@ -5810,17 +5882,23 @@ class _HostedProviderConfiguration extends StatefulWidget {
 class _HostedProviderConfigurationState
     extends State<_HostedProviderConfiguration> {
   late final TextEditingController _tokenController;
+  late final FocusNode _tokenFocusNode;
+  late final FocusNode _connectTokenFocusNode;
   bool _rememberToken = true;
 
   @override
   void initState() {
     super.initState();
     _tokenController = TextEditingController();
+    _tokenFocusNode = FocusNode(debugLabel: 'repository-access-token');
+    _connectTokenFocusNode = FocusNode(debugLabel: 'repository-access-connect');
   }
 
   @override
   void dispose() {
     _tokenController.dispose();
+    _tokenFocusNode.dispose();
+    _connectTokenFocusNode.dispose();
     super.dispose();
   }
 
@@ -5828,85 +5906,125 @@ class _HostedProviderConfigurationState
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final viewModel = widget.viewModel;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _AccessCallout(
-          semanticLabel: l10n.manageGitHubAccess,
-          title: _repositoryAccessTitle(l10n, viewModel),
-          message:
-              '${_repositoryAccessMessage(l10n, viewModel)} '
-              '${l10n.repositoryAccessSettingsHint}',
-          tone: _repositoryAccessCalloutTone(viewModel),
-        ),
-        const SizedBox(height: 12),
-        _AccessCallout(
-          semanticLabel: l10n.attachments,
-          title: _attachmentStorageCalloutTitle(l10n, viewModel),
-          message: _attachmentStorageCalloutMessage(l10n, viewModel),
-          tone: _attachmentStorageCalloutTone(viewModel),
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          controller: _tokenController,
-          obscureText: true,
-          decoration: InputDecoration(
-            labelText: l10n.fineGrainedToken,
-            helperText: l10n.fineGrainedTokenHelper,
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _AccessCallout(
+            semanticLabel: l10n.manageGitHubAccess,
+            title: _repositoryAccessTitle(l10n, viewModel),
+            message:
+                '${_repositoryAccessMessage(l10n, viewModel)} '
+                '${l10n.repositoryAccessSettingsHint}',
+            tone: _repositoryAccessCalloutTone(viewModel),
+            sortOrder: 1,
           ),
-        ),
-        const SizedBox(height: 8),
-        CheckboxListTile(
-          contentPadding: EdgeInsets.zero,
-          value: _rememberToken,
-          title: Text(l10n.rememberOnThisBrowser),
-          subtitle: Text(l10n.rememberOnThisBrowserHelp),
-          onChanged: viewModel.isSaving
-              ? null
-              : (value) =>
-                    setState(() => _rememberToken = value ?? _rememberToken),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            Semantics(
-              button: true,
-              label: l10n.connectToken,
-              child: FilledButton(
-                onPressed: viewModel.isSaving
-                    ? null
-                    : () => viewModel.connectGitHub(
-                        _tokenController.text,
-                        remember: _rememberToken,
-                      ),
-                child: Text(l10n.connectToken),
-              ),
-            ),
-            if (viewModel.isGitHubAppAuthAvailable)
-              Semantics(
-                button: true,
-                label: l10n.continueWithGitHubApp,
-                child: OutlinedButton(
-                  onPressed: viewModel.isSaving
-                      ? null
-                      : viewModel.startGitHubAppLogin,
-                  child: Text(l10n.continueWithGitHubApp),
-                ),
-              ),
-          ],
-        ),
-        if (viewModel.connectedUser != null) ...[
           const SizedBox(height: 12),
-          Text(
-            l10n.githubConnected(
-              viewModel.connectedUser!.login,
-              viewModel.project!.repository,
+          _AccessCallout(
+            semanticLabel: l10n.attachments,
+            title: _attachmentStorageCalloutTitle(l10n, viewModel),
+            message: _attachmentStorageCalloutMessage(l10n, viewModel),
+            tone: _attachmentStorageCalloutTone(viewModel),
+            sortOrder: 2,
+          ),
+          const SizedBox(height: 12),
+          FocusTraversalGroup(
+            policy: OrderedTraversalPolicy(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(3),
+                  child: Semantics(
+                    sortKey: OrdinalSortKey(3),
+                    child: TextFormField(
+                      controller: _tokenController,
+                      focusNode: _tokenFocusNode,
+                      obscureText: true,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(
+                        labelText: l10n.fineGrainedToken,
+                        helperText: l10n.fineGrainedTokenHelper,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(4),
+                  child: Semantics(
+                    sortKey: OrdinalSortKey(4),
+                    child: CheckboxListTile(
+                      checkboxSemanticLabel: l10n.rememberOnThisBrowser,
+                      contentPadding: EdgeInsets.zero,
+                      value: _rememberToken,
+                      title: Text(l10n.rememberOnThisBrowser),
+                      subtitle: Text(l10n.rememberOnThisBrowserHelp),
+                      onChanged: viewModel.isSaving
+                          ? null
+                          : (value) => setState(
+                              () => _rememberToken = value ?? _rememberToken,
+                            ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(5),
+                  child: Semantics(
+                    sortKey: OrdinalSortKey(5),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        Semantics(
+                          button: true,
+                          label: l10n.connectToken,
+                          sortKey: OrdinalSortKey(5),
+                          child: FilledButton(
+                            focusNode: _connectTokenFocusNode,
+                            onPressed: viewModel.isSaving
+                                ? null
+                                : () => viewModel.connectGitHub(
+                                    _tokenController.text,
+                                    remember: _rememberToken,
+                                  ),
+                            child: ExcludeSemantics(
+                              child: Text(l10n.connectToken),
+                            ),
+                          ),
+                        ),
+                        if (viewModel.isGitHubAppAuthAvailable)
+                          Semantics(
+                            button: true,
+                            label: l10n.continueWithGitHubApp,
+                            child: OutlinedButton(
+                              onPressed: viewModel.isSaving
+                                  ? null
+                                  : viewModel.startGitHubAppLogin,
+                              child: Text(l10n.continueWithGitHubApp),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
+          if (viewModel.connectedUser != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              l10n.githubConnected(
+                viewModel.connectedUser!.login,
+                viewModel.project!.repository,
+              ),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
@@ -6043,11 +6161,13 @@ class _PrimaryButton extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onPressed,
+    this.height,
   });
 
   final String label;
   final TrackStateIconGlyph icon;
   final VoidCallback? onPressed;
+  final double? height;
 
   @override
   Widget build(BuildContext context) {
@@ -6056,16 +6176,26 @@ class _PrimaryButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
-      child: FilledButton.icon(
-        onPressed: onPressed,
-        style: FilledButton.styleFrom(
-          backgroundColor: colors.primary,
-          foregroundColor: onPrimary,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: SizedBox(
+        height: height,
+        child: FilledButton.icon(
+          onPressed: onPressed,
+          style: FilledButton.styleFrom(
+            backgroundColor: colors.primary,
+            foregroundColor: onPrimary,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+          ),
+          icon: TrackStateIcon(
+            icon,
+            size: height == null ? 16 : _desktopTopBarIconSize,
+            color: onPrimary,
+          ),
+          label: Text(label, style: TextStyle(color: onPrimary, height: 1)),
         ),
-        icon: TrackStateIcon(icon, size: 16, color: onPrimary),
-        label: Text(label, style: TextStyle(color: onPrimary)),
       ),
     );
   }
@@ -6076,11 +6206,13 @@ class _IconButtonSurface extends StatelessWidget {
     required this.label,
     required this.glyph,
     required this.onPressed,
+    this.size,
   });
 
   final String label;
   final TrackStateIconGlyph glyph;
   final VoidCallback? onPressed;
+  final double? size;
 
   @override
   Widget build(BuildContext context) {
@@ -6091,25 +6223,28 @@ class _IconButtonSurface extends StatelessWidget {
       enabled: enabled,
       label: label,
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         onTap: onPressed,
         child: Container(
-          padding: const EdgeInsets.all(11),
+          width: size,
+          height: size,
+          alignment: Alignment.center,
+          padding: size == null ? const EdgeInsets.all(11) : null,
           decoration: BoxDecoration(
             color: colors.surface,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(color: colors.border),
           ),
           foregroundDecoration: enabled
               ? null
               : BoxDecoration(
                   color: colors.page.withValues(alpha: 0.45),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                 ),
           child: TrackStateIcon(
             glyph,
             color: enabled ? colors.text : colors.muted,
-            size: 18,
+            size: size == null ? 18 : _desktopTopBarIconSize,
           ),
         ),
       ),
@@ -7729,17 +7864,23 @@ class _BottomNavigation extends StatelessWidget {
 }
 
 class _SyncPill extends StatelessWidget {
-  const _SyncPill({required this.label});
+  const _SyncPill({required this.label, this.height});
 
   final String label;
+  final double? height;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
     return Semantics(
+      container: true,
       label: label,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        constraints: height == null
+            ? null
+            : BoxConstraints.tightFor(height: height),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
           color: colors.secondarySoft,
           borderRadius: BorderRadius.circular(999),
@@ -7750,7 +7891,7 @@ class _SyncPill extends StatelessWidget {
             TrackStateIcon(
               TrackStateIconGlyph.sync,
               color: colors.secondary,
-              size: 16,
+              size: height == null ? 16 : _desktopTopBarIconSize,
             ),
             const SizedBox(width: 6),
             Flexible(
@@ -7760,6 +7901,7 @@ class _SyncPill extends StatelessWidget {
                 style: TextStyle(
                   color: colors.text,
                   fontWeight: FontWeight.w600,
+                  height: 1,
                 ),
               ),
             ),
@@ -8103,20 +8245,15 @@ class _AttachmentsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
-    final hostedRepositoryPathDownloadOnly =
-        viewModel.exposesHostedAccessGates &&
-        !viewModel.usesGitHubReleasesAttachmentStorage;
-    final accessTitle = hostedRepositoryPathDownloadOnly
-        ? l10n.repositoryAccessAttachmentRestrictedTitle
-        : _repositoryAccessTitle(l10n, viewModel);
-    final accessMessage = hostedRepositoryPathDownloadOnly
-        ? l10n.attachmentsDownloadOnlyMessage
-        : _attachmentsAccessMessage(l10n, viewModel);
+    final accessTitle = _repositoryAccessTitle(l10n, viewModel);
+    final accessMessage = _attachmentsAccessMessage(l10n, viewModel);
     final attachmentDownloadOnly =
-        hostedRepositoryPathDownloadOnly ||
-        (viewModel.hostedRepositoryAccessMode ==
-                HostedRepositoryAccessMode.attachmentRestricted &&
-            !viewModel.canUploadIssueAttachments);
+        viewModel.hostedRepositoryAccessMode ==
+            HostedRepositoryAccessMode.attachmentRestricted &&
+        !viewModel.canUploadIssueAttachments;
+    final showSettingsAction =
+        viewModel.hostedRepositoryAccessMode ==
+        HostedRepositoryAccessMode.attachmentRestricted;
     final canChooseAttachment =
         !attachmentDownloadOnly &&
         !isSaving &&
@@ -8132,10 +8269,8 @@ class _AttachmentsTab extends StatelessWidget {
             semanticLabel: l10n.attachments,
             title: accessTitle,
             message: accessMessage,
-            primaryActionLabel: attachmentDownloadOnly
-                ? l10n.openSettings
-                : null,
-            onPrimaryAction: attachmentDownloadOnly
+            primaryActionLabel: showSettingsAction ? l10n.openSettings : null,
+            onPrimaryAction: showSettingsAction
                 ? () => viewModel.openProjectSettings(
                     tab: ProjectSettingsTab.attachments,
                   )
@@ -8201,7 +8336,7 @@ class _AttachmentsTab extends StatelessWidget {
                   message: uploadNotice!,
                 ),
               ],
-              if (!hostedRepositoryPathDownloadOnly) ...[
+              if (!attachmentDownloadOnly) ...[
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
@@ -8209,7 +8344,9 @@ class _AttachmentsTab extends StatelessWidget {
                   children: [
                     _IssueDetailActionButton(
                       label: l10n.chooseAttachment,
-                      onPressed: canChooseAttachment ? onChooseAttachment : null,
+                      onPressed: canChooseAttachment
+                          ? onChooseAttachment
+                          : null,
                     ),
                     _IssueDetailActionButton(
                       label: l10n.uploadAttachment,

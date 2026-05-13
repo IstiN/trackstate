@@ -1381,28 +1381,18 @@ class TrackStateCli {
           type: requestedType,
         );
         final issue = _requireMutationSuccess(result);
-        final storedLink = issue.links
-            .where(
-              (candidate) =>
-                  candidate.targetKey == targetKey &&
-                  (normalizedLink == null ||
-                      (candidate.type == normalizedLink.canonicalKey &&
-                          candidate.direction == normalizedLink.direction)),
-            )
-            .toList(growable: false)
-            .lastOrNull;
         return <String, Object?>{
           'command': 'ticket-link',
           'operation': result.operation,
           'authSource': context.authSource,
           'revision': result.revision,
           'link': _linkPayload(
-            storedLink ??
-                IssueLink(
-                  type: normalizedLink?.canonicalKey ?? requestedType,
-                  targetKey: targetKey,
-                  direction: normalizedLink?.direction ?? 'outward',
-                ),
+            _canonicalCliLinkPayload(
+              normalizedLink: normalizedLink,
+              requestedType: requestedType,
+              issueKey: issueKey,
+              targetKey: targetKey,
+            ),
           ),
           'issue': _issueMutationPayload(issue),
         };
@@ -2131,28 +2121,18 @@ class TrackStateCli {
           type: requestedType,
         );
         final issue = _requireMutationSuccess(result);
-        final storedLink = issue.links
-            .where(
-              (candidate) =>
-                  candidate.targetKey == targetKey &&
-                  (normalizedLink == null ||
-                      (candidate.type == normalizedLink.canonicalKey &&
-                          candidate.direction == normalizedLink.direction)),
-            )
-            .toList(growable: false)
-            .lastOrNull;
         return <String, Object?>{
           'command': 'jira-link-issues',
           'operation': result.operation,
           'authSource': context.authSource,
           'revision': result.revision,
           'link': _linkPayload(
-            storedLink ??
-                IssueLink(
-                  type: normalizedLink?.canonicalKey ?? requestedType,
-                  targetKey: targetKey,
-                  direction: normalizedLink?.direction ?? 'outward',
-                ),
+            _canonicalCliLinkPayload(
+              normalizedLink: normalizedLink,
+              requestedType: requestedType,
+              issueKey: issueKey,
+              targetKey: targetKey,
+            ),
           ),
           'issue': _issueMutationPayload(issue),
         };
@@ -2605,11 +2585,10 @@ class TrackStateCli {
               (field) => _metadataTextLabel(
                 canonicalName: field.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.fieldLabel(
-                      field.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project.fieldLabel(
+                  field.id,
+                  locale: requestedLocale,
+                ),
               ),
             ),
           ),
@@ -2633,11 +2612,8 @@ class TrackStateCli {
               (status) => _metadataTextLabel(
                 canonicalName: status.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.statusLabel(
-                      status.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project
+                    .statusLabel(status.id, locale: requestedLocale),
               ),
             ),
           ),
@@ -2676,11 +2652,8 @@ class TrackStateCli {
               (item) => _metadataTextLabel(
                 canonicalName: item.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.issueTypeLabel(
-                      item.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project
+                    .issueTypeLabel(item.id, locale: requestedLocale),
               ),
             ),
           ),
@@ -2704,11 +2677,8 @@ class TrackStateCli {
               (item) => _metadataTextLabel(
                 canonicalName: item.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.componentLabel(
-                      item.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project
+                    .componentLabel(item.id, locale: requestedLocale),
               ),
             ),
           ),
@@ -2732,11 +2702,8 @@ class TrackStateCli {
               (item) => _metadataTextLabel(
                 canonicalName: item.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.versionLabel(
-                      item.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project
+                    .versionLabel(item.id, locale: requestedLocale),
               ),
             ),
           ),
@@ -3161,7 +3128,6 @@ class TrackStateCli {
     required String attachmentName,
     required List<int> bytes,
   }) async {
-    final credential = await _resolveOptionalLocalCredential();
     final branch = await _resolveLocalBranch(target);
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
@@ -3173,10 +3139,24 @@ class TrackStateCli {
         RepositoryConnection(
           repository: target.value,
           branch: branch,
-          token: credential?.token ?? '',
+          token: '',
         ),
       );
       final snapshot = await repository.loadSnapshot();
+      final credential =
+          snapshot.project.attachmentStorage.mode ==
+              AttachmentStorageMode.githubReleases
+          ? await _resolveLocalReleaseAttachmentCredential(repository)
+          : null;
+      if (credential != null) {
+        await repository.connect(
+          RepositoryConnection(
+            repository: target.value,
+            branch: branch,
+            token: credential.token,
+          ),
+        );
+      }
       final issue = _findIssue(snapshot, issueKey);
       final updatedIssue = await repository.uploadIssueAttachment(
         issue: issue,
@@ -3265,7 +3245,6 @@ class TrackStateCli {
     required String attachmentId,
     required String resolvedOutPath,
   }) async {
-    final credential = await _resolveOptionalLocalCredential();
     final branch = await _resolveLocalBranch(target);
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
@@ -3277,11 +3256,25 @@ class TrackStateCli {
         RepositoryConnection(
           repository: target.value,
           branch: branch,
-          token: credential?.token ?? '',
+          token: '',
         ),
       );
       final snapshot = await repository.loadSnapshot();
       final resolvedAttachment = _findAttachment(snapshot, attachmentId);
+      final credential =
+          resolvedAttachment.attachment.storageBackend ==
+              AttachmentStorageMode.githubReleases
+          ? await _resolveLocalReleaseAttachmentCredential(repository)
+          : null;
+      if (credential != null) {
+        await repository.connect(
+          RepositoryConnection(
+            repository: target.value,
+            branch: branch,
+            token: credential.token,
+          ),
+        );
+      }
       final bytes = await repository.downloadAttachment(
         resolvedAttachment.attachment,
       );
@@ -3482,7 +3475,7 @@ class TrackStateCli {
         'provider': target.provider,
         'repository': target.value,
       },
-      );
+    );
   }
 
   Future<TrackStateCliCredential?> _resolveOptionalLocalCredential() =>
@@ -3491,6 +3484,24 @@ class TrackStateCli {
         environment: _environment.environment,
         readGhToken: _environment.readGhAuthToken,
       );
+
+  Future<TrackStateCliCredential?> _resolveLocalReleaseAttachmentCredential(
+    TrackStateRepository repository,
+  ) async {
+    if (repository
+        case final ProviderBackedTrackStateRepository providerBacked) {
+      final provider = providerBacked.providerAdapter;
+      if (provider
+          case final RepositoryGitHubIdentityResolver identityResolver) {
+        final repositoryIdentity = await identityResolver
+            .resolveGitHubRepositoryIdentity();
+        if (repositoryIdentity == null || repositoryIdentity.trim().isEmpty) {
+          return null;
+        }
+      }
+    }
+    return _resolveOptionalLocalCredential();
+  }
 
   TrackStateIssue _findIssue(TrackerSnapshot snapshot, String issueKey) {
     try {
@@ -3684,6 +3695,35 @@ class TrackStateCli {
       return _mapCompatibilityError(error);
     }
     if (error is TrackStateProviderException) {
+      if (target.type == TrackStateCliTargetType.local &&
+          _looksLikeAttachmentStorageValidationFailure(error.message)) {
+        return _TrackStateCliException(
+          code: 'INVALID_REQUEST',
+          category: TrackStateCliErrorCategory.validation,
+          message: error.message,
+          exitCode: 4,
+          details: <String, Object?>{
+            'path': target.value,
+            'reason': error.message,
+          },
+        );
+      }
+      if (_looksLikeAuthenticationFailure(error.message)) {
+        return _TrackStateCliException(
+          code: 'AUTHENTICATION_FAILED',
+          category: TrackStateCliErrorCategory.auth,
+          message: 'Authentication is required for the selected provider.',
+          exitCode: 3,
+          details: <String, Object?>{
+            if (target.type == TrackStateCliTargetType.local)
+              'path': target.value
+            else
+              'repository': target.value,
+            'provider': target.provider,
+            'reason': error.message,
+          },
+        );
+      }
       return target.type == TrackStateCliTargetType.hosted
           ? _mapHostedProviderError(error, target)
           : _TrackStateCliException(
@@ -4959,6 +4999,17 @@ class TrackStateCli {
     'direction': link.direction,
   };
 
+  IssueLink _canonicalCliLinkPayload({
+    required _ResolvedMutationField? normalizedLink,
+    required String requestedType,
+    required String issueKey,
+    required String targetKey,
+  }) => IssueLink(
+    type: normalizedLink?.canonicalKey ?? requestedType,
+    targetKey: normalizedLink?.direction == 'inward' ? issueKey : targetKey,
+    direction: 'outward',
+  );
+
   Map<String, Object?> _deletedIssuePayload(DeletedIssueTombstone tombstone) =>
       <String, Object?>{
         'key': tombstone.key,
@@ -5270,29 +5321,19 @@ class TrackStateCli {
     '${issue.key}: ${issue.summary}',
     'Project: ${project.key}',
     'Type: ${_metadataTextLabel(
-      canonicalName: _findConfigEntry(
-        project.issueTypeDefinitions,
-        issue.issueTypeId,
-      ).name,
+      canonicalName: _findConfigEntry(project.issueTypeDefinitions, issue.issueTypeId).name,
       locale: locale,
-      localizedName: (requestedLocale) =>
-          project.issueTypeLabel(issue.issueTypeId, locale: requestedLocale),
+      localizedName: (requestedLocale) => project.issueTypeLabel(issue.issueTypeId, locale: requestedLocale),
     )}',
     'Status: ${_metadataTextLabel(
-      canonicalName: _findConfigEntry(project.statusDefinitions, issue.statusId)
-          .name,
+      canonicalName: _findConfigEntry(project.statusDefinitions, issue.statusId).name,
       locale: locale,
-      localizedName: (requestedLocale) =>
-          project.statusLabel(issue.statusId, locale: requestedLocale),
+      localizedName: (requestedLocale) => project.statusLabel(issue.statusId, locale: requestedLocale),
     )}',
     'Priority: ${_metadataTextLabel(
-      canonicalName: _findConfigEntry(
-        project.priorityDefinitions,
-        issue.priorityId,
-      ).name,
+      canonicalName: _findConfigEntry(project.priorityDefinitions, issue.priorityId).name,
       locale: locale,
-      localizedName: (requestedLocale) =>
-          project.priorityLabel(issue.priorityId, locale: requestedLocale),
+      localizedName: (requestedLocale) => project.priorityLabel(issue.priorityId, locale: requestedLocale),
     )}',
   ].join('\n');
 
@@ -5332,11 +5373,7 @@ class TrackStateCli {
     _ResolvedTarget target,
   ) {
     final message = error.message;
-    final isAuthenticationFailure =
-        message.contains('(401)') ||
-        message.contains('(403)') ||
-        message.toLowerCase().contains('bad credentials') ||
-        message.toLowerCase().contains('write access first');
+    final isAuthenticationFailure = _looksLikeAuthenticationFailure(message);
     if (isAuthenticationFailure) {
       return _TrackStateCliException(
         code: 'AUTHENTICATION_FAILED',
@@ -5426,6 +5463,21 @@ class TrackStateCli {
       }),
     );
   }
+
+  bool _looksLikeAuthenticationFailure(String message) {
+    final normalized = message.toLowerCase();
+    return message.contains('(401)') ||
+        message.contains('(403)') ||
+        normalized.contains('bad credentials') ||
+        normalized.contains('write access first') ||
+        normalized.contains('authentication') ||
+        normalized.contains('authenticate with gh') ||
+        normalized.contains('trackstate_token') ||
+        normalized.contains('credential');
+  }
+
+  bool _looksLikeAttachmentStorageValidationFailure(String message) =>
+      message.startsWith('project.json attachmentStorage.');
 
   Map<String, Object?> _permissionJson(RepositoryPermission permission) =>
       <String, Object?>{
@@ -6526,10 +6578,6 @@ const List<Map<String, Object?>> _jiraLinkTypes = [
 
 extension on String {
   String ifEmpty(String fallback) => trim().isEmpty ? fallback : this;
-}
-
-extension<T> on List<T> {
-  T? get lastOrNull => isEmpty ? null : last;
 }
 
 String _normalizeFieldTokenStatic(String value) =>

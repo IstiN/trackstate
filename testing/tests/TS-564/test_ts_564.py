@@ -489,7 +489,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
             f"{_jira_inline(_as_text(result.get('supported_ticket_command')))}."
         ),
         "* Seeded a disposable local TrackState repository configured with {{attachmentStorage.mode = github-releases}} and removed GitHub credentials from the runtime environment.",
-        f"* Compiled the CLI from source ref {_jira_inline(_as_text(result.get('compiled_source_ref')))} to exercise the deployed auth-contract implementation.",
+        f"* Compiled the CLI from source ref {_jira_inline(_as_text(result.get('compiled_source_ref')))} so the automation exercised the selected revision under test.",
         "* Inspected the caller-visible terminal output, the JSON error payload, and the local output path after the failed download.",
         "",
         "h4. Result",
@@ -521,7 +521,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
             f"`{_as_text(result.get('supported_ticket_command'))}`."
         ),
         "- Seeded a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and removed GitHub credentials from the runtime environment.",
-        f"- Compiled the CLI from source ref `{_as_text(result.get('compiled_source_ref'))}` to exercise the deployed auth-contract implementation.",
+        f"- Compiled the CLI from source ref `{_as_text(result.get('compiled_source_ref'))}` so the automation exercised the selected revision under test.",
         "- Inspected the caller-visible terminal output, the JSON error payload, and the local output path after the failed download.",
         "",
         "## Result",
@@ -581,7 +581,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
             f"{_jira_inline(_as_text(result.get('supported_ticket_command')))}."
         ),
         "* Seeded a disposable local TrackState repository configured with {{attachmentStorage.mode = github-releases}} and removed GitHub credentials from the runtime environment.",
-        f"* Compiled the CLI from source ref {_jira_inline(_as_text(result.get('compiled_source_ref')))} to exercise the deployed auth-contract implementation.",
+        f"* Compiled the CLI from source ref {_jira_inline(_as_text(result.get('compiled_source_ref')))} so the automation exercised the selected revision under test.",
         "* Inspected the JSON error {{category}} and {{exitCode}} fields plus the local output path after the failed download.",
         "",
         "h4. Result",
@@ -625,7 +625,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
             f"`{_as_text(result.get('supported_ticket_command'))}`."
         ),
         "- Seeded a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and removed GitHub credentials from the runtime environment.",
-        f"- Compiled the CLI from source ref `{_as_text(result.get('compiled_source_ref'))}` to exercise the deployed auth-contract implementation.",
+        f"- Compiled the CLI from source ref `{_as_text(result.get('compiled_source_ref'))}` so the automation exercised the selected revision under test.",
         "- Inspected the JSON error `category` and `exitCode` fields plus the local output path after the failed download.",
         "",
         "## Result",

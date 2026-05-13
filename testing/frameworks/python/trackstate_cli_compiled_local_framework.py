@@ -22,13 +22,13 @@ class PythonTrackStateCliCompiledLocalFramework:
         *,
         source_root: Path | None = None,
     ) -> None:
-        resolved_source_root = Path(source_root or self._repository_root)
+        compile_root = source_root or self._repository_root
         destination.write_text(
             "\n".join(
                 (
                     "#!/usr/bin/env bash",
                     "set -euo pipefail",
-                    f'repo_root="{resolved_source_root}"',
+                    f'repo_root="{compile_root}"',
                     'working_directory="$PWD"',
                     'temp_dir="$(mktemp -d)"',
                     'cleanup() {',

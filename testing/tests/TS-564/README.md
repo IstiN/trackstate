@@ -8,14 +8,17 @@ error contract.
 The automation:
 1. reviews the ticket step `trackstate attachment download --issue TS-123 --file manual.pdf --target local --output json`
 2. executes the current supported equivalent `trackstate attachment download --attachment-id TS/TS-123/attachments/manual.pdf --out ./downloads/manual.pdf --target local --output json`
-3. compiles the CLI from `origin/main` so the scenario runs against the deployed auth-contract implementation even when the current branch lags behind `main`
-4. seeds a disposable local TrackState repository with
+3. compiles the CLI from the current checkout by default so the scenario validates
+   the revision under review
+4. keeps alternate source refs opt-in through `runtime_inputs.compiled_source_ref`
+   when a ticket temporarily needs to exercise a different ref
+5. seeds a disposable local TrackState repository with
    `attachmentStorage.mode = github-releases`
-5. removes ambient GitHub credentials from the runtime environment
-6. verifies the visible output still explains the missing GitHub auth/configuration
+6. removes ambient GitHub credentials from the runtime environment
+7. verifies the visible output still explains the missing GitHub auth/configuration
    problem to a user
-7. inspects the JSON error `category` and `exitCode`
-8. verifies no local download file is created and the repository stays clean
+8. inspects the JSON error `code`, `category`, and `exitCode`
+9. verifies no local download file is created and the repository stays clean
 
 ## Run this test
 

@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/cli/trackstate_cli.dart';
-
+import 'trackstate_cli_http_override.dart';
 void main() {
   test('trackstate cli harness', () async {
     final argsFile = _requiredEnvironmentVariable('TRACKSTATE_CLI_ARGS_FILE');
@@ -36,7 +36,10 @@ void main() {
       ),
     );
 
-    final execution = await cli.run(await _readArguments(argsFile));
+    final arguments = await _readArguments(argsFile);
+    final execution = await runWithOptionalReleaseAssetDeleteFailure(
+      () => cli.run(arguments),
+    );
 
     await File(stdoutFile).writeAsString(execution.stdout, flush: true);
     await File(exitCodeFile).writeAsString(
