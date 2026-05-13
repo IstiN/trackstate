@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -1513,6 +1514,24 @@ README.md -filter
   );
 
   test(
+    'github provider reuses a single fallback http client when no client is injected',
+    () async {
+      final overrides = _CountingHttpOverrides();
+      final provider = GitHubTrackStateProvider(repositoryName: 'cli/cli');
+
+      await HttpOverrides.runZoned(() async {
+        final first = await provider.getBranch('main');
+        final second = await provider.getBranch('release');
+
+        expect(first.exists, isFalse);
+        expect(second.exists, isFalse);
+      }, createHttpClient: overrides.createHttpClient);
+
+      expect(overrides.createCount, 1);
+    },
+  );
+
+  test(
     'github provider reads non-LFS binary attachments without UTF-8 decoding',
     () async {
       final bytes = Uint8List.fromList(const [
@@ -1776,6 +1795,13 @@ size 6
           }
           if (path ==
                   '/repos/${SetupTrackStateRepository.repositoryName}/releases' &&
+              request.method == 'GET') {
+            expect(request.url.queryParameters['per_page'], '100');
+            expect(request.url.queryParameters['page'], '1');
+            return http.Response('[]', 200);
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases' &&
               request.method == 'POST') {
             return http.Response(
               jsonEncode({
@@ -1838,7 +1864,7 @@ size 6
       expect(metadataJson, [
         {
           'id': 'DEMO/DEMO-1/attachments/release-plan.txt',
-          'name': 'release-plan.txt',
+          'name': 'release plan.txt',
           'mediaType': 'text/plain',
           'sizeBytes': 7,
           'author': 'demo-user',
@@ -1895,7 +1921,7 @@ size 6
               as List<Object?>;
       expect(metadata.single, {
         'id': 'DEMO/DEMO-1/attachments/release-plan.txt',
-        'name': 'release-plan.txt',
+        'name': 'release plan.txt',
         'mediaType': 'text/plain',
         'sizeBytes': 7,
         'author': 'demo-user',
@@ -1940,7 +1966,12 @@ size 6
             {'id': 'story', 'name': 'Story'},
           ]),
           'DEMO/config/fields.json': jsonEncode([
-            {'id': 'summary', 'name': 'Summary', 'type': 'string', 'required': true},
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
           ]),
           'DEMO/.trackstate/index/issues.json': jsonEncode([
             {
@@ -2014,7 +2045,10 @@ Nested release-backed attachment issue.
         updated.attachments.single.storageBackend,
         AttachmentStorageMode.githubReleases,
       );
-      expect(updated.attachments.single.githubReleaseTag, 'trackstate-attachments-DEMO-2');
+      expect(
+        updated.attachments.single.githubReleaseTag,
+        'trackstate-attachments-DEMO-2',
+      );
       expect(updated.attachments.single.githubReleaseAssetName, 'manual.pdf');
       expect(updated.attachments.single.revisionOrOid, '84');
       final metadata =
@@ -2172,6 +2206,13 @@ Nested release-backed attachment issue.
                   '/repos/${SetupTrackStateRepository.repositoryName}/releases/tags/trackstate-attachments-DEMO-1' &&
               request.method == 'GET') {
             return http.Response('', 404);
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases' &&
+              request.method == 'GET') {
+            expect(request.url.queryParameters['per_page'], '100');
+            expect(request.url.queryParameters['page'], '1');
+            return http.Response('[]', 200);
           }
           if (path ==
                   '/repos/${SetupTrackStateRepository.repositoryName}/releases' &&
@@ -2399,6 +2440,92 @@ Nested release-backed attachment issue.
         issue.attachments.single,
       );
       expect(utf8.decode(restoredBytes), 'legacy');
+    },
+  );
+
+  test(
+    'github provider reuses a matching draft release when tag lookup misses it',
+    () async {
+      var createdDuplicateRelease = false;
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/IstiN/trackstate' && request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path ==
+                  '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            return http.Response('', 404);
+          }
+          if (path == '/repos/IstiN/trackstate/releases' &&
+              request.method == 'GET') {
+            expect(request.url.queryParameters['per_page'], '100');
+            expect(request.url.queryParameters['page'], '1');
+            return http.Response(
+              jsonEncode([
+                {
+                  'id': 10,
+                  'tag_name': 'trackstate-attachments-DEMO-1',
+                  'name': 'Attachments for DEMO-1',
+                  'body': 'Manual Notes',
+                  'draft': true,
+                  'assets': const <Object?>[],
+                },
+              ]),
+              200,
+            );
+          }
+          if (path == '/repos/IstiN/trackstate/releases' &&
+              request.method == 'POST') {
+            createdDuplicateRelease = true;
+            return http.Response(
+              '{"message":"unexpected duplicate create"}',
+              500,
+            );
+          }
+          if (request.url.host == 'uploads.github.com' &&
+              path == '/repos/IstiN/trackstate/releases/10/assets' &&
+              request.method == 'POST') {
+            expect(request.url.queryParameters['name'], 'design.png');
+            return http.Response(
+              jsonEncode({'id': 2, 'name': 'design.png', 'size': 4}),
+              201,
+            );
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final result = await provider.writeReleaseAttachment(
+        RepositoryReleaseAttachmentWriteRequest(
+          issueKey: 'DEMO-1',
+          releaseTag: 'trackstate-attachments-DEMO-1',
+          releaseTitle: 'Attachments for DEMO-1',
+          assetName: 'design.png',
+          bytes: Uint8List.fromList(const [1, 2, 3, 4]),
+          mediaType: 'image/png',
+          branch: 'main',
+        ),
+      );
+
+      expect(createdDuplicateRelease, isFalse);
+      expect(result.assetId, '2');
     },
   );
 
@@ -2673,6 +2800,133 @@ Nested release-backed attachment issue.
       expect(asset.bytes, Uint8List.fromList(const [1, 2, 3, 4, 5, 6]));
     },
   );
+
+  test(
+    'provider-backed repository resolves release-backed downloads through a local GitHub remote identity',
+    () async {
+      final provider = _FakeRemoteIdentityProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        repository: 'cli/cli',
+        files: _releaseAttachmentFixtureFiles(),
+      );
+      final repository = ProviderBackedTrackStateRepository(
+        provider: provider,
+        githubClient: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/cli/cli/releases/assets/1' &&
+              request.method == 'GET') {
+            expect(request.headers['accept'], 'application/octet-stream');
+            return http.Response('', 404);
+          }
+          if (path == '/repos/cli/cli/releases/tags/v2.74.0' &&
+              request.method == 'GET') {
+            return http.Response(
+              jsonEncode({
+                'id': 10,
+                'tag_name': 'v2.74.0',
+                'name': 'CLI 2.74.0',
+                'assets': const [],
+              }),
+              200,
+            );
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await expectLater(
+        () => repository.downloadAttachment(
+          const IssueAttachment(
+            id: 'DEMO/DEMO-1/attachments/manual.pdf',
+            name: 'manual.pdf',
+            mediaType: 'application/pdf',
+            sizeBytes: 19,
+            author: 'tester',
+            createdAt: '2026-05-13T00:00:00Z',
+            storagePath: 'DEMO/DEMO-1/attachments/manual.pdf',
+            revisionOrOid: '1',
+            storageBackend: AttachmentStorageMode.githubReleases,
+            githubReleaseTag: 'v2.74.0',
+            githubReleaseAssetName: 'manual.pdf',
+          ),
+        ),
+        throwsA(
+          isA<TrackStateProviderException>().having(
+            (error) => error.message,
+            'message',
+            contains(
+              'GitHub release v2.74.0 does not contain asset manual.pdf.',
+            ),
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'provider-backed repository surfaces local release auth guidance before hosted download lookup',
+    () async {
+      var requestCount = 0;
+      final provider = _FakeRemoteIdentityProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        repository: 'cli/cli',
+        releaseAttachmentFailureReason:
+            'GitHub Releases attachment storage requires GitHub authentication. '
+            'Set TRACKSTATE_TOKEN or authenticate with gh before using '
+            'release-backed attachments from a local repository.',
+        files: _releaseAttachmentFixtureFiles(),
+      );
+      final repository = ProviderBackedTrackStateRepository(
+        provider: provider,
+        githubClient: MockClient((request) async {
+          requestCount += 1;
+          return http.Response('', 404);
+        }),
+      );
+
+      await expectLater(
+        () => repository.downloadAttachment(
+          const IssueAttachment(
+            id: 'DEMO/DEMO-1/attachments/manual.pdf',
+            name: 'manual.pdf',
+            mediaType: 'application/pdf',
+            sizeBytes: 19,
+            author: 'tester',
+            createdAt: '2026-05-13T00:00:00Z',
+            storagePath: 'DEMO/DEMO-1/attachments/manual.pdf',
+            revisionOrOid: '1',
+            storageBackend: AttachmentStorageMode.githubReleases,
+            githubReleaseTag: 'v2.74.0',
+            githubReleaseAssetName: 'manual.pdf',
+          ),
+        ),
+        throwsA(
+          isA<TrackStateRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            contains(
+              'GitHub Releases attachment storage requires GitHub authentication.',
+            ),
+          ),
+        ),
+      );
+      expect(requestCount, 0);
+    },
+  );
 }
 
 SetupTrackStateRepository _mockSetupRepository({
@@ -2869,6 +3123,271 @@ class _FakeReleaseAttachmentProvider
   Future<void> deleteReleaseAttachment(
     RepositoryReleaseAttachmentDeleteRequest request,
   ) async {}
+}
+
+class _FakeRemoteIdentityProvider
+    implements TrackStateProviderAdapter, RepositoryGitHubIdentityResolver {
+  _FakeRemoteIdentityProvider({
+    required this.permission,
+    required this.repository,
+    this.releaseAttachmentFailureReason,
+    required Map<String, String> files,
+  }) : files = {...files};
+
+  final RepositoryPermission permission;
+  final String repository;
+  final String? releaseAttachmentFailureReason;
+  final Map<String, String> files;
+  RepositoryConnection? _connection;
+
+  @override
+  ProviderType get providerType => ProviderType.local;
+
+  @override
+  String get repositoryLabel => _connection?.repository ?? '.';
+
+  @override
+  String get dataRef => 'HEAD';
+
+  @override
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    _connection = connection;
+    return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+  }
+
+  @override
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async {
+    return [
+      for (final path in files.keys)
+        RepositoryTreeEntry(path: path, type: 'blob'),
+    ];
+  }
+
+  @override
+  Future<RepositoryTextFile> readTextFile(
+    String path, {
+    required String ref,
+  }) async {
+    final content = files[path];
+    if (content == null) {
+      throw TrackStateProviderException('File not found: $path');
+    }
+    return RepositoryTextFile(path: path, content: content, revision: 'abc123');
+  }
+
+  @override
+  Future<String> resolveWriteBranch() async => _connection?.branch ?? dataRef;
+
+  @override
+  Future<RepositoryBranch> getBranch(String name) async =>
+      RepositoryBranch(name: name, exists: true, isCurrent: true);
+
+  @override
+  Future<RepositoryWriteResult> writeTextFile(
+    RepositoryWriteRequest request,
+  ) async {
+    files[request.path] = request.content;
+    return RepositoryWriteResult(
+      path: request.path,
+      branch: request.branch,
+      revision: 'metadata-sha',
+    );
+  }
+
+  @override
+  Future<RepositoryCommitResult> createCommit(
+    RepositoryCommitRequest request,
+  ) async => RepositoryCommitResult(
+    branch: request.branch,
+    message: request.message,
+    revision: 'commit-sha',
+  );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
+  Future<RepositoryPermission> getPermission() async => permission;
+
+  @override
+  Future<RepositoryAttachment> readAttachment(
+    String path, {
+    required String ref,
+  }) async {
+    final content = files[path];
+    if (content == null) {
+      throw TrackStateProviderException('Attachment not found: $path');
+    }
+    return RepositoryAttachment(
+      path: path,
+      bytes: Uint8List.fromList(utf8.encode(content)),
+      revision: 'attachment-sha',
+      declaredSizeBytes: utf8.encode(content).length,
+    );
+  }
+
+  @override
+  Future<RepositoryAttachmentWriteResult> writeAttachment(
+    RepositoryAttachmentWriteRequest request,
+  ) async {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<bool> isLfsTracked(String path) async => false;
+
+  @override
+  Future<String?> resolveGitHubRepositoryIdentity() async => repository;
+
+  @override
+  Future<String?> releaseAttachmentIdentityFailureReason() async =>
+      releaseAttachmentFailureReason;
+}
+
+class _CountingHttpOverrides {
+  int createCount = 0;
+
+  HttpClient createHttpClient(SecurityContext? context) {
+    createCount += 1;
+    return _FakeHttpClient();
+  }
+}
+
+class _FakeHttpClient implements HttpClient {
+  @override
+  Future<HttpClientRequest> openUrl(String method, Uri url) async =>
+      _FakeHttpClientRequest(
+        _FakeHttpClientResponse(statusCode: 404, reasonPhrase: 'Not Found'),
+      );
+
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeHttpClientRequest implements HttpClientRequest {
+  _FakeHttpClientRequest(this._response);
+
+  final HttpClientResponse _response;
+  final HttpHeaders _headers = _FakeHttpHeaders();
+  bool _followRedirects = true;
+  int _maxRedirects = 5;
+  int _contentLength = -1;
+  bool _persistentConnection = true;
+
+  @override
+  HttpHeaders get headers => _headers;
+
+  @override
+  bool get followRedirects => _followRedirects;
+
+  @override
+  set followRedirects(bool value) {
+    _followRedirects = value;
+  }
+
+  @override
+  int get maxRedirects => _maxRedirects;
+
+  @override
+  set maxRedirects(int value) {
+    _maxRedirects = value;
+  }
+
+  @override
+  int get contentLength => _contentLength;
+
+  @override
+  set contentLength(int value) {
+    _contentLength = value;
+  }
+
+  @override
+  bool get persistentConnection => _persistentConnection;
+
+  @override
+  set persistentConnection(bool value) {
+    _persistentConnection = value;
+  }
+
+  @override
+  Future<void> addStream(Stream<List<int>> stream) async {
+    await stream.drain<void>();
+  }
+
+  @override
+  Future<HttpClientResponse> close() async => _response;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeHttpClientResponse extends Stream<List<int>>
+    implements HttpClientResponse {
+  _FakeHttpClientResponse({
+    required this.statusCode,
+    required this.reasonPhrase,
+  });
+
+  @override
+  final int statusCode;
+
+  @override
+  final String reasonPhrase;
+
+  @override
+  final HttpHeaders headers = _FakeHttpHeaders();
+
+  @override
+  int get contentLength => 0;
+
+  @override
+  bool get isRedirect => false;
+
+  @override
+  bool get persistentConnection => false;
+
+  @override
+  List<RedirectInfo> get redirects => const <RedirectInfo>[];
+
+  @override
+  HttpClientResponseCompressionState get compressionState =>
+      HttpClientResponseCompressionState.notCompressed;
+
+  @override
+  StreamSubscription<List<int>> listen(
+    void Function(List<int> event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) => Stream<List<int>>.empty().listen(
+    onData,
+    onError: onError,
+    onDone: onDone,
+    cancelOnError: cancelOnError,
+  );
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeHttpHeaders implements HttpHeaders {
+  final Map<String, List<String>> _values = <String, List<String>>{};
+
+  @override
+  void set(String name, Object value, {bool preserveHeaderCase = false}) {
+    _values[name.toLowerCase()] = <String>[value.toString()];
+  }
+
+  @override
+  void forEach(void Function(String name, List<String> values) action) {
+    _values.forEach(action);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 Map<String, String> _fixtureFilesFromDisk(String rootPath) {

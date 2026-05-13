@@ -1,0 +1,39 @@
+test_id: TS-554
+type: cli
+framework: python
+platform: local-git
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+  - gh CLI available on PATH
+  - GH_TOKEN or GITHUB_TOKEN with release upload access to the hosted setup repository
+notes:
+  - Seeds a disposable local TrackState repository configured for github-releases attachment storage with the fixed tag prefix `ts-att-` and pointed at the live setup repository as origin.
+  - Executes the exact local CLI command `trackstate attachment upload --issue TS-456 --file image.png --target local`.
+  - Verifies the command succeeds, `attachments.json` records the release-backed metadata, and `gh release view ts-att-TS-456` exposes a draft release titled `Attachments for TS-456` containing the uploaded asset.
+runtime_inputs:
+  ticket_command: trackstate attachment upload --issue TS-456 --file image.png --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - upload
+    - --issue
+    - TS-456
+    - --file
+    - image.png
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-554 Project
+  issue_key: TS-456
+  issue_summary: TS-554 draft release creation fixture
+  source_file_name: image.png
+  source_file_text: |-
+    TS-554 upload payload
+    Verifies the local github-releases upload path creates the missing draft release and tag.
+  release_tag_prefix_base: ts-att-
+  expected_sanitized_asset_name: image.png
+  manifest_poll_timeout_seconds: 120
+  manifest_poll_interval_seconds: 4
+  release_poll_timeout_seconds: 120
+  release_poll_interval_seconds: 4

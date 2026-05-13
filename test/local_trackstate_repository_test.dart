@@ -212,7 +212,7 @@ void main() {
   );
 
   test(
-    'local release-backed uploads fail with GitHub Releases auth guidance instead of the generic attachment gate',
+    'local release-backed uploads fail with an explicit repository identity error when no git remote is configured',
     () async {
       final repo = await _createLocalRepository();
       addTearDown(() => repo.delete(recursive: true));
@@ -245,13 +245,96 @@ void main() {
           isA<TrackStateRepositoryException>().having(
             (error) => error.message,
             'message',
-            allOf(
-              contains('GitHub Releases'),
-              anyOf(contains('auth'), contains('configuration')),
+            contains(
+              'GitHub repository identity cannot be resolved from the local Git configuration because no remote is configured.',
             ),
           ),
         ),
       );
+    },
+  );
+
+  test(
+    'local release-backed uploads delegate GitHub Release writes when a token and GitHub remote are configured',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+      await _writeFile(
+        repo,
+        'DEMO/project.json',
+        '{"key":"DEMO","name":"Local Demo","attachmentStorage":{"mode":"github-releases","githubReleases":{"tagPrefix":"trackstate-attachments-"}}}\n',
+      );
+      await _git(repo.path, [
+        'remote',
+        'add',
+        'origin',
+        'https://github.com/octo/releases-demo.git',
+      ]);
+      await _git(repo.path, ['add', 'DEMO/project.json']);
+      await _git(repo.path, [
+        'commit',
+        '-m',
+        'Configure release-backed attachment storage',
+      ]);
+
+      final hostedProvider = _FakeHostedReleaseTrackStateProvider();
+      final repository = ProviderBackedTrackStateRepository(
+        provider: LocalGitTrackStateProvider(
+          repositoryPath: repo.path,
+          hostedProviderFactory: ({
+            required String repository,
+            required String branch,
+            required String dataRef,
+          }) {
+            hostedProvider.repositoryName = repository;
+            hostedProvider.branch = branch;
+            hostedProvider.dataRefOverride = dataRef;
+            return hostedProvider;
+          },
+        ),
+        usesLocalPersistence: true,
+        supportsGitHubAuth: false,
+      );
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: '.',
+          branch: 'main',
+          token: 'env-token',
+        ),
+      );
+
+      final updated = await repository.uploadIssueAttachment(
+        issue: snapshot.issues.single,
+        name: 'Report #2026 (Final)!.pdf',
+        bytes: Uint8List.fromList(utf8.encode('release-payload')),
+      );
+      final uploaded = updated.attachments.firstWhere(
+        (attachment) => attachment.name == 'Report #2026 (Final)!.pdf',
+      );
+      final metadataJson =
+          jsonDecode(
+                File(
+                  '${repo.path}/DEMO/DEMO-1/attachments.json',
+                ).readAsStringSync(),
+              )
+              as List<Object?>;
+      final metadataEntry =
+          metadataJson.cast<Map<String, Object?>>().firstWhere(
+            (entry) => entry['name'] == 'Report #2026 (Final)!.pdf',
+          );
+
+      expect(hostedProvider.connection?.repository, 'octo/releases-demo');
+      expect(hostedProvider.connection?.token, 'env-token');
+      expect(hostedProvider.lastWriteRequest?.assetName, 'Report-2026-Final-.pdf');
+      expect(uploaded.storageBackend, AttachmentStorageMode.githubReleases);
+      expect(uploaded.githubReleaseAssetName, 'Report-2026-Final-.pdf');
+      expect(
+        uploaded.githubReleaseTag,
+        'trackstate-attachments-DEMO-1',
+      );
+      expect(metadataEntry['storageBackend'], 'github-releases');
+      expect(metadataEntry['githubReleaseAssetName'], 'Report-2026-Final-.pdf');
     },
   );
 
@@ -1663,4 +1746,108 @@ Future<void> _git(String repositoryPath, List<String> args) async {
   if (result.exitCode != 0) {
     throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
   }
+}
+
+class _FakeHostedReleaseTrackStateProvider
+    implements TrackStateProviderAdapter, RepositoryReleaseAttachmentStore {
+  RepositoryConnection? connection;
+  RepositoryReleaseAttachmentWriteRequest? lastWriteRequest;
+  String repositoryName = 'octo/releases-demo';
+  String branch = 'main';
+  String dataRefOverride = 'main';
+
+  @override
+  String get dataRef => dataRefOverride;
+
+  @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
+  String get repositoryLabel => repositoryName;
+
+  @override
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    this.connection = connection;
+    return const RepositoryUser(
+      login: 'release-bot',
+      displayName: 'Release Bot',
+    );
+  }
+
+  @override
+  Future<RepositoryPermission> getPermission() async => const RepositoryPermission(
+    canRead: true,
+    canWrite: true,
+    isAdmin: false,
+    supportsReleaseAttachmentWrites: true,
+  );
+
+  @override
+  Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
+    RepositoryReleaseAttachmentWriteRequest request,
+  ) async {
+    lastWriteRequest = request;
+    return RepositoryReleaseAttachmentWriteResult(
+      releaseTag: request.releaseTag,
+      assetName: request.assetName,
+      assetId: 'asset-1',
+    );
+  }
+
+  @override
+  Future<RepositoryAttachment> readReleaseAttachment(
+    RepositoryReleaseAttachmentReadRequest request,
+  ) async => RepositoryAttachment(
+    path: request.assetName,
+    bytes: Uint8List.fromList(utf8.encode('release-asset')),
+    revision: request.assetId,
+  );
+
+  @override
+  Future<void> deleteReleaseAttachment(
+    RepositoryReleaseAttachmentDeleteRequest request,
+  ) async {}
+
+  @override
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<RepositoryTextFile> readTextFile(
+    String path, {
+    required String ref,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<String> resolveWriteBranch() async => branch;
+
+  @override
+  Future<RepositoryBranch> getBranch(String name) async =>
+      RepositoryBranch(name: name, exists: true, isCurrent: name == branch);
+
+  @override
+  Future<RepositoryWriteResult> writeTextFile(RepositoryWriteRequest request) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<RepositoryCommitResult> createCommit(
+    RepositoryCommitRequest request,
+  ) async => throw UnimplementedError();
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
+  Future<RepositoryAttachment> readAttachment(
+    String path, {
+    required String ref,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<RepositoryAttachmentWriteResult> writeAttachment(
+    RepositoryAttachmentWriteRequest request,
+  ) async => throw UnimplementedError();
+
+  @override
+  Future<bool> isLfsTracked(String path) async => false;
 }

@@ -39,6 +39,25 @@ class RepositoryAccessSectionObservation:
     secondary_callout: RepositoryAccessCalloutObservation
 
 
+@dataclass(frozen=True)
+class ProjectSettingsTabObservation:
+    body_text: str
+    selected_tab_label: str
+    selected_tab_semantics: str
+    attachment_storage_visible: bool
+    add_status_visible: bool
+
+
+@dataclass(frozen=True)
+class ProjectSettingsNavigationState:
+    body_text: str
+    settings_heading_visible: bool
+    selected_tab_label: str
+    attachments_tab_selected: bool
+    attachment_storage_visible: bool
+    add_status_visible: bool
+
+
 class LiveProjectSettingsPage:
     _button_selector = 'flt-semantics[role="button"]'
     _tab_selector = 'flt-semantics[role="tab"]'
@@ -145,6 +164,149 @@ class LiveProjectSettingsPage:
             timeout_ms=30_000,
         )
         return self._session.wait_for_text(self._settings_heading, timeout_ms=60_000)
+
+    def selected_tab_label(self, *, timeout_ms: int = 30_000) -> str:
+        payload = self._session.wait_for_function(
+            """
+            () => {
+              const tab = Array.from(
+                document.querySelectorAll('flt-semantics[role="tab"]'),
+              ).find((candidate) => candidate.getAttribute('aria-selected') === 'true');
+              return tab?.getAttribute('aria-label') ?? null;
+            }
+            """,
+            timeout_ms=timeout_ms,
+        )
+        label = str(payload).strip()
+        if not label:
+            raise AssertionError(
+                "Precondition failed: the hosted Project Settings surface did not expose "
+                "a selected sub-tab.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        return label
+
+    def open_tab(
+        self,
+        label: str,
+        *,
+        expected_visible_text: str | None = None,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        selector = self._tab_selector_for(label)
+        self._scroll_into_view(selector)
+        self._session.click(selector, timeout_ms=timeout_ms)
+        payload = self._session.wait_for_function(
+            """
+            ({ selector, expectedVisibleText }) => {
+              const tab = document.querySelector(selector);
+              const bodyText = document.body?.innerText ?? '';
+              if (!tab || tab.getAttribute('aria-selected') !== 'true') {
+                return null;
+              }
+              if (expectedVisibleText && !bodyText.includes(expectedVisibleText)) {
+                return null;
+              }
+              return bodyText;
+            }
+            """,
+            arg={
+                "selector": selector,
+                "expectedVisibleText": expected_visible_text,
+            },
+            timeout_ms=timeout_ms,
+        )
+        return str(payload)
+
+    def observe_attachment_settings_surface(
+        self,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> ProjectSettingsTabObservation:
+        selector = self._tab_selector_for("Attachments")
+        payload = self._session.wait_for_function(
+            """
+            ({ selector, settingsHeading, attachmentStorageLabel }) => {
+              const bodyText = document.body?.innerText ?? '';
+              const tab = document.querySelector(selector);
+              if (!tab || tab.getAttribute('aria-selected') !== 'true') {
+                return null;
+              }
+              if (
+                !bodyText.includes(settingsHeading)
+                || !bodyText.includes(attachmentStorageLabel)
+              ) {
+                return null;
+              }
+              return {
+                bodyText,
+                selectedTabLabel: ((tab.innerText || '').trim() || (tab.getAttribute('aria-label') ?? '')).trim(),
+                selectedTabSemantics: tab.getAttribute('aria-label') ?? '',
+                attachmentStorageVisible: bodyText.includes(attachmentStorageLabel),
+                addStatusVisible: bodyText.includes('Add status'),
+              };
+            }
+            """,
+            arg={
+                "selector": selector,
+                "settingsHeading": self._settings_heading,
+                "attachmentStorageLabel": "Attachment storage mode",
+            },
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 2 failed: the hosted flow did not navigate to the Project Settings "
+                "Attachments configuration after the user activated `Open settings`.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        return ProjectSettingsTabObservation(
+            body_text=str(payload.get("bodyText", "")),
+            selected_tab_label=str(payload.get("selectedTabLabel", "")).strip(),
+            selected_tab_semantics=str(payload.get("selectedTabSemantics", "")).strip(),
+            attachment_storage_visible=bool(payload.get("attachmentStorageVisible")),
+            add_status_visible=bool(payload.get("addStatusVisible")),
+        )
+
+    def navigation_state(self) -> ProjectSettingsNavigationState:
+        payload = self._session.evaluate(
+            """
+            ({ settingsHeading, attachmentStorageLabel, attachmentsTabLabel }) => {
+              const bodyText = document.body?.innerText ?? '';
+              const selectedTab = Array.from(
+                document.querySelectorAll('flt-semantics[role="tab"]'),
+              ).find((candidate) => candidate.getAttribute('aria-selected') === 'true');
+              const selectedTabLabel = selectedTab?.getAttribute('aria-label') ?? '';
+              return {
+                bodyText,
+                settingsHeadingVisible: bodyText.includes(settingsHeading),
+                selectedTabLabel,
+                attachmentsTabSelected: selectedTabLabel === attachmentsTabLabel,
+                attachmentStorageVisible: bodyText.includes(attachmentStorageLabel),
+                addStatusVisible: bodyText.includes('Add status'),
+              };
+            }
+            """,
+            arg={
+                "settingsHeading": self._settings_heading,
+                "attachmentStorageLabel": "Attachment storage mode",
+                "attachmentsTabLabel": "Attachments",
+            },
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The hosted page did not expose a readable Project Settings navigation "
+                "snapshot.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        return ProjectSettingsNavigationState(
+            body_text=str(payload.get("bodyText", "")),
+            settings_heading_visible=bool(payload.get("settingsHeadingVisible")),
+            selected_tab_label=str(payload.get("selectedTabLabel", "")).strip(),
+            attachments_tab_selected=bool(payload.get("attachmentsTabSelected")),
+            attachment_storage_visible=bool(payload.get("attachmentStorageVisible")),
+            add_status_visible=bool(payload.get("addStatusVisible")),
+        )
 
     def add_status(
         self,
@@ -552,6 +714,22 @@ class LiveProjectSettingsPage:
                 f"Observed body text:\n{self.body_text()}",
             ) from error
         return self.body_text()
+
+    def _scroll_into_view(self, selector: str) -> None:
+        self._session.evaluate(
+            """
+            (selector) => {
+              const element = document.querySelector(selector);
+              if (element) {
+                element.scrollIntoView({ block: 'center', inline: 'center' });
+              }
+            }
+            """,
+            arg=selector,
+        )
+
+    def _tab_selector_for(self, label: str) -> str:
+        return f'{self._tab_selector}[aria-label="{self._escape(label)}"]'
 
     @staticmethod
     def _repository_access_callout(
