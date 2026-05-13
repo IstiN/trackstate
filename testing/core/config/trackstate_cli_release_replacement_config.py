@@ -30,6 +30,8 @@ class TrackStateCliReleaseReplacementConfig:
     manifest_poll_interval_seconds: int
     release_poll_timeout_seconds: int
     release_poll_interval_seconds: int
+    delete_release_asset_override_status_code: int | None
+    delete_release_asset_override_body: str | None
 
     @property
     def issue_path(self) -> str:
@@ -138,6 +140,15 @@ class TrackStateCliReleaseReplacementConfig:
                 "release_poll_interval_seconds",
                 path,
             ),
+            delete_release_asset_override_status_code=cls._optional_int(
+                runtime_inputs,
+                "delete_release_asset_override_status_code",
+                path,
+            ),
+            delete_release_asset_override_body=cls._optional_string(
+                runtime_inputs,
+                "delete_release_asset_override_body",
+            ),
         )
 
     @staticmethod
@@ -151,6 +162,18 @@ class TrackStateCliReleaseReplacementConfig:
             )
         normalized = value.strip()
         return normalized or None
+
+    @staticmethod
+    def _optional_int(payload: dict[str, Any], key: str, path: Path) -> int | None:
+        value = payload.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, int):
+            raise ValueError(
+                "Release replacement config runtime_inputs."
+                f"{key} must be an integer in {path}.",
+            )
+        return value
 
     @staticmethod
     def _require_string(payload: dict[str, Any], key: str, path: Path) -> str:
