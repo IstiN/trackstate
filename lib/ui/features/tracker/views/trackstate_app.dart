@@ -235,8 +235,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
             (profile) =>
                 profile.targetType == WorkspaceProfileTargetType.local &&
                 profile.normalizedTarget == normalizedRepositoryPath &&
-                profile.normalizedDefaultBranch == normalizedDefaultBranch &&
-                profile.normalizedWriteBranch == normalizedWriteBranch,
+                profile.normalizedDefaultBranch == normalizedDefaultBranch,
           );
           workspaceState = await widget.workspaceProfileService.selectProfile(
             workspace.id,
