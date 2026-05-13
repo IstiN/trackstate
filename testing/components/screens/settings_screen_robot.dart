@@ -45,8 +45,14 @@ class SettingsScreenRobot {
       topBarProviderControl('Connect GitHub');
   Finder get connectGitHubSettingsControl =>
       settingsProviderControl('Connect GitHub');
+  Finder get readOnlyTopBarControl => topBarProviderControl('Read-only');
+  Finder get readOnlySettingsControl => settingsProviderControl('Read-only');
   Finder get connectedTopBarControl => topBarProviderControl('Connected');
   Finder get connectedSettingsControl => settingsProviderControl('Connected');
+  Finder get attachmentsLimitedTopBarControl =>
+      topBarProviderControl('Attachments limited');
+  Finder get attachmentsLimitedSettingsControl =>
+      settingsProviderControl('Attachments limited');
   Finder get profileAvatar =>
       find.descendant(of: topBar, matching: find.byType(CircleAvatar));
   Finder get localGitControl => providerControl('Local Git');
@@ -1191,7 +1197,13 @@ class SettingsScreenRobot {
   }
 
   Finder _currentTopBarControl() {
-    for (final label in const ['Connected', 'Connect GitHub', 'Local Git']) {
+    for (final label in const [
+      'Connected',
+      'Read-only',
+      'Attachments limited',
+      'Connect GitHub',
+      'Local Git',
+    ]) {
       final control = topBarProviderControl(label);
       if (control.evaluate().isNotEmpty) {
         return control;
