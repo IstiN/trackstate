@@ -40,6 +40,28 @@ class RepositoryAccessSectionObservation:
 
 
 @dataclass(frozen=True)
+class RepositoryAccessControlsObservation:
+    body_text: str
+    section_text: str
+    project_settings_visible: bool
+    repository_access_visible: bool
+    fine_grained_token_visible: bool
+    remember_on_this_browser_visible: bool
+    connect_token_visible: bool
+
+
+@dataclass(frozen=True)
+class RepositoryAccessFocusObservation:
+    label: str | None
+    tag_name: str
+    role: str | None
+    accessible_name: str | None
+    text: str
+    outer_html: str
+    body_text: str
+
+
+@dataclass(frozen=True)
 class ProjectSettingsTabObservation:
     body_text: str
     selected_tab_label: str
@@ -63,6 +85,11 @@ class LiveProjectSettingsPage:
     _tab_selector = 'flt-semantics[role="tab"]'
     _connect_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
+    _remember_on_this_browser_selector = (
+        'flt-semantics[role="checkbox"][aria-label*="Remember on this browser"]'
+    )
+    _connect_token_selector = 'flt-semantics[role="button"][aria-label*="Connect token"]'
+    _repository_access_selector = 'flt-semantics[aria-label*="Repository access"]'
     _settings_nav_selector = 'flt-semantics[role="button"]'
     _settings_heading = "Project Settings"
     _settings_admin_heading = "Project settings administration"
@@ -377,6 +404,219 @@ class LiveProjectSettingsPage:
 
     def body_text(self) -> str:
         return self._tracker_page.body_text()
+
+    def observe_repository_access_controls(
+        self,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> RepositoryAccessControlsObservation:
+        payload = self._session.wait_for_function(
+            """
+            ({ settingsHeading, repositoryAccessLabel, repositoryAccessSelector, tokenSelector, rememberSelector, connectSelector }) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const bodyText = document.body?.innerText ?? '';
+              const repositoryAccess = Array.from(document.querySelectorAll(repositoryAccessSelector))
+                .find((candidate) => isVisible(candidate))
+                ?? null;
+              const sectionText = (
+                repositoryAccess?.getAttribute('aria-label')
+                ?? repositoryAccess?.innerText
+                ?? ''
+              ).replace(/\\s+/g, ' ').trim();
+              const tokenVisible = Boolean(document.querySelector(tokenSelector));
+              const rememberVisible = Array.from(document.querySelectorAll(rememberSelector))
+                .some((candidate) => isVisible(candidate));
+              const connectVisible = Array.from(document.querySelectorAll(connectSelector))
+                .some((candidate) => isVisible(candidate));
+              if (
+                !bodyText.includes(settingsHeading)
+                || !repositoryAccess
+                || !tokenVisible
+                || !rememberVisible
+                || !connectVisible
+              ) {
+                return null;
+              }
+              return {
+                bodyText,
+                sectionText,
+                projectSettingsVisible: bodyText.includes(settingsHeading),
+                repositoryAccessVisible: bodyText.includes(repositoryAccessLabel),
+                fineGrainedTokenVisible: tokenVisible,
+                rememberOnThisBrowserVisible: rememberVisible,
+                connectTokenVisible: connectVisible,
+              };
+            }
+            """,
+            arg={
+                "settingsHeading": self._settings_heading,
+                "repositoryAccessLabel": "Repository access",
+                "repositoryAccessSelector": self._repository_access_selector,
+                "tokenSelector": self._token_input_selector,
+                "rememberSelector": self._remember_on_this_browser_selector,
+                "connectSelector": self._connect_token_selector,
+            },
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 1 failed: the hosted Project Settings screen did not expose the "
+                "visible Repository access controls needed for keyboard traversal.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        return RepositoryAccessControlsObservation(
+            body_text=str(payload.get("bodyText", "")),
+            section_text=str(payload.get("sectionText", "")),
+            project_settings_visible=bool(payload.get("projectSettingsVisible")),
+            repository_access_visible=bool(payload.get("repositoryAccessVisible")),
+            fine_grained_token_visible=bool(payload.get("fineGrainedTokenVisible")),
+            remember_on_this_browser_visible=bool(
+                payload.get("rememberOnThisBrowserVisible")
+            ),
+            connect_token_visible=bool(payload.get("connectTokenVisible")),
+        )
+
+    def focus_repository_access_token_field(self, *, timeout_ms: int = 30_000) -> None:
+        self._session.focus(self._token_input_selector, timeout_ms=timeout_ms)
+
+    def press_tab(self, *, timeout_ms: int = 30_000) -> None:
+        self._session.press_key("Tab", timeout_ms=timeout_ms)
+
+    def press_tab_from_repository_access_focus(
+        self,
+        current_label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        selector = {
+            "Fine-grained token": self._token_input_selector,
+            "Remember on this browser": self._remember_on_this_browser_selector,
+            "Connect token": self._connect_token_selector,
+        }.get(current_label)
+        if selector is None:
+            raise AssertionError(
+                f"Unsupported Repository access focus target for Tab navigation: {current_label!r}.",
+            )
+        self._session.press(selector, "Tab", timeout_ms=timeout_ms)
+
+    def wait_for_repository_access_focus(
+        self,
+        expected_label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> RepositoryAccessFocusObservation:
+        payload = self._session.wait_for_function(
+            """
+            ({ tokenSelector, rememberSelector, connectSelector, expectedLabel }) => {
+              const active = document.activeElement;
+              const bodyText = document.body?.innerText ?? '';
+              if (!active) {
+                return null;
+              }
+              const identify = (element) => {
+                if (!element) {
+                  return null;
+                }
+                const labelCandidates = [
+                  element.getAttribute?.('aria-label') ?? '',
+                  element.previousElementSibling?.getAttribute?.('aria-label') ?? '',
+                  element.nextElementSibling?.getAttribute?.('aria-label') ?? '',
+                  element.parentElement?.getAttribute?.('aria-label') ?? '',
+                  element.textContent ?? '',
+                ]
+                  .map((value) => value.replace(/\\s+/g, ' ').trim())
+                  .filter((value) => value.length > 0);
+                if (
+                  typeof element.matches === 'function'
+                  && element.matches(tokenSelector)
+                ) {
+                  return 'Fine-grained token';
+                }
+                if (
+                  typeof element.matches === 'function'
+                  && element.matches(rememberSelector)
+                ) {
+                  return 'Remember on this browser';
+                }
+                if (
+                  typeof element.matches === 'function'
+                  && element.matches(connectSelector)
+                ) {
+                  return 'Connect token';
+                }
+                if (labelCandidates.some((value) => value.includes('Connect token'))) {
+                  return 'Connect token';
+                }
+                if (typeof element.closest === 'function') {
+                  if (element.closest(tokenSelector)) {
+                    return 'Fine-grained token';
+                  }
+                  if (element.closest(rememberSelector)) {
+                    return 'Remember on this browser';
+                  }
+                  if (element.closest(connectSelector)) {
+                    return 'Connect token';
+                  }
+                }
+                return null;
+              };
+              const label = identify(active);
+              if (label !== expectedLabel) {
+                return null;
+              }
+              const text = (active.textContent ?? '').replace(/\\s+/g, ' ').trim();
+              return {
+                label,
+                tagName: active.tagName,
+                role: active.getAttribute('role'),
+                accessibleName: active.getAttribute('aria-label') || text || null,
+                text,
+                outerHtml: active.outerHTML.slice(0, 400),
+                bodyText,
+              };
+            }
+            """,
+            arg={
+                "tokenSelector": self._token_input_selector,
+                "rememberSelector": self._remember_on_this_browser_selector,
+                "connectSelector": self._connect_token_selector,
+                "expectedLabel": expected_label,
+            },
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            active = self._session.active_element()
+            raise AssertionError(
+                f"Keyboard focus did not reach `{expected_label}` within the Repository "
+                "access controls.\n"
+                f"Observed active element label: {active.accessible_name!r}\n"
+                f"Observed active element role: {active.role!r}\n"
+                f"Observed active element HTML: {active.outer_html}\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        return RepositoryAccessFocusObservation(
+            label=str(payload.get("label")) if payload.get("label") is not None else None,
+            tag_name=str(payload.get("tagName", "")),
+            role=str(payload.get("role")) if payload.get("role") is not None else None,
+            accessible_name=(
+                str(payload.get("accessibleName"))
+                if payload.get("accessibleName") is not None
+                else None
+            ),
+            text=str(payload.get("text", "")),
+            outer_html=str(payload.get("outerHtml", "")),
+            body_text=str(payload.get("bodyText", "")),
+        )
 
     def observe_repository_access_section(
         self,

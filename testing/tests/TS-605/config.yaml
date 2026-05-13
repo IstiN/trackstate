@@ -1,8 +1,9 @@
 test_id: TS-605
-type: ui
-framework: flutter_test
-platform: widget
+type: web
+framework: playwright
+platform: chromium
 dependencies: []
 notes:
-  - Pumps the production hosted Settings repository-access surface with remembered-token sessions in both fully available and limited attachment-upload states.
-  - Verifies keyboard Tab traversal starts on the Fine-grained token field and advances sequentially to Remember on this browser and Connect token without skipping either control.
+  - Opens the deployed hosted TrackState app against the live setup repository in Chromium with a stored GitHub token.
+  - Verifies the visible Project Settings > Repository access controls include Fine-grained token, Remember on this browser, and Connect token.
+  - Passes only when Tab traversal on the live page moves from Fine-grained token to Remember on this browser and then to Connect token without skipping either control.
