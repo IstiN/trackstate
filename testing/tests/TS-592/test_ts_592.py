@@ -232,15 +232,24 @@ class Ts592NonGitHubRemoteIdentityScenario:
             for fragment in self.config.expected_identity_fragments
             if fragment not in lowered_error
         ]
+        observed_error_code = (
+            _as_text(error.get("code")).strip() if isinstance(error, dict) else ""
+        )
+        returned_generic_repository_open_error = (
+            observed_error_code == "REPOSITORY_OPEN_FAILED"
+        )
         provider_capability_fragments_present = [
             fragment
             for fragment in self.config.provider_capability_fragments
             if fragment in lowered_error
         ]
 
-        if not missing_identity_fragments and not provider_capability_fragments_present:
+        if (
+            not missing_identity_fragments
+            and not provider_capability_fragments_present
+            and not returned_generic_repository_open_error
+        ):
             result["failure_mode"] = "none"
-            error_code = error.get("code") if isinstance(error, dict) else ""
             error_category = error.get("category") if isinstance(error, dict) else ""
             _record_step(
                 result,
@@ -249,7 +258,7 @@ class Ts592NonGitHubRemoteIdentityScenario:
                 action=self.config.ticket_command,
                 observed=(
                     f"exit_code={observation.result.exit_code}; "
-                    f"error_code={error_code}; "
+                    f"error_code={observed_error_code}; "
                     f"error_category={error_category}; "
                     f"visible_error={visible_error}"
                 ),
@@ -259,9 +268,28 @@ class Ts592NonGitHubRemoteIdentityScenario:
                 check=(
                     "Verified the exact terminal output shown to a user failed with "
                     "explicit repository-identity guidance that no GitHub remote is "
-                    "configured, rather than the old generic provider-capability failure."
+                    "configured, rather than any generic `REPOSITORY_OPEN_FAILED` or "
+                    "provider-capability failure."
                 ),
                 observed=visible_error,
+            )
+            return failures
+
+        if returned_generic_repository_open_error:
+            result["failure_mode"] = "generic_repository_open_error"
+            result["product_gap"] = (
+                "Local release-backed uploads still report the generic "
+                "`REPOSITORY_OPEN_FAILED` contract for non-GitHub remotes instead of a "
+                "specific repository-identity validation error."
+            )
+            failures.append(
+                "Step 1 failed: the CLI still returned the generic "
+                "`REPOSITORY_OPEN_FAILED` error code for a non-GitHub-remote "
+                "release-identity failure.\n"
+                "TS-592 requires a specific repository-identity contract instead of the "
+                "generic repository-open failure.\n"
+                f"Visible output:\n{visible_error}\n"
+                f"{_format_supporting_evidence(payload=payload, stdout=stdout, stderr=stderr)}"
             )
             return failures
 
@@ -456,7 +484,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         "## What was automated",
         f"- Executed `{_as_text(result.get('ticket_command'))}` from a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and a non-GitHub `{remote_url}` origin remote.",
         "- Removed GitHub credentials from the runtime environment and inspected the caller-visible CLI failure output.",
-        "- Verified the visible error included explicit repository-identity wording that no GitHub remote is configured and did not fall back to the old generic provider-capability failure.",
+        "- Verified the visible error included explicit repository-identity wording that no GitHub remote is configured and did not fall back to generic `REPOSITORY_OPEN_FAILED` or provider-capability failure output.",
         f"- Inspected `{_as_text(result.get('expected_attachment_relative_path'))}` and the local attachments directory after the command.",
         "",
         "## Result",
@@ -504,7 +532,24 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     observed_provider = _as_text(result.get("observed_provider")) or "local-git"
     remote_url = _as_text(result.get("expected_origin_remote_url"))
 
-    if failure_mode == "provider_capability_gate":
+    if failure_mode == "generic_repository_open_error":
+        step_one_summary = (
+            "the command surfaced repository-identity wording, but it still returned "
+            "the generic `REPOSITORY_OPEN_FAILED` contract that TS-592 explicitly "
+            "rejects"
+        )
+        human_summary = (
+            "Human-style verification observed the right high-level explanation for the "
+            "non-GitHub remote, but the CLI still exposed the generic "
+            "`REPOSITORY_OPEN_FAILED` failure instead of a specific replacement "
+            "validation contract."
+        )
+        actual_result_line = (
+            "* The visible output mentioned the non-GitHub-remote repository-identity "
+            f"problem, but the command still returned {_jira_inline('REPOSITORY_OPEN_FAILED')} "
+            "instead of a specific repository-identity validation error."
+        )
+    elif failure_mode == "provider_capability_gate":
         step_one_summary = (
             "the command failed, but the visible output still matched the old generic "
             "provider-capability failure instead of an explicit repository-identity error "
@@ -548,7 +593,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "h4. What was automated",
         f"* Executed {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository configured with {_jira_inline('attachmentStorage.mode = github-releases')} and a non-GitHub {_jira_inline(remote_url)} origin remote.",
-        "* Inspected the caller-visible CLI output for explicit repository-identity guidance and for the old generic provider-capability wording that should no longer appear.",
+        "* Inspected the caller-visible CLI output for explicit repository-identity guidance and confirmed the scenario does not regress to generic {{REPOSITORY_OPEN_FAILED}} or provider-capability output.",
         f"* Inspected the repository attachment path {_jira_inline(expected_path)} after the command.",
         "",
         "h4. Result",
@@ -587,7 +632,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "## What was automated",
         f"- Executed `{_as_text(result.get('ticket_command'))}` from a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and a non-GitHub `{remote_url}` origin remote.",
-        "- Inspected the caller-visible CLI output for explicit repository-identity guidance and for the old generic provider-capability wording that should no longer appear.",
+        "- Inspected the caller-visible CLI output for explicit repository-identity guidance and confirmed the scenario does not regress to generic `REPOSITORY_OPEN_FAILED` or provider-capability output.",
         f"- Inspected the repository attachment path `{expected_path}` after the command.",
         "",
         "## Result",
@@ -633,7 +678,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "## Expected result",
         "- The command should fail with a specific error that says the GitHub repository identity cannot be resolved from the configured local remotes because none point to GitHub.",
-        "- The visible output should not fall back to the generic provider-capability failure.",
+        "- The visible output should not fall back to generic `REPOSITORY_OPEN_FAILED` or the old provider-capability failure.",
         f"- The file must not be written to the local repository path `{expected_path}`.",
         "",
         "## Actual result",
