@@ -8,12 +8,14 @@ class LocalTrackStateRepository extends ProviderBackedTrackStateRepository {
   LocalTrackStateRepository({
     required String repositoryPath,
     String dataRef = 'HEAD',
+    String? writeBranch,
     http.Client? client,
     GitProcessRunner? processRunner,
   }) : super(
           provider: LocalGitTrackStateProvider(
             repositoryPath: repositoryPath,
             dataRef: dataRef,
+            writeBranch: writeBranch,
             processRunner: processRunner,
             hostedProviderFactory: ({
               required String repository,
