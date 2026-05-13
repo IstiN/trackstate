@@ -86,140 +86,192 @@ def main() -> None:
             ),
         ) as tracker_page:
             workspace_page = LiveWorkspaceManagementPage(tracker_page)
-            runtime = tracker_page.open()
-            result["runtime_state"] = runtime.kind
-            result["runtime_body_text"] = runtime.body_text
-            if runtime.kind != "ready":
-                raise AssertionError(
-                    "Step 1 failed: the deployed app did not reach the interactive "
-                    "tracker shell before the workspace management scenario began.\n"
-                    f"Observed body text:\n{runtime.body_text}",
-                )
-            _record_step(
-                result,
-                step=1,
-                status="passed",
-                action="Open the onboarding workspace list.",
-                observed=(
-                    "Opened the deployed TrackState app with a preloaded hosted/local "
-                    "workspace state and reached the interactive shell."
-                ),
-            )
+            try:
+                try:
+                    runtime = tracker_page.open()
+                except AssertionError as error:
+                    result["runtime_state"] = "startup-observation-failed"
+                    result["runtime_body_text"] = tracker_page.body_text()
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action="Open the onboarding workspace list.",
+                        observed=str(error),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Viewed the startup state of the deployed TrackState app "
+                            "after preloading one hosted workspace and one local workspace."
+                        ),
+                        observed=(
+                            "The app did not reach the interactive tracker shell. "
+                            f"Visible body text: {_snippet(result['runtime_body_text'])}"
+                        ),
+                    )
+                    raise
 
-            observation = workspace_page.open_settings_and_observe_saved_workspaces()
-            result["workspace_observation"] = _list_asdict(observation)
-            if not (observation.section_visible and observation.row_count >= 2):
-                failure_observation = (
-                    "Saved workspaces card was not visible after opening Project "
-                    f"Settings. row_count={observation.row_count}; "
-                    f"section_text={observation.section_text or '<missing>'}; "
-                    f"body_excerpt={_snippet(observation.body_text)}"
+                result["runtime_state"] = runtime.kind
+                result["runtime_body_text"] = runtime.body_text
+                if runtime.kind != "ready":
+                    failure_observation = _runtime_failure_observation(runtime)
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action="Open the onboarding workspace list.",
+                        observed=failure_observation,
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Viewed the startup state of the deployed TrackState app "
+                            "after preloading one hosted workspace and one local workspace."
+                        ),
+                        observed=(
+                            "The deployed app showed a startup failure surface instead of "
+                            "the interactive tracker shell. "
+                            f"Visible body text: {_snippet(runtime.body_text)}"
+                        ),
+                    )
+                    raise AssertionError(
+                        "Step 1 failed: the deployed app did not reach the interactive "
+                        "tracker shell before the workspace management scenario began.\n"
+                        f"Observed runtime state: {runtime.kind}\n"
+                        f"Observed body text:\n{runtime.body_text}",
+                    )
+                _record_step(
+                    result,
+                    step=1,
+                    status="passed",
+                    action="Open the onboarding workspace list.",
+                    observed=(
+                        "Opened the deployed TrackState app with a preloaded hosted/local "
+                        "workspace state and reached the interactive shell."
+                    ),
                 )
+
+                observation = workspace_page.open_settings_and_observe_saved_workspaces()
+                result["workspace_observation"] = _list_asdict(observation)
+                if not (observation.section_visible and observation.row_count >= 2):
+                    failure_observation = (
+                        "Saved workspaces card was not visible after opening Project "
+                        f"Settings. row_count={observation.row_count}; "
+                        f"section_text={observation.section_text or '<missing>'}; "
+                        f"body_excerpt={_snippet(observation.body_text)}"
+                    )
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action="Inspect the row for a 'Local' workspace and a 'Hosted' workspace.",
+                        observed=failure_observation,
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Viewed the rendered Project Settings screen as a user after "
+                            "preloading one hosted workspace and one local workspace."
+                        ),
+                        observed=(
+                            "The screen showed Repository access, Attachments, Local Git, "
+                            "and Project settings administration, but no Saved workspaces "
+                            "card or workspace rows."
+                        ),
+                    )
+                _assert_saved_workspace_section(observation)
+                hosted_row = _find_row(observation, target=HOSTED_TARGET)
+                local_row = _find_row(observation, target=LOCAL_TARGET)
                 _record_step(
                     result,
                     step=2,
-                    status="failed",
+                    status="passed",
                     action="Inspect the row for a 'Local' workspace and a 'Hosted' workspace.",
-                    observed=failure_observation,
+                    observed=(
+                        f"Found {observation.row_count} saved workspace rows; hosted row text="
+                        f"{hosted_row.visible_text!r}; local row text={local_row.visible_text!r}."
+                    ),
+                )
+                _assert_target_type_row(hosted_row, expected_type="Hosted")
+                _assert_target_type_row(local_row, expected_type="Local")
+                _record_step(
+                    result,
+                    step=3,
+                    status="passed",
+                    action=(
+                        "Verify the colors of the selected row against TrackState tokens "
+                        "(primary/primarySoft)."
+                    ),
+                    observed=_selected_row_summary(observation),
+                )
+
+                _assert_selected_row_tokens(observation)
+                _assert_accessibility(observation)
+                _record_step(
+                    result,
+                    step=4,
+                    status="passed",
+                    action="Run accessibility audit on the row interactive elements.",
+                    observed=_accessibility_summary(observation),
+                )
+
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Viewed the rendered Project Settings screen as a user and confirmed "
+                        "the Saved workspaces card presented one hosted row and one local row "
+                        "with explicit target-type text."
+                    ),
+                    observed=(
+                        f"section_visible={observation.section_visible}; "
+                        f"hosted_row={hosted_row.visible_text!r}; "
+                        f"local_row={local_row.visible_text!r}"
+                    ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the rendered Project Settings screen as a user after "
-                        "preloading one hosted workspace and one local workspace."
+                        "Confirmed the selected row used the expected selection treatment and "
+                        "that row controls exposed readable accessible labels."
                     ),
                     observed=(
-                        "The screen showed Repository access, Attachments, Local Git, "
-                        "and Project settings administration, but no Saved workspaces "
-                        "card or workspace rows."
+                        f"selected_row={_selected_row_summary(observation)}; "
+                        f"buttons={_button_summary(observation)}"
                     ),
                 )
-            _assert_saved_workspace_section(observation)
-            hosted_row = _find_row(observation, target=HOSTED_TARGET)
-            local_row = _find_row(observation, target=LOCAL_TARGET)
-            _record_step(
-                result,
-                step=2,
-                status="passed",
-                action="Inspect the row for a 'Local' workspace and a 'Hosted' workspace.",
-                observed=(
-                    f"Found {observation.row_count} saved workspace rows; hosted row text="
-                    f"{hosted_row.visible_text!r}; local row text={local_row.visible_text!r}."
-                ),
-            )
 
-            _assert_target_type_row(hosted_row, expected_type="Hosted")
-            _assert_target_type_row(local_row, expected_type="Local")
-            _record_step(
-                result,
-                step=3,
-                status="passed",
-                action=(
-                    "Verify the colors of the selected row against TrackState tokens "
-                    "(primary/primarySoft)."
-                ),
-                observed=_selected_row_summary(observation),
-            )
-
-            _assert_selected_row_tokens(observation)
-            _assert_accessibility(observation)
-            _record_step(
-                result,
-                step=4,
-                status="passed",
-                action="Run accessibility audit on the row interactive elements.",
-                observed=_accessibility_summary(observation),
-            )
-
-            _record_human_verification(
-                result,
-                check=(
-                    "Viewed the rendered Project Settings screen as a user and confirmed "
-                    "the Saved workspaces card presented one hosted row and one local row "
-                    "with explicit target-type text."
-                ),
-                observed=(
-                    f"section_visible={observation.section_visible}; "
-                    f"hosted_row={hosted_row.visible_text!r}; "
-                    f"local_row={local_row.visible_text!r}"
-                ),
-            )
-            _record_human_verification(
-                result,
-                check=(
-                    "Confirmed the selected row used the expected selection treatment and "
-                    "that row controls exposed readable accessible labels."
-                ),
-                observed=(
-                    f"selected_row={_selected_row_summary(observation)}; "
-                    f"buttons={_button_summary(observation)}"
-                ),
-            )
-
-            tracker_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
-            result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
+                _capture_visible_screenshot(
+                    tracker_page=tracker_page,
+                    path=SUCCESS_SCREENSHOT_PATH,
+                    result=result,
+                )
+            except AssertionError as error:
+                result["error"] = _format_error(error)
+                result["traceback"] = traceback.format_exc()
+                _capture_visible_screenshot(
+                    tracker_page=tracker_page,
+                    path=FAILURE_SCREENSHOT_PATH,
+                    result=result,
+                )
+                raise
+            except Exception as error:
+                result["error"] = _format_error(error)
+                result["traceback"] = traceback.format_exc()
+                _capture_visible_screenshot(
+                    tracker_page=tracker_page,
+                    path=FAILURE_SCREENSHOT_PATH,
+                    result=result,
+                )
+                raise
     except AssertionError as error:
-        result["error"] = str(error)
-        result["traceback"] = traceback.format_exc()
-        _capture_failure_screenshot(
-            config=config,
-            token=token,
-            workspace_state=workspace_state,
-            path=FAILURE_SCREENSHOT_PATH,
-        )
-        result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
+        result.setdefault("error", _format_error(error))
+        result.setdefault("traceback", traceback.format_exc())
         _write_failure_outputs(result)
         raise
     except Exception as error:
-        result["error"] = f"{type(error).__name__}: {error}"
-        result["traceback"] = traceback.format_exc()
-        _capture_failure_screenshot(
-            config=config,
-            token=token,
-            workspace_state=workspace_state,
-            path=FAILURE_SCREENSHOT_PATH,
-        )
-        result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
+        result.setdefault("error", _format_error(error))
+        result.setdefault("traceback", traceback.format_exc())
         _write_failure_outputs(result)
         raise
 
@@ -445,28 +497,24 @@ def _record_human_verification(
     checks.append({"check": check, "observed": observed})
 
 
-def _capture_failure_screenshot(
+def _capture_visible_screenshot(
     *,
-    config,
-    token: str,
-    workspace_state: dict[str, object],
+    tracker_page: TrackStateTrackerPage,
     path: Path,
+    result: dict[str, object],
 ) -> None:
+    path.unlink(missing_ok=True)
     try:
-        with create_live_tracker_app(
-            config,
-            runtime_factory=lambda: StoredWorkspaceProfilesRuntime(
-                repository=config.repository,
-                token=token,
-                workspace_state=workspace_state,
-            ),
-        ) as tracker_page:
-            workspace_page = LiveWorkspaceManagementPage(tracker_page)
-            tracker_page.open()
-            workspace_page.open_settings_and_observe_saved_workspaces()
-            workspace_page.screenshot(str(path))
-    except Exception:
+        tracker_page.screenshot(str(path))
+    except Exception as error:
+        result["screenshot_capture_error"] = _format_error(error)
         return
+    if path.exists():
+        result["screenshot"] = str(path)
+        return
+    result["screenshot_capture_error"] = (
+        f"AssertionError: Screenshot capture completed without creating {path}."
+    )
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -536,7 +584,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         (
             "* Matched the expected result."
             if passed
-            else "* The scenario failed because the deployed UI did not render the expected saved workspace rows for the preloaded hosted/local state."
+            else f"* Did not match the expected result. {_failure_summary(result)}"
         ),
         (
             f"* Observed summary: {_selected_row_summary_from_result(result)}"
@@ -548,7 +596,6 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             f"{{{{{result['repository']}}}}} @ {{{{{result['repository_ref']}}}}}, "
             f"browser {{Chromium (Playwright)}}, OS {{{{{platform.system()}}}}}."
         ),
-        f"* Screenshot: {{{{{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}}}}}",
         "",
         "h4. Test file",
         "{code}",
@@ -576,6 +623,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
                 "{code}",
             ]
         )
+    lines.extend(_artifact_lines(result, jira=True))
     return "\n".join(lines) + "\n"
 
 
@@ -603,7 +651,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         (
             "- Matched the expected result."
             if passed
-            else "- Did not match the expected result: the deployed UI did not render the expected saved workspace rows for the preloaded hosted/local state."
+            else f"- Did not match the expected result. {_failure_summary(result)}"
         ),
         (
             f"- Observed summary: {_selected_row_summary_from_result(result)}"
@@ -614,7 +662,6 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             f"- Environment: URL `{result['app_url']}`, repository `{result['repository']}` "
             f"@ `{result['repository_ref']}`, browser `Chromium (Playwright)`, OS `{platform.system()}`."
         ),
-        f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
         "",
         "## Human-style verification",
         *_human_lines(result, jira=False),
@@ -634,6 +681,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
                 "```",
             ]
         )
+    lines.extend(_artifact_lines(result, jira=False))
     return "\n".join(lines) + "\n"
 
 
@@ -652,12 +700,12 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             if passed
             else f"- Result: {_failed_step_summary(result)}"
         ),
-        f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
         (
             f"- Environment: `{result['app_url']}` on Chromium/Playwright "
             f"({platform.system()}) against `{result['repository']}` @ `{result['repository_ref']}`."
         ),
     ]
+    lines.extend(_artifact_lines(result, jira=False))
     if not passed:
         lines.extend(
             [
@@ -683,7 +731,6 @@ def _bug_description(result: dict[str, object]) -> str:
             f"* Repository: {{{{{result['repository']}}}}} @ {{{{{result['repository_ref']}}}}}",
             "* Browser: {Chromium (Playwright)}",
             f"* OS: {{{{{platform.platform()}}}}}",
-            f"* Screenshot: {{{{{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}}}}}",
             "",
             "h4. Steps to Reproduce",
             "1. Open the onboarding workspace list.",
@@ -720,6 +767,33 @@ def _bug_description(result: dict[str, object]) -> str:
             "{code}",
         ]
     ) + "\n"
+
+
+def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    prefix = "*" if jira else "-"
+    lines: list[str] = []
+    screenshot = result.get("screenshot")
+    if screenshot:
+        lines.append(f"{prefix} Screenshot: `{screenshot}`" if not jira else f"{prefix} Screenshot: {{{{{screenshot}}}}}")
+    screenshot_capture_error = result.get("screenshot_capture_error")
+    if screenshot_capture_error:
+        lines.append(f"{prefix} Screenshot capture: not available ({screenshot_capture_error})")
+    return lines
+
+
+def _failure_summary(result: dict[str, object]) -> str:
+    return _failed_step_summary(result)
+
+
+def _format_error(error: BaseException) -> str:
+    return f"{type(error).__name__}: {error}"
+
+
+def _runtime_failure_observation(runtime) -> str:
+    return (
+        f"Tracker startup exposed `{runtime.kind}` instead of the interactive shell. "
+        f"body_excerpt={_snippet(runtime.body_text)}"
+    )
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
