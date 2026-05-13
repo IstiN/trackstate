@@ -916,8 +916,11 @@ String _repositoryAccessPrimaryActionLabel(
   return switch (viewModel.hostedRepositoryAccessMode) {
     HostedRepositoryAccessMode.disconnected => l10n.connectGitHub,
     HostedRepositoryAccessMode.readOnly => l10n.reconnectWriteAccess,
-    HostedRepositoryAccessMode.writable ||
-    HostedRepositoryAccessMode.attachmentRestricted => l10n.manageGitHubAccess,
+    HostedRepositoryAccessMode.writable => l10n.manageGitHubAccess,
+    HostedRepositoryAccessMode.attachmentRestricted =>
+      viewModel.usesGitHubReleasesAttachmentStorage
+          ? l10n.openSettings
+          : l10n.manageGitHubAccess,
   };
 }
 
@@ -1235,10 +1238,11 @@ class _RepositoryAccessBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final attachmentDownloadOnly =
+    final opensAttachmentSettings =
         viewModel.hostedRepositoryAccessMode ==
             HostedRepositoryAccessMode.attachmentRestricted &&
-        !viewModel.canUploadIssueAttachments;
+        (!viewModel.canUploadIssueAttachments ||
+            viewModel.usesGitHubReleasesAttachmentStorage);
     if (!viewModel.exposesHostedAccessGates ||
         viewModel.hostedRepositoryAccessMode ==
             HostedRepositoryAccessMode.writable) {
@@ -1251,10 +1255,10 @@ class _RepositoryAccessBanner extends StatelessWidget {
         semanticLabel: _repositoryAccessTitle(l10n, viewModel),
         title: _repositoryAccessTitle(l10n, viewModel),
         message: _repositoryAccessMessage(l10n, viewModel),
-        primaryActionLabel: attachmentDownloadOnly
+        primaryActionLabel: opensAttachmentSettings
             ? l10n.openSettings
             : _repositoryAccessPrimaryActionLabel(l10n, viewModel),
-        onPrimaryAction: attachmentDownloadOnly
+        onPrimaryAction: opensAttachmentSettings
             ? () => viewModel.openProjectSettings(
                 tab: ProjectSettingsTab.attachments,
               )
