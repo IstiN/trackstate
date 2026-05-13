@@ -92,6 +92,7 @@ class PythonTrackStateCliReleaseReplacementFramework(
                     expected_release_tag=expected_release_tag,
                 )
                 observation = self._observe_command(
+                    config=config,
                     requested_command=config.requested_command,
                     repository_path=repository_path,
                     executable_path=executable_path,
@@ -303,6 +304,7 @@ Release replacement fixture.
     def _observe_command(
         self,
         *,
+        config: TrackStateCliReleaseReplacementConfig,
         requested_command: tuple[str, ...],
         repository_path: Path,
         executable_path: Path,
@@ -323,6 +325,14 @@ Release replacement fixture.
         env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
         env["GH_CONFIG_DIR"] = str(sandbox_home / ".config" / "gh")
         env["GIT_TERMINAL_PROMPT"] = "0"
+        if config.delete_release_asset_override_status_code is not None:
+            env["TRACKSTATE_CLI_FAIL_RELEASE_ASSET_DELETE_STATUS"] = str(
+                config.delete_release_asset_override_status_code,
+            )
+            if config.delete_release_asset_override_body is not None:
+                env["TRACKSTATE_CLI_FAIL_RELEASE_ASSET_DELETE_BODY"] = (
+                    config.delete_release_asset_override_body
+                )
         result = self._run(executed_command, cwd=repository_path, env=env)
         return TrackStateCliCommandObservation(
             requested_command=requested_command,
