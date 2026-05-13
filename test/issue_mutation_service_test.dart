@@ -282,6 +282,36 @@ void main() {
     },
   );
 
+  test(
+    'service rejects self-referencing links without writing metadata',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final result = await service.createLink(
+        issueKey: 'DEMO-2',
+        targetKey: 'DEMO-2',
+        type: 'relates to',
+      );
+
+      expect(result.isSuccess, isFalse);
+      expect(result.failure?.category, IssueMutationErrorCategory.validation);
+      expect(result.failure?.message, contains('DEMO-2'));
+      expect(result.failure?.message, contains('itself'));
+      expect(
+        File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
+        isFalse,
+      );
+    },
+  );
+
   test('service adds comments through the shared typed contract', () async {
     final repo = await _createMutationRepository();
     addTearDown(() => repo.delete(recursive: true));
