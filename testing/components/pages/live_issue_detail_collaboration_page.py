@@ -933,6 +933,12 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=60_000,
         )
 
+    def download_attachment(self, attachment_name: str) -> str:
+        return self._session.wait_for_download_after_click(
+            self._download_button_selector(attachment_name),
+            timeout_ms=60_000,
+        )
+
     def visible_button_count(self, label: str) -> int:
         return self._session.count(self._button_selector, has_text=label)
 
@@ -1407,6 +1413,14 @@ class LiveIssueDetailCollaborationPage:
     @staticmethod
     def _download_button_label(attachment_name: str) -> str:
         return f"Download {attachment_name}"
+
+    @staticmethod
+    def _download_button_selector(attachment_name: str) -> str:
+        return (
+            'flt-semantics[aria-label="'
+            f'{LiveIssueDetailCollaborationPage._escape(LiveIssueDetailCollaborationPage._download_button_label(attachment_name))}'
+            '"]'
+        )
 
     @staticmethod
     def _deferred_error_selector(

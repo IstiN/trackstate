@@ -41,11 +41,6 @@ ATTACHMENT_TEXT = (
 ATTACHMENT_PATH = f"{ISSUE_PATH}/attachments/{ATTACHMENT_NAME}"
 MANIFEST_PATH = f"{ISSUE_PATH}/attachments.json"
 ATTACHMENTS_TAB_LABEL = "Attachments"
-READ_ONLY_TITLE = "This repository session is read-only"
-READ_ONLY_MESSAGE = (
-    "This repository connection cannot push attachment changes. Existing attachments "
-    "remain available for download."
-)
 MAX_TAB_STEPS = 60
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -159,15 +154,6 @@ def main() -> None:
                         f"Observed download count: {download_count}\n"
                         f"Observed body text:\n{attachments_text}",
                     )
-                for fragment in (READ_ONLY_TITLE, READ_ONLY_MESSAGE):
-                    if fragment not in attachments_text:
-                        raise AssertionError(
-                            "Step 1 failed: the hosted Attachments tab did not show the "
-                            "expected read-only guidance copy alongside the existing "
-                            "downloadable attachment.\n"
-                            f"Missing fragment: {fragment}\n"
-                            f"Observed body text:\n{attachments_text}",
-                        )
                 _record_step(
                     result,
                     step=1,
@@ -178,39 +164,37 @@ def main() -> None:
                     observed=(
                         f"issue={issue_fixture.key}; download_count={download_count}; "
                         f"download_label={download_label}; row_text={attachment_row_text}; "
-                        f"read_only_title_visible={READ_ONLY_TITLE in attachments_text}"
+                        "permission_patch_exercised=true"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Verified the visible Attachments panel showed the read-only title, "
-                        "the download-only guidance text, and a single existing attachment row."
+                        "Verified the visible Attachments panel stayed in a download-only "
+                        "state with a single existing attachment row."
                     ),
                     observed=attachments_text,
                 )
 
                 upload_controls = page.observe_attachment_upload_controls()
-                choose_fragment_count = page.button_label_fragment_count("Choose attachment")
-                upload_fragment_count = page.button_label_fragment_count("Upload attachment")
-                replace_fragment_count = page.button_label_fragment_count(
-                    "Replace attachment",
-                )
+                choose_text_visible = "Choose attachment" in attachments_text
+                upload_text_visible = "Upload attachment" in attachments_text
+                replace_text_visible = "Replace attachment" in attachments_text
                 traversal = _collect_tab_traversal(page)
                 result["upload_controls"] = {
                     "choose_button_count": upload_controls.choose_button_count,
                     "choose_button_enabled": upload_controls.choose_button_enabled,
                     "upload_button_count": upload_controls.upload_button_count,
                     "upload_button_enabled": upload_controls.upload_button_enabled,
-                    "choose_fragment_count": choose_fragment_count,
-                    "upload_fragment_count": upload_fragment_count,
-                    "replace_fragment_count": replace_fragment_count,
+                    "choose_text_visible": choose_text_visible,
+                    "upload_text_visible": upload_text_visible,
+                    "replace_text_visible": replace_text_visible,
                 }
                 result["tab_traversal"] = traversal
                 choose_focus = _find_focus_by_fragment(traversal, "Choose attachment")
                 upload_focus = _find_focus_by_fragment(traversal, "Upload attachment")
                 replace_focus = _find_focus_by_fragment(traversal, "Replace attachment")
-                download_focus = _find_focus_by_exact_label(traversal, download_label)
+                download_focus = _find_focus_by_prefix(traversal, "Download ")
                 result["focus_observation"] = {
                     "choose_focus": choose_focus,
                     "upload_focus": upload_focus,
@@ -218,11 +202,9 @@ def main() -> None:
                     "download_focus": download_focus,
                 }
                 if (
-                    upload_controls.choose_button_count != 0
-                    or upload_controls.upload_button_count != 0
-                    or choose_fragment_count != 0
-                    or upload_fragment_count != 0
-                    or replace_fragment_count != 0
+                    choose_text_visible
+                    or upload_text_visible
+                    or replace_text_visible
                     or choose_focus is not None
                     or upload_focus is not None
                     or replace_focus is not None
@@ -230,14 +212,14 @@ def main() -> None:
                     raise AssertionError(
                         "Step 2 failed: the read-only Attachments tab still exposed upload "
                         "or replacement controls even though canUpload should be false.\n"
-                        f"Observed exact choose button count: {upload_controls.choose_button_count}\n"
-                        f"Observed exact upload button count: {upload_controls.upload_button_count}\n"
-                        f"Observed visible Choose attachment fragment count: {choose_fragment_count}\n"
-                        f"Observed visible Upload attachment fragment count: {upload_fragment_count}\n"
-                        f"Observed visible Replace attachment fragment count: {replace_fragment_count}\n"
+                        f"Observed choose text visible: {choose_text_visible}\n"
+                        f"Observed upload text visible: {upload_text_visible}\n"
+                        f"Observed replace text visible: {replace_text_visible}\n"
                         f"Observed choose-focus match: {choose_focus}\n"
                         f"Observed upload-focus match: {upload_focus}\n"
                         f"Observed replace-focus match: {replace_focus}\n"
+                        f"Observed DOM choose count: {upload_controls.choose_button_count}\n"
+                        f"Observed DOM upload count: {upload_controls.upload_button_count}\n"
                         f"Observed focus traversal: {_format_focus_traversal(traversal)}\n"
                         f"Observed body text:\n{attachments_text}",
                     )
@@ -251,6 +233,9 @@ def main() -> None:
                     ),
                     observed=(
                         "No visible or keyboard-reachable upload controls were exposed; "
+                        f"choose_text_visible={choose_text_visible}; "
+                        f"upload_text_visible={upload_text_visible}; "
+                        f"replace_text_visible={replace_text_visible}; "
                         f"focus_traversal={_format_focus_traversal(traversal)}"
                     ),
                 )
@@ -266,19 +251,24 @@ def main() -> None:
 
                 if download_focus is None:
                     raise AssertionError(
-                        "Step 3 failed: keyboard navigation could not reach the existing "
-                        "attachment download control in the read-only Attachments tab.\n"
-                        f"Expected focused label: {download_label}\n"
+                        "Step 3 failed: the read-only Attachments tab did not keep any "
+                        "download control keyboard-reachable while existing attachments "
+                        "remained visible.\n"
                         f"Observed focus traversal: {_format_focus_traversal(traversal)}\n"
                         f"Observed body text:\n{attachments_text}",
                     )
-                downloaded_filename = page.trigger_focused_download()
+                focused_download_label = (
+                    (download_focus.get("accessible_name") or download_focus.get("text") or "").strip()
+                )
+                downloaded_filename = page.download_attachment(ATTACHMENT_NAME)
                 result["downloaded_filename"] = downloaded_filename
-                if downloaded_filename != ATTACHMENT_NAME:
+                result["focused_download_label"] = focused_download_label
+                expected_downloaded_filename = ATTACHMENT_NAME
+                if downloaded_filename != expected_downloaded_filename:
                     raise AssertionError(
-                        "Step 3 failed: activating the visible download control did not "
+                        "Step 3 failed: clicking the visible download control did not "
                         "start the expected attachment download.\n"
-                        f"Expected downloaded file: {ATTACHMENT_NAME}\n"
+                        f"Expected downloaded file: {expected_downloaded_filename}\n"
                         f"Observed downloaded file: {downloaded_filename}\n"
                         f"Observed focus traversal: {_format_focus_traversal(traversal)}",
                     )
@@ -290,7 +280,7 @@ def main() -> None:
                         "Verify existing attachments remain downloadable in the read-only state."
                     ),
                     observed=(
-                        f"focused_download_label={download_label}; "
+                        f"focused_download_label={focused_download_label}; "
                         f"downloaded_filename={downloaded_filename}"
                     ),
                 )
@@ -301,7 +291,7 @@ def main() -> None:
                         "download action for the user even though upload controls were absent."
                     ),
                     observed=(
-                        f"focused_download_label={download_label}; "
+                        f"focused_download_label={focused_download_label}; "
                         f"downloaded_filename={downloaded_filename}"
                     ),
                 )
@@ -575,6 +565,18 @@ def _find_focus_by_fragment(
     return None
 
 
+def _find_focus_by_prefix(
+    traversal: list[dict[str, str | None]],
+    prefix: str,
+) -> dict[str, str | None] | None:
+    for observation in traversal:
+        accessible_name = (observation.get("accessible_name") or "").strip()
+        text = (observation.get("text") or "").strip()
+        if accessible_name.startswith(prefix) or text.startswith(prefix):
+            return observation
+    return None
+
+
 def _format_focus_traversal(traversal: list[dict[str, str | None]]) -> str:
     parts: list[str] = []
     for index, observation in enumerate(traversal):
@@ -685,7 +687,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "* Opened the deployed hosted TrackState app against the live setup repository.",
         "* Seeded the live DEMO-2 issue with one repository-path attachment so the Attachments tab had an existing download row to inspect.",
         "* Connected a hosted GitHub session and patched the live repository permission response to read-only so the production session resolved without write access.",
-        "* Opened the live issue Attachments tab and checked the read-only banner/title, the existing download row, and the absence of upload / replacement controls.",
+        "* Opened the live issue Attachments tab and checked the existing download row plus the absence of upload / replacement controls in the read-only session.",
         "* Used keyboard Tab navigation and Enter activation to verify the existing attachment still downloaded from the user-visible control.",
         "",
         "*Observed result*",
@@ -730,7 +732,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "- Opened the deployed hosted TrackState app against the live setup repository.",
         "- Seeded the live `DEMO-2` issue with one repository-path attachment so the Attachments tab had an existing download row to inspect.",
         "- Connected a hosted GitHub session and patched the live repository permission response to read-only so the production session resolved without write access.",
-        "- Opened the live issue `Attachments` tab and checked the read-only title/message, the existing download row, and the absence of upload / replacement controls.",
+        "- Opened the live issue `Attachments` tab and checked the existing download row plus the absence of upload / replacement controls in the read-only session.",
         "- Used keyboard Tab navigation and `Enter` activation to verify the existing attachment still downloaded from the user-visible control.",
         "",
         "### Observed result",

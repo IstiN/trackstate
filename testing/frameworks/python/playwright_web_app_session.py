@@ -463,6 +463,26 @@ class PlaywrightWebAppSession(WebAppSession):
             ) from error
         return download.suggested_filename
 
+    def wait_for_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                locator.click(timeout=timeout_ms)
+            download = download_info.value
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a download after clicking selector "{selector}".',
+            ) from error
+        return download.suggested_filename
+
     def select_files_after_click(
         self,
         trigger_selector: str,
