@@ -1,0 +1,49 @@
+test_id: TS-594
+type: cli
+framework: python
+platform: local
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+  - TRACKSTATE_TOKEN, GH_TOKEN, or GITHUB_TOKEN with permission to manage releases in the live setup repository
+notes:
+  - Automates the TS-594 successful local github-releases download scenario against a disposable TrackState repository and a real GitHub Release asset.
+  - The ticket wording uses the older `--issue` plus `--file` download syntax, but the live CLI currently exposes the equivalent release-backed download flow through `--attachment-id` plus `--out`, so the automation executes that supported equivalent with `--output json`.
+  - Verifies valid authentication plus a valid GitHub remote are not blocked by pre-flight validation and that the downloaded file contains the expected attachment bytes.
+runtime_inputs:
+  ticket_command: trackstate attachment download --issue TS-123 --file manual.pdf --target local --output json
+  requested_command:
+    - trackstate
+    - attachment
+    - download
+    - --attachment-id
+    - TS/TS-123/attachments/manual.pdf
+    - --out
+    - ./downloads/manual.pdf
+    - --target
+    - local
+    - --output
+    - json
+  project_key: TS
+  project_name: TS-594 Project
+  issue_key: TS-123
+  issue_summary: Release-backed local attachment download success fixture
+  attachment_name: manual.pdf
+  attachment_relative_path: TS/TS-123/attachments/manual.pdf
+  attachment_media_type: application/pdf
+  attachment_created_at: "2026-05-13T00:00:00Z"
+  attachment_author: tester
+  attachment_revision_or_oid: ts594-release-download-success
+  attachment_text: |-
+    %PDF-1.4
+    TS-594 successful release-backed local download fixture.
+    This file proves the local provider delegated to GitHub Releases without blocking valid authentication.
+  attachment_tag_prefix: ts594-
+  attachment_release_tag: ts594-TS-123
+  attachment_release_title: TS-594 local download fixture for TS-123
+  attachment_release_body: TrackState TS-594 release-backed local download success fixture.
+  output_file_argument: ./downloads/manual.pdf
+  expected_output_relative_path: downloads/manual.pdf
+  provider_capability_fragments:
+    - does not support github releases attachment downloads
+    - repository provider
