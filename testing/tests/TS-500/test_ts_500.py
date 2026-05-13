@@ -452,6 +452,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     failure_mode = _as_text(result.get("failure_mode"))
     product_gap = _as_text(result.get("product_gap"))
     observed_provider = _as_text(result.get("observed_provider")) or "local-git"
+    observed_output_format = _as_text(result.get("observed_output_format")) or "json"
     if failure_mode == "local_provider_capability_gate":
         step_one_summary = (
             "the exact `--target local` path failed earlier at the local-provider "
@@ -464,10 +465,9 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         )
         actual_result_line = (
             "* However, the command failed earlier through the generic "
-            f"{_jira_inline(observed_provider)} provider path with message "
-            f"{_jira_inline(_as_text(result.get('observed_error_message')) or visible_error)}. "
-            "That means the exact local runtime path never reached GitHub "
-            "Releases auth/configuration handling."
+            f"{_jira_inline(observed_provider)} provider path. The exact terminal-visible "
+            f"failure was {_jira_inline(visible_error)}. That means the exact local runtime "
+            "path never reached GitHub Releases auth/configuration handling."
         )
     else:
         step_one_summary = (
@@ -562,6 +562,8 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"* Repository path: {_jira_inline(_as_text(result.get('repository_path')))}",
         f"* Command: {_jira_inline(_as_text(result.get('ticket_command')))}",
         f"* OS: {platform.system()}",
+        f"* Runtime/provider: {_jira_inline('local CLI')} / {_jira_inline(observed_provider)}",
+        f"* Output format: {_jira_inline(observed_output_format)}",
         f"* Remote origin: {_jira_inline(_as_text(result.get('remote_origin_url')))}",
         "* Auth setup: GH_TOKEN, GITHUB_TOKEN, and TRACKSTATE_TOKEN were removed from the process environment before execution.",
         "",
@@ -591,6 +593,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "h4. Actual Result",
         "* The file was not written locally, so repository-path fallback did not occur.",
         actual_result_line,
+        f"* The terminal-visible error was: {_jira_inline(visible_error)}",
         "",
         "h4. Logs / Error Output",
         "{code}",
