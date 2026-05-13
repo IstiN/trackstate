@@ -1198,6 +1198,36 @@ abstract class AppLocalizations {
   /// **'Settings is the canonical place to review repository access and reconnect safely.'**
   String get repositoryAccessSettingsHint;
 
+  /// No description provided for @savedWorkspaces.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved workspaces'**
+  String get savedWorkspaces;
+
+  /// No description provided for @activeWorkspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get activeWorkspace;
+
+  /// No description provided for @openWorkspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get openWorkspace;
+
+  /// No description provided for @workspaceDeleteConfirmationTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete saved workspace'**
+  String get workspaceDeleteConfirmationTitle;
+
+  /// No description provided for @workspaceDeleteConfirmationMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete {workspaceName} and remove its stored credentials? This action cannot be undone.'**
+  String workspaceDeleteConfirmationMessage(String workspaceName);
+
   /// No description provided for @startupRecovery.
   ///
   /// In en, this message translates to:
