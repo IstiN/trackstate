@@ -2617,6 +2617,7 @@ Nested release-backed attachment issue.
       var deletedAssetId = '';
       var releaseReadsAfterDelete = 0;
       var deletionCommitted = false;
+      var uploadAttemptCount = 0;
       final provider = GitHubTrackStateProvider(
         repositoryName: 'IstiN/trackstate',
         dataRef: 'main',
@@ -2664,15 +2665,14 @@ Nested release-backed attachment issue.
               path == '/repos/IstiN/trackstate/releases/10/assets' &&
               request.method == 'POST') {
             expect(request.url.queryParameters['name'], 'design.png');
-            if (!deletionCommitted) {
-              return http.Response(
-                jsonEncode({
-                  'message':
-                      'existing asset is still visible while deletion propagates',
-                }),
-                422,
-              );
-            }
+            uploadAttemptCount += 1;
+            expect(
+              deletionCommitted,
+              isTrue,
+              reason:
+                  'provider must wait for the deleted asset to disappear '
+                  'before re-uploading the replacement',
+            );
             return http.Response(
               jsonEncode({'id': 2, 'name': 'design.png', 'size': 4}),
               201,
@@ -2703,6 +2703,7 @@ Nested release-backed attachment issue.
 
       expect(deletedAssetId, '1');
       expect(releaseReadsAfterDelete, greaterThanOrEqualTo(2));
+      expect(uploadAttemptCount, 1);
       expect(result.assetId, '2');
     },
   );
