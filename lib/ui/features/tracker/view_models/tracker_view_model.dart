@@ -411,9 +411,6 @@ class TrackerViewModel extends ChangeNotifier {
         !session.canWrite) {
       return false;
     }
-    if (usesGitHubReleasesAttachmentStorage) {
-      return session.supportsReleaseAttachmentWrites;
-    }
     return session.canManageAttachments;
   }
 
