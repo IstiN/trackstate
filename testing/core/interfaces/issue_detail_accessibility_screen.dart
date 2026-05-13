@@ -31,6 +31,8 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
 
   ActionAvailability attachmentAction(String issueKey, String label);
 
+  Future<void> tapIssueDetailAction(String issueKey, String label);
+
   List<String> commentActionLabels(String issueKey);
 
   bool showsAttachmentUploadRestrictionNotice(

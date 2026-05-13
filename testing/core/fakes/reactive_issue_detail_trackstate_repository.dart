@@ -22,6 +22,7 @@ class ReactiveIssueDetailTrackStateRepository
     Set<String> failingTextPaths = const <String>{},
     Map<String, String> textFixtures = const <String, String>{},
     Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
+    bool includeDefaultBinaryFixtures = true,
   }) => ReactiveIssueDetailTrackStateRepository._(
     MutableIssueDetailTrackStateProvider(
       permission: permission,
@@ -29,10 +30,13 @@ class ReactiveIssueDetailTrackStateRepository
       failingTextPaths: failingTextPaths,
       textFixtures: textFixtures,
       binaryFixtures: binaryFixtures,
+      includeDefaultBinaryFixtures: includeDefaultBinaryFixtures,
     ),
   );
 
   final MutableIssueDetailTrackStateProvider _provider;
+
+  String? textFixture(String path) => _provider.textFixture(path);
 
   void synchronizeSessionToReadOnly() {
     final currentSession = session;
@@ -104,7 +108,10 @@ class ReactiveIssueDetailTrackStateRepository
 }
 
 class MutableIssueDetailTrackStateProvider
-    implements TrackStateProviderAdapter, RepositoryFileMutator {
+    implements
+        TrackStateProviderAdapter,
+        RepositoryFileMutator,
+        RepositoryReleaseAttachmentStore {
   MutableIssueDetailTrackStateProvider({
     RepositoryPermission permission = const RepositoryPermission(
       canRead: true,
@@ -118,13 +125,17 @@ class MutableIssueDetailTrackStateProvider
     Set<String> failingTextPaths = const <String>{},
     Map<String, String> textFixtures = const <String, String>{},
     Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
+    bool includeDefaultBinaryFixtures = true,
   }) : _permission = permission,
        _lfsTrackedPaths = lfsTrackedPaths,
        _failingTextPaths = failingTextPaths,
        _textFiles = Map<String, String>.from(_textFixtures)
          ..addAll(textFixtures),
        _binaryFiles = <String, Uint8List>{
-         for (final entry in _binaryFixtures.entries)
+         for (final entry
+             in (includeDefaultBinaryFixtures
+                 ? _binaryFixtures.entries
+                 : const <MapEntry<String, Uint8List>>[]))
            entry.key: Uint8List.fromList(entry.value),
          for (final entry in binaryFixtures.entries)
            entry.key: Uint8List.fromList(entry.value),
@@ -307,6 +318,11 @@ Read and write tracker files through GitHub Contents API.
   };
   final Map<String, String> _textFiles;
   final Map<String, Uint8List> _binaryFiles;
+  final Map<String, _ReactiveReleaseAttachment> _releaseAttachments =
+      <String, _ReactiveReleaseAttachment>{};
+  int _nextReleaseAssetId = 1;
+
+  String? textFixture(String path) => _textFiles[path];
 
   void updatePermission(RepositoryPermission permission) {
     _permission = permission;
@@ -458,6 +474,72 @@ Read and write tracker files through GitHub Contents API.
       revision: _revision,
     ).copyWith(path: request.path, branch: request.branch);
   }
+
+  @override
+  Future<RepositoryAttachment> readReleaseAttachment(
+    RepositoryReleaseAttachmentReadRequest request,
+  ) async {
+    final attachment =
+        _releaseAttachments[_releaseAttachmentKey(
+          request.releaseTag,
+          request.assetName,
+        )];
+    if (attachment == null) {
+      throw TrackStateProviderException(
+        'Missing release attachment fixture for ${request.releaseTag}/${request.assetName}.',
+      );
+    }
+    return RepositoryAttachment(
+      path: '${request.releaseTag}/${request.assetName}',
+      bytes: Uint8List.fromList(attachment.bytes),
+      revision: attachment.assetId,
+      declaredSizeBytes: attachment.bytes.length,
+    );
+  }
+
+  @override
+  Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
+    RepositoryReleaseAttachmentWriteRequest request,
+  ) async {
+    final key = _releaseAttachmentKey(request.releaseTag, request.assetName);
+    final existing = _releaseAttachments[key];
+    final assetId =
+        existing?.assetId ?? 'reactive-release-${_nextReleaseAssetId++}';
+    _releaseAttachments[key] = _ReactiveReleaseAttachment(
+      assetId: assetId,
+      bytes: Uint8List.fromList(request.bytes),
+      mediaType: request.mediaType,
+    );
+    return RepositoryReleaseAttachmentWriteResult(
+      releaseTag: request.releaseTag,
+      assetName: request.assetName,
+      assetId: assetId,
+    );
+  }
+
+  @override
+  Future<void> deleteReleaseAttachment(
+    RepositoryReleaseAttachmentDeleteRequest request,
+  ) async {
+    _releaseAttachments.remove(
+      _releaseAttachmentKey(request.releaseTag, request.assetName),
+    );
+  }
+
+  String _releaseAttachmentKey(String releaseTag, String assetName) =>
+      '$releaseTag::$assetName';
+}
+
+class _ReactiveReleaseAttachment {
+  const _ReactiveReleaseAttachment({
+    required this.assetId,
+    required this.bytes,
+    required this.mediaType,
+  });
+
+  final String assetId;
+  final Uint8List bytes;
+  final String mediaType;
 }
 
 extension on RepositoryTextFile {

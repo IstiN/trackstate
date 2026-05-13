@@ -75,10 +75,10 @@ class LiveIssueDetailCollaborationPage:
         'flt-semantics[aria-label="Upload attachment"] flt-semantics[flt-tappable]'
     )
     _replace_attachment_button_selector = (
-        'flt-semantics[aria-label="Replace attachment"] flt-semantics[flt-tappable]'
+        'flt-semantics[role="button"][flt-tappable]:text-is("Replace attachment")'
     )
     _keep_attachment_button_selector = (
-        'flt-semantics[aria-label="Keep current attachment"] flt-semantics[flt-tappable]'
+        'flt-semantics[role="button"][flt-tappable]:text-is("Keep current attachment")'
     )
     _selected_button_selector = _active_tab_button_selector
 
@@ -1086,11 +1086,7 @@ class LiveIssueDetailCollaborationPage:
         return self.current_body_text()
 
     def confirm_replace_attachment(self) -> None:
-        self._session.click(
-            self._button_selector,
-            has_text="Replace attachment",
-            timeout_ms=30_000,
-        )
+        self._session.click(self._replace_attachment_button_selector, timeout_ms=30_000)
 
     def wait_for_replace_attachment_dialog_to_close(
         self,

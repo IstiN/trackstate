@@ -170,6 +170,19 @@ class IssueDetailAccessibilityRobot
   }
 
   @override
+  Future<void> tapIssueDetailAction(String issueKey, String label) async {
+    final action = _issueDetailAction(issueKey, label);
+    if (action.evaluate().isEmpty) {
+      throw StateError(
+        'No "$label" action was rendered in issue detail $issueKey.',
+      );
+    }
+    await tester.ensureVisible(action.first);
+    await tester.tap(action.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
+  @override
   List<String> commentActionLabels(String issueKey) {
     final rootLabel = 'Issue detail $issueKey';
     final targets = _screenReaderTargets(issueKey, rootLabel);
