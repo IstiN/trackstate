@@ -30,6 +30,7 @@ class CreateIssueObservation:
 
 class TrackStateTrackerPage:
     LOAD_ERROR_TEXT = TrackStateLiveAppPage.LOAD_ERROR_TEXT
+    LOAD_ERROR_TEXT_VARIANTS = TrackStateLiveAppPage.LOAD_ERROR_TEXT_VARIANTS
     BOARD_LABEL = "Board"
     BOARD_HINT = "Drag-ready workflow columns backed by Git files"
     CREATE_ISSUE_LABEL = "Create issue"
@@ -54,7 +55,7 @@ class TrackStateTrackerPage:
         self._live_page.open()
         try:
             wait_match = self.session.wait_for_any_text(
-                [self.LOAD_ERROR_TEXT, "Connect GitHub", self.BOARD_LABEL],
+                [*self.LOAD_ERROR_TEXT_VARIANTS, "Connect GitHub", self.BOARD_LABEL],
                 timeout_ms=120_000,
             )
         except WebAppTimeoutError as error:
@@ -62,7 +63,7 @@ class TrackStateTrackerPage:
                 "Step 1 failed: the deployed app never reached an interactive state. "
                 f"Visible body text: {self.body_text()}",
             ) from error
-        if wait_match.matched_text == self.LOAD_ERROR_TEXT:
+        if wait_match.matched_text in self.LOAD_ERROR_TEXT_VARIANTS:
             return RuntimeObservation(
                 kind="data-load-failed",
                 body_text=wait_match.body_text,
