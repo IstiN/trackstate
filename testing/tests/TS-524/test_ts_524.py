@@ -379,18 +379,21 @@ def _seed_fixture(service: LiveSetupRepositoryService) -> dict[str, object]:
         "mode": "github-releases",
         "githubReleases": {"tagPrefix": RELEASE_TAG_PREFIX},
     }
-    service.write_repo_text(
-        PROJECT_JSON_PATH,
+    _write_repo_text_with_retry(
+        service=service,
+        path=PROJECT_JSON_PATH,
         content=json.dumps(project_payload, indent=2) + "\n",
         message=f"{TICKET_KEY}: enable github-releases attachment storage",
     )
-    service.write_repo_text(
-        LEGACY_ATTACHMENT_PATH,
+    _write_repo_text_with_retry(
+        service=service,
+        path=LEGACY_ATTACHMENT_PATH,
         content=LEGACY_ATTACHMENT_TEXT,
         message=f"{TICKET_KEY}: seed legacy repository-path attachment",
     )
-    service.write_repo_text(
-        MANIFEST_PATH,
+    _write_repo_text_with_retry(
+        service=service,
+        path=MANIFEST_PATH,
         content=json.dumps([_legacy_manifest_entry()], indent=2) + "\n",
         message=f"{TICKET_KEY}: seed legacy attachment manifest",
     )
@@ -489,6 +492,90 @@ def _attachment_size_label(payload: bytes) -> str:
     return f"{len(payload)} B"
 
 
+def _write_repo_text_with_retry(
+    *,
+    service: LiveSetupRepositoryService,
+    path: str,
+    content: str,
+    message: str,
+) -> None:
+    matched, last_error = poll_until(
+        probe=lambda: _try_write_repo_text(
+            service=service,
+            path=path,
+            content=content,
+            message=message,
+        ),
+        is_satisfied=lambda value: value is None,
+        timeout_seconds=60,
+        interval_seconds=3,
+    )
+    if not matched:
+        raise AssertionError(
+            f"Failed to write hosted file `{path}` after retrying GitHub contents conflicts.\n"
+            f"Last error: {last_error}",
+        )
+
+
+def _try_write_repo_text(
+    *,
+    service: LiveSetupRepositoryService,
+    path: str,
+    content: str,
+    message: str,
+) -> str | None:
+    try:
+        service.write_repo_text(path, content=content, message=message)
+        return None
+    except urllib.error.HTTPError as error:
+        if error.code != 409:
+            raise
+        current = _fetch_repo_file_if_exists(service, path)
+        if current is not None and current.content == content:
+            return None
+        return f"HTTP 409 conflict while writing {path}"
+
+
+def _delete_repo_file_with_retry(
+    *,
+    service: LiveSetupRepositoryService,
+    path: str,
+    message: str,
+) -> None:
+    matched, last_error = poll_until(
+        probe=lambda: _try_delete_repo_file(
+            service=service,
+            path=path,
+            message=message,
+        ),
+        is_satisfied=lambda value: value is None,
+        timeout_seconds=60,
+        interval_seconds=3,
+    )
+    if not matched:
+        raise AssertionError(
+            f"Failed to delete hosted file `{path}` after retrying GitHub contents conflicts.\n"
+            f"Last error: {last_error}",
+        )
+
+
+def _try_delete_repo_file(
+    *,
+    service: LiveSetupRepositoryService,
+    path: str,
+    message: str,
+) -> str | None:
+    try:
+        service.delete_repo_file(path, message=message)
+        return None
+    except urllib.error.HTTPError as error:
+        if error.code != 409:
+            raise
+        if _fetch_repo_file_if_exists(service, path) is None:
+            return None
+        return f"HTTP 409 conflict while deleting {path}"
+
+
 def _restore_fixture(
     *,
     service: LiveSetupRepositoryService,
@@ -500,16 +587,18 @@ def _restore_fixture(
         if mutation.original_file is None:
             current = _fetch_repo_file_if_exists(service, mutation.path)
             if current is not None:
-                service.delete_repo_file(
-                    mutation.path,
+                _delete_repo_file_with_retry(
+                    service=service,
+                    path=mutation.path,
                     message=f"{TICKET_KEY}: cleanup seeded fixture",
                 )
                 deleted_paths.append(mutation.path)
             continue
         current = service.fetch_repo_text(mutation.path)
         if current != mutation.original_file.content:
-            service.write_repo_text(
-                mutation.path,
+            _write_repo_text_with_retry(
+                service=service,
+                path=mutation.path,
                 content=mutation.original_file.content,
                 message=f"{TICKET_KEY}: restore original fixture",
             )
