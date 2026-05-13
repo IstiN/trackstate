@@ -5903,7 +5903,6 @@ class _HostedProviderConfigurationState
     extends State<_HostedProviderConfiguration> {
   late final TextEditingController _tokenController;
   late final FocusNode _tokenFocusNode;
-  late final FocusNode _rememberTokenFocusNode;
   late final FocusNode _connectTokenFocusNode;
   bool _rememberToken = true;
 
@@ -5912,9 +5911,6 @@ class _HostedProviderConfigurationState
     super.initState();
     _tokenController = TextEditingController();
     _tokenFocusNode = FocusNode(debugLabel: 'repository-access-token');
-    _rememberTokenFocusNode = FocusNode(
-      debugLabel: 'repository-access-remember-token',
-    );
     _connectTokenFocusNode = FocusNode(debugLabel: 'repository-access-connect');
   }
 
@@ -5922,7 +5918,6 @@ class _HostedProviderConfigurationState
   void dispose() {
     _tokenController.dispose();
     _tokenFocusNode.dispose();
-    _rememberTokenFocusNode.dispose();
     _connectTokenFocusNode.dispose();
     super.dispose();
   }
@@ -5980,25 +5975,13 @@ class _HostedProviderConfigurationState
                 FocusTraversalOrder(
                   order: const NumericFocusOrder(4),
                   child: Semantics(
-                    container: true,
-                    label: l10n.rememberOnThisBrowser,
                     sortKey: OrdinalSortKey(4),
                     child: CheckboxListTile(
                       checkboxSemanticLabel: l10n.rememberOnThisBrowser,
                       contentPadding: EdgeInsets.zero,
                       value: _rememberToken,
-                      title: FocusableActionDetector(
-                        focusNode: _rememberTokenFocusNode,
-                        child: Semantics(
-                          label: l10n.rememberOnThisBrowser,
-                          child: ExcludeSemantics(
-                            child: Text(l10n.rememberOnThisBrowser),
-                          ),
-                        ),
-                      ),
-                      subtitle: ExcludeSemantics(
-                        child: Text(l10n.rememberOnThisBrowserHelp),
-                      ),
+                      title: Text(l10n.rememberOnThisBrowser),
+                      subtitle: Text(l10n.rememberOnThisBrowserHelp),
                       onChanged: viewModel.isSaving
                           ? null
                           : (value) => setState(
