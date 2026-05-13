@@ -643,16 +643,45 @@ void main() {
         await tester.tap(find.bySemanticsLabel(RegExp('Attachments')).first);
         await tester.pumpAndSettle();
 
-        expect(find.bySemanticsLabel('Choose attachment'), findsOneWidget);
-        expect(find.bySemanticsLabel('Upload attachment'), findsOneWidget);
+        final chooseAttachmentSemantics = find.bySemanticsLabel(
+          'Choose attachment',
+        );
+        final uploadAttachmentSemantics = find.bySemanticsLabel(
+          'Upload attachment',
+        );
+        final chooseAttachmentButton = find.widgetWithText(
+          OutlinedButton,
+          'Choose attachment',
+        );
+        final uploadAttachmentButton = find.widgetWithText(
+          FilledButton,
+          'Upload attachment',
+        );
 
-        await tester.tap(find.bySemanticsLabel('Choose attachment'));
+        expect(chooseAttachmentSemantics, findsOneWidget);
+        expect(uploadAttachmentSemantics, findsOneWidget);
+        expect(chooseAttachmentButton, findsOneWidget);
+        expect(uploadAttachmentButton, findsOneWidget);
+        expect(
+          tester.widget<OutlinedButton>(chooseAttachmentButton).onPressed,
+          isNotNull,
+        );
+        expect(
+          tester.widget<FilledButton>(uploadAttachmentButton).onPressed,
+          isNull,
+        );
+
+        await tester.tap(chooseAttachmentSemantics);
         await tester.pumpAndSettle();
 
         expect(find.text('release notes.pdf'), findsOneWidget);
         expect(find.text('4 B'), findsOneWidget);
+        expect(
+          tester.widget<FilledButton>(uploadAttachmentButton).onPressed,
+          isNotNull,
+        );
 
-        await tester.tap(find.bySemanticsLabel('Upload attachment'));
+        await tester.tap(uploadAttachmentSemantics);
         await tester.pumpAndSettle();
 
         expect(find.text('release-notes.pdf'), findsOneWidget);

@@ -1910,6 +1910,135 @@ size 6
   );
 
   test(
+    'provider-backed repository replaces a legacy repository-path attachment with github-releases metadata',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: false,
+          attachmentUploadMode: AttachmentUploadMode.none,
+          supportsReleaseAttachmentWrites: true,
+          canCheckCollaborators: false,
+        ),
+        enforceExistingRevisionOnWrite: true,
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'attachmentStorage': {
+              'mode': 'github-releases',
+              'githubReleases': {'tagPrefix': 'trackstate-attachments-'},
+            },
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {'id': 'summary', 'name': 'Summary', 'type': 'string', 'required': true},
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-2',
+              'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Nested release-backed attachment issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-12T20:31:06Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/DEMO-2/main.md': '''
+---
+key: DEMO-2
+project: DEMO
+issueType: story
+status: todo
+summary: Nested release-backed attachment issue
+updated: 2026-05-12T20:31:06Z
+---
+
+# Description
+
+Nested release-backed attachment issue.
+''',
+          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf':
+              '%PDF-1.4\nlegacy repository attachment\n',
+          'DEMO/DEMO-1/DEMO-2/attachments.json': jsonEncode([
+            {
+              'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+              'name': 'manual.pdf',
+              'mediaType': 'application/pdf',
+              'sizeBytes': 59,
+              'author': 'legacy-user',
+              'createdAt': '2026-05-12T20:31:06Z',
+              'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+              'revisionOrOid': '',
+              'storageBackend': 'repository-path',
+              'repositoryPath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+            },
+          ]),
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final issue = await repository.hydrateIssue(
+        snapshot.issues.single,
+        scopes: const {IssueHydrationScope.attachments},
+      );
+      final updated = await repository.uploadIssueAttachment(
+        issue: issue,
+        name: 'manual.pdf',
+        bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
+      );
+
+      expect(updated.attachments, hasLength(1));
+      expect(
+        updated.attachments.single.storageBackend,
+        AttachmentStorageMode.githubReleases,
+      );
+      expect(updated.attachments.single.githubReleaseTag, 'trackstate-attachments-DEMO-2');
+      expect(updated.attachments.single.githubReleaseAssetName, 'manual.pdf');
+      expect(updated.attachments.single.revisionOrOid, '84');
+      final metadata =
+          jsonDecode(provider.files['DEMO/DEMO-1/DEMO-2/attachments.json']!)
+              as List<Object?>;
+      expect(metadata, [
+        {
+          'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+          'name': 'manual.pdf',
+          'mediaType': 'application/octet-stream',
+          'sizeBytes': utf8.encode('replacement attachment').length,
+          'author': 'demo-user',
+          'createdAt': updated.attachments.single.createdAt,
+          'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+          'revisionOrOid': '84',
+          'storageBackend': 'github-releases',
+          'githubReleaseTag': 'trackstate-attachments-DEMO-2',
+          'githubReleaseAssetName': 'manual.pdf',
+        },
+      ]);
+    },
+  );
+
+  test(
     'setup repository downloads github release attachments from metadata',
     () async {
       final repository = SetupTrackStateRepository(
@@ -2606,10 +2735,12 @@ class _FakeReleaseAttachmentProvider
   _FakeReleaseAttachmentProvider({
     required this.permission,
     required Map<String, String> files,
+    this.enforceExistingRevisionOnWrite = false,
   }) : files = {...files};
 
   final RepositoryPermission permission;
   final Map<String, String> files;
+  final bool enforceExistingRevisionOnWrite;
   RepositoryConnection? _connection;
 
   @override
@@ -2658,6 +2789,14 @@ class _FakeReleaseAttachmentProvider
   Future<RepositoryWriteResult> writeTextFile(
     RepositoryWriteRequest request,
   ) async {
+    if (enforceExistingRevisionOnWrite &&
+        files.containsKey(request.path) &&
+        (request.expectedRevision?.isNotEmpty != true)) {
+      throw TrackStateProviderException(
+        'Cannot save ${request.path} because it changed in the current branch. '
+        'Expected revision for existing file was not provided.',
+      );
+    }
     files[request.path] = request.content;
     return RepositoryWriteResult(
       path: request.path,
@@ -2686,7 +2825,16 @@ class _FakeReleaseAttachmentProvider
     String path, {
     required String ref,
   }) async {
-    throw UnimplementedError();
+    final content = files[path];
+    if (content == null) {
+      throw TrackStateProviderException('Attachment not found: $path');
+    }
+    return RepositoryAttachment(
+      path: path,
+      bytes: Uint8List.fromList(utf8.encode(content)),
+      revision: 'attachment-sha',
+      declaredSizeBytes: utf8.encode(content).length,
+    );
   }
 
   @override
