@@ -34,12 +34,13 @@ class GitHubTrackStateProvider
   );
 
   final http.Client? _client;
+  late final http.Client _ownedClient = http.Client();
   final String repositoryName;
   final String sourceRef;
 
   RepositoryConnection? _connection;
 
-  http.Client get _http => _client ?? http.Client();
+  http.Client get _http => _client ?? _ownedClient;
 
   @override
   ProviderType get providerType => ProviderType.github;
@@ -707,15 +708,19 @@ class GitHubTrackStateProvider
     required String? expectedTitle,
   }) async {
     for (var page = 1; page <= 10; page++) {
-      final json = await _getGitHubJson(
-            '/repos/$repository/releases',
-            queryParameters: {'per_page': '100', 'page': '$page'},
-          )
-          as List<Object?>;
-      final matching = [
-        for (final entry in json.whereType<Map<String, Object?>>())
-          _parseReleaseSummary(entry, fallbackTagName: releaseTag),
-      ].where((release) => release.tagName == releaseTag).toList(growable: false);
+      final json =
+          await _getGitHubJson(
+                '/repos/$repository/releases',
+                queryParameters: {'per_page': '100', 'page': '$page'},
+              )
+              as List<Object?>;
+      final matching =
+          [
+                for (final entry in json.whereType<Map<String, Object?>>())
+                  _parseReleaseSummary(entry, fallbackTagName: releaseTag),
+              ]
+              .where((release) => release.tagName == releaseTag)
+              .toList(growable: false);
       if (matching.length > 1) {
         throw TrackStateProviderException(
           'GitHub release $releaseTag maps to multiple release containers and '

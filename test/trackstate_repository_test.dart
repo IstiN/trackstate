@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -1513,6 +1514,24 @@ README.md -filter
   );
 
   test(
+    'github provider reuses a single fallback http client when no client is injected',
+    () async {
+      final overrides = _CountingHttpOverrides();
+      final provider = GitHubTrackStateProvider(repositoryName: 'cli/cli');
+
+      await HttpOverrides.runZoned(() async {
+        final first = await provider.getBranch('main');
+        final second = await provider.getBranch('release');
+
+        expect(first.exists, isFalse);
+        expect(second.exists, isFalse);
+      }, createHttpClient: overrides.createHttpClient);
+
+      expect(overrides.createCount, 1);
+    },
+  );
+
+  test(
     'github provider reads non-LFS binary attachments without UTF-8 decoding',
     () async {
       final bytes = Uint8List.fromList(const [
@@ -2468,7 +2487,10 @@ Nested release-backed attachment issue.
           if (path == '/repos/IstiN/trackstate/releases' &&
               request.method == 'POST') {
             createdDuplicateRelease = true;
-            return http.Response('{"message":"unexpected duplicate create"}', 500);
+            return http.Response(
+              '{"message":"unexpected duplicate create"}',
+              500,
+            );
           }
           if (request.url.host == 'uploads.github.com' &&
               path == '/repos/IstiN/trackstate/releases/10/assets' &&
@@ -3159,6 +3181,152 @@ class _FakeRemoteIdentityProvider
 
   @override
   Future<String?> releaseAttachmentIdentityFailureReason() async => null;
+}
+
+class _CountingHttpOverrides {
+  int createCount = 0;
+
+  HttpClient createHttpClient(SecurityContext? context) {
+    createCount += 1;
+    return _FakeHttpClient();
+  }
+}
+
+class _FakeHttpClient implements HttpClient {
+  @override
+  Future<HttpClientRequest> openUrl(String method, Uri url) async =>
+      _FakeHttpClientRequest(
+        _FakeHttpClientResponse(statusCode: 404, reasonPhrase: 'Not Found'),
+      );
+
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeHttpClientRequest implements HttpClientRequest {
+  _FakeHttpClientRequest(this._response);
+
+  final HttpClientResponse _response;
+  final HttpHeaders _headers = _FakeHttpHeaders();
+  bool _followRedirects = true;
+  int _maxRedirects = 5;
+  int _contentLength = -1;
+  bool _persistentConnection = true;
+
+  @override
+  HttpHeaders get headers => _headers;
+
+  @override
+  bool get followRedirects => _followRedirects;
+
+  @override
+  set followRedirects(bool value) {
+    _followRedirects = value;
+  }
+
+  @override
+  int get maxRedirects => _maxRedirects;
+
+  @override
+  set maxRedirects(int value) {
+    _maxRedirects = value;
+  }
+
+  @override
+  int get contentLength => _contentLength;
+
+  @override
+  set contentLength(int value) {
+    _contentLength = value;
+  }
+
+  @override
+  bool get persistentConnection => _persistentConnection;
+
+  @override
+  set persistentConnection(bool value) {
+    _persistentConnection = value;
+  }
+
+  @override
+  Future<void> addStream(Stream<List<int>> stream) async {
+    await stream.drain<void>();
+  }
+
+  @override
+  Future<HttpClientResponse> close() async => _response;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeHttpClientResponse extends Stream<List<int>>
+    implements HttpClientResponse {
+  _FakeHttpClientResponse({
+    required this.statusCode,
+    required this.reasonPhrase,
+  });
+
+  @override
+  final int statusCode;
+
+  @override
+  final String reasonPhrase;
+
+  @override
+  final HttpHeaders headers = _FakeHttpHeaders();
+
+  @override
+  int get contentLength => 0;
+
+  @override
+  bool get isRedirect => false;
+
+  @override
+  bool get persistentConnection => false;
+
+  @override
+  List<RedirectInfo> get redirects => const <RedirectInfo>[];
+
+  @override
+  HttpClientResponseCompressionState get compressionState =>
+      HttpClientResponseCompressionState.notCompressed;
+
+  @override
+  StreamSubscription<List<int>> listen(
+    void Function(List<int> event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) => Stream<List<int>>.empty().listen(
+    onData,
+    onError: onError,
+    onDone: onDone,
+    cancelOnError: cancelOnError,
+  );
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeHttpHeaders implements HttpHeaders {
+  final Map<String, List<String>> _values = <String, List<String>>{};
+
+  @override
+  void set(String name, Object value, {bool preserveHeaderCase = false}) {
+    _values[name.toLowerCase()] = <String>[value.toString()];
+  }
+
+  @override
+  void forEach(void Function(String name, List<String> values) action) {
+    _values.forEach(action);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 Map<String, String> _fixtureFilesFromDisk(String rootPath) {
