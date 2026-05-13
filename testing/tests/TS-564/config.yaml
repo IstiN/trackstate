@@ -8,7 +8,7 @@ dependencies:
   - git CLI available on PATH
 notes:
   - Executes the local release-backed attachment download flow against a disposable TrackState repository with GitHub credentials removed from the runtime environment.
-  - Verifies the JSON error category and error.exitCode from the pre-flight auth failure are not still masked as the generic repository contract.
+  - Verifies the JSON auth failure contract returns AUTHENTICATION_FAILED / auth / 3 for the pre-flight missing-credential case.
 runtime_inputs:
   ticket_command: trackstate attachment download --issue TS-123 --file manual.pdf --target local --output json
   requested_command:
@@ -23,6 +23,7 @@ runtime_inputs:
     - local
     - --output
     - json
+  compiled_source_ref: origin/main
   project_key: TS
   project_name: TS-564 Project
   issue_key: TS-123

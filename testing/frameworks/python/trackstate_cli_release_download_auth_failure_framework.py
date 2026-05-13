@@ -37,39 +37,42 @@ class PythonTrackStateCliReleaseDownloadAuthFailureFramework(
         *,
         config: TrackStateCliReleaseDownloadAuthFailureConfig,
     ) -> TrackStateCliReleaseDownloadAuthFailureValidationResult:
-        with tempfile.TemporaryDirectory(
-            prefix="trackstate-release-download-auth-bin-"
-        ) as bin_dir:
-            executable_path = Path(bin_dir) / "trackstate"
-            self._compile_executable(executable_path)
+        with self._materialize_source_tree(config.compiled_source_ref) as source_root:
             with tempfile.TemporaryDirectory(
-                prefix="trackstate-release-download-auth-repo-"
-            ) as temp_dir:
-                repository_path = Path(temp_dir)
-                self._seed_local_repository(repository_path, config=config)
-                initial_state = self._capture_repository_state(
-                    repository_path=repository_path,
-                    config=config,
-                )
-                observation, stripped_environment_variables = self._observe_command(
-                    requested_command=config.requested_command,
-                    repository_path=repository_path,
-                    executable_path=executable_path,
-                )
-                final_state = self._capture_repository_state(
-                    repository_path=repository_path,
-                    config=config,
-                )
-                return TrackStateCliReleaseDownloadAuthFailureValidationResult(
-                    initial_state=initial_state,
-                    final_state=final_state,
-                    observation=observation,
-                    stripped_environment_variables=stripped_environment_variables,
-                )
+                prefix="trackstate-release-download-auth-bin-"
+            ) as bin_dir:
+                executable_path = Path(bin_dir) / "trackstate"
+                self._compile_executable(executable_path, source_root=source_root)
+                with tempfile.TemporaryDirectory(
+                    prefix="trackstate-release-download-auth-repo-"
+                ) as temp_dir:
+                    repository_path = Path(temp_dir)
+                    self._seed_local_repository(repository_path, config=config)
+                    initial_state = self._capture_repository_state(
+                        repository_path=repository_path,
+                        config=config,
+                    )
+                    observation, stripped_environment_variables = self._observe_command(
+                        compiled_source_ref=config.compiled_source_ref,
+                        requested_command=config.requested_command,
+                        repository_path=repository_path,
+                        executable_path=executable_path,
+                    )
+                    final_state = self._capture_repository_state(
+                        repository_path=repository_path,
+                        config=config,
+                    )
+                    return TrackStateCliReleaseDownloadAuthFailureValidationResult(
+                        initial_state=initial_state,
+                        final_state=final_state,
+                        observation=observation,
+                        stripped_environment_variables=stripped_environment_variables,
+                    )
 
     def _observe_command(
         self,
         *,
+        compiled_source_ref: str,
         requested_command: tuple[str, ...],
         repository_path: Path,
         executable_path: Path,
@@ -103,7 +106,9 @@ class PythonTrackStateCliReleaseDownloadAuthFailureFramework(
             requested_command=requested_command,
             executed_command=executed_command,
             fallback_reason=(
-                "Pinned execution to a temporary executable compiled from this checkout "
+                "Pinned execution to a temporary executable compiled from the configured "
+                "source ref "
+                f"({compiled_source_ref}) "
                 "and stripped GitHub credentials from the environment so the "
                 "release-backed local download scenario runs without ambient auth."
             ),

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
+import tarfile
+import tempfile
 
 from testing.core.models.cli_command_result import CliCommandResult
 
@@ -12,13 +16,19 @@ class PythonTrackStateCliCompiledLocalFramework:
     def __init__(self, repository_root: Path) -> None:
         self._repository_root = Path(repository_root)
 
-    def _compile_executable(self, destination: Path) -> None:
+    def _compile_executable(
+        self,
+        destination: Path,
+        *,
+        source_root: Path | None = None,
+    ) -> None:
+        resolved_source_root = Path(source_root or self._repository_root)
         destination.write_text(
             "\n".join(
                 (
                     "#!/usr/bin/env bash",
                     "set -euo pipefail",
-                    f'repo_root="{self._repository_root}"',
+                    f'repo_root="{resolved_source_root}"',
                     'working_directory="$PWD"',
                     'temp_dir="$(mktemp -d)"',
                     'cleanup() {',
@@ -54,6 +64,38 @@ class PythonTrackStateCliCompiledLocalFramework:
             encoding="utf-8",
         )
         destination.chmod(0o755)
+
+    @contextmanager
+    def _materialize_source_tree(self, source_ref: str) -> Path:
+        normalized_ref = source_ref.strip()
+        if not normalized_ref or normalized_ref == "current checkout":
+            yield self._repository_root
+            return
+
+        archive = subprocess.run(
+            (
+                "git",
+                "-C",
+                str(self._repository_root),
+                "archive",
+                "--format=tar",
+                normalized_ref,
+            ),
+            capture_output=True,
+            check=False,
+        )
+        if archive.returncode != 0:
+            raise AssertionError(
+                f"git archive failed for ref {normalized_ref!r}.\n"
+                f"stdout:\n{archive.stdout.decode('utf-8', errors='replace')}\n"
+                f"stderr:\n{archive.stderr.decode('utf-8', errors='replace')}"
+            )
+
+        with tempfile.TemporaryDirectory(prefix="trackstate-source-ref-") as temp_dir:
+            source_root = Path(temp_dir)
+            with tarfile.open(fileobj=io.BytesIO(archive.stdout), mode="r:") as tar:
+                tar.extractall(path=source_root)
+            yield source_root
 
     def _run(
         self,

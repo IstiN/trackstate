@@ -37,8 +37,9 @@ RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 TEST_FILE_PATH = "testing/tests/TS-564/test_ts_564.py"
 RUN_COMMAND = "python testing/tests/TS-564/test_ts_564.py"
-EXPECTED_ERROR_CATEGORIES = ("authentication", "configuration")
-GENERIC_REPOSITORY_EXIT_CODE = 4
+EXPECTED_ERROR_CODE = "AUTHENTICATION_FAILED"
+EXPECTED_ERROR_CATEGORY = "auth"
+EXPECTED_ERROR_EXIT_CODE = 3
 
 
 class Ts564ReleaseDownloadAuthContractScenario:
@@ -99,6 +100,7 @@ class Ts564ReleaseDownloadAuthContractScenario:
             "requested_command": validation.observation.requested_command_text,
             "executed_command": validation.observation.executed_command_text,
             "compiled_binary_path": validation.observation.compiled_binary_path,
+            "compiled_source_ref": self.config.compiled_source_ref,
             "repository_path": validation.observation.repository_path,
             "config_path": str(self.config_path),
             "os": platform.system(),
@@ -292,12 +294,11 @@ class Ts564ReleaseDownloadAuthContractScenario:
             fragment in lowered_error for fragment in self.config.expected_auth_fragments
         )
         observed_category = _as_text(error_dict.get("category")).strip().lower()
+        observed_error_code = _as_text(error_dict.get("code")).strip()
         observed_error_exit_code = error_dict.get("exitCode")
-        category_ok = observed_category in EXPECTED_ERROR_CATEGORIES
-        exit_code_ok = (
-            isinstance(observed_error_exit_code, int)
-            and observed_error_exit_code != GENERIC_REPOSITORY_EXIT_CODE
-        )
+        code_ok = observed_error_code == EXPECTED_ERROR_CODE
+        category_ok = observed_category == EXPECTED_ERROR_CATEGORY
+        exit_code_ok = observed_error_exit_code == EXPECTED_ERROR_EXIT_CODE
 
         if has_release_context and has_auth_context:
             _record_human_verification(
@@ -319,7 +320,7 @@ class Ts564ReleaseDownloadAuthContractScenario:
                 f"{_format_supporting_evidence(payload=payload, stdout=stdout, stderr=stderr)}"
             )
 
-        if category_ok and exit_code_ok:
+        if code_ok and category_ok and exit_code_ok:
             result["failure_mode"] = "none"
             _record_step(
                 result,
@@ -328,7 +329,7 @@ class Ts564ReleaseDownloadAuthContractScenario:
                 action=result["supported_ticket_command"],
                 observed=(
                     f"process_exit_code={observation.result.exit_code}; "
-                    f"error_code={_as_text(error_dict.get('code'))}; "
+                    f"error_code={observed_error_code}; "
                     f"error_category={observed_category}; "
                     f"error_exit_code={observed_error_exit_code}; "
                     f"visible_error={visible_error}"
@@ -344,6 +345,7 @@ class Ts564ReleaseDownloadAuthContractScenario:
                     f"target.type={_as_text(result.get('observed_target_type'))}; "
                     f"target.value={_as_text(result.get('observed_target_value'))}; "
                     f"payload.output={_as_text(payload_dict.get('output'))}; "
+                    f"error.code={observed_error_code}; "
                     f"error.category={observed_category}; "
                     f"error.exitCode={observed_error_exit_code}"
                 ),
@@ -353,22 +355,31 @@ class Ts564ReleaseDownloadAuthContractScenario:
         result["failure_mode"] = "masked_auth_contract"
         result["product_gap"] = (
             "The visible local release-backed download error now mentions missing GitHub "
-            "authentication, but the machine-readable JSON contract still reports the "
-            "generic repository category and repository exit code."
+            "authentication, but the machine-readable JSON contract does not return the "
+            f"expected {EXPECTED_ERROR_CODE}/{EXPECTED_ERROR_CATEGORY}/{EXPECTED_ERROR_EXIT_CODE} "
+            "authentication contract."
         )
+        if not code_ok:
+            failures.append(
+                "Step 2 failed: the JSON error `code` did not switch to the "
+                "authentication contract.\n"
+                f"Expected code: {EXPECTED_ERROR_CODE!r}\n"
+                f"Observed code: {observed_error_code!r}\n"
+                f"Observed payload:\n{json.dumps(payload_dict, indent=2, sort_keys=True)}"
+            )
         if not category_ok:
             failures.append(
-                "Step 2 failed: the JSON error `category` is still the generic repository "
-                "contract instead of an auth/configuration category.\n"
-                f"Expected one of: {EXPECTED_ERROR_CATEGORIES}\n"
+                "Step 2 failed: the JSON error `category` did not switch to the "
+                "authentication contract.\n"
+                f"Expected category: {EXPECTED_ERROR_CATEGORY!r}\n"
                 f"Observed category: {observed_category!r}\n"
                 f"Observed payload:\n{json.dumps(payload_dict, indent=2, sort_keys=True)}"
             )
         if not exit_code_ok:
             failures.append(
-                "Step 2 failed: the JSON error `exitCode` is still the generic repository "
-                "provider code instead of a distinct auth/configuration failure code.\n"
-                f"Expected a value different from: {GENERIC_REPOSITORY_EXIT_CODE}\n"
+                "Step 2 failed: the JSON error `exitCode` did not switch to the "
+                "authentication contract.\n"
+                f"Expected exitCode: {EXPECTED_ERROR_EXIT_CODE!r}\n"
                 f"Observed exitCode: {observed_error_exit_code!r}\n"
                 f"Observed payload:\n{json.dumps(payload_dict, indent=2, sort_keys=True)}"
             )
@@ -478,11 +489,12 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
             f"{_jira_inline(_as_text(result.get('supported_ticket_command')))}."
         ),
         "* Seeded a disposable local TrackState repository configured with {{attachmentStorage.mode = github-releases}} and removed GitHub credentials from the runtime environment.",
+        f"* Compiled the CLI from source ref {_jira_inline(_as_text(result.get('compiled_source_ref')))} to exercise the deployed auth-contract implementation.",
         "* Inspected the caller-visible terminal output, the JSON error payload, and the local output path after the failed download.",
         "",
         "h4. Result",
         "* Step 1 passed: the CLI failed with explicit release-backed GitHub auth/configuration guidance visible to the user.",
-        f"* Step 2 passed: JSON {_jira_inline('error.category')} = {_jira_inline(_as_text(result.get('observed_error_category')))} and {_jira_inline('error.exitCode')} = {_jira_inline(_as_text(result.get('observed_error_exit_code')))} no longer match the generic repository contract.",
+        f"* Step 2 passed: JSON {_jira_inline('error.code')} = {_jira_inline(_as_text(result.get('observed_error_code')))}, {_jira_inline('error.category')} = {_jira_inline(_as_text(result.get('observed_error_category')))}, and {_jira_inline('error.exitCode')} = {_jira_inline(_as_text(result.get('observed_error_exit_code')))} match the fixed authentication contract.",
         "* Step 3 passed: no local download file was created and the repository stayed clean.",
         f"* Human-style verification passed: {_jira_inline(visible_error)}",
         "",
@@ -509,11 +521,12 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
             f"`{_as_text(result.get('supported_ticket_command'))}`."
         ),
         "- Seeded a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and removed GitHub credentials from the runtime environment.",
+        f"- Compiled the CLI from source ref `{_as_text(result.get('compiled_source_ref'))}` to exercise the deployed auth-contract implementation.",
         "- Inspected the caller-visible terminal output, the JSON error payload, and the local output path after the failed download.",
         "",
         "## Result",
         "- Step 1 passed: the CLI failed with explicit release-backed GitHub auth/configuration guidance visible to the user.",
-        f"- Step 2 passed: JSON `error.category = {_as_text(result.get('observed_error_category'))}` and `error.exitCode = {_as_text(result.get('observed_error_exit_code'))}` no longer match the generic repository contract.",
+        f"- Step 2 passed: JSON `error.code = {_as_text(result.get('observed_error_code'))}`, `error.category = {_as_text(result.get('observed_error_category'))}`, and `error.exitCode = {_as_text(result.get('observed_error_exit_code'))}` match the fixed authentication contract.",
         "- Step 3 passed: no local download file was created and the repository stayed clean.",
         f"- Human-style verification passed: `{visible_error}`",
         "",
@@ -568,11 +581,12 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
             f"{_jira_inline(_as_text(result.get('supported_ticket_command')))}."
         ),
         "* Seeded a disposable local TrackState repository configured with {{attachmentStorage.mode = github-releases}} and removed GitHub credentials from the runtime environment.",
+        f"* Compiled the CLI from source ref {_jira_inline(_as_text(result.get('compiled_source_ref')))} to exercise the deployed auth-contract implementation.",
         "* Inspected the JSON error {{category}} and {{exitCode}} fields plus the local output path after the failed download.",
         "",
         "h4. Result",
         "* ✅ Step 1 passed: the visible CLI failure did explain the missing GitHub auth/configuration requirement for release-backed downloads.",
-        f"* ❌ Step 2 failed: JSON {_jira_inline('error.category')} remained {_jira_inline(observed_category)} and {_jira_inline('error.exitCode')} remained {_jira_inline(observed_error_exit_code)} instead of switching to an auth/configuration contract distinct from the generic repository provider failure.",
+        f"* ❌ Step 2 failed: JSON {_jira_inline('error.code')} = {_jira_inline(_as_text(result.get('observed_error_code')))}, {_jira_inline('error.category')} = {_jira_inline(observed_category)}, and {_jira_inline('error.exitCode')} = {_jira_inline(observed_error_exit_code)} instead of matching the fixed authentication contract.",
         f"* Observed provider/output: {_jira_inline(observed_provider)} / {_jira_inline(_as_text(result.get('observed_output_format')))}",
         f"* Observed visible output: {_jira_inline(visible_error)}",
         "* ✅ Step 3 passed: no local download file was created and the repository stayed clean.",
@@ -611,11 +625,12 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
             f"`{_as_text(result.get('supported_ticket_command'))}`."
         ),
         "- Seeded a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and removed GitHub credentials from the runtime environment.",
+        f"- Compiled the CLI from source ref `{_as_text(result.get('compiled_source_ref'))}` to exercise the deployed auth-contract implementation.",
         "- Inspected the JSON error `category` and `exitCode` fields plus the local output path after the failed download.",
         "",
         "## Result",
         "- ✅ Step 1 passed: the visible CLI failure did explain the missing GitHub auth/configuration requirement for release-backed downloads.",
-        f"- ❌ Step 2 failed: JSON `error.category` remained `{observed_category}` and `error.exitCode` remained `{observed_error_exit_code}` instead of switching to an auth/configuration contract distinct from the generic repository provider failure.",
+        f"- ❌ Step 2 failed: JSON `error.code = {_as_text(result.get('observed_error_code'))}`, `error.category = {observed_category}`, and `error.exitCode = {observed_error_exit_code}` instead of matching the fixed authentication contract.",
         f"- Observed provider/output: `{observed_provider}` / `{_as_text(result.get('observed_output_format'))}`",
         f"- Observed visible output: `{visible_error}`",
         "- ✅ Step 3 passed: no local download file was created and the repository stayed clean.",
@@ -641,6 +656,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "## Environment",
         f"- Repository path: `{_as_text(result.get('repository_path'))}`",
+        f"- Compiled source ref: `{_as_text(result.get('compiled_source_ref'))}`",
         f"- Ticket step reviewed: `{_as_text(result.get('ticket_command'))}`",
         f"- Executed supported command: `{_as_text(result.get('supported_ticket_command'))}`",
         f"- OS: `{platform.system()}`",
@@ -664,7 +680,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         ),
         (
             "3. ❌ Inspect the JSON error output fields `category` and `exitCode`. "
-            f"Observed: `error.category = {observed_category}` and "
+            f"Observed: `error.code = {_as_text(result.get('observed_error_code'))}`, `error.category = {observed_category}`, and "
             f"`error.exitCode = {observed_error_exit_code}`."
         ),
         (
@@ -673,15 +689,14 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         ),
         "",
         "## Expected result",
-        "- The command should fail with an auth/configuration-related JSON `error.category` such as `authentication` or `configuration`, not `repository`.",
-        f"- The JSON `error.exitCode` should be different from the generic repository failure code `{GENERIC_REPOSITORY_EXIT_CODE}`.",
+        f"- The command should return JSON `error.code = {EXPECTED_ERROR_CODE}`, `error.category = {EXPECTED_ERROR_CATEGORY}`, and `error.exitCode = {EXPECTED_ERROR_EXIT_CODE}`.",
         "- The terminal-visible error should still explain that GitHub access is required for the release-backed download.",
         f"- The local output path `{expected_output_path}` must not be written.",
         "",
         "## Actual result",
         "- The terminal-visible error correctly explains the missing GitHub authentication requirement.",
-        f"- However, the machine-readable JSON still reports `error.category = {observed_category}` and `error.exitCode = {observed_error_exit_code}`.",
-        f"- The full payload still maps the auth failure to the generic repository contract:\n\n```json\n{json.dumps(payload, indent=2, sort_keys=True)}\n```",
+        f"- However, the machine-readable JSON reports `error.code = {_as_text(result.get('observed_error_code'))}`, `error.category = {observed_category}`, and `error.exitCode = {observed_error_exit_code}`.",
+        f"- The full payload differs from the fixed authentication contract:\n\n```json\n{json.dumps(payload, indent=2, sort_keys=True)}\n```",
         "",
         "## Exact error / stack trace",
         "```text",
