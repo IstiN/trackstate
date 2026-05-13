@@ -66,11 +66,13 @@ class PythonTrackStateCliReleaseReplacementFramework(
             deleted_asset_ids=(),
         )
 
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-553-bin-") as bin_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-release-replacement-bin-",
+        ) as bin_dir:
             executable_path = Path(bin_dir) / "trackstate"
             self._compile_executable(executable_path)
             with tempfile.TemporaryDirectory(
-                prefix="trackstate-ts-553-repo-",
+                prefix="trackstate-release-replacement-repo-",
             ) as temp_dir:
                 repository_path = Path(temp_dir)
                 seeded_release = self._seed_release_container(
@@ -164,7 +166,7 @@ class PythonTrackStateCliReleaseReplacementFramework(
         release = self._repository_client.create_release(
             tag_name=expected_release_tag,
             name=config.expected_release_title,
-            body="TS-553 seeded replacement fixture",
+            body="Release replacement seeded fixture",
             draft=True,
         )
         asset = self._repository_client.upload_release_asset(
@@ -236,7 +238,7 @@ updated: {config.seeded_attachment_created_at}
 
 # Description
 
-TS-553 deterministic replacement fixture.
+Release replacement fixture.
 """,
         )
         self._write_file(
@@ -266,21 +268,27 @@ TS-553 deterministic replacement fixture.
             config.source_file_bytes,
         )
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-553 Tester")
+        self._git(
+            repository_path,
+            "config",
+            "--local",
+            "user.name",
+            "Release Replacement Tester",
+        )
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "ts553@example.com",
+            "release-replacement@example.com",
         )
         self._git(repository_path, "remote", "add", "origin", remote_origin_url)
         git_env = {
-            "GIT_AUTHOR_NAME": "TS-553 Tester",
-            "GIT_AUTHOR_EMAIL": "ts553@example.com",
+            "GIT_AUTHOR_NAME": "Release Replacement Tester",
+            "GIT_AUTHOR_EMAIL": "release-replacement@example.com",
             "GIT_AUTHOR_DATE": config.seeded_attachment_created_at,
-            "GIT_COMMITTER_NAME": "TS-553 Tester",
-            "GIT_COMMITTER_EMAIL": "ts553@example.com",
+            "GIT_COMMITTER_NAME": "Release Replacement Tester",
+            "GIT_COMMITTER_EMAIL": "release-replacement@example.com",
             "GIT_COMMITTER_DATE": config.seeded_attachment_created_at,
         }
         self._git(repository_path, "add", ".", env=git_env)
@@ -288,7 +296,7 @@ TS-553 deterministic replacement fixture.
             repository_path,
             "commit",
             "-m",
-            "Seed TS-553 replacement fixture",
+            "Seed release replacement fixture",
             env=git_env,
         )
 
@@ -309,7 +317,7 @@ TS-553 deterministic replacement fixture.
         env["TRACKSTATE_TOKEN"] = access_token
         env["GH_TOKEN"] = access_token
         env["GITHUB_TOKEN"] = access_token
-        sandbox_home = repository_path / ".ts553-home"
+        sandbox_home = repository_path / ".release-replacement-home"
         sandbox_home.mkdir(parents=True, exist_ok=True)
         env["HOME"] = str(sandbox_home)
         env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
