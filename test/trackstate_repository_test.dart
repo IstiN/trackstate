@@ -1940,7 +1940,12 @@ size 6
             {'id': 'story', 'name': 'Story'},
           ]),
           'DEMO/config/fields.json': jsonEncode([
-            {'id': 'summary', 'name': 'Summary', 'type': 'string', 'required': true},
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
           ]),
           'DEMO/.trackstate/index/issues.json': jsonEncode([
             {
@@ -2014,7 +2019,10 @@ Nested release-backed attachment issue.
         updated.attachments.single.storageBackend,
         AttachmentStorageMode.githubReleases,
       );
-      expect(updated.attachments.single.githubReleaseTag, 'trackstate-attachments-DEMO-2');
+      expect(
+        updated.attachments.single.githubReleaseTag,
+        'trackstate-attachments-DEMO-2',
+      );
       expect(updated.attachments.single.githubReleaseAssetName, 'manual.pdf');
       expect(updated.attachments.single.revisionOrOid, '84');
       final metadata =
@@ -2673,6 +2681,75 @@ Nested release-backed attachment issue.
       expect(asset.bytes, Uint8List.fromList(const [1, 2, 3, 4, 5, 6]));
     },
   );
+
+  test(
+    'provider-backed repository resolves release-backed downloads through a local GitHub remote identity',
+    () async {
+      final provider = _FakeRemoteIdentityProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        repository: 'cli/cli',
+        files: _releaseAttachmentFixtureFiles(),
+      );
+      final repository = ProviderBackedTrackStateRepository(
+        provider: provider,
+        githubClient: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/cli/cli/releases/assets/1' &&
+              request.method == 'GET') {
+            expect(request.headers['accept'], 'application/octet-stream');
+            return http.Response('', 404);
+          }
+          if (path == '/repos/cli/cli/releases/tags/v2.74.0' &&
+              request.method == 'GET') {
+            return http.Response(
+              jsonEncode({
+                'id': 10,
+                'tag_name': 'v2.74.0',
+                'name': 'CLI 2.74.0',
+                'assets': const [],
+              }),
+              200,
+            );
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await expectLater(
+        () => repository.downloadAttachment(
+          const IssueAttachment(
+            id: 'DEMO/DEMO-1/attachments/manual.pdf',
+            name: 'manual.pdf',
+            mediaType: 'application/pdf',
+            sizeBytes: 19,
+            author: 'tester',
+            createdAt: '2026-05-13T00:00:00Z',
+            storagePath: 'DEMO/DEMO-1/attachments/manual.pdf',
+            revisionOrOid: '1',
+            storageBackend: AttachmentStorageMode.githubReleases,
+            githubReleaseTag: 'v2.74.0',
+            githubReleaseAssetName: 'manual.pdf',
+          ),
+        ),
+        throwsA(
+          isA<TrackStateProviderException>().having(
+            (error) => error.message,
+            'message',
+            contains(
+              'GitHub release v2.74.0 does not contain asset manual.pdf.',
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 SetupTrackStateRepository _mockSetupRepository({
@@ -2869,6 +2946,122 @@ class _FakeReleaseAttachmentProvider
   Future<void> deleteReleaseAttachment(
     RepositoryReleaseAttachmentDeleteRequest request,
   ) async {}
+}
+
+class _FakeRemoteIdentityProvider
+    implements TrackStateProviderAdapter, RepositoryGitHubIdentityResolver {
+  _FakeRemoteIdentityProvider({
+    required this.permission,
+    required this.repository,
+    required Map<String, String> files,
+  }) : files = {...files};
+
+  final RepositoryPermission permission;
+  final String repository;
+  final Map<String, String> files;
+  RepositoryConnection? _connection;
+
+  @override
+  ProviderType get providerType => ProviderType.local;
+
+  @override
+  String get repositoryLabel => _connection?.repository ?? '.';
+
+  @override
+  String get dataRef => 'HEAD';
+
+  @override
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    _connection = connection;
+    return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+  }
+
+  @override
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async {
+    return [
+      for (final path in files.keys)
+        RepositoryTreeEntry(path: path, type: 'blob'),
+    ];
+  }
+
+  @override
+  Future<RepositoryTextFile> readTextFile(
+    String path, {
+    required String ref,
+  }) async {
+    final content = files[path];
+    if (content == null) {
+      throw TrackStateProviderException('File not found: $path');
+    }
+    return RepositoryTextFile(path: path, content: content, revision: 'abc123');
+  }
+
+  @override
+  Future<String> resolveWriteBranch() async => _connection?.branch ?? dataRef;
+
+  @override
+  Future<RepositoryBranch> getBranch(String name) async =>
+      RepositoryBranch(name: name, exists: true, isCurrent: true);
+
+  @override
+  Future<RepositoryWriteResult> writeTextFile(
+    RepositoryWriteRequest request,
+  ) async {
+    files[request.path] = request.content;
+    return RepositoryWriteResult(
+      path: request.path,
+      branch: request.branch,
+      revision: 'metadata-sha',
+    );
+  }
+
+  @override
+  Future<RepositoryCommitResult> createCommit(
+    RepositoryCommitRequest request,
+  ) async => RepositoryCommitResult(
+    branch: request.branch,
+    message: request.message,
+    revision: 'commit-sha',
+  );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
+  Future<RepositoryPermission> getPermission() async => permission;
+
+  @override
+  Future<RepositoryAttachment> readAttachment(
+    String path, {
+    required String ref,
+  }) async {
+    final content = files[path];
+    if (content == null) {
+      throw TrackStateProviderException('Attachment not found: $path');
+    }
+    return RepositoryAttachment(
+      path: path,
+      bytes: Uint8List.fromList(utf8.encode(content)),
+      revision: 'attachment-sha',
+      declaredSizeBytes: utf8.encode(content).length,
+    );
+  }
+
+  @override
+  Future<RepositoryAttachmentWriteResult> writeAttachment(
+    RepositoryAttachmentWriteRequest request,
+  ) async {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<bool> isLfsTracked(String path) async => false;
+
+  @override
+  Future<String?> resolveGitHubRepositoryIdentity() async => repository;
+
+  @override
+  Future<String?> releaseAttachmentIdentityFailureReason() async => null;
 }
 
 Map<String, String> _fixtureFilesFromDisk(String rootPath) {

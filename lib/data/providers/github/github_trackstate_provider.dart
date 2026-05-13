@@ -404,15 +404,25 @@ class GitHubTrackStateProvider
   @override
   Future<RepositoryAttachment> readReleaseAttachment(
     RepositoryReleaseAttachmentReadRequest request,
-  ) async {
-    final connection = _requireConnection();
+  ) async => readReleaseAttachmentForRepository(
+    repository: _requireConnection().repository,
+    request: request,
+    token: _connection?.token,
+  );
+
+  Future<RepositoryAttachment> readReleaseAttachmentForRepository({
+    required String repository,
+    required RepositoryReleaseAttachmentReadRequest request,
+    String? token,
+  }) async {
     final requestedAssetId = request.assetId?.trim() ?? '';
     if (requestedAssetId.isNotEmpty) {
       final directArtifact = await _downloadReleaseAsset(
-        repository: connection.repository,
+        repository: repository,
         releaseTag: request.releaseTag,
         assetId: requestedAssetId,
         assetName: request.assetName,
+        token: token,
         allowMissing: true,
       );
       if (directArtifact != null) {
@@ -420,10 +430,11 @@ class GitHubTrackStateProvider
       }
     }
     final release = (await _loadReleaseByTag(
-      repository: connection.repository,
+      repository: repository,
       releaseTag: request.releaseTag,
       issueKey: null,
       expectedTitle: null,
+      token: token,
     ))!;
     final matchingAssets = release.assets.where(
       (candidate) => candidate.name == request.assetName,
@@ -436,11 +447,12 @@ class GitHubTrackStateProvider
       );
     }
     return (await _downloadReleaseAsset(
-      repository: connection.repository,
+      repository: repository,
       releaseTag: request.releaseTag,
       assetId: matchedAsset.id,
       assetName: request.assetName,
       expectedSizeBytes: matchedAsset.sizeBytes,
+      token: token,
     ))!;
   }
 
@@ -646,11 +658,12 @@ class GitHubTrackStateProvider
     required String releaseTag,
     required String? issueKey,
     required String? expectedTitle,
+    String? token,
     bool allowMissing = false,
   }) async {
     final response = await _http.get(
       _githubUri('/repos/$repository/releases/tags/$releaseTag'),
-      headers: _githubHeaders(_connection?.token),
+      headers: _githubHeaders(token ?? _connection?.token),
     );
     if (response.statusCode == 404) {
       if (allowMissing) {
@@ -864,13 +877,14 @@ class GitHubTrackStateProvider
     required String releaseTag,
     required String assetId,
     required String assetName,
+    String? token,
     int? expectedSizeBytes,
     bool allowMissing = false,
   }) async {
     final response = await _http.get(
       _githubUri('/repos/$repository/releases/assets/$assetId'),
       headers: {
-        ..._githubHeaders(_connection?.token),
+        ..._githubHeaders(token ?? _connection?.token),
         'accept': 'application/octet-stream',
       },
     );
