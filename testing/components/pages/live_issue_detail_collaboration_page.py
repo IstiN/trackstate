@@ -1311,7 +1311,7 @@ class LiveIssueDetailCollaborationPage:
     def choose_attachment(self, file_path: str, *, timeout_ms: int = 30_000) -> None:
         self.wait_for_attachment_picker_ready(timeout_ms=timeout_ms)
         self._session.select_files_after_click(
-            'flt-semantics[aria-label="Choose attachment"]',
+            self._choose_attachment_button_selector,
             [file_path],
             timeout_ms=timeout_ms,
         )
