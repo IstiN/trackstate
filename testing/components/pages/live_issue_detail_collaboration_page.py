@@ -707,9 +707,8 @@ class LiveIssueDetailCollaborationPage:
         )
 
     def attachment_download_button_count(self, attachment_name: str) -> int:
-        return self._session.count(
-            self._button_selector,
-            has_text=self._download_button_label(attachment_name),
+        return self._visible_button_count_by_label(
+            self._download_button_label(attachment_name),
         )
 
     def attachment_download_button_label(self, attachment_name: str) -> str:
@@ -726,7 +725,7 @@ class LiveIssueDetailCollaborationPage:
         )
 
     def visible_button_count(self, label: str) -> int:
-        return self._session.count(self._button_selector, has_text=label)
+        return self._visible_button_count_by_label(label)
 
     def choose_attachment_file(self, file_path: str) -> None:
         self._session.click_and_set_files(
@@ -1061,6 +1060,47 @@ class LiveIssueDetailCollaborationPage:
             button_label=str(payload.get("buttonLabel", "")),
             button_enabled=bool(payload.get("buttonEnabled")),
         )
+
+    def _visible_button_count_by_label(self, label: str) -> int:
+        payload = self._session.evaluate(
+            """
+            ({ label }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const seen = new Set();
+              let count = 0;
+              for (const element of document.querySelectorAll('flt-semantics[role="button"]')) {
+                const text = normalize(
+                  [
+                    element.getAttribute('aria-label') ?? '',
+                    element.innerText ?? '',
+                    element.textContent ?? '',
+                  ].join(' ')
+                );
+                if (!text.includes(label)) {
+                  continue;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  continue;
+                }
+                const key = [
+                  Math.round(rect.left),
+                  Math.round(rect.top),
+                  Math.round(rect.width),
+                  Math.round(rect.height),
+                ].join('|');
+                if (seen.has(key)) {
+                  continue;
+                }
+                seen.add(key);
+                count += 1;
+              }
+              return count;
+            }
+            """,
+            arg={"label": label},
+        )
+        return int(payload)
 
     def _is_connected(self, connected_banner: str) -> bool:
         return (

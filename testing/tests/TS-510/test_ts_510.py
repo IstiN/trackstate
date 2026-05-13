@@ -468,12 +468,33 @@ def _select_attachment(
     upload_path: str,
     attachment_size_label: str,
 ) -> str:
-    page.choose_attachment_file(upload_path)
-    return page.wait_for_selected_attachment_summary(
-        attachment_name=ATTACHMENT_NAME,
-        attachment_size_label=attachment_size_label,
+    page.choose_attachment(upload_path, timeout_ms=60_000)
+    selected_body = page.wait_for_text(
+        f"Selected attachment: {ATTACHMENT_NAME}",
         timeout_ms=60_000,
     )
+    summary_line = next(
+        (
+            line.strip()
+            for line in selected_body.splitlines()
+            if line.strip().startswith(f"Selected attachment: {ATTACHMENT_NAME}")
+        ),
+        "",
+    )
+    if not summary_line:
+        raise AssertionError(
+            "Step 2 failed: choosing the replacement file did not surface the visible "
+            f"selected-file summary for {ATTACHMENT_NAME!r}.\n"
+            f"Observed body text:\n{selected_body}",
+        )
+    if attachment_size_label not in summary_line:
+        raise AssertionError(
+            "Step 2 failed: the selected-file summary showed the wrong file size before "
+            "uploading the replacement.\n"
+            f"Expected size label: {attachment_size_label}\n"
+            f"Observed summary line: {summary_line}",
+        )
+    return summary_line
 
 
 def _observe_manifest_state(service: LiveSetupRepositoryService) -> dict[str, object]:
