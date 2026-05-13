@@ -1,7 +1,6 @@
 import 'dart:io';
 
-import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
-import 'package:trackstate/data/services/issue_mutation_service.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/issue_mutation_models.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
@@ -34,35 +33,20 @@ class Ts601ArchiveParentWithChildrenFixture {
 
   Future<void> dispose() => directory.delete(recursive: true);
 
-  Future<Ts601ArchiveParentWithChildrenObservation>
-  observeBeforeArchiveAttempt() async {
-    final repository = LocalTrackStateRepository(
-      repositoryPath: repositoryPath,
-    );
+  Future<Ts601ArchiveParentWithChildrenObservation> observeRepositoryState({
+    required TrackStateRepository repository,
+    IssueMutationResult<TrackStateIssue>? result,
+  }) async {
     final snapshot = await repository.loadSnapshot();
-    return _observeState(snapshot: snapshot);
-  }
-
-  Future<Ts601ArchiveParentWithChildrenObservation>
-  attemptArchiveViaService() async {
-    final repository = LocalTrackStateRepository(
-      repositoryPath: repositoryPath,
+    return _observeState(
+      repository: repository,
+      snapshot: snapshot,
+      result: result,
     );
-    await repository.loadSnapshot();
-    await repository.connect(
-      const RepositoryConnection(repository: '.', branch: 'main', token: ''),
-    );
-    final service = IssueMutationService(repository: repository);
-    final result = await service.archiveIssue(parentIssueKey);
-
-    final refreshedRepository = LocalTrackStateRepository(
-      repositoryPath: repositoryPath,
-    );
-    final refreshedSnapshot = await refreshedRepository.loadSnapshot();
-    return _observeState(snapshot: refreshedSnapshot, result: result);
   }
 
   Future<Ts601ArchiveParentWithChildrenObservation> _observeState({
+    required TrackStateRepository repository,
     required TrackerSnapshot snapshot,
     IssueMutationResult<TrackStateIssue>? result,
   }) async {
@@ -95,19 +79,13 @@ class Ts601ArchiveParentWithChildrenFixture {
       childIssueFileExists: childIssueFileExists,
       archivedParentIssueFileExists: archivedParentIssueFileExists,
       projectSearchResults: List<TrackStateIssue>.unmodifiable(
-        await LocalTrackStateRepository(
-          repositoryPath: repositoryPath,
-        ).searchIssues('project = $projectKey'),
+        await repository.searchIssues('project = $projectKey'),
       ),
       parentSearchResults: List<TrackStateIssue>.unmodifiable(
-        await LocalTrackStateRepository(
-          repositoryPath: repositoryPath,
-        ).searchIssues('project = $projectKey $parentIssueKey'),
+        await repository.searchIssues('project = $projectKey $parentIssueKey'),
       ),
       childSearchResults: List<TrackStateIssue>.unmodifiable(
-        await LocalTrackStateRepository(
-          repositoryPath: repositoryPath,
-        ).searchIssues('project = $projectKey $childIssueKey'),
+        await repository.searchIssues('project = $projectKey $childIssueKey'),
       ),
       headRevision: await _gitOutput(['rev-parse', 'HEAD']),
       latestCommitSubject: await _gitOutput(['log', '-1', '--pretty=%s']),

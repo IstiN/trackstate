@@ -1,15 +1,36 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../components/factories/testing_dependencies.dart';
+import '../../core/interfaces/issue_archive_mutation_port.dart';
+import '../../core/interfaces/local_git_repository_port.dart';
 import 'support/ts601_archive_parent_with_children_fixture.dart';
 
 void main() {
-  test(
+  testWidgets(
     'TS-601 archives a parent issue successfully while child issues remain active',
-    () async {
-      final fixture = await Ts601ArchiveParentWithChildrenFixture.create();
-      addTearDown(fixture.dispose);
+    (tester) async {
+      final fixture = await tester.runAsync(
+        Ts601ArchiveParentWithChildrenFixture.create,
+      );
+      if (fixture == null) {
+        throw StateError('TS-601 fixture creation did not complete.');
+      }
+      addTearDown(() async {
+        await tester.runAsync(fixture.dispose);
+      });
 
-      final beforeArchive = await fixture.observeBeforeArchiveAttempt();
+      const dependencies = defaultTestingDependencies;
+      final LocalGitRepositoryPort repositoryPort = dependencies
+          .createLocalGitRepositoryPort(tester);
+      final beforeRepository = await repositoryPort.openRepository(
+        repositoryPath: fixture.repositoryPath,
+      );
+      final beforeArchive = await tester.runAsync(
+        () => fixture.observeRepositoryState(repository: beforeRepository),
+      );
+      if (beforeArchive == null) {
+        throw StateError('TS-601 pre-archive observation did not complete.');
+      }
 
       expect(
         beforeArchive.parentIssue?.key,
@@ -84,7 +105,24 @@ void main() {
             'Precondition failed: the seeded repository must start clean so any observed change comes from the archive attempt.',
       );
 
-      final afterArchive = await fixture.attemptArchiveViaService();
+      final IssueArchiveMutationPort archivePort = dependencies
+          .createIssueArchiveMutationPort(tester);
+      final mutationResult = await archivePort.archiveIssue(
+        repositoryPath: fixture.repositoryPath,
+        issueKey: Ts601ArchiveParentWithChildrenFixture.parentIssueKey,
+      );
+      final afterRepository = await repositoryPort.openRepository(
+        repositoryPath: fixture.repositoryPath,
+      );
+      final afterArchive = await tester.runAsync(
+        () => fixture.observeRepositoryState(
+          repository: afterRepository,
+          result: mutationResult,
+        ),
+      );
+      if (afterArchive == null) {
+        throw StateError('TS-601 post-archive observation did not complete.');
+      }
 
       expect(
         afterArchive.result?.isSuccess,
