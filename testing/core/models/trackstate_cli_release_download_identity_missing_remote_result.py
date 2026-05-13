@@ -11,6 +11,7 @@ from testing.core.models.trackstate_cli_command_observation import (
 class TrackStateCliReleaseDownloadIdentityMissingRemoteRepositoryState:
     issue_main_exists: bool
     attachments_metadata_exists: bool
+    manifest_text: str | None
     metadata_attachment_ids: tuple[str, ...]
     expected_output_exists: bool
     expected_output_size_bytes: int | None
