@@ -2945,6 +2945,63 @@ Nested release-backed attachment issue.
   );
 
   test(
+    'provider-backed repository surfaces local release auth guidance before hosted upload attempts',
+    () async {
+      var requestCount = 0;
+      final provider = _FakeRemoteIdentityProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          releaseAttachmentWriteFailureReason:
+              'GitHub Releases attachment storage requires GitHub authentication. '
+              'Set TRACKSTATE_TOKEN or authenticate with gh before using '
+              'release-backed attachments from a local repository.',
+          canCheckCollaborators: false,
+        ),
+        repository: 'cli/cli',
+        files: _releaseAttachmentFixtureFiles(),
+      );
+      final repository = ProviderBackedTrackStateRepository(
+        provider: provider,
+        githubClient: MockClient((request) async {
+          requestCount += 1;
+          return http.Response('', 404);
+        }),
+      );
+
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: 'cli/cli',
+          branch: 'main',
+          token: '',
+        ),
+      );
+
+      await expectLater(
+        () => repository.uploadIssueAttachment(
+          issue: snapshot.issues.single,
+          name: 'release plan.txt',
+          bytes: Uint8List.fromList(utf8.encode('roadmap')),
+        ),
+        throwsA(
+          isA<TrackStateRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            contains(
+              'GitHub Releases attachment storage requires GitHub authentication.',
+            ),
+          ),
+        ),
+      );
+      expect(requestCount, 0);
+    },
+  );
+
+  test(
     'provider-backed repository surfaces local release auth guidance before hosted download lookup',
     () async {
       var requestCount = 0;
