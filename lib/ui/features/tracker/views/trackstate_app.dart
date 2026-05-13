@@ -1313,26 +1313,18 @@ class _AccessCallout extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   if (primaryActionLabel != null && onPrimaryAction != null)
-                    Semantics(
-                      button: true,
-                      label: primaryActionLabel,
-                      child: OutlinedButton(
-                        onPressed: onPrimaryAction,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: colors.text,
-                          side: BorderSide(color: accentColor),
-                        ),
-                        child: Text(primaryActionLabel!),
+                    OutlinedButton(
+                      onPressed: onPrimaryAction,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: colors.text,
+                        side: BorderSide(color: accentColor),
                       ),
+                      child: Text(primaryActionLabel!),
                     ),
                   if (secondaryActionLabel != null && onSecondaryAction != null)
-                    Semantics(
-                      button: true,
-                      label: secondaryActionLabel,
-                      child: FilledButton(
-                        onPressed: onSecondaryAction,
-                        child: Text(secondaryActionLabel!),
-                      ),
+                    FilledButton(
+                      onPressed: onSecondaryAction,
+                      child: Text(secondaryActionLabel!),
                     ),
                 ],
               ),
@@ -8111,13 +8103,25 @@ class _AttachmentsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
-    final accessMessage = _attachmentsAccessMessage(l10n, viewModel);
+    final hostedRepositoryPathDownloadOnly =
+        viewModel.exposesHostedAccessGates &&
+        !viewModel.usesGitHubReleasesAttachmentStorage;
+    final accessTitle = hostedRepositoryPathDownloadOnly
+        ? l10n.repositoryAccessAttachmentRestrictedTitle
+        : _repositoryAccessTitle(l10n, viewModel);
+    final accessMessage = hostedRepositoryPathDownloadOnly
+        ? l10n.attachmentsDownloadOnlyMessage
+        : _attachmentsAccessMessage(l10n, viewModel);
     final attachmentDownloadOnly =
-        viewModel.hostedRepositoryAccessMode ==
-            HostedRepositoryAccessMode.attachmentRestricted &&
-        !viewModel.canUploadIssueAttachments;
+        hostedRepositoryPathDownloadOnly ||
+        (viewModel.hostedRepositoryAccessMode ==
+                HostedRepositoryAccessMode.attachmentRestricted &&
+            !viewModel.canUploadIssueAttachments);
     final canChooseAttachment =
-        !isSaving && !isLoading && viewModel.canUploadIssueAttachments;
+        !attachmentDownloadOnly &&
+        !isSaving &&
+        !isLoading &&
+        viewModel.canUploadIssueAttachments;
     final canUploadAttachment =
         canChooseAttachment && selectedAttachment != null;
     return Column(
@@ -8126,7 +8130,7 @@ class _AttachmentsTab extends StatelessWidget {
         if (accessMessage.isNotEmpty) ...[
           _AccessCallout(
             semanticLabel: l10n.attachments,
-            title: _repositoryAccessTitle(l10n, viewModel),
+            title: accessTitle,
             message: accessMessage,
             primaryActionLabel: attachmentDownloadOnly
                 ? l10n.openSettings
@@ -8197,27 +8201,29 @@ class _AttachmentsTab extends StatelessWidget {
                   message: uploadNotice!,
                 ),
               ],
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _IssueDetailActionButton(
-                    label: l10n.chooseAttachment,
-                    onPressed: canChooseAttachment ? onChooseAttachment : null,
-                  ),
-                  _IssueDetailActionButton(
-                    label: l10n.uploadAttachment,
-                    emphasized: true,
-                    onPressed: canUploadAttachment ? onUpload : null,
-                  ),
-                  if (selectedAttachment != null)
+              if (!hostedRepositoryPathDownloadOnly) ...[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
                     _IssueDetailActionButton(
-                      label: l10n.clearSelectedAttachment,
-                      onPressed: isSaving ? null : onClearSelection,
+                      label: l10n.chooseAttachment,
+                      onPressed: canChooseAttachment ? onChooseAttachment : null,
                     ),
-                ],
-              ),
+                    _IssueDetailActionButton(
+                      label: l10n.uploadAttachment,
+                      emphasized: true,
+                      onPressed: canUploadAttachment ? onUpload : null,
+                    ),
+                    if (selectedAttachment != null)
+                      _IssueDetailActionButton(
+                        label: l10n.clearSelectedAttachment,
+                        onPressed: isSaving ? null : onClearSelection,
+                      ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),

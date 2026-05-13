@@ -84,6 +84,7 @@ class LiveHostedRelease:
     assets: list[LiveHostedReleaseAsset]
     body: str = ""
     draft: bool = False
+    prerelease: bool = False
     target_commitish: str = ""
 
 
@@ -428,6 +429,23 @@ class LiveSetupRepositoryService:
             return matches[0]
         return self.fetch_release_by_tag(tag_name)
 
+    def list_matching_tag_refs(self, tag_name: str) -> tuple[str, ...]:
+        try:
+            payload = self._read_json(
+                f"/repos/{self.repository}/git/matching-refs/tags/{quote(tag_name, safe='')}",
+            )
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                return ()
+            raise
+        if not isinstance(payload, list):
+            return ()
+        return tuple(
+            str(entry.get("ref", "")).strip()
+            for entry in payload
+            if isinstance(entry, dict) and str(entry.get("ref", "")).strip()
+        )
+
     def download_release_asset_bytes(self, asset_id: int) -> bytes:
         request = urllib.request.Request(
             f"https://api.github.com/repos/{self.repository}/releases/assets/{asset_id}",
@@ -491,6 +509,32 @@ class LiveSetupRepositoryService:
                     f"{response.status}.",
                 )
 
+    def delete_tag_ref(self, tag_name: str) -> None:
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{self.repository}/git/refs/tags/{quote(tag_name, safe='')}",
+            method="DELETE",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                **(
+                    {"Authorization": f"Bearer {self.token}"}
+                    if self.token
+                    else {}
+                ),
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                if response.status not in (204, 404):
+                    raise RuntimeError(
+                        f"GitHub delete for tag {tag_name} returned unexpected status "
+                        f"{response.status}.",
+                    )
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                return
+            raise
+
     def create_release(
         self,
         *,
@@ -515,13 +559,39 @@ class LiveSetupRepositoryService:
         )
         return self._parse_release(payload, context=f"create release {tag_name}")
 
-    def update_release_name(self, release_id: int, *, name: str) -> LiveHostedRelease:
-        payload = self._write_json(
+    def update_release(
+        self,
+        release_id: int,
+        *,
+        name: str | None = None,
+        body: str | None = None,
+        target_commitish: str | None = None,
+        draft: bool | None = None,
+        prerelease: bool | None = None,
+    ) -> LiveHostedRelease:
+        payload: dict[str, object] = {}
+        if name is not None:
+            payload["name"] = name
+        if body is not None:
+            payload["body"] = body
+        if target_commitish is not None:
+            payload["target_commitish"] = target_commitish
+        if draft is not None:
+            payload["draft"] = draft
+        if prerelease is not None:
+            payload["prerelease"] = prerelease
+        if not payload:
+            raise ValueError("update_release requires at least one field to update.")
+
+        updated = self._write_json(
             f"/repos/{self.repository}/releases/{release_id}",
-            payload={"name": name},
+            payload=payload,
             method="PATCH",
         )
-        return self._parse_release(payload, context=f"update release {release_id}")
+        return self._parse_release(updated, context=f"update release {release_id}")
+
+    def update_release_name(self, release_id: int, *, name: str) -> LiveHostedRelease:
+        return self.update_release(release_id, name=name)
 
     def upload_release_asset(
         self,
@@ -565,7 +635,6 @@ class LiveSetupRepositoryService:
             id=int(raw_payload.get("id", 0)),
             name=str(raw_payload.get("name", "")).strip(),
         )
-
     def _read_config_names(self, path: str) -> list[str]:
         values = self._read_repo_json(path)
         return [
@@ -735,6 +804,7 @@ class LiveSetupRepositoryService:
             ],
             body=str(payload.get("body", "")),
             draft=bool(payload.get("draft", False)),
+            prerelease=bool(payload.get("prerelease", False)),
             target_commitish=str(payload.get("target_commitish", "")).strip(),
         )
 

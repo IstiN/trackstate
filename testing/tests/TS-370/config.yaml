@@ -1,0 +1,8 @@
+test_id: TS-370
+type: web
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Uses the hosted reactive repository fixture so the production widget tree drives the disconnected and read-only repository-access banner states without mocking the UI itself.
+  - Verifies the global banner state across dashboard, board, JQL search, hierarchy, and issue-detail flows, then confirms the recovery CTA opens the canonical reconnect surface.

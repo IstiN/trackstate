@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import io
 import json
 import os
 import subprocess
-import tarfile
 import tempfile
 from pathlib import Path
 
@@ -31,8 +29,6 @@ class PythonTrackStateCliReleaseDownloadAuthFailureFramework(
     PythonTrackStateCliCompiledLocalFramework,
     TrackStateCliReleaseDownloadAuthFailureProbe,
 ):
-    _COMPILED_SOURCE_REF = "origin/main"
-
     def __init__(self, repository_root: Path) -> None:
         super().__init__(repository_root)
 
@@ -41,34 +37,31 @@ class PythonTrackStateCliReleaseDownloadAuthFailureFramework(
         *,
         config: TrackStateCliReleaseDownloadAuthFailureConfig,
     ) -> TrackStateCliReleaseDownloadAuthFailureValidationResult:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-522-source-") as source_dir:
-            source_root = Path(source_dir)
-            self._export_git_ref(self._COMPILED_SOURCE_REF, destination=source_root)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-522-bin-") as bin_dir:
-                executable_path = Path(bin_dir) / "trackstate"
-                self._compile_executable(executable_path, source_root=source_root)
-                with tempfile.TemporaryDirectory(prefix="trackstate-ts-522-repo-") as temp_dir:
-                    repository_path = Path(temp_dir)
-                    self._seed_local_repository(repository_path, config=config)
-                    initial_state = self._capture_repository_state(
-                        repository_path=repository_path,
-                        config=config,
-                    )
-                    observation, stripped_environment_variables = self._observe_command(
-                        requested_command=config.requested_command,
-                        repository_path=repository_path,
-                        executable_path=executable_path,
-                    )
-                    final_state = self._capture_repository_state(
-                        repository_path=repository_path,
-                        config=config,
-                    )
-                    return TrackStateCliReleaseDownloadAuthFailureValidationResult(
-                        initial_state=initial_state,
-                        final_state=final_state,
-                        observation=observation,
-                        stripped_environment_variables=stripped_environment_variables,
-                    )
+        with tempfile.TemporaryDirectory(prefix="trackstate-ts-522-bin-") as bin_dir:
+            executable_path = Path(bin_dir) / "trackstate"
+            self._compile_executable(executable_path)
+            with tempfile.TemporaryDirectory(prefix="trackstate-ts-522-repo-") as temp_dir:
+                repository_path = Path(temp_dir)
+                self._seed_local_repository(repository_path, config=config)
+                initial_state = self._capture_repository_state(
+                    repository_path=repository_path,
+                    config=config,
+                )
+                observation, stripped_environment_variables = self._observe_command(
+                    requested_command=config.requested_command,
+                    repository_path=repository_path,
+                    executable_path=executable_path,
+                )
+                final_state = self._capture_repository_state(
+                    repository_path=repository_path,
+                    config=config,
+                )
+                return TrackStateCliReleaseDownloadAuthFailureValidationResult(
+                    initial_state=initial_state,
+                    final_state=final_state,
+                    observation=observation,
+                    stripped_environment_variables=stripped_environment_variables,
+                )
 
     def _observe_command(
         self,
@@ -104,9 +97,9 @@ class PythonTrackStateCliReleaseDownloadAuthFailureFramework(
             requested_command=requested_command,
             executed_command=executed_command,
             fallback_reason=(
-                "Pinned execution to a temporary executable compiled from origin/main "
+                "Pinned execution to a temporary executable compiled from this checkout "
                 "and stripped GitHub credentials from the environment so TS-522 runs "
-                "the exact deployed local-download path without ambient auth."
+                "the exact local download command without ambient auth."
             ),
             repository_path=str(repository_path),
             compiled_binary_path=str(executable_path),
@@ -119,29 +112,6 @@ class PythonTrackStateCliReleaseDownloadAuthFailureFramework(
             ),
         )
         return observation, stripped
-
-    def _export_git_ref(self, git_ref: str, *, destination: Path) -> None:
-        completed = subprocess.run(
-            (
-                "git",
-                "-C",
-                str(self._repository_root),
-                "archive",
-                "--format=tar",
-                git_ref,
-            ),
-            capture_output=True,
-            check=False,
-        )
-        if completed.returncode != 0:
-            raise AssertionError(
-                "Failed to export the TrackState CLI source used by TS-522.\n"
-                f"git ref: {git_ref}\n"
-                f"stdout:\n{completed.stdout.decode('utf-8', errors='replace')}\n"
-                f"stderr:\n{completed.stderr.decode('utf-8', errors='replace')}"
-            )
-        with tarfile.open(fileobj=io.BytesIO(completed.stdout), mode="r:") as archive:
-            archive.extractall(destination)
 
     def _seed_local_repository(
         self,
