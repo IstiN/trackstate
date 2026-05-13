@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Sequence
 
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
 from testing.core.interfaces.web_app_session import WebAppTimeoutError
@@ -59,6 +60,16 @@ class RepositoryAccessFocusObservation:
     text: str
     outer_html: str
     body_text: str
+
+
+@dataclass(frozen=True)
+class RepositoryAccessActivationObservation:
+    key: str
+    matched_text: str
+    response_kind: str
+    response_text: str
+    body_text_before: str
+    body_text_after: str
 
 
 @dataclass(frozen=True)
@@ -949,6 +960,105 @@ class LiveProjectSettingsPage:
             body_text=str(payload.get("bodyText", "")),
         )
 
+    def focus_repository_access_connect_token_via_keyboard(
+        self,
+        *,
+        token: str,
+        timeout_ms: int = 30_000,
+    ) -> list[RepositoryAccessFocusObservation]:
+        self.focus_repository_access_token_field(timeout_ms=timeout_ms)
+        self._session.fill(self._token_input_selector, token, timeout_ms=timeout_ms)
+        initial_focus = self.wait_for_repository_access_focus(
+            "Fine-grained token",
+            timeout_ms=5_000,
+        )
+        self.press_tab_from_repository_access_focus(
+            "Fine-grained token",
+            timeout_ms=timeout_ms,
+        )
+        remember_focus = self.wait_for_repository_access_focus(
+            "Remember on this browser",
+            timeout_ms=5_000,
+        )
+        self.press_tab_from_repository_access_focus(
+            "Remember on this browser",
+            timeout_ms=timeout_ms,
+        )
+        connect_focus = self.wait_for_repository_access_focus(
+            "Connect token",
+            timeout_ms=5_000,
+        )
+        return [initial_focus, remember_focus, connect_focus]
+
+    def wait_for_repository_access_feedback_absence(
+        self,
+        feedback_texts: Sequence[str],
+        *,
+        timeout_ms: int = 5_000,
+    ) -> str:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                (expectedTexts) => {
+                  const bodyText = document.body?.innerText ?? '';
+                  const matchedText = expectedTexts.find((text) => bodyText.includes(text));
+                  return matchedText ? null : bodyText;
+                }
+                """,
+                arg=list(feedback_texts),
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError:
+            body_text = self.body_text()
+            raise AssertionError(
+                "The Repository access flow already showed visible connection feedback "
+                "before the keyboard activation started.\n"
+                f"Observed body text:\n{body_text}",
+            ) from None
+        if not isinstance(payload, str):
+            return self.body_text()
+        return payload
+
+    def activate_focused_repository_access_connect_token(
+        self,
+        *,
+        key: str,
+        feedback_texts: Sequence[str],
+        connected_banner_text: str,
+        timeout_ms: int = 120_000,
+    ) -> RepositoryAccessActivationObservation:
+        self.wait_for_repository_access_focus("Connect token", timeout_ms=5_000)
+        body_text_before = self.body_text()
+        self._session.press_key(key, timeout_ms=30_000)
+        try:
+            wait_match = self._session.wait_for_any_text(
+                feedback_texts,
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError:
+            raise AssertionError(
+                "The focused Connect token button did not surface visible connection "
+                "feedback after keyboard activation.\n"
+                f"Observed body text:\n{self.body_text()}",
+            ) from None
+        return RepositoryAccessActivationObservation(
+            key=key,
+            matched_text=wait_match.matched_text,
+            response_kind=(
+                "success"
+                if wait_match.matched_text == connected_banner_text
+                else "error"
+                if wait_match.matched_text == "GitHub connection failed:"
+                else "feedback"
+            ),
+            response_text=self._extract_repository_access_feedback_text(
+                wait_match.body_text,
+                wait_match.matched_text,
+            ),
+            body_text_before=body_text_before,
+            body_text_after=wait_match.body_text,
+        )
+
     def observe_repository_access_section(
         self,
         *,
@@ -1285,6 +1395,19 @@ class LiveProjectSettingsPage:
                 f"Observed body text:\n{self.body_text()}",
             ) from error
         return self.body_text()
+
+    @staticmethod
+    def _extract_repository_access_feedback_text(
+        body_text: str,
+        matched_text: str,
+    ) -> str:
+        if matched_text != "GitHub connection failed:":
+            return matched_text
+        for line in body_text.splitlines():
+            normalized = " ".join(line.split())
+            if normalized.startswith(matched_text):
+                return normalized
+        return matched_text
 
     def _scroll_into_view(self, selector: str) -> None:
         self._session.evaluate(
