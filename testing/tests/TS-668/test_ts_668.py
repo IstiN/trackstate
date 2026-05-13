@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from testing.components.pages.live_workspace_management_page import (  # noqa: E402
     LiveWorkspaceManagementPage,
+    SavedWorkspaceActionObservation,
     SavedWorkspaceListObservation,
     SavedWorkspaceRowObservation,
 )
@@ -43,6 +44,8 @@ FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts668_failure.png"
 EXPECTED_PRIMARY_HEX = "#b24328"
 EXPECTED_PRIMARY_SOFT_HEX = "#f2d2c4"
 MIN_TEXT_CONTRAST = 4.5
+MIN_GRAPHIC_CONTRAST = 3.0
+MIN_CONTROL_BORDER_CONTRAST = 3.0
 HOSTED_TARGET = "IstiN/trackstate-setup"
 LOCAL_TARGET = "/tmp/trackstate-demo"
 DEFAULT_BRANCH = "main"
@@ -183,6 +186,8 @@ def main() -> None:
                 _assert_saved_workspace_section(observation)
                 hosted_row = _find_row(observation, target=HOSTED_TARGET)
                 local_row = _find_row(observation, target=LOCAL_TARGET)
+                _assert_target_type_row(hosted_row, expected_type="Hosted")
+                _assert_target_type_row(local_row, expected_type="Local")
                 _record_step(
                     result,
                     step=2,
@@ -190,11 +195,12 @@ def main() -> None:
                     action="Inspect the row for a 'Local' workspace and a 'Hosted' workspace.",
                     observed=(
                         f"Found {observation.row_count} saved workspace rows; hosted row text="
-                        f"{hosted_row.visible_text!r}; local row text={local_row.visible_text!r}."
+                        f"{hosted_row.visible_text!r}; local row text={local_row.visible_text!r}; "
+                        f"hosted_icon_count={hosted_row.image_count}; "
+                        f"local_icon_count={local_row.image_count}."
                     ),
                 )
-                _assert_target_type_row(hosted_row, expected_type="Hosted")
-                _assert_target_type_row(local_row, expected_type="Local")
+                _assert_selected_row_tokens(observation)
                 _record_step(
                     result,
                     step=3,
@@ -205,9 +211,12 @@ def main() -> None:
                     ),
                     observed=_selected_row_summary(observation),
                 )
-
-                _assert_selected_row_tokens(observation)
-                _assert_accessibility(observation)
+                _assert_accessibility(
+                    {
+                        "Hosted": hosted_row,
+                        "Local": local_row,
+                    }
+                )
                 _record_step(
                     result,
                     step=4,
@@ -221,23 +230,26 @@ def main() -> None:
                     check=(
                         "Viewed the rendered Project Settings screen as a user and confirmed "
                         "the Saved workspaces card presented one hosted row and one local row "
-                        "with explicit target-type text."
+                        "with explicit target-type text and a visible icon signal for each row."
                     ),
                     observed=(
                         f"section_visible={observation.section_visible}; "
                         f"hosted_row={hosted_row.visible_text!r}; "
-                        f"local_row={local_row.visible_text!r}"
+                        f"local_row={local_row.visible_text!r}; "
+                        f"hosted_icon_label={hosted_row.icon_accessibility_label!r}; "
+                        f"local_icon_label={local_row.icon_accessibility_label!r}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
                         "Confirmed the selected row used the expected selection treatment and "
-                        "that row controls exposed readable accessible labels."
+                        "that row controls and workspace-type icons exposed accessible, "
+                        "high-contrast signals."
                     ),
                     observed=(
                         f"selected_row={_selected_row_summary(observation)}; "
-                        f"buttons={_button_summary(observation)}"
+                        f"accessibility={_accessibility_summary_for_rows({'Hosted': hosted_row, 'Local': local_row})}"
                     ),
                 )
 
@@ -357,6 +369,12 @@ def _assert_target_type_row(
             "non-empty semantics label.\n"
             f"Observed row: {_row_asdict(row)}",
         )
+    if row.image_count < 1:
+        raise AssertionError(
+            "Expected result failed: the saved workspace row did not expose any "
+            "visible icon/image signal alongside the workspace-type text.\n"
+            f"Observed row: {_row_asdict(row)}",
+        )
     if row.target_type_label == expected_type:
         return
     raise AssertionError(
@@ -392,19 +410,60 @@ def _assert_selected_row_tokens(observation: SavedWorkspaceListObservation) -> N
         )
 
 
-def _assert_accessibility(observation: SavedWorkspaceListObservation) -> None:
-    for row in observation.rows:
+def _assert_accessibility(rows_by_type: dict[str, SavedWorkspaceRowObservation]) -> None:
+    for expected_type, row in rows_by_type.items():
         if not row.semantics_label:
             raise AssertionError(
                 "Step 4 failed: a workspace row was missing its screen-reader "
                 "semantics label.\n"
                 f"Observed row: {_row_asdict(row)}",
             )
-        for label in row.button_labels:
-            if not label.strip():
+        if not row.icon_accessibility_label:
+            raise AssertionError(
+                "Step 4 failed: the workspace-type icon did not expose any "
+                "accessible label or equivalent public semantics signal.\n"
+                f"Expected row type: {expected_type}\n"
+                f"Observed row: {_row_asdict(row)}",
+            )
+        if row.icon_contrast_ratio is None or row.icon_contrast_ratio < MIN_GRAPHIC_CONTRAST:
+            raise AssertionError(
+                "Expected result failed: the workspace-type icon contrast did not "
+                "meet WCAG AA non-text contrast expectations.\n"
+                f"Expected row type: {expected_type}\n"
+                f"Observed row: {_row_asdict(row)}",
+            )
+        if not row.action_observations:
+            raise AssertionError(
+                "Step 4 failed: the workspace row did not expose the expected "
+                "interactive controls for accessibility inspection.\n"
+                f"Expected row type: {expected_type}\n"
+                f"Observed row: {_row_asdict(row)}",
+            )
+        for action in row.action_observations:
+            if not action.label.strip():
                 raise AssertionError(
                     "Step 4 failed: a row action button rendered without an accessible "
                     "name.\n"
+                    f"Observed row: {_row_asdict(row)}",
+                )
+            if action.contrast_ratio is None or action.contrast_ratio < MIN_TEXT_CONTRAST:
+                raise AssertionError(
+                    "Expected result failed: a row control label did not meet WCAG AA "
+                    "contrast requirements.\n"
+                    f"Expected row type: {expected_type}\n"
+                    f"Observed action: {_action_asdict(action)}\n"
+                    f"Observed row: {_row_asdict(row)}",
+                )
+            if (
+                action.border_color is not None
+                and action.border_contrast_ratio is not None
+                and action.border_contrast_ratio < MIN_CONTROL_BORDER_CONTRAST
+            ):
+                raise AssertionError(
+                    "Expected result failed: a row control outline did not remain "
+                    "visibly distinct against the row background.\n"
+                    f"Expected row type: {expected_type}\n"
+                    f"Observed action: {_action_asdict(action)}\n"
                     f"Observed row: {_row_asdict(row)}",
                 )
         if row.title_contrast_ratio is None or row.title_contrast_ratio < MIN_TEXT_CONTRAST:
@@ -446,6 +505,12 @@ def _selected_row_summary(observation: SavedWorkspaceListObservation) -> str:
 
 
 def _accessibility_summary(observation: SavedWorkspaceListObservation) -> str:
+    rows_by_type: dict[str, SavedWorkspaceRowObservation] = {}
+    for row in observation.rows:
+        if row.target_type_label in {"Hosted", "Local"}:
+            rows_by_type[row.target_type_label] = row
+    if rows_by_type:
+        return _accessibility_summary_for_rows(rows_by_type)
     return "; ".join(
         (
             f"{row.display_name or row.visible_text}: "
@@ -453,16 +518,42 @@ def _accessibility_summary(observation: SavedWorkspaceListObservation) -> str:
             f"title_contrast={row.title_contrast_ratio}, "
             f"detail_contrast={row.detail_contrast_ratio}, "
             f"type_contrast={row.type_contrast_ratio}, "
-            f"buttons={list(row.button_labels)}"
+            f"icon_label={row.icon_accessibility_label!r}, "
+            f"icon_contrast={row.icon_contrast_ratio}, "
+            f"actions={_action_summary(row.action_observations)}"
         )
         for row in observation.rows
     )
 
 
-def _button_summary(observation: SavedWorkspaceListObservation) -> str:
+def _accessibility_summary_for_rows(
+    rows_by_type: dict[str, SavedWorkspaceRowObservation],
+) -> str:
     return "; ".join(
-        f"{row.display_name or row.visible_text}: {list(row.button_labels)}"
-        for row in observation.rows
+        (
+            f"{expected_type}: "
+            f"semantics={row.semantics_label!r}, "
+            f"icon_label={row.icon_accessibility_label!r}, "
+            f"icon_contrast={row.icon_contrast_ratio}, "
+            f"title_contrast={row.title_contrast_ratio}, "
+            f"detail_contrast={row.detail_contrast_ratio}, "
+            f"type_contrast={row.type_contrast_ratio}, "
+            f"actions={_action_summary(row.action_observations)}"
+        )
+        for expected_type, row in rows_by_type.items()
+    )
+
+
+def _action_summary(actions: tuple[SavedWorkspaceActionObservation, ...]) -> str:
+    return str(
+        [
+            {
+                "label": action.label,
+                "contrast": action.contrast_ratio,
+                "border_contrast": action.border_contrast_ratio,
+            }
+            for action in actions
+        ]
     )
 
 
@@ -576,8 +667,8 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "* Navigated to *Project Settings* and inspected the rendered saved-workspace rows.",
         (
             "* Verified whether the rows exposed explicit {{Hosted}} / {{Local}} "
-            "text, non-empty semantics labels, token-compliant selected-row colors, "
-            "and accessible row action labels."
+            "text, a visible workspace-type icon signal, token-compliant selected-row "
+            "colors, and accessible icon/control contrast."
         ),
         "",
         "h4. Result",
@@ -643,8 +734,8 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "- Navigated to **Project Settings** and inspected the rendered saved-workspace list.",
         (
             "- Checked for explicit `Hosted` / `Local` text labels, selected-row "
-            "token colors, non-empty semantics labels, accessible row action labels, "
-            "and WCAG AA text contrast."
+            "token colors, a visible workspace-type icon signal, non-empty semantics "
+            "labels, and WCAG AA icon/control contrast."
         ),
         "",
         "## Result",
@@ -874,6 +965,10 @@ def _step_observation(result: dict[str, object], step_number: int) -> str:
 
 def _row_asdict(row: SavedWorkspaceRowObservation) -> dict[str, object]:
     return asdict(row)
+
+
+def _action_asdict(action: SavedWorkspaceActionObservation) -> dict[str, object]:
+    return asdict(action)
 
 
 def _list_asdict(observation: SavedWorkspaceListObservation) -> dict[str, object]:

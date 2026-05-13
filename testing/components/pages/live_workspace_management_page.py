@@ -7,6 +7,16 @@ from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPa
 
 
 @dataclass(frozen=True)
+class SavedWorkspaceActionObservation:
+    label: str
+    foreground_color: str | None
+    background_color: str | None
+    border_color: str | None
+    contrast_ratio: float | None
+    border_contrast_ratio: float | None
+
+
+@dataclass(frozen=True)
 class SavedWorkspaceRowObservation:
     semantics_label: str | None
     display_name: str | None
@@ -22,8 +32,13 @@ class SavedWorkspaceRowObservation:
     title_contrast_ratio: float | None
     detail_contrast_ratio: float | None
     type_contrast_ratio: float | None
+    image_count: int
+    icon_accessibility_label: str | None
+    icon_color: str | None
+    icon_contrast_ratio: float | None
     action_labels: tuple[str, ...]
     button_labels: tuple[str, ...]
+    action_observations: tuple[SavedWorkspaceActionObservation, ...]
 
 
 @dataclass(frozen=True)
@@ -105,14 +120,90 @@ class LiveWorkspaceManagementPage:
                 const darker = Math.min(foregroundLuminance, backgroundLuminance);
                 return Number(((lighter + 0.05) / (darker + 0.05)).toFixed(2));
               };
+              const resolveComputedHex = (element, property) => {
+                if (!element) {
+                  return null;
+                }
+                return toHex(window.getComputedStyle(element)[property] || null);
+              };
+              const accessibleLabel = (element) =>
+                normalize(
+                  element?.getAttribute?.('aria-label')
+                    || element?.getAttribute?.('alt')
+                    || element?.getAttribute?.('title')
+                    || element?.innerText
+                    || ''
+                );
               const visibleElements = (root, selector = '*') =>
                 Array.from(root.querySelectorAll(selector)).filter((candidate) => isVisible(candidate));
+              const dedupeNestedElements = (elements) => {
+                const deduped = [];
+                for (const candidate of elements) {
+                  if (deduped.some((accepted) => accepted.contains(candidate))) {
+                    continue;
+                  }
+                  deduped.push(candidate);
+                }
+                return deduped;
+              };
               const actionNodeLabels = (root) =>
                 visibleElements(root, 'flt-semantics[role="button"],[role="button"],button')
-                  .map((element) => normalize(element.getAttribute('aria-label') || element.innerText || ''))
+                  .map((element) => accessibleLabel(element))
                   .filter((label) => label.length > 0);
               const hasSelectedSemantics = (root) =>
                 visibleElements(root, 'flt-semantics[aria-selected="true"],[aria-selected="true"]').length > 0;
+              const resolveForegroundColor = (element) => {
+                if (!element) {
+                  return null;
+                }
+                const directCandidates = [
+                  resolveComputedHex(element, 'color'),
+                  resolveComputedHex(element, 'stroke'),
+                  resolveComputedHex(element, 'fill'),
+                  toHex(element.getAttribute?.('stroke') || null),
+                  toHex(element.getAttribute?.('fill') || null),
+                ];
+                const directColor = directCandidates.find((value) => value);
+                if (directColor) {
+                  return directColor;
+                }
+                for (const descendant of element.querySelectorAll('svg,path,line,circle,rect,ellipse,polyline,polygon')) {
+                  const descendantColor = [
+                    resolveComputedHex(descendant, 'color'),
+                    resolveComputedHex(descendant, 'stroke'),
+                    resolveComputedHex(descendant, 'fill'),
+                    toHex(descendant.getAttribute?.('stroke') || null),
+                    toHex(descendant.getAttribute?.('fill') || null),
+                  ].find((value) => value);
+                  if (descendantColor) {
+                    return descendantColor;
+                  }
+                }
+                return null;
+              };
+              const resolveBackgroundColor = (element, fallback = null) => {
+                let current = element;
+                while (current && current !== document.body) {
+                  const backgroundColor = resolveComputedHex(current, 'backgroundColor');
+                  if (backgroundColor) {
+                    return backgroundColor;
+                  }
+                  current = current.parentElement;
+                }
+                return fallback;
+              };
+              const resolveBorderColor = (element) => {
+                let current = element;
+                while (current && current !== document.body) {
+                  const style = window.getComputedStyle(current);
+                  const borderColor = toHex(style.borderTopColor);
+                  if (Number.parseFloat(style.borderTopWidth || '0') > 0 && borderColor) {
+                    return borderColor;
+                  }
+                  current = current.parentElement;
+                }
+                return null;
+              };
               const findStyledElement = (element) => {
                 if (!element) {
                   return null;
@@ -262,6 +353,7 @@ class LiveWorkspaceManagementPage:
 
               const rowPayload = rows.map((rowCandidate) => {
                 const rowElement = rowCandidate.element;
+                const rowRect = rowElement.getBoundingClientRect();
                 const rawLines = (rowElement.innerText || '')
                   .split(/\\n+/)
                   .map((line) => normalize(line))
@@ -305,8 +397,64 @@ class LiveWorkspaceManagementPage:
                 const titleColor = titleElement ? toHex(window.getComputedStyle(titleElement).color) : null;
                 const detailColor = detailElement ? toHex(window.getComputedStyle(detailElement).color) : null;
                 const typeColor = typeElement ? toHex(window.getComputedStyle(typeElement).color) : null;
-                const buttonLabels = actionNodeLabels(rowElement);
-                const backgroundColor = rowStyles?.backgroundColor ?? null;
+                const backgroundColor = rowStyles?.backgroundColor ?? resolveBackgroundColor(rowElement, null);
+                const buttonElements = dedupeNestedElements(
+                  visibleElements(rowElement, 'flt-semantics[role="button"],[role="button"],button')
+                    .sort((left, right) => {
+                      const leftRect = left.getBoundingClientRect();
+                      const rightRect = right.getBoundingClientRect();
+                      const leftArea = leftRect.width * leftRect.height;
+                      const rightArea = rightRect.width * rightRect.height;
+                      return leftArea - rightArea;
+                    })
+                );
+                const actionObservations = buttonElements
+                  .map((element) => {
+                    const label = accessibleLabel(element);
+                    const actionBackgroundColor = resolveBackgroundColor(element, backgroundColor);
+                    const borderColor = resolveBorderColor(element);
+                    return {
+                      label,
+                      foregroundColor: resolveForegroundColor(element),
+                      backgroundColor: actionBackgroundColor,
+                      borderColor,
+                      contrastRatio: contrastRatio(
+                        resolveForegroundColor(element),
+                        actionBackgroundColor,
+                      ),
+                      borderContrastRatio: contrastRatio(
+                        borderColor,
+                        actionBackgroundColor ?? backgroundColor,
+                      ),
+                    };
+                  })
+                  .filter((candidate) => candidate.label.length > 0);
+                const buttonLabels = actionObservations.map((candidate) => candidate.label);
+                const imageElements = dedupeNestedElements(
+                  visibleElements(rowElement, 'flt-semantics[role="img"],[role="img"],img,svg,canvas')
+                    .filter((element) => {
+                      const rect = element.getBoundingClientRect();
+                      return rect.width > 0
+                        && rect.height > 0
+                        && rect.width <= rowRect.width * 0.5
+                        && rect.height <= rowRect.height;
+                    })
+                    .sort((left, right) => {
+                      const leftRect = left.getBoundingClientRect();
+                      const rightRect = right.getBoundingClientRect();
+                      return leftRect.left - rightRect.left;
+                    })
+                );
+                const iconElement = imageElements[0] ?? null;
+                const iconAccessibilityLabel = imageElements
+                  .map((element) => accessibleLabel(element))
+                  .find((label) => label.length > 0) ?? null;
+                const iconColor = iconElement
+                  ? (
+                    resolveForegroundColor(iconElement)
+                    ?? resolveForegroundColor(iconElement.parentElement)
+                  )
+                  : null;
                 return {
                   semanticsLabel,
                   displayName,
@@ -322,8 +470,13 @@ class LiveWorkspaceManagementPage:
                   titleContrastRatio: contrastRatio(titleColor, backgroundColor),
                   detailContrastRatio: contrastRatio(detailColor, backgroundColor),
                   typeContrastRatio: contrastRatio(typeColor, backgroundColor),
+                  imageCount: imageElements.length,
+                  iconAccessibilityLabel,
+                  iconColor,
+                  iconContrastRatio: contrastRatio(iconColor, backgroundColor),
                   actionLabels: rowActionLabels,
                   buttonLabels,
+                  actionObservations,
                 };
               });
 
@@ -406,8 +559,56 @@ class LiveWorkspaceManagementPage:
                     if row.get("typeContrastRatio") is not None
                     else None
                 ),
+                image_count=int(row.get("imageCount", 0)),
+                icon_accessibility_label=(
+                    str(row.get("iconAccessibilityLabel"))
+                    if row.get("iconAccessibilityLabel") is not None
+                    else None
+                ),
+                icon_color=(
+                    str(row.get("iconColor"))
+                    if row.get("iconColor") is not None
+                    else None
+                ),
+                icon_contrast_ratio=(
+                    float(row.get("iconContrastRatio"))
+                    if row.get("iconContrastRatio") is not None
+                    else None
+                ),
                 action_labels=tuple(str(label) for label in row.get("actionLabels", [])),
                 button_labels=tuple(str(label) for label in row.get("buttonLabels", [])),
+                action_observations=tuple(
+                    SavedWorkspaceActionObservation(
+                        label=str(action.get("label", "")),
+                        foreground_color=(
+                            str(action.get("foregroundColor"))
+                            if action.get("foregroundColor") is not None
+                            else None
+                        ),
+                        background_color=(
+                            str(action.get("backgroundColor"))
+                            if action.get("backgroundColor") is not None
+                            else None
+                        ),
+                        border_color=(
+                            str(action.get("borderColor"))
+                            if action.get("borderColor") is not None
+                            else None
+                        ),
+                        contrast_ratio=(
+                            float(action.get("contrastRatio"))
+                            if action.get("contrastRatio") is not None
+                            else None
+                        ),
+                        border_contrast_ratio=(
+                            float(action.get("borderContrastRatio"))
+                            if action.get("borderContrastRatio") is not None
+                            else None
+                        ),
+                    )
+                    for action in row.get("actionObservations", [])
+                    if isinstance(action, dict)
+                ),
             )
             for row in rows_payload
             if isinstance(row, dict)
