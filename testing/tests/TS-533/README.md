@@ -41,7 +41,9 @@ python testing/tests/TS-533/test_ts_533.py
 
 - **Pass:** the CLI fails immediately with explicit permission guidance such as
   requiring permission to manage releases or upload assets in the resolved
-  GitHub repository, and no local attachment file is written under
+  GitHub repository, or explicitly stating that the authenticated GitHub
+  identity does not permit GitHub Release uploads there, and no local
+  attachment file is written under
   `TS/TS-475/attachments/test.txt`.
 - **Fail:** the command succeeds, falls back to repository-path storage, leaves
   local repository changes behind, or returns only generic

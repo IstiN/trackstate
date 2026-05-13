@@ -40,10 +40,13 @@ runtime_inputs:
     - github releases
     - github-releases
     - release-backed
+    - github release uploads
   expected_auth_fragments:
     - permission to manage releases
     - permission to upload assets
     - requires permission
+    - does not permit
+    - does not permit github release uploads
   provider_capability_fragments:
     - authentication/configuration
     - supports release uploads
