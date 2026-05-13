@@ -6,4 +6,4 @@ dependencies: []
 notes:
   - Opens the deployed hosted TrackState app against the live setup repository in Chromium with a stored GitHub token.
   - Navigates to Project Settings > Repository access and verifies the visible Fine-grained token, Remember on this browser, and Connect token controls are present in the same section.
-  - Passes only when keyboard users can tab to the visible Connect token button and both Enter and Space initiate the live connection flow, surfacing the connected banner.
+  - Passes only when keyboard users can tab to the visible Connect token button and both Enter and Space initiate the live connection flow, surfacing new visible connection feedback such as the success banner or a visible error.

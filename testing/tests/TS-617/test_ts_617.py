@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from testing.components.pages.live_project_settings_page import (  # noqa: E402
     LiveProjectSettingsPage,
+    RepositoryAccessActivationObservation,
     RepositoryAccessControlsObservation,
     RepositoryAccessFocusObservation,
 )
@@ -33,9 +34,10 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts617_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts617_failure.png"
-TOKEN_SELECTOR = 'input[aria-label="Fine-grained token"]'
+CONNECTION_ERROR_PREFIX = "GitHub connection failed:"
 
 
 def main() -> None:
@@ -91,7 +93,6 @@ def main() -> None:
 
                 enter_observation = _exercise_keyboard_activation(
                     result=result,
-                    tracker_page=tracker_page,
                     settings_page=settings_page,
                     token=token,
                     connected_banner=connected_banner,
@@ -122,7 +123,7 @@ def main() -> None:
                         "Verified the user-visible response after pressing Enter on the "
                         "focused Connect token button."
                     ),
-                    observed=str(enter_observation["banner_text"]),
+                    observed=str(enter_observation["feedback_text"]),
                 )
 
                 tracker_page.session.goto(
@@ -144,7 +145,6 @@ def main() -> None:
                 refreshed_settings_page = LiveProjectSettingsPage(tracker_page)
                 space_observation = _exercise_keyboard_activation(
                     result=result,
-                    tracker_page=tracker_page,
                     settings_page=refreshed_settings_page,
                     token=token,
                     connected_banner=connected_banner,
@@ -173,7 +173,7 @@ def main() -> None:
                         "Verified the user-visible response after pressing Space on the "
                         "focused Connect token button."
                     ),
-                    observed=str(space_observation["banner_text"]),
+                    observed=str(space_observation["feedback_text"]),
                 )
 
                 refreshed_settings_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
@@ -200,7 +200,6 @@ def main() -> None:
 def _exercise_keyboard_activation(
     *,
     result: dict[str, object],
-    tracker_page,
     settings_page: LiveProjectSettingsPage,
     token: str,
     connected_banner: str,
@@ -216,7 +215,6 @@ def _exercise_keyboard_activation(
     _assert_visible_controls(controls, step=navigation_step)
     return _exercise_keyboard_activation_with_result(
         result=result,
-        tracker_page=tracker_page,
         settings_page=settings_page,
         token=token,
         connected_banner=connected_banner,
@@ -234,7 +232,6 @@ def _exercise_keyboard_activation(
 def _exercise_keyboard_activation_with_result(
     *,
     result: dict[str, object],
-    tracker_page,
     settings_page: LiveProjectSettingsPage,
     token: str,
     connected_banner: str,
@@ -248,7 +245,6 @@ def _exercise_keyboard_activation_with_result(
     combine_navigation_and_focus: bool,
 ) -> dict[str, object]:
     focus_sequence = _focus_connect_token(
-        tracker_page=tracker_page,
         settings_page=settings_page,
         token=token,
         step=focus_step,
@@ -284,31 +280,29 @@ def _exercise_keyboard_activation_with_result(
             observed=focus_observed,
         )
 
-    tracker_page.session.press_key(key, timeout_ms=30_000)
+    settings_page.wait_for_repository_access_feedback_absence(
+        [connected_banner, CONNECTION_ERROR_PREFIX],
+        timeout_ms=5_000,
+    )
+    activation_observation = settings_page.activate_focused_repository_access_connect_token(
+        key=key,
+        feedback_texts=[connected_banner, CONNECTION_ERROR_PREFIX],
+        connected_banner_text=connected_banner,
+        timeout_ms=120_000,
+    )
     _record_step(
         result,
         step=press_step,
         status="passed",
         action="Press the Enter key." if key == "Enter" else "Press the Space bar.",
-        observed=_focus_summary(final_focus),
+        observed=f"{_focus_summary(final_focus)}; pre_press_feedback_absent=True",
     )
-
-    wait_match = tracker_page.session.wait_for_any_text(
-        [connected_banner, "GitHub connection failed:"],
-        timeout_ms=120_000,
-    )
-    if wait_match.matched_text != connected_banner:
-        raise AssertionError(
-            f"Step {observe_step} failed: pressing {key} on the focused Connect token "
-            "button did not reach the connected state.\n"
-            f"Observed body text:\n{wait_match.body_text}",
-        )
     _record_step(
         result,
         step=observe_step,
         status="passed",
         action="Observe the application behavior.",
-        observed=connected_banner,
+        observed=_activation_feedback_summary(activation_observation),
     )
 
     if settings_page.body_text().count(connected_banner):
@@ -320,8 +314,11 @@ def _exercise_keyboard_activation_with_result(
         "controls": asdict(controls),
         "focus_sequence": [asdict_focus(item) for item in focus_sequence],
         "section_text": controls.section_text or controls.body_text,
-        "banner_text": connected_banner,
-        "body_text_after_activation": wait_match.body_text,
+        "feedback_kind": activation_observation.response_kind,
+        "feedback_text": activation_observation.response_text,
+        "matched_feedback": activation_observation.matched_text,
+        "body_text_before_activation": activation_observation.body_text_before,
+        "body_text_after_activation": activation_observation.body_text_after,
     }
 
 
@@ -348,33 +345,14 @@ def _assert_visible_controls(
 
 def _focus_connect_token(
     *,
-    tracker_page,
     settings_page: LiveProjectSettingsPage,
     token: str,
     step: int,
 ) -> list[RepositoryAccessFocusObservation]:
     try:
-        settings_page.focus_repository_access_token_field()
-        tracker_page.session.fill(TOKEN_SELECTOR, token, timeout_ms=30_000)
-        initial_focus = settings_page.wait_for_repository_access_focus(
-            "Fine-grained token",
-            timeout_ms=5_000,
-        )
-        settings_page.press_tab_from_repository_access_focus(
-            "Fine-grained token",
+        return settings_page.focus_repository_access_connect_token_via_keyboard(
+            token=token,
             timeout_ms=30_000,
-        )
-        remember_focus = settings_page.wait_for_repository_access_focus(
-            "Remember on this browser",
-            timeout_ms=5_000,
-        )
-        settings_page.press_tab_from_repository_access_focus(
-            "Remember on this browser",
-            timeout_ms=30_000,
-        )
-        connect_focus = settings_page.wait_for_repository_access_focus(
-            "Connect token",
-            timeout_ms=5_000,
         )
     except AssertionError as error:
         raise AssertionError(
@@ -382,7 +360,6 @@ def _focus_connect_token(
             "did not leave focus on the Connect token button.\n"
             f"{error}",
         ) from None
-    return [initial_focus, remember_focus, connect_focus]
 
 
 def _append_activation_result(
@@ -461,6 +438,15 @@ def _focus_path_summary(sequence: list[RepositoryAccessFocusObservation]) -> str
     return " -> ".join(labels)
 
 
+def _activation_feedback_summary(
+    observation: RepositoryAccessActivationObservation,
+) -> str:
+    return (
+        f"feedback_kind={observation.response_kind}; "
+        f"feedback_text={observation.response_text}"
+    )
+
+
 def _visible_controls_from_activation(activation: dict[str, object]) -> str:
     controls = activation.get("controls", {})
     if not isinstance(controls, dict):
@@ -486,6 +472,40 @@ def _focus_path_from_activation(activation: dict[str, object]) -> str:
     return " -> ".join(labels) if labels else "<unknown>"
 
 
+def _activation_by_key(result: dict[str, object], key: str) -> dict[str, object]:
+    for activation in result.get("activation_results", []):
+        if isinstance(activation, dict) and str(activation.get("key")) == key:
+            return activation
+    return {}
+
+
+def _activation_feedback_detail(result: dict[str, object], key: str) -> str:
+    activation = _activation_by_key(result, key)
+    if not activation:
+        return f"{key}: <not recorded>"
+    feedback_kind = str(activation.get("feedback_kind", "feedback"))
+    feedback_text = _snippet(activation.get("feedback_text", "<not recorded>"))
+    return f"{key}: {feedback_kind} ({feedback_text})"
+
+
+def _pass_result_summary(result: dict[str, object], *, jira: bool) -> str:
+    enter_feedback = _activation_feedback_detail(result, "Enter")
+    space_feedback = _activation_feedback_detail(result, "Space")
+    if jira:
+        return (
+            "* Matched the expected result: both keyboard activations surfaced visible "
+            "connection feedback after the focused {{Connect token}} button was triggered "
+            f"({{{{{enter_feedback}}}}}; {{{{{space_feedback}}}}}), confirming the button "
+            "behaves like a standard interactive element."
+        )
+    return (
+        "- Matched the expected result: both keyboard activations surfaced visible "
+        "connection feedback after the focused `Connect token` button was triggered "
+        f"(`{enter_feedback}`; `{space_feedback}`), confirming the button behaves like a "
+        "standard interactive element."
+    )
+
+
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     RESULT_PATH.write_text(
@@ -504,6 +524,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    _write_review_replies()
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -526,6 +547,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    _write_review_replies()
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -555,11 +577,9 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "*Observed result*",
         (
-            "* Matched the expected result: both keyboard activations surfaced the visible "
-            "{{Connected as ... Drag cards to commit status changes.}} banner, confirming "
-            "the button behaves like a standard interactive element."
+            _pass_result_summary(result, jira=True)
             if passed
-            else "* Did not match the expected result."
+            else "* Did not match the expected result: a focused-button keyboard activation did not surface new visible connection feedback."
         ),
         (
             f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
@@ -593,6 +613,11 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         f"## {TICKET_KEY} {status}",
         "",
+        "### Rework",
+        "- Relaxed the assertion so the test passes on any visible connection feedback caused by the focused-button keyboard activation, including success and error feedback.",
+        "- Added a pre-press absence check for connection feedback before each Enter/Space activation so the observed response is causally tied to that key press.",
+        "- Moved token entry, keyboard focus traversal, and focused-button activation behind `LiveProjectSettingsPage`.",
+        "",
         "### Automation",
         (
             "- Opened the deployed hosted TrackState app in Chromium using the configured "
@@ -613,11 +638,9 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "### Observed result",
         (
-            "- Matched the expected result: both keyboard activations surfaced the visible "
-            "`Connected as ... Drag cards to commit status changes.` banner, confirming "
-            "the button behaves like a standard interactive element."
+            _pass_result_summary(result, jira=False)
             if passed
-            else "- Did not match the expected result."
+            else "- Did not match the expected result: a focused-button keyboard activation did not surface new visible connection feedback."
         ),
         (
             f"- Environment: URL `{result['app_url']}`, repository `{result['repository']}` "
@@ -648,23 +671,21 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     status = "passed" if passed else "failed"
     screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
     lines = [
-        f"# {TICKET_KEY} {status}",
+        f"# {TICKET_KEY} rework {status}",
         "",
-        "Ran the deployed hosted Repository access keyboard-activation scenario.",
-        "",
-        "## Observed",
+        "- Fixed the assertion to accept any visible connection feedback triggered by the focused `Connect token` button instead of only the success banner.",
+        "- Added a pre-press absence check so each Enter/Space observation is tied to a new keyboard-triggered response.",
+        "- Moved Repository access token entry, keyboard focus traversal, and focused-button activation into `LiveProjectSettingsPage`.",
         f"- Screenshot: `{screenshot_path}`",
         f"- Environment: `{result['app_url']}` on Chromium/Playwright ({platform.system()})",
         f"- Repository: `{result['repository']}` @ `{result['repository_ref']}`",
     ]
     if passed:
-        lines.append(
-            "- Result: `Enter` and `Space` on the focused `Connect token` button both "
-            "surfaced the connected banner."
-        )
+        lines.append(f"- Result: {_activation_feedback_detail(result, 'Enter')}; {_activation_feedback_detail(result, 'Space')}")
     else:
         lines.extend(
             [
+                "- Result: failed because a focused-button keyboard activation did not surface new visible connection feedback.",
                 "",
                 "## Error",
                 "```text",
@@ -675,10 +696,44 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _write_review_replies() -> None:
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps(
+            {
+                "replies": [
+                    {
+                        "inReplyToId": 3235710279,
+                        "threadId": "PRRT_kwDOSU6Gf86B0MG1",
+                        "reply": (
+                            "Fixed: the test now waits for visible connection feedback triggered by the focused `Connect token` keyboard activation and accepts either the success banner or a visible `GitHub connection failed:` error instead of requiring only the connected banner."
+                        ),
+                    },
+                    {
+                        "inReplyToId": 3235710462,
+                        "threadId": "PRRT_kwDOSU6Gf86B0MJG",
+                        "reply": (
+                            "Fixed: each Enter/Space run now first proves the success/error feedback is absent before the key press, then waits for new visible feedback after that activation so the pass condition is causally linked to the keyboard event."
+                        ),
+                    },
+                    {
+                        "inReplyToId": 3235710722,
+                        "threadId": "PRRT_kwDOSU6Gf86B0MMH",
+                        "reply": (
+                            "Fixed: token entry, Repository access keyboard traversal, pre-press feedback checks, and focused-button activation now live on `LiveProjectSettingsPage`, so the test stays at the business-action layer."
+                        ),
+                    },
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            "# TS-617 - Focused Connect token button does not activate from keyboard",
+            "# TS-617 - Focused Connect token button does not surface visible keyboard feedback",
             "",
             "## Steps to reproduce",
             "1. Navigate to Project Settings → Repository access.",
@@ -700,15 +755,15 @@ def _bug_description(result: dict[str, object]) -> str:
             (
                 "- Expected: after keyboard focus reaches the visible `Connect token` "
                 "button in Project Settings → Repository access, both `Enter` and `Space` "
-                "should initiate the connection flow and surface a user-visible connected "
-                "state such as `Connected as ... Drag cards to commit status changes.`"
+                "should initiate the connection flow and surface user-visible connection "
+                "feedback such as a success banner or a visible `GitHub connection failed:` error."
             ),
             (
                 "- Actual: "
                 + str(
                     result.get("error")
-                    or "the focused Connect token button did not surface the expected "
-                    "connected state after keyboard activation."
+                    or "the focused Connect token button did not surface new visible "
+                    "connection feedback after keyboard activation."
                 )
             ),
             "",
@@ -723,6 +778,9 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- Repository: `{result['repository']}` @ `{result['repository_ref']}`",
             f"- Browser: `Chromium (Playwright)`",
             f"- OS: `{platform.platform()}`",
+            "",
+            "## Missing or broken production capability",
+            "- The hosted Repository access flow does not expose new visible connection feedback after keyboard activation of the focused `Connect token` button.",
             "",
             "## Screenshots or logs",
             f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",

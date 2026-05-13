@@ -13,10 +13,11 @@ The automation:
    section
 4. tabs from the token field to the visible **Connect token** button and presses
    `Enter`
-5. verifies the live page shows the connected banner after keyboard activation
-6. refreshes the page, repeats the keyboard navigation, and presses `Space`
-7. verifies the live page again shows the connected banner after keyboard
+5. verifies the live page surfaces new visible connection feedback after keyboard
    activation
+6. refreshes the page, repeats the keyboard navigation, and presses `Space`
+7. verifies the live page again surfaces new visible connection feedback after
+   keyboard activation
 8. writes the required result artifacts to `outputs/`
 
 ## Install dependencies
