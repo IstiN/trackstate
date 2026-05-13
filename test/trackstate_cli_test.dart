@@ -1317,6 +1317,63 @@ void main() {
     );
 
     test(
+      'local release-backed upload without a git remote does not query gh auth before preflight validation',
+      () async {
+        final repo = await _createCliLocalRepository();
+        addTearDown(() => repo.delete(recursive: true));
+        final uploadFile = File('${repo.path}/release-plan.txt');
+        await uploadFile.writeAsString('roadmap');
+        await _writeCliTestFile(
+          repo,
+          'DEMO/project.json',
+          '{"key":"DEMO","name":"Local Demo","attachmentStorage":{"mode":"github-releases","githubReleases":{"tagPrefix":"trackstate-attachments-"}}}\n',
+        );
+        await _gitCliTest(repo.path, ['add', 'DEMO/project.json']);
+        await _gitCliTest(repo.path, [
+          'commit',
+          '-m',
+          'Configure release-backed attachment storage',
+        ]);
+        var ghTokenReads = 0;
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: repo.path,
+            resolvePath: (path) => path,
+            readGhAuthToken: () async {
+              ghTokenReads += 1;
+              return 'gh-token';
+            },
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--issue',
+          'DEMO-1',
+          '--file',
+          uploadFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final details = error['details']! as Map<String, Object?>;
+
+        expect(result.exitCode, 4);
+        expect(ghTokenReads, 0);
+        expect(
+          details['reason'],
+          contains(
+            'GitHub repository identity cannot be resolved from the local Git configuration because no remote is configured.',
+          ),
+        );
+      },
+    );
+
+    test(
       'matches uploaded attachment metadata by sanitized stored name',
       () async {
         final sampleSnapshot = _sampleSnapshot();
@@ -2184,7 +2241,8 @@ class _FakeSearchRepository implements TrackStateRepository {
     required Uint8List bytes,
   }) async {
     final requiredUploadToken = this.requiredUploadToken;
-    if (requiredUploadToken != null && connection?.token != requiredUploadToken) {
+    if (requiredUploadToken != null &&
+        connection?.token != requiredUploadToken) {
       throw const TrackStateRepositoryException(
         'GitHub release uploads require an authenticated repository connection.',
       );
@@ -2401,7 +2459,9 @@ class _UnexpectedGitProcessRunner implements GitProcessRunner {
 }
 
 Future<Directory> _createCliLocalRepository() async {
-  final directory = await Directory.systemTemp.createTemp('trackstate-cli-local-');
+  final directory = await Directory.systemTemp.createTemp(
+    'trackstate-cli-local-',
+  );
   await _writeCliTestFile(
     directory,
     '.gitattributes',
