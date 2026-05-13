@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Mapping, Protocol
 
 
 @dataclass(frozen=True)
@@ -15,4 +15,10 @@ class DartProbeExecution:
 
 
 class DartProbeRuntime(Protocol):
-    def execute(self, *, probe_root: Path, entrypoint: Path) -> DartProbeExecution: ...
+    def execute(
+        self,
+        *,
+        probe_root: Path,
+        entrypoint: Path,
+        extra_env: Mapping[str, str] | None = None,
+    ) -> DartProbeExecution: ...
