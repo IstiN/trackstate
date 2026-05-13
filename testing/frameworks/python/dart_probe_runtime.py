@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from typing import Mapping
 import urllib.request
 import zipfile
 
@@ -18,17 +19,25 @@ class PythonDartProbeRuntime(DartProbeRuntime):
         self._repository_root = repository_root
         self._runtime_manifest = self._load_runtime_manifest()
 
-    def execute(self, *, probe_root: Path, entrypoint: Path) -> DartProbeExecution:
+    def execute(
+        self,
+        *,
+        probe_root: Path,
+        entrypoint: Path,
+        extra_env: Mapping[str, str] | None = None,
+    ) -> DartProbeExecution:
         dart_bin = self._resolve_dart_bin()
         self._run(
             [str(dart_bin), "--disable-analytics", "pub", "get", "--offline"],
             cwd=probe_root,
+            extra_env=extra_env,
         )
 
         analyze = self._run(
             [str(dart_bin), "--disable-analytics", "analyze", str(entrypoint)],
             cwd=probe_root,
             check=False,
+            extra_env=extra_env,
         )
         if analyze.returncode != 0:
             return DartProbeExecution(
@@ -42,6 +51,7 @@ class PythonDartProbeRuntime(DartProbeRuntime):
         execution = self._run(
             [str(dart_bin), "--disable-analytics", "run", str(entrypoint)],
             cwd=probe_root,
+            extra_env=extra_env,
         )
         return DartProbeExecution(
             succeeded=True,
@@ -220,9 +230,12 @@ class PythonDartProbeRuntime(DartProbeRuntime):
         *,
         cwd: Path,
         check: bool = True,
+        extra_env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
+        if extra_env is not None:
+            env.update(extra_env)
         process = subprocess.run(
             command,
             cwd=cwd,
