@@ -296,7 +296,6 @@ class LiveIssueDetailCollaborationPage:
             rect.left + (rect.width / 2),
             rect.top + (rect.height / 2),
         )
-
     def wait_for_text_fragment(
         self,
         fragment: str,
