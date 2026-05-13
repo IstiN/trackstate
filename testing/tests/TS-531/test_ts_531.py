@@ -366,7 +366,7 @@ def _resolved_attachment_mode(project_json_text: str) -> str:
     mode = _project_attachment_mode(project_json_text)
     if mode:
         return mode
-    return "repository-path (implicit default)"
+    return "default (attachmentStorage unset)"
 
 
 def _collect_original_files(
@@ -926,7 +926,11 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Observed",
         f"- Screenshot: `{screenshot_path}`",
         f"- Environment: `{result['app_url']}` on Chromium/Playwright ({platform.system()})",
-        f"- Attachment storage mode: `{result.get('attachment_storage_mode')}`",
+        (
+            "- Seeded attachment storage configuration: "
+            f"`{result.get('attachment_storage_configuration')}` "
+            f"(`{result.get('attachment_storage_mode')}` in `project.json`)"
+        ),
         f"- Cleanup: `{result.get('cleanup')}`",
     ]
     if not passed:
