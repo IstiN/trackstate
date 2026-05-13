@@ -1,0 +1,40 @@
+test_id: TS-557
+type: cli
+framework: python
+platform: local
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+notes:
+  - Executes the exact TS-557 local attachment upload command from a disposable TrackState repository configured for github-releases attachment storage and no Git remotes configured.
+  - Removes ambient GitHub credentials from the runtime environment so the test can prove missing-repository-identity validation is prioritized ahead of auth/configuration guidance.
+runtime_inputs:
+  ticket_command: trackstate attachment upload --issue TS-475 --file test.txt --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - upload
+    - --issue
+    - TS-475
+    - --file
+    - test.txt
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-557 Project
+  issue_key: TS-475
+  issue_summary: Missing-remote identity precedence fixture
+  source_file_name: test.txt
+  source_file_text: |
+    TS-557 upload payload
+    This file should never be written when release-backed upload cannot resolve repository identity from local remotes.
+  attachment_tag_prefix: ts557-
+  expected_attachment_relative_path: TS/TS-475/attachments/test.txt
+  expected_identity_fragments:
+    - github
+    - repository identity
+    - local git configuration
+  generic_release_auth_fragments:
+    - authentication/configuration
+    - supports release uploads
+    - release-backed attachments
