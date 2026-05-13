@@ -1,0 +1,11 @@
+test_id: TS-629
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Flutter SDK available on PATH
+  - git CLI available on PATH
+notes:
+  - Reuses the existing disposable Local Git inverse-link CLI harness from TS-624.
+  - Creates Issue A and Issue B, then runs `trackstate ticket link --type "is blocked by"` from Issue A to Issue B.
+  - Verifies the user-visible JSON response payload reports the canonical normalized relationship metadata instead of the inverse input semantics.
