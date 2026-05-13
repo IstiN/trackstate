@@ -33,6 +33,8 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
 
   ActionAvailability commentComposerAction(String issueKey, String label);
 
+  Future<void> tapIssueDetailAction(String issueKey, String label);
+
   List<String> commentActionLabels(String issueKey);
 
   bool showsCommentComposer(String issueKey);

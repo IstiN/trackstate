@@ -865,11 +865,14 @@ class ProviderBackedTrackStateRepository
         );
       }
       if (!permission.supportsReleaseAttachmentWrites) {
-        throw const TrackStateRepositoryException(
-          'GitHub Releases attachment storage requires GitHub '
-          'authentication/configuration that supports release uploads. '
-          'This repository session cannot upload release-backed '
-          'attachments.',
+        throw TrackStateRepositoryException(
+          permission.releaseAttachmentWriteFailureReason?.trim().isNotEmpty ==
+                  true
+              ? permission.releaseAttachmentWriteFailureReason!.trim()
+              : 'GitHub Releases attachment storage requires GitHub '
+                    'authentication/configuration that supports release '
+                    'uploads. This repository session cannot upload '
+                    'release-backed attachments.',
         );
       }
     } else if (!permission.canManageAttachments) {

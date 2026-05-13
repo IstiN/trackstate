@@ -1,0 +1,9 @@
+test_id: TS-536
+type: api
+framework: python
+platform: dart-probe
+dependencies: []
+notes:
+  - Seeds a hosted `DEMO/TS-50` issue in the live setup repository with `github-releases` attachment storage and tag prefix `trackstate-attachments-`.
+  - Ensures a draft GitHub release already exists at `trackstate-attachments-TS-50` with title `Attachments for TS-50` and body `Manual Notes`.
+  - Runs the real provider-backed attachment upload through the existing Dart probe and passes only when the upload reuses the same hosted release object, persists a GitHub Releases-backed manifest entry, and leaves the release body either preserved as `Manual Notes` or normalized to the standard machine-generated note.
