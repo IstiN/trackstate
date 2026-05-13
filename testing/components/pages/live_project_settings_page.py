@@ -424,20 +424,18 @@ class LiveProjectSettingsPage:
                   && style.visibility !== 'hidden'
                   && style.display !== 'none';
               };
+              const visibleMatches = (selector) => Array.from(document.querySelectorAll(selector))
+                .filter((candidate) => isVisible(candidate));
               const bodyText = document.body?.innerText ?? '';
-              const repositoryAccess = Array.from(document.querySelectorAll(repositoryAccessSelector))
-                .find((candidate) => isVisible(candidate))
-                ?? null;
+              const repositoryAccess = visibleMatches(repositoryAccessSelector)[0] ?? null;
               const sectionText = (
                 repositoryAccess?.getAttribute('aria-label')
                 ?? repositoryAccess?.innerText
                 ?? ''
               ).replace(/\\s+/g, ' ').trim();
-              const tokenVisible = Boolean(document.querySelector(tokenSelector));
-              const rememberVisible = Array.from(document.querySelectorAll(rememberSelector))
-                .some((candidate) => isVisible(candidate));
-              const connectVisible = Array.from(document.querySelectorAll(connectSelector))
-                .some((candidate) => isVisible(candidate));
+              const tokenVisible = visibleMatches(tokenSelector).length > 0;
+              const rememberVisible = visibleMatches(rememberSelector).length > 0;
+              const connectVisible = visibleMatches(connectSelector).length > 0;
               if (
                 !bodyText.includes(settingsHeading)
                 || !repositoryAccess
@@ -451,7 +449,7 @@ class LiveProjectSettingsPage:
                 bodyText,
                 sectionText,
                 projectSettingsVisible: bodyText.includes(settingsHeading),
-                repositoryAccessVisible: bodyText.includes(repositoryAccessLabel),
+                repositoryAccessVisible: sectionText.includes(repositoryAccessLabel),
                 fineGrainedTokenVisible: tokenVisible,
                 rememberOnThisBrowserVisible: rememberVisible,
                 connectTokenVisible: connectVisible,
@@ -498,16 +496,16 @@ class LiveProjectSettingsPage:
         *,
         timeout_ms: int = 30_000,
     ) -> None:
-        selector = {
-            "Fine-grained token": self._token_input_selector,
-            "Remember on this browser": self._remember_on_this_browser_selector,
-            "Connect token": self._connect_token_selector,
-        }.get(current_label)
-        if selector is None:
+        if current_label not in {
+            "Fine-grained token",
+            "Remember on this browser",
+            "Connect token",
+        }:
             raise AssertionError(
                 f"Unsupported Repository access focus target for Tab navigation: {current_label!r}.",
             )
-        self._session.press(selector, "Tab", timeout_ms=timeout_ms)
+        self.wait_for_repository_access_focus(current_label, timeout_ms=timeout_ms)
+        self._session.press_key("Tab", timeout_ms=timeout_ms)
 
     def wait_for_repository_access_focus(
         self,
@@ -515,85 +513,88 @@ class LiveProjectSettingsPage:
         *,
         timeout_ms: int = 30_000,
     ) -> RepositoryAccessFocusObservation:
-        payload = self._session.wait_for_function(
-            """
-            ({ tokenSelector, rememberSelector, connectSelector, expectedLabel }) => {
-              const active = document.activeElement;
-              const bodyText = document.body?.innerText ?? '';
-              if (!active) {
-                return null;
-              }
-              const identify = (element) => {
-                if (!element) {
-                  return null;
-                }
-                const labelCandidates = [
-                  element.getAttribute?.('aria-label') ?? '',
-                  element.previousElementSibling?.getAttribute?.('aria-label') ?? '',
-                  element.nextElementSibling?.getAttribute?.('aria-label') ?? '',
-                  element.parentElement?.getAttribute?.('aria-label') ?? '',
-                  element.textContent ?? '',
-                ]
-                  .map((value) => value.replace(/\\s+/g, ' ').trim())
-                  .filter((value) => value.length > 0);
-                if (
-                  typeof element.matches === 'function'
-                  && element.matches(tokenSelector)
-                ) {
-                  return 'Fine-grained token';
-                }
-                if (
-                  typeof element.matches === 'function'
-                  && element.matches(rememberSelector)
-                ) {
-                  return 'Remember on this browser';
-                }
-                if (
-                  typeof element.matches === 'function'
-                  && element.matches(connectSelector)
-                ) {
-                  return 'Connect token';
-                }
-                if (labelCandidates.some((value) => value.includes('Connect token'))) {
-                  return 'Connect token';
-                }
-                if (typeof element.closest === 'function') {
-                  if (element.closest(tokenSelector)) {
-                    return 'Fine-grained token';
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ tokenSelector, rememberSelector, connectSelector, expectedLabel }) => {
+                  const active = document.activeElement;
+                  const bodyText = document.body?.innerText ?? '';
+                  if (!active) {
+                    return null;
                   }
-                  if (element.closest(rememberSelector)) {
-                    return 'Remember on this browser';
+                  const identify = (element) => {
+                    if (!element) {
+                      return null;
+                    }
+                    const labelCandidates = [
+                      element.getAttribute?.('aria-label') ?? '',
+                      element.previousElementSibling?.getAttribute?.('aria-label') ?? '',
+                      element.nextElementSibling?.getAttribute?.('aria-label') ?? '',
+                      element.parentElement?.getAttribute?.('aria-label') ?? '',
+                      element.textContent ?? '',
+                    ]
+                      .map((value) => value.replace(/\\s+/g, ' ').trim())
+                      .filter((value) => value.length > 0);
+                    if (
+                      typeof element.matches === 'function'
+                      && element.matches(tokenSelector)
+                    ) {
+                      return 'Fine-grained token';
+                    }
+                    if (
+                      typeof element.matches === 'function'
+                      && element.matches(rememberSelector)
+                    ) {
+                      return 'Remember on this browser';
+                    }
+                    if (
+                      typeof element.matches === 'function'
+                      && element.matches(connectSelector)
+                    ) {
+                      return 'Connect token';
+                    }
+                    if (labelCandidates.some((value) => value.includes('Connect token'))) {
+                      return 'Connect token';
+                    }
+                    if (typeof element.closest === 'function') {
+                      if (element.closest(tokenSelector)) {
+                        return 'Fine-grained token';
+                      }
+                      if (element.closest(rememberSelector)) {
+                        return 'Remember on this browser';
+                      }
+                      if (element.closest(connectSelector)) {
+                        return 'Connect token';
+                      }
+                    }
+                    return null;
+                  };
+                  const label = identify(active);
+                  if (label !== expectedLabel) {
+                    return null;
                   }
-                  if (element.closest(connectSelector)) {
-                    return 'Connect token';
-                  }
+                  const text = (active.textContent ?? '').replace(/\\s+/g, ' ').trim();
+                  return {
+                    label,
+                    tagName: active.tagName,
+                    role: active.getAttribute('role'),
+                    accessibleName: active.getAttribute('aria-label') || text || null,
+                    text,
+                    outerHtml: active.outerHTML.slice(0, 400),
+                    bodyText,
+                  };
                 }
-                return null;
-              };
-              const label = identify(active);
-              if (label !== expectedLabel) {
-                return null;
-              }
-              const text = (active.textContent ?? '').replace(/\\s+/g, ' ').trim();
-              return {
-                label,
-                tagName: active.tagName,
-                role: active.getAttribute('role'),
-                accessibleName: active.getAttribute('aria-label') || text || null,
-                text,
-                outerHtml: active.outerHTML.slice(0, 400),
-                bodyText,
-              };
-            }
-            """,
-            arg={
-                "tokenSelector": self._token_input_selector,
-                "rememberSelector": self._remember_on_this_browser_selector,
-                "connectSelector": self._connect_token_selector,
-                "expectedLabel": expected_label,
-            },
-            timeout_ms=timeout_ms,
-        )
+                """,
+                arg={
+                    "tokenSelector": self._token_input_selector,
+                    "rememberSelector": self._remember_on_this_browser_selector,
+                    "connectSelector": self._connect_token_selector,
+                    "expectedLabel": expected_label,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError:
+            payload = None
         if not isinstance(payload, dict):
             active = self._session.active_element()
             raise AssertionError(

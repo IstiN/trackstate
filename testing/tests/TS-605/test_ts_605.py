@@ -25,12 +25,14 @@ from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
 )
 
 TICKET_KEY = "TS-605"
+RUN_COMMAND = "python testing/tests/TS-605/test_ts_605.py"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts605_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts605_failure.png"
 
@@ -135,9 +137,7 @@ def main() -> None:
                     observed=_focus_summary(initial_focus),
                 )
 
-                settings_page.press_tab_from_repository_access_focus(
-                    "Fine-grained token",
-                )
+                settings_page.press_tab()
                 _record_step(
                     result,
                     step=3,
@@ -173,9 +173,7 @@ def main() -> None:
                     observed=_focus_summary(first_tab_focus),
                 )
 
-                settings_page.press_tab_from_repository_access_focus(
-                    "Remember on this browser",
-                )
+                settings_page.press_tab()
                 _record_step(
                     result,
                     step=5,
@@ -338,6 +336,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_pr_body(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    _write_review_replies()
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -360,6 +359,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    _write_review_replies()
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -423,6 +423,10 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         f"## {TICKET_KEY} {status}",
         "",
+        "### Rework updates",
+        "- Updated the Repository access precondition to require visible matches for the Fine-grained token field, Remember on this browser checkbox, and Connect token action.",
+        "- Switched the TS-605 Tab traversal to the page keyboard after confirming the active element, so the test no longer re-targets duplicate Flutter semantics nodes.",
+        "",
         "### Automation",
         (
             "- Opened the deployed hosted TrackState app in Chromium using the configured "
@@ -472,33 +476,66 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
-    status = "passed" if passed else "failed"
-    screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
+    status = "PASSED" if passed else "FAILED"
     lines = [
-        f"# {TICKET_KEY} {status}",
+        f"h3. {TICKET_KEY} rework {status}",
         "",
+        "*Rework completed*",
         (
-            "Ran the live hosted Project Settings → Repository access keyboard-traversal "
-            "scenario and checked the visible controls plus the Tab focus sequence."
+            "* Updated the Repository access precondition so all three controls are "
+            "validated through visible matches on the live page."
         ),
-        "",
-        "## Observed",
-        f"- Screenshot: `{screenshot_path}`",
-        f"- Environment: `{result['app_url']}` on Chromium/Playwright ({platform.system()})",
-        f"- Repository: `{result['repository']}` @ `{result['repository_ref']}`",
-        f"- Focus sequence: `{_focus_sequence_summary(result)}`",
+        (
+            "* Updated keyboard traversal to send {{Tab}} through the page keyboard after "
+            "confirming the current active element, avoiding locator retargeting."
+        ),
+        (
+            "* New test result: "
+            + (
+                "PASSED — focus moved from {{Fine-grained token}} to {{Remember on this browser}} and then to {{Connect token}}."
+                if passed
+                else f"FAILED — {result.get('error', 'the live focus order still did not match the expected sequence.')}"
+            )
+        ),
     ]
     if not passed:
         lines.extend(
             [
                 "",
-                "## Error",
-                "```text",
+                "*Exact error*",
+                "{code}",
                 str(result.get("traceback", result.get("error", ""))),
-                "```",
+                "{code}",
             ]
         )
     return "\n".join(lines) + "\n"
+
+
+def _write_review_replies() -> None:
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps(
+            {
+                "replies": [
+                    {
+                        "inReplyToId": 3235003483,
+                        "threadId": "PRRT_kwDOSU6Gf86ByMfC",
+                        "reply": (
+                            "Fixed: the Repository access precondition now applies the same visible-match filtering to the Fine-grained token field as the checkbox and button, so Step 1 only passes when all three controls are visibly present on the live page."
+                        ),
+                    },
+                    {
+                        "inReplyToId": 3235003672,
+                        "threadId": "PRRT_kwDOSU6Gf86ByMg3",
+                        "reply": (
+                            "Fixed: TS-605 now advances with the page keyboard after asserting the active element, and the helper also uses page-level Tab input instead of locator-scoped press() so duplicate Flutter semantics nodes cannot retarget the second Tab."
+                        ),
+                    },
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _bug_description(result: dict[str, object]) -> str:
@@ -534,6 +571,18 @@ def _bug_description(result: dict[str, object]) -> str:
                     or "the hosted Repository access keyboard traversal did not follow the expected order."
                 )
             ),
+            "",
+            "## Missing or broken production capability",
+            (
+                "- The hosted Repository access focus traversal does not advance from the "
+                "visible `Remember on this browser` checkbox to the visible `Connect token` "
+                "button after a real page-level `Tab` keypress. The checkbox keeps focus "
+                "instead of the UI exposing the next visible control in sequence."
+            ),
+            "",
+            "## Failing command and output",
+            f"- Command: `{RUN_COMMAND}`",
+            f"- Result JSON: `{RESULT_PATH}`",
             "",
             "## Exact error message or assertion failure",
             "```text",
