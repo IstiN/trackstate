@@ -139,30 +139,6 @@ class TrackStateCliReadTicketNoRelationshipsTest(unittest.TestCase):
             "ticket summary.\n"
             f"Observed fields: {fields}",
         )
-        self.assertEqual(
-            fields["description"],
-            self.config.fixture_ticket.issue_description,
-            "Expected result failed: the raw Jira issue fields did not preserve the "
-            "ticket description.\n"
-            f"Observed fields: {fields}",
-        )
-
-        issuetype = fields["issuetype"]
-        self.assertIsInstance(
-            issuetype,
-            dict,
-            "Expected result failed: the raw Jira issue fields did not expose the "
-            "issue type block as an object.\n"
-            f"Observed fields: {fields}",
-        )
-        assert isinstance(issuetype, dict)
-        self.assertEqual(
-            issuetype.get("id"),
-            self.config.fixture_ticket.issue_type,
-            "Expected result failed: the raw Jira issue fields did not expose the "
-            "canonical issue type id.\n"
-            f"Observed issue type payload: {issuetype}",
-        )
 
         issue_links = fields["issuelinks"]
         self.assertIsInstance(

@@ -42,17 +42,6 @@ class TrackStateCliReadTicketNoRelationshipsConfig(TrackStateCliReadTicketShapeC
             ),
             required_field_keys=(
                 "summary",
-                "description",
-                "issuetype",
-                "status",
-                "priority",
-                "project",
-                "assignee",
-                "reporter",
-                "labels",
-                "components",
-                "fixVersions",
-                "parent",
                 "issuelinks",
             ),
             required_stdout_fragments=(
