@@ -620,24 +620,33 @@ class _TopBar extends StatelessWidget {
                       child: TextField(
                         controller: TextEditingController(text: viewModel.jql),
                         onSubmitted: viewModel.updateQuery,
+                        maxLines: 1,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.copyWith(height: 1),
                         textAlignVertical: TextAlignVertical.center,
                         decoration: InputDecoration(
                           isDense: true,
+                          isCollapsed: true,
+                          constraints: const BoxConstraints.tightFor(
+                            height: _desktopTopBarControlHeight,
+                          ),
                           contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 0,
+                            horizontal: 10,
+                            vertical: 8,
                           ),
                           prefixIcon: Padding(
-                            padding: const EdgeInsets.all(12),
+                            padding: const EdgeInsets.all(8),
                             child: TrackStateIcon(
                               TrackStateIconGlyph.search,
                               color: colors.muted,
+                              size: _desktopTopBarIconSize,
                               semanticLabel: l10n.searchIssues,
                             ),
                           ),
-                          prefixIconConstraints: const BoxConstraints(
-                            minWidth: 48,
-                            minHeight: _desktopTopBarControlHeight,
+                          prefixIconConstraints: const BoxConstraints.tightFor(
+                            width: _desktopTopBarControlHeight,
+                            height: _desktopTopBarControlHeight,
                           ),
                           hintText: l10n.jqlPlaceholder,
                         ),
@@ -707,64 +716,33 @@ class _TopBar extends StatelessWidget {
                             !condensedDesktop) ...[
                           ConstrainedBox(
                             constraints: const BoxConstraints(maxWidth: 180),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Semantics(
-                                  container: true,
-                                  label: _profileDisplayName(viewModel),
-                                  child: ExcludeSemantics(
-                                    child: Text(
-                                      _profileDisplayName(viewModel),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelLarge
-                                          ?.copyWith(
-                                            color: colors.text,
-                                            fontWeight: FontWeight.w600,
-                                          ),
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: Text(
+                                _profileDisplayName(viewModel),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelLarge
+                                    ?.copyWith(
+                                      color: colors.text,
+                                      fontWeight: FontWeight.w600,
+                                      height: 1,
                                     ),
-                                  ),
-                                ),
-                                if (_profileLogin(viewModel) case final login?)
-                                  Semantics(
-                                    container: true,
-                                    label: login,
-                                    child: ExcludeSemantics(
-                                      child: Text(
-                                        login,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(color: colors.muted),
-                                      ),
-                                    ),
-                                  ),
-                              ],
+                              ),
                             ),
                           ),
                           const SizedBox(width: 8),
                         ],
-                        Semantics(
-                          label: _profileDisplayName(viewModel),
-                          image: true,
-                          child: ExcludeSemantics(
-                            child: CircleAvatar(
-                              radius: 18,
-                              backgroundColor: colors.primarySoft,
-                              child: Text(
-                                _profileInitials(l10n, viewModel),
-                                style: TextStyle(
-                                  color: colors.text,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
+                        CircleAvatar(
+                          radius: compact ? 18 : _desktopTopBarAvatarRadius,
+                          backgroundColor: colors.primarySoft,
+                          child: Text(
+                            _profileInitials(l10n, viewModel),
+                            style: TextStyle(
+                              color: colors.text,
+                              fontWeight: FontWeight.w700,
+                              fontSize: compact ? null : 12,
+                              height: 1,
                             ),
                           ),
                         ),
@@ -781,7 +759,9 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-const double _desktopTopBarControlHeight = 58;
+const double _desktopTopBarControlHeight = 32;
+const double _desktopTopBarIconSize = 14;
+const double _desktopTopBarAvatarRadius = _desktopTopBarControlHeight / 2;
 
 Future<void> _showRepositoryAccessDialog(
   BuildContext context,
@@ -6196,17 +6176,26 @@ class _PrimaryButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
-      child: FilledButton.icon(
-        onPressed: onPressed,
-        style: FilledButton.styleFrom(
-          backgroundColor: colors.primary,
-          foregroundColor: onPrimary,
-          minimumSize: height == null ? null : Size(0, height!),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: SizedBox(
+        height: height,
+        child: FilledButton.icon(
+          onPressed: onPressed,
+          style: FilledButton.styleFrom(
+            backgroundColor: colors.primary,
+            foregroundColor: onPrimary,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+          ),
+          icon: TrackStateIcon(
+            icon,
+            size: height == null ? 16 : _desktopTopBarIconSize,
+            color: onPrimary,
+          ),
+          label: Text(label, style: TextStyle(color: onPrimary, height: 1)),
         ),
-        icon: TrackStateIcon(icon, size: 16, color: onPrimary),
-        label: Text(label, style: TextStyle(color: onPrimary)),
       ),
     );
   }
@@ -6234,7 +6223,7 @@ class _IconButtonSurface extends StatelessWidget {
       enabled: enabled,
       label: label,
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         onTap: onPressed,
         child: Container(
           width: size,
@@ -6243,19 +6232,19 @@ class _IconButtonSurface extends StatelessWidget {
           padding: size == null ? const EdgeInsets.all(11) : null,
           decoration: BoxDecoration(
             color: colors.surface,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(color: colors.border),
           ),
           foregroundDecoration: enabled
               ? null
               : BoxDecoration(
                   color: colors.page.withValues(alpha: 0.45),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                 ),
           child: TrackStateIcon(
             glyph,
             color: enabled ? colors.text : colors.muted,
-            size: 18,
+            size: size == null ? 18 : _desktopTopBarIconSize,
           ),
         ),
       ),
@@ -7887,9 +7876,11 @@ class _SyncPill extends StatelessWidget {
       container: true,
       label: label,
       child: Container(
-        constraints: height == null ? null : BoxConstraints(minHeight: height!),
+        constraints: height == null
+            ? null
+            : BoxConstraints.tightFor(height: height),
         alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
           color: colors.secondarySoft,
           borderRadius: BorderRadius.circular(999),
@@ -7900,7 +7891,7 @@ class _SyncPill extends StatelessWidget {
             TrackStateIcon(
               TrackStateIconGlyph.sync,
               color: colors.secondary,
-              size: 16,
+              size: height == null ? 16 : _desktopTopBarIconSize,
             ),
             const SizedBox(width: 6),
             Flexible(
@@ -7910,6 +7901,7 @@ class _SyncPill extends StatelessWidget {
                 style: TextStyle(
                   color: colors.text,
                   fontWeight: FontWeight.w600,
+                  height: 1,
                 ),
               ),
             ),
