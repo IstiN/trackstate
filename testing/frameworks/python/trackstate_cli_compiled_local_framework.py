@@ -12,13 +12,19 @@ class PythonTrackStateCliCompiledLocalFramework:
     def __init__(self, repository_root: Path) -> None:
         self._repository_root = Path(repository_root)
 
-    def _compile_executable(self, destination: Path) -> None:
+    def _compile_executable(
+        self,
+        destination: Path,
+        *,
+        source_root: Path | None = None,
+    ) -> None:
+        compile_root = source_root or self._repository_root
         destination.write_text(
             "\n".join(
                 (
                     "#!/usr/bin/env bash",
                     "set -euo pipefail",
-                    f'repo_root="{self._repository_root}"',
+                    f'repo_root="{compile_root}"',
                     'working_directory="$PWD"',
                     'temp_dir="$(mktemp -d)"',
                     'cleanup() {',
