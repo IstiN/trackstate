@@ -213,6 +213,37 @@ void main() {
     expect(viewModel.connectedUser?.initials, 'DU');
   });
 
+  test('view model restores a workspace-scoped GitHub token', () async {
+    SharedPreferences.setMockInitialValues({
+      'trackstate.githubToken.workspace.hosted%3Atrackstate%2Ftrackstate%40main':
+          'workspace-token',
+    });
+    final viewModel = TrackerViewModel(
+      repository: const DemoTrackStateRepository(),
+      workspaceId: 'hosted:trackstate/trackstate@main',
+    );
+
+    await viewModel.load();
+
+    expect(viewModel.isConnected, isTrue);
+    expect(viewModel.connectedUser?.login, 'demo-user');
+  });
+
+  test(
+    'view model connects hosted auth against the provider write branch',
+    () async {
+      final repository = _HostedWriteBranchRepository(
+        writeBranch: 'feature/ts-632',
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      await viewModel.connectGitHub('token');
+
+      expect(repository.lastConnection?.branch, 'feature/ts-632');
+    },
+  );
+
   test(
     'view model resumes startup recovery once after GitHub authentication succeeds',
     () async {
@@ -2486,4 +2517,29 @@ class _StartupRecoveryRepository implements TrackStateRepository {
     required String name,
     required Uint8List bytes,
   }) async => issue;
+}
+
+class _HostedWriteBranchRepository extends ProviderBackedTrackStateRepository {
+  _HostedWriteBranchRepository({required String writeBranch})
+    : super(
+        provider: _WriteBranchAwareMutableProvider(writeBranch: writeBranch),
+      );
+
+  RepositoryConnection? lastConnection;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    lastConnection = connection;
+    return super.connect(connection);
+  }
+}
+
+class _WriteBranchAwareMutableProvider
+    extends MutableIssueDetailTrackStateProvider {
+  _WriteBranchAwareMutableProvider({required this.writeBranch});
+
+  final String writeBranch;
+
+  @override
+  Future<String> resolveWriteBranch() async => writeBranch;
 }

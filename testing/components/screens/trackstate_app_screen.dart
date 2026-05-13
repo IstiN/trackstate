@@ -226,7 +226,11 @@ class TrackStateAppScreen implements TrackStateAppComponent {
           key: UniqueKey(),
           repository: repository,
           openLocalRepository:
-              ({required String repositoryPath, required String writeBranch}) =>
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) =>
                   _repositoryService.openRepository(
                     repositoryPath: repositoryPath,
                   ),
