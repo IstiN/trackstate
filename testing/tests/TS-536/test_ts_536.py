@@ -43,6 +43,7 @@ EXPECTED_RELEASE_TAG = f"{RELEASE_TAG_PREFIX}{ISSUE_KEY}"
 EXPECTED_RELEASE_TITLE = f"Attachments for {ISSUE_KEY}"
 SEEDED_RELEASE_BODY = "Manual Notes"
 STANDARD_RELEASE_BODY = f"TrackState-managed attachment container for {ISSUE_KEY}.\n"
+RELEASE_STABILIZATION_TIMEOUT_SECONDS = 24
 RUN_SUFFIX = uuid.uuid4().hex[:8]
 ATTACHMENT_NAME = f"ts536-release-reuse-{RUN_SUFFIX}.txt"
 ATTACHMENT_TEXT = (
@@ -428,8 +429,8 @@ def _build_failures(
         _record_human_verification(
             result,
             check=(
-                "Verified the issue manifest now exposes the uploaded file as a visible "
-                "GitHub Releases-backed attachment entry for TS-50."
+                "Verified the repository-visible attachment manifest now exposes the uploaded "
+                "file as the GitHub Releases-backed entry consumed by clients."
             ),
             observed=manifest_observation["manifest_text"],
         )
@@ -468,6 +469,16 @@ def _build_failures(
         )
         return failures
 
+    _, stabilized_release_candidates = poll_until(
+        probe=lambda: service.fetch_releases_by_tag_any_state(EXPECTED_RELEASE_TAG),
+        is_satisfied=lambda value: _release_reuse_state_satisfied(
+            release_candidates=value,
+            seeded_release_id=seeded_release_id,
+        ),
+        timeout_seconds=RELEASE_STABILIZATION_TIMEOUT_SECONDS,
+        interval_seconds=4,
+    )
+    release_candidates = stabilized_release_candidates
     metadata_failures = _release_reuse_failures(
         release_with_asset=release_with_asset,
         seeded_release=seeded_release,
@@ -769,6 +780,23 @@ def _snapshot_releases(
     )
 
 
+def _release_reuse_state_satisfied(
+    *,
+    release_candidates: list[LiveHostedRelease],
+    seeded_release_id: int,
+) -> bool:
+    if len(release_candidates) != 1:
+        return False
+    candidate = release_candidates[0]
+    return (
+        candidate.id == seeded_release_id
+        and ATTACHMENT_NAME in [asset.name for asset in candidate.assets]
+        and candidate.tag_name == EXPECTED_RELEASE_TAG
+        and candidate.name == EXPECTED_RELEASE_TITLE
+        and candidate.body in {SEEDED_RELEASE_BODY, STANDARD_RELEASE_BODY}
+    )
+
+
 def _is_seeded_release_candidate(
     release: LiveHostedRelease,
     *,
@@ -926,6 +954,10 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             f"* Inspected {{{{{MANIFEST_PATH}}}}} and the live GitHub release "
             f"{{{{{EXPECTED_RELEASE_TAG}}}}} after the upload completed."
         ),
+        (
+            f"* Allowed up to *{RELEASE_STABILIZATION_TIMEOUT_SECONDS} seconds* for the "
+            "release state to settle before deciding whether a duplicate persisted."
+        ),
         "",
         "*Observed result*",
         (
@@ -981,6 +1013,10 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             f"- Inspected `{MANIFEST_PATH}` and the live GitHub release "
             f"`{EXPECTED_RELEASE_TAG}` after the upload completed."
         ),
+        (
+            f"- Allowed up to **{RELEASE_STABILIZATION_TIMEOUT_SECONDS} seconds** for the "
+            "release state to settle before deciding whether a duplicate persisted."
+        ),
         "",
         "### Observed result",
         (
@@ -1032,6 +1068,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             f"`{result.get('observed_release_body', SEEDED_RELEASE_BODY)}` after the upload."
         ),
         "",
+        f"Included a {RELEASE_STABILIZATION_TIMEOUT_SECONDS}-second post-upload stabilization window before evaluating release reuse.",
         "## Observed",
         f"- Environment: `{result['repository']}` @ `{result['repository_ref']}` on {platform.system()}",
         f"- Cleanup: `{result.get('cleanup')}`",
@@ -1068,7 +1105,7 @@ def _bug_description(result: dict[str, object]) -> str:
                 f"`{STANDARD_RELEASE_BODY!r}`."
             ),
             (
-                "- Actual: "
+                f"- Actual (after waiting {RELEASE_STABILIZATION_TIMEOUT_SECONDS} seconds for release stabilization): "
                 + str(
                     result.get("error")
                     or "the seeded release was not reused with an acceptable body outcome."
