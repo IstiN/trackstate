@@ -5,5 +5,7 @@ platform: chromium
 dependencies: []
 notes:
   - Temporarily switches the live DEMO project attachment storage mode to github-releases with a ticket-specific tag prefix.
+  - Verifies the hosted Repository access surface exposes browser-supported GitHub Releases uploads for the seeded tag prefix before using the Attachments tab as product evidence.
   - Uses a real browser file selection flow with a Git LFS-tracked extension to confirm the hosted Attachments tab bypasses local-Git/LFS warnings when release-backed writes are enabled.
+  - Waits for the live Attachments section to finish hydrating after the project mutation before asserting the user-visible upload state.
   - Passes only when the hosted UI keeps upload controls enabled, does not show the amber local-Git/LFS restriction copy, and persists the upload as a GitHub Release-backed attachment.
