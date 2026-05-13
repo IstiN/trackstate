@@ -93,9 +93,32 @@ def main() -> None:
                     "header controls are ready for interaction."
                 )
                 baseline_summary = _header_summary(baseline)
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Verified the desktop header visibly showed the sync status, "
+                        "Search issues field, Create issue button, Attachments limited "
+                        "state, theme toggle, and the signed-in profile label."
+                    ),
+                    observed=_header_labels_summary(baseline, user.login),
+                )
                 try:
                     _assert_baseline_header(baseline=baseline, user_login=user.login)
                 except AssertionError as error:
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Checked the live desktop header as a user would see it before "
+                            "any interaction and compared the visible control heights in the "
+                            "top row."
+                        ),
+                        observed=(
+                            "The Search issues field was visibly taller than the surrounding "
+                            f"32px controls: {_control_summary(baseline.search)}; "
+                            f"sync={_control_summary(baseline.sync)}; "
+                            f"create={_control_summary(baseline.create)}"
+                        ),
+                    )
                     _record_step(
                         result,
                         step=1,
@@ -110,15 +133,6 @@ def main() -> None:
                     status="passed",
                     action=baseline_action,
                     observed=baseline_summary,
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Verified the desktop header visibly showed the sync status, "
-                        "Search issues field, Create issue button, Attachments limited "
-                        "state, theme toggle, and the signed-in profile label."
-                    ),
-                    observed=_header_labels_summary(baseline, user.login),
                 )
 
                 page.hover_create_issue()
@@ -956,6 +970,19 @@ def _step_observation(result: dict[str, object], step_number: int) -> str:
     for step in result.get("steps", []):
         if isinstance(step, dict) and step.get("step") == step_number:
             return str(step.get("observed", "No observation recorded."))
+    failed_steps = [
+        int(step.get("step"))
+        for step in result.get("steps", [])
+        if isinstance(step, dict)
+        and step.get("status") == "failed"
+        and isinstance(step.get("step"), int)
+    ]
+    if failed_steps:
+        first_failed_step = min(failed_steps)
+        if step_number > first_failed_step:
+            return (
+                f"Not executed because step {first_failed_step} failed before this step ran."
+            )
     return "No observation recorded."
 
 
