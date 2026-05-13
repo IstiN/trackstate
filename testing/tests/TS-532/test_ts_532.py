@@ -487,10 +487,9 @@ def _wait_for_repository_path_notice(
     matched, notice_state = poll_until(
         probe=lambda: _observe_repository_path_notice(page),
         is_satisfied=lambda state: (
-            int(state["title_count"]) > 0
-            and int(state["message_count"]) > 0
-            and int(state["accessible_title_count"]) > 0
+            int(state["accessible_title_count"]) > 0
             and int(state["accessible_message_count"]) > 0
+            and int(state["open_settings_count"]) > 0
         ),
         timeout_seconds=10,
         interval_seconds=1,
