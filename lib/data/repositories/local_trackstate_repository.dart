@@ -5,6 +5,7 @@ class LocalTrackStateRepository extends ProviderBackedTrackStateRepository {
   LocalTrackStateRepository({
     required String repositoryPath,
     String dataRef = 'HEAD',
+    super.githubClient,
     GitProcessRunner? processRunner,
   }) : super(
          provider: LocalGitTrackStateProvider(

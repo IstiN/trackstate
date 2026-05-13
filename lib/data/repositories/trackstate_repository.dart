@@ -100,8 +100,10 @@ class ProviderBackedTrackStateRepository
     required TrackStateProviderAdapter provider,
     this.usesLocalPersistence = false,
     this.supportsGitHubAuth = true,
+    http.Client? githubClient,
     JqlSearchService searchService = const JqlSearchService(),
   }) : _provider = provider,
+       _githubClient = githubClient,
        _searchService = searchService,
        _session = ProviderSession(
          providerType: provider.providerType,
@@ -118,6 +120,7 @@ class ProviderBackedTrackStateRepository
        );
 
   final TrackStateProviderAdapter _provider;
+  final http.Client? _githubClient;
   final JqlSearchService _searchService;
   final ProjectSettingsValidationService _projectSettingsValidationService =
       const ProjectSettingsValidationService();
@@ -1150,20 +1153,41 @@ class ProviderBackedTrackStateRepository
           '${attachment.name}.',
         );
       }
-      final releaseStore = switch (_provider) {
-        final RepositoryReleaseAttachmentStore supported => supported,
+      final request = RepositoryReleaseAttachmentReadRequest(
+        releaseTag: releaseTag,
+        assetName: assetName,
+        assetId: attachment.revisionOrOid,
+      );
+      final artifact = switch (_provider) {
+        final RepositoryReleaseAttachmentStore supported =>
+          await supported.readReleaseAttachment(request),
+        final RepositoryGitHubIdentityResolver identityResolver =>
+          await () async {
+            final repository = await identityResolver
+                .resolveGitHubRepositoryIdentity();
+            if (repository == null || repository.trim().isEmpty) {
+              final reason = await identityResolver
+                  .releaseAttachmentIdentityFailureReason();
+              throw TrackStateRepositoryException(
+                reason?.trim().isNotEmpty == true
+                    ? reason!.trim()
+                    : 'This repository provider does not support GitHub Releases '
+                          'attachment downloads.',
+              );
+            }
+            return GitHubTrackStateProvider(
+              client: _githubClient,
+              repositoryName: repository,
+            ).readReleaseAttachmentForRepository(
+              repository: repository,
+              request: request,
+            );
+          }(),
         _ => throw const TrackStateRepositoryException(
           'This repository provider does not support GitHub Releases '
           'attachment downloads.',
         ),
       };
-      final artifact = await releaseStore.readReleaseAttachment(
-        RepositoryReleaseAttachmentReadRequest(
-          releaseTag: releaseTag,
-          assetName: assetName,
-          assetId: attachment.revisionOrOid,
-        ),
-      );
       return artifact.bytes;
     }
     final artifact = await _provider.readAttachment(
