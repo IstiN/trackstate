@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../core/interfaces/create_issue_accessibility_screen.dart';
@@ -9,6 +10,7 @@ void main() {
     'TS-336 resizes Create issue from desktop to mobile without RenderFlex overflow',
     (tester) async {
       final semantics = tester.ensureSemantics();
+      final frameworkErrors = _FrameworkErrorCollector();
       CreateIssueAccessibilityScreenHandle? screen;
 
       const requiredTexts = <String>[
@@ -31,6 +33,7 @@ void main() {
         (width: 390, height: 844),
       ];
 
+      frameworkErrors.install();
       try {
         screen = await launchCreateIssueAccessibilityFixture(tester);
 
@@ -44,7 +47,8 @@ void main() {
 
           final layout = screen.observeLayout();
           final visibleTexts = screen.visibleTexts();
-          final exceptions = _drainFrameworkExceptions(tester);
+          final exceptions = frameworkErrors.drain();
+          _drainFrameworkExceptions(tester);
 
           if (exceptions.isNotEmpty) {
             failures.add(
@@ -101,6 +105,7 @@ void main() {
           fail(failures.join('\n'));
         }
       } finally {
+        frameworkErrors.dispose();
         await screen?.dispose();
         semantics.dispose();
       }
@@ -132,4 +137,48 @@ List<String> _drainFrameworkExceptions(WidgetTester tester) {
     messages.add(exception.toString());
   }
   return messages;
+}
+
+class _FrameworkErrorCollector {
+  final List<String> _capturedErrors = <String>[];
+  FlutterExceptionHandler? _previousHandler;
+
+  void install() {
+    _previousHandler = FlutterError.onError;
+    FlutterError.onError = (details) {
+      _capturedErrors.add(_describe(details));
+      _previousHandler?.call(details);
+    };
+  }
+
+  List<String> drain() {
+    final errors = List<String>.from(_capturedErrors);
+    _capturedErrors.clear();
+    return errors;
+  }
+
+  void dispose() {
+    FlutterError.onError = _previousHandler;
+  }
+
+  String _describe(FlutterErrorDetails details) {
+    final buffer = StringBuffer(details.exceptionAsString());
+
+    final library = details.library?.trim();
+    if (library != null && library.isNotEmpty) {
+      buffer.write('\nLibrary: $library');
+    }
+
+    final context = details.context?.toDescription();
+    if (context != null && context.isNotEmpty) {
+      buffer.write('\nContext: $context');
+    }
+
+    final stackTrace = details.stack?.toString().trim();
+    if (stackTrace != null && stackTrace.isNotEmpty) {
+      buffer.write('\nStack trace:\n$stackTrace');
+    }
+
+    return buffer.toString();
+  }
 }

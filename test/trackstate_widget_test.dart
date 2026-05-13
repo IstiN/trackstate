@@ -718,7 +718,7 @@ void main() {
         await tester.tap(uploadAttachmentSemantics);
         await tester.pumpAndSettle();
 
-        expect(find.text('release-notes.pdf'), findsOneWidget);
+        expect(find.text('release notes.pdf'), findsOneWidget);
         expect(
           find.text('Choose a file to review its size before upload.'),
           findsOneWidget,
@@ -788,7 +788,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Replace attachment?'), findsNothing);
-        expect(find.text('sync-sequence.svg'), findsOneWidget);
+        expect(find.text('sync sequence.svg'), findsOneWidget);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
