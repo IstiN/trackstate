@@ -25,8 +25,11 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Finder get goldenTarget => find.byKey(_goldenTargetKey);
 
-  Finder get repositoryAccessButton =>
-      find.bySemanticsLabel(RegExp(r'^(Local Git|Connect GitHub|Connected)$'));
+  Finder get repositoryAccessButton => find.bySemanticsLabel(
+    RegExp(
+      r'^(Local Git|Connect GitHub|Connected|Read-only|Attachments limited)$',
+    ),
+  );
 
   Finder get localGitAccessButton => find.bySemanticsLabel(RegExp('Local Git'));
 
@@ -122,6 +125,39 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         widget.properties.label == label &&
         widget.properties.readOnly == true;
   }, description: 'read-only field labeled $label');
+
+  Finder _repositoryAccessBanner(String title, {required String message}) =>
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            widget.properties.label == '$title $title $message',
+        description: 'repository-access banner "$title"',
+      );
+
+  Finder _repositoryAccessBannerAction(
+    String title, {
+    required String message,
+    required String actionLabel,
+  }) {
+    final banner = _repositoryAccessBanner(title, message: message);
+    if (banner.evaluate().isEmpty) {
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing repository-access banner action "$actionLabel"',
+      );
+    }
+    final button = find.descendant(
+      of: banner,
+      matching: find.ancestor(
+        of: _text(actionLabel),
+        matching: find.bySubtype<ButtonStyleButton>(),
+      ),
+    );
+    if (button.evaluate().isNotEmpty) {
+      return button.first;
+    }
+    return find.descendant(of: banner, matching: _text(actionLabel));
+  }
 
   Finder get _dialogScope {
     final alertDialog = find.byType(AlertDialog);
@@ -900,6 +936,32 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> tapDialogControlWithoutSettling(String label) async {
+    final dialogScope = _dialogScope;
+    if (dialogScope.evaluate().isEmpty) {
+      return false;
+    }
+    await tester.pump();
+    final semanticsMatch = find.descendant(
+      of: dialogScope,
+      matching: _exactSemanticsLabel(label),
+    );
+    final textMatch = find.descendant(
+      of: dialogScope,
+      matching: find.text(label, findRichText: true),
+    );
+    final target = semanticsMatch.evaluate().isNotEmpty
+        ? semanticsMatch
+        : textMatch;
+    if (target.evaluate().isEmpty) {
+      return false;
+    }
+    await tester.ensureVisible(target.first);
+    await tester.tap(target.first, warnIfMissed: false);
+    return true;
+  }
+
+  @override
   Future<bool> isTextFieldVisible(String label) async {
     await tester.pump();
     return _labeledTextField(label).evaluate().isNotEmpty;
@@ -1245,6 +1307,55 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> isRepositoryAccessBannerVisible({
+    required String title,
+    required String message,
+  }) async {
+    await tester.pump();
+    return _repositoryAccessBanner(
+      title,
+      message: message,
+    ).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<bool> isRepositoryAccessBannerTextVisible({
+    required String title,
+    required String message,
+    required String text,
+  }) async {
+    await tester.pump();
+    final banner = _repositoryAccessBanner(title, message: message);
+    if (banner.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(of: banner, matching: _text(text))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  Future<bool> tapRepositoryAccessBannerAction({
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) async {
+    final action = _repositoryAccessBannerAction(
+      title,
+      message: message,
+      actionLabel: actionLabel,
+    );
+    if (action.evaluate().isEmpty) {
+      return false;
+    }
+    await tester.ensureVisible(action);
+    await tester.tap(action.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+    return true;
+  }
+
+  @override
   void expectLocalRuntimeChrome() {
     expect(localGitAccessButton, findsAtLeastNWidgets(1));
     expect(find.text('Local Git'), findsOneWidget);
@@ -1354,6 +1465,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     required String label,
     required Finder semanticsMatch,
     required Finder textMatch,
+    bool settle = true,
   }) async {
     await tester.pump();
     final target = semanticsMatch.evaluate().isNotEmpty
@@ -1369,16 +1481,28 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         await tester.pump();
         await Future<void>.delayed(const Duration(milliseconds: 500));
       });
-      await tester.pumpAndSettle();
+      if (settle) {
+        await tester.pumpAndSettle();
+      } else {
+        await tester.pump();
+      }
       return true;
     }
     if (label == 'History') {
       await tester.tap(target.first, warnIfMissed: false);
-      await _pumpFrames();
+      if (settle) {
+        await _pumpFrames();
+      } else {
+        await tester.pump();
+      }
       return true;
     }
     await tester.tap(target.first, warnIfMissed: false);
-    await tester.pumpAndSettle();
+    if (settle) {
+      await tester.pumpAndSettle();
+    } else {
+      await tester.pump();
+    }
     return true;
   }
 }

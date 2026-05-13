@@ -150,6 +150,8 @@ abstract interface class TrackStateAppComponent {
 
   Future<bool> tapDialogControl(String label);
 
+  Future<bool> tapDialogControlWithoutSettling(String label);
+
   Future<bool> isTextFieldVisible(String label);
 
   Future<int> countLabeledTextFields(String label);
@@ -182,4 +184,21 @@ abstract interface class TrackStateAppComponent {
   List<String> topBarVisibleTextsSnapshot();
 
   List<String> visibleSemanticsLabelsSnapshot();
+
+  Future<bool> isRepositoryAccessBannerVisible({
+    required String title,
+    required String message,
+  });
+
+  Future<bool> isRepositoryAccessBannerTextVisible({
+    required String title,
+    required String message,
+    required String text,
+  });
+
+  Future<bool> tapRepositoryAccessBannerAction({
+    required String title,
+    required String message,
+    required String actionLabel,
+  });
 }
