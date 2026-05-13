@@ -1,233 +1,20 @@
 from __future__ import annotations
 
-import json
-import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 import unittest
 
+from testing.components.services.trackstate_cli_symmetric_link_show_validator import (
+    TrackStateCliSymmetricLinkShowValidator,
+)
+from testing.core.config.trackstate_cli_symmetric_link_show_config import (
+    TrackStateCliSymmetricLinkShowConfig,
+)
 from testing.core.models.trackstate_cli_command_observation import (
     TrackStateCliCommandObservation,
 )
-from testing.frameworks.python.trackstate_cli_compiled_local_framework import (
-    PythonTrackStateCliCompiledLocalFramework,
+from testing.tests.support.trackstate_cli_symmetric_link_show_probe_factory import (
+    create_trackstate_cli_symmetric_link_show_probe,
 )
-
-
-@dataclass(frozen=True)
-class TrackStateCliSymmetricLinkShowObservation:
-    issue_a_create_observation: TrackStateCliCommandObservation
-    issue_b_create_observation: TrackStateCliCommandObservation
-    relates_to_link_observation: TrackStateCliCommandObservation
-    ticket_show_observation: TrackStateCliCommandObservation
-    read_ticket_observation: TrackStateCliCommandObservation
-
-
-class PythonTrackStateCliSymmetricLinkShowFramework(
-    PythonTrackStateCliCompiledLocalFramework
-):
-    project_key = "TS"
-    seed_issue_key = "TS-0"
-    issue_a_key = "TS-1"
-    issue_b_key = "TS-2"
-    issue_a_summary = "Issue A"
-    issue_b_summary = "Issue B"
-    expected_author_email = "ts657@example.com"
-
-    def observe(self) -> TrackStateCliSymmetricLinkShowObservation:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-657-bin-") as bin_dir:
-            executable_path = Path(bin_dir) / "trackstate"
-            self._compile_executable(executable_path)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-657-repo-") as repo_dir:
-                repository_path = Path(repo_dir)
-                self._seed_local_repository(repository_path)
-                fallback_reason = (
-                    "Pinned execution to a temporary executable compiled from this "
-                    "checkout so TS-657 exercises the live local CLI against a seeded "
-                    "disposable repository."
-                )
-                issue_a_create_observation = self._observe_command(
-                    requested_command=(
-                        "trackstate",
-                        "ticket",
-                        "create",
-                        "--target",
-                        "local",
-                        "--summary",
-                        self.issue_a_summary,
-                        "--issue-type",
-                        "Story",
-                        "--path",
-                        str(repository_path),
-                    ),
-                    repository_path=repository_path,
-                    executable_path=executable_path,
-                    fallback_reason=fallback_reason,
-                )
-                issue_b_create_observation = self._observe_command(
-                    requested_command=(
-                        "trackstate",
-                        "ticket",
-                        "create",
-                        "--target",
-                        "local",
-                        "--summary",
-                        self.issue_b_summary,
-                        "--issue-type",
-                        "Story",
-                        "--path",
-                        str(repository_path),
-                    ),
-                    repository_path=repository_path,
-                    executable_path=executable_path,
-                    fallback_reason=fallback_reason,
-                )
-                relates_to_link_observation = self._observe_command(
-                    requested_command=(
-                        "trackstate",
-                        "ticket",
-                        "link",
-                        "--target",
-                        "local",
-                        "--key",
-                        self.issue_a_key,
-                        "--target-key",
-                        self.issue_b_key,
-                        "--type",
-                        "relates to",
-                        "--path",
-                        str(repository_path),
-                    ),
-                    repository_path=repository_path,
-                    executable_path=executable_path,
-                    fallback_reason=fallback_reason,
-                )
-                ticket_show_observation = self._observe_command(
-                    requested_command=(
-                        "trackstate",
-                        "ticket",
-                        "show",
-                        "--target",
-                        "local",
-                        "--key",
-                        self.issue_b_key,
-                        "--path",
-                        str(repository_path),
-                    ),
-                    repository_path=repository_path,
-                    executable_path=executable_path,
-                    fallback_reason=fallback_reason,
-                )
-                read_ticket_observation = self._observe_command(
-                    requested_command=(
-                        "trackstate",
-                        "read",
-                        "ticket",
-                        "--target",
-                        "local",
-                        "--key",
-                        self.issue_b_key,
-                        "--path",
-                        str(repository_path),
-                    ),
-                    repository_path=repository_path,
-                    executable_path=executable_path,
-                    fallback_reason=fallback_reason,
-                )
-                return TrackStateCliSymmetricLinkShowObservation(
-                    issue_a_create_observation=issue_a_create_observation,
-                    issue_b_create_observation=issue_b_create_observation,
-                    relates_to_link_observation=relates_to_link_observation,
-                    ticket_show_observation=ticket_show_observation,
-                    read_ticket_observation=read_ticket_observation,
-                )
-
-    def _observe_command(
-        self,
-        *,
-        requested_command: tuple[str, ...],
-        repository_path: Path,
-        executable_path: Path,
-        fallback_reason: str,
-    ) -> TrackStateCliCommandObservation:
-        executed_command = (str(executable_path), *requested_command[1:])
-        return TrackStateCliCommandObservation(
-            requested_command=requested_command,
-            executed_command=executed_command,
-            fallback_reason=fallback_reason,
-            repository_path=str(repository_path),
-            compiled_binary_path=str(executable_path),
-            result=self._run(executed_command, cwd=repository_path),
-        )
-
-    def _seed_local_repository(self, repository_path: Path) -> None:
-        repository_path.mkdir(parents=True, exist_ok=True)
-        self._write_file(
-            repository_path / f"{self.project_key}/project.json",
-            json.dumps(
-                {
-                    "key": self.project_key,
-                    "name": "TS-657 Symmetric Link Show Project",
-                }
-            )
-            + "\n",
-        )
-        self._write_file(
-            repository_path / f"{self.project_key}/config/statuses.json",
-            '[{"id":"todo","name":"To Do"}]\n',
-        )
-        self._write_file(
-            repository_path / f"{self.project_key}/config/issue-types.json",
-            '[{"id":"story","name":"Story"}]\n',
-        )
-        self._write_file(
-            repository_path / f"{self.project_key}/config/priorities.json",
-            '[{"id":"medium","name":"Medium"}]\n',
-        )
-        self._write_file(
-            repository_path / f"{self.project_key}/config/fields.json",
-            '[{"id":"summary","name":"Summary","type":"string","required":true}]\n',
-        )
-        self._write_file(
-            repository_path / self.project_key / self.seed_issue_key / "main.md",
-            f"""---
-key: {self.seed_issue_key}
-project: {self.project_key}
-issueType: story
-status: todo
-priority: medium
-summary: "Seed Issue"
-assignee: seed-user
-reporter: seed-user
-updated: 2026-05-13T00:00:00Z
----
-
-# Summary
-
-Seed Issue
-
-# Description
-
-Initial issue so the local mutation service can open the repository.
-""",
-        )
-        self._git(repository_path, "init", "-b", "main")
-        self._git(
-            repository_path,
-            "config",
-            "--local",
-            "user.name",
-            "TS-657 Tester",
-        )
-        self._git(
-            repository_path,
-            "config",
-            "--local",
-            "user.email",
-            self.expected_author_email,
-        )
-        self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-657 fixture")
 
 
 class TrackStateCliSymmetricLinkShowTest(unittest.TestCase):
@@ -235,27 +22,20 @@ class TrackStateCliSymmetricLinkShowTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.repository_root = Path(__file__).resolve().parents[3]
-        self.framework = PythonTrackStateCliSymmetricLinkShowFramework(
-            self.repository_root
+        self.config = TrackStateCliSymmetricLinkShowConfig.from_defaults()
+        self.validator = TrackStateCliSymmetricLinkShowValidator(
+            probe=create_trackstate_cli_symmetric_link_show_probe(
+                self.repository_root
+            )
         )
 
     def test_ticket_show_returns_canonical_inward_symmetric_link_metadata(self) -> None:
-        observation = self.framework.observe()
+        observation = self.validator.validate(config=self.config).observation
 
         self._assert_command_was_executed_exactly(
             observation=observation.issue_a_create_observation,
-            expected_command=(
-                "trackstate",
-                "ticket",
-                "create",
-                "--target",
-                "local",
-                "--summary",
-                "Issue A",
-                "--issue-type",
-                "Story",
-                "--path",
-                observation.issue_a_create_observation.repository_path,
+            expected_command=self.config.issue_a_create_command(
+                observation.issue_a_create_observation.repository_path
             ),
             precondition_message=(
                 "Precondition failed: TS-657 must create Issue A in the disposable "
@@ -264,18 +44,8 @@ class TrackStateCliSymmetricLinkShowTest(unittest.TestCase):
         )
         self._assert_command_was_executed_exactly(
             observation=observation.issue_b_create_observation,
-            expected_command=(
-                "trackstate",
-                "ticket",
-                "create",
-                "--target",
-                "local",
-                "--summary",
-                "Issue B",
-                "--issue-type",
-                "Story",
-                "--path",
-                observation.issue_b_create_observation.repository_path,
+            expected_command=self.config.issue_b_create_command(
+                observation.issue_b_create_observation.repository_path
             ),
             precondition_message=(
                 "Precondition failed: TS-657 must create Issue B in the disposable "
@@ -284,20 +54,8 @@ class TrackStateCliSymmetricLinkShowTest(unittest.TestCase):
         )
         self._assert_command_was_executed_exactly(
             observation=observation.relates_to_link_observation,
-            expected_command=(
-                "trackstate",
-                "ticket",
-                "link",
-                "--target",
-                "local",
-                "--key",
-                "TS-1",
-                "--target-key",
-                "TS-2",
-                "--type",
-                "relates to",
-                "--path",
-                observation.relates_to_link_observation.repository_path,
+            expected_command=self.config.inverse_link_command(
+                observation.relates_to_link_observation.repository_path
             ),
             precondition_message=(
                 "Precondition failed: TS-657 must create the symmetric `relates to` "
@@ -306,21 +64,24 @@ class TrackStateCliSymmetricLinkShowTest(unittest.TestCase):
         )
         self._assert_command_was_executed_exactly(
             observation=observation.ticket_show_observation,
-            expected_command=(
-                "trackstate",
-                "ticket",
-                "show",
-                "--target",
-                "local",
-                "--key",
-                "TS-2",
-                "--path",
-                observation.ticket_show_observation.repository_path,
+            expected_command=self.config.ticket_show_command(
+                observation.ticket_show_observation.repository_path
             ),
             precondition_message=(
                 "Step 1 failed: TS-657 must execute the exact `trackstate ticket "
                 "show --key TS-2` command from the ticket against the disposable "
                 "Local Git repository."
+            ),
+        )
+        self._assert_command_was_executed_exactly(
+            observation=observation.read_ticket_observation,
+            expected_command=self.config.read_ticket_command(
+                observation.read_ticket_observation.repository_path
+            ),
+            precondition_message=(
+                "Human-style verification failed: TS-657 must also capture the "
+                "closest currently supported read command so the product gap is "
+                "reported against a real observable CLI path."
             ),
         )
 
@@ -331,14 +92,14 @@ class TrackStateCliSymmetricLinkShowTest(unittest.TestCase):
         issue_a = issue_a_payload["data"]["issue"]
         self.assertEqual(
             issue_a["key"],
-            "TS-1",
+            self.config.issue_a_key,
             "Precondition failed: the Issue A create response returned an "
             "unexpected issue key.\n"
             f"Observed issue: {issue_a}",
         )
         self.assertEqual(
             issue_a["summary"],
-            "Issue A",
+            self.config.issue_a_summary,
             "Precondition failed: the Issue A create response did not preserve the "
             "requested summary.\n"
             f"Observed issue: {issue_a}",
@@ -351,14 +112,14 @@ class TrackStateCliSymmetricLinkShowTest(unittest.TestCase):
         issue_b = issue_b_payload["data"]["issue"]
         self.assertEqual(
             issue_b["key"],
-            "TS-2",
+            self.config.issue_b_key,
             "Precondition failed: the Issue B create response returned an "
             "unexpected issue key.\n"
             f"Observed issue: {issue_b}",
         )
         self.assertEqual(
             issue_b["summary"],
-            "Issue B",
+            self.config.issue_b_summary,
             "Precondition failed: the Issue B create response did not preserve the "
             "requested summary.\n"
             f"Observed issue: {issue_b}",
@@ -370,7 +131,7 @@ class TrackStateCliSymmetricLinkShowTest(unittest.TestCase):
         )
         self.assertEqual(
             link_payload["data"]["link"],
-            {"type": "relates to", "target": "TS-2", "direction": "outward"},
+            self.config.expected_canonical_link_payload,
             "Precondition failed: the setup link response did not preserve the "
             "canonical outward symmetric metadata required by the linked bug fix.\n"
             f"Observed payload: {link_payload}",
@@ -416,22 +177,21 @@ class TrackStateCliSymmetricLinkShowTest(unittest.TestCase):
         )
         assert isinstance(links, list)
         self.assertIn(
-            {"type": "relates to", "target": "TS-1", "direction": "inward"},
+            self.config.expected_inward_link_payload,
             links,
             "Expected result failed: the target issue JSON did not report the "
-            "canonical inward symmetric relationship for TS-1.\n"
-            'Expected entry: {"type": "relates to", "target": "TS-1", '
-            '"direction": "inward"}\n'
+            f"canonical inward symmetric relationship for {self.config.issue_a_key}.\n"
+            f"Expected entry: {self.config.expected_inward_link_payload}\n"
             f"Observed links: {links}\n"
             f"Observed payload: {ticket_show_payload}",
         )
 
         for fragment in (
-            '"key": "TS-2"',
-            '"summary": "Issue B"',
-            '"type": "relates to"',
-            '"target": "TS-1"',
-            '"direction": "inward"',
+            f'"key": "{self.config.issue_b_key}"',
+            f'"summary": "{self.config.issue_b_summary}"',
+            f'"type": "{self.config.expected_inward_link_payload["type"]}"',
+            f'"target": "{self.config.expected_inward_link_payload["target"]}"',
+            f'"direction": "{self.config.expected_inward_link_payload["direction"]}"',
         ):
             self.assertIn(
                 fragment,
