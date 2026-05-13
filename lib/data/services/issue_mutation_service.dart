@@ -1048,6 +1048,15 @@ class IssueMutationService {
           message: 'Unsupported link type $type.',
         );
       }
+      if (issue.key == targetKey) {
+        return _failure(
+          operation: operation,
+          issueKey: issueKey,
+          category: IssueMutationErrorCategory.validation,
+          message: 'Issue $issueKey cannot be linked to itself.',
+          details: <String, Object?>{'targetKey': targetKey},
+        );
+      }
 
       final provider = providerRepository.providerAdapter;
       final writeBranch = await provider.resolveWriteBranch();
