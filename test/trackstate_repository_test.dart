@@ -1845,7 +1845,7 @@ size 6
       expect(metadataJson, [
         {
           'id': 'DEMO/DEMO-1/attachments/release-plan.txt',
-          'name': 'release-plan.txt',
+          'name': 'release plan.txt',
           'mediaType': 'text/plain',
           'sizeBytes': 7,
           'author': 'demo-user',
@@ -1902,7 +1902,7 @@ size 6
               as List<Object?>;
       expect(metadata.single, {
         'id': 'DEMO/DEMO-1/attachments/release-plan.txt',
-        'name': 'release-plan.txt',
+        'name': 'release plan.txt',
         'mediaType': 'text/plain',
         'sizeBytes': 7,
         'author': 'demo-user',

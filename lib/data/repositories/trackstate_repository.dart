@@ -969,8 +969,8 @@ class ProviderBackedTrackStateRepository
       );
       final updatedAttachment = IssueAttachment(
         id: attachmentPath,
-        name: assetName,
-        mediaType: _mediaTypeForPath(assetName),
+        name: normalizedName,
+        mediaType: _mediaTypeForPath(normalizedName),
         sizeBytes: bytes.length,
         author: author,
         createdAt: timestamp,
