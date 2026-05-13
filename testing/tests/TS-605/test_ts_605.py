@@ -424,8 +424,8 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         f"## {TICKET_KEY} {status}",
         "",
         "### Rework updates",
-        "- Updated the Repository access precondition to require visible matches for the Fine-grained token field, Remember on this browser checkbox, and Connect token action.",
-        "- Switched the TS-605 Tab traversal to the page keyboard after confirming the active element, so the test no longer re-targets duplicate Flutter semantics nodes.",
+        "- Scoped the Repository access precondition to the same visible Repository access section root, so Step 1 only passes when the Fine-grained token field, Remember on this browser checkbox, and Connect token action are visible inside that section.",
+        "- Scoped the initial token focus and both focus assertions to that visible Repository access section root, so duplicate Flutter semantics elsewhere on the page cannot satisfy the test.",
         "",
         "### Automation",
         (
@@ -482,12 +482,14 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "*Rework completed*",
         (
-            "* Updated the Repository access precondition so all three controls are "
-            "validated through visible matches on the live page."
+            "* Updated the Repository access precondition so the Fine-grained token "
+            "field, Remember on this browser checkbox, and Connect token action are "
+            "validated inside the same visible Repository access section."
         ),
         (
-            "* Updated keyboard traversal to send {{Tab}} through the page keyboard after "
-            "confirming the current active element, avoiding locator retargeting."
+            "* Updated the token focus and focus matcher so keyboard assertions stay "
+            "anchored to that visible Repository access section and cannot pass on "
+            "duplicate semantics elsewhere on the page."
         ),
         (
             "* New test result: "
@@ -528,6 +530,20 @@ def _write_review_replies() -> None:
                         "threadId": "PRRT_kwDOSU6Gf86ByMg3",
                         "reply": (
                             "Fixed: TS-605 now advances with the page keyboard after asserting the active element, and the helper also uses page-level Tab input instead of locator-scoped press() so duplicate Flutter semantics nodes cannot retarget the second Tab."
+                        ),
+                    },
+                    {
+                        "inReplyToId": 3235102173,
+                        "threadId": "PRRT_kwDOSU6Gf86ByecZ",
+                        "reply": (
+                            "Fixed: Step 1 now resolves the smallest visible Repository access section that contains the Fine-grained token field, Remember on this browser checkbox, and Connect token action, and it only counts those controls inside that scoped section."
+                        ),
+                    },
+                    {
+                        "inReplyToId": 3235102377,
+                        "threadId": "PRRT_kwDOSU6Gf86Byeex",
+                        "reply": (
+                            "Fixed: the active-element matcher now resolves the same visible Repository access section and only accepts focused elements or matching ancestors inside that section, so focus cannot escape to duplicate semantics elsewhere on the page and still satisfy the assertion."
                         ),
                     },
                 ]
