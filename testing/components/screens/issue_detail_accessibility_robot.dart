@@ -858,36 +858,40 @@ class IssueDetailAccessibilityRobot
     String issueKey, {
     required String title,
     required String message,
-  }) => find.ancestor(
-    of: find.descendant(
-      of: _issueDetail(issueKey),
-      matching: find.text(title, findRichText: true),
+  }) => _smallestByArea(
+    find.ancestor(
+      of: find.descendant(
+        of: _issueDetail(issueKey),
+        matching: find.text(title, findRichText: true),
+      ),
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! Semantics) {
+          return false;
+        }
+        final label = widget.properties.label ?? '';
+        return label.contains(title) && label.contains(message);
+      }, description: 'attachments restriction callout "$title"'),
     ),
-    matching: find.byWidgetPredicate((widget) {
-      if (widget is! Semantics) {
-        return false;
-      }
-      final label = widget.properties.label ?? '';
-      return label.contains(title) && label.contains(message);
-    }, description: 'attachments restriction callout "$title"'),
   );
 
   Finder _commentsRestrictionCallout(
     String issueKey, {
     required String title,
     required String message,
-  }) => find.ancestor(
-    of: find.descendant(
-      of: _issueDetail(issueKey),
-      matching: find.text(title, findRichText: true),
+  }) => _smallestByArea(
+    find.ancestor(
+      of: find.descendant(
+        of: _issueDetail(issueKey),
+        matching: find.text(title, findRichText: true),
+      ),
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! Semantics) {
+          return false;
+        }
+        final label = widget.properties.label ?? '';
+        return label.contains(title) && label.contains(message);
+      }, description: 'comments restriction callout "$title"'),
     ),
-    matching: find.byWidgetPredicate((widget) {
-      if (widget is! Semantics) {
-        return false;
-      }
-      final label = widget.properties.label ?? '';
-      return label.contains(title) && label.contains(message);
-    }, description: 'comments restriction callout "$title"'),
   );
 
   Finder _commentsRestrictionAction(

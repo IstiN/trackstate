@@ -103,6 +103,17 @@ void main() {
             }
           }
 
+          if (!screen.commentsRestrictionCalloutIsInline(
+            _issueKey,
+            tabLabel: _commentsLabel,
+            title: _readOnlyTitle,
+            message: _readOnlyMessage,
+          )) {
+            failures.add(
+              'Step 3 failed: the Comments restriction callout was not rendered inline on the Comments surface where the composer normally appears.',
+            );
+          }
+
           if (!screen.showsCommentComposer(_issueKey)) {
             failures.add(
               'Step 4 failed: the Comments composer disappeared instead of staying visible in a blocked read-only state.',

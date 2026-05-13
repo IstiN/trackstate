@@ -212,6 +212,50 @@ void main() {
   );
 
   test(
+    'local release-backed uploads fail with GitHub Releases auth guidance instead of the generic attachment gate',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      await _writeFile(
+        repo,
+        'DEMO/project.json',
+        '{"key":"DEMO","name":"Local Demo","attachmentStorage":{"mode":"github-releases","githubReleases":{"tagPrefix":"trackstate-attachments-"}}}\n',
+      );
+      await _git(repo.path, ['add', 'DEMO/project.json']);
+      await _git(repo.path, [
+        'commit',
+        '-m',
+        'Configure release-backed attachment storage',
+      ]);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final configuredSnapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+
+      await expectLater(
+        () => repository.uploadIssueAttachment(
+          issue: configuredSnapshot.issues.single,
+          name: 'release plan.txt',
+          bytes: Uint8List.fromList(utf8.encode('roadmap')),
+        ),
+        throwsA(
+          isA<TrackStateRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            allOf(
+              contains('GitHub Releases'),
+              anyOf(contains('auth'), contains('configuration')),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
     'local repository derives issue history entries from git commits',
     () async {
       final repo = await _createLocalRepository();
