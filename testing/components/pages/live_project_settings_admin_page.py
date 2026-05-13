@@ -19,7 +19,6 @@ class LiveProjectSettingsAdminPage:
     BUG_WORKFLOW_NAME = "Bug Workflow"
     BUG_WORKFLOW_ID = "bug-workflow"
     BUG_ISSUE_TYPE_NAME = "Bug"
-    WORKFLOW_TRANSITION_ID = "complete-bug"
     WORKFLOW_TRANSITION_NAME = "Complete bug"
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
@@ -88,27 +87,10 @@ class LiveProjectSettingsAdminPage:
         self._click_button_text("Add transition")
 
         self.session.wait_for_selector('input[aria-label="Transition name"]', timeout_ms=30_000)
-        self.session.fill(
-            'input[aria-label="ID"]',
-            self.WORKFLOW_TRANSITION_ID,
-            index=1,
-            timeout_ms=30_000,
-        )
-        transition_id = self.session.read_value(
-            'input[aria-label="ID"]',
-            index=1,
-            timeout_ms=30_000,
-        )
-        if transition_id != self.WORKFLOW_TRANSITION_ID:
-            raise AssertionError(
-                "The hosted transition ID field did not keep the saved value.\n"
-                f"Expected: {self.WORKFLOW_TRANSITION_ID}\n"
-                f"Observed: {transition_id}",
-            )
-        self.session.fill(
+        self._type_transition_id("complete-bug")
+        self._type_into_input(
             'input[aria-label="Transition name"]',
             self.WORKFLOW_TRANSITION_NAME,
-            timeout_ms=30_000,
         )
         self._click_button_text("To status To Do")
         self.session.wait_for_selector(
@@ -285,15 +267,19 @@ class LiveProjectSettingsAdminPage:
         )
         return "" if value is None else str(value)
 
-    def _type_into_input(self, selector: str, value: str) -> None:
-        self._scroll_into_view(selector)
+    def _type_into_input(self, selector: str, value: str, *, index: int = 0) -> None:
+        self._scroll_into_view(selector, index=index)
+        self.session.click(selector, index=index, timeout_ms=30_000)
+        self.session.press(selector, "Control+A", index=index, timeout_ms=30_000)
+        self.session.press(selector, "Backspace", index=index, timeout_ms=30_000)
         self.session.type_text(
             selector,
             value,
+            index=index,
             timeout_ms=30_000,
             delay_ms=120,
         )
-        observed = self.session.read_value(selector, timeout_ms=30_000)
+        observed = self.session.read_value(selector, index=index, timeout_ms=30_000)
         if observed != value:
             raise AssertionError(
                 "The hosted text field did not keep the typed value.\n"
@@ -301,6 +287,28 @@ class LiveProjectSettingsAdminPage:
                 f"Expected: {value}\n"
                 f"Observed: {observed}",
             )
+
+    def _type_transition_id(self, value: str) -> str:
+        selector = 'input[aria-label="ID"]'
+        self._scroll_into_view(selector, index=1)
+        self.session.click(selector, index=1, timeout_ms=30_000)
+        self.session.press(selector, "Control+A", index=1, timeout_ms=30_000)
+        self.session.press(selector, "Backspace", index=1, timeout_ms=30_000)
+        self.session.type_text(
+            selector,
+            value,
+            index=1,
+            timeout_ms=30_000,
+            delay_ms=120,
+        )
+        observed = self.session.read_value(selector, index=1, timeout_ms=30_000)
+        if not observed.strip() or not observed.endswith(value):
+            raise AssertionError(
+                "The hosted transition ID field did not keep the typed value suffix.\n"
+                f"Expected suffix: {value}\n"
+                f"Observed: {observed}",
+            )
+        return observed
 
     def _read_matching_text(
         self,

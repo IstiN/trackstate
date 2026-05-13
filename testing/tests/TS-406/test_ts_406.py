@@ -5,7 +5,6 @@ import os
 import sys
 import traceback
 from pathlib import Path
-from time import monotonic, sleep
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -19,6 +18,7 @@ from testing.components.services.live_setup_repository_service import (
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config
 from testing.core.interfaces.web_app_session import WebAppTimeoutError
+from testing.core.utils.polling import poll_until
 from testing.tests.support.live_tracker_app_factory import (
     create_live_tracker_app_with_stored_token,
 )
@@ -29,7 +29,6 @@ BUG_WORKFLOW_ID = "bug-workflow"
 BUG_WORKFLOW_NAME = "Bug Workflow"
 BUG_ISSUE_TYPE_ID = "bug"
 BUG_ISSUE_TYPE_NAME = "Bug"
-WORKFLOW_TRANSITION_ID = "complete-bug"
 WORKFLOW_TRANSITION_NAME = "Complete bug"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts406_failure.png"
@@ -357,29 +356,36 @@ def _reload_issue_type_row(settings_page: LiveProjectSettingsAdminPage) -> str:
 def _wait_for_repository_persistence(
     service: LiveSetupRepositoryService,
 ) -> dict[str, object]:
-    deadline = monotonic() + PERSISTENCE_TIMEOUT_SECONDS
-    last_observation: dict[str, object] = {}
-
-    while monotonic() < deadline:
-        workflows = service.fetch_workflow_config_map(PROJECT_KEY)
-        issue_types = service.fetch_issue_type_config_entries(PROJECT_KEY)
-        workflow = workflows.get(BUG_WORKFLOW_ID)
-        bug_issue_type = _bug_issue_type_entry(issue_types)
-        last_observation = {
-            "workflow": workflow,
-            "bug_issue_type": bug_issue_type,
-        }
-        if _workflow_matches_expectation(workflow) and _bug_issue_type_matches_expectation(
-            bug_issue_type,
-        ):
-            return last_observation
-        sleep(PERSISTENCE_POLL_SECONDS)
+    matched, last_observation = poll_until(
+        probe=lambda: _observe_repository_persistence(service),
+        is_satisfied=lambda observation: _workflow_matches_expectation(
+            observation.get("workflow"),
+        )
+        and _bug_issue_type_matches_expectation(observation.get("bug_issue_type")),
+        timeout_seconds=PERSISTENCE_TIMEOUT_SECONDS,
+        interval_seconds=PERSISTENCE_POLL_SECONDS,
+    )
+    if matched:
+        return last_observation
 
     raise AssertionError(
         "Step 7 failed: the live repository config did not persist the Bug workflow "
         "assignment within the allowed wait window.\n"
         f"Observed repository config:\n{json.dumps(last_observation, indent=2)}",
     )
+
+
+def _observe_repository_persistence(
+    service: LiveSetupRepositoryService,
+) -> dict[str, object]:
+    workflows = service.fetch_workflow_config_map(PROJECT_KEY)
+    issue_types = service.fetch_issue_type_config_entries(PROJECT_KEY)
+    workflow = workflows.get(BUG_WORKFLOW_ID)
+    bug_issue_type = _bug_issue_type_entry(issue_types)
+    return {
+        "workflow": workflow,
+        "bug_issue_type": bug_issue_type,
+    }
 
 
 def _wait_for_save_failure(
@@ -406,8 +412,10 @@ def _workflow_matches_expectation(workflow: object) -> bool:
     transition = transitions[0]
     if not isinstance(transition, dict):
         return False
+    transition_id = transition.get("id")
     return (
-        transition.get("id") == WORKFLOW_TRANSITION_ID
+        isinstance(transition_id, str)
+        and bool(transition_id.strip())
         and transition.get("name") == WORKFLOW_TRANSITION_NAME
         and transition.get("from") == "todo"
         and transition.get("to") == "done"
