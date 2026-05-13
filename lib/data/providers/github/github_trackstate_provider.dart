@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 import '../../../domain/models/trackstate_models.dart';
+import '../foundation_compat.dart' show kIsWeb;
 import '../trackstate_provider.dart';
 
 class GitHubTrackStateProvider

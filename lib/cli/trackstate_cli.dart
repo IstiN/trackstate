@@ -2605,11 +2605,10 @@ class TrackStateCli {
               (field) => _metadataTextLabel(
                 canonicalName: field.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.fieldLabel(
-                      field.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project.fieldLabel(
+                  field.id,
+                  locale: requestedLocale,
+                ),
               ),
             ),
           ),
@@ -2633,11 +2632,8 @@ class TrackStateCli {
               (status) => _metadataTextLabel(
                 canonicalName: status.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.statusLabel(
-                      status.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project
+                    .statusLabel(status.id, locale: requestedLocale),
               ),
             ),
           ),
@@ -2676,11 +2672,8 @@ class TrackStateCli {
               (item) => _metadataTextLabel(
                 canonicalName: item.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.issueTypeLabel(
-                      item.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project
+                    .issueTypeLabel(item.id, locale: requestedLocale),
               ),
             ),
           ),
@@ -2704,11 +2697,8 @@ class TrackStateCli {
               (item) => _metadataTextLabel(
                 canonicalName: item.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.componentLabel(
-                      item.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project
+                    .componentLabel(item.id, locale: requestedLocale),
               ),
             ),
           ),
@@ -2732,11 +2722,8 @@ class TrackStateCli {
               (item) => _metadataTextLabel(
                 canonicalName: item.name,
                 locale: locale,
-                localizedName: (requestedLocale) =>
-                    snapshot.project.versionLabel(
-                      item.id,
-                      locale: requestedLocale,
-                    ),
+                localizedName: (requestedLocale) => snapshot.project
+                    .versionLabel(item.id, locale: requestedLocale),
               ),
             ),
           ),
@@ -3161,7 +3148,6 @@ class TrackStateCli {
     required String attachmentName,
     required List<int> bytes,
   }) async {
-    final credential = await _resolveOptionalLocalCredential();
     final branch = await _resolveLocalBranch(target);
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
@@ -3173,10 +3159,24 @@ class TrackStateCli {
         RepositoryConnection(
           repository: target.value,
           branch: branch,
-          token: credential?.token ?? '',
+          token: '',
         ),
       );
       final snapshot = await repository.loadSnapshot();
+      final credential =
+          snapshot.project.attachmentStorage.mode ==
+              AttachmentStorageMode.githubReleases
+          ? await _resolveLocalReleaseAttachmentCredential(repository)
+          : null;
+      if (credential != null) {
+        await repository.connect(
+          RepositoryConnection(
+            repository: target.value,
+            branch: branch,
+            token: credential.token,
+          ),
+        );
+      }
       final issue = _findIssue(snapshot, issueKey);
       final updatedIssue = await repository.uploadIssueAttachment(
         issue: issue,
@@ -3265,7 +3265,6 @@ class TrackStateCli {
     required String attachmentId,
     required String resolvedOutPath,
   }) async {
-    final credential = await _resolveOptionalLocalCredential();
     final branch = await _resolveLocalBranch(target);
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
@@ -3277,11 +3276,25 @@ class TrackStateCli {
         RepositoryConnection(
           repository: target.value,
           branch: branch,
-          token: credential?.token ?? '',
+          token: '',
         ),
       );
       final snapshot = await repository.loadSnapshot();
       final resolvedAttachment = _findAttachment(snapshot, attachmentId);
+      final credential =
+          resolvedAttachment.attachment.storageBackend ==
+              AttachmentStorageMode.githubReleases
+          ? await _resolveLocalReleaseAttachmentCredential(repository)
+          : null;
+      if (credential != null) {
+        await repository.connect(
+          RepositoryConnection(
+            repository: target.value,
+            branch: branch,
+            token: credential.token,
+          ),
+        );
+      }
       final bytes = await repository.downloadAttachment(
         resolvedAttachment.attachment,
       );
@@ -3482,7 +3495,7 @@ class TrackStateCli {
         'provider': target.provider,
         'repository': target.value,
       },
-      );
+    );
   }
 
   Future<TrackStateCliCredential?> _resolveOptionalLocalCredential() =>
@@ -3491,6 +3504,24 @@ class TrackStateCli {
         environment: _environment.environment,
         readGhToken: _environment.readGhAuthToken,
       );
+
+  Future<TrackStateCliCredential?> _resolveLocalReleaseAttachmentCredential(
+    TrackStateRepository repository,
+  ) async {
+    if (repository
+        case final ProviderBackedTrackStateRepository providerBacked) {
+      final provider = providerBacked.providerAdapter;
+      if (provider
+          case final RepositoryGitHubIdentityResolver identityResolver) {
+        final repositoryIdentity = await identityResolver
+            .resolveGitHubRepositoryIdentity();
+        if (repositoryIdentity == null || repositoryIdentity.trim().isEmpty) {
+          return null;
+        }
+      }
+    }
+    return _resolveOptionalLocalCredential();
+  }
 
   TrackStateIssue _findIssue(TrackerSnapshot snapshot, String issueKey) {
     try {
@@ -5270,29 +5301,19 @@ class TrackStateCli {
     '${issue.key}: ${issue.summary}',
     'Project: ${project.key}',
     'Type: ${_metadataTextLabel(
-      canonicalName: _findConfigEntry(
-        project.issueTypeDefinitions,
-        issue.issueTypeId,
-      ).name,
+      canonicalName: _findConfigEntry(project.issueTypeDefinitions, issue.issueTypeId).name,
       locale: locale,
-      localizedName: (requestedLocale) =>
-          project.issueTypeLabel(issue.issueTypeId, locale: requestedLocale),
+      localizedName: (requestedLocale) => project.issueTypeLabel(issue.issueTypeId, locale: requestedLocale),
     )}',
     'Status: ${_metadataTextLabel(
-      canonicalName: _findConfigEntry(project.statusDefinitions, issue.statusId)
-          .name,
+      canonicalName: _findConfigEntry(project.statusDefinitions, issue.statusId).name,
       locale: locale,
-      localizedName: (requestedLocale) =>
-          project.statusLabel(issue.statusId, locale: requestedLocale),
+      localizedName: (requestedLocale) => project.statusLabel(issue.statusId, locale: requestedLocale),
     )}',
     'Priority: ${_metadataTextLabel(
-      canonicalName: _findConfigEntry(
-        project.priorityDefinitions,
-        issue.priorityId,
-      ).name,
+      canonicalName: _findConfigEntry(project.priorityDefinitions, issue.priorityId).name,
       locale: locale,
-      localizedName: (requestedLocale) =>
-          project.priorityLabel(issue.priorityId, locale: requestedLocale),
+      localizedName: (requestedLocale) => project.priorityLabel(issue.priorityId, locale: requestedLocale),
     )}',
   ].join('\n');
 
