@@ -1,0 +1,9 @@
+test_id: TS-524
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Seeds the hosted DEMO-2 issue with a legacy repository-path attachment entry.
+  - Temporarily switches DEMO/project.json attachment storage to github-releases.
+  - Verifies the live hosted Attachments tab keeps the Choose attachment control visible and enables Upload attachment after a file is selected.

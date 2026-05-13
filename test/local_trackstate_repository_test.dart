@@ -212,7 +212,7 @@ void main() {
   );
 
   test(
-    'local release-backed uploads fail with GitHub Releases auth guidance instead of the generic attachment gate',
+    'local release-backed uploads fail with an explicit repository identity error when no git remote is configured',
     () async {
       final repo = await _createLocalRepository();
       addTearDown(() => repo.delete(recursive: true));
@@ -245,9 +245,8 @@ void main() {
           isA<TrackStateRepositoryException>().having(
             (error) => error.message,
             'message',
-            allOf(
-              contains('GitHub Releases'),
-              anyOf(contains('auth'), contains('configuration')),
+            contains(
+              'GitHub repository identity cannot be resolved from the local Git configuration because no remote is configured.',
             ),
           ),
         ),

@@ -153,14 +153,14 @@ void main() {
           ),
           findsOneWidget,
         );
-        final chooseAttachment = tester.widget<OutlinedButton>(
+        expect(
           find.widgetWithText(OutlinedButton, 'Choose attachment'),
+          findsNothing,
         );
-        final uploadAttachment = tester.widget<FilledButton>(
+        expect(
           find.widgetWithText(FilledButton, 'Upload attachment'),
+          findsNothing,
         );
-        expect(chooseAttachment.onPressed, isNull);
-        expect(uploadAttachment.onPressed, isNull);
 
         final editButton = tester.widget<OutlinedButton>(
           find.widgetWithText(OutlinedButton, 'Edit').first,
@@ -174,7 +174,7 @@ void main() {
   );
 
   testWidgets(
-    'attachment-restricted hosted flow keeps browser-supported uploads enabled when attachment permission is available',
+    'attachment-restricted hosted flow keeps repository-path attachments download-only when attachment permission is available',
     (tester) async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'attachment-token',
@@ -210,28 +210,23 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          find.text('Some attachment uploads still require local Git'),
+          find.text('Attachments stay download-only in the browser'),
           findsAtLeastNWidgets(1),
         );
         expect(
           find.textContaining(
-            'browser-supported attachment uploads can continue here',
+            'Attachment upload is unavailable in this browser session',
           ),
           findsOneWidget,
         );
         expect(
-          find.text('Attachments stay download-only in the browser'),
+          find.widgetWithText(OutlinedButton, 'Choose attachment'),
           findsNothing,
         );
-
-        final chooseAttachment = tester.widget<OutlinedButton>(
-          find.widgetWithText(OutlinedButton, 'Choose attachment'),
-        );
-        final uploadAttachment = tester.widget<FilledButton>(
+        expect(
           find.widgetWithText(FilledButton, 'Upload attachment'),
+          findsNothing,
         );
-        expect(chooseAttachment.onPressed, isNotNull);
-        expect(uploadAttachment.onPressed, isNull);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();

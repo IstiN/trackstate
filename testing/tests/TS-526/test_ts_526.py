@@ -482,6 +482,16 @@ def _assert_repository_path_browser_restriction(
             f"Observed Open settings count: {open_settings_count}\n"
             f"Observed body text:\n{attachments_body}",
         )
+    normalized_attachments_body = _normalize_whitespace(attachments_body)
+    for unexpected_title in (UNEXPECTED_LIMITED_TITLE, UNEXPECTED_RELEASE_TITLE):
+        if unexpected_title in normalized_attachments_body:
+            raise AssertionError(
+                "Step 2 failed: the Attachments tab rendered a restriction notice for a "
+                "different attachment-storage mode instead of the repository-path "
+                "download-only warning.\n"
+                f"Unexpected title: {unexpected_title}\n"
+                f"Observed body text:\n{attachments_body}",
+            )
     if (
         controls.choose_button_count != 0
         or controls.upload_button_count != 0

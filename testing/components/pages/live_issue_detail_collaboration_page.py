@@ -6,6 +6,7 @@ from testing.components.pages.live_jql_search_page import LiveJqlSearchPage
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
 from testing.core.interfaces.web_app_session import (
     FocusedElementObservation,
+    NewPageObservation,
     WebAppTimeoutError,
 )
 
@@ -75,10 +76,10 @@ class LiveIssueDetailCollaborationPage:
         'flt-semantics[aria-label="Upload attachment"] flt-semantics[flt-tappable]'
     )
     _replace_attachment_button_selector = (
-        'flt-semantics[aria-label="Replace attachment"] flt-semantics[flt-tappable]'
+        'flt-semantics[role="button"][flt-tappable]:text-is("Replace attachment")'
     )
     _keep_attachment_button_selector = (
-        'flt-semantics[aria-label="Keep current attachment"] flt-semantics[flt-tappable]'
+        'flt-semantics[role="button"][flt-tappable]:text-is("Keep current attachment")'
     )
     _selected_button_selector = _active_tab_button_selector
 
@@ -275,6 +276,26 @@ class LiveIssueDetailCollaborationPage:
 
     def wait_for_text_absent(self, text: str, *, timeout_ms: int = 60_000) -> str:
         return self._session.wait_for_text_absent(text, timeout_ms=timeout_ms)
+
+    def click_button(self, label: str, *, timeout_ms: int = 30_000) -> None:
+        self._session.click(
+            self._button_selector,
+            has_text=label,
+            timeout_ms=timeout_ms,
+        )
+
+    def click_button_via_semantics_center(
+        self,
+        label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        self.wait_for_text(label, timeout_ms=timeout_ms)
+        rect = self.find_semantics_rect_containing_text(label)
+        self._session.mouse_click(
+            rect.left + (rect.width / 2),
+            rect.top + (rect.height / 2),
+        )
 
     def wait_for_text_fragment(
         self,
@@ -1007,8 +1028,23 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=60_000,
         )
 
+    def activate_focused_control_in_new_page(
+        self,
+        *,
+        timeout_ms: int = 8_000,
+    ) -> NewPageObservation:
+        return self._session.wait_for_new_page_after_active_element_click(
+            timeout_ms=timeout_ms,
+        )
+
+    def download_attachment(self, attachment_name: str) -> str:
+        return self._session.wait_for_download_after_click(
+            self._download_button_selector(attachment_name),
+            timeout_ms=60_000,
+        )
+
     def visible_button_count(self, label: str) -> int:
-        return self._session.count(self._button_selector, has_text=label)
+        return self._visible_button_count_by_label(label)
 
     def observe_attachment_upload_controls(self) -> AttachmentUploadControlsObservation:
         payload = self._session.evaluate(
@@ -1454,6 +1490,47 @@ class LiveIssueDetailCollaborationPage:
             button_enabled=bool(payload.get("buttonEnabled")),
         )
 
+    def _visible_button_count_by_label(self, label: str) -> int:
+        payload = self._session.evaluate(
+            """
+            ({ label }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const seen = new Set();
+              let count = 0;
+              for (const element of document.querySelectorAll('flt-semantics[role="button"]')) {
+                const text = normalize(
+                  [
+                    element.getAttribute('aria-label') ?? '',
+                    element.innerText ?? '',
+                    element.textContent ?? '',
+                  ].join(' ')
+                );
+                if (!text.includes(label)) {
+                  continue;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  continue;
+                }
+                const key = [
+                  Math.round(rect.left),
+                  Math.round(rect.top),
+                  Math.round(rect.width),
+                  Math.round(rect.height),
+                ].join('|');
+                if (seen.has(key)) {
+                  continue;
+                }
+                seen.add(key);
+                count += 1;
+              }
+              return count;
+            }
+            """,
+            arg={"label": label},
+        )
+        return int(payload)
+
     def _is_connected(self, connected_banner: str) -> bool:
         return (
             self._session.count(self._connected_button_selector) > 0
@@ -1481,6 +1558,14 @@ class LiveIssueDetailCollaborationPage:
     @staticmethod
     def _download_button_label(attachment_name: str) -> str:
         return f"Download {attachment_name}"
+
+    @staticmethod
+    def _download_button_selector(attachment_name: str) -> str:
+        return (
+            'flt-semantics[aria-label="'
+            f'{LiveIssueDetailCollaborationPage._escape(LiveIssueDetailCollaborationPage._download_button_label(attachment_name))}'
+            '"]'
+        )
 
     @staticmethod
     def _deferred_error_selector(

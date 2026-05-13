@@ -84,6 +84,7 @@ class LiveHostedRelease:
     assets: list[LiveHostedReleaseAsset]
     body: str = ""
     draft: bool = False
+    prerelease: bool = False
     target_commitish: str = ""
 
 
@@ -515,13 +516,39 @@ class LiveSetupRepositoryService:
         )
         return self._parse_release(payload, context=f"create release {tag_name}")
 
-    def update_release_name(self, release_id: int, *, name: str) -> LiveHostedRelease:
-        payload = self._write_json(
+    def update_release(
+        self,
+        release_id: int,
+        *,
+        name: str | None = None,
+        body: str | None = None,
+        target_commitish: str | None = None,
+        draft: bool | None = None,
+        prerelease: bool | None = None,
+    ) -> LiveHostedRelease:
+        payload: dict[str, object] = {}
+        if name is not None:
+            payload["name"] = name
+        if body is not None:
+            payload["body"] = body
+        if target_commitish is not None:
+            payload["target_commitish"] = target_commitish
+        if draft is not None:
+            payload["draft"] = draft
+        if prerelease is not None:
+            payload["prerelease"] = prerelease
+        if not payload:
+            raise ValueError("update_release requires at least one field to update.")
+
+        updated = self._write_json(
             f"/repos/{self.repository}/releases/{release_id}",
-            payload={"name": name},
+            payload=payload,
             method="PATCH",
         )
-        return self._parse_release(payload, context=f"update release {release_id}")
+        return self._parse_release(updated, context=f"update release {release_id}")
+
+    def update_release_name(self, release_id: int, *, name: str) -> LiveHostedRelease:
+        return self.update_release(release_id, name=name)
 
     def upload_release_asset(
         self,
@@ -565,7 +592,6 @@ class LiveSetupRepositoryService:
             id=int(raw_payload.get("id", 0)),
             name=str(raw_payload.get("name", "")).strip(),
         )
-
     def _read_config_names(self, path: str) -> list[str]:
         values = self._read_repo_json(path)
         return [
@@ -735,6 +761,7 @@ class LiveSetupRepositoryService:
             ],
             body=str(payload.get("body", "")),
             draft=bool(payload.get("draft", False)),
+            prerelease=bool(payload.get("prerelease", False)),
             target_commitish=str(payload.get("target_commitish", "")).strip(),
         )
 
