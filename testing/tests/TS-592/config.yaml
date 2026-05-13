@@ -1,0 +1,41 @@
+test_id: TS-592
+type: cli
+framework: python
+platform: local
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+notes:
+  - Executes the exact TS-592 local attachment upload command from a disposable TrackState repository configured for github-releases attachment storage.
+  - Seeds a non-GitHub `origin` remote and removes ambient GitHub credentials from the runtime environment so the test can verify explicit repository-identity guidance instead of the old generic provider-capability failure.
+runtime_inputs:
+  ticket_command: trackstate attachment upload --issue TS-475 --file test.txt --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - upload
+    - --issue
+    - TS-475
+    - --file
+    - test.txt
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-592 Project
+  issue_key: TS-475
+  issue_summary: Non-GitHub remote release identity fixture
+  source_file_name: test.txt
+  source_file_text: |
+    TS-592 upload payload
+    This file should never be written when release-backed upload cannot resolve a GitHub repository from configured remotes.
+  attachment_tag_prefix: ts592-
+  expected_attachment_relative_path: TS/TS-475/attachments/test.txt
+  origin_remote_name: origin
+  origin_remote_url: https://gitlab.com/user/project.git
+  expected_identity_fragments:
+    - github
+    - repository identity
+    - local git configuration
+    - no github remote is configured
+  provider_capability_fragments:
+    - this repository session does not allow attachment uploads
