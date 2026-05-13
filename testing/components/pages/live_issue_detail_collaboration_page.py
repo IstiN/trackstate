@@ -284,6 +284,19 @@ class LiveIssueDetailCollaborationPage:
             timeout_ms=timeout_ms,
         )
 
+    def click_button_via_semantics_center(
+        self,
+        label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        self.wait_for_text(label, timeout_ms=timeout_ms)
+        rect = self.find_semantics_rect_containing_text(label)
+        self._session.mouse_click(
+            rect.left + (rect.width / 2),
+            rect.top + (rect.height / 2),
+        )
+
     def wait_for_text_fragment(
         self,
         fragment: str,
