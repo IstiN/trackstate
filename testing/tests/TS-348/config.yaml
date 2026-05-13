@@ -1,0 +1,11 @@
+test_id: TS-348
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+notes:
+  - Executes the exact ticket command `trackstate search --jql "project = TRACK and status = 'Non-Existent-Status-XYZ'"` from a seeded temporary TrackState repository.
+  - Reuses the shared TrackState CLI JQL search probe to compile a temporary CLI binary from this checkout so the seeded repository can remain the current working directory.
+  - Verifies the empty-result payload keeps flattened pagination metadata at the top level and does not reintroduce the legacy nested `data.page` object.

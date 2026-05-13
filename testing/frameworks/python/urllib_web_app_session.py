@@ -258,6 +258,18 @@ class UrllibWebAppSession(WebAppSession):
             "DOM evaluation is not supported by the urllib web session fallback."
         )
 
+    def wait_for_function(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+        timeout_ms: int = 30_000,
+    ) -> object:
+        del expression, arg, timeout_ms
+        raise NotImplementedError(
+            "Function-based DOM waits are not supported by the urllib web session fallback."
+        )
+
     def active_element(self) -> FocusedElementObservation:
         raise NotImplementedError(
             "Active-element inspection is not supported by the urllib web session fallback."
@@ -270,6 +282,19 @@ class UrllibWebAppSession(WebAppSession):
         timeout_ms: int = 30_000,
     ) -> str:
         del key, timeout_ms
+        raise NotImplementedError(
+            "Download capture is not supported by the urllib web session fallback."
+        )
+
+    def wait_for_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        del selector, has_text, index, timeout_ms
         raise NotImplementedError(
             "Download capture is not supported by the urllib web session fallback."
         )

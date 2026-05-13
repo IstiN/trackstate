@@ -7,6 +7,9 @@
 const GOAL_INSTRUCTIONS = './.dmtools/instructions/goal/goal.md';
 const DESIGN_REFERENCE = './.dmtools/instructions/goal/DESIGN.md';
 const SETUP_REPO_INSTRUCTIONS = './.dmtools/instructions/product/trackstate_setup_repo.md';
+const TRACKSTATE_TEST_AUTOMATION_RULES = './.dmtools/instructions/agents/test_automation_hardening.md';
+const TRACKSTATE_TEST_REVIEW_CHECKLIST = './.dmtools/instructions/agents/test_automation_review_checklist.md';
+const TRACKSTATE_FLUTTER_RULES = './.dmtools/instructions/agents/flutter_development_rules.md';
 const TRACKSTATE_SETUP_SUBMODULES = [
     { path: 'trackstate-setup', branch: 'main', tagPrefix: 'stable' }
 ];
@@ -37,6 +40,9 @@ const FLUTTER_FEEDBACK = {
 };
 
 module.exports = {
+    // SM parallelism: number of workflows SM dispatches per run (overrides sm.json default)
+    smMaxWorkflows: 1,
+
     repository: {
         owner: 'IstiN',
         repo: 'trackstate'
@@ -145,6 +151,28 @@ module.exports = {
             GOAL_INSTRUCTIONS,
             SETUP_REPO_INSTRUCTIONS,
             './.dmtools/instructions/product/trackstate_domain_knowledge.md'
+        ],
+        story_development: [
+            TRACKSTATE_FLUTTER_RULES
+        ],
+        bug_development: [
+            TRACKSTATE_FLUTTER_RULES
+        ],
+        test_case_automation: [
+            TRACKSTATE_TEST_AUTOMATION_RULES
+        ],
+        pr_review: [
+            TRACKSTATE_FLUTTER_RULES
+        ],
+        pr_rework: [
+            TRACKSTATE_FLUTTER_RULES
+        ],
+        pr_test_automation_review: [
+            TRACKSTATE_TEST_AUTOMATION_RULES,
+            TRACKSTATE_TEST_REVIEW_CHECKLIST
+        ],
+        pr_test_automation_rework: [
+            TRACKSTATE_TEST_AUTOMATION_RULES
         ],
         bug_creation: [
             GOAL_INSTRUCTIONS,

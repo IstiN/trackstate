@@ -1,0 +1,8 @@
+test_id: TS-448
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Uses a hosted setup repository fixture that returns a GitHub rate-limit response on the first mandatory bootstrap fetch of either `TRACK/project.json` or `TRACK/.trackstate/index/issues.json`.
+  - Verifies the real app renders the shell-first recovery state with visible navigation chrome, keeps non-Settings navigation inert while recovery is active, and allows Dashboard and Board again after Retry succeeds.

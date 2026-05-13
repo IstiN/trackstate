@@ -1,0 +1,8 @@
+test_id: TS-395
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies the Create issue form opens directly at 1440x640 with vertical scrolling already initialized on the first build.
+  - Confirms the form renders without RenderFlex overflow exceptions and the bottom Save and Cancel actions remain reachable after scrolling.
