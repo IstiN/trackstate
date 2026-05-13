@@ -1,0 +1,9 @@
+test_id: TS-665
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Seeds legacy SharedPreferences data for a hosted repository token plus an active hosted repository context.
+  - Exercises the production workspace migration flow through SharedPreferencesWorkspaceProfileService.ensureLegacyContextMigrated().
+  - Verifies exactly one active workspace is stored, only the active repository token moves to the workspace-scoped key, and the migrated state restores a connected hosted session in the app chrome.
