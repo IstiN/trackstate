@@ -1,0 +1,9 @@
+test_id: TS-531
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Uses the deployed hosted TrackState app against the live setup repository.
+  - Temporarily removes the live DEMO project's attachmentStorage config to exercise the product's default hosted attachment path, then restores the original project.json after the run.
+  - Verifies the hosted Attachments tab hides storage restriction notices and Open settings while keeping Choose attachment and Upload attachment controls visible and interactive.

@@ -34,10 +34,10 @@ TICKET_SUMMARY = (
     "release-backed storage"
 )
 OUTPUTS_DIR = REPO_ROOT / "outputs"
-JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 TEST_FILE_PATH = "testing/tests/TS-533/test_ts_533.py"
 RUN_COMMAND = "python testing/tests/TS-533/test_ts_533.py"
@@ -373,33 +373,6 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
     visible_error = _as_text(result.get("visible_error_text"))
     token_source = _as_text(result.get("token_source_environment_variable"))
-    jira_lines = [
-        "h3. Test Automation Result",
-        "",
-        "*Status:* ✅ PASSED",
-        f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
-        "",
-        "h4. What was tested",
-        f"* Executed {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository configured with {_jira_inline('attachmentStorage.mode = github-releases')}.",
-        f"* Pointed the local Git remote at {_jira_inline(_as_text(result.get('remote_origin_url')))} and mirrored {_jira_inline(token_source)} into {_jira_inline('TRACKSTATE_TOKEN')} for the upload attempt.",
-        "* Inspected the caller-visible CLI error output and the repository attachment path after the command.",
-        "",
-        "h4. Result",
-        "* Step 1 passed: the CLI failed immediately with explicit release-backed permission guidance.",
-        f"* Observed error: {_jira_inline(visible_error)}",
-        "* Step 2 passed: no local attachment file was written and the repository stayed clean.",
-        "* Human-style verification passed: the terminal output clearly explained the permission problem, and no fallback file appeared in the repository.",
-        "",
-        "h4. Test file",
-        "{code}",
-        TEST_FILE_PATH,
-        "{code}",
-        "",
-        "h4. Run command",
-        "{code:bash}",
-        RUN_COMMAND,
-        "{code}",
-    ]
     markdown_lines = [
         "## Test Automation Result",
         "",
@@ -422,9 +395,14 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         RUN_COMMAND,
         "```",
     ]
-    JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
+    response_lines = [
+        f"TS-533 rework updated `{TEST_FILE_PATH}`.",
+        "- Resolved the merge conflict in the TS-533 test and kept the explicit release-permission assertions.",
+        "- Latest result: PASSED — the CLI now surfaces explicit release-backed permission guidance and no local fallback file is written.",
+    ]
     PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
-    RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    RESPONSE_PATH.write_text("\n".join(response_lines) + "\n", encoding="utf-8")
+    _write_review_replies()
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -468,10 +446,9 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         )
         actual_result_line = (
             "* However, the command only surfaced the generic release-backed "
-            "auth/configuration output "
-            f"{_jira_inline(visible_error)} "
-            f"(error code/category {_jira_inline(_as_text(result.get('observed_error_code')))} / "
-            f"{_jira_inline(_as_text(result.get('observed_error_category')))}) "
+            f"auth/configuration message {_jira_inline(_as_text(result.get('observed_error_message')) or visible_error)} "
+            f"with error code/category {_jira_inline(_as_text(result.get('observed_error_code')))} / "
+            f"{_jira_inline(_as_text(result.get('observed_error_category')))} "
             "instead of explicit permission-denied guidance."
         )
     else:
@@ -487,50 +464,18 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         actual_result_line = (
             "* The command failed with repository/provider output "
             f"({_jira_inline(_as_text(result.get('observed_error_code')))} / "
-            f"{_jira_inline(_as_text(result.get('observed_error_category')))}) and visible output "
-            f"{_jira_inline(visible_error)} instead of explicit "
+            f"{_jira_inline(_as_text(result.get('observed_error_category')))}) and message "
+            f"{_jira_inline(_as_text(result.get('observed_error_message')) or visible_error)} "
+            "instead of explicit "
             "release-permission guidance."
         )
 
-    jira_lines = [
-        "h3. Test Automation Result",
-        "",
-        "*Status:* ❌ FAILED",
-        f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
-        "",
-        "h4. What was tested",
-        f"* Executed {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository configured with {_jira_inline('attachmentStorage.mode = github-releases')}.",
-        f"* Pointed the local Git remote at {_jira_inline(_as_text(result.get('remote_origin_url')))} and mirrored {_jira_inline(token_source)} into {_jira_inline('TRACKSTATE_TOKEN')}.",
-        "* Inspected the caller-visible CLI output and the repository attachment path after the command.",
-        "",
-        "h4. Result",
-        f"* ❌ Step 1 failed: {step_one_summary}.",
-        f"* Observed error code/category: {_jira_inline(_as_text(result.get('observed_error_code')))} / {_jira_inline(_as_text(result.get('observed_error_category')))}",
-        f"* Observed provider/output: {_jira_inline(observed_provider)} / {_jira_inline(_as_text(result.get('observed_output_format')))}",
-        f"* Observed visible output: {_jira_inline(visible_error)}",
-        "* ✅ Step 2 passed: no file was written to the local repository attachment path.",
-        f"* {human_summary}",
-        *([f"* Product gap: {product_gap}"] if product_gap else []),
-        "* Observed repository state:",
-        "{code:json}",
-        final_state_text,
-        "{code}",
-        "",
-        "h4. Observed output",
-        "{code}",
-        observed_output,
-        "{code}",
-        "",
-        "h4. Test file",
-        "{code}",
-        TEST_FILE_PATH,
-        "{code}",
-        "",
-        "h4. Run command",
-        "{code:bash}",
-        RUN_COMMAND,
-        "{code}",
+    response_lines = [
+        f"TS-533 rework updated `{TEST_FILE_PATH}`.",
+        "- Resolved the merge conflict in the test output text and preserved the release-permission product-gap assertions.",
+        f"- Latest result: FAILED — {error_message}",
     ]
+
     markdown_lines = [
         "## Test Automation Result",
         "",
@@ -622,9 +567,9 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         final_state_text,
         "{code}",
     ]
-    JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
     PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
-    RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+    RESPONSE_PATH.write_text("\n".join(response_lines) + "\n", encoding="utf-8")
+    _write_review_replies()
     BUG_DESCRIPTION_PATH.write_text("\n".join(bug_lines) + "\n", encoding="utf-8")
 
 
@@ -781,6 +726,13 @@ def _as_text(value: object) -> str:
 def _jira_inline(text: str) -> str:
     escaped = text.replace("{", "\\{").replace("}", "\\}")
     return "{{" + escaped + "}}"
+
+
+def _write_review_replies() -> None:
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": []}),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":
