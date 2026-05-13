@@ -5430,10 +5430,7 @@ class TrackStateCli {
         'output': output.name,
         'error': <String, Object?>{
           'code': error.code,
-          'category': switch (error.category) {
-            TrackStateCliErrorCategory.auth => 'authentication',
-            _ => error.category.name,
-          },
+          'category': error.category.name,
           'message': error.message,
           'exitCode': error.exitCode,
           'details': error.details,

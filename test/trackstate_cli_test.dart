@@ -104,7 +104,7 @@ void main() {
 
       expect(result.exitCode, 3);
       expect(error['code'], 'AUTHENTICATION_FAILED');
-      expect(error['category'], 'authentication');
+      expect(error['category'], 'auth');
     });
 
     test(
@@ -131,7 +131,7 @@ void main() {
 
         expect(result.exitCode, 3);
         expect(error['code'], 'AUTHENTICATION_FAILED');
-        expect(error['category'], 'authentication');
+        expect(error['category'], 'auth');
       },
     );
 
@@ -335,7 +335,7 @@ void main() {
 
         expect(result.exitCode, 3);
         expect(error['code'], 'AUTHENTICATION_FAILED');
-        expect(error['category'], 'authentication');
+        expect(error['category'], 'auth');
       },
     );
 
@@ -1519,7 +1519,7 @@ void main() {
 
         expect(result.exitCode, 3);
         expect(error['code'], 'AUTHENTICATION_FAILED');
-        expect(error['category'], 'authentication');
+        expect(error['category'], 'auth');
         expect(details['reason'], contains('GitHub authentication'));
         expect(File(outFile).existsSync(), isFalse);
       },
