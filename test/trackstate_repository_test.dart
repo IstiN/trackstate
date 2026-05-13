@@ -45,6 +45,80 @@ void main() {
   );
 
   test(
+    'provider-backed repository defaults missing attachmentStorage to repository-path',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-1',
+              'path': 'DEMO/DEMO-1/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Repository-path default issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-13T00:00:00Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/main.md': '''
+---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+summary: Repository-path default issue
+updated: 2026-05-13T00:00:00Z
+---
+
+# Description
+
+Hosted projects without explicit attachmentStorage should keep repository-path attachments by default.
+''',
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+
+      expect(
+        snapshot.project.attachmentStorage.mode,
+        AttachmentStorageMode.repositoryPath,
+      );
+      expect(snapshot.project.attachmentStorage.githubReleases, isNull);
+    },
+  );
+
+  test(
     'setup repository resolves github releases attachment storage and metadata',
     () async {
       final repository = _mockSetupRepository(
