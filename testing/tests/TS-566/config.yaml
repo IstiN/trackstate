@@ -1,0 +1,9 @@
+test_id: TS-566
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Uses the deployed hosted TrackState app against the live setup repository.
+  - Temporarily switches the live DEMO project to github-releases storage with a deterministic tag prefix, then restores the original project.json after the run.
+  - Selects and submits a real hosted attachment upload, then verifies the visible attachment row plus the corresponding GitHub Release asset and attachments.json manifest entry.
