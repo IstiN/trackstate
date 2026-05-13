@@ -794,7 +794,7 @@ This comment demonstrates markdown-backed collaboration history.
   );
 
   test(
-    'checked-in setup template includes repository index artifacts and richer fixtures',
+    'checked-in setup template includes repository index artifacts',
     () async {
       final files = _fixtureFilesFromDisk('trackstate-setup/DEMO');
 

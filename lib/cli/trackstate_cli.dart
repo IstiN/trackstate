@@ -108,7 +108,7 @@ class TrackStateCli {
         'jira_post_comment' => await _runJiraPostComment(
           arguments.skip(1).toList(),
         ),
-        'jira_link_issues' => await _runJiraLinkIssues(
+        'jira_link_issues' || 'jira-link-issues' => await _runJiraLinkIssues(
           arguments.skip(1).toList(),
         ),
         'jira_delete_ticket' => await _runJiraDeleteTicket(
@@ -2102,7 +2102,9 @@ class TrackStateCli {
     return _runMutationCommand(
       arguments: _normalizeLegacyJiraArguments(arguments, const {
         '--sourceKey': '--issueKey',
+        '--key': '--issueKey',
         '--anotherKey': '--targetIssueKey',
+        '--target-key': '--targetIssueKey',
         '--relationship': '--type',
       }),
       parser: parser,
@@ -4993,11 +4995,53 @@ class TrackStateCli {
         'storagePath': comment.storagePath,
       };
 
-  Map<String, Object?> _linkPayload(IssueLink link) => <String, Object?>{
-    'type': link.type,
-    'target': link.targetKey,
-    'direction': link.direction,
-  };
+  Map<String, Object?> _linkPayload(IssueLink link) {
+    final warning = _nonCanonicalLinkMetadataWarning(link);
+    if (warning != null) {
+      stderr.writeln(warning);
+    }
+    return <String, Object?>{
+      'type': link.type,
+      'target': link.targetKey,
+      'direction': link.direction,
+    };
+  }
+
+  String? _nonCanonicalLinkMetadataWarning(IssueLink link) {
+    final normalizedType = link.type.trim().toLowerCase();
+    final normalizedDirection = link.direction.trim().toLowerCase();
+    if (normalizedType.isEmpty || normalizedDirection.isEmpty) {
+      return null;
+    }
+
+    for (final linkType in _jiraLinkTypes) {
+      final id = linkType['id']!.toString().trim().toLowerCase();
+      final name = linkType['name']!.toString().trim().toLowerCase();
+      final outward = linkType['outward']!.toString().trim().toLowerCase();
+      final inward = linkType['inward']!.toString().trim().toLowerCase();
+
+      if (normalizedType != id &&
+          normalizedType != name &&
+          normalizedType != outward &&
+          normalizedType != inward) {
+        continue;
+      }
+
+      if (outward == inward) {
+        return null;
+      }
+
+      final expectedDirection = normalizedType == inward ? 'inward' : 'outward';
+      if (normalizedDirection == expectedDirection) {
+        return null;
+      }
+
+      return 'Warning: link type "${link.type}" uses non-canonical '
+          'direction "${link.direction}"; expected "$expectedDirection".';
+    }
+
+    return null;
+  }
 
   IssueLink _canonicalCliLinkPayload({
     required _ResolvedMutationField? normalizedLink,
@@ -5005,10 +5049,33 @@ class TrackStateCli {
     required String issueKey,
     required String targetKey,
   }) => IssueLink(
-    type: normalizedLink?.canonicalKey ?? requestedType,
+    type: _canonicalCliLinkType(
+      normalizedLink: normalizedLink,
+      requestedType: requestedType,
+    ),
     targetKey: normalizedLink?.direction == 'inward' ? issueKey : targetKey,
     direction: 'outward',
   );
+
+  String _canonicalCliLinkType({
+    required _ResolvedMutationField? normalizedLink,
+    required String requestedType,
+  }) {
+    final canonicalKey = normalizedLink?.canonicalKey.trim().toLowerCase();
+    if (canonicalKey == null || canonicalKey.isEmpty) {
+      return requestedType;
+    }
+
+    for (final linkType in _jiraLinkTypes) {
+      final id = linkType['id']!.toString().trim().toLowerCase();
+      if (id != canonicalKey) {
+        continue;
+      }
+      return linkType['outward']!.toString();
+    }
+
+    return requestedType;
+  }
 
   Map<String, Object?> _deletedIssuePayload(DeletedIssueTombstone tombstone) =>
       <String, Object?>{

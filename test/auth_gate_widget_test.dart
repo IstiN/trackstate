@@ -153,7 +153,7 @@ void main() {
         );
         expect(
           find.textContaining(
-            'Issue edits and comments can continue, but this project stores new attachments in GitHub Releases',
+            'Issue edits and comments can continue. For new attachments, use the repository inbox workflow',
           ),
           findsOneWidget,
         );
@@ -261,7 +261,7 @@ void main() {
         expect(find.text('GitHub Releases attachment storage'), findsOneWidget);
         expect(
           find.text(
-            'New attachments resolve to release tag browser-assets-<ISSUE_KEY>, but browser-based GitHub Release asset uploads are not supported in this hosted session (uploads.github.com does not allow browser requests). Use the desktop app or CLI to upload attachments.',
+            'New attachments resolve to release tag browser-assets-<ISSUE_KEY>. Browser sessions cannot upload directly to GitHub Releases, so use the repository inbox workflow: commit to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main.',
           ),
           findsOneWidget,
         );
@@ -312,7 +312,7 @@ void main() {
         expect(find.text('GitHub Releases attachment storage'), findsOneWidget);
         expect(
           find.text(
-            'New attachments resolve to release tag browser-assets-<ISSUE_KEY>, but browser-based GitHub Release asset uploads are not supported in this hosted session (uploads.github.com does not allow browser requests). Use the desktop app or CLI to upload attachments.',
+            'New attachments resolve to release tag browser-assets-<ISSUE_KEY>. Browser sessions cannot upload directly to GitHub Releases, so use the repository inbox workflow: commit to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main.',
           ),
           findsOneWidget,
         );
@@ -378,7 +378,7 @@ void main() {
         );
         expect(
           find.textContaining(
-            'this project stores new attachments in GitHub Releases',
+            'For new attachments, use the repository inbox workflow',
           ),
           findsWidgets,
         );
