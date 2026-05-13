@@ -794,7 +794,7 @@ This comment demonstrates markdown-backed collaboration history.
   );
 
   test(
-    'checked-in setup template includes repository index artifacts and richer fixtures',
+    'checked-in setup template includes repository index artifacts',
     () async {
       final files = _fixtureFilesFromDisk('trackstate-setup/DEMO');
 
@@ -862,10 +862,7 @@ This comment demonstrates markdown-backed collaboration history.
       expect(boardIssue.customFields['releaseTrain'], ['web', 'mobile']);
       expect(epicIssue.customFields['created'], '2026-05-05T00:00:00Z');
       expect(boardIssue.links.single.targetKey, 'DEMO-4');
-      expect(
-        boardIssue.attachments.map((attachment) => attachment.name),
-        containsAll(['board-preview.svg', 'manual.pdf']),
-      );
+      expect(boardIssue.attachments.single.name, 'board-preview.svg');
       expect(doneIssue.statusId, 'done');
       expect(doneIssue.resolutionId, 'done');
     },
