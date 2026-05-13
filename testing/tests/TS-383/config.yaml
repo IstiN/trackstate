@@ -1,0 +1,12 @@
+test_id: TS-383
+type: cli
+framework: python
+platform: hosted-github
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - GH_TOKEN or GITHUB_TOKEN with write access to the hosted setup repository
+  - Network access to GitHub APIs
+notes:
+  - Seeds a temporary hosted `TS-22` issue inside the live `DEMO` project because the hosted repository already exposes that project and repository index.
+  - Reuses the live repository `.gitattributes` rule that already tracks `*.zip` through Git LFS.
+  - Passes only when the hosted CLI returns an explicit unsupported error for the LFS-tracked upload and leaves the remote issue without an uploaded attachment.

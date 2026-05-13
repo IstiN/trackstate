@@ -1,0 +1,8 @@
+test_id: TS-337
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies the desktop Create issue viewport matches the approved right-docked golden baseline at 1440x960.
+  - Confirms the rendered Create issue surface is visible to the user and flush with the right edge before the golden comparison runs.

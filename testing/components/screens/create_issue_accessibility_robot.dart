@@ -3,6 +3,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../core/models/create_issue_layout_observation.dart';
+import '../../core/models/create_issue_scroll_observation.dart';
 import '../../core/models/create_issue_text_contrast_observation.dart';
 import '../../core/utils/color_contrast.dart';
 
@@ -35,6 +36,52 @@ class CreateIssueAccessibilityRobot {
   Finder textWithinCreateIssueSurface(String text) => find.descendant(
     of: createIssueSurface.first,
     matching: find.text(text, findRichText: true),
+  );
+
+  Finder labeledTextFieldWithinCreateIssueSurface(String label) {
+    final decorationMatch = find.descendant(
+      of: createIssueSurface.first,
+      matching: find.byWidgetPredicate((widget) {
+        return widget is TextField && widget.decoration?.labelText == label;
+      }, description: 'text field labeled $label'),
+    );
+    if (decorationMatch.evaluate().isNotEmpty) {
+      return decorationMatch;
+    }
+
+    final semanticsMatch = find.descendant(
+      of: createIssueSurface.first,
+      matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
+    );
+    if (semanticsMatch.evaluate().isEmpty) {
+      return semanticsMatch;
+    }
+    return find.descendant(
+      of: semanticsMatch.first,
+      matching: find.byWidgetPredicate(
+        (widget) => widget is EditableText || widget is TextField,
+        description: 'editable control labeled $label',
+      ),
+    );
+  }
+
+  Finder controlWithinCreateIssueSurface(String label) {
+    final semanticsMatch = find.descendant(
+      of: createIssueSurface.first,
+      matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
+    );
+    if (semanticsMatch.evaluate().isNotEmpty) {
+      return semanticsMatch;
+    }
+    return find.descendant(
+      of: createIssueSurface.first,
+      matching: find.text(label, findRichText: true),
+    );
+  }
+
+  Finder get createIssueScrollable => find.descendant(
+    of: createIssueSurface.first,
+    matching: find.byType(Scrollable),
   );
 
   void expectCreateIssueSurfaceVisible() {
@@ -71,8 +118,40 @@ class CreateIssueAccessibilityRobot {
     );
   }
 
+  CreateIssueScrollObservation observeVerticalScroll() {
+    expectCreateIssueSurfaceVisible();
+    if (createIssueScrollable.evaluate().isEmpty) {
+      throw StateError(
+        'No vertical Scrollable was rendered inside the Create issue surface.',
+      );
+    }
+    final scrollableState = tester.state<ScrollableState>(
+      createIssueScrollable.first,
+    );
+    final position = scrollableState.position;
+    return CreateIssueScrollObservation(
+      offset: position.pixels,
+      maxScrollExtent: position.maxScrollExtent,
+      viewportDimension: position.viewportDimension,
+    );
+  }
+
   bool showsText(String text) =>
       textWithinCreateIssueSurface(text).evaluate().isNotEmpty;
+
+  bool isTextVisibleInViewport(String text) {
+    expectCreateIssueSurfaceVisible();
+    final surfaceRect = tester.getRect(createIssueSurface.first);
+    final textFinder = textWithinCreateIssueSurface(text);
+    final count = textFinder.evaluate().length;
+    for (var index = 0; index < count; index++) {
+      final candidate = textFinder.at(index);
+      if (_isWithinSurface(surfaceRect, tester.getRect(candidate))) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   List<String> visibleTexts() {
     return tester
@@ -86,6 +165,43 @@ class CreateIssueAccessibilityRobot {
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .toList(growable: false);
+  }
+
+  Rect? observeLabeledTextFieldRect(String label) {
+    final field = labeledTextFieldWithinCreateIssueSurface(label);
+    if (field.evaluate().isEmpty) {
+      return null;
+    }
+    return tester.getRect(field.first);
+  }
+
+  String? readLabeledTextFieldValue(String label) {
+    final field = labeledTextFieldWithinCreateIssueSurface(label);
+    if (field.evaluate().isEmpty) {
+      return null;
+    }
+
+    String? emptyCandidate;
+    final count = field.evaluate().length;
+    for (var index = 0; index < count; index++) {
+      final value = _readTextFieldValue(field.at(index));
+      if (value == null) {
+        continue;
+      }
+      if (value.isNotEmpty) {
+        return value;
+      }
+      emptyCandidate ??= value;
+    }
+    return emptyCandidate;
+  }
+
+  Rect? observeControlRect(String label) {
+    final control = controlWithinCreateIssueSurface(label);
+    if (control.evaluate().isEmpty) {
+      return null;
+    }
+    return tester.getRect(control.first);
   }
 
   List<String> semanticsTraversal() {
@@ -113,6 +229,34 @@ class CreateIssueAccessibilityRobot {
 
     visit(rootNode);
     return _dedupeConsecutive(labels);
+  }
+
+  Future<void> scrollToBottom() async {
+    final observation = observeVerticalScroll();
+    if (!observation.hasOverflow) {
+      await tester.pump();
+      return;
+    }
+    final scrollableState = tester.state<ScrollableState>(
+      createIssueScrollable.first,
+    );
+    scrollableState.position.jumpTo(scrollableState.position.maxScrollExtent);
+    await tester.pump();
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> scrollToTop() async {
+    final observation = observeVerticalScroll();
+    if (!observation.hasOverflow) {
+      await tester.pump();
+      return;
+    }
+    final scrollableState = tester.state<ScrollableState>(
+      createIssueScrollable.first,
+    );
+    scrollableState.position.jumpTo(0);
+    await tester.pump();
+    await tester.pumpAndSettle();
   }
 
   CreateIssueTextContrastObservation observeTextContrast(String text) {
@@ -355,5 +499,25 @@ class CreateIssueAccessibilityRobot {
   String _rgbHex(Color color) {
     final rgb = color.toARGB32() & 0x00FFFFFF;
     return '#${rgb.toRadixString(16).padLeft(6, '0').toUpperCase()}';
+  }
+
+  String? _readTextFieldValue(Finder field) {
+    final widget = tester.widget(field);
+    if (widget is EditableText) {
+      return widget.controller.text;
+    }
+    if (widget is TextField) {
+      return widget.controller?.text;
+    }
+
+    final editableText = find.descendant(
+      of: field,
+      matching: find.byType(EditableText),
+    );
+    if (editableText.evaluate().isNotEmpty) {
+      return tester.widget<EditableText>(editableText.first).controller.text;
+    }
+
+    return null;
   }
 }

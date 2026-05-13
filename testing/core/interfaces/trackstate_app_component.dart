@@ -1,6 +1,9 @@
+import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 
 abstract interface class TrackStateAppComponent {
+  Finder get goldenTarget;
+
   Future<void> pump(TrackStateRepository repository);
 
   Future<void> pumpLocalGitApp({
@@ -38,11 +41,21 @@ abstract interface class TrackStateAppComponent {
 
   Future<String?> readJqlSearchFieldValue();
 
+  Future<bool> isBlockingSearchLoaderVisible();
+
   Future<void> expectIssueSearchResultVisible(String key, String summary);
 
   void expectIssueSearchResultAbsent(String key, String summary);
 
   List<String> visibleIssueSearchResultLabelsSnapshot();
+
+  Future<bool> isIssueSearchResultTextVisible(
+    String key,
+    String summary,
+    String text,
+  );
+
+  List<String> issueSearchResultTextsSnapshot(String key, String summary);
 
   Future<void> dragIssueToStatusColumn({
     required String key,
@@ -119,6 +132,26 @@ abstract interface class TrackStateAppComponent {
 
   Future<bool> tapTopBarControl(String label);
 
+  Future<bool> isNavigationControlVisible(String label);
+
+  Future<void> expectNavigationControlEnabled(String label);
+
+  Future<bool> isNavigationChromeVisible();
+
+  Future<List<String>> collectDisabledNavigationViolations({
+    required String label,
+    required String retainedText,
+    required List<String> disallowedTexts,
+  });
+
+  Future<bool> isDialogTextVisible(String text);
+
+  List<String> visibleDialogTextsSnapshot();
+
+  Future<bool> tapDialogControl(String label);
+
+  Future<bool> tapDialogControlWithoutSettling(String label);
+
   Future<bool> isTextFieldVisible(String label);
 
   Future<int> countLabeledTextFields(String label);
@@ -126,6 +159,8 @@ abstract interface class TrackStateAppComponent {
   Future<bool> isDropdownFieldVisible(String label);
 
   Future<int> countDropdownFields(String label);
+
+  Future<List<String>> readDropdownOptions(String label);
 
   Future<void> selectDropdownOption(String label, {required String optionText});
 
@@ -137,6 +172,11 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> enterLabeledTextField(String label, {required String text});
 
+  Future<void> enterLabeledTextFieldWithoutSettling(
+    String label, {
+    required String text,
+  });
+
   Future<String?> readLabeledTextFieldValue(String label);
 
   List<String> visibleTextsSnapshot();
@@ -144,4 +184,21 @@ abstract interface class TrackStateAppComponent {
   List<String> topBarVisibleTextsSnapshot();
 
   List<String> visibleSemanticsLabelsSnapshot();
+
+  Future<bool> isRepositoryAccessBannerVisible({
+    required String title,
+    required String message,
+  });
+
+  Future<bool> isRepositoryAccessBannerTextVisible({
+    required String title,
+    required String message,
+    required String text,
+  });
+
+  Future<bool> tapRepositoryAccessBannerAction({
+    required String title,
+    required String message,
+    required String actionLabel,
+  });
 }

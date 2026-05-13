@@ -28,10 +28,11 @@ void main() {
 
         for (final card in [
           robot.projectSettingsHeading,
+          robot.projectSettingsAdmin,
+          robot.statusesTab,
           robot.issueTypesCard,
           robot.workflowCard,
           robot.fieldsCard,
-          robot.languageCard,
         ]) {
           expectSingle(card, 'Settings content');
         }
@@ -60,10 +61,11 @@ void main() {
 
         for (final card in [
           robot.projectSettingsHeading,
+          robot.projectSettingsAdmin,
+          robot.statusesTab,
           robot.issueTypesCard,
           robot.workflowCard,
           robot.fieldsCard,
-          robot.languageCard,
         ]) {
           expectSingle(card, 'GitHub settings content');
         }

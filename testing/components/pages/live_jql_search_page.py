@@ -14,18 +14,30 @@ class LiveJqlSearchObservation:
     body_text: str
     count_summary: str | None
     issue_result_count: int
+    issue_result_labels: tuple[str, ...]
+
+    @property
+    def issue_labels(self) -> tuple[str, ...]:
+        return self.issue_result_labels
 
 
 class LiveJqlSearchPage:
     _button_selector = 'flt-semantics[role="button"]'
     _active_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
-    _issue_button_selector = 'flt-semantics[role="button"][aria-label*="Open DEMO-"]'
+    _panel_selector = 'flt-semantics[role="group"][aria-label="JQL Search"]'
+    _panel_search_field_selector = (
+        f'{_panel_selector} input[data-semantics-role="text-field"]:not([disabled])'
+    )
     _search_field_candidates = (
-        'input[data-semantics-role="text-field"]:not([disabled]):not([aria-label])',
-        'textarea[data-semantics-role="text-field"]:not([disabled]):not([aria-label])',
-        'input[aria-label="Search issues"]',
-        'textarea[aria-label="Search issues"]',
-        '[role="textbox"][aria-label="Search issues"]',
+        _panel_search_field_selector,
+        f'{_panel_selector} textarea[data-semantics-role="text-field"]:not([disabled])',
+        f'{_panel_selector} [data-semantics-role="text-field"]:not([disabled])',
+        f'{_panel_selector} input[aria-label^="Search issues"]',
+        f'{_panel_selector} textarea[aria-label="Search issues"]',
+        f'{_panel_selector} [role="textbox"][aria-label="Search issues"]',
+    )
+    _issue_button_selector = (
+        f'{_panel_selector} flt-semantics[role="button"][aria-label^="Open DEMO-"]'
     )
     _no_results_text = "No results"
 
@@ -77,9 +89,33 @@ class LiveJqlSearchPage:
         query: str,
         expected_count_summaries: tuple[str, ...] | None = None,
     ) -> LiveJqlSearchObservation:
-        field_selector = self._submit_query(query)
+        field_selector, field_index = self._submit_query(query)
         self._wait_for_count_summary(expected_count_summaries=expected_count_summaries)
-        return self._observe(query=query, field_selector=field_selector)
+        return self._observe(
+            query=query,
+            field_selector=field_selector,
+            field_index=field_index,
+        )
+
+    def search_with_verified_result_change(
+        self,
+        *,
+        query: str,
+        expected_count_summaries: tuple[str, ...] | None = None,
+    ) -> LiveJqlSearchObservation:
+        self.open()
+        field_selector = self._wait_for_search_field()
+        self._establish_distinct_pre_submit_state(
+            field_selector=field_selector,
+            expected_count_summaries=expected_count_summaries,
+        )
+        self._session.fill(field_selector, query, timeout_ms=30_000)
+        self._session.press(field_selector, "Enter", timeout_ms=30_000)
+        return self._wait_for_submitted_result(
+            query=query,
+            field_selector=field_selector,
+            expected_count_summaries=expected_count_summaries,
+        )
 
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
@@ -87,39 +123,66 @@ class LiveJqlSearchPage:
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
 
-    def _submit_query(self, query: str) -> str:
+    def _submit_query(self, query: str) -> tuple[str, int]:
         self.open()
-        field_selector = self._wait_for_search_field()
-        self._session.fill(field_selector, query, timeout_ms=30_000)
-        self._session.press(field_selector, "Enter", timeout_ms=30_000)
-        return field_selector
+        field_selector, field_index = self._wait_for_search_field()
+        self._session.focus(
+            field_selector,
+            index=field_index,
+            timeout_ms=30_000,
+        )
+        self._session.fill(
+            field_selector,
+            query,
+            index=field_index,
+            timeout_ms=30_000,
+        )
+        self._session.wait_for_input_value(
+            field_selector,
+            query,
+            index=field_index,
+            timeout_ms=30_000,
+        )
+        self._session.press(
+            field_selector,
+            "Enter",
+            index=field_index,
+            timeout_ms=30_000,
+        )
+        return field_selector, field_index
 
     def _observe(
         self,
         *,
         query: str,
         field_selector: str,
+        field_index: int,
     ) -> LiveJqlSearchObservation:
         body_text = self.current_body_text()
         return LiveJqlSearchObservation(
             query=query,
-            visible_query=self._session.read_value(field_selector, timeout_ms=30_000),
+            visible_query=self._session.read_value(
+                field_selector,
+                index=field_index,
+                timeout_ms=30_000,
+            ),
             body_text=body_text,
             count_summary=self._count_summary(body_text),
             issue_result_count=self._session.count(self._issue_button_selector),
+            issue_result_labels=self._issue_result_labels(),
         )
 
-    def _wait_for_search_field(self) -> str:
+    def _wait_for_search_field(self) -> tuple[str, int]:
         errors: list[str] = []
         for selector in self._search_field_candidates:
             try:
                 self._session.wait_for_selector(selector, timeout_ms=10_000)
-                return selector
+                return selector, 0
             except WebAppTimeoutError as error:
                 errors.append(str(error))
         raise AssertionError(
             "Step 3 failed: the live app did not expose the visible JQL Search text "
-            "field.\n"
+            "field inside the JQL Search panel.\n"
             f"Observed body text:\n{self.current_body_text()}\n"
             f"Selector attempts: {errors}",
         )
@@ -149,9 +212,146 @@ class LiveJqlSearchPage:
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
 
+    def _wait_for_submitted_result(
+        self,
+        *,
+        query: str,
+        field_selector: str,
+        expected_count_summaries: tuple[str, ...] | None = None,
+    ) -> LiveJqlSearchObservation:
+        try:
+            self._session.wait_for_function(
+                """
+                ({
+                    fieldSelector,
+                    issueSelector,
+                    submittedQuery,
+                    expectedCountSummaries,
+                }) => {
+                    const field = document.querySelector(fieldSelector);
+                    if (!field || !("value" in field)) {
+                        return null;
+                    }
+                    if (field.value !== submittedQuery) {
+                        return null;
+                    }
+                    const bodyText = document.body?.innerText ?? "";
+                    const countMatch = bodyText.match(/\\b(?:No issues|\\d+ issues?)\\b/);
+                    const countSummary = countMatch ? countMatch[0] : null;
+                    const issueLabels = Array.from(document.querySelectorAll(issueSelector))
+                        .map((element) => (element.getAttribute("aria-label") ?? "").trim())
+                        .filter((label) => label.length > 0);
+                    const countMatches =
+                        expectedCountSummaries === null
+                        || expectedCountSummaries.includes(countSummary);
+                    if (!countMatches) {
+                        return null;
+                    }
+                    return {
+                        visibleQuery: field.value,
+                        bodyText,
+                        countSummary,
+                        issueLabels,
+                    };
+                }
+                """,
+                arg={
+                    "fieldSelector": field_selector,
+                    "issueSelector": self._issue_button_selector,
+                    "submittedQuery": query,
+                    "expectedCountSummaries": list(expected_count_summaries)
+                    if expected_count_summaries is not None
+                    else None,
+                },
+                timeout_ms=60_000,
+            )
+        except WebAppTimeoutError as error:
+            latest_observation = self._observe(query=query, field_selector=field_selector)
+            raise AssertionError(
+                "Step 4 failed: the live JQL Search panel never reached a post-submit "
+                "state for the submitted query.\n"
+                f"Submitted query: {query}\n"
+                f"Expected summaries after submit: {expected_count_summaries}\n"
+                f"Latest visible query: {latest_observation.visible_query}\n"
+                f"Latest count summary: {latest_observation.count_summary}\n"
+                f"Latest visible issue labels: {list(latest_observation.issue_labels)}\n"
+                f"Latest body text:\n{latest_observation.body_text}",
+            ) from error
+        return self._observe(query=query, field_selector=field_selector)
+
+    def _establish_distinct_pre_submit_state(
+        self,
+        *,
+        field_selector: str,
+        expected_count_summaries: tuple[str, ...] | None,
+    ) -> None:
+        if expected_count_summaries is None:
+            return
+        current_summary = self._count_summary(self.current_body_text())
+        if current_summary not in expected_count_summaries:
+            return
+
+        sync_query = self._synchronization_query(expected_count_summaries)
+        self._session.fill(field_selector, sync_query, timeout_ms=30_000)
+        self._session.press(field_selector, "Enter", timeout_ms=30_000)
+        self._wait_for_non_matching_count_summary(
+            excluded_count_summaries=expected_count_summaries,
+        )
+
+    def _wait_for_non_matching_count_summary(
+        self,
+        *,
+        excluded_count_summaries: tuple[str, ...],
+    ) -> None:
+        try:
+            self._session.wait_for_function(
+                """
+                (excludedCountSummaries) => {
+                    const bodyText = document.body?.innerText ?? "";
+                    const countMatch = bodyText.match(/\\b(?:No issues|\\d+ issues?)\\b/);
+                    if (!countMatch) {
+                        return null;
+                    }
+                    const countSummary = countMatch[0];
+                    return excludedCountSummaries.includes(countSummary)
+                        ? null
+                        : { countSummary, bodyText };
+                }
+                """,
+                arg=list(excluded_count_summaries),
+                timeout_ms=60_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 4 failed: the live JQL Search panel never reached a synchronization "
+                "state that was distinct from the target count summary before the final "
+                "query was submitted.\n"
+                f"Target summaries: {excluded_count_summaries}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+
+    @staticmethod
+    def _synchronization_query(expected_count_summaries: tuple[str, ...]) -> str:
+        if "No issues" in expected_count_summaries:
+            return ""
+        return "__ts327_sync_no_match__"
+
     @staticmethod
     def _count_summary(body_text: str) -> str | None:
         match = re.search(r"\b(?:No issues|\d+ issues?)\b", body_text)
         if match is None:
             return None
         return match.group(0)
+
+    def _issue_result_labels(self) -> tuple[str, ...]:
+        payload = self._session.evaluate(
+            """
+            (selector) => Array.from(document.querySelectorAll(selector))
+              .map((element) => element.getAttribute("aria-label") ?? "")
+              .filter((label) => label.length > 0)
+            """,
+            arg=self._issue_button_selector,
+        )
+        if not isinstance(payload, list):
+            return ()
+        return tuple(str(label) for label in payload)

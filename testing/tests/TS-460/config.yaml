@@ -1,0 +1,10 @@
+test_id: TS-460
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH for seeding a disposable Local Git repository
+notes:
+  - Executes the live canonical multi-field update flow through `trackstate jira_update_ticket --target local --issueKey TS-1 --json <fields-envelope>`.
+  - Verifies one success envelope is returned, `TS/TS-1/main.md` reflects summary/priority/labels/assignee changes, and the mutation persists as exactly one Git commit.

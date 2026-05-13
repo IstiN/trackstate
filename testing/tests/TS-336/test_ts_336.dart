@@ -34,7 +34,6 @@ void main() {
       ];
 
       frameworkErrors.install();
-
       try {
         screen = await launchCreateIssueAccessibilityFixture(tester);
 

@@ -9,12 +9,34 @@ class ReactiveIssueDetailTrackStateRepository
   ReactiveIssueDetailTrackStateRepository._(this._provider)
     : super(provider: _provider);
 
-  factory ReactiveIssueDetailTrackStateRepository() =>
-      ReactiveIssueDetailTrackStateRepository._(
-        MutableIssueDetailTrackStateProvider(),
-      );
+  factory ReactiveIssueDetailTrackStateRepository({
+    RepositoryPermission permission = const RepositoryPermission(
+      canRead: true,
+      canWrite: true,
+      isAdmin: false,
+      canCreateBranch: true,
+      canManageAttachments: true,
+      canCheckCollaborators: false,
+    ),
+    Set<String> lfsTrackedPaths = const <String>{},
+    Set<String> failingTextPaths = const <String>{},
+    Map<String, String> textFixtures = const <String, String>{},
+    Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
+    bool includeDefaultBinaryFixtures = true,
+  }) => ReactiveIssueDetailTrackStateRepository._(
+    MutableIssueDetailTrackStateProvider(
+      permission: permission,
+      lfsTrackedPaths: lfsTrackedPaths,
+      failingTextPaths: failingTextPaths,
+      textFixtures: textFixtures,
+      binaryFixtures: binaryFixtures,
+      includeDefaultBinaryFixtures: includeDefaultBinaryFixtures,
+    ),
+  );
 
   final MutableIssueDetailTrackStateProvider _provider;
+
+  String? textFixture(String path) => _provider.textFixture(path);
 
   void synchronizeSessionToReadOnly() {
     final currentSession = session;
@@ -43,28 +65,89 @@ class ReactiveIssueDetailTrackStateRepository
       canCreateBranch: readOnlyPermission.canCreateBranch,
       canManageAttachments: readOnlyPermission.canManageAttachments,
       attachmentUploadMode: readOnlyPermission.attachmentUploadMode,
+      supportsReleaseAttachmentWrites:
+          readOnlyPermission.supportsReleaseAttachmentWrites,
       canCheckCollaborators: readOnlyPermission.canCheckCollaborators,
+    );
+  }
+
+  void synchronizeSessionToAttachmentRestricted() {
+    final currentSession = session;
+    if (currentSession == null) {
+      throw StateError(
+        'Cannot restrict attachments before the provider session is connected.',
+      );
+    }
+
+    const attachmentRestrictedPermission = RepositoryPermission(
+      canRead: true,
+      canWrite: true,
+      isAdmin: false,
+      canCreateBranch: true,
+      canManageAttachments: false,
+      attachmentUploadMode: AttachmentUploadMode.noLfs,
+      canCheckCollaborators: false,
+    );
+
+    _provider.updatePermission(attachmentRestrictedPermission);
+    currentSession.update(
+      providerType: currentSession.providerType,
+      connectionState: ProviderConnectionState.connected,
+      resolvedUserIdentity: currentSession.resolvedUserIdentity,
+      canRead: attachmentRestrictedPermission.canRead,
+      canWrite: attachmentRestrictedPermission.canWrite,
+      canCreateBranch: attachmentRestrictedPermission.canCreateBranch,
+      canManageAttachments: attachmentRestrictedPermission.canManageAttachments,
+      attachmentUploadMode: attachmentRestrictedPermission.attachmentUploadMode,
+      supportsReleaseAttachmentWrites:
+          attachmentRestrictedPermission.supportsReleaseAttachmentWrites,
+      canCheckCollaborators:
+          attachmentRestrictedPermission.canCheckCollaborators,
     );
   }
 }
 
 class MutableIssueDetailTrackStateProvider
-    implements TrackStateProviderAdapter {
-  MutableIssueDetailTrackStateProvider()
-    : _permission = const RepositoryPermission(
-        canRead: true,
-        canWrite: true,
-        isAdmin: false,
-        canCreateBranch: true,
-        canManageAttachments: true,
-        canCheckCollaborators: false,
-      );
+    implements
+        TrackStateProviderAdapter,
+        RepositoryFileMutator,
+        RepositoryReleaseAttachmentStore {
+  MutableIssueDetailTrackStateProvider({
+    RepositoryPermission permission = const RepositoryPermission(
+      canRead: true,
+      canWrite: true,
+      isAdmin: false,
+      canCreateBranch: true,
+      canManageAttachments: true,
+      canCheckCollaborators: false,
+    ),
+    Set<String> lfsTrackedPaths = const <String>{},
+    Set<String> failingTextPaths = const <String>{},
+    Map<String, String> textFixtures = const <String, String>{},
+    Map<String, Uint8List> binaryFixtures = const <String, Uint8List>{},
+    bool includeDefaultBinaryFixtures = true,
+  }) : _permission = permission,
+       _lfsTrackedPaths = lfsTrackedPaths,
+       _failingTextPaths = failingTextPaths,
+       _textFiles = Map<String, String>.from(_textFixtures)
+         ..addAll(textFixtures),
+       _binaryFiles = <String, Uint8List>{
+         for (final entry
+             in (includeDefaultBinaryFixtures
+                 ? _binaryFixtures.entries
+                 : const <MapEntry<String, Uint8List>>[]))
+           entry.key: Uint8List.fromList(entry.value),
+         for (final entry in binaryFixtures.entries)
+           entry.key: Uint8List.fromList(entry.value),
+       };
 
   RepositoryPermission _permission;
+  final Set<String> _lfsTrackedPaths;
+  final Set<String> _failingTextPaths;
 
   static const String _revision = 'reactive-read-only-test-revision';
 
-  static const Map<String, String> _files = {
+  static const Map<String, String> _textFixtures = {
     'project.json': '''
 {
   "key": "TRACK",
@@ -100,6 +183,84 @@ class MutableIssueDetailTrackStateProvider
   {"id": "priority", "name": "Priority", "type": "option", "required": false},
   {"id": "assignee", "name": "Assignee", "type": "user", "required": false},
   {"id": "labels", "name": "Labels", "type": "array", "required": false}
+]
+''',
+    'config/priorities.json': '''
+[
+  {"id": "highest", "name": "Highest"},
+  {"id": "high", "name": "High"},
+  {"id": "medium", "name": "Medium"}
+]
+''',
+    'TRACK/config/priorities.json': '''
+[
+  {"id": "highest", "name": "Highest"},
+  {"id": "high", "name": "High"},
+  {"id": "medium", "name": "Medium"}
+]
+''',
+    'config/workflows.json': '''
+{
+  "default": {
+    "name": "Default Workflow",
+    "statuses": ["todo", "in-progress", "in-review", "done"],
+    "transitions": [
+      {"id": "start", "name": "Start", "from": "todo", "to": "in-progress"},
+      {"id": "review", "name": "Review", "from": "in-progress", "to": "in-review"},
+      {"id": "finish", "name": "Finish", "from": "in-review", "to": "done"}
+    ]
+  }
+}
+''',
+    'TRACK/config/workflows.json': '''
+{
+  "default": {
+    "name": "Default Workflow",
+    "statuses": ["todo", "in-progress", "in-review", "done"],
+    "transitions": [
+      {"id": "start", "name": "Start", "from": "todo", "to": "in-progress"},
+      {"id": "review", "name": "Review", "from": "in-progress", "to": "in-review"},
+      {"id": "finish", "name": "Finish", "from": "in-review", "to": "done"}
+    ]
+  }
+}
+''',
+    '.trackstate/index/issues.json': '''
+[
+  {
+    "key": "TRACK-11",
+    "path": "TRACK-11/main.md",
+    "parent": null,
+    "epic": null,
+    "parentPath": null,
+    "epicPath": null,
+    "summary": "Stabilize dashboard polling",
+    "issueType": "story",
+    "status": "todo",
+    "priority": "highest",
+    "assignee": "Denis",
+    "labels": ["dashboard"],
+    "updated": "2 minutes ago",
+    "children": [],
+    "archived": false
+  },
+  {
+    "key": "TRACK-12",
+    "path": "TRACK-12/main.md",
+    "parent": null,
+    "epic": null,
+    "parentPath": null,
+    "epicPath": null,
+    "summary": "Implement Git sync service",
+    "issueType": "story",
+    "status": "in-progress",
+    "priority": "high",
+    "assignee": "Denis",
+    "labels": ["sync"],
+    "updated": "5 minutes ago",
+    "children": [],
+    "archived": false
+  }
 ]
 ''',
     'TRACK-11/main.md': '''
@@ -150,6 +311,19 @@ Read and write tracker files through GitHub Contents API.
 ''',
   };
 
+  static final Map<String, Uint8List> _binaryFixtures = <String, Uint8List>{
+    'TRACK-12/attachments/sync-sequence.svg': Uint8List.fromList(
+      '<svg />'.codeUnits,
+    ),
+  };
+  final Map<String, String> _textFiles;
+  final Map<String, Uint8List> _binaryFiles;
+  final Map<String, _ReactiveReleaseAttachment> _releaseAttachments =
+      <String, _ReactiveReleaseAttachment>{};
+  int _nextReleaseAssetId = 1;
+
+  String? textFixture(String path) => _textFiles[path];
+
   void updatePermission(RepositoryPermission permission) {
     _permission = permission;
   }
@@ -178,11 +352,12 @@ Read and write tracker files through GitHub Contents API.
   Future<RepositoryPermission> getPermission() async => _permission;
 
   @override
-  Future<bool> isLfsTracked(String path) async => false;
+  Future<bool> isLfsTracked(String path) async =>
+      _lfsTrackedPaths.contains(path);
 
   @override
   Future<List<RepositoryTreeEntry>> listTree({required String ref}) async => [
-    for (final path in _files.keys)
+    for (final path in [..._textFiles.keys, ..._binaryFiles.keys])
       RepositoryTreeEntry(path: path, type: 'blob'),
   ];
 
@@ -191,9 +366,27 @@ Read and write tracker files through GitHub Contents API.
     String path, {
     required String ref,
   }) async {
-    throw const TrackStateProviderException(
-      'Attachment access is not required for the TS-104 widget test.',
-    );
+    final binary = _binaryFiles[path];
+    if (binary != null) {
+      return RepositoryAttachment(
+        path: path,
+        bytes: binary,
+        revision: _revision,
+        declaredSizeBytes: binary.length,
+        lfsOid: _lfsTrackedPaths.contains(path) ? 'reactive-lfs-oid' : null,
+      );
+    }
+    final text = _textFiles[path];
+    if (text != null) {
+      final bytes = Uint8List.fromList(text.codeUnits);
+      return RepositoryAttachment(
+        path: path,
+        bytes: bytes,
+        revision: _revision,
+        declaredSizeBytes: bytes.length,
+      );
+    }
+    throw TrackStateProviderException('Missing attachment fixture for $path.');
   }
 
   @override
@@ -201,7 +394,10 @@ Read and write tracker files through GitHub Contents API.
     String path, {
     required String ref,
   }) async {
-    final content = _files[path];
+    if (_failingTextPaths.contains(path)) {
+      throw TrackStateProviderException('Deferred read failed for $path.');
+    }
+    final content = _textFiles[path];
     if (content == null) {
       throw TrackStateProviderException('Missing fixture for $path.');
     }
@@ -226,22 +422,124 @@ Read and write tracker files through GitHub Contents API.
 
   @override
   Future<void> ensureCleanWorktree() async {}
+
+  @override
   Future<RepositoryWriteResult> writeTextFile(
     RepositoryWriteRequest request,
   ) async {
-    throw const TrackStateProviderException(
-      'TS-104 should not attempt to write issue files while verifying capability sync.',
-    );
+    _textFiles[request.path] = request.content;
+    return const RepositoryWriteResult(
+      path: '',
+      branch: '',
+      revision: _revision,
+    ).copyWith(path: request.path, branch: request.branch);
+  }
+
+  @override
+  Future<RepositoryCommitResult> applyFileChanges(
+    RepositoryFileChangeRequest request,
+  ) async {
+    for (final change in request.changes) {
+      switch (change) {
+        case RepositoryTextFileChange():
+          _textFiles[change.path] = change.content;
+        case RepositoryBinaryFileChange():
+          _binaryFiles[change.path] = Uint8List.fromList(change.bytes);
+        case RepositoryDeleteFileChange():
+          _textFiles.remove(change.path);
+          _binaryFiles.remove(change.path);
+      }
+    }
+    return const RepositoryCommitResult(
+      branch: '',
+      message: '',
+      revision: _revision,
+    ).copyWith(branch: request.branch, message: request.message);
   }
 
   @override
   Future<RepositoryAttachmentWriteResult> writeAttachment(
     RepositoryAttachmentWriteRequest request,
   ) async {
-    throw const TrackStateProviderException(
-      'TS-104 should not attempt to write attachments while verifying capability sync.',
+    final existing = _binaryFiles[request.path];
+    if (existing != null && request.expectedRevision != _revision) {
+      throw TrackStateProviderException(
+        'Expected revision ${request.expectedRevision} does not match ${request.path}.',
+      );
+    }
+    _binaryFiles[request.path] = Uint8List.fromList(request.bytes);
+    return const RepositoryAttachmentWriteResult(
+      path: '',
+      branch: '',
+      revision: _revision,
+    ).copyWith(path: request.path, branch: request.branch);
+  }
+
+  @override
+  Future<RepositoryAttachment> readReleaseAttachment(
+    RepositoryReleaseAttachmentReadRequest request,
+  ) async {
+    final attachment =
+        _releaseAttachments[_releaseAttachmentKey(
+          request.releaseTag,
+          request.assetName,
+        )];
+    if (attachment == null) {
+      throw TrackStateProviderException(
+        'Missing release attachment fixture for ${request.releaseTag}/${request.assetName}.',
+      );
+    }
+    return RepositoryAttachment(
+      path: '${request.releaseTag}/${request.assetName}',
+      bytes: Uint8List.fromList(attachment.bytes),
+      revision: attachment.assetId,
+      declaredSizeBytes: attachment.bytes.length,
     );
   }
+
+  @override
+  Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
+    RepositoryReleaseAttachmentWriteRequest request,
+  ) async {
+    final key = _releaseAttachmentKey(request.releaseTag, request.assetName);
+    final existing = _releaseAttachments[key];
+    final assetId =
+        existing?.assetId ?? 'reactive-release-${_nextReleaseAssetId++}';
+    _releaseAttachments[key] = _ReactiveReleaseAttachment(
+      assetId: assetId,
+      bytes: Uint8List.fromList(request.bytes),
+      mediaType: request.mediaType,
+    );
+    return RepositoryReleaseAttachmentWriteResult(
+      releaseTag: request.releaseTag,
+      assetName: request.assetName,
+      assetId: assetId,
+    );
+  }
+
+  @override
+  Future<void> deleteReleaseAttachment(
+    RepositoryReleaseAttachmentDeleteRequest request,
+  ) async {
+    _releaseAttachments.remove(
+      _releaseAttachmentKey(request.releaseTag, request.assetName),
+    );
+  }
+
+  String _releaseAttachmentKey(String releaseTag, String assetName) =>
+      '$releaseTag::$assetName';
+}
+
+class _ReactiveReleaseAttachment {
+  const _ReactiveReleaseAttachment({
+    required this.assetId,
+    required this.bytes,
+    required this.mediaType,
+  });
+
+  final String assetId;
+  final Uint8List bytes;
+  final String mediaType;
 }
 
 extension on RepositoryTextFile {
@@ -253,6 +551,48 @@ extension on RepositoryTextFile {
     return RepositoryTextFile(
       path: path ?? this.path,
       content: content ?? this.content,
+      revision: revision ?? this.revision,
+    );
+  }
+}
+
+extension on RepositoryAttachmentWriteResult {
+  RepositoryAttachmentWriteResult copyWith({
+    String? path,
+    String? branch,
+    String? revision,
+  }) {
+    return RepositoryAttachmentWriteResult(
+      path: path ?? this.path,
+      branch: branch ?? this.branch,
+      revision: revision ?? this.revision,
+    );
+  }
+}
+
+extension on RepositoryWriteResult {
+  RepositoryWriteResult copyWith({
+    String? path,
+    String? branch,
+    String? revision,
+  }) {
+    return RepositoryWriteResult(
+      path: path ?? this.path,
+      branch: branch ?? this.branch,
+      revision: revision ?? this.revision,
+    );
+  }
+}
+
+extension on RepositoryCommitResult {
+  RepositoryCommitResult copyWith({
+    String? branch,
+    String? message,
+    String? revision,
+  }) {
+    return RepositoryCommitResult(
+      branch: branch ?? this.branch,
+      message: message ?? this.message,
       revision: revision ?? this.revision,
     );
   }

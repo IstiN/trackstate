@@ -150,6 +150,24 @@ void main() {
     expect(page.issues.map((issue) => issue.key), ['TRACK-10']);
   });
 
+  test(
+    'flags project-plus-free-text compatibility clauses for detail hydration',
+    () {
+      expect(
+        service.requiresIssueDetails(
+          'project = TRACK deterministic pagination',
+        ),
+        isTrue,
+      );
+      expect(
+        service.requiresIssueDetails(
+          'project = TRACK AND summary = "Implement parser"',
+        ),
+        isFalse,
+      );
+    },
+  );
+
   test('returns deterministic offset pagination with key tie-breakers', () {
     final firstPage = service.search(
       issues: issues,

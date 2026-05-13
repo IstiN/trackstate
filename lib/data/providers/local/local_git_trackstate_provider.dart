@@ -38,7 +38,13 @@ class LocalGitTrackStateProvider
     }
     final name = await _gitConfigValue('user.name');
     final email = await _gitConfigValue('user.email');
-    return RepositoryUser(login: email, displayName: name.ifEmpty(email));
+    return RepositoryUser(
+      login: email,
+      displayName: name.ifEmpty(email),
+      accountId: email.ifEmpty(name),
+      emailAddress: email.isEmpty ? null : email,
+      active: true,
+    );
   }
 
   @override
@@ -221,10 +227,14 @@ class LocalGitTrackStateProvider
   Future<RepositoryPermission> getPermission() async {
     final branch = await resolveWriteBranch();
     final exists = await getBranch(branch);
+    final releaseAttachmentWriteFailureReason =
+        await _releaseAttachmentWriteFailureReason();
     return RepositoryPermission(
       canRead: exists.exists,
       canWrite: exists.exists,
       isAdmin: false,
+      releaseAttachmentWriteFailureReason:
+          releaseAttachmentWriteFailureReason,
     );
   }
 
@@ -339,6 +349,51 @@ class LocalGitTrackStateProvider
 
   Future<String> _gitConfigValue(String key) async =>
       (await _tryGit(['config', '--local', key]))?.stdout.trim() ?? '';
+
+  Future<String?> _releaseAttachmentWriteFailureReason() async {
+    final remoteNamesResult = await _tryGit(['remote']);
+    final remoteNames = remoteNamesResult == null
+        ? const <String>[]
+        : LineSplitter.split(remoteNamesResult.stdout)
+              .map((line) => line.trim())
+              .where((line) => line.isNotEmpty)
+              .toList(growable: false);
+    if (remoteNames.isEmpty) {
+      return 'GitHub repository identity cannot be resolved from the local Git '
+          'configuration because no remote is configured.';
+    }
+    for (final remoteName in remoteNames) {
+      final remoteUrl = (await _tryGit(['remote', 'get-url', remoteName]))
+              ?.stdout
+              .trim() ??
+          '';
+      if (_githubRepositoryIdentityFromRemoteUrl(remoteUrl) != null) {
+        return null;
+      }
+    }
+    return 'GitHub repository identity cannot be resolved from the local Git '
+        'configuration because no GitHub remote is configured.';
+  }
+
+  String? _githubRepositoryIdentityFromRemoteUrl(String remoteUrl) {
+    final normalized = remoteUrl.trim();
+    if (normalized.isEmpty) {
+      return null;
+    }
+    final match = RegExp(
+      r'^(?:https://|ssh://git@|git@)github\.com[:/](?<owner>[^/]+)/(?<repo>[^/]+?)(?:\.git)?/?$',
+      caseSensitive: false,
+    ).firstMatch(normalized);
+    if (match == null) {
+      return null;
+    }
+    final owner = match.namedGroup('owner')?.trim() ?? '';
+    final repo = match.namedGroup('repo')?.trim() ?? '';
+    if (owner.isEmpty || repo.isEmpty) {
+      return null;
+    }
+    return '$owner/$repo';
+  }
 
   Future<void> _ensurePathClean(String path) async {
     final result = await _runGit(['status', '--porcelain', '--', path]);
@@ -531,7 +586,10 @@ _LfsPointerInfo? _parseLfsPointer(String content) {
     r'^oid sha256:([a-f0-9]+)$',
     multiLine: true,
   ).firstMatch(content);
-  final sizeMatch = RegExp(r'^size (\d+)$', multiLine: true).firstMatch(content);
+  final sizeMatch = RegExp(
+    r'^size (\d+)$',
+    multiLine: true,
+  ).firstMatch(content);
   return _LfsPointerInfo(
     oid: oidMatch?.group(1),
     sizeBytes: int.tryParse(sizeMatch?.group(1) ?? ''),

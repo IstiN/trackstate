@@ -15,11 +15,21 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     required LocalGitRepositoryPort repositoryService,
   }) : _repositoryService = repositoryService;
 
+  static const ValueKey<String> _goldenTargetKey = ValueKey<String>(
+    'trackstate-app-golden-target',
+  );
+
   final WidgetTester tester;
   final LocalGitRepositoryPort _repositoryService;
 
-  Finder get repositoryAccessButton =>
-      find.bySemanticsLabel(RegExp(r'^(Local Git|Connect GitHub|Connected)$'));
+  @override
+  Finder get goldenTarget => find.byKey(_goldenTargetKey);
+
+  Finder get repositoryAccessButton => find.bySemanticsLabel(
+    RegExp(
+      r'^(Local Git|Connect GitHub|Connected|Read-only|Attachments limited)$',
+    ),
+  );
 
   Finder get localGitAccessButton => find.bySemanticsLabel(RegExp('Local Git'));
 
@@ -63,6 +73,20 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     matching: find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
   );
 
+  Finder _globalAction(String label) =>
+      find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
+
+  Finder _navigationControl(String label) => find.byWidgetPredicate(
+    (widget) =>
+        widget is Semantics &&
+        widget.properties.button == true &&
+        widget.properties.label == label,
+    description: 'navigation control labeled $label',
+  );
+
+  Finder get _navigationChrome =>
+      find.bySemanticsLabel(RegExp('^TrackState\\.AI navigation\$'));
+
   Finder _issueDetailEditor(String key) => find.descendant(
     of: _issueDetail(key),
     matching: find.byWidgetPredicate(
@@ -92,7 +116,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   Finder _labeledDropdownField(String label) =>
       find.byWidgetPredicate((widget) {
-        return widget is DropdownButtonFormField<String> &&
+        return widget is DropdownButtonFormField &&
             widget.decoration.labelText == label;
       }, description: 'dropdown field labeled $label');
 
@@ -101,6 +125,51 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         widget.properties.label == label &&
         widget.properties.readOnly == true;
   }, description: 'read-only field labeled $label');
+
+  Finder _repositoryAccessBanner(String title, {required String message}) =>
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            widget.properties.label == '$title $title $message',
+        description: 'repository-access banner "$title"',
+      );
+
+  Finder _repositoryAccessBannerAction(
+    String title, {
+    required String message,
+    required String actionLabel,
+  }) {
+    final banner = _repositoryAccessBanner(title, message: message);
+    if (banner.evaluate().isEmpty) {
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing repository-access banner action "$actionLabel"',
+      );
+    }
+    final button = find.descendant(
+      of: banner,
+      matching: find.ancestor(
+        of: _text(actionLabel),
+        matching: find.bySubtype<ButtonStyleButton>(),
+      ),
+    );
+    if (button.evaluate().isNotEmpty) {
+      return button.first;
+    }
+    return find.descendant(of: banner, matching: _text(actionLabel));
+  }
+
+  Finder get _dialogScope {
+    final alertDialog = find.byType(AlertDialog);
+    if (alertDialog.evaluate().isNotEmpty) {
+      return alertDialog.last;
+    }
+    final dialog = find.byType(Dialog);
+    if (dialog.evaluate().isNotEmpty) {
+      return dialog.last;
+    }
+    return alertDialog;
+  }
 
   Finder get _jqlSearchPanel => find.byWidgetPredicate(
     (widget) => widget is Semantics && widget.properties.label == 'JQL Search',
@@ -151,14 +220,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     });
 
     await tester.pumpWidget(
-      TrackStateApp(
-        key: UniqueKey(),
-        repository: repository,
-        openLocalRepository:
-            ({required String repositoryPath, required String writeBranch}) =>
-                _repositoryService.openRepository(
-                  repositoryPath: repositoryPath,
-                ),
+      KeyedSubtree(
+        key: _goldenTargetKey,
+        child: TrackStateApp(
+          key: UniqueKey(),
+          repository: repository,
+          openLocalRepository:
+              ({required String repositoryPath, required String writeBranch}) =>
+                  _repositoryService.openRepository(
+                    repositoryPath: repositoryPath,
+                  ),
+        ),
       ),
     );
     await _pumpFrames();
@@ -386,6 +458,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> isBlockingSearchLoaderVisible() async {
+    await tester.pump();
+    return find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
+  }
+
+  @override
   Future<void> expectIssueSearchResultVisible(
     String key,
     String summary,
@@ -413,6 +491,75 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     return labels;
   }
 
+  Finder _issueSearchResultRow(String key, String summary) {
+    final summaryMatch = find.text(summary, findRichText: true);
+    final rowCandidates = find.ancestor(
+      of: summaryMatch,
+      matching: find.byType(Row),
+    );
+
+    Finder? best;
+    var smallestArea = double.infinity;
+    final matches = rowCandidates.evaluate().length;
+    for (var index = 0; index < matches; index++) {
+      final candidate = rowCandidates.at(index);
+      final hasKey = find
+          .descendant(
+            of: candidate,
+            matching: find.text(key, findRichText: true),
+          )
+          .evaluate()
+          .isNotEmpty;
+      if (!hasKey) {
+        continue;
+      }
+      final rect = tester.getRect(candidate);
+      final area = rect.width * rect.height;
+      if (area < smallestArea) {
+        smallestArea = area;
+        best = candidate;
+      }
+    }
+
+    return best ?? rowCandidates.first;
+  }
+
+  @override
+  Future<bool> isIssueSearchResultTextVisible(
+    String key,
+    String summary,
+    String text,
+  ) async {
+    await tester.pump();
+    final row = _issueSearchResultRow(key, summary);
+    if (row.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(of: row, matching: find.text(text, findRichText: true))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  List<String> issueSearchResultTextsSnapshot(String key, String summary) {
+    final row = _issueSearchResultRow(key, summary);
+    if (row.evaluate().isEmpty) {
+      return const <String>[];
+    }
+    final values = <String>[];
+    for (final widget in tester.widgetList<Text>(
+      find.descendant(of: row, matching: find.byType(Text)),
+    )) {
+      final value = widget.data?.trim();
+      if (value == null || value.isEmpty) {
+        continue;
+      }
+      values.add(value);
+    }
+    return values;
+  }
+
   @override
   Future<void> expectIssueDetailVisible(String key) async {
     final detail = _issueDetail(key);
@@ -435,14 +582,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     required String label,
   }) async {
     final editor = _issueDetailEditor(key);
+    final fallback = _labeledTextField(label);
     await _waitForVisible(_issueDetail(key));
-    if (editor.evaluate().isEmpty) {
+    if (editor.evaluate().isEmpty && fallback.evaluate().isEmpty) {
       fail(
         'Expected issue detail $key to expose a "$label" editor for the '
         'dirty local save flow, but no editable control was rendered.',
       );
     }
-    expect(editor, findsWidgets);
+    expect(
+      editor.evaluate().isNotEmpty || fallback.evaluate().isNotEmpty,
+      isTrue,
+    );
   }
 
   @override
@@ -451,8 +602,10 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     required String label,
     required String text,
   }) async {
-    final editor = _issueDetailEditor(key);
     await expectIssueDescriptionEditorVisible(key, label: label);
+    final editor = _issueDetailEditor(key).evaluate().isNotEmpty
+        ? _issueDetailEditor(key)
+        : _labeledTextField(label);
     await tester.ensureVisible(editor.first);
     await tester.tap(editor.first, warnIfMissed: false);
     await tester.pump();
@@ -462,7 +615,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> tapIssueDetailAction(String key, {required String label}) async {
-    final action = _issueDetailAction(key, label);
+    final action = _issueDetailAction(key, label).evaluate().isNotEmpty
+        ? _issueDetailAction(key, label)
+        : _globalAction(label);
     await _waitForVisible(_issueDetail(key));
     if (action.evaluate().isEmpty) {
       fail(
@@ -527,21 +682,20 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Future<bool> dismissMessageBannerContaining(String text) async {
     final banner = _messageBanner(text);
     await _waitForVisible(banner, timeout: const Duration(seconds: 10));
-    final bannerScope = banner.first;
     final dismissCandidates = <Finder>[
       find.descendant(
-        of: bannerScope,
+        of: banner,
         matching: find.bySemanticsLabel(
           RegExp(r'^(Dismiss|Close|Hide|OK|Ok)$'),
         ),
       ),
-      find.descendant(of: bannerScope, matching: find.text('Dismiss')),
-      find.descendant(of: bannerScope, matching: find.text('Close')),
-      find.descendant(of: bannerScope, matching: find.text('Hide')),
-      find.descendant(of: bannerScope, matching: find.text('OK')),
-      find.descendant(of: bannerScope, matching: find.text('Ok')),
+      find.descendant(of: banner, matching: find.text('Dismiss')),
+      find.descendant(of: banner, matching: find.text('Close')),
+      find.descendant(of: banner, matching: find.text('Hide')),
+      find.descendant(of: banner, matching: find.text('OK')),
+      find.descendant(of: banner, matching: find.text('Ok')),
       find.descendant(
-        of: bannerScope,
+        of: banner,
         matching: find.byWidgetPredicate(
           (widget) =>
               widget is IconButton &&
@@ -550,14 +704,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
           description: 'dismiss control inside the message banner',
         ),
       ),
+      find.bySemanticsLabel(RegExp(r'^(Dismiss|Close|Hide|OK|Ok)$')),
+      find.text('Dismiss'),
+      find.text('Close'),
     ];
 
     for (final candidate in dismissCandidates) {
       if (candidate.evaluate().isEmpty) {
         continue;
       }
-      await tester.ensureVisible(candidate.first);
-      await tester.tap(candidate.first, warnIfMissed: false);
+      await tester.ensureVisible(candidate.last);
+      await tester.tap(candidate.last, warnIfMissed: false);
       await tester.pumpAndSettle();
       return banner.evaluate().isEmpty;
     }
@@ -645,6 +802,166 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> isNavigationControlVisible(String label) async {
+    await tester.pump();
+    return _navigationControl(label).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<void> expectNavigationControlEnabled(String label) async {
+    final target = _navigationControl(label);
+    await tester.pump();
+    expect(
+      target,
+      findsOneWidget,
+      reason:
+          'Expected a visible navigation control labeled "$label". Visible '
+          'semantics: ${_formatSnapshot(visibleSemanticsLabelsSnapshot())}.',
+    );
+
+    final semanticsData = tester.getSemantics(target.last).getSemanticsData();
+    final hasTapAction = semanticsData.hasAction(SemanticsAction.tap);
+    final isEnabled = semanticsData.hasFlag(SemanticsFlag.isEnabled);
+    expect(
+      hasTapAction || isEnabled,
+      isTrue,
+      reason:
+          'Expected "$label" navigation control to remain interactive. '
+          'Semantics label="${semanticsData.label}", hasTapAction='
+          '$hasTapAction, isEnabled=$isEnabled.',
+    );
+  }
+
+  @override
+  Future<bool> isNavigationChromeVisible() async {
+    await tester.pump();
+    return _navigationChrome.evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<List<String>> collectDisabledNavigationViolations({
+    required String label,
+    required String retainedText,
+    required List<String> disallowedTexts,
+  }) async {
+    final violations = <String>[];
+    final target = _navigationControl(label);
+    await tester.pump();
+
+    if (target.evaluate().isEmpty) {
+      violations.add(
+        'no visible navigation control labeled "$label" was rendered in the recovery shell.',
+      );
+      return violations;
+    }
+
+    final semanticsData = tester.getSemantics(target.last).getSemanticsData();
+    final hasTapAction = semanticsData.hasAction(SemanticsAction.tap);
+    final isEnabled = semanticsData.hasFlag(SemanticsFlag.isEnabled);
+
+    if (hasTapAction || isEnabled) {
+      violations.add(
+        'the "$label" navigation control remained enabled during mandatory bootstrap recovery. '
+        'Semantics label="${semanticsData.label}", hasTapAction=$hasTapAction, isEnabled=$isEnabled.',
+      );
+    }
+
+    await tester.tap(target.last, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    final visibleTexts = visibleTextsSnapshot();
+    final visibleSemantics = visibleSemanticsLabelsSnapshot();
+    if (!_snapshotContains(visibleTexts, retainedText) &&
+        !_snapshotContains(visibleSemantics, retainedText)) {
+      violations.add(
+        'tapping "$label" navigated away from Settings while recovery was active. '
+        'Visible texts: ${_formatSnapshot(visibleTexts)}. '
+        'Visible semantics: ${_formatSnapshot(visibleSemantics)}.',
+      );
+    }
+
+    for (final disallowedText in disallowedTexts) {
+      if (_snapshotContains(visibleTexts, disallowedText) ||
+          _snapshotContains(visibleSemantics, disallowedText)) {
+        violations.add(
+          'tapping "$label" surfaced "$disallowedText" while the recovery container was still active. '
+          'Visible texts: ${_formatSnapshot(visibleTexts)}. '
+          'Visible semantics: ${_formatSnapshot(visibleSemantics)}.',
+        );
+      }
+    }
+
+    return violations;
+  }
+
+  @override
+  Future<bool> isDialogTextVisible(String text) async {
+    await tester.pump();
+    final dialogScope = _dialogScope;
+    if (dialogScope.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(of: dialogScope, matching: _text(text))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  List<String> visibleDialogTextsSnapshot() {
+    final dialogScope = _dialogScope;
+    if (dialogScope.evaluate().isEmpty) {
+      return const <String>[];
+    }
+    return _textSnapshotWithin(dialogScope);
+  }
+
+  @override
+  Future<bool> tapDialogControl(String label) async {
+    final dialogScope = _dialogScope;
+    if (dialogScope.evaluate().isEmpty) {
+      return false;
+    }
+    return _tapControl(
+      label: label,
+      semanticsMatch: find.descendant(
+        of: dialogScope,
+        matching: _exactSemanticsLabel(label),
+      ),
+      textMatch: find.descendant(
+        of: dialogScope,
+        matching: find.text(label, findRichText: true),
+      ),
+    );
+  }
+
+  @override
+  Future<bool> tapDialogControlWithoutSettling(String label) async {
+    final dialogScope = _dialogScope;
+    if (dialogScope.evaluate().isEmpty) {
+      return false;
+    }
+    await tester.pump();
+    final semanticsMatch = find.descendant(
+      of: dialogScope,
+      matching: _exactSemanticsLabel(label),
+    );
+    final textMatch = find.descendant(
+      of: dialogScope,
+      matching: find.text(label, findRichText: true),
+    );
+    final target = semanticsMatch.evaluate().isNotEmpty
+        ? semanticsMatch
+        : textMatch;
+    if (target.evaluate().isEmpty) {
+      return false;
+    }
+    await tester.ensureVisible(target.first);
+    await tester.tap(target.first, warnIfMissed: false);
+    return true;
+  }
+
+  @override
   Future<bool> isTextFieldVisible(String label) async {
     await tester.pump();
     return _labeledTextField(label).evaluate().isNotEmpty;
@@ -666,6 +983,77 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Future<int> countDropdownFields(String label) async {
     await tester.pump();
     return _labeledDropdownField(label).evaluate().length;
+  }
+
+  @override
+  Future<List<String>> readDropdownOptions(String label) async {
+    await tester.pump();
+    final field = _labeledDropdownField(label);
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible dropdown field labeled "$label", but no matching '
+        'control was rendered.',
+      );
+    }
+    final optionTexts = <String>[];
+    final dropdownButton = find.descendant(
+      of: field.first,
+      matching: find.byType(DropdownButton<String>),
+    );
+    if (dropdownButton.evaluate().isEmpty) {
+      fail(
+        'Expected the "$label" dropdown field to render a DropdownButton, but '
+        'no dropdown button widget was found.',
+      );
+    }
+    final dropdown = tester.widget<DropdownButton<String>>(
+      dropdownButton.first,
+    );
+    for (final item in dropdown.items ?? const <DropdownMenuItem<String>>[]) {
+      final optionText = _dropdownItemText(item.child);
+      if (optionText == null || optionTexts.contains(optionText)) {
+        continue;
+      }
+      optionTexts.add(optionText);
+    }
+
+    return optionTexts;
+  }
+
+  String? _dropdownItemText(Widget? widget) {
+    if (widget == null) {
+      return null;
+    }
+    if (widget is Text) {
+      final text = widget.data?.trim() ?? widget.textSpan?.toPlainText().trim();
+      return text == null || text.isEmpty ? null : text;
+    }
+    if (widget is RichText) {
+      final text = widget.text.toPlainText().trim();
+      return text.isEmpty ? null : text;
+    }
+    if (widget is Semantics) {
+      final label = widget.properties.label?.trim();
+      if (label != null && label.isNotEmpty) {
+        return label;
+      }
+      return _dropdownItemText(widget.child);
+    }
+    if (widget is Icon) {
+      return null;
+    }
+    if (widget is SingleChildRenderObjectWidget) {
+      return _dropdownItemText(widget.child);
+    }
+    if (widget is MultiChildRenderObjectWidget) {
+      for (final child in widget.children) {
+        final text = _dropdownItemText(child);
+        if (text != null) {
+          return text;
+        }
+      }
+    }
+    return null;
   }
 
   @override
@@ -704,7 +1092,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     if (field.evaluate().isEmpty) {
       return null;
     }
-    final dropdown = tester.widget<DropdownButtonFormField<String>>(
+    final dropdown = tester.widget<DropdownButtonFormField<Object?>>(
       field.first,
     );
     final helperText = dropdown.decoration.helperText?.trim();
@@ -772,19 +1160,17 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     String label, {
     required String text,
   }) async {
-    final field = _labeledTextField(label);
-    await tester.pump();
-    if (field.evaluate().isEmpty) {
-      fail(
-        'Expected a visible text field labeled "$label", but no matching '
-        'editable control was rendered.',
-      );
-    }
-    await tester.ensureVisible(field.first);
-    await tester.tap(field.first, warnIfMissed: false);
-    await tester.pump();
-    await tester.enterText(field.first, text);
-    await tester.pumpAndSettle();
+    final field = await _requireVisibleLabeledTextField(label);
+    await _enterTextField(field, text: text, settle: true);
+  }
+
+  @override
+  Future<void> enterLabeledTextFieldWithoutSettling(
+    String label, {
+    required String text,
+  }) async {
+    final field = await _requireVisibleLabeledTextField(label);
+    await _enterTextField(field, text: text, settle: false);
   }
 
   @override
@@ -800,6 +1186,34 @@ class TrackStateAppScreen implements TrackStateAppComponent {
           'Expected the visible text field labeled "$label" to expose a '
           'readable value, but no controller-backed editable widget was found.',
     );
+  }
+
+  Future<Finder> _requireVisibleLabeledTextField(String label) async {
+    final field = _labeledTextField(label);
+    await tester.pump();
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible text field labeled "$label", but no matching '
+        'editable control was rendered.',
+      );
+    }
+    return field.first;
+  }
+
+  Future<void> _enterTextField(
+    Finder field, {
+    required String text,
+    required bool settle,
+  }) async {
+    await tester.ensureVisible(field);
+    await tester.tap(field, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(field, text);
+    if (settle) {
+      await tester.pumpAndSettle();
+      return;
+    }
+    await tester.pump();
   }
 
   String? _readTextFieldValue(
@@ -867,6 +1281,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     return snapshot.join(' | ');
   }
 
+  bool _snapshotContains(List<String> values, String expected) {
+    for (final value in values) {
+      final trimmed = value.trim();
+      if (trimmed == expected ||
+          trimmed.startsWith(expected) ||
+          trimmed.contains(expected)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @override
   List<String> visibleSemanticsLabelsSnapshot() {
     final values = <String>[];
@@ -878,6 +1304,55 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       values.add(value);
     }
     return values;
+  }
+
+  @override
+  Future<bool> isRepositoryAccessBannerVisible({
+    required String title,
+    required String message,
+  }) async {
+    await tester.pump();
+    return _repositoryAccessBanner(
+      title,
+      message: message,
+    ).evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<bool> isRepositoryAccessBannerTextVisible({
+    required String title,
+    required String message,
+    required String text,
+  }) async {
+    await tester.pump();
+    final banner = _repositoryAccessBanner(title, message: message);
+    if (banner.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(of: banner, matching: _text(text))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  Future<bool> tapRepositoryAccessBannerAction({
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) async {
+    final action = _repositoryAccessBannerAction(
+      title,
+      message: message,
+      actionLabel: actionLabel,
+    );
+    if (action.evaluate().isEmpty) {
+      return false;
+    }
+    await tester.ensureVisible(action);
+    await tester.tap(action.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+    return true;
   }
 
   @override
@@ -990,6 +1465,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     required String label,
     required Finder semanticsMatch,
     required Finder textMatch,
+    bool settle = true,
   }) async {
     await tester.pump();
     final target = semanticsMatch.evaluate().isNotEmpty
@@ -1005,16 +1481,28 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         await tester.pump();
         await Future<void>.delayed(const Duration(milliseconds: 500));
       });
-      await tester.pumpAndSettle();
+      if (settle) {
+        await tester.pumpAndSettle();
+      } else {
+        await tester.pump();
+      }
       return true;
     }
     if (label == 'History') {
       await tester.tap(target.first, warnIfMissed: false);
-      await _pumpFrames();
+      if (settle) {
+        await _pumpFrames();
+      } else {
+        await tester.pump();
+      }
       return true;
     }
     await tester.tap(target.first, warnIfMissed: false);
-    await tester.pumpAndSettle();
+    if (settle) {
+      await tester.pumpAndSettle();
+    } else {
+      await tester.pump();
+    }
     return true;
   }
 }

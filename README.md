@@ -21,12 +21,15 @@ Golden baselines are stored in `test/goldens/` and are exercised by `flutter tes
 
 ## CLI foundation
 
-The repository now exposes a TrackState CLI entrypoint for target resolution and session loading:
+The repository now exposes a TrackState CLI entrypoint for target resolution, JQL search, attachment flows, and a narrow Jira compatibility fallback:
 
 ```bash
 dart run trackstate --help
 dart run trackstate session --target local
 dart run trackstate session --target hosted --provider github --repository owner/name
+dart run trackstate attachment upload --target local --issue TRACK-1 --file ./design.png
+dart run trackstate attachment download --target hosted --provider github --repository owner/name --attachment-id TRACK/TRACK-1/attachments/design.png --out ./downloads/design.png
+dart run trackstate jira_execute_request --target local --method GET --request-path /rest/api/2/search --query jql=project=TRACK
 ```
 
 `session` defaults to JSON output and returns a versioned TrackState envelope with target/provider metadata plus command data. Hosted authentication uses this precedence:
@@ -34,6 +37,10 @@ dart run trackstate session --target hosted --provider github --repository owner
 1. `--token`
 2. `TRACKSTATE_TOKEN`
 3. `gh auth token`
+
+`trackstate attachment upload` and `trackstate attachment download` are the primary public attachment commands. Jira migration aliases `jira_attach_file_to_ticket` and `jira_download_attachment` are also supported.
+
+`jira_execute_request` returns raw Jira-compatible JSON on success for a documented allowlist of safe read paths (`/rest/api/2|3/search`, `/rest/api/2|3/issue/{key}`, and `/rest/api/2|3/issue/{key}/comment`). Unsupported or unsafe request shapes fail explicitly in the standard error envelope.
 
 ## GitHub artifacts
 
