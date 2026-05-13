@@ -266,17 +266,19 @@ void main() {
       );
 
       expect(result.isSuccess, isTrue);
+      expect(
+        File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
+        isFalse,
+      );
       final links =
           jsonDecode(
-                File(
-                  '${repo.path}/DEMO/DEMO-1/DEMO-2/links.json',
-                ).readAsStringSync(),
+                File('${repo.path}/DEMO/DEMO-10/links.json').readAsStringSync(),
               )
               as List<dynamic>;
       expect(links, hasLength(1));
       expect(links.single['type'], 'blocks');
-      expect(links.single['direction'], 'inward');
-      expect(links.single['target'], 'DEMO-10');
+      expect(links.single['direction'], 'outward');
+      expect(links.single['target'], 'DEMO-2');
     },
   );
 
