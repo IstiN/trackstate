@@ -71,6 +71,7 @@ class ReleaseSnapshot:
     name: str
     body: str
     draft: bool
+    prerelease: bool
     target_commitish: str
     asset_names: tuple[str, ...]
 
@@ -345,6 +346,7 @@ def _seed_fixture(
         "release_title": observed_release.name,
         "release_body": observed_release.body,
         "release_draft": observed_release.draft,
+        "release_prerelease": observed_release.prerelease,
         "release_asset_names": [asset.name for asset in observed_release.assets],
     }
 
@@ -716,6 +718,7 @@ def _restore_fixture(
                 current_release.name != original_release.name
                 or current_release.body != original_release.body
                 or current_release.draft != original_release.draft
+                or current_release.prerelease != original_release.prerelease
                 or current_release.target_commitish != original_release.target_commitish
             ):
                 restored_release = service.update_release(
@@ -724,10 +727,12 @@ def _restore_fixture(
                     body=original_release.body,
                     target_commitish=original_release.target_commitish,
                     draft=original_release.draft,
+                    prerelease=original_release.prerelease,
                 )
                 release_actions.append(
                     f"restored release {restored_release.id} metadata to "
-                    f"name={restored_release.name!r}, body={restored_release.body!r}, draft={restored_release.draft}"
+                    f"name={restored_release.name!r}, body={restored_release.body!r}, "
+                    f"draft={restored_release.draft}, prerelease={restored_release.prerelease}"
                 )
 
     return {
@@ -747,6 +752,7 @@ def _snapshot_release(release: LiveHostedRelease | None) -> ReleaseSnapshot | No
         name=release.name,
         body=release.body,
         draft=release.draft,
+        prerelease=release.prerelease,
         target_commitish=release.target_commitish,
         asset_names=tuple(asset.name for asset in release.assets),
     )
@@ -824,6 +830,7 @@ def _release_payload(release: LiveHostedRelease | None) -> dict[str, object]:
         "tag_name": release.tag_name,
         "name": release.name,
         "draft": release.draft,
+        "prerelease": release.prerelease,
         "target_commitish": release.target_commitish,
         "body": release.body,
         "assets": [asset.name for asset in release.assets],

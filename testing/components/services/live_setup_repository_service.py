@@ -84,6 +84,7 @@ class LiveHostedRelease:
     assets: list[LiveHostedReleaseAsset]
     body: str = ""
     draft: bool = False
+    prerelease: bool = False
     target_commitish: str = ""
 
 
@@ -760,6 +761,7 @@ class LiveSetupRepositoryService:
             ],
             body=str(payload.get("body", "")),
             draft=bool(payload.get("draft", False)),
+            prerelease=bool(payload.get("prerelease", False)),
             target_commitish=str(payload.get("target_commitish", "")).strip(),
         )
 
