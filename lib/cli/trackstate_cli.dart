@@ -1381,28 +1381,18 @@ class TrackStateCli {
           type: requestedType,
         );
         final issue = _requireMutationSuccess(result);
-        final storedLink = issue.links
-            .where(
-              (candidate) =>
-                  candidate.targetKey == targetKey &&
-                  (normalizedLink == null ||
-                      (candidate.type == normalizedLink.canonicalKey &&
-                          candidate.direction == normalizedLink.direction)),
-            )
-            .toList(growable: false)
-            .lastOrNull;
         return <String, Object?>{
           'command': 'ticket-link',
           'operation': result.operation,
           'authSource': context.authSource,
           'revision': result.revision,
           'link': _linkPayload(
-            storedLink ??
-                IssueLink(
-                  type: normalizedLink?.canonicalKey ?? requestedType,
-                  targetKey: targetKey,
-                  direction: normalizedLink?.direction ?? 'outward',
-                ),
+            _canonicalCliLinkPayload(
+              normalizedLink: normalizedLink,
+              requestedType: requestedType,
+              issueKey: issueKey,
+              targetKey: targetKey,
+            ),
           ),
           'issue': _issueMutationPayload(issue),
         };
@@ -2131,28 +2121,18 @@ class TrackStateCli {
           type: requestedType,
         );
         final issue = _requireMutationSuccess(result);
-        final storedLink = issue.links
-            .where(
-              (candidate) =>
-                  candidate.targetKey == targetKey &&
-                  (normalizedLink == null ||
-                      (candidate.type == normalizedLink.canonicalKey &&
-                          candidate.direction == normalizedLink.direction)),
-            )
-            .toList(growable: false)
-            .lastOrNull;
         return <String, Object?>{
           'command': 'jira-link-issues',
           'operation': result.operation,
           'authSource': context.authSource,
           'revision': result.revision,
           'link': _linkPayload(
-            storedLink ??
-                IssueLink(
-                  type: normalizedLink?.canonicalKey ?? requestedType,
-                  targetKey: targetKey,
-                  direction: normalizedLink?.direction ?? 'outward',
-                ),
+            _canonicalCliLinkPayload(
+              normalizedLink: normalizedLink,
+              requestedType: requestedType,
+              issueKey: issueKey,
+              targetKey: targetKey,
+            ),
           ),
           'issue': _issueMutationPayload(issue),
         };
@@ -5019,6 +4999,17 @@ class TrackStateCli {
     'direction': link.direction,
   };
 
+  IssueLink _canonicalCliLinkPayload({
+    required _ResolvedMutationField? normalizedLink,
+    required String requestedType,
+    required String issueKey,
+    required String targetKey,
+  }) => IssueLink(
+    type: normalizedLink?.canonicalKey ?? requestedType,
+    targetKey: normalizedLink?.direction == 'inward' ? issueKey : targetKey,
+    direction: 'outward',
+  );
+
   Map<String, Object?> _deletedIssuePayload(DeletedIssueTombstone tombstone) =>
       <String, Object?>{
         'key': tombstone.key,
@@ -6587,10 +6578,6 @@ const List<Map<String, Object?>> _jiraLinkTypes = [
 
 extension on String {
   String ifEmpty(String fallback) => trim().isEmpty ? fallback : this;
-}
-
-extension<T> on List<T> {
-  T? get lastOrNull => isEmpty ? null : last;
 }
 
 String _normalizeFieldTokenStatic(String value) =>
