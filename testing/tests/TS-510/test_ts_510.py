@@ -817,7 +817,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            "# TS-510 - Legacy attachment replacement still surfaces duplicate or stale active entries",
+            "# TS-510 - Hosted legacy attachment replacement is blocked in the Attachments tab",
             "",
             "## Steps to reproduce",
             "1. Open 'TS-477' in the Issue Detail Attachments tab.",
