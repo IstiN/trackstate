@@ -35,6 +35,7 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 TEST_FILE_PATH = "testing/tests/TS-597/test_ts_597.py"
 RUN_COMMAND = "python testing/tests/TS-597/test_ts_597.py"
 
@@ -164,21 +165,22 @@ class Ts597FlutterDependencyBoundaryScenario:
         validation: FlutterDependencyBoundaryValidationResult,
         result: dict[str, object],
     ) -> list[str]:
-        if validation.replacement_strategy is None:
+        if not validation.provider_meta_import_matches:
+            observed = (
+                "Observed Dart `required` constructor parameters, but the current ticket "
+                "still explicitly requires `package:meta` evidence."
+                if validation.provider_required_keyword_matches
+                else "No `package:meta` import or alternate replacement evidence was found."
+            )
             return [
-                "Step 3 failed: the provider showed neither a `package:meta` import nor "
-                "language-level `required` constructor parameters, so the non-Flutter "
-                "replacement evidence is missing.\n"
+                "Step 3 failed: the ticket explicitly requires `package:meta` "
+                "replacement evidence in `github_trackstate_provider.dart`, but no "
+                "`package:meta` import was found.\n"
+                f"Observed replacement evidence: {observed}\n"
                 f"Observed import block:\n{_provider_block(validation)}"
             ]
 
-        if validation.replacement_strategy == "package:meta":
-            observed = "Observed `package:meta` import in the provider."
-        else:
-            observed = (
-                "Observed Dart `required` constructor parameters in the provider, so "
-                "`package:meta` is not required for the deployed fix."
-            )
+        observed = "Observed `package:meta` import in the provider."
 
         _record_step(
             result,
@@ -228,6 +230,7 @@ def main() -> None:
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    _write_review_replies()
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -245,17 +248,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     search_roots = ", ".join(str(root) for root in result.get("search_roots", []))
     provider_relative_path = _as_text(result.get("provider_relative_path"))
     provider_excerpt = _as_text(result.get("provider_excerpt")) or "<empty>"
-    replacement_strategy = _as_text(result.get("replacement_strategy"))
     disallowed_import_matches = result.get("disallowed_import_matches") or []
     provider_forbidden_import_matches = result.get("provider_forbidden_import_matches") or []
     provider_meta_import_matches = result.get("provider_meta_import_matches") or []
     provider_required_keyword_matches = result.get("provider_required_keyword_matches") or []
-
-    replacement_summary = (
-        "The provider uses `package:meta` after removing the Flutter import."
-        if replacement_strategy == "package:meta"
-        else "The provider uses Dart `required` parameters, so no `package:meta` import is needed."
-    )
 
     jira_lines = [
         "h3. Test Automation Result",
@@ -274,7 +270,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         ),
         (
             f"* Verified the shipped replacement evidence after the import removal. "
-            f"{replacement_summary}"
+            "The provider imports `package:meta`, matching the ticket's stated expectation."
         ),
         "",
         "h4. Human-style verification",
@@ -290,8 +286,8 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         "* Step 1 passed: the global search returned zero direct Flutter imports under `lib/data/` and `lib/domain/`.",
         "* Step 2 passed: `github_trackstate_provider.dart` no longer imports Flutter foundation and visibly imports `foundation_compat.dart` for `kIsWeb`.",
         (
-            "* Step 3 passed: the provider still shows a non-Flutter replacement strategy "
-            f"(`{replacement_strategy}`) after the import removal."
+            "* Step 3 passed: the provider imports `package:meta`, matching the ticket's "
+            "explicit replacement expectation."
         ),
         (
             f"* Observed counts: disallowed boundary matches = {len(disallowed_import_matches)}, "
@@ -329,7 +325,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         ),
         (
             "- Verified the shipped replacement evidence after the import removal. "
-            f"{replacement_summary}"
+            "The provider imports `package:meta`, matching the ticket's stated expectation."
         ),
         "",
         "## Human-style verification",
@@ -345,8 +341,8 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         "- Step 1 passed: the global search returned zero direct Flutter imports under `lib/data/` and `lib/domain/`.",
         "- Step 2 passed: `github_trackstate_provider.dart` no longer imports Flutter foundation and visibly imports `foundation_compat.dart` for `kIsWeb`.",
         (
-            "- Step 3 passed: the provider still shows a non-Flutter replacement strategy "
-            f"(`{replacement_strategy}`) after the import removal."
+            "- Step 3 passed: the provider imports `package:meta`, matching the ticket's "
+            "explicit replacement expectation."
         ),
         (
             f"- Observed counts: disallowed boundary matches = {len(disallowed_import_matches)}, "
@@ -368,6 +364,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error_message = _as_text(result.get("error")) or "AssertionError: unknown failure"
+    _write_review_replies()
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -446,19 +443,20 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
             "* Step 3 — Check for the non-Flutter replacement in the provider: "
             + (
                 "✅ passed."
-                if meta_matches or required_matches
-                else "❌ failed because neither `package:meta` nor Dart `required` evidence was present."
+                if meta_matches
+                else "❌ failed because no `package:meta` import was present. "
+                + _replacement_failure_detail(required_matches)
             )
         ),
         "",
         "h4. Actual vs Expected",
-        "* Expected: no direct Flutter imports in the data/domain layers, and the GitHub provider remains decoupled from Flutter-specific foundation APIs.",
+        "* Expected: no direct Flutter imports in the data/domain layers, and `github_trackstate_provider.dart` shows `package:meta` as the non-Flutter replacement evidence named by the ticket.",
         (
             "* Actual: "
             + (
                 "the repository scan or provider inspection still exposed Flutter-boundary evidence."
                 if disallowed_matches or forbidden_matches
-                else "the provider no longer exposed Flutter imports, but the replacement evidence required by the test was missing."
+                else _replacement_actual_detail(required_matches)
             )
         ),
         "",
@@ -513,19 +511,20 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
             "3. Check for the non-Flutter replacement in the provider — "
             + (
                 "passed."
-                if meta_matches or required_matches
-                else "failed because neither `package:meta` nor Dart `required` evidence was present."
+                if meta_matches
+                else "failed because no `package:meta` import was present. "
+                + _replacement_failure_detail(required_matches)
             )
         ),
         "",
         "## Actual vs Expected",
-        "- Expected: no direct Flutter imports in the data/domain layers, and the GitHub provider remains decoupled from Flutter-specific foundation APIs.",
+        "- Expected: no direct Flutter imports in the data/domain layers, and `github_trackstate_provider.dart` shows `package:meta` as the non-Flutter replacement evidence named by the ticket.",
         (
             "- Actual: "
             + (
                 "the repository scan or provider inspection still exposed Flutter-boundary evidence."
                 if disallowed_matches or forbidden_matches
-                else "the provider no longer exposed Flutter imports, but the replacement evidence required by the test was missing."
+                else _replacement_actual_detail(required_matches)
             )
         ),
         "",
@@ -574,20 +573,21 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         (
             "3. Check for the non-Flutter replacement in the provider.\n"
             + (
-                "   - ✅ Passed: replacement evidence was present."
-                if meta_matches or required_matches
-                else "   - ❌ Failed: neither `package:meta` nor Dart `required` evidence was present."
+                "   - ✅ Passed: a `package:meta` import was present."
+                if meta_matches
+                else "   - ❌ Failed: no `package:meta` import was present. "
+                + _replacement_failure_detail(required_matches)
             )
         ),
         "",
         "## Actual vs Expected",
-        "- **Expected:** No files within the data or domain layers import from `package:flutter/`, and the GitHub provider remains free of Flutter foundation dependencies.",
+        "- **Expected:** No files within the data or domain layers import from `package:flutter/`, and the GitHub provider remains free of Flutter foundation dependencies while showing `package:meta` as the replacement evidence named by the ticket.",
         (
             "- **Actual:** "
             + (
                 "The scan or provider inspection still exposed Flutter-boundary imports."
                 if disallowed_matches or forbidden_matches
-                else "The provider header did not expose a valid non-Flutter replacement after the import removal."
+                else _replacement_actual_detail(required_matches)
             )
         ),
         "",
@@ -609,6 +609,33 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
     RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text("\n".join(bug_lines) + "\n", encoding="utf-8")
+
+
+def _write_review_replies() -> None:
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps(
+            {
+                "replies": [
+                    {
+                        "inReplyToId": 3234673312,
+                        "threadId": "PRRT_kwDOSU6Gf86BxRVw",
+                        "reply": (
+                            "Fixed: step 3 now passes only when `github_trackstate_provider.dart` contains a real `package:meta` import. Dart `required` usage is kept as diagnostic evidence only, so the rerun now correctly fails against the current repository state because `package:meta` is absent."
+                        ),
+                    },
+                    {
+                        "inReplyToId": None,
+                        "threadId": None,
+                        "reply": (
+                            "Fixed: added `testing/tests/TS-597/README.md` and tightened the test to the ticket's exact `package:meta` expectation. The rerun now reports the real product-visible mismatch instead of masking it with a synthetic pass."
+                        ),
+                    },
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _record_step(
@@ -680,6 +707,27 @@ def _format_match_dicts(matches: object) -> str:
 
 def _provider_block(validation: FlutterDependencyBoundaryValidationResult) -> str:
     return "\n".join(validation.provider_excerpt_lines)
+
+
+def _replacement_failure_detail(required_matches: object) -> str:
+    if isinstance(required_matches, list) and required_matches:
+        return (
+            "The provider still contains Dart `required` constructor parameters, but "
+            "the current ticket explicitly asks for `package:meta` evidence."
+        )
+    return "The provider did not expose the ticket's required `package:meta` evidence."
+
+
+def _replacement_actual_detail(required_matches: object) -> str:
+    if isinstance(required_matches, list) and required_matches:
+        return (
+            "the provider no longer exposes Flutter imports, but it uses Dart "
+            "`required` parameters instead of the ticket's expected `package:meta` import."
+        )
+    return (
+        "the provider no longer exposes Flutter imports, but it also does not show "
+        "the ticket's expected `package:meta` replacement evidence."
+    )
 
 
 def _as_text(value: object) -> str:

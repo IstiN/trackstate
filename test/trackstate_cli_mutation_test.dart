@@ -648,9 +648,17 @@ void main() {
       expect(link['type'], 'blocks');
       expect(link['direction'], 'inward');
       expect(
-        File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').readAsStringSync(),
-        contains('"type":"blocks"'),
+        File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
+        isFalse,
       );
+      final storedLinks =
+          jsonDecode(
+                File('${repo.path}/DEMO/DEMO-10/links.json').readAsStringSync(),
+              )
+              as List<dynamic>;
+      expect(storedLinks, [
+        {'type': 'blocks', 'target': 'DEMO-2', 'direction': 'outward'},
+      ]);
     });
 
     test(

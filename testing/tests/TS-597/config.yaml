@@ -7,7 +7,7 @@ dependencies:
 notes:
   - Scans the live repository checkout under `lib/data/` and `lib/domain/` for direct `package:flutter/` imports.
   - Inspects `lib/data/providers/github/github_trackstate_provider.dart` to confirm the deployed fix uses the provider compatibility shim instead of Flutter foundation.
-  - Treats language-level `required` usage as valid replacement evidence when no `package:meta` import is needed.
+  - Requires `package:meta` import evidence in the provider to match the current ticket wording exactly.
 runtime_inputs:
   search_roots:
     - lib/data
@@ -21,4 +21,3 @@ runtime_inputs:
   meta_import_literal: "import 'package:meta/"
   replacement_keyword_literal: "required this."
   provider_excerpt_end_line: 12
-
