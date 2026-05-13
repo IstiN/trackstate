@@ -32,6 +32,7 @@ TICKET_SUMMARY = (
     "Local runtime download with missing auth — explicit failure for "
     "release-backed attachments"
 )
+COMPILED_SOURCE_REF = "origin/main"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
@@ -65,22 +66,13 @@ class Ts522ReleaseDownloadAuthFailureScenario:
         failures.extend(self._validate_filesystem_state(validation, result))
         return result, failures
 
-    def _build_result(
-        self,
-        validation: TrackStateCliReleaseDownloadAuthFailureValidationResult,
-    ) -> dict[str, object]:
-        payload = validation.observation.result.json_payload
-        payload_dict = payload if isinstance(payload, dict) else None
-        error = payload_dict.get("error") if isinstance(payload_dict, dict) else None
-        error_dict = error if isinstance(error, dict) else None
+    def build_base_result(self) -> dict[str, object]:
         return {
             "ticket": TICKET_KEY,
             "ticket_summary": TICKET_SUMMARY,
             "ticket_command": self.config.ticket_command,
-            "requested_command": validation.observation.requested_command_text,
-            "executed_command": validation.observation.executed_command_text,
-            "compiled_binary_path": validation.observation.compiled_binary_path,
-            "repository_path": validation.observation.repository_path,
+            "requested_command": " ".join(self.config.requested_command),
+            "compiled_source_ref": COMPILED_SOURCE_REF,
             "config_path": str(self.config_path),
             "os": platform.system(),
             "project_key": self.config.project_key,
@@ -88,37 +80,56 @@ class Ts522ReleaseDownloadAuthFailureScenario:
             "attachment_relative_path": self.config.attachment_relative_path,
             "expected_output_relative_path": self.config.expected_output_relative_path,
             "remote_origin_url": self.config.remote_origin_url,
-            "stdout": validation.observation.result.stdout,
-            "stderr": validation.observation.result.stderr,
-            "exit_code": validation.observation.result.exit_code,
-            "payload": payload_dict,
-            "error": error_dict,
-            "observed_error_code": error_dict.get("code")
-            if isinstance(error_dict, dict)
-            else None,
-            "observed_error_category": error_dict.get("category")
-            if isinstance(error_dict, dict)
-            else None,
-            "observed_provider": payload_dict.get("provider")
-            if isinstance(payload_dict, dict)
-            else None,
-            "observed_output_format": payload_dict.get("output")
-            if isinstance(payload_dict, dict)
-            else None,
-            "observed_error_message": error_dict.get("message")
-            if isinstance(error_dict, dict)
-            else None,
-            "observed_error_details": error_dict.get("details")
-            if isinstance(error_dict, dict)
-            else None,
-            "initial_state": _state_to_dict(validation.initial_state),
-            "final_state": _state_to_dict(validation.final_state),
-            "stripped_environment_variables": list(
-                validation.stripped_environment_variables
-            ),
             "steps": [],
             "human_verification": [],
         }
+
+    def _build_result(
+        self,
+        validation: TrackStateCliReleaseDownloadAuthFailureValidationResult,
+    ) -> dict[str, object]:
+        result = self.build_base_result()
+        payload = validation.observation.result.json_payload
+        payload_dict = payload if isinstance(payload, dict) else None
+        error = payload_dict.get("error") if isinstance(payload_dict, dict) else None
+        error_dict = error if isinstance(error, dict) else None
+        result.update(
+            {
+                "requested_command": validation.observation.requested_command_text,
+                "executed_command": validation.observation.executed_command_text,
+                "compiled_binary_path": validation.observation.compiled_binary_path,
+                "repository_path": validation.observation.repository_path,
+                "stdout": validation.observation.result.stdout,
+                "stderr": validation.observation.result.stderr,
+                "exit_code": validation.observation.result.exit_code,
+                "payload": payload_dict,
+                "error": error_dict,
+                "observed_error_code": error_dict.get("code")
+                if isinstance(error_dict, dict)
+                else None,
+                "observed_error_category": error_dict.get("category")
+                if isinstance(error_dict, dict)
+                else None,
+                "observed_provider": payload_dict.get("provider")
+                if isinstance(payload_dict, dict)
+                else None,
+                "observed_output_format": payload_dict.get("output")
+                if isinstance(payload_dict, dict)
+                else None,
+                "observed_error_message": error_dict.get("message")
+                if isinstance(error_dict, dict)
+                else None,
+                "observed_error_details": error_dict.get("details")
+                if isinstance(error_dict, dict)
+                else None,
+                "initial_state": _state_to_dict(validation.initial_state),
+                "final_state": _state_to_dict(validation.final_state),
+                "stripped_environment_variables": list(
+                    validation.stripped_environment_variables
+                ),
+            }
+        )
+        return result
 
     def _assert_exact_command(
         self,
@@ -339,6 +350,7 @@ class Ts522ReleaseDownloadAuthFailureScenario:
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     scenario = Ts522ReleaseDownloadAuthFailureScenario()
+    base_result = scenario.build_base_result()
 
     try:
         result, failures = scenario.execute()
@@ -346,9 +358,10 @@ def main() -> None:
             raise AssertionError("\n".join(failures))
         _write_pass_outputs(result)
     except Exception as error:
-        failure_result = locals().get("result", {}) if "result" in locals() else {}
+        failure_result = locals().get("result", base_result)
         if not isinstance(failure_result, dict):
-            failure_result = {}
+            failure_result = dict(base_result)
+        _apply_failure_context(failure_result, error)
         failure_result.update(
             {
                 "ticket": TICKET_KEY,
@@ -387,6 +400,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
         "",
         "h4. What was tested",
+        f"* Compiled the TrackState CLI from {_jira_inline(COMPILED_SOURCE_REF)} to match the deployed main-branch implementation.",
         f"* Executed {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository whose {_jira_inline('attachments.json')} points {_jira_inline('manual.pdf')} at {_jira_inline('storageBackend = github-releases')}.",
         "* Removed GitHub credentials from the runtime environment and inspected the caller-visible CLI error output.",
         f"* Inspected the local output path {_jira_inline(_as_text(result.get('expected_output_relative_path')))} after the command.",
@@ -414,6 +428,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         f"**Test Case:** {TICKET_KEY} — {TICKET_SUMMARY}",
         "",
         "## What was automated",
+        f"- Compiled the TrackState CLI from `{COMPILED_SOURCE_REF}` to match the deployed main-branch implementation.",
         f"- Executed `{_as_text(result.get('ticket_command'))}` from a disposable local TrackState repository whose `attachments.json` points `manual.pdf` at `storageBackend = github-releases`.",
         "- Removed GitHub credentials from the runtime environment and inspected the caller-visible CLI error output.",
         f"- Inspected `{_as_text(result.get('expected_output_relative_path'))}` after the command.",
@@ -453,15 +468,38 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     stdout = _as_text(result.get("stdout"))
     stderr = _as_text(result.get("stderr"))
     visible_error = _visible_error_text(result.get("payload"), stdout=stdout, stderr=stderr)
+    if not visible_error:
+        visible_error = error_message
     observed_output = _observed_command_output(stdout=stdout, stderr=stderr)
+    if observed_output == "<empty>":
+        observed_output = error_message or _as_text(result.get("traceback"))
     final_state = result.get("final_state")
-    final_state_text = json.dumps(final_state, indent=2, sort_keys=True)
+    final_state_text = json.dumps(final_state or {}, indent=2, sort_keys=True)
     expected_output_path = _as_text(result.get("expected_output_relative_path"))
     failure_mode = _as_text(result.get("failure_mode"))
     product_gap = _as_text(result.get("product_gap"))
     observed_provider = _as_text(result.get("observed_provider")) or "local-git"
     observed_reason = _error_reason(result) or visible_error
-    if failure_mode == "local_provider_capability_gate":
+    if failure_mode == "cli_build_failure_on_main":
+        step_one_summary = (
+            "the deployed main-branch CLI could not be built for local execution, "
+            "so the attachment download command never started"
+        )
+        human_summary = (
+            "Human-style verification observed the local runtime failing before any "
+            "ticket-specific CLI output appeared because the main-branch command path "
+            "hit Flutter-only `dart:ui` imports during startup/build."
+        )
+        actual_result_line = (
+            "* The attachment command did not start because compiling or launching "
+            f"{_jira_inline(COMPILED_SOURCE_REF)} for local CLI execution failed with "
+            f"{_jira_inline(observed_reason)}."
+        )
+        step_two_line = (
+            "* ⚪ Step 2 was not reached because the local CLI never started executing "
+            "the attachment download command."
+        )
+    elif failure_mode == "local_provider_capability_gate":
         step_one_summary = (
             "the local release-backed download path failed earlier at the provider "
             "capability gate, so the command never reached missing-auth handling"
@@ -478,6 +516,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
             "That means the local runtime path never reached GitHub "
             "auth/configuration handling for the release-backed attachment."
         )
+        step_two_line = "* ✅ Step 2 passed: no local download file was created."
     else:
         step_one_summary = (
             "the command failed, but the visible output was generic and did not "
@@ -495,6 +534,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
             f"{_jira_inline(observed_reason)} instead of explicit "
             "release-auth/configuration guidance."
         )
+        step_two_line = "* ✅ Step 2 passed: no local download file was created."
     jira_lines = [
         "h3. Test Automation Result",
         "",
@@ -502,6 +542,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
         "",
         "h4. What was tested",
+        f"* Compiled the TrackState CLI from {_jira_inline(COMPILED_SOURCE_REF)} to match the deployed main-branch implementation.",
         f"* Executed {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository configured with {_jira_inline('attachmentStorage.mode = github-releases')} and no GitHub token in CLI args or environment.",
         "* Inspected the caller-visible CLI output and the local output path after the command.",
         "",
@@ -510,7 +551,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"* Observed error code/category: {_jira_inline(_as_text(result.get('observed_error_code')))} / {_jira_inline(_as_text(result.get('observed_error_category')))}",
         f"* Observed provider/output: {_jira_inline(observed_provider)} / {_jira_inline(_as_text(result.get('observed_output_format')))}",
         f"* Observed visible output: {_jira_inline(visible_error)}",
-        "* ✅ Step 2 passed: no local download file was created.",
+        step_two_line,
         f"* {human_summary}",
         *([f"* Product gap: {product_gap}"] if product_gap else []),
         "* Observed repository state:",
@@ -540,6 +581,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"**Test Case:** {TICKET_KEY} — {TICKET_SUMMARY}",
         "",
         "## What was automated",
+        f"- Compiled the TrackState CLI from `{COMPILED_SOURCE_REF}` to match the deployed main-branch implementation.",
         f"- Executed `{_as_text(result.get('ticket_command'))}` from a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and no GitHub token in CLI args or environment.",
         "- Inspected the caller-visible CLI output and the local output path after the command.",
         "",
@@ -548,7 +590,12 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"- Observed error code/category: `{_as_text(result.get('observed_error_code'))}` / `{_as_text(result.get('observed_error_category'))}`",
         f"- Observed provider/output: `{observed_provider}` / `{_as_text(result.get('observed_output_format'))}`",
         f"- Observed visible output: `{visible_error}`",
-        "- ✅ Step 2 passed: no local download file was created.",
+        (
+            "- ⚪ Step 2 was not reached because the local CLI never started executing "
+            "the attachment download command."
+            if failure_mode == "cli_build_failure_on_main"
+            else "- ✅ Step 2 passed: no local download file was created."
+        ),
         f"- {human_summary}",
         *([f"- Product gap: {product_gap}"] if product_gap else []),
         "- Observed repository state:",
@@ -569,28 +616,37 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     bug_lines = [
         "h4. Environment",
         f"* Repository path: {_jira_inline(_as_text(result.get('repository_path')))}",
+        f"* Compiled CLI source ref: {_jira_inline(COMPILED_SOURCE_REF)}",
         f"* Command: {_jira_inline(_as_text(result.get('ticket_command')))}",
         f"* OS: {platform.system()}",
         f"* Remote origin: {_jira_inline(_as_text(result.get('remote_origin_url')))}",
         "* Auth setup: GH_TOKEN, GITHUB_TOKEN, and TRACKSTATE_TOKEN were removed from the process environment before execution.",
         "",
+        "h4. Preconditions",
+        "* Intended fixture: disposable local TrackState repository with {{attachmentStorage.mode = github-releases}} and a release-backed {{manual.pdf}} entry in {{attachments.json}}.",
+        "",
         "h4. Steps to Reproduce",
         (
-            f"# ✅ Create a local TrackState repository whose {_jira_inline('project.json')} sets "
-            f"{_jira_inline('attachmentStorage.mode = github-releases')} and whose "
-            f"{_jira_inline('attachments.json')} contains the release-backed entry "
-            f"{_jira_inline(_as_text(result.get('attachment_relative_path')))}. "
-            "Observed: the fixture repository opened normally and contained TS-123 with a release-backed manual.pdf attachment entry and no local download output file."
-        ),
-        (
             f"# ❌ Execute CLI command: {_jira_inline(_as_text(result.get('ticket_command')))}. "
-            f"Observed: exit code {_as_text(result.get('exit_code'))}; visible output = "
-            f"{visible_error}"
+            + (
+                "Observed: the deployed main-branch CLI could not start because building "
+                f"{_jira_inline(COMPILED_SOURCE_REF)} for local execution failed with "
+                f"{_jira_inline(observed_reason)}"
+                if failure_mode == "cli_build_failure_on_main"
+                else f"Observed: exit code {_as_text(result.get('exit_code'))}; visible output = "
+                f"{visible_error}"
+            )
         ),
         (
-            f"# ✅ Inspect the command output and local filesystem path "
-            f"{_jira_inline(expected_output_path)}. Observed: the file was not created, "
-            "stdout showed the repository error envelope below, and the repository stayed clean."
+            (
+                f"# ⚪ Inspect the command output and local filesystem path "
+                f"{_jira_inline(expected_output_path)}. Observed: this step was not reached because "
+                "the CLI failed during startup/build before the attachment download command began."
+                if failure_mode == "cli_build_failure_on_main"
+                else f"# ✅ Inspect the command output and local filesystem path "
+                f"{_jira_inline(expected_output_path)}. Observed: the file was not created, "
+                "stdout showed the repository error envelope below, and the repository stayed clean."
+            )
         ),
         "",
         "h4. Expected Result",
@@ -599,7 +655,13 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "* Silent fallback to local attachment storage must not occur.",
         "",
         "h4. Actual Result",
-        "* The file was not written locally, so no download artifact was created.",
+        *(
+            [
+                "* The command never reached attachment download execution, so no filesystem change was observed."
+            ]
+            if failure_mode == "cli_build_failure_on_main"
+            else ["* The file was not written locally, so no download artifact was created."]
+        ),
         actual_result_line,
         "",
         "h4. Logs / Error Output",
@@ -770,6 +832,26 @@ def _error_reason(result: dict[str, object]) -> str:
         if isinstance(reason, str) and reason:
             return reason
     return ""
+
+
+def _apply_failure_context(result: dict[str, object], error: Exception) -> None:
+    message = f"{type(error).__name__}: {error}"
+    lowered = message.lower()
+    if "failed to compile a temporary trackstate cli executable" in lowered and (
+        "dart:ui" in lowered or "failed to build trackstate:trackstate" in lowered
+    ):
+        result.setdefault("failure_mode", "cli_build_failure_on_main")
+        result.setdefault("observed_error_code", "CLI_BUILD_FAILED")
+        result.setdefault("observed_error_category", "runtime")
+        result.setdefault("observed_provider", "main-branch-cli")
+        result.setdefault("observed_output_format", "build")
+        result.setdefault(
+            "product_gap",
+            "The deployed main-branch TrackState CLI cannot be built for local "
+            "execution in this environment because the command path now imports "
+            "Flutter-only `dart:ui` APIs before TS-522 can reach the attachment "
+            "download scenario.",
+        )
 
 
 def _jira_inline(value: str) -> str:

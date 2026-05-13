@@ -5,11 +5,10 @@ not silently fall through with a generic repository/provider failure when the
 repository is configured for `github-releases` attachments but no GitHub
 authentication is available.
 
-Today the exact `--target local` path still fails earlier with the generic
-local-provider message `This repository provider does not support GitHub
-Releases attachment downloads.`, so the automation intentionally stays red and
-records that product gap until the local runtime can surface explicit
-release-auth/configuration guidance.
+The ticket targets behavior that is already fixed on `main`, so this automation
+compiles the CLI from `origin/main` before exercising the disposable local
+fixture repository. That keeps TS-522 aligned with the deployed implementation
+even when the current branch predates the production fix.
 
 The automation:
 1. seeds a disposable local TrackState repository with
@@ -24,7 +23,7 @@ The automation:
    stderr, or a JSON-shaped error payload
 6. verifies no local output file is created and the disposable repository stays
    clean
-7. if the exact local path fails earlier at the provider capability gate,
+7. if the exact local path still fails earlier at the provider capability gate,
    reports that as the real product gap instead of pretending the missing-auth
    contract was verified
 
@@ -49,7 +48,7 @@ python testing/tests/TS-522/test_ts_522.py
 
 ## Expected pass / fail behavior
 
-- **Pass:** the CLI fails immediately with explicit GitHub
+- **Pass:** the CLI compiled from `origin/main` fails immediately with explicit GitHub
   auth/configuration or GitHub Releases guidance for the release-backed
   attachment download, and no `downloads/manual.pdf` file is created.
 - **Fail:** the command succeeds, writes a local output file, leaves repository

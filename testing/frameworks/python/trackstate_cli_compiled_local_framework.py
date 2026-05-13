@@ -12,11 +12,17 @@ class PythonTrackStateCliCompiledLocalFramework:
     def __init__(self, repository_root: Path) -> None:
         self._repository_root = Path(repository_root)
 
-    def _compile_executable(self, destination: Path) -> None:
+    def _compile_executable(
+        self,
+        destination: Path,
+        *,
+        source_root: Path | None = None,
+    ) -> None:
         dart_bin = os.environ.get("TRACKSTATE_DART_BIN", "dart")
         env = os.environ.copy()
         env.setdefault("CI", "true")
         env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
+        compile_root = source_root or self._repository_root
         completed = subprocess.run(
             (
                 dart_bin,
@@ -26,7 +32,7 @@ class PythonTrackStateCliCompiledLocalFramework:
                 "-o",
                 str(destination),
             ),
-            cwd=self._repository_root,
+            cwd=compile_root,
             env=env,
             capture_output=True,
             text=True,
@@ -36,6 +42,7 @@ class PythonTrackStateCliCompiledLocalFramework:
             raise AssertionError(
                 "Failed to compile a temporary TrackState CLI executable.\n"
                 f"Command: {dart_bin} compile exe bin/trackstate.dart -o {destination}\n"
+                f"Source root: {compile_root}\n"
                 f"Exit code: {completed.returncode}\n"
                 f"stdout:\n{completed.stdout}\n"
                 f"stderr:\n{completed.stderr}"
