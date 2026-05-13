@@ -9,4 +9,4 @@ notes:
   - Compiles a temporary `trackstate` executable from this checkout.
   - Seeds a disposable Local Git repository with one existing issue because local mutation commands reject completely empty repositories.
   - Creates a parent story, a sub-task under that story, two unrelated stories, and a non-hierarchical `blocks` link between the unrelated stories.
-  - Verifies only the non-hierarchical link is persisted in `links.json`, while the parent-child relationship remains represented by the filesystem path, issue markdown, and local issue index.
+  - Verifies the repository-root `links.json` persists only the non-hierarchical link, while the parent-child relationship remains represented by the filesystem path, issue markdown, and local issue index.

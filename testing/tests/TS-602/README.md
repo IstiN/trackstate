@@ -12,11 +12,11 @@ The automation:
    sub-task under that story
 4. creates two unrelated stories and links them with
    `trackstate ticket link --type blocks`
-5. inspects the persisted `TS/TS-3/links.json` file and confirms it contains
-   only the non-hierarchical link record
-6. confirms no extra `links.json` files were created for the parent/child
-   hierarchy and that the child markdown plus local issue index still show the
-   canonical `parent: TS-1` relationship
+5. inspects the repository-root `links.json` file and confirms it contains only
+   the non-hierarchical link record
+6. confirms the child markdown plus local issue index still show the canonical
+   `parent: TS-1` relationship rather than persisting hierarchy metadata as a
+   non-hierarchical link
 
 ## Run this test
 

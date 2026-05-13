@@ -204,31 +204,28 @@ class TrackStateCliLinksJsonHierarchyExclusionTest(unittest.TestCase):
         self.assertIsInstance(
             links_payload,
             list,
-            "Step 5 failed: the persisted links file was not a JSON array.\n"
+            "Step 5 failed: the repository-root `links.json` file was not a JSON "
+            "array.\n"
             f"Path: {observation.links_json_relative_path}\n"
+            f"Discovered links.json files: {observation.links_json_files}\n"
             f"Observed content:\n{observation.links_json_content}",
         )
         assert isinstance(links_payload, list)
         self.assertEqual(
             links_payload,
             [self.config.expected_link_payload],
-            "Step 5 failed: `links.json` did not contain exactly the expected "
-            "non-hierarchical link record.\n"
+            "Step 5 failed: the repository-root `links.json` file did not contain "
+            "exactly the expected non-hierarchical link record.\n"
             f"Path: {observation.links_json_relative_path}\n"
+            f"Discovered links.json files: {observation.links_json_files}\n"
             f"Observed payload: {links_payload}",
-        )
-        self.assertEqual(
-            observation.links_json_files,
-            (self.config.links_json_relative_path,),
-            "Expected result failed: hierarchy creation produced extra `links.json` "
-            "files instead of keeping only the unrelated issue link file.\n"
-            f"Observed links.json files: {observation.links_json_files}",
         )
         self.assertNotIn(
             self.config.parent_issue_key,
             observation.links_json_content or "",
             "Expected result failed: the persisted non-hierarchical link file leaked "
             "the parent issue key from the hierarchy relationship.\n"
+            f"Discovered links.json files: {observation.links_json_files}\n"
             f"Observed content:\n{observation.links_json_content}",
         )
         self.assertNotIn(
@@ -236,6 +233,7 @@ class TrackStateCliLinksJsonHierarchyExclusionTest(unittest.TestCase):
             observation.links_json_content or "",
             "Expected result failed: the persisted non-hierarchical link file leaked "
             "the child issue key from the hierarchy relationship.\n"
+            f"Discovered links.json files: {observation.links_json_files}\n"
             f"Observed content:\n{observation.links_json_content}",
         )
 

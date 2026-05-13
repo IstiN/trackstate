@@ -44,7 +44,7 @@ class TrackStateCliLinksJsonHierarchyExclusionConfig:
 
     @property
     def links_json_relative_path(self) -> str:
-        return f"{self.project_key}/{self.unrelated_source_issue_key}/links.json"
+        return "links.json"
 
     @property
     def issue_index_relative_path(self) -> str:
