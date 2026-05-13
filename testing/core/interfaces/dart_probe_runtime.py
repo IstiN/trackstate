@@ -11,6 +11,7 @@ class DartProbeExecution:
     analyze_output: str
     run_output: str | None
     session_payload: dict[str, object] | None
+    run_stderr: str | None = None
 
 
 class DartProbeRuntime(Protocol):
