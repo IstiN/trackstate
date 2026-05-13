@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:mirrors';
 
 import '../../../../../lib/cli/trackstate_cli.dart';
@@ -15,6 +16,24 @@ LibraryMirror _trackStateCliLibrary() {
   throw StateError('Could not locate the trackstate_cli.dart library mirror.');
 }
 
+Map<String, String> _loadCanonicalLinkPayload() {
+  final rawPayload = Platform.environment['TRACKSTATE_TS653_LINK_PAYLOAD'];
+  if (rawPayload == null || rawPayload.isEmpty) {
+    throw StateError(
+      'TRACKSTATE_TS653_LINK_PAYLOAD must be provided by the Python probe.',
+    );
+  }
+  final decoded = jsonDecode(rawPayload);
+  if (decoded is! Map) {
+    throw StateError(
+      'TRACKSTATE_TS653_LINK_PAYLOAD must decode to a JSON object.',
+    );
+  }
+  return decoded.map(
+    (key, value) => MapEntry(key.toString(), value.toString()),
+  );
+}
+
 Future<void> main() async {
   final result = <String, Object?>{'status': 'failed'};
 
@@ -22,10 +41,11 @@ Future<void> main() async {
     final library = _trackStateCliLibrary();
     final cli = TrackStateCli();
     final cliMirror = reflect(cli);
-    const canonicalLink = IssueLink(
-      type: 'blocks',
-      targetKey: 'TS-2',
-      direction: 'outward',
+    final linkInput = _loadCanonicalLinkPayload();
+    final canonicalLink = IssueLink(
+      type: linkInput['type'] ?? '',
+      targetKey: linkInput['target'] ?? '',
+      direction: linkInput['direction'] ?? '',
     );
 
     final payload = Map<String, Object?>.from(
@@ -37,43 +57,55 @@ Future<void> main() async {
           .reflectee as Map,
     );
 
-    final successText = cliMirror
+    final formatterData = <String, Object?>{
+      'command': 'ticket-link',
+      'authSource': 'probe',
+      'issue': <String, Object?>{
+        'key': 'TS-1',
+        'summary': 'Issue A',
+      },
+      'link': payload,
+      'revision': 'probe-revision',
+    };
+
+    final jsonExecution = cliMirror
         .invoke(
-          MirrorSystem.getSymbol('_textSuccess', library),
+          MirrorSystem.getSymbol('_success', library),
           const <Object>[],
           <Symbol, Object?>{
             #targetType: TrackStateCliTargetType.local,
             #targetValue: '/tmp/ts-653',
             #provider: 'local',
-            #data: <String, Object?>{
-              'command': 'ticket-link',
-              'authSource': 'probe',
-              'issue': <String, Object?>{
-                'key': 'TS-1',
-                'summary': 'Issue A',
-              },
-              'link': payload,
-              'revision': 'probe-revision',
-            },
+            #output: TrackStateCliOutput.json,
+            #data: formatterData,
           },
         )
-        .reflectee as String;
+        .reflectee as TrackStateCliExecution;
+    final textExecution = cliMirror
+        .invoke(
+          MirrorSystem.getSymbol('_success', library),
+          const <Object>[],
+          <Symbol, Object?>{
+            #targetType: TrackStateCliTargetType.local,
+            #targetValue: '/tmp/ts-653',
+            #provider: 'local',
+            #output: TrackStateCliOutput.text,
+            #data: formatterData,
+          },
+        )
+        .reflectee as TrackStateCliExecution;
 
     result.addAll(<String, Object?>{
       'libraryUri': library.uri.toString(),
-      'invokedMembers': const <String>['_linkPayload', '_textSuccess'],
+      'invokedMembers': const <String>['_linkPayload', '_success'],
       'linkInput': <String, String>{
         'type': canonicalLink.type,
         'target': canonicalLink.targetKey,
         'direction': canonicalLink.direction,
       },
       'observedLinkPayload': payload,
-      'stdoutPreview': const JsonEncoder.withIndent('  ').convert(
-        <String, Object?>{
-          'data': <String, Object?>{'link': payload},
-        },
-      ),
-      'visibleSuccessText': successText,
+      'stdoutPreview': jsonExecution.stdout,
+      'visibleSuccessText': textExecution.stdout,
     });
     result['status'] = 'passed';
   } catch (error, stackTrace) {

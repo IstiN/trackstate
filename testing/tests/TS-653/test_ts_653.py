@@ -51,7 +51,7 @@ class TrackStateCliCanonicalLinkFormatterTest(unittest.TestCase):
 
         self.assertEqual(
             payload.get("invokedMembers"),
-            ["_linkPayload", "_textSuccess"],
+            ["_linkPayload", "_success"],
             "Precondition failed: TS-653 did not invoke the expected production "
             "formatter helpers.\n"
             f"Observed payload: {payload}",

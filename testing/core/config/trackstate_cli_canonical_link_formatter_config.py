@@ -17,6 +17,8 @@ class TrackStateCliCanonicalLinkFormatterConfig:
                 "direction": "outward",
             },
             required_visible_fragments=(
+                '"ok": true',
+                '"output": "json"',
                 '"type": "blocks"',
                 '"direction": "outward"',
                 "Link: blocks outward TS-2",

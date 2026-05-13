@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from testing.core.config.trackstate_cli_canonical_link_formatter_config import (
@@ -24,10 +25,15 @@ class PythonTrackStateCliCanonicalLinkFormatterProbe(
         *,
         config: TrackStateCliCanonicalLinkFormatterConfig,
     ) -> TrackStateCliCanonicalLinkFormatterProbeResult:
-        del config
         execution = self._runtime.execute(
             probe_root=self._probe_root,
             entrypoint=Path("bin/ts653_canonical_link_formatter_probe.dart"),
+            extra_env={
+                "TRACKSTATE_TS653_LINK_PAYLOAD": json.dumps(
+                    config.probe_link_payload,
+                    separators=(",", ":"),
+                ),
+            },
         )
         return TrackStateCliCanonicalLinkFormatterProbeResult(
             succeeded=execution.succeeded,

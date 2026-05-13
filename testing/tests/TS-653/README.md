@@ -6,11 +6,12 @@ schema validation warning when it receives canonical link metadata such as
 
 The automation:
 1. runs a Dart probe against the live `lib/cli/trackstate_cli.dart` source
-2. invokes the private formatter helpers through Dart mirrors with a manual
+2. passes the canonical link payload from the Python test config into the probe
+3. invokes the production formatter success path through Dart mirrors with that
    `IssueLink(type: "blocks", targetKey: "TS-2", direction: "outward")`
-3. captures the formatted JSON payload, the terminal-style success text, and any
-   writes to `stderr`
-4. verifies the canonical payload is visible to the user and that `stderr`
+4. captures the real JSON success output, the terminal-style success text, and
+   any writes to `stderr`
+5. verifies the canonical payload is visible to the user and that `stderr`
    stays empty so the formatter does not emit a false positive warning
 
 ## Run this test

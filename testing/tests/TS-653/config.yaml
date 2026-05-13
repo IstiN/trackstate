@@ -6,6 +6,6 @@ dependencies:
   - Python 3 standard library
   - Dart SDK available on PATH or via TRACKSTATE_DART_BIN, or bootstrapped by the shared Dart probe runtime
 notes:
-  - Programmatically invokes the production CLI link formatter helpers through a Dart probe.
-  - Passes a canonical `IssueLink(type: "blocks", direction: "outward")` object to the formatter path.
-  - Verifies the visible formatted payload still renders and that stderr remains empty for canonical relationship metadata.
+  - Passes the canonical link payload from the Python test config into a Dart probe.
+  - Invokes the production CLI formatter success path for both JSON and text output.
+  - Verifies the real formatted payload still renders and that stderr remains empty for canonical relationship metadata.
