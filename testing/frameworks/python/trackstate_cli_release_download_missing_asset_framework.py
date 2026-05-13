@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import io
 import json
 import os
 import subprocess
-import tarfile
 import tempfile
 from pathlib import Path
 
@@ -39,37 +37,31 @@ class PythonTrackStateCliReleaseDownloadMissingAssetFramework(
         *,
         config: TrackStateCliReleaseDownloadMissingAssetConfig,
     ) -> TrackStateCliReleaseDownloadMissingAssetValidationResult:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-535-main-src-") as source_dir:
-            source_root = Path(source_dir)
-            self._export_main_snapshot(destination=source_root)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-535-bin-") as bin_dir:
-                executable_path = Path(bin_dir) / "trackstate"
-                self._compile_exported_executable(
-                    source_root=source_root,
-                    destination=executable_path,
+        with tempfile.TemporaryDirectory(prefix="trackstate-ts-535-bin-") as bin_dir:
+            executable_path = Path(bin_dir) / "trackstate"
+            self._compile_executable(executable_path)
+            with tempfile.TemporaryDirectory(prefix="trackstate-ts-535-repo-") as temp_dir:
+                repository_path = Path(temp_dir)
+                self._seed_local_repository(repository_path, config=config)
+                initial_state = self._capture_repository_state(
+                    repository_path=repository_path,
+                    config=config,
                 )
-                with tempfile.TemporaryDirectory(prefix="trackstate-ts-535-repo-") as temp_dir:
-                    repository_path = Path(temp_dir)
-                    self._seed_local_repository(repository_path, config=config)
-                    initial_state = self._capture_repository_state(
-                        repository_path=repository_path,
-                        config=config,
-                    )
-                    observation, stripped_environment_variables = self._observe_command(
-                        requested_command=config.requested_command,
-                        repository_path=repository_path,
-                        executable_path=executable_path,
-                    )
-                    final_state = self._capture_repository_state(
-                        repository_path=repository_path,
-                        config=config,
-                    )
-                    return TrackStateCliReleaseDownloadMissingAssetValidationResult(
-                        initial_state=initial_state,
-                        final_state=final_state,
-                        observation=observation,
-                        stripped_environment_variables=stripped_environment_variables,
-                    )
+                observation, stripped_environment_variables = self._observe_command(
+                    requested_command=config.requested_command,
+                    repository_path=repository_path,
+                    executable_path=executable_path,
+                )
+                final_state = self._capture_repository_state(
+                    repository_path=repository_path,
+                    config=config,
+                )
+                return TrackStateCliReleaseDownloadMissingAssetValidationResult(
+                    initial_state=initial_state,
+                    final_state=final_state,
+                    observation=observation,
+                    stripped_environment_variables=stripped_environment_variables,
+                )
 
     def _observe_command(
         self,
@@ -105,10 +97,9 @@ class PythonTrackStateCliReleaseDownloadMissingAssetFramework(
             requested_command=requested_command,
             executed_command=executed_command,
             fallback_reason=(
-                "Pinned execution to a temporary executable compiled from the repository "
-                "main snapshot exported with git archive and stripped ambient GitHub "
-                "credentials so TS-535 runs the deployed local download flow "
-                "deterministically."
+                "Pinned execution to a temporary executable compiled from the current "
+                "checkout and stripped ambient GitHub credentials so TS-535 runs the "
+                "revision under test deterministically."
             ),
             repository_path=str(repository_path),
             compiled_binary_path=str(executable_path),
@@ -272,61 +263,3 @@ TS-535 local github-releases attachment download fixture.
     def _git_head_count(self, repository_path: Path) -> int:
         output = self._git_output(repository_path, "rev-list", "--count", "HEAD").strip()
         return int(output) if output else 0
-    def _export_main_snapshot(self, *, destination: Path) -> None:
-        completed = subprocess.run(
-            (
-                "git",
-                "-C",
-                str(self._repository_root),
-                "archive",
-                "--format=tar",
-                "main",
-            ),
-            capture_output=True,
-            check=False,
-        )
-        if completed.returncode != 0:
-            raise AssertionError(
-                "Failed to export the repository main snapshot for TS-535.\n"
-                f"Command: git -C {self._repository_root} archive --format=tar main\n"
-                f"Exit code: {completed.returncode}\n"
-                f"stdout:\n{completed.stdout.decode('utf-8', errors='replace')}\n"
-                f"stderr:\n{completed.stderr.decode('utf-8', errors='replace')}"
-            )
-        with tarfile.open(fileobj=io.BytesIO(completed.stdout), mode="r:") as archive:
-            archive.extractall(destination)
-
-    def _compile_exported_executable(
-        self,
-        *,
-        source_root: Path,
-        destination: Path,
-    ) -> None:
-        dart_bin = os.environ.get("TRACKSTATE_DART_BIN", "dart")
-        env = os.environ.copy()
-        env.setdefault("CI", "true")
-        env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
-        completed = subprocess.run(
-            (
-                dart_bin,
-                "compile",
-                "exe",
-                "bin/trackstate.dart",
-                "-o",
-                str(destination),
-            ),
-            cwd=source_root,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if completed.returncode != 0:
-            raise AssertionError(
-                "Failed to compile a temporary TrackState CLI executable from the "
-                "repository main snapshot.\n"
-                f"Command: {dart_bin} compile exe bin/trackstate.dart -o {destination}\n"
-                f"Exit code: {completed.returncode}\n"
-                f"stdout:\n{completed.stdout}\n"
-                f"stderr:\n{completed.stderr}"
-            )

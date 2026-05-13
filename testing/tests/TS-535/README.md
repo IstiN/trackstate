@@ -7,9 +7,8 @@ real GitHub Release that exists but does not contain the requested asset.
 The automation:
 1. creates a disposable local TrackState repository whose `attachments.json`
    contains `TS/TS-123/attachments/manual.pdf` backed by GitHub Releases
-2. exports the repository `main` branch to a temporary snapshot and compiles the
-   TrackState CLI from that tree so the probe exercises the deployed
-   implementation instead of the stale test branch checkout
+2. compiles the TrackState CLI from the current checkout so the probe exercises
+   the revision under test, consistent with the other local CLI automation
 3. points the fixture repository `origin` at `https://github.com/cli/cli.git`
    and references public release tag `v2.74.0`
 4. removes ambient GitHub credentials from the command environment
