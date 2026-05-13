@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../domain/models/trackstate_models.dart';
 import 'foundation_compat.dart';
 
@@ -210,6 +212,98 @@ class RepositoryWriteRequest {
   final String message;
   final String branch;
   final String? expectedRevision;
+}
+
+void validateRepositoryTextWrite(RepositoryWriteRequest request) {
+  _validateRepositoryTextContent(path: request.path, content: request.content);
+}
+
+void validateRepositoryTextChange(RepositoryTextFileChange change) {
+  _validateRepositoryTextContent(path: change.path, content: change.content);
+}
+
+void _validateRepositoryTextContent({
+  required String path,
+  required String content,
+}) {
+  if (!_isLinksJsonPath(path)) {
+    return;
+  }
+
+  final decoded = _decodeLinksJson(path, content);
+  if (decoded is! List) {
+    throw TrackStateProviderException(
+      'Validation failed for $path: links.json must contain a JSON array of link records.',
+    );
+  }
+
+  for (final entry in decoded) {
+    if (entry is! Map) {
+      throw TrackStateProviderException(
+        'Validation failed for $path: links.json must contain only link objects.',
+      );
+    }
+    _validateStoredLinkRecord(path, entry);
+  }
+}
+
+bool _isLinksJsonPath(String path) =>
+    path == 'links.json' || path.endsWith('/links.json');
+
+Object? _decodeLinksJson(String path, String content) {
+  try {
+    return jsonDecode(content);
+  } on FormatException catch (error) {
+    throw TrackStateProviderException(
+      'Validation failed for $path: links.json must contain valid JSON. ${error.message}',
+    );
+  }
+}
+
+void _validateStoredLinkRecord(String path, Map entry) {
+  final rawType = entry['type']?.toString();
+  if (rawType == null || rawType.trim().isEmpty) {
+    throw TrackStateProviderException(
+      'Validation failed for $path: each links.json record must include a non-empty type.',
+    );
+  }
+
+  final normalizedType = _canonicalStorageToken(rawType);
+  final canonicalType = _canonicalStoredLinkType(normalizedType);
+  if (canonicalType == null) {
+    return;
+  }
+
+  final rawDirection = entry['direction']?.toString() ?? 'outward';
+  final normalizedDirection = _canonicalStorageToken(rawDirection);
+  if (normalizedType == canonicalType && normalizedDirection == 'outward') {
+    return;
+  }
+
+  throw TrackStateProviderException(
+    'Validation failed for $path: standardized links.json records must use the canonical outward form. '
+    'Found type "$rawType" with direction "$rawDirection".',
+  );
+}
+
+String? _canonicalStoredLinkType(String normalizedType) {
+  return switch (normalizedType) {
+    'blocks' || 'is-blocked-by' => 'blocks',
+    'relates' || 'relates-to' => 'relates-to',
+    'duplicates' || 'is-duplicated-by' => 'duplicates',
+    'clones' || 'is-cloned-by' => 'clones',
+    _ => null,
+  };
+}
+
+String _canonicalStorageToken(String? value) {
+  final text = value?.trim().toLowerCase() ?? '';
+  if (text.isEmpty) {
+    return '';
+  }
+  return text
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
 }
 
 class RepositoryWriteResult {
