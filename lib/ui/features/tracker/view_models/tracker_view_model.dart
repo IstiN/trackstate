@@ -266,10 +266,10 @@ class TrackerViewModel extends ChangeNotifier {
         const SharedPreferencesTrackStateAuthStore(),
     String? workspaceId,
   }) : _repository = repository,
-        _issueMutationService =
-            issueMutationService ?? IssueMutationService(repository: repository),
-        _authStore = authStore,
-        _workspaceId = workspaceId {
+       _issueMutationService =
+           issueMutationService ?? IssueMutationService(repository: repository),
+       _authStore = authStore,
+       _workspaceId = workspaceId {
     _bindProviderSession();
   }
 
@@ -642,7 +642,8 @@ class TrackerViewModel extends ChangeNotifier {
     if (_workspaceId == normalizedWorkspaceId) {
       return;
     }
-    _workspaceId = normalizedWorkspaceId == null || normalizedWorkspaceId.isEmpty
+    _workspaceId =
+        normalizedWorkspaceId == null || normalizedWorkspaceId.isEmpty
         ? null
         : normalizedWorkspaceId;
   }
@@ -677,7 +678,7 @@ class TrackerViewModel extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final target = _connectionTarget();
+    final target = await _connectionTarget();
     if (target == null) {
       return;
     }
@@ -1597,7 +1598,7 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   Future<void> _restoreGitHubConnection() async {
-    final target = _connectionTarget();
+    final target = await _connectionTarget();
     if (target == null || _isConnected) return;
     final callbackToken = _callbackToken();
     final storedToken =
@@ -1754,18 +1755,24 @@ class TrackerViewModel extends ChangeNotifier {
     );
   }
 
-  ({String repository, String branch})? _connectionTarget() {
+  Future<({String repository, String branch})?> _connectionTarget() async {
     final project = _snapshot?.project;
+    if (_repository case final ProviderBackedTrackStateRepository repository) {
+      final resolvedBranch =
+          (await repository.providerAdapter.resolveWriteBranch()).trim();
+      return (
+        repository: project?.repository.isNotEmpty == true
+            ? project!.repository
+            : repository.providerAdapter.repositoryLabel,
+        branch: resolvedBranch.isEmpty
+            ? repository.providerAdapter.dataRef
+            : resolvedBranch,
+      );
+    }
     if (project != null) {
       return (repository: project.repository, branch: project.branch);
     }
-    return switch (_repository) {
-      ProviderBackedTrackStateRepository repository => (
-        repository: repository.providerAdapter.repositoryLabel,
-        branch: repository.providerAdapter.dataRef,
-      ),
-      _ => null,
-    };
+    return null;
   }
 
   Future<void> _resumeStartupRecoveryAfterAuthentication() async {

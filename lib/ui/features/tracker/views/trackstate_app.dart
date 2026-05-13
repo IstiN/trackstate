@@ -45,7 +45,8 @@ class TrackStateApp extends StatefulWidget {
     this.repository,
     this.openLocalRepository,
     this.openHostedRepository,
-    this.workspaceProfileService = const SharedPreferencesWorkspaceProfileService(),
+    this.workspaceProfileService =
+        const SharedPreferencesWorkspaceProfileService(),
     this.attachmentPicker = pickAttachmentWithFileSelector,
   });
 
@@ -234,7 +235,8 @@ class _TrackStateAppState extends State<TrackStateApp> {
             (profile) =>
                 profile.targetType == WorkspaceProfileTargetType.local &&
                 profile.normalizedTarget == normalizedRepositoryPath &&
-                profile.normalizedDefaultBranch == normalizedDefaultBranch,
+                profile.normalizedDefaultBranch == normalizedDefaultBranch &&
+                profile.normalizedWriteBranch == normalizedWriteBranch,
           );
           workspaceState = await widget.workspaceProfileService.selectProfile(
             workspace.id,
@@ -322,9 +324,8 @@ class _TrackStateAppState extends State<TrackStateApp> {
       return;
     }
     final currentContext = _workspaceProfileInputForCurrentContext();
-    final workspace = await widget.workspaceProfileService.ensureLegacyContextMigrated(
-      currentContext,
-    );
+    final workspace = await widget.workspaceProfileService
+        .ensureLegacyContextMigrated(currentContext);
     final updatedState = await widget.workspaceProfileService.loadState();
     if (!mounted) {
       return;
@@ -618,19 +619,19 @@ class _DesktopShell extends StatelessWidget {
       children: [
         SizedBox(width: 268, child: _Sidebar(viewModel: viewModel)),
         Expanded(
-            child: _TrackerMainPane(
-              viewModel: viewModel,
-              isCreateIssueVisible: isCreateIssueVisible,
-              onOpenCreateIssue: onOpenCreateIssue,
-              onCloseCreateIssue: onCloseCreateIssue,
-              createIssuePrefill: createIssuePrefill,
-              onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
-              workspaces: workspaces,
-              onSelectWorkspace: onSelectWorkspace,
-              onDeleteWorkspace: onDeleteWorkspace,
-              attachmentPicker: attachmentPicker,
-            ),
+          child: _TrackerMainPane(
+            viewModel: viewModel,
+            isCreateIssueVisible: isCreateIssueVisible,
+            onOpenCreateIssue: onOpenCreateIssue,
+            onCloseCreateIssue: onCloseCreateIssue,
+            createIssuePrefill: createIssuePrefill,
+            onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+            workspaces: workspaces,
+            onSelectWorkspace: onSelectWorkspace,
+            onDeleteWorkspace: onDeleteWorkspace,
+            attachmentPicker: attachmentPicker,
           ),
+        ),
       ],
     );
   }
@@ -2570,7 +2571,9 @@ class _SavedWorkspaceList extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch}',
+                            workspace.defaultBranch == workspace.writeBranch
+                                ? '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch}'
+                                : '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch} • ${l10n.writeBranch}: ${workspace.writeBranch}',
                             style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(color: colors.muted),
                           ),
@@ -2581,9 +2584,8 @@ class _SavedWorkspaceList extends StatelessWidget {
                     if (workspace.id == activeWorkspaceId)
                       Text(
                         l10n.activeWorkspace,
-                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: colors.primary,
-                        ),
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(color: colors.primary),
                       )
                     else
                       OutlinedButton(

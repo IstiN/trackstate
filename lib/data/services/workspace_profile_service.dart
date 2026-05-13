@@ -26,7 +26,8 @@ abstract interface class WorkspaceProfileService {
 class SharedPreferencesWorkspaceProfileService
     implements WorkspaceProfileService {
   const SharedPreferencesWorkspaceProfileService({
-    TrackStateAuthStore authStore = const SharedPreferencesTrackStateAuthStore(),
+    TrackStateAuthStore authStore =
+        const SharedPreferencesTrackStateAuthStore(),
     DateTime Function()? now,
   }) : _authStore = authStore,
        _now = now;
@@ -73,7 +74,9 @@ class SharedPreferencesWorkspaceProfileService
       migrationComplete: true,
     );
     await _writeState(preferences, nextState);
-    return nextState.profiles.firstWhere((profile) => profile.id == nextProfile.id);
+    return nextState.profiles.firstWhere(
+      (profile) => profile.id == nextProfile.id,
+    );
   }
 
   @override
@@ -85,16 +88,19 @@ class SharedPreferencesWorkspaceProfileService
     _validateInput(input);
     final preferences = await SharedPreferences.getInstance();
     final state = _normalizeState(_readState(preferences));
-    final existingProfile = state.profiles.where((profile) => profile.id == workspaceId);
+    final existingProfile = state.profiles.where(
+      (profile) => profile.id == workspaceId,
+    );
     if (existingProfile.isEmpty) {
-      throw WorkspaceProfileException('Saved workspace $workspaceId was not found.');
+      throw WorkspaceProfileException(
+        'Saved workspace $workspaceId was not found.',
+      );
     }
 
     final currentProfile = existingProfile.first;
     final updatedProfile = WorkspaceProfile.create(
       input,
-      lastOpenedAt:
-          select ? _clock : (currentProfile.lastOpenedAt?.toUtc()),
+      lastOpenedAt: select ? _clock : (currentProfile.lastOpenedAt?.toUtc()),
     );
     _throwIfDuplicate(
       state.profiles,
@@ -140,7 +146,9 @@ class SharedPreferencesWorkspaceProfileService
           profile,
     ];
     if (selectedProfile == null) {
-      throw WorkspaceProfileException('Saved workspace $workspaceId was not found.');
+      throw WorkspaceProfileException(
+        'Saved workspace $workspaceId was not found.',
+      );
     }
     final nextState = WorkspaceProfilesState(
       profiles: resolveWorkspaceDisplayNames(nextProfiles)
@@ -160,8 +168,9 @@ class SharedPreferencesWorkspaceProfileService
       state.profiles.where((profile) => profile.id != workspaceId),
     )..sort(compareWorkspaceProfileRecency);
     final fallbackWorkspace = nextProfiles.isEmpty ? null : nextProfiles.first;
-    final nextActiveWorkspaceId =
-        state.activeWorkspaceId == workspaceId ? fallbackWorkspace?.id : state.activeWorkspaceId;
+    final nextActiveWorkspaceId = state.activeWorkspaceId == workspaceId
+        ? fallbackWorkspace?.id
+        : state.activeWorkspaceId;
     final nextState = WorkspaceProfilesState(
       profiles: nextProfiles,
       activeWorkspaceId: nextActiveWorkspaceId,
@@ -239,6 +248,7 @@ class SharedPreferencesWorkspaceProfileService
             targetType: profile.targetType,
             target: profile.target,
             defaultBranch: profile.defaultBranch,
+            writeBranch: profile.writeBranch,
           ),
           displayName: profile.displayName,
           targetType: profile.targetType,
@@ -248,10 +258,22 @@ class SharedPreferencesWorkspaceProfileService
           lastOpenedAt: profile.lastOpenedAt?.toUtc(),
         ),
     ])..sort(compareWorkspaceProfileRecency);
-    final activeWorkspaceId = normalizedProfiles.any(
-          (profile) => profile.id == state.activeWorkspaceId,
-        )
+    final previousActiveWorkspace = state.profiles.where(
+      (profile) => profile.id == state.activeWorkspaceId,
+    );
+    final normalizedActiveWorkspaceId = previousActiveWorkspace.isEmpty
         ? state.activeWorkspaceId
+        : workspaceProfileId(
+            targetType: previousActiveWorkspace.first.targetType,
+            target: previousActiveWorkspace.first.target,
+            defaultBranch: previousActiveWorkspace.first.defaultBranch,
+            writeBranch: previousActiveWorkspace.first.writeBranch,
+          );
+    final activeWorkspaceId =
+        normalizedProfiles.any(
+          (profile) => profile.id == normalizedActiveWorkspaceId,
+        )
+        ? normalizedActiveWorkspaceId
         : normalizedProfiles.isEmpty
         ? null
         : normalizedProfiles.first.id;
@@ -271,9 +293,7 @@ class SharedPreferencesWorkspaceProfileService
       jsonEncode({
         'activeWorkspaceId': state.activeWorkspaceId,
         'migrationComplete': state.migrationComplete,
-        'profiles': [
-          for (final profile in state.profiles) profile.toJson(),
-        ],
+        'profiles': [for (final profile in state.profiles) profile.toJson()],
       }),
     );
   }
@@ -297,9 +317,13 @@ class SharedPreferencesWorkspaceProfileService
       }
       if (profile.targetType == candidate.targetType &&
           profile.normalizedTarget == candidate.normalizedTarget &&
-          profile.normalizedDefaultBranch == candidate.normalizedDefaultBranch) {
+          profile.normalizedDefaultBranch ==
+              candidate.normalizedDefaultBranch &&
+          profile.normalizedWriteBranch == candidate.normalizedWriteBranch) {
         throw WorkspaceProfileException(
-          'A saved workspace already exists for ${candidate.target} on ${candidate.defaultBranch}.',
+          candidate.normalizedWriteBranch == candidate.normalizedDefaultBranch
+              ? 'A saved workspace already exists for ${candidate.target} on ${candidate.defaultBranch}.'
+              : 'A saved workspace already exists for ${candidate.target} on ${candidate.defaultBranch} -> ${candidate.writeBranch}.',
         );
       }
     }

@@ -9,167 +9,241 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  test('createProfile rejects duplicates for the same target and default branch', () async {
-    final service = SharedPreferencesWorkspaceProfileService(
-      authStore: _MemoryAuthStore(),
-    );
+  test(
+    'createProfile allows distinct write branches and rejects exact duplicates',
+    () async {
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: _MemoryAuthStore(),
+      );
 
-    await service.createProfile(
-      const WorkspaceProfileInput(
-        targetType: WorkspaceProfileTargetType.local,
-        target: '/tmp/trackstate',
-        defaultBranch: 'main',
-        writeBranch: 'feature/ts-632',
-      ),
-    );
-
-    expect(
-      () => service.createProfile(
+      final featureA = await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate',
+          defaultBranch: 'main',
+          writeBranch: 'feature/ts-632',
+        ),
+      );
+      final featureB = await service.createProfile(
         const WorkspaceProfileInput(
           targetType: WorkspaceProfileTargetType.local,
           target: '/tmp/trackstate',
           defaultBranch: 'main',
           writeBranch: 'other-branch',
         ),
-      ),
-      throwsA(isA<WorkspaceProfileException>()),
-    );
-  });
+        select: false,
+      );
 
-  test('updateProfile moves workspace-scoped credentials when the workspace id changes', () async {
-    final authStore = _MemoryAuthStore()
-      ..workspaceTokens['hosted:trackstate/trackstate@main'] = 'token';
-    final service = SharedPreferencesWorkspaceProfileService(
-      authStore: authStore,
-      now: () => DateTime.utc(2026, 5, 13, 12),
-    );
+      expect(featureA.id, 'local:/tmp/trackstate@main:feature/ts-632');
+      expect(featureB.id, 'local:/tmp/trackstate@main:other-branch');
 
-    await service.createProfile(
-      const WorkspaceProfileInput(
-        targetType: WorkspaceProfileTargetType.hosted,
-        target: 'trackstate/trackstate',
-        defaultBranch: 'main',
-      ),
-    );
+      expect(
+        () => service.createProfile(
+          const WorkspaceProfileInput(
+            targetType: WorkspaceProfileTargetType.local,
+            target: '/tmp/trackstate',
+            defaultBranch: 'main',
+            writeBranch: 'feature/ts-632',
+          ),
+        ),
+        throwsA(isA<WorkspaceProfileException>()),
+      );
+    },
+  );
 
-    final updated = await service.updateProfile(
-      'hosted:trackstate/trackstate@main',
-      const WorkspaceProfileInput(
-        targetType: WorkspaceProfileTargetType.hosted,
-        target: 'trackstate/trackstate',
-        defaultBranch: 'release',
-      ),
-    );
+  test(
+    'updateProfile moves workspace-scoped credentials when the workspace id changes',
+    () async {
+      final authStore = _MemoryAuthStore()
+        ..workspaceTokens['hosted:trackstate/trackstate@main'] = 'token';
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+        now: () => DateTime.utc(2026, 5, 13, 12),
+      );
 
-    expect(updated.id, 'hosted:trackstate/trackstate@release');
-    expect(
-      authStore.workspaceTokens['hosted:trackstate/trackstate@release'],
-      'token',
-    );
-    expect(
-      authStore.workspaceTokens.containsKey('hosted:trackstate/trackstate@main'),
-      isFalse,
-    );
-  });
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'trackstate/trackstate',
+          defaultBranch: 'main',
+        ),
+      );
 
-  test('deleteProfile clears scoped credentials and falls back to the most recently opened workspace', () async {
-    final authStore = _MemoryAuthStore()
-      ..workspaceTokens['local:/tmp/alpha@main'] = 'alpha-token'
-      ..workspaceTokens['local:/tmp/beta@main'] = 'beta-token';
-    final service = SharedPreferencesWorkspaceProfileService(
-      authStore: authStore,
-      now: () => DateTime.utc(2026, 5, 13, 18),
-    );
+      final updated = await service.updateProfile(
+        'hosted:trackstate/trackstate@main',
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'trackstate/trackstate',
+          defaultBranch: 'main',
+          writeBranch: 'release',
+        ),
+      );
 
-    await service.createProfile(
-      const WorkspaceProfileInput(
-        targetType: WorkspaceProfileTargetType.local,
-        target: '/tmp/alpha',
-        defaultBranch: 'main',
-      ),
-    );
-    await service.createProfile(
-      const WorkspaceProfileInput(
-        targetType: WorkspaceProfileTargetType.local,
-        target: '/tmp/beta',
-        defaultBranch: 'main',
-      ),
-    );
+      expect(updated.id, 'hosted:trackstate/trackstate@main:release');
+      expect(
+        authStore.workspaceTokens['hosted:trackstate/trackstate@main:release'],
+        'token',
+      );
+      expect(
+        authStore.workspaceTokens.containsKey(
+          'hosted:trackstate/trackstate@main',
+        ),
+        isFalse,
+      );
+    },
+  );
 
-    final nextState = await service.deleteProfile('local:/tmp/beta@main');
+  test(
+    'deleteProfile clears scoped credentials and falls back to the most recently opened workspace',
+    () async {
+      final authStore = _MemoryAuthStore()
+        ..workspaceTokens['local:/tmp/alpha@main'] = 'alpha-token'
+        ..workspaceTokens['local:/tmp/beta@main'] = 'beta-token';
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+        now: () => DateTime.utc(2026, 5, 13, 18),
+      );
 
-    expect(nextState.activeWorkspaceId, 'local:/tmp/alpha@main');
-    expect(authStore.clearedWorkspaceIds, contains('local:/tmp/beta@main'));
-  });
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/alpha',
+          defaultBranch: 'main',
+        ),
+      );
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/beta',
+          defaultBranch: 'main',
+        ),
+      );
 
-  test('ensureLegacyContextMigrated seeds one workspace and migrates the active legacy token only once', () async {
-    final authStore = _MemoryAuthStore()
-      ..legacyTokens['trackstate/trackstate'] = 'legacy-token';
-    final service = SharedPreferencesWorkspaceProfileService(
-      authStore: authStore,
-      now: () => DateTime.utc(2026, 5, 13, 18, 39),
-    );
+      final nextState = await service.deleteProfile('local:/tmp/beta@main');
 
-    final seededWorkspace = await service.ensureLegacyContextMigrated(
-      const WorkspaceProfileInput(
-        targetType: WorkspaceProfileTargetType.hosted,
-        target: 'trackstate/trackstate',
-        defaultBranch: 'main',
-      ),
-    );
-    final secondAttempt = await service.ensureLegacyContextMigrated(
-      const WorkspaceProfileInput(
-        targetType: WorkspaceProfileTargetType.hosted,
-        target: 'other/repository',
-        defaultBranch: 'main',
-      ),
-    );
-    final state = await service.loadState();
+      expect(nextState.activeWorkspaceId, 'local:/tmp/alpha@main');
+      expect(authStore.clearedWorkspaceIds, contains('local:/tmp/beta@main'));
+    },
+  );
 
-    expect(seededWorkspace?.id, 'hosted:trackstate/trackstate@main');
-    expect(secondAttempt?.id, 'hosted:trackstate/trackstate@main');
-    expect(state.profiles, hasLength(1));
-    expect(
-      authStore.workspaceTokens['hosted:trackstate/trackstate@main'],
-      'legacy-token',
-    );
-    expect(
-      authStore.legacyTokens.containsKey('trackstate/trackstate'),
-      isFalse,
-    );
-  });
+  test(
+    'ensureLegacyContextMigrated seeds one workspace and migrates the active legacy token only once',
+    () async {
+      final authStore = _MemoryAuthStore()
+        ..legacyTokens['trackstate/trackstate'] = 'legacy-token';
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+        now: () => DateTime.utc(2026, 5, 13, 18, 39),
+      );
 
-  test('display names include the branch only when needed to distinguish saved workspaces', () async {
-    final service = SharedPreferencesWorkspaceProfileService(
-      authStore: _MemoryAuthStore(),
-    );
+      final seededWorkspace = await service.ensureLegacyContextMigrated(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'trackstate/trackstate',
+          defaultBranch: 'main',
+        ),
+      );
+      final secondAttempt = await service.ensureLegacyContextMigrated(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'other/repository',
+          defaultBranch: 'main',
+        ),
+      );
+      final state = await service.loadState();
 
-    final mainWorkspace = await service.createProfile(
-      const WorkspaceProfileInput(
-        targetType: WorkspaceProfileTargetType.hosted,
-        target: 'trackstate/trackstate',
-        defaultBranch: 'main',
-      ),
-    );
-    final releaseWorkspace = await service.createProfile(
-      const WorkspaceProfileInput(
-        targetType: WorkspaceProfileTargetType.hosted,
-        target: 'trackstate/trackstate',
-        defaultBranch: 'release',
-      ),
-      select: false,
-    );
-    final state = await service.loadState();
+      expect(seededWorkspace?.id, 'hosted:trackstate/trackstate@main');
+      expect(secondAttempt?.id, 'hosted:trackstate/trackstate@main');
+      expect(state.profiles, hasLength(1));
+      expect(
+        authStore.workspaceTokens['hosted:trackstate/trackstate@main'],
+        'legacy-token',
+      );
+      expect(
+        authStore.legacyTokens.containsKey('trackstate/trackstate'),
+        isFalse,
+      );
+    },
+  );
 
-    expect(
-      state.profiles.firstWhere((profile) => profile.id == mainWorkspace.id).displayName,
-      'trackstate/trackstate (main)',
-    );
-    expect(
-      state.profiles.firstWhere((profile) => profile.id == releaseWorkspace.id).displayName,
-      'trackstate/trackstate (release)',
-    );
-  });
+  test(
+    'display names include the branch only when needed to distinguish saved workspaces',
+    () async {
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: _MemoryAuthStore(),
+      );
+
+      final mainWorkspace = await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'trackstate/trackstate',
+          defaultBranch: 'main',
+        ),
+      );
+      final releaseWorkspace = await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'trackstate/trackstate',
+          defaultBranch: 'release',
+        ),
+        select: false,
+      );
+      final state = await service.loadState();
+
+      expect(
+        state.profiles
+            .firstWhere((profile) => profile.id == mainWorkspace.id)
+            .displayName,
+        'trackstate/trackstate (main)',
+      );
+      expect(
+        state.profiles
+            .firstWhere((profile) => profile.id == releaseWorkspace.id)
+            .displayName,
+        'trackstate/trackstate (release)',
+      );
+    },
+  );
+
+  test(
+    'display names include the write branch when the default branch is shared',
+    () async {
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: _MemoryAuthStore(),
+      );
+
+      final mainWorkspace = await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'trackstate/trackstate',
+          defaultBranch: 'main',
+        ),
+      );
+      final featureWorkspace = await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'trackstate/trackstate',
+          defaultBranch: 'main',
+          writeBranch: 'feature/ts-632',
+        ),
+        select: false,
+      );
+      final state = await service.loadState();
+
+      expect(
+        state.profiles
+            .firstWhere((profile) => profile.id == mainWorkspace.id)
+            .displayName,
+        'trackstate/trackstate (main)',
+      );
+      expect(
+        state.profiles
+            .firstWhere((profile) => profile.id == featureWorkspace.id)
+            .displayName,
+        'trackstate/trackstate (main -> feature/ts-632)',
+      );
+    },
+  );
 }
 
 class _MemoryAuthStore implements TrackStateAuthStore {

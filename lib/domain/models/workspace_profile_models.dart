@@ -119,6 +119,7 @@ class WorkspaceProfile {
         targetType: input.targetType,
         target: normalizedTarget,
         defaultBranch: normalizedDefaultBranch,
+        writeBranch: normalizedWriteBranch,
       ),
       displayName: '',
       targetType: input.targetType,
@@ -193,12 +194,19 @@ String workspaceProfileId({
   required WorkspaceProfileTargetType targetType,
   required String target,
   required String defaultBranch,
+  required String writeBranch,
 }) {
   final prefix = switch (targetType) {
     WorkspaceProfileTargetType.hosted => 'hosted',
     WorkspaceProfileTargetType.local => 'local',
   };
-  return '$prefix:${_normalizeTarget(targetType, target)}@${_normalizeBranch(defaultBranch)}';
+  final normalizedTarget = _normalizeTarget(targetType, target);
+  final normalizedDefaultBranch = _normalizeBranch(defaultBranch);
+  final normalizedWriteBranch = _normalizeBranch(writeBranch);
+  final baseId = '$prefix:$normalizedTarget@$normalizedDefaultBranch';
+  return normalizedWriteBranch == normalizedDefaultBranch
+      ? baseId
+      : '$baseId:$normalizedWriteBranch';
 }
 
 List<WorkspaceProfile> resolveWorkspaceDisplayNames(
@@ -213,9 +221,25 @@ List<WorkspaceProfile> resolveWorkspaceDisplayNames(
   return [
     for (final profile in profiles)
       profile.copyWith(
-        displayName: (baseNameCounts[profile.baseDisplayName] ?? 0) > 1
-            ? '${profile.baseDisplayName} (${profile.defaultBranch})'
-            : profile.baseDisplayName,
+        displayName: () {
+          if ((baseNameCounts[profile.baseDisplayName] ?? 0) <= 1) {
+            return profile.baseDisplayName;
+          }
+          final branchScopedCount = profiles
+              .where(
+                (candidate) =>
+                    candidate.baseDisplayName == profile.baseDisplayName &&
+                    candidate.normalizedDefaultBranch ==
+                        profile.normalizedDefaultBranch,
+              )
+              .length;
+          if (branchScopedCount <= 1 ||
+              profile.normalizedWriteBranch ==
+                  profile.normalizedDefaultBranch) {
+            return '${profile.baseDisplayName} (${profile.defaultBranch})';
+          }
+          return '${profile.baseDisplayName} (${profile.defaultBranch} -> ${profile.writeBranch})';
+        }(),
       ),
   ];
 }
