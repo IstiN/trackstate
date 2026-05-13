@@ -81,6 +81,43 @@ class SettingsScreenRobot {
     ),
   );
 
+  Finder accessCallout(String title, {String? message}) => _smallestByArea(
+    find.ancestor(
+      of: find.text(title),
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! Semantics) {
+          return false;
+        }
+        final label = widget.properties.label;
+        if (label == null || label.isEmpty) {
+          return false;
+        }
+        if (message != null && !label.contains(message)) {
+          return false;
+        }
+        return label.contains(title);
+      }, description: 'access callout "$title"'),
+    ),
+  );
+
+  Finder semanticsNode(String label) =>
+      find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
+
+  Finder semanticsNodeContaining(String label) =>
+      find.bySemanticsLabel(RegExp(RegExp.escape(label)));
+
+  Finder labeledTextField(String label) => _labeledTextField(label);
+
+  Finder checkboxTile(String label) => _smallestByArea(
+    find.ancestor(
+      of: semanticsNodeContaining(label),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is CheckboxListTile,
+        description: 'checkbox tile "$label"',
+      ),
+    ),
+  );
+
   Future<void> pumpApp({
     required TrackStateRepository repository,
     Map<String, Object> sharedPreferences = const {},
@@ -136,6 +173,29 @@ class SettingsScreenRobot {
 
   Future<void> openLocalesTab() => selectTab('Locales');
 
+  Future<void> openStatusesTab() => selectTab('Statuses');
+
+  Future<void> selectAttachmentStorageMode(String optionText) {
+    return _selectDropdownOption(
+      'Attachment storage mode',
+      optionText: optionText,
+    );
+  }
+
+  Future<void> enterAttachmentReleaseTagPrefix(String value) {
+    return enterTextField('Release tag prefix', value);
+  }
+
+  Future<bool> showsAttachmentReleaseTagPrefixField() {
+    return isTextFieldVisible('Release tag prefix');
+  }
+
+  Future<void> openProjectStatuses() async {
+    await openSettings();
+    expectVisibleSettingsContent();
+    await openStatusesTab();
+  }
+
   Finder localeChip(String label) => find.widgetWithText(ChoiceChip, label);
 
   Future<void> selectLocaleChip(String label) async {
@@ -148,21 +208,42 @@ class SettingsScreenRobot {
   Finder removeLocaleButton(String locale) =>
       actionButton('Remove locale $locale');
 
-  Finder localeEntryFieldScope({required String locale, required String id}) =>
-      find.byKey(ValueKey('locale-$locale-$id'));
+  Finder localeEntryFieldScope({
+    required String locale,
+    required String id,
+    String? section,
+  }) {
+    if (section != null) {
+      return find.byKey(ValueKey('locale-$locale-$section-$id'));
+    }
+    return find.byWidgetPredicate((widget) {
+      final key = widget.key;
+      return key is ValueKey<String> &&
+          key.value.startsWith('locale-$locale-') &&
+          key.value.endsWith('-$id');
+    }, description: 'locale entry scope for $locale/$id');
+  }
 
-  Finder localeEntryTextField({required String locale, required String id}) =>
-      find.descendant(
-        of: localeEntryFieldScope(locale: locale, id: id),
-        matching: find.byType(EditableText),
-      );
+  Finder localeEntryTextField({
+    required String locale,
+    required String id,
+    String? section,
+  }) => find.descendant(
+    of: localeEntryFieldScope(locale: locale, id: id, section: section),
+    matching: find.byType(EditableText),
+  );
 
   Future<void> enterLocaleTranslation({
     required String locale,
     required String id,
     required String text,
+    String? section,
   }) async {
-    final field = localeEntryTextField(locale: locale, id: id);
+    final field = localeEntryTextField(
+      locale: locale,
+      id: id,
+      section: section,
+    );
     await tester.ensureVisible(field.first);
     await tester.tap(field.first, warnIfMissed: false);
     await tester.pump();
@@ -173,8 +254,13 @@ class SettingsScreenRobot {
   String localeTranslationFieldValue({
     required String locale,
     required String id,
+    String? section,
   }) {
-    final field = localeEntryTextField(locale: locale, id: id);
+    final field = localeEntryTextField(
+      locale: locale,
+      id: id,
+      section: section,
+    );
     if (field.evaluate().isEmpty) {
       throw StateError(
         'No locale translation field found for locale "$locale" and id "$id".',
@@ -186,8 +272,13 @@ class SettingsScreenRobot {
   Future<void> focusLocaleTranslationField({
     required String locale,
     required String id,
+    String? section,
   }) async {
-    final field = localeEntryTextField(locale: locale, id: id);
+    final field = localeEntryTextField(
+      locale: locale,
+      id: id,
+      section: section,
+    );
     await tester.ensureVisible(field.first);
     await tester.tap(field.first, warnIfMissed: false);
     await tester.pumpAndSettle();
@@ -196,8 +287,13 @@ class SettingsScreenRobot {
   String localeTranslationFieldSemanticsLabel({
     required String locale,
     required String id,
+    String? section,
   }) {
-    final field = localeEntryTextField(locale: locale, id: id);
+    final field = localeEntryTextField(
+      locale: locale,
+      id: id,
+      section: section,
+    );
     if (field.evaluate().isEmpty) {
       throw StateError(
         'No locale translation field found for locale "$locale" and id "$id".',
@@ -209,9 +305,10 @@ class SettingsScreenRobot {
   Color localeTranslationFieldPlaceholderColor({
     required String locale,
     required String id,
+    String? section,
   }) {
     return _decoratedFieldTextColorWithin(
-      localeEntryFieldScope(locale: locale, id: id),
+      localeEntryFieldScope(locale: locale, id: id, section: section),
       'Translation ($locale)',
     );
   }
@@ -318,6 +415,131 @@ class SettingsScreenRobot {
     await tester.ensureVisible(button);
     await tester.tap(button, warnIfMissed: false);
     await tester.pumpAndSettle();
+  }
+
+  /// Taps the Save settings button and waits for the underlying async save
+  /// (which involves real git I/O) to complete before returning.
+  ///
+  /// Unlike [tapActionButton], this method performs the tap and initial pump
+  /// inside [WidgetTester.runAsync] so that the button's [onPressed] fires in
+  /// the real-async zone. This ensures continuations from git [Process.run]
+  /// calls are scheduled in the real microtask queue rather than the FakeAsync
+  /// intercepted queue, allowing the entire save chain to complete naturally.
+  Future<void> tapSaveSettingsButton() async {
+    final button = actionButton('Save settings');
+    await tester.ensureVisible(button);
+    await tester.runAsync(() async {
+      await tester.tap(button, warnIfMissed: false);
+      await tester.pump();
+      await Future<void>.delayed(const Duration(milliseconds: 2000));
+    });
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> enterTextField(String label, String text) async {
+    final field = _labeledTextField(label);
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pump();
+    await tester.enterText(field.first, text);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> focusTextField(String label) async {
+    final field = _labeledTextField(label);
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pump();
+  }
+
+  String textFieldValue(String label) {
+    final field = _labeledTextField(label);
+    if (field.evaluate().isEmpty) {
+      throw StateError('Expected a visible editable control labeled "$label".');
+    }
+    final widget = tester.widget(field.first);
+    return switch (widget) {
+      EditableText editableText => editableText.controller.text,
+      TextField textField => textField.controller?.text ?? '',
+      _ => throw StateError(
+        'Expected the "$label" control to expose an editable text controller.',
+      ),
+    };
+  }
+
+  bool isVisibleText(String text) =>
+      find.text(text, findRichText: true).evaluate().isNotEmpty;
+
+  bool showsModalDialog() => settingsEditorDialog.evaluate().isNotEmpty;
+
+  bool showsProjectSettingsSurface() =>
+      isVisibleText('Project Settings') &&
+      projectSettingsHeading.evaluate().isNotEmpty;
+
+  bool showsHostedReleaseUploadRestriction({required String storageLabel}) {
+    final snapshot = repositoryAccessSnapshot().toLowerCase();
+    final lowerStorageLabel = storageLabel.toLowerCase();
+    return snapshot.contains(lowerStorageLabel) &&
+        (snapshot.contains('unavailable') ||
+            snapshot.contains('not available') ||
+            snapshot.contains('cannot complete')) &&
+        (snapshot.contains('upload') || snapshot.contains('transfer'));
+  }
+
+  bool showsReleaseAttachmentStorageConfiguration({
+    required String storageLabel,
+    required String tagPrefix,
+  }) {
+    final snapshot = repositoryAccessSnapshot().toLowerCase();
+    return snapshot.contains(storageLabel.toLowerCase()) &&
+        snapshot.contains(tagPrefix.toLowerCase());
+  }
+
+  bool suggestsHostedReleaseUploadSupport({required String tagPrefix}) {
+    final snapshot = repositoryAccessSnapshot().toLowerCase();
+    final mentionsSupportedUpload =
+        snapshot.contains('can complete release-backed uploads') ||
+        snapshot.contains(
+          'hosted session can complete release-backed uploads',
+        ) ||
+        snapshot.contains('uploads are available') ||
+        snapshot.contains('release-backed uploads are supported');
+    final mentionsUnavailableUpload =
+        snapshot.contains('cannot complete release-backed uploads') ||
+        snapshot.contains('uploads are unavailable') ||
+        snapshot.contains('unavailable in the browser');
+    return snapshot.contains(tagPrefix.toLowerCase()) &&
+        mentionsSupportedUpload &&
+        !mentionsUnavailableUpload;
+  }
+
+  String repositoryAccessSnapshot() => [
+    ..._textsWithin(repositoryAccessSection),
+    ..._semanticsLabelsWithin(repositoryAccessSection),
+  ].join(' | ');
+
+  bool showsProjectSettingsTab(String label) =>
+      showsProjectSettingsSurface() && tabByLabel(label).evaluate().isNotEmpty;
+
+  bool showsAttachmentStorageModeSetting() =>
+      isVisibleText('Attachment storage mode');
+
+  bool statusSummaryVisible({
+    required String name,
+    required String id,
+    required String category,
+  }) {
+    final combined = visibleTexts().join(' | ');
+    return combined.contains(name) &&
+        combined.contains('ID: $id') &&
+        combined.contains('Category: $category');
+  }
+
+  void expectStatusEditorVisible(String title) {
+    expect(editorTitle(title), findsWidgets);
+    expect(find.text('ID'), findsOneWidget);
+    expect(find.text('Name'), findsOneWidget);
+    expect(find.text('Category'), findsOneWidget);
   }
 
   Future<bool> isTextFieldVisible(String label) async {
@@ -670,7 +892,10 @@ class SettingsScreenRobot {
         (candidate) => candidate == element,
         description: 'button within $scope',
       );
-      final texts = find.descendant(of: buttonFinder, matching: find.byType(Text));
+      final texts = find.descendant(
+        of: buttonFinder,
+        matching: find.byType(Text),
+      );
       String? label;
       for (final textElement in texts.evaluate()) {
         final widget = textElement.widget;
@@ -732,6 +957,42 @@ class SettingsScreenRobot {
     );
   }
 
+  Finder _labeledDropdownField(String label) =>
+      find.byWidgetPredicate((widget) {
+        if (widget is DropdownButtonFormField) {
+          return widget.decoration?.labelText == label;
+        }
+        return false;
+      }, description: 'dropdown field labeled $label');
+
+  Future<void> _selectDropdownOption(
+    String label, {
+    required String optionText,
+  }) async {
+    await tester.pump();
+    final field = _labeledDropdownField(label);
+    if (field.evaluate().isEmpty) {
+      fail(
+        'Expected a visible dropdown field labeled "$label", but no matching '
+        'control was rendered.',
+      );
+    }
+    await tester.ensureVisible(field.first);
+    await tester.tap(field.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    final option = find.text(optionText, findRichText: true);
+    if (option.evaluate().isEmpty) {
+      fail(
+        'Expected the "$label" dropdown to expose the option "$optionText", '
+        'but it was not visible after opening the menu.',
+      );
+    }
+    await tester.ensureVisible(option.last);
+    await tester.tap(option.last, warnIfMissed: false);
+    await tester.pumpAndSettle();
+  }
+
   Container? _decoratedContainerWithin(Finder scope) {
     for (final element in scope.evaluate()) {
       final widget = element.widget;
@@ -739,7 +1000,10 @@ class SettingsScreenRobot {
         return widget;
       }
     }
-    final containers = find.descendant(of: scope, matching: find.byType(Container));
+    final containers = find.descendant(
+      of: scope,
+      matching: find.byType(Container),
+    );
     for (final element in containers.evaluate()) {
       final widget = element.widget;
       if (widget is Container && widget.decoration is BoxDecoration) {
@@ -790,6 +1054,28 @@ class SettingsScreenRobot {
     return tester
         .widgetList<Text>(find.byType(Text))
         .map((widget) => widget.data?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
+
+  List<String> _textsWithin(Finder scope) {
+    return tester
+        .widgetList<Text>(
+          find.descendant(of: scope, matching: find.byType(Text)),
+        )
+        .map((widget) => widget.data?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
+
+  List<String> _semanticsLabelsWithin(Finder scope) {
+    return tester
+        .widgetList<Semantics>(
+          find.descendant(of: scope, matching: find.byType(Semantics)),
+        )
+        .map((widget) => widget.properties.label?.trim())
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .toList();

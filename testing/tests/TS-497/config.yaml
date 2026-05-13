@@ -1,0 +1,8 @@
+test_id: TS-497
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Pumps the production issue-detail Attachments tab with github-releases storage configured and hosted release-backed uploads unavailable.
+  - Verifies upload affordances stay disabled, release-backed download actions remain visible, and the Project Settings repository-access messaging stays honest.
