@@ -9,7 +9,8 @@ class LocalGitTrackStateProvider
     implements
         TrackStateProviderAdapter,
         RepositoryFileMutator,
-        RepositoryHistoryReader {
+        RepositoryHistoryReader,
+        RepositoryGitHubIdentityResolver {
   LocalGitTrackStateProvider({
     required this.repositoryPath,
     this.dataRef = 'HEAD',
@@ -233,8 +234,7 @@ class LocalGitTrackStateProvider
       canRead: exists.exists,
       canWrite: exists.exists,
       isAdmin: false,
-      releaseAttachmentWriteFailureReason:
-          releaseAttachmentWriteFailureReason,
+      releaseAttachmentWriteFailureReason: releaseAttachmentWriteFailureReason,
     );
   }
 
@@ -363,9 +363,8 @@ class LocalGitTrackStateProvider
           'configuration because no remote is configured.';
     }
     for (final remoteName in remoteNames) {
-      final remoteUrl = (await _tryGit(['remote', 'get-url', remoteName]))
-              ?.stdout
-              .trim() ??
+      final remoteUrl =
+          (await _tryGit(['remote', 'get-url', remoteName]))?.stdout.trim() ??
           '';
       if (_githubRepositoryIdentityFromRemoteUrl(remoteUrl) != null) {
         return null;
@@ -374,6 +373,31 @@ class LocalGitTrackStateProvider
     return 'GitHub repository identity cannot be resolved from the local Git '
         'configuration because no GitHub remote is configured.';
   }
+
+  @override
+  Future<String?> resolveGitHubRepositoryIdentity() async {
+    final remoteNamesResult = await _tryGit(['remote']);
+    final remoteNames = remoteNamesResult == null
+        ? const <String>[]
+        : LineSplitter.split(remoteNamesResult.stdout)
+              .map((line) => line.trim())
+              .where((line) => line.isNotEmpty)
+              .toList(growable: false);
+    for (final remoteName in remoteNames) {
+      final remoteUrl =
+          (await _tryGit(['remote', 'get-url', remoteName]))?.stdout.trim() ??
+          '';
+      final repository = _githubRepositoryIdentityFromRemoteUrl(remoteUrl);
+      if (repository != null) {
+        return repository;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<String?> releaseAttachmentIdentityFailureReason() async =>
+      _releaseAttachmentWriteFailureReason();
 
   String? _githubRepositoryIdentityFromRemoteUrl(String remoteUrl) {
     final normalized = remoteUrl.trim();

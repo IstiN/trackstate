@@ -568,6 +568,37 @@ void main() {
     );
 
     test(
+      'search command forwards the shared HTTP client to local repositories',
+      () async {
+        final repository = _FakeSearchRepository(
+          snapshot: _sampleSnapshot(),
+          page: const TrackStateIssueSearchPage.empty(),
+        );
+        final repositoryFactory = _FakeTrackStateCliRepositoryFactory(
+          localRepository: repository,
+        );
+        final client = http.Client();
+        addTearDown(client.close);
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: repositoryFactory,
+          httpClient: client,
+        );
+
+        final result = await cli.run(const <String>[
+          'search',
+          '--jql',
+          'project = TRACK',
+        ]);
+
+        expect(result.exitCode, 0);
+        expect(repositoryFactory.lastLocalClient, same(client));
+      },
+    );
+
+    test(
       'returns Jira-shaped ticket JSON from the canonical read command',
       () async {
         final cli = TrackStateCli(
@@ -1833,6 +1864,7 @@ class _FakeTrackStateCliRepositoryFactory
   final TrackStateRepository? hostedRepository;
   String? lastRepositoryPath;
   String? lastDataRef;
+  http.Client? lastLocalClient;
   String? lastHostedRepository;
   String? lastHostedBranch;
   String? lastHostedProvider;
@@ -1841,9 +1873,11 @@ class _FakeTrackStateCliRepositoryFactory
   TrackStateRepository createLocal({
     required String repositoryPath,
     required String dataRef,
+    http.Client? client,
   }) {
     lastRepositoryPath = repositoryPath;
     lastDataRef = dataRef;
+    lastLocalClient = client;
     final repository = localRepository;
     if (repository == null) {
       throw StateError('Expected a fake local repository.');
