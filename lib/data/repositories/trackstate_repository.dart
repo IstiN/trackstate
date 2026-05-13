@@ -2008,15 +2008,7 @@ class ProviderBackedTrackStateRepository
   ) {
     final rawAttachmentStorage = projectJson['attachmentStorage'];
     if (rawAttachmentStorage == null) {
-      return usesLocalPersistence
-          ? const ProjectAttachmentStorageSettings()
-          : const ProjectAttachmentStorageSettings(
-              mode: AttachmentStorageMode.githubReleases,
-              githubReleases: GitHubReleasesAttachmentStorageSettings(
-                tagPrefix:
-                    GitHubReleasesAttachmentStorageSettings.defaultTagPrefix,
-              ),
-            );
+      return const ProjectAttachmentStorageSettings();
     }
     if (rawAttachmentStorage is! Map) {
       throw const TrackStateRepositoryException(

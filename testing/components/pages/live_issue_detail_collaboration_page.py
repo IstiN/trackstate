@@ -1069,11 +1069,16 @@ class LiveIssueDetailCollaborationPage:
                 ).some(isVisible)
               );
               const controlTrigger = (element) => [
-                element,
                 element?.querySelector('flt-semantics[flt-tappable]'),
                 element?.querySelector('[flt-tappable]'),
                 element?.querySelector('flt-semantics[role="button"]'),
                 element?.querySelector('[role="button"]'),
+                (
+                  element?.getAttribute('flt-tappable') !== null
+                  || element?.getAttribute('aria-disabled') !== null
+                )
+                  ? element
+                  : null,
               ].find((candidate) => !!candidate && isVisible(candidate)) ?? null;
               const isEnabled = (element) => {
                 const trigger = controlTrigger(element);
@@ -1084,14 +1089,17 @@ class LiveIssueDetailCollaborationPage:
                 );
               };
 
-              const chooseButtons = controlRoots('Choose attachment');
-              const uploadButtons = controlRoots('Upload attachment');
+              const actionableControls = (label) => controlRoots(label)
+                .map((element) => ({ element, trigger: controlTrigger(element) }))
+                .filter(({ trigger }) => !!trigger && isVisible(trigger));
+              const chooseButtons = actionableControls('Choose attachment');
+              const uploadButtons = actionableControls('Upload attachment');
 
               return {
                 chooseButtonCount: chooseButtons.length,
-                chooseButtonEnabled: chooseButtons.some(isEnabled),
+                chooseButtonEnabled: chooseButtons.some(({ element }) => isEnabled(element)),
                 uploadButtonCount: uploadButtons.length,
-                uploadButtonEnabled: uploadButtons.some(isEnabled),
+                uploadButtonEnabled: uploadButtons.some(({ element }) => isEnabled(element)),
               };
             }
             """,
@@ -1303,7 +1311,7 @@ class LiveIssueDetailCollaborationPage:
     def choose_attachment(self, file_path: str, *, timeout_ms: int = 30_000) -> None:
         self.wait_for_attachment_picker_ready(timeout_ms=timeout_ms)
         self._session.select_files_after_click(
-            'flt-semantics[aria-label="Choose attachment"]',
+            self._choose_attachment_button_selector,
             [file_path],
             timeout_ms=timeout_ms,
         )

@@ -38,9 +38,6 @@ python testing/tests/TS-523/test_ts_523.py
 - `git` CLI available on `PATH`
 - No Git remotes configured in the seeded local repository
 - No `GH_TOKEN`, `GITHUB_TOKEN`, or `TRACKSTATE_TOKEN` set for the test process
-- Optional: set `TRACKSTATE_TS523_SOURCE_ROOT` to a different TrackState checkout
-  (for example a temporary `origin/main` worktree) when the current branch does
-  not yet contain the production fix that must be validated
 
 ## Expected pass / fail behavior
 

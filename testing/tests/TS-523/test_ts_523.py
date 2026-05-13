@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import platform
 import sys
 import traceback
@@ -10,27 +9,6 @@ from pathlib import Path
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 if str(WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_ROOT))
-
-SOURCE_ROOT_ENV = "TRACKSTATE_TS523_SOURCE_ROOT"
-
-
-def _resolve_source_root() -> Path:
-    configured_root = os.environ.get(SOURCE_ROOT_ENV)
-    if not configured_root:
-        return WORKSPACE_ROOT
-    candidate = Path(configured_root).expanduser()
-    if not candidate.is_absolute():
-        candidate = (WORKSPACE_ROOT / candidate).resolve()
-    else:
-        candidate = candidate.resolve()
-    if not candidate.is_dir():
-        raise ValueError(
-            f"{SOURCE_ROOT_ENV} must point to an existing TrackState checkout: {candidate}"
-        )
-    return candidate
-
-
-SOURCE_ROOT = _resolve_source_root()
 
 from testing.components.services.trackstate_cli_release_identity_missing_remote_validator import (  # noqa: E402
     TrackStateCliReleaseIdentityMissingRemoteValidator,
@@ -69,7 +47,7 @@ RUN_COMMAND = "python testing/tests/TS-523/test_ts_523.py"
 class Ts523ReleaseIdentityMissingRemoteScenario:
     def __init__(self) -> None:
         self.workspace_root = WORKSPACE_ROOT
-        self.source_root = SOURCE_ROOT
+        self.source_root = WORKSPACE_ROOT
         self.config_path = self.workspace_root / "testing/tests/TS-523/config.yaml"
         self.config = TrackStateCliReleaseIdentityMissingRemoteConfig.from_file(
             self.config_path
@@ -798,7 +776,23 @@ def _write_compile_failure_outputs(
 
 def _write_review_replies() -> None:
     REVIEW_REPLIES_PATH.write_text(
-        json.dumps({"replies": []}),
+        json.dumps(
+            {
+                "replies": [
+                    {
+                        "inReplyToId": 3234648281,
+                        "threadId": "PRRT_kwDOSU6Gf86BxMzA",
+                        "reply": (
+                            "Fixed: removed the `TRACKSTATE_TS523_SOURCE_ROOT` "
+                            "override so TS-523 now always compiles and validates "
+                            "the workspace checkout under review. The reported "
+                            "result stays pinned to this branch, and any branch-"
+                            "local product gap remains a real failed outcome."
+                        ),
+                    }
+                ]
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -845,10 +839,7 @@ def _source_checkout_display(result: dict[str, object]) -> str:
 
 
 def _display_run_command(result: dict[str, object]) -> str:
-    source_checkout = _source_checkout_display(result)
-    if not source_checkout:
-        return RUN_COMMAND
-    return f'{SOURCE_ROOT_ENV}="{source_checkout}" {RUN_COMMAND}'
+    return RUN_COMMAND
 
 
 def _record_step(
