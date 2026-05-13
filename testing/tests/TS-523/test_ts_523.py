@@ -416,6 +416,8 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     )
 
     visible_error = _as_text(result.get("visible_error_text"))
+    source_checkout = _source_checkout_display(result)
+    run_command = _display_run_command(result)
     jira_lines = [
         "h3. Test Automation Result",
         "",
@@ -426,6 +428,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         f"* Executed {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository configured with {_jira_inline('attachmentStorage.mode = github-releases')} and no Git remotes configured.",
         "* Removed GitHub credentials from the runtime environment and inspected the caller-visible CLI error output.",
         f"* Inspected the repository path {_jira_inline(_as_text(result.get('expected_attachment_relative_path')))} and the local attachments directory after the command.",
+        *([f"* Validated against source checkout {_jira_inline(source_checkout)}."] if source_checkout else []),
         "",
         "h4. Result",
         "* Step 1 passed: the CLI failed immediately with explicit repository-identity guidance tied to the missing local Git remote configuration.",
@@ -440,7 +443,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         "",
         "h4. Run command",
         "{code:bash}",
-        RUN_COMMAND,
+        run_command,
         "{code}",
     ]
     markdown_lines = [
@@ -453,6 +456,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         f"- Executed `{_as_text(result.get('ticket_command'))}` from a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and no Git remotes configured.",
         "- Removed GitHub credentials from the runtime environment and inspected the caller-visible CLI error output.",
         f"- Inspected `{_as_text(result.get('expected_attachment_relative_path'))}` and the local attachments directory after the command.",
+        *([f"- Validated against source checkout `{source_checkout}`."] if source_checkout else []),
         "",
         "## Result",
         "- Step 1 passed: the CLI failed immediately with explicit repository-identity guidance tied to the missing local Git remote configuration.",
@@ -462,7 +466,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         "",
         "## How to run",
         "```bash",
-        RUN_COMMAND,
+        run_command,
         "```",
     ]
     JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
@@ -503,6 +507,8 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     failure_mode = _as_text(result.get("failure_mode"))
     product_gap = _as_text(result.get("product_gap"))
     observed_provider = _as_text(result.get("observed_provider")) or "local-git"
+    source_checkout = _source_checkout_display(result)
+    run_command = _display_run_command(result)
     if failure_mode == "generic_release_auth_guidance":
         step_one_summary = (
             "the command failed, but it only returned generic release-upload "
@@ -545,6 +551,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "h4. What was tested",
         f"* Executed {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository configured with {_jira_inline('attachmentStorage.mode = github-releases')} and no Git remotes configured.",
         "* Inspected the caller-visible CLI output and the repository attachment path after the command.",
+        *([f"* Validated against source checkout {_jira_inline(source_checkout)}."] if source_checkout else []),
         "",
         "h4. Result",
         f"* ❌ Step 1 failed: {step_one_summary}.",
@@ -571,7 +578,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "h4. Run command",
         "{code:bash}",
-        RUN_COMMAND,
+        run_command,
         "{code}",
     ]
     markdown_lines = [
@@ -583,6 +590,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "## What was automated",
         f"- Executed `{_as_text(result.get('ticket_command'))}` from a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and no Git remotes configured.",
         "- Inspected the caller-visible CLI output and the repository attachment path after the command.",
+        *([f"- Validated against source checkout `{source_checkout}`."] if source_checkout else []),
         "",
         "## Result",
         f"- ❌ Step 1 failed: {step_one_summary}.",
@@ -604,13 +612,14 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "## How to run",
         "```bash",
-        RUN_COMMAND,
+        run_command,
         "```",
     ]
     bug_lines = [
         "# TS-523 bug reproduction",
         "",
         "## Environment",
+        *([f"- Source checkout: `{source_checkout}`"] if source_checkout else []),
         f"- Repository path: `{_as_text(result.get('repository_path'))}`",
         f"- Command: `{_as_text(result.get('ticket_command'))}`",
         f"- OS: `{platform.system()}`",
@@ -688,6 +697,8 @@ def _write_compile_failure_outputs(
         "\n\nTraceback",
     ) or _extract_after(_as_text(result.get("traceback")), "stderr:\n")
     visible_error = _first_non_empty_line(compile_stderr) or error_message
+    source_checkout = _source_checkout_display(result)
+    run_command = _display_run_command(result)
 
     jira_lines = [
         "h3. Test Automation Result",
@@ -698,6 +709,7 @@ def _write_compile_failure_outputs(
         "h4. What was tested",
         f"* Attempted to execute {_jira_inline(_as_text(result.get('ticket_command')))} from a disposable local TrackState repository configured with {_jira_inline('attachmentStorage.mode = github-releases')} and no Git remotes configured.",
         "* The test first compiled the repository-local TrackState CLI so the exact public local command could be exercised against the disposable repository.",
+        *([f"* Validated against source checkout {_jira_inline(source_checkout)}."] if source_checkout else []),
         "",
         "h4. Result",
         "* ❌ The ticket scenario could not start because the repository-local CLI failed to compile for the local runtime.",
@@ -713,7 +725,7 @@ def _write_compile_failure_outputs(
         "",
         "h4. Run command",
         "{code:bash}",
-        RUN_COMMAND,
+        run_command,
         "{code}",
     ]
     markdown_lines = [
@@ -725,6 +737,7 @@ def _write_compile_failure_outputs(
         "## What was automated",
         f"- Attempted to execute `{_as_text(result.get('ticket_command'))}` from a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and no Git remotes configured.",
         "- The test first compiled the repository-local TrackState CLI so the exact public local command could run against the disposable repository.",
+        *([f"- Validated against source checkout `{source_checkout}`."] if source_checkout else []),
         "",
         "## Result",
         "- ❌ The ticket scenario could not start because the repository-local CLI failed to compile for the local runtime.",
@@ -740,21 +753,21 @@ def _write_compile_failure_outputs(
         "",
         "## How to run",
         "```bash",
-        RUN_COMMAND,
+        run_command,
         "```",
     ]
     bug_lines = [
         "# TS-523 bug reproduction",
         "",
         "## Environment",
-        f"- Source checkout: `{_as_text(result.get('source_root')) or str(WORKSPACE_ROOT)}`",
+        *([f"- Source checkout: `{source_checkout}`"] if source_checkout else []),
         f"- Command: `{_as_text(result.get('ticket_command'))}`",
         f"- OS: `{platform.system()}`",
         "",
         "## Steps to reproduce",
         "1. Create a disposable local TrackState repository configured with `attachmentStorage.mode = github-releases` and no Git remotes.",
         "2. From this checkout, run the TS-523 automation or compile the CLI directly:",
-        f"   - `{RUN_COMMAND}`",
+        f"   - `{run_command}`",
         f"   - `{compile_command}`",
         "3. Observe the CLI build failure before the ticket command can execute.",
         "",
@@ -817,6 +830,25 @@ def _first_non_empty_line(text: str) -> str:
         if line.strip():
             return line.strip()
     return ""
+
+
+def _source_checkout_display(result: dict[str, object]) -> str:
+    source_root = _as_text(result.get("source_root")).strip()
+    if not source_root:
+        return ""
+    try:
+        if Path(source_root).resolve() == WORKSPACE_ROOT.resolve():
+            return ""
+    except OSError:
+        pass
+    return source_root
+
+
+def _display_run_command(result: dict[str, object]) -> str:
+    source_checkout = _source_checkout_display(result)
+    if not source_checkout:
+        return RUN_COMMAND
+    return f'{SOURCE_ROOT_ENV}="{source_checkout}" {RUN_COMMAND}'
 
 
 def _record_step(
