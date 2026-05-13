@@ -1808,16 +1808,17 @@ class ProviderBackedTrackStateRepository
         ),
       );
     }
-    issues.sort((a, b) => a.key.compareTo(b.key));
+    final resolvedIssues = _resolveIssueLinks(issues)
+      ..sort((a, b) => a.key.compareTo(b.key));
 
     final normalizedIndex = _normalizeRepositoryIndex(
       repositoryIndex.entries.isEmpty
-          ? _deriveRepositoryIndex(issues, repositoryIndex.deleted)
+          ? _deriveRepositoryIndex(resolvedIssues, repositoryIndex.deleted)
           : repositoryIndex,
-      issues,
+      resolvedIssues,
     );
     final indexedIssues = [
-      for (final issue in issues)
+      for (final issue in resolvedIssues)
         issue.withRepositoryIndex(normalizedIndex.entryForKey(issue.key)),
     ]..sort((a, b) => a.key.compareTo(b.key));
     return TrackerSnapshot(
@@ -2505,6 +2506,71 @@ class ProviderBackedTrackStateRepository
         )
         .where((link) => link.targetKey.isNotEmpty)
         .toList(growable: false);
+  }
+
+  List<TrackStateIssue> _resolveIssueLinks(List<TrackStateIssue> issues) {
+    final inboundByKey = <String, List<IssueLink>>{};
+    for (final issue in issues) {
+      for (final link in issue.links) {
+        final targetKey = link.targetKey.trim();
+        if (targetKey.isEmpty) {
+          continue;
+        }
+        inboundByKey
+            .putIfAbsent(targetKey, () => <IssueLink>[])
+            .add(_inverseIssueLink(link, sourceKey: issue.key));
+      }
+    }
+
+    return [
+      for (final issue in issues)
+        issue.copyWith(
+          links: _dedupeIssueLinks(<IssueLink>[
+            ...issue.links,
+            ...?inboundByKey[issue.key],
+          ]),
+        ),
+    ];
+  }
+
+  List<IssueLink> _dedupeIssueLinks(List<IssueLink> links) {
+    final seen = <String>{};
+    final deduped = <IssueLink>[];
+    for (final link in links) {
+      final signature =
+          '${_canonicalConfigId(link.type)}|${link.targetKey}|${_canonicalConfigId(link.direction)}';
+      if (seen.add(signature)) {
+        deduped.add(link);
+      }
+    }
+    return deduped;
+  }
+
+  IssueLink _inverseIssueLink(IssueLink link, {required String sourceKey}) {
+    final normalizedType = _canonicalConfigId(link.type);
+    final normalizedDirection = _canonicalConfigId(link.direction);
+    final invertedDirection = normalizedDirection == 'inward'
+        ? 'outward'
+        : 'inward';
+    final invertedType = switch (normalizedType) {
+      'blocks' => invertedDirection == 'inward' ? 'is blocked by' : 'blocks',
+      'is-blocked-by' =>
+        invertedDirection == 'inward' ? 'is blocked by' : 'blocks',
+      'duplicates' =>
+        invertedDirection == 'inward' ? 'is duplicated by' : 'duplicates',
+      'is-duplicated-by' =>
+        invertedDirection == 'inward' ? 'is duplicated by' : 'duplicates',
+      'clones' => invertedDirection == 'inward' ? 'is cloned by' : 'clones',
+      'is-cloned-by' =>
+        invertedDirection == 'inward' ? 'is cloned by' : 'clones',
+      'relates' || 'relates-to' => 'relates to',
+      _ => link.type,
+    };
+    return IssueLink(
+      type: invertedType,
+      targetKey: sourceKey,
+      direction: invertedDirection,
+    );
   }
 
   Future<List<IssueAttachment>> _loadAttachments({

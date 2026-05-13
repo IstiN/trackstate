@@ -636,6 +636,80 @@ void main() {
     );
 
     test(
+      'returns native ticket detail JSON from ticket show with canonical links',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshotWithInwardLink(),
+              page: const TrackStateIssueSearchPage.empty(),
+            ),
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'ticket',
+          'show',
+          '--target',
+          'local',
+          '--key',
+          'TRACK-2',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json['key'], 'TRACK-2');
+        expect(json['summary'], 'Implement pagination');
+        expect(json['links'], <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'relates to',
+            'target': 'TRACK-1',
+            'direction': 'inward',
+          },
+        ]);
+      },
+    );
+
+    test('read ticket exposes Jira issue link metadata', () async {
+      final cli = TrackStateCli(
+        environment: const TrackStateCliEnvironment(
+          workingDirectory: '/workspace/repo',
+        ),
+        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+          localRepository: _FakeSearchRepository(
+            snapshot: _sampleSnapshotWithInwardLink(),
+            page: const TrackStateIssueSearchPage.empty(),
+          ),
+        ),
+      );
+
+      final result = await cli.run(const <String>[
+        'read',
+        'ticket',
+        '--key',
+        'TRACK-2',
+      ]);
+      final json = jsonDecode(result.stdout) as Map<String, Object?>;
+      final fields = json['fields']! as Map<String, Object?>;
+
+      expect(result.exitCode, 0);
+      expect(fields['issuelinks'], <Map<String, Object?>>[
+        <String, Object?>{
+          'type': <String, Object?>{
+            'id': 'relates-to',
+            'name': 'Relates',
+            'inward': 'relates to',
+            'outward': 'relates to',
+          },
+          'inwardIssue': <String, Object?>{'id': '1', 'key': 'TRACK-1'},
+        },
+      ]);
+    });
+
+    test(
       'supports compatibility aliases and returns Jira field metadata',
       () async {
         final cli = TrackStateCli(
@@ -1975,6 +2049,39 @@ const TrackStateIssue _sampleReadIssue = TrackStateIssue(
   isArchived: false,
 );
 
+const TrackStateIssue _sampleReadIssueWithInwardLink = TrackStateIssue(
+  key: 'TRACK-2',
+  project: 'TRACK',
+  issueType: IssueType.story,
+  issueTypeId: 'story',
+  status: IssueStatus.inProgress,
+  statusId: 'in-progress',
+  priority: IssuePriority.high,
+  priorityId: 'high',
+  summary: 'Implement pagination',
+  description: 'Adds paged JQL output.',
+  assignee: 'ana',
+  reporter: 'ana',
+  labels: <String>['release'],
+  components: <String>['tracker-core'],
+  fixVersionIds: <String>['mvp'],
+  watchers: <String>[],
+  customFields: <String, Object?>{},
+  parentKey: null,
+  epicKey: 'TRACK-1',
+  parentPath: null,
+  epicPath: null,
+  progress: 0,
+  updatedLabel: 'just now',
+  acceptanceCriteria: <String>['Expose next page tokens.'],
+  comments: <IssueComment>[],
+  links: <IssueLink>[
+    IssueLink(type: 'relates to', targetKey: 'TRACK-1', direction: 'inward'),
+  ],
+  attachments: <IssueAttachment>[],
+  isArchived: false,
+);
+
 TrackerSnapshot _sampleSnapshot() => TrackerSnapshot(
   project: const ProjectConfig(
     key: 'TRACK',
@@ -2068,6 +2175,12 @@ TrackerSnapshot _sampleSnapshot() => TrackerSnapshot(
     ],
   ),
   issues: const <TrackStateIssue>[_sampleIssue, _sampleReadIssue],
+);
+
+TrackerSnapshot _sampleSnapshotWithInwardLink() => TrackerSnapshot(
+  project: _sampleSnapshot().project,
+  repositoryIndex: _sampleSnapshot().repositoryIndex,
+  issues: const <TrackStateIssue>[_sampleIssue, _sampleReadIssueWithInwardLink],
 );
 
 Future<String?> _ghToken() async => 'gh-token';
