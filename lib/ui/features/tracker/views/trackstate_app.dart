@@ -2793,67 +2793,73 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         const SizedBox(height: 12),
         Text(l10n.attachmentStorageDescription),
         const SizedBox(height: 16),
-        DropdownButtonFormField<AttachmentStorageMode>(
-          key: const ValueKey('attachment-storage-mode-field'),
-          initialValue: attachmentStorage.mode,
-          decoration: InputDecoration(labelText: l10n.attachmentStorageMode),
-          items: [
-            DropdownMenuItem(
-              value: AttachmentStorageMode.repositoryPath,
-              child: Text(l10n.repositoryPath),
-            ),
-            DropdownMenuItem(
-              value: AttachmentStorageMode.githubReleases,
-              child: Text(l10n.githubReleases),
-            ),
-          ],
-          onChanged: !canEdit
-              ? null
-              : (value) {
-                  if (value == null) {
-                    return;
-                  }
-                  _replaceDraft(
-                    settings.copyWith(
-                      attachmentStorage: settings.attachmentStorage.copyWith(
-                        mode: value,
-                        githubReleases:
-                            value == AttachmentStorageMode.githubReleases
-                            ? (settings.attachmentStorage.githubReleases ??
-                                  const GitHubReleasesAttachmentStorageSettings(
-                                    tagPrefix:
-                                        GitHubReleasesAttachmentStorageSettings
-                                            .defaultTagPrefix,
-                                  ))
-                            : null,
+        FocusTraversalOrder(
+          order: const NumericFocusOrder(1),
+          child: DropdownButtonFormField<AttachmentStorageMode>(
+            key: const ValueKey('attachment-storage-mode-field'),
+            initialValue: attachmentStorage.mode,
+            decoration: InputDecoration(labelText: l10n.attachmentStorageMode),
+            items: [
+              DropdownMenuItem(
+                value: AttachmentStorageMode.repositoryPath,
+                child: Text(l10n.repositoryPath),
+              ),
+              DropdownMenuItem(
+                value: AttachmentStorageMode.githubReleases,
+                child: Text(l10n.githubReleases),
+              ),
+            ],
+            onChanged: !canEdit
+                ? null
+                : (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    _replaceDraft(
+                      settings.copyWith(
+                        attachmentStorage: settings.attachmentStorage.copyWith(
+                          mode: value,
+                          githubReleases:
+                              value == AttachmentStorageMode.githubReleases
+                              ? (settings.attachmentStorage.githubReleases ??
+                                    const GitHubReleasesAttachmentStorageSettings(
+                                      tagPrefix:
+                                          GitHubReleasesAttachmentStorageSettings
+                                              .defaultTagPrefix,
+                                    ))
+                              : null,
+                        ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+          ),
         ),
         const SizedBox(height: 16),
         if (attachmentStorage.mode == AttachmentStorageMode.repositoryPath)
           Text(l10n.attachmentRepositoryPathSummary)
         else ...[
-          TextFormField(
-            key: const ValueKey('attachment-release-tag-prefix-field'),
-            initialValue: tagPrefix,
-            enabled: canEdit,
-            decoration: InputDecoration(
-              labelText: l10n.attachmentReleaseTagPrefix,
-              helperText: l10n.attachmentReleaseTagPrefixHelper,
-            ),
-            onChanged: (value) {
-              _replaceDraft(
-                settings.copyWith(
-                  attachmentStorage: settings.attachmentStorage.copyWith(
-                    githubReleases: GitHubReleasesAttachmentStorageSettings(
-                      tagPrefix: value,
+          FocusTraversalOrder(
+            order: const NumericFocusOrder(2),
+            child: TextFormField(
+              key: const ValueKey('attachment-release-tag-prefix-field'),
+              initialValue: tagPrefix,
+              enabled: canEdit,
+              decoration: InputDecoration(
+                labelText: l10n.attachmentReleaseTagPrefix,
+                helperText: l10n.attachmentReleaseTagPrefixHelper,
+              ),
+              onChanged: (value) {
+                _replaceDraft(
+                  settings.copyWith(
+                    attachmentStorage: settings.attachmentStorage.copyWith(
+                      githubReleases: GitHubReleasesAttachmentStorageSettings(
+                        tagPrefix: value,
+                      ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
           const SizedBox(height: 12),
           Text(l10n.attachmentReleaseMappingSummary(tagPrefix.trim())),
@@ -3187,6 +3193,25 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     );
   }
 
+  Widget _orderedSettingsAction({
+    required Widget child,
+    required ProjectSettingsTab activeTab,
+    required ProjectSettingsCatalog settings,
+    required bool emphasized,
+  }) {
+    if (activeTab != ProjectSettingsTab.attachments) {
+      return child;
+    }
+    final resetOrder =
+        settings.attachmentStorage.mode == AttachmentStorageMode.githubReleases
+        ? 3.0
+        : 2.0;
+    return FocusTraversalOrder(
+      order: NumericFocusOrder(emphasized ? resetOrder + 1 : resetOrder),
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final project = widget.viewModel.project!;
@@ -3194,26 +3219,30 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     _syncRequestedTab();
     final l10n = AppLocalizations.of(context)!;
     final settings = _draftSettings!;
+    final activeTab = ProjectSettingsTab.values[_tabController.index];
     final canEdit =
         widget.viewModel.supportsProjectSettingsAdmin &&
         !widget.viewModel.hasBlockedWriteAccess &&
         !widget.viewModel.isSaving;
-    final tabBar = TabBar(
-      controller: _tabController,
-      isScrollable: true,
-      tabs: [
-        Tab(text: l10n.statuses),
-        Tab(text: l10n.workflows),
-        Tab(text: l10n.issueTypes),
-        Tab(text: l10n.fields),
-        Tab(text: l10n.priorities),
-        Tab(text: l10n.components),
-        Tab(text: l10n.versions),
-        Tab(text: l10n.attachments),
-        Tab(text: l10n.locales),
-      ],
+    final tabBar = FocusTraversalOrder(
+      order: const NumericFocusOrder(0),
+      child: TabBar(
+        controller: _tabController,
+        isScrollable: true,
+        tabs: [
+          Tab(text: l10n.statuses),
+          Tab(text: l10n.workflows),
+          Tab(text: l10n.issueTypes),
+          Tab(text: l10n.fields),
+          Tab(text: l10n.priorities),
+          Tab(text: l10n.components),
+          Tab(text: l10n.versions),
+          Tab(text: l10n.attachments),
+          Tab(text: l10n.locales),
+        ],
+      ),
     );
-    final content = switch (ProjectSettingsTab.values[_tabController.index]) {
+    final content = switch (activeTab) {
       ProjectSettingsTab.statuses => _buildStatusTab(l10n, settings, canEdit),
       ProjectSettingsTab.workflows => _buildWorkflowTab(
         l10n,
@@ -3293,47 +3322,60 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     return _SurfaceCard(
       semanticLabel: l10n.projectSettingsAdmin,
       explicitChildNodes: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _SectionTitle(l10n.projectSettingsAdmin),
+                      const SizedBox(height: 4),
+                      Text(l10n.projectSettingsDescription),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    _SectionTitle(l10n.projectSettingsAdmin),
-                    const SizedBox(height: 4),
-                    Text(l10n.projectSettingsDescription),
+                    _orderedSettingsAction(
+                      activeTab: activeTab,
+                      settings: settings,
+                      emphasized: false,
+                      child: _IssueDetailActionButton(
+                        label: l10n.resetSettings,
+                        onPressed: widget.viewModel.isSaving
+                            ? null
+                            : () => _resetDraft(project),
+                      ),
+                    ),
+                    _orderedSettingsAction(
+                      activeTab: activeTab,
+                      settings: settings,
+                      emphasized: true,
+                      child: _IssueDetailActionButton(
+                        label: l10n.saveSettings,
+                        emphasized: true,
+                        onPressed: canEdit ? _saveSettings : null,
+                      ),
+                    ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _IssueDetailActionButton(
-                    label: l10n.resetSettings,
-                    onPressed: widget.viewModel.isSaving
-                        ? null
-                        : () => _resetDraft(project),
-                  ),
-                  _IssueDetailActionButton(
-                    label: l10n.saveSettings,
-                    emphasized: true,
-                    onPressed: canEdit ? _saveSettings : null,
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          tabBar,
-          const SizedBox(height: 16),
-          content,
-        ],
+              ],
+            ),
+            const SizedBox(height: 16),
+            tabBar,
+            const SizedBox(height: 16),
+            content,
+          ],
+        ),
       ),
     );
   }
