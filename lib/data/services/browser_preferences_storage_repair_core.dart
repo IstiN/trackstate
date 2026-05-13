@@ -12,7 +12,8 @@ abstract interface class BrowserPreferencesStorage {
 
 const String workspaceProfilesStorageKey = 'trackstate.workspaceProfiles.state';
 const String repositoryTokenStorageKeyPrefix = 'trackstate.githubToken.';
-const String workspaceTokenStorageKeyPrefix = 'trackstate.githubToken.workspace.';
+const String workspaceTokenStorageKeyPrefix =
+    'trackstate.githubToken.workspace.';
 
 void repairBrowserPreferencesStorageEntries(BrowserPreferencesStorage storage) {
   _repairWorkspaceProfilesState(storage);
@@ -36,11 +37,16 @@ void _repairWorkspaceProfilesState(BrowserPreferencesStorage storage) {
 
 void _repairStringPreferences(BrowserPreferencesStorage storage) {
   final plainKeys = <String>{
-    for (final key in storage.keys)
-      if (key.startsWith(repositoryTokenStorageKeyPrefix)) key,
-    for (final key in storage.keys)
-      if (key.startsWith('flutter.$repositoryTokenStorageKeyPrefix'))
-        key.substring('flutter.'.length),
+    for (final keyPrefix in const [
+      repositoryTokenStorageKeyPrefix,
+      workspaceTokenStorageKeyPrefix,
+    ]) ...[
+      for (final key in storage.keys)
+        if (key.startsWith(keyPrefix)) key,
+      for (final key in storage.keys)
+        if (key.startsWith('flutter.$keyPrefix'))
+          key.substring('flutter.'.length),
+    ],
   };
 
   for (final plainKey in plainKeys) {

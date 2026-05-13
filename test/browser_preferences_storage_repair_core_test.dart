@@ -40,6 +40,24 @@ void main() {
       );
     },
   );
+
+  test(
+    'repairs raw preloaded workspace-scoped token values into shared_preferences web format',
+    () {
+      const workspaceId = 'hosted:istin/trackstate-setup@main';
+      final encodedWorkspaceId = Uri.encodeComponent(workspaceId);
+      final plainKey = 'trackstate.githubToken.workspace.$encodedWorkspaceId';
+      final prefixedKey = 'flutter.$plainKey';
+      final storage = _FakeBrowserPreferencesStorage({
+        plainKey: 'workspace-token',
+        prefixedKey: 'workspace-token',
+      });
+
+      repairBrowserPreferencesStorageEntries(storage);
+
+      expect(storage.values[prefixedKey], jsonEncode('workspace-token'));
+    },
+  );
 }
 
 class _FakeBrowserPreferencesStorage implements BrowserPreferencesStorage {
