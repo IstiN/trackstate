@@ -20,10 +20,7 @@ class PythonDartProbeRuntime(DartProbeRuntime):
 
     def execute(self, *, probe_root: Path, entrypoint: Path) -> DartProbeExecution:
         dart_bin = self._resolve_dart_bin()
-        self._run(
-            [str(dart_bin), "--disable-analytics", "pub", "get", "--offline"],
-            cwd=probe_root,
-        )
+        self._ensure_probe_dependencies(dart_bin=dart_bin, probe_root=probe_root)
 
         analyze = self._run(
             [str(dart_bin), "--disable-analytics", "analyze", str(entrypoint)],
@@ -242,3 +239,43 @@ class PythonDartProbeRuntime(DartProbeRuntime):
     def _combine_output(process: subprocess.CompletedProcess[str]) -> str:
         parts = [process.stdout.strip(), process.stderr.strip()]
         return "\n".join(part for part in parts if part)
+
+    def _ensure_probe_dependencies(self, *, dart_bin: Path, probe_root: Path) -> None:
+        offline_command = [
+            str(dart_bin),
+            "--disable-analytics",
+            "pub",
+            "get",
+            "--offline",
+        ]
+        offline = self._run(offline_command, cwd=probe_root, check=False)
+        if offline.returncode == 0:
+            return
+
+        offline_output = self._combine_output(offline)
+        normalized_offline_output = offline_output.lower()
+        cache_miss_markers = (
+            "try again without --offline",
+            "could not find package",
+            "not found in cache",
+            "doesn't exist (could not find package",
+        )
+        if not any(
+            marker in normalized_offline_output for marker in cache_miss_markers
+        ):
+            raise AssertionError(
+                f"Command failed with exit code {offline.returncode}: "
+                f"{' '.join(offline_command)}\n{offline_output}"
+            )
+
+        online_command = [str(dart_bin), "--disable-analytics", "pub", "get"]
+        online = self._run(online_command, cwd=probe_root, check=False)
+        if online.returncode != 0:
+            raise AssertionError(
+                "Offline dependency resolution failed because the probe cache was "
+                "incomplete, and the online retry also failed.\n"
+                f"Offline command: {' '.join(offline_command)}\n"
+                f"{offline_output}\n\n"
+                f"Online command: {' '.join(online_command)}\n"
+                f"{self._combine_output(online)}"
+            )
