@@ -261,22 +261,6 @@ class LocalGitTrackStateProvider
   Future<RepositoryAttachment> readReleaseAttachment(
     RepositoryReleaseAttachmentReadRequest request,
   ) async {
-    final remoteIdentity = await _resolveGitHubRepositoryIdentity();
-    if (remoteIdentity == null) {
-      throw TrackStateProviderException(await _gitRemoteFailureReason());
-    }
-    final provider = _hostedProviderFactory(
-      repository: remoteIdentity,
-      branch: dataRef,
-      dataRef: dataRef,
-    );
-    if (provider case final GitHubTrackStateProvider githubProvider) {
-      return githubProvider.readReleaseAttachmentForRepository(
-        repository: remoteIdentity,
-        request: request,
-        token: _connection?.token,
-      );
-    }
     final store = await _resolveReleaseAttachmentStore(branch: dataRef);
     return store.readReleaseAttachment(request);
   }

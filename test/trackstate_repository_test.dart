@@ -2869,6 +2869,64 @@ Nested release-backed attachment issue.
       );
     },
   );
+
+  test(
+    'provider-backed repository surfaces local release auth guidance before hosted download lookup',
+    () async {
+      var requestCount = 0;
+      final provider = _FakeRemoteIdentityProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          canCheckCollaborators: false,
+        ),
+        repository: 'cli/cli',
+        releaseAttachmentFailureReason:
+            'GitHub Releases attachment storage requires GitHub authentication. '
+            'Set TRACKSTATE_TOKEN or authenticate with gh before using '
+            'release-backed attachments from a local repository.',
+        files: _releaseAttachmentFixtureFiles(),
+      );
+      final repository = ProviderBackedTrackStateRepository(
+        provider: provider,
+        githubClient: MockClient((request) async {
+          requestCount += 1;
+          return http.Response('', 404);
+        }),
+      );
+
+      await expectLater(
+        () => repository.downloadAttachment(
+          const IssueAttachment(
+            id: 'DEMO/DEMO-1/attachments/manual.pdf',
+            name: 'manual.pdf',
+            mediaType: 'application/pdf',
+            sizeBytes: 19,
+            author: 'tester',
+            createdAt: '2026-05-13T00:00:00Z',
+            storagePath: 'DEMO/DEMO-1/attachments/manual.pdf',
+            revisionOrOid: '1',
+            storageBackend: AttachmentStorageMode.githubReleases,
+            githubReleaseTag: 'v2.74.0',
+            githubReleaseAssetName: 'manual.pdf',
+          ),
+        ),
+        throwsA(
+          isA<TrackStateRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            contains(
+              'GitHub Releases attachment storage requires GitHub authentication.',
+            ),
+          ),
+        ),
+      );
+      expect(requestCount, 0);
+    },
+  );
 }
 
 SetupTrackStateRepository _mockSetupRepository({
@@ -3072,11 +3130,13 @@ class _FakeRemoteIdentityProvider
   _FakeRemoteIdentityProvider({
     required this.permission,
     required this.repository,
+    this.releaseAttachmentFailureReason,
     required Map<String, String> files,
   }) : files = {...files};
 
   final RepositoryPermission permission;
   final String repository;
+  final String? releaseAttachmentFailureReason;
   final Map<String, String> files;
   RepositoryConnection? _connection;
 
@@ -3180,7 +3240,8 @@ class _FakeRemoteIdentityProvider
   Future<String?> resolveGitHubRepositoryIdentity() async => repository;
 
   @override
-  Future<String?> releaseAttachmentIdentityFailureReason() async => null;
+  Future<String?> releaseAttachmentIdentityFailureReason() async =>
+      releaseAttachmentFailureReason;
 }
 
 class _CountingHttpOverrides {

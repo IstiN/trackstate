@@ -56,24 +56,63 @@ void main() {
       }
 
       await runGit(const <String>['init']);
+      await runGit(const <String>['config', 'user.name', 'Runtime Tester']);
+      await runGit(const <String>[
+        'config',
+        'user.email',
+        'runtime@test.invalid',
+      ]);
+      await File('${repositoryDir.path}/README.md').writeAsString('runtime');
+      await runGit(const <String>['add', 'README.md']);
+      await runGit(const <String>['commit', '-m', 'Initial commit']);
       await runGit(const <String>[
         'remote',
         'add',
         'origin',
         'https://github.com/trackstate-test-owner/trackstate-test-repo.git',
       ]);
+      final branchResult = await Process.run(
+        'git',
+        const <String>['branch', '--show-current'],
+        workingDirectory: repositoryDir.path,
+      );
+      if (branchResult.exitCode != 0) {
+        throw StateError(
+          'git branch --show-current failed: ${branchResult.stderr}',
+        );
+      }
+      final currentBranch = (branchResult.stdout as String).trim();
+      var sawAssetDownload = false;
 
       final repository = createTrackStateRepository(
         runtime: TrackStateRuntime.localGit,
         client: MockClient((request) async {
-          expect(
-            request.url.path,
-            '/repos/trackstate-test-owner/trackstate-test-repo/releases/assets/asset-1',
-          );
-          expect(request.headers['accept'], 'application/octet-stream');
-          return http.Response.bytes(const <int>[1, 2, 3, 4], 200);
+          switch (request.url.path) {
+            case '/user':
+              return http.Response(
+                '{"login":"runtime-user","name":"Runtime User"}',
+                200,
+              );
+            case '/repos/trackstate-test-owner/trackstate-test-repo':
+              return http.Response(
+                '{"permissions":{"pull":true,"push":true,"admin":false}}',
+                200,
+              );
+            case '/repos/trackstate-test-owner/trackstate-test-repo/releases/assets/asset-1':
+              sawAssetDownload = true;
+              expect(request.headers['accept'], 'application/octet-stream');
+              return http.Response.bytes(const <int>[1, 2, 3, 4], 200);
+          }
+          fail('Unexpected request: ${request.url.path}');
         }),
         localRepositoryPath: repositoryDir.path,
+      );
+      await repository.connect(
+        RepositoryConnection(
+          repository: repositoryDir.path,
+          branch: currentBranch,
+          token: 'token',
+        ),
       );
 
       final bytes = await repository.downloadAttachment(
@@ -93,6 +132,7 @@ void main() {
       );
 
       expect(bytes, Uint8List.fromList(const <int>[1, 2, 3, 4]));
+      expect(sawAssetDownload, isTrue);
     },
   );
 }
