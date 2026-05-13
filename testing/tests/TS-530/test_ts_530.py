@@ -16,6 +16,11 @@ from testing.components.pages.live_issue_detail_collaboration_page import (  # n
     AttachmentUploadControlsObservation,
     LiveIssueDetailCollaborationPage,
 )
+from testing.components.pages.live_project_settings_page import (  # noqa: E402
+    LiveProjectSettingsPage,
+    ProjectSettingsNavigationState,
+    ProjectSettingsTabObservation,
+)
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveHostedIssueFixture,
     LiveHostedRepositoryFile,
@@ -27,18 +32,19 @@ from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
     create_live_tracker_app_with_stored_token,
 )
 
-TICKET_KEY = "TS-526"
+TICKET_KEY = "TS-530"
 ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
 PROJECT_JSON_PATH = "DEMO/project.json"
 EXPECTED_STORAGE_MODE = "repository-path"
+ATTACHMENTS_TAB_LABEL = "Attachments"
+STATUSES_TAB_LABEL = "Statuses"
 EXPECTED_RESTRICTION_TITLE = "Attachments stay download-only in the browser"
 EXPECTED_RESTRICTION_MESSAGE = (
     "Attachment upload is unavailable in this browser session. Existing "
     "attachments remain available for download."
 )
 EXPECTED_OPEN_SETTINGS_LABEL = "Open settings"
-UNEXPECTED_LIMITED_TITLE = "Some attachment uploads still require local Git"
-UNEXPECTED_RELEASE_TITLE = "GitHub Releases uploads are unavailable in the browser"
+EXPECTED_ATTACHMENT_SETTINGS_LABEL = "Attachment storage mode"
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -46,8 +52,8 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
-SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts526_success.png"
-FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts526_failure.png"
+SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts530_success.png"
+FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts530_failure.png"
 
 
 @dataclass(frozen=True)
@@ -64,7 +70,7 @@ def main() -> None:
     token = service.token
     if not token:
         raise RuntimeError(
-            "TS-526 requires GH_TOKEN or GITHUB_TOKEN to open the hosted live app.",
+            "TS-530 requires GH_TOKEN or GITHUB_TOKEN to open the hosted live app.",
         )
 
     user = service.fetch_authenticated_user()
@@ -103,7 +109,8 @@ def main() -> None:
             config,
             token=token,
         ) as tracker_page:
-            page = LiveIssueDetailCollaborationPage(tracker_page)
+            issue_page = LiveIssueDetailCollaborationPage(tracker_page)
+            settings_page = LiveProjectSettingsPage(tracker_page)
             try:
                 runtime = tracker_page.open()
                 result["runtime_state"] = runtime.kind
@@ -111,129 +118,223 @@ def main() -> None:
                 if runtime.kind != "ready":
                     raise AssertionError(
                         "Step 1 failed: the deployed app did not reach the hosted tracker "
-                        "shell before the repository-path attachment restriction scenario began.\n"
+                        "shell before the repository-path Attachments restriction scenario began.\n"
                         f"Observed body text:\n{runtime.body_text}",
                     )
 
-                page.ensure_connected(
+                issue_page.ensure_connected(
                     token=token,
                     repository=service.repository,
                     user_login=user.login,
                 )
-                page.dismiss_connection_banner()
-                page.open_issue(
-                    issue_key=issue_fixture.key,
-                    issue_summary=issue_fixture.summary,
+                issue_page.dismiss_connection_banner()
+
+                settings_text = settings_page.open_settings()
+                selected_settings_tab_before = settings_page.selected_tab_label(
+                    timeout_ms=30_000,
                 )
-                if page.issue_detail_count(issue_fixture.key) == 0:
+                result["settings_body_text_before"] = settings_text
+                result["selected_settings_tab_before"] = selected_settings_tab_before
+                if selected_settings_tab_before != STATUSES_TAB_LABEL:
                     raise AssertionError(
-                        "Step 1 failed: selecting the live issue did not open the hosted "
-                        "issue detail view.\n"
-                        f"Observed body text:\n{page.current_body_text()}",
+                        "Precondition failed: the live Project Settings screen did not "
+                        "default to the Statuses tab before verifying the inline `Open settings` "
+                        "recovery action.\n"
+                        f"Observed selected tab: {selected_settings_tab_before!r}\n"
+                        f"Observed body text:\n{settings_text}",
                     )
 
-                page.open_collaboration_tab("Attachments")
-                attachments_body = page.wait_for_text(attachment_name, timeout_ms=60_000)
-                result["attachments_body_text"] = attachments_body
-                download_count = page.attachment_download_button_count(attachment_name)
-                attachment_row_text = page.attachment_row_text(
+                issue_page.search_and_select_issue(
+                    issue_key=issue_fixture.key,
+                    issue_summary=issue_fixture.summary,
+                    query=issue_fixture.key,
+                )
+                issue_page.open_collaboration_tab(ATTACHMENTS_TAB_LABEL)
+                issue_page.wait_for_selected_tab(ATTACHMENTS_TAB_LABEL, timeout_ms=30_000)
+                attachments_body = issue_page.wait_for_collaboration_section_to_settle(
+                    ATTACHMENTS_TAB_LABEL,
+                    timeout_ms=60_000,
+                )
+                issue_page.wait_for_text(attachment_name, timeout_ms=60_000)
+                attachment_row_text = issue_page.attachment_row_text(
                     attachment_name,
                     timeout_ms=30_000,
                 )
-                attachment_row_summary = _normalize_whitespace(attachment_row_text)
-                result["download_count"] = download_count
-                result["attachment_row_text"] = attachment_row_text
-                if download_count != 1:
-                    raise AssertionError(
-                        "Step 1 failed: the Attachments tab did not keep exactly one visible "
-                        f"download row for `{attachment_name}`.\n"
-                        f"Observed download control count: {download_count}\n"
-                        f"Observed body text:\n{attachments_body}",
-                    )
-                _record_step(
-                    result,
-                    step=1,
-                    status="passed",
-                    action="Navigate to an issue's 'Attachments' tab.",
-                    observed=(
-                        f"Opened live issue {issue_fixture.key}; "
-                        f"attachment_name={attachment_name}; "
-                        f"download_count={download_count}; "
-                        f"attachment_row={attachment_row_summary}"
-                    ),
+                download_count = issue_page.attachment_download_button_count(attachment_name)
+                controls = issue_page.observe_attachment_upload_controls()
+                open_settings_count = issue_page.button_label_fragment_count(
+                    EXPECTED_OPEN_SETTINGS_LABEL,
                 )
-
-                controls = page.observe_attachment_upload_controls()
+                notice_state = _wait_for_repository_path_notice(issue_page)
+                restriction_accessible_text = _wait_for_accessible_fragments(
+                    issue_page,
+                    (EXPECTED_RESTRICTION_TITLE, EXPECTED_RESTRICTION_MESSAGE),
+                    timeout_ms=5_000,
+                )
+                title_rect = issue_page.find_semantics_rect_containing_text(
+                    EXPECTED_RESTRICTION_TITLE,
+                )
+                open_settings_rect = issue_page.find_semantics_rect_containing_text(
+                    EXPECTED_OPEN_SETTINGS_LABEL,
+                )
+                attachment_rect = issue_page.find_semantics_rect_containing_text(
+                    attachment_name,
+                )
+                result["attachments_body_text"] = attachments_body
+                result["attachment_row_text"] = attachment_row_text
+                result["download_count"] = download_count
                 result["choose_button_count"] = controls.choose_button_count
                 result["choose_button_enabled"] = controls.choose_button_enabled
                 result["upload_button_count"] = controls.upload_button_count
                 result["upload_button_enabled"] = controls.upload_button_enabled
-                open_settings_count = page.button_label_fragment_count(
-                    EXPECTED_OPEN_SETTINGS_LABEL,
-                )
                 result["open_settings_count"] = open_settings_count
-                result["unexpected_limited_title_count"] = (
-                    page.visible_accessible_label_count_containing(
-                        UNEXPECTED_LIMITED_TITLE,
-                    )
-                )
-                result["unexpected_release_title_count"] = (
-                    page.visible_accessible_label_count_containing(
-                        UNEXPECTED_RELEASE_TITLE,
-                    )
-                )
-                notice_state = _wait_for_repository_path_notice(page)
                 result["restriction_notice_state"] = notice_state
-                restriction_accessible_text = _wait_for_accessible_fragments(
-                    page,
-                    (EXPECTED_RESTRICTION_TITLE, EXPECTED_RESTRICTION_MESSAGE),
-                    timeout_ms=5_000,
-                )
                 result["restriction_accessible_text"] = restriction_accessible_text
-
-                _assert_repository_path_browser_restriction(
-                    page=page,
+                result["notice_title_rect"] = _rect_dict(title_rect)
+                result["open_settings_rect"] = _rect_dict(open_settings_rect)
+                result["attachment_row_rect"] = _rect_dict(attachment_rect)
+                _assert_repository_path_notice_state(
+                    issue_page=issue_page,
                     attachments_body=attachments_body,
                     controls=controls,
                     open_settings_count=open_settings_count,
+                    attachment_name=attachment_name,
+                    download_count=download_count,
+                    notice_top=title_rect.top,
+                    attachment_top=attachment_rect.top,
                 )
                 _record_step(
                     result,
-                    step=2,
+                    step=1,
                     status="passed",
-                    action=(
-                        "Check for the presence of file selection and upload buttons."
-                    ),
+                    action="Open an issue detail screen and verify the hosted Attachments notice.",
                     observed=(
-                        f"restriction_notice={restriction_accessible_text!r}; "
+                        f"Opened live issue {issue_fixture.key}; "
+                        f"attachment_name={attachment_name}; "
+                        f"download_count={download_count}; "
+                        f"restriction_notice={_normalize_whitespace(restriction_accessible_text)!r}; "
                         f"open_settings_count={open_settings_count}; "
+                        f"attachment_row={_normalize_whitespace(attachment_row_text)!r}; "
+                        f"notice_top={title_rect.top:.1f}; attachment_top={attachment_rect.top:.1f}; "
                         f"choose_button_count={controls.choose_button_count}; "
-                        f"choose_button_enabled={controls.choose_button_enabled}; "
-                        f"upload_button_count={controls.upload_button_count}; "
-                        f"upload_button_enabled={controls.upload_button_enabled}"
+                        f"upload_button_count={controls.upload_button_count}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
                         "Verified the visible Attachments tab showed the repository-path "
-                        "download-only warning title, message, and recovery action."
+                        "warning title and message in the top area, with the existing "
+                        "attachment row remaining below the notice."
                     ),
-                    observed=restriction_accessible_text,
+                    observed=_normalize_whitespace(attachments_body),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Verified the user still saw the existing attachment download row "
-                        "while no browser upload controls were rendered."
+                        "Verified as a user that no browser upload controls were visible in "
+                        "the repository-path hosted state."
                     ),
-                    observed=attachment_row_text,
+                    observed=(
+                        f"choose_button_count={controls.choose_button_count}; "
+                        f"choose_button_enabled={controls.choose_button_enabled}; "
+                        f"upload_button_count={controls.upload_button_count}; "
+                        f"upload_button_enabled={controls.upload_button_enabled}"
+                    ),
                 )
 
-                page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
+                issue_page.click_button_via_semantics_center(
+                    EXPECTED_OPEN_SETTINGS_LABEL,
+                    timeout_ms=30_000,
+                )
+                matched_navigation, navigation_state = poll_until(
+                    probe=settings_page.navigation_state,
+                    is_satisfied=lambda state: (
+                        state.settings_heading_visible
+                        and state.attachments_tab_selected
+                        and state.attachment_storage_visible
+                    ),
+                    timeout_seconds=12,
+                    interval_seconds=1,
+                )
+                result["settings_after_click"] = _navigation_state_dict(navigation_state)
+                if not matched_navigation:
+                    raise AssertionError(
+                        "Step 2 failed: clicking `Open settings` did not navigate to the "
+                        "Project Settings Attachments configuration.\n"
+                        f"Observed settings heading visible: "
+                        f"{navigation_state.settings_heading_visible}\n"
+                        f"Observed selected tab label: "
+                        f"{navigation_state.selected_tab_label!r}\n"
+                        f"Observed attachments tab selected: "
+                        f"{navigation_state.attachments_tab_selected}\n"
+                        f"Observed attachment storage visible: "
+                        f"{navigation_state.attachment_storage_visible}\n"
+                        f"Observed Add status visible: "
+                        f"{navigation_state.add_status_visible}\n"
+                        f"Observed body text:\n{navigation_state.body_text}",
+                    )
+                settings_observation = settings_page.observe_attachment_settings_surface(
+                    timeout_ms=15_000,
+                )
+                result["settings_after_click"] = _settings_observation_dict(
+                    settings_observation,
+                )
+                selected_tab_identity = (
+                    settings_observation.selected_tab_label
+                    or settings_observation.selected_tab_semantics
+                )
+                if selected_tab_identity != ATTACHMENTS_TAB_LABEL:
+                    raise AssertionError(
+                        "Step 2 failed: clicking `Open settings` did not keep the "
+                        "Attachments settings tab selected.\n"
+                        f"Observed selected tab label: {settings_observation.selected_tab_label!r}\n"
+                        f"Observed selected tab semantics: "
+                        f"{settings_observation.selected_tab_semantics!r}\n"
+                        f"Observed body text:\n{settings_observation.body_text}",
+                    )
+                if not settings_observation.attachment_storage_visible:
+                    raise AssertionError(
+                        "Step 2 failed: clicking `Open settings` navigated away from the "
+                        "issue, but the Project Settings Attachments configuration did not "
+                        f"show the visible `{EXPECTED_ATTACHMENT_SETTINGS_LABEL}` section.\n"
+                        f"Observed body text:\n{settings_observation.body_text}",
+                    )
+                if settings_observation.add_status_visible:
+                    raise AssertionError(
+                        "Step 2 failed: clicking `Open settings` left the Statuses tab "
+                        "content visible instead of switching to the Attachments settings "
+                        "configuration.\n"
+                        f"Observed body text:\n{settings_observation.body_text}",
+                    )
+                _record_step(
+                    result,
+                    step=2,
+                    status="passed",
+                    action="Click the visible 'Open settings' action and confirm it is usable.",
+                    observed=(
+                        "Navigated to Project Settings; "
+                        f"selected_tab={settings_observation.selected_tab_label!r}; "
+                        f"selected_tab_semantics={settings_observation.selected_tab_semantics!r}; "
+                        f"attachment_storage_visible="
+                        f"{settings_observation.attachment_storage_visible}; "
+                        f"add_status_visible={settings_observation.add_status_visible}"
+                    ),
+                )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Verified as a user that clicking Open settings landed on the "
+                        "Project Settings screen with the Attachments tab active and the "
+                        "Attachment storage mode control visible."
+                    ),
+                    observed=_normalize_whitespace(settings_observation.body_text),
+                )
+
+                settings_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
             except Exception:
-                page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                tracker_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
                 result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
                 raise
     except Exception as error:
@@ -286,12 +387,12 @@ def main() -> None:
 def _assert_preconditions(issue_fixture: LiveHostedIssueFixture) -> None:
     if issue_fixture.key != "DEMO-2":
         raise AssertionError(
-            "Precondition failed: TS-526 expected the seeded DEMO-2 issue fixture.\n"
+            "Precondition failed: TS-530 expected the seeded DEMO-2 issue fixture.\n"
             f"Observed issue key: {issue_fixture.key}",
         )
     if not issue_fixture.attachment_paths:
         raise AssertionError(
-            "Precondition failed: TS-526 requires a live issue with visible attachments.\n"
+            "Precondition failed: TS-530 requires a live issue with visible attachments.\n"
             f"Issue path: {issue_fixture.path}",
         )
 
@@ -396,10 +497,7 @@ def _wait_for_accessible_fragments(
 ) -> str:
     labels: list[str] = []
     for fragment in fragments:
-        label = page.wait_for_visible_accessible_label_fragment(
-            fragment,
-            timeout_ms=timeout_ms,
-        )
+        label = page.wait_for_accessible_label_fragment(fragment, timeout_ms=timeout_ms)
         if label:
             labels.append(label)
     combined = " ".join(labels)
@@ -407,7 +505,7 @@ def _wait_for_accessible_fragments(
     missing = [fragment for fragment in fragments if fragment not in normalized]
     if missing:
         raise AssertionError(
-            "Step 2 failed: the Attachments tab did not expose the expected repository-path "
+            "Step 1 failed: the Attachments tab did not expose the expected repository-path "
             "restriction notice in the visible accessibility tree.\n"
             f"Missing fragments: {missing}\n"
             f"Observed labels:\n{combined}",
@@ -423,15 +521,15 @@ def _wait_for_repository_path_notice(
         is_satisfied=lambda state: (
             int(state["title_count"]) > 0
             and int(state["message_count"]) > 0
-            and int(state["visible_accessible_title_count"]) > 0
-            and int(state["visible_accessible_message_count"]) > 0
+            and int(state["accessible_title_count"]) > 0
+            and int(state["accessible_message_count"]) > 0
         ),
         timeout_seconds=10,
         interval_seconds=1,
     )
     if not matched:
         raise AssertionError(
-            "Step 2 failed: the Attachments tab did not render the expected "
+            "Step 1 failed: the Attachments tab did not render the expected "
             "repository-path download-only notice after switching the live project "
             "to `repository-path` storage.\n"
             f"Observed notice state: {json.dumps(notice_state, sort_keys=True)}\n"
@@ -446,10 +544,10 @@ def _observe_repository_path_notice(
     return {
         "title_count": page.text_fragment_count(EXPECTED_RESTRICTION_TITLE),
         "message_count": page.text_fragment_count(EXPECTED_RESTRICTION_MESSAGE),
-        "visible_accessible_title_count": page.visible_accessible_label_count_containing(
+        "accessible_title_count": page.accessible_label_count_containing(
             EXPECTED_RESTRICTION_TITLE,
         ),
-        "visible_accessible_message_count": page.visible_accessible_label_count_containing(
+        "accessible_message_count": page.accessible_label_count_containing(
             EXPECTED_RESTRICTION_MESSAGE,
         ),
         "open_settings_count": page.button_label_fragment_count(
@@ -458,40 +556,41 @@ def _observe_repository_path_notice(
     }
 
 
-def _assert_repository_path_browser_restriction(
+def _assert_repository_path_notice_state(
     *,
-    page: LiveIssueDetailCollaborationPage,
+    issue_page: LiveIssueDetailCollaborationPage,
     attachments_body: str,
     controls: AttachmentUploadControlsObservation,
     open_settings_count: int,
+    attachment_name: str,
+    download_count: int,
+    notice_top: float,
+    attachment_top: float,
 ) -> None:
+    if download_count != 1:
+        raise AssertionError(
+            "Step 1 failed: the repository-path Attachments tab did not keep exactly one "
+            f"visible download row for `{attachment_name}`.\n"
+            f"Observed download control count: {download_count}\n"
+            f"Observed body text:\n{attachments_body}",
+        )
     for expected_fragment in (
         EXPECTED_RESTRICTION_TITLE,
         EXPECTED_RESTRICTION_MESSAGE,
     ):
-        if page.text_fragment_count(expected_fragment) == 0:
+        if issue_page.text_fragment_count(expected_fragment) == 0:
             raise AssertionError(
-                "Step 2 failed: the Attachments tab did not render the expected "
+                "Step 1 failed: the Attachments tab did not render the expected "
                 f"repository-path restriction copy.\nMissing fragment: {expected_fragment}\n"
                 f"Observed body text:\n{attachments_body}",
             )
     if open_settings_count != 1:
         raise AssertionError(
-            "Step 2 failed: the repository-path restriction state did not expose exactly "
+            "Step 1 failed: the repository-path restriction notice did not expose exactly "
             "one visible `Open settings` recovery action.\n"
             f"Observed Open settings count: {open_settings_count}\n"
             f"Observed body text:\n{attachments_body}",
         )
-    normalized_attachments_body = _normalize_whitespace(attachments_body)
-    for unexpected_title in (UNEXPECTED_LIMITED_TITLE, UNEXPECTED_RELEASE_TITLE):
-        if unexpected_title in normalized_attachments_body:
-            raise AssertionError(
-                "Step 2 failed: the Attachments tab rendered a restriction notice for a "
-                "different attachment-storage mode instead of the repository-path "
-                "download-only warning.\n"
-                f"Unexpected title: {unexpected_title}\n"
-                f"Observed body text:\n{attachments_body}",
-            )
     if (
         controls.choose_button_count != 0
         or controls.upload_button_count != 0
@@ -499,7 +598,7 @@ def _assert_repository_path_browser_restriction(
         or controls.upload_button_enabled
     ):
         raise AssertionError(
-            "Step 2 failed: the hosted Attachments tab still exposed browser upload "
+            "Step 1 failed: the hosted Attachments tab still exposed browser upload "
             "controls even though the project is in `repository-path` storage mode and "
             "the UI should remain download-only.\n"
             f"Observed choose button count: {controls.choose_button_count}\n"
@@ -508,6 +607,48 @@ def _assert_repository_path_browser_restriction(
             f"Observed upload button enabled: {controls.upload_button_enabled}\n"
             f"Observed body text:\n{attachments_body}",
         )
+    if attachment_top <= notice_top:
+        raise AssertionError(
+            "Step 1 failed: the existing attachment row was not rendered below the "
+            "repository-path restriction notice.\n"
+            f"Observed notice top: {notice_top}\n"
+            f"Observed attachment top: {attachment_top}\n"
+            f"Observed body text:\n{attachments_body}",
+        )
+
+
+def _settings_observation_dict(
+    observation: ProjectSettingsTabObservation,
+) -> dict[str, object]:
+    return {
+        "body_text": observation.body_text,
+        "selected_tab_label": observation.selected_tab_label,
+        "selected_tab_semantics": observation.selected_tab_semantics,
+        "attachment_storage_visible": observation.attachment_storage_visible,
+        "add_status_visible": observation.add_status_visible,
+    }
+
+
+def _navigation_state_dict(
+    state: ProjectSettingsNavigationState,
+) -> dict[str, object]:
+    return {
+        "body_text": state.body_text,
+        "settings_heading_visible": state.settings_heading_visible,
+        "selected_tab_label": state.selected_tab_label,
+        "attachments_tab_selected": state.attachments_tab_selected,
+        "attachment_storage_visible": state.attachment_storage_visible,
+        "add_status_visible": state.add_status_visible,
+    }
+
+
+def _rect_dict(rect: object) -> dict[str, object]:
+    return {
+        "left": float(getattr(rect, "left")),
+        "top": float(getattr(rect, "top")),
+        "width": float(getattr(rect, "width")),
+        "height": float(getattr(rect, "height")),
+    }
 
 
 def _normalize_whitespace(value: str) -> str:
@@ -547,6 +688,7 @@ def _record_human_verification(
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    FAILURE_SCREENSHOT_PATH.unlink(missing_ok=True)
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -567,6 +709,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error = str(result.get("error", "AssertionError: unknown failure"))
+    SUCCESS_SCREENSHOT_PATH.unlink(missing_ok=True)
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -598,17 +741,27 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             f"* Switched {{{{{PROJECT_JSON_PATH}}}}} to "
             f"`attachmentStorage.mode = {EXPECTED_STORAGE_MODE}` for the live run and restored the original file afterward."
         ),
-        "* Opened the deployed hosted TrackState app, connected GitHub, and navigated to the live issue Attachments tab.",
         (
-            "* Checked the exact repository-path restriction title/message plus the "
-            "`Open settings` recovery action, and counted visible upload controls."
+            "* Confirmed the hosted *Project Settings* screen initially had the "
+            "*Statuses* sub-tab selected before returning to the issue detail."
+        ),
+        (
+            "* Opened the deployed hosted TrackState app, connected GitHub, navigated to "
+            "the live issue *Attachments* tab, and checked the exact repository-path "
+            "restriction title/message, the visible {{Open settings}} action, attachment "
+            "download visibility, and upload-control absence."
+        ),
+        (
+            "* Activated {{Open settings}} from the restriction notice and checked that "
+            "the hosted app landed on *Project Settings* with the *Attachments* tab active "
+            "and the {{Attachment storage mode}} section visible."
         ),
         "",
         "*Observed result*",
         (
-            "* Matched the expected result: the repository-path restriction notice was visible, "
-            "existing attachment downloads remained available, and no browser upload "
-            "controls were rendered."
+            "* Matched the expected result: the repository-path notice was visible at the top "
+            "of the hosted *Attachments* tab, the existing attachment row remained below it, "
+            "browser upload controls were absent, and {{Open settings}} was clickable."
             if passed
             else "* Did not match the expected result."
         ),
@@ -649,12 +802,27 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             f"- Switched `{PROJECT_JSON_PATH}` to "
             f"`attachmentStorage.mode = {EXPECTED_STORAGE_MODE}` for the live run and restored the original file afterward."
         ),
-        "- Opened the deployed hosted TrackState app, connected GitHub, and navigated to the live issue Attachments tab.",
-        "- Checked the exact repository-path restriction title/message plus the `Open settings` recovery action, and counted visible upload controls.",
+        (
+            "- Confirmed the hosted `Project Settings` screen initially had the "
+            "`Statuses` sub-tab selected before returning to the issue detail."
+        ),
+        (
+            "- Opened the deployed hosted TrackState app, connected GitHub, navigated to "
+            "the live issue `Attachments` tab, and checked the exact repository-path "
+            "restriction title/message, the visible `Open settings` action, attachment "
+            "download visibility, and upload-control absence."
+        ),
+        (
+            "- Activated `Open settings` from the restriction notice and checked that the "
+            "hosted app landed on `Project Settings > Attachments`, with the "
+            "`Attachment storage mode` section visible."
+        ),
         "",
         "### Observed result",
         (
-            "- Matched the expected result: the repository-path restriction notice was visible, existing attachment downloads remained available, and no browser upload controls were rendered."
+            "- Matched the expected result: the repository-path notice was visible at the "
+            "top of the hosted `Attachments` tab, the existing attachment row remained "
+            "below it, browser upload controls were absent, and `Open settings` was clickable."
             if passed
             else "- Did not match the expected result."
         ),
@@ -690,17 +858,18 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         f"# {TICKET_KEY} {status}",
         "",
         (
-            "Ran the live hosted repository-path Attachments scenario and checked the "
-            "visible restriction notice, existing download row, and browser upload "
-            "control visibility."
+            "Ran the live hosted repository-path Attachments restriction scenario and "
+            "checked the visible warning copy, the inline Open settings action, the "
+            "download row placement, the absence of browser upload controls, and the "
+            "destination Project Settings Attachments configuration."
         ),
         "",
         "## Observed",
         f"- Screenshot: `{screenshot_path}`",
         f"- Environment: `{result['app_url']}` on Chromium/Playwright ({platform.system()})",
-            f"- Attachment storage mode: `{result.get('attachment_storage_mode')}`",
-            f"- Cleanup: `{result.get('cleanup')}`",
-        ]
+        f"- Attachment storage mode: `{result.get('attachment_storage_mode')}`",
+        f"- Cleanup: `{result.get('cleanup')}`",
+    ]
     if not passed:
         lines.extend(
             [
@@ -717,26 +886,33 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            "# TS-526 - Hosted repository-path Attachments tab still exposes browser upload controls",
+            "# TS-530 - Hosted repository-path Attachments tab does not present the restriction notice and usable Open settings recovery action as expected",
             "",
             "## Steps to reproduce",
-            "1. Navigate to an issue's 'Attachments' tab.",
+            "1. Open an issue detail screen.",
             f"   - {'✅' if _step_status(result, 1) == 'passed' else '❌'} {_step_observation(result, 1)}",
-            "2. Check for the presence of file selection and upload buttons.",
+            "2. Navigate to the `Attachments` tab.",
+            f"   - {'✅' if _step_status(result, 1) == 'passed' else '❌'} {_step_observation(result, 1)}",
+            "3. Observe the top area of the tab content.",
+            f"   - {'✅' if _step_status(result, 1) == 'passed' else '❌'} {_step_observation(result, 1)}",
+            "4. Verify the restriction notice title and message are visible, that existing attachments are still listed below, and that upload controls are absent.",
+            f"   - {'✅' if _step_status(result, 1) == 'passed' else '❌'} {_step_observation(result, 1)}",
+            "5. Verify the `Open settings` action is visible and clickable.",
             f"   - {'✅' if _step_status(result, 2) == 'passed' else '❌'} {_step_observation(result, 2)}",
             "",
             "## Actual vs Expected",
             (
-                "- Expected: when the live project is configured for `repository-path` "
-                "storage in the hosted browser, the Attachments tab should show the "
-                f"`{EXPECTED_RESTRICTION_TITLE}` notice, keep existing downloads visible, "
-                "and render zero visible `Choose attachment` / `Upload attachment` controls."
+                "- Expected: in the hosted browser with `attachmentStorage.mode = repository-path`, "
+                "the Attachments tab should show the visible repository-path warning at the top, "
+                "keep existing attachment downloads visible below it, render no browser upload "
+                "controls, and let the user activate `Open settings` to reach "
+                "`Project Settings > Attachments`."
             ),
             (
                 "- Actual: "
                 + str(
                     result.get("error")
-                    or "the hosted repository-path Attachments tab did not stay download-only."
+                    or "the hosted repository-path Attachments tab did not expose the expected notice and usable recovery action."
                 )
             ),
             "",
@@ -756,9 +932,9 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Screenshots or logs",
             f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
-            "### Project configuration",
-            "```json",
-            str(result.get("project_json", "")),
+            "### Project Settings precondition snapshot",
+            "```text",
+            str(result.get("settings_body_text_before", "")),
             "```",
             "### Attachments tab body text",
             "```text",
@@ -767,10 +943,6 @@ def _bug_description(result: dict[str, object]) -> str:
             "### Restriction accessible text",
             "```text",
             str(result.get("restriction_accessible_text", "")),
-            "```",
-            "### Visible attachment row",
-            "```text",
-            str(result.get("attachment_row_text", "")),
             "```",
             "### Upload control observation",
             "```json",
@@ -782,10 +954,16 @@ def _bug_description(result: dict[str, object]) -> str:
                     "upload_button_enabled": result.get("upload_button_enabled"),
                     "open_settings_count": result.get("open_settings_count"),
                     "restriction_notice_state": result.get("restriction_notice_state"),
+                    "notice_title_rect": result.get("notice_title_rect"),
+                    "attachment_row_rect": result.get("attachment_row_rect"),
                 },
                 indent=2,
                 sort_keys=True,
             ),
+            "```",
+            "### Settings body text after clicking Open settings",
+            "```text",
+            str(result.get("settings_after_click", {}).get("body_text", "")),
             "```",
         ],
     ) + "\n"
@@ -803,7 +981,11 @@ def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
             f"{status.upper() if jira else status}: {step['observed']}"
         )
     if not lines:
-        lines.append("# No step details were recorded." if jira else "1. No step details were recorded.")
+        lines.append(
+            "# No step details were recorded."
+            if jira
+            else "1. No step details were recorded."
+        )
     return lines
 
 
@@ -862,8 +1044,8 @@ def _extract_failed_step_number(message: str) -> int | None:
 
 def _ticket_step_action(step_number: int) -> str:
     return {
-        1: "Navigate to an issue's 'Attachments' tab.",
-        2: "Check for the presence of file selection and upload buttons.",
+        1: "Open an issue detail screen and verify the hosted Attachments notice.",
+        2: "Click the visible 'Open settings' action and confirm it is usable.",
     }.get(step_number, "Ticket step")
 
 

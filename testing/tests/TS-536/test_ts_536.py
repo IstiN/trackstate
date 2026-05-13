@@ -479,6 +479,24 @@ def _build_failures(
         interval_seconds=4,
     )
     release_candidates = stabilized_release_candidates
+    release_with_asset = next(
+        (
+            candidate
+            for candidate in release_candidates
+            if ATTACHMENT_NAME in [asset.name for asset in candidate.assets]
+        ),
+        release_with_asset,
+    )
+    seeded_release = next(
+        (candidate for candidate in release_candidates if candidate.id == seeded_release_id),
+        seeded_release,
+    )
+    result["release_candidates_after_upload"] = [
+        _release_payload(candidate) for candidate in release_candidates
+    ]
+    result["release_after_upload"] = _release_payload(release_with_asset)
+    result["seeded_release_after_upload"] = _release_payload(seeded_release)
+
     metadata_failures = _release_reuse_failures(
         release_with_asset=release_with_asset,
         seeded_release=seeded_release,
@@ -795,7 +813,6 @@ def _release_reuse_state_satisfied(
         and candidate.name == EXPECTED_RELEASE_TITLE
         and candidate.body in {SEEDED_RELEASE_BODY, STANDARD_RELEASE_BODY}
     )
-
 
 def _is_seeded_release_candidate(
     release: LiveHostedRelease,
