@@ -703,7 +703,7 @@ abstract class AppLocalizations {
   /// No description provided for @attachmentStorageGitHubReleasesRestrictedMessage.
   ///
   /// In en, this message translates to:
-  /// **'New attachments resolve to release tag {tagPrefix}<ISSUE_KEY>, but this hosted session cannot complete release-backed uploads in the browser yet.'**
+  /// **'New attachments resolve to release tag {tagPrefix}<ISSUE_KEY>, but browser-based GitHub Release asset uploads are not supported in this hosted session (uploads.github.com does not allow browser requests). Use the desktop app or CLI to upload attachments.'**
   String attachmentStorageGitHubReleasesRestrictedMessage(String tagPrefix);
 
   /// No description provided for @language.

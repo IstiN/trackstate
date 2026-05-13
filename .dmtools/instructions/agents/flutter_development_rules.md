@@ -127,7 +127,24 @@ When fixing a rendering/display bug (e.g. locale label fallback), check **all** 
 
 Add a test for each surface you fix.
 
-## General development rules
+### 8 — Web (kIsWeb) capability gating for browser-incompatible upload paths
+
+Some external APIs (e.g. `uploads.github.com`) do not expose browser-safe CORS headers. Any capability that requires a CORS-incompatible host **must** be gated on `!kIsWeb`:
+
+```mermaid
+flowchart TD
+  Impl([Implementing upload / network feature]) --> Host{Upload target\nCORS-safe for browsers?}
+  Host -->|api.github.com etc.| Both[Enable on all platforms]
+  Host -->|uploads.github.com\nor other non-CORS hosts| Gate["supportsFeature = canWrite && !kIsWeb"]
+  Gate --> UI[UI falls to restricted/unavailable\nstate on web]
+  UI --> Msg[Update callout message\nto explain the limitation clearly]
+```
+
+- Import: `import 'package:flutter/foundation.dart' show kIsWeb;`
+- **Never** advertise a write capability on web that routes through a non-CORS endpoint — the upload appears to work (controls enabled) but silently fails.
+- Update the UI callout message to explain the limitation (not just "not supported yet").
+
+
 
 | # | Rule |
 |---|------|
