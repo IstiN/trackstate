@@ -40,12 +40,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      const expectedHeight = 32.0;
       final syncPill = find.ancestor(
         of: find.text('Synced with Git').last,
         matching: find.byWidgetPredicate(
           (widget) =>
               widget is Container &&
-              widget.constraints?.minHeight == 58 &&
+              widget.constraints?.minHeight == expectedHeight &&
               widget.alignment == Alignment.center,
           description: 'desktop top bar sync pill container',
         ),
@@ -71,8 +72,8 @@ void main() {
       expect(themeToggle, findsOneWidget);
       expect(profileIdentity, findsWidgets);
 
-      final expectedHeight = tester.getRect(searchField).height;
       final controlHeights = <String, double>{
+        'search field': tester.getRect(searchField).height,
         'sync pill': tester.getRect(syncPill).height,
         'create issue': tester.getRect(createIssueButton).height,
         'repository access': tester.getRect(repositoryAccessButton).height,
@@ -85,7 +86,7 @@ void main() {
           entry.value,
           closeTo(expectedHeight, 1),
           reason:
-              'Expected ${entry.key} to match the desktop header search field height ($expectedHeight), but it rendered at ${entry.value}.',
+              'Expected ${entry.key} to stay at the required 32px desktop header height, but it rendered at ${entry.value}.',
         );
       }
     } finally {
