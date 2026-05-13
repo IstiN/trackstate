@@ -3715,6 +3715,22 @@ class TrackStateCli {
       return _mapCompatibilityError(error);
     }
     if (error is TrackStateProviderException) {
+      if (_looksLikeAuthenticationFailure(error.message)) {
+        return _TrackStateCliException(
+          code: 'AUTHENTICATION_FAILED',
+          category: TrackStateCliErrorCategory.auth,
+          message: 'Authentication is required for the selected provider.',
+          exitCode: 3,
+          details: <String, Object?>{
+            if (target.type == TrackStateCliTargetType.local)
+              'path': target.value
+            else
+              'repository': target.value,
+            'provider': target.provider,
+            'reason': error.message,
+          },
+        );
+      }
       return target.type == TrackStateCliTargetType.hosted
           ? _mapHostedProviderError(error, target)
           : _TrackStateCliException(
@@ -5353,11 +5369,7 @@ class TrackStateCli {
     _ResolvedTarget target,
   ) {
     final message = error.message;
-    final isAuthenticationFailure =
-        message.contains('(401)') ||
-        message.contains('(403)') ||
-        message.toLowerCase().contains('bad credentials') ||
-        message.toLowerCase().contains('write access first');
+    final isAuthenticationFailure = _looksLikeAuthenticationFailure(message);
     if (isAuthenticationFailure) {
       return _TrackStateCliException(
         code: 'AUTHENTICATION_FAILED',
@@ -5446,6 +5458,18 @@ class TrackStateCli {
         },
       }),
     );
+  }
+
+  bool _looksLikeAuthenticationFailure(String message) {
+    final normalized = message.toLowerCase();
+    return message.contains('(401)') ||
+        message.contains('(403)') ||
+        normalized.contains('bad credentials') ||
+        normalized.contains('write access first') ||
+        normalized.contains('authentication') ||
+        normalized.contains('authenticate with gh') ||
+        normalized.contains('trackstate_token') ||
+        normalized.contains('credential');
   }
 
   Map<String, Object?> _permissionJson(RepositoryPermission permission) =>

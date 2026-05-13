@@ -1517,6 +1517,72 @@ void main() {
     );
 
     test(
+      'local release-backed attachment download surfaces an authentication contract for missing GitHub credentials',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'trackstate-cli-download-auth',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
+        final outFile = '${tempDir.path}/downloads/manual.pdf';
+        final repository = _FakeSearchRepository(
+          snapshot: _sampleSnapshot(),
+          downloadException: const TrackStateProviderException(
+            'GitHub Releases attachment storage requires GitHub authentication. '
+            'Set TRACKSTATE_TOKEN or authenticate with gh before using '
+            'release-backed attachments from a local repository.',
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+                canManageAttachments: true,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: repository,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'download',
+          '--target',
+          'local',
+          '--attachment-id',
+          'TRACK/TRACK-1/attachments/design.png',
+          '--out',
+          outFile,
+          '--output',
+          'json',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final details = error['details']! as Map<String, Object?>;
+
+        expect(result.exitCode, 3);
+        expect(error['code'], 'AUTHENTICATION_FAILED');
+        expect(error['category'], 'auth');
+        expect(details['reason'], contains('GitHub authentication'));
+        expect(File(outFile).existsSync(), isFalse);
+      },
+    );
+
+    test(
       'returns raw Jira-compatible search JSON for jira_execute_request',
       () async {
         final repository = _FakeSearchRepository(
@@ -2071,6 +2137,7 @@ class _FakeSearchRepository implements TrackStateRepository {
     RepositoryUser? user,
     RepositoryUser? connectedUser,
     this.downloadBytes = const <String, List<int>>{},
+    this.downloadException,
     this.uploadedAttachmentNameBuilder,
     this.sortUploadedAttachmentsByName = false,
     this.requiredUploadToken,
@@ -2088,6 +2155,7 @@ class _FakeSearchRepository implements TrackStateRepository {
   final RepositoryUser user;
   final RepositoryUser connectedUser;
   final Map<String, List<int>> downloadBytes;
+  final TrackStateProviderException? downloadException;
   final String Function(String name)? uploadedAttachmentNameBuilder;
   final bool sortUploadedAttachmentsByName;
   final String? requiredUploadToken;
@@ -2217,6 +2285,10 @@ class _FakeSearchRepository implements TrackStateRepository {
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) async {
     lastDownloadedAttachmentId = attachment.id;
+    final exception = downloadException;
+    if (exception != null) {
+      throw exception;
+    }
     return Uint8List.fromList(
       downloadBytes[attachment.id] ?? utf8.encode('download:${attachment.id}'),
     );
