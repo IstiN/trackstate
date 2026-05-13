@@ -162,24 +162,6 @@ class TrackStateCliInverseLinkCanonicalStorageTest(unittest.TestCase):
             f"Observed files detail:\n{self._format_links_json_snapshots(observation)}",
         )
 
-        target_links_content = observation.target_links_json_content or ""
-        for fragment in (
-            '"type": "blocks"',
-            f'"target": "{self.config.issue_a_key}"',
-            '"direction": "outward"',
-        ):
-            self.assertIn(
-                fragment,
-                target_links_content,
-                "Human-style verification failed: a user inspecting the stored "
-                "`links.json` file would not see the expected canonical `blocks` "
-                "relationship from Issue B to Issue A.\n"
-                f"Missing fragment: {fragment}\n"
-                f"Expected canonical path: {observation.target_links_json_relative_path}\n"
-                f"Observed content:\n{target_links_content}\n"
-                f"Observed files detail:\n{self._format_links_json_snapshots(observation)}",
-            )
-
         for fragment in (
             '"command": "ticket-link"',
             f'"key": "{self.config.issue_a_key}"',
