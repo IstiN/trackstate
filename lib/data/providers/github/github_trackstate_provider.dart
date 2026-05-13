@@ -14,6 +14,11 @@ class GitHubTrackStateProvider
         RepositoryUserLookup,
         RepositoryFileMutator,
         RepositoryHistoryReader {
+  static const _releaseAssetDeletionVisibilityMaxAttempts = 8;
+  static const _releaseAssetDeletionVisibilityDelay = Duration(
+    milliseconds: 250,
+  );
+
   GitHubTrackStateProvider({
     http.Client? client,
     this.repositoryName = defaultRepositoryName,
@@ -522,6 +527,12 @@ class GitHubTrackStateProvider
         assetId: existingAsset.first.id,
         assetName: existingAsset.first.name,
       );
+      await _waitForReleaseAssetDeletionVisibility(
+        repository: connection.repository,
+        releaseTag: request.releaseTag,
+        assetId: existingAsset.first.id,
+        assetName: existingAsset.first.name,
+      );
     }
     final assetId = await _uploadReleaseAsset(
       repository: connection.repository,
@@ -842,6 +853,39 @@ class GitHubTrackStateProvider
             'Could not replace GitHub release asset $assetName in $releaseTag',
       );
     }
+  }
+
+  Future<void> _waitForReleaseAssetDeletionVisibility({
+    required String repository,
+    required String releaseTag,
+    required String assetId,
+    required String assetName,
+  }) async {
+    for (
+      var attempt = 0;
+      attempt < _releaseAssetDeletionVisibilityMaxAttempts;
+      attempt += 1
+    ) {
+      final release = await _loadReleaseByTag(
+        repository: repository,
+        releaseTag: releaseTag,
+        issueKey: null,
+        expectedTitle: null,
+      );
+      final assetStillVisible = release!.assets.any(
+        (asset) => asset.id == assetId || asset.name == assetName,
+      );
+      if (!assetStillVisible) {
+        return;
+      }
+      if (attempt + 1 < _releaseAssetDeletionVisibilityMaxAttempts) {
+        await Future<void>.delayed(_releaseAssetDeletionVisibilityDelay);
+      }
+    }
+    throw TrackStateProviderException(
+      'GitHub release asset $assetName in $releaseTag is still visible after '
+      'deletion and cannot be replaced safely yet.',
+    );
   }
 
   Future<String> _uploadReleaseAsset({

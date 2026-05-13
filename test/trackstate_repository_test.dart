@@ -2533,6 +2533,7 @@ Nested release-backed attachment issue.
     'github provider replaces same-name release assets deterministically',
     () async {
       var deletedAssetId = '';
+      var deletionCommitted = false;
       final provider = GitHubTrackStateProvider(
         repositoryName: 'IstiN/trackstate',
         dataRef: 'main',
@@ -2550,14 +2551,20 @@ Nested release-backed attachment issue.
           if (path ==
                   '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
               request.method == 'GET') {
+            final assets = deletedAssetId.isEmpty || !deletionCommitted
+                ? [
+                    {'id': 1, 'name': 'design.png', 'size': 3},
+                  ]
+                : const <Object?>[];
+            if (deletedAssetId.isNotEmpty) {
+              deletionCommitted = true;
+            }
             return http.Response(
               jsonEncode({
                 'id': 10,
                 'tag_name': 'trackstate-attachments-DEMO-1',
                 'name': 'Attachments for DEMO-1',
-                'assets': [
-                  {'id': 1, 'name': 'design.png', 'size': 3},
-                ],
+                'assets': assets,
               }),
               200,
             );
@@ -2600,6 +2607,102 @@ Nested release-backed attachment issue.
       );
 
       expect(deletedAssetId, '1');
+      expect(result.assetId, '2');
+    },
+  );
+
+  test(
+    'github provider waits for release deletion visibility before re-uploading same-name assets',
+    () async {
+      var deletedAssetId = '';
+      var releaseReadsAfterDelete = 0;
+      var deletionCommitted = false;
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/IstiN/trackstate' && request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path ==
+                  '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            final assets = deletedAssetId.isEmpty || !deletionCommitted
+                ? [
+                    {'id': 1, 'name': 'design.png', 'size': 3},
+                  ]
+                : const <Object?>[];
+            if (deletedAssetId.isNotEmpty && !deletionCommitted) {
+              releaseReadsAfterDelete += 1;
+              if (releaseReadsAfterDelete >= 2) {
+                deletionCommitted = true;
+              }
+            }
+            return http.Response(
+              jsonEncode({
+                'id': 10,
+                'tag_name': 'trackstate-attachments-DEMO-1',
+                'name': 'Attachments for DEMO-1',
+                'assets': assets,
+              }),
+              200,
+            );
+          }
+          if (path == '/repos/IstiN/trackstate/releases/assets/1' &&
+              request.method == 'DELETE') {
+            deletedAssetId = '1';
+            return http.Response('', 204);
+          }
+          if (request.url.host == 'uploads.github.com' &&
+              path == '/repos/IstiN/trackstate/releases/10/assets' &&
+              request.method == 'POST') {
+            expect(request.url.queryParameters['name'], 'design.png');
+            if (!deletionCommitted) {
+              return http.Response(
+                jsonEncode({
+                  'message':
+                      'existing asset is still visible while deletion propagates',
+                }),
+                422,
+              );
+            }
+            return http.Response(
+              jsonEncode({'id': 2, 'name': 'design.png', 'size': 4}),
+              201,
+            );
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final result = await provider.writeReleaseAttachment(
+        RepositoryReleaseAttachmentWriteRequest(
+          issueKey: 'DEMO-1',
+          releaseTag: 'trackstate-attachments-DEMO-1',
+          releaseTitle: 'Attachments for DEMO-1',
+          assetName: 'design.png',
+          bytes: Uint8List.fromList(const [1, 2, 3, 4]),
+          mediaType: 'image/png',
+          branch: 'main',
+        ),
+      );
+
+      expect(deletedAssetId, '1');
+      expect(releaseReadsAfterDelete, greaterThanOrEqualTo(2));
       expect(result.assetId, '2');
     },
   );
