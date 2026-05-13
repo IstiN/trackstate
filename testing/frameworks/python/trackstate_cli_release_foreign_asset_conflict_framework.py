@@ -54,8 +54,8 @@ class PythonTrackStateCliReleaseForeignAssetConflictFramework(
     ) -> TrackStateCliReleaseForeignAssetConflictValidationResult:
         if not self._repository_client.token:
             raise AssertionError(
-                "TS-552 requires GH_TOKEN or GITHUB_TOKEN to seed and inspect the live "
-                "GitHub Release fixture.",
+                "Release foreign-asset conflict automation requires GH_TOKEN or "
+                "GITHUB_TOKEN to seed and inspect the live GitHub Release fixture.",
             )
 
         remote_origin_url = f"https://github.com/{config.repository}.git"
@@ -69,10 +69,14 @@ class PythonTrackStateCliReleaseForeignAssetConflictFramework(
 
         try:
             self._seed_release_fixture(config=config, release_tag=release_tag)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-552-bin-") as bin_dir:
+            with tempfile.TemporaryDirectory(
+                prefix="trackstate-release-foreign-asset-bin-"
+            ) as bin_dir:
                 executable_path = Path(bin_dir) / "trackstate"
                 self._compile_executable(executable_path)
-                with tempfile.TemporaryDirectory(prefix="trackstate-ts-552-repo-") as temp_dir:
+                with tempfile.TemporaryDirectory(
+                    prefix="trackstate-release-foreign-asset-repo-"
+                ) as temp_dir:
                     repository_path = Path(temp_dir)
                     self._seed_local_repository(
                         repository_path=repository_path,
@@ -153,7 +157,7 @@ class PythonTrackStateCliReleaseForeignAssetConflictFramework(
         self._repository_client.create_release(
             tag_name=release_tag,
             name=config.expected_release_title,
-            body=f"TS-552 foreign asset conflict fixture for {config.issue_key}.",
+            body=f"Release foreign asset conflict fixture for {config.issue_key}.",
             draft=False,
             prerelease=False,
             target_commitish=config.branch,
@@ -248,7 +252,7 @@ class PythonTrackStateCliReleaseForeignAssetConflictFramework(
                 "updated: 2026-05-13T00:00:00Z\n"
                 "---\n\n"
                 "# Description\n\n"
-                "TS-552 local foreign asset conflict fixture.\n"
+                "Local release foreign asset conflict fixture.\n"
             ),
         )
         self._write_file(
@@ -260,17 +264,17 @@ class PythonTrackStateCliReleaseForeignAssetConflictFramework(
             config.source_file_bytes,
         )
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-552 Tester")
+        self._git(repository_path, "config", "--local", "user.name", "TrackState Test")
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "ts552@example.com",
+            "trackstate-tests@example.com",
         )
         self._git(repository_path, "remote", "add", "origin", remote_origin_url)
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-552 fixture")
+        self._git(repository_path, "commit", "-m", "Seed foreign asset conflict fixture")
 
     def _capture_local_state(
         self,
@@ -421,8 +425,9 @@ class PythonTrackStateCliReleaseForeignAssetConflictFramework(
             executed_command=executed_command,
             fallback_reason=(
                 "Pinned execution to a temporary executable compiled from this checkout "
-                "and injected GitHub credentials so TS-552 can run the exact local "
-                "github-releases upload command from a disposable repository."
+                "and injected GitHub credentials so the foreign-asset conflict "
+                "automation can run the exact local github-releases upload command "
+                "from a disposable repository."
             ),
             repository_path=str(repository_path),
             compiled_binary_path=str(executable_path),
@@ -446,7 +451,7 @@ class PythonTrackStateCliReleaseForeignAssetConflictFramework(
         env["TRACKSTATE_TOKEN"] = access_token
         env["GH_TOKEN"] = access_token
         env["GITHUB_TOKEN"] = access_token
-        sandbox_home = cwd / ".ts552-home"
+        sandbox_home = cwd / ".trackstate-test-home"
         sandbox_home.mkdir(parents=True, exist_ok=True)
         env["HOME"] = str(sandbox_home)
         env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
@@ -515,7 +520,7 @@ def _foreign_asset_bytes() -> bytes:
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(
             "README.txt",
-            "TS-552 foreign release asset that must remain outside attachments.json.\n",
+            "Foreign release asset that must remain outside attachments.json.\n",
         )
     return buffer.getvalue()
 
