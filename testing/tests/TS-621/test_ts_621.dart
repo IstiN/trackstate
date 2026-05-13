@@ -8,7 +8,7 @@ import 'package:trackstate/domain/models/trackstate_models.dart';
 import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/issue_aggregate_loader.dart';
 import '../../core/interfaces/issue_transition_mutation_port.dart';
-import 'support/ts621_invalid_workflow_transition_fixture.dart';
+import '../../fixtures/repositories/ts621_invalid_workflow_transition_fixture.dart';
 
 void main() {
   testWidgets(
