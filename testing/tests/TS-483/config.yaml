@@ -1,0 +1,8 @@
+test_id: TS-483
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Seeds a Local Git repository with an Attachments project-settings configuration.
+  - Reuses the shared SettingsScreenRobot to verify the dedicated Attachments tab, storage-mode toggling, release-tag-prefix visibility, semantics labels, contrast, keyboard order, and button interaction states.
