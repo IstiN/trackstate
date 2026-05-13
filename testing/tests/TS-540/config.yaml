@@ -1,0 +1,12 @@
+test_id: TS-540
+type: cli
+framework: python
+platform: local
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+  - GH_TOKEN or GITHUB_TOKEN with permission to manage releases in the live setup repository
+notes:
+  - Creates a real GitHub Release asset named manual.pdf in the live setup repository and points a disposable local-git attachment manifest entry at that release tag.
+  - Executes the current supported equivalent of the ticket command by using --attachment-id plus --out for the TS-540 local download success path.
+  - Passes only when the local provider bypasses its native capability gate, downloads the release asset bytes successfully, and reports a JSON success envelope for the local-git download path.
