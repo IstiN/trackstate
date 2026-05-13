@@ -1,0 +1,39 @@
+test_id: TS-555
+type: cli
+framework: python
+platform: local
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+  - GH_TOKEN or GITHUB_TOKEN with permission to manage releases in the live setup repository
+notes:
+  - Seeds a disposable local repository configured for `github-releases` attachment storage with tag prefix `ts-`.
+  - Ensures the exact remote tag `ts-TS-789` exists before the CLI upload runs while no GitHub Release exists for that tag.
+  - Passes only when the exact ticket command succeeds, persists a release-backed local attachment manifest entry, and creates a new draft GitHub Release on the pre-existing tag without changing the tag SHA.
+runtime_inputs:
+  ticket_command: trackstate attachment upload --issue TS-789 --file log.txt --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - upload
+    - --issue
+    - TS-789
+    - --file
+    - log.txt
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-555 Project
+  issue_key: TS-789
+  issue_summary: Create release for existing tag fixture
+  source_file_name: log.txt
+  source_file_text: |-
+    TS-555 release-backed upload payload.
+    The remote tag already exists, but its GitHub release container does not.
+  attachment_tag_prefix: ts-
+  expected_issue_key: TS-789
+  expected_attachment_name: log.txt
+  expected_attachment_relative_path: TS/TS-789/attachments/log.txt
+  expected_release_tag: ts-TS-789
+  expected_release_title: Attachments for TS-789
+  expected_release_body: "TrackState-managed attachment container for TS-789.\n"

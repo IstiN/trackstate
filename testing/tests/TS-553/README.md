@@ -8,12 +8,14 @@ The automation:
 1. creates a disposable local TrackState repository configured for
    `attachmentStorage.mode = github-releases`
 2. points the local Git remote at the live setup repository
-3. pre-seeds the issue release container with one `doc.pdf` asset and writes a
+3. delegates release seeding, CLI execution, polling, and cleanup through a
+   dedicated validator/probe/framework/support stack under `testing/`
+4. pre-seeds the issue release container with one `doc.pdf` asset and writes a
    matching `attachments.json` entry
-4. runs the exact ticket command `trackstate attachment upload --issue TS-123 --file doc.pdf --target local`
-5. verifies the live GitHub Release still contains exactly one `doc.pdf` asset
+5. runs the exact ticket command `trackstate attachment upload --issue TS-123 --file doc.pdf --target local`
+6. verifies the live GitHub Release still contains exactly one `doc.pdf` asset
    whose bytes match the replacement payload
-6. verifies local `attachments.json` now points at the new asset identifier
+7. verifies local `attachments.json` now points at the new asset identifier
 
 ## Run this test
 
@@ -26,7 +28,6 @@ python testing/tests/TS-553/test_ts_553.py
 - Python 3.12+
 - Dart SDK available on `PATH` or via `TRACKSTATE_DART_BIN`
 - `git` CLI available on `PATH`
-- `gh` CLI available on `PATH`
 - `GH_TOKEN` or `GITHUB_TOKEN` with release upload access to the hosted setup
   repository
 
