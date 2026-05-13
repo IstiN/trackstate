@@ -627,52 +627,36 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "```",
     ]
     if failure_mode == "runtime_setup_failure":
-        bug_steps = [
-            "h4. Steps to Reproduce",
-            (
-                f"# ⚪ Prepare a disposable local TrackState repository whose {_jira_inline('project.json')} sets "
-                f"{_jira_inline('attachmentStorage.mode = github-releases')} and whose "
-                f"{_jira_inline('attachments.json')} contains the release-backed entry "
-                f"{_jira_inline(_as_text(result.get('attachment_relative_path')))}."
-            ),
-            (
-                f"# ❌ Execute CLI command: {_jira_inline(_as_text(result.get('ticket_command')))}. "
-                "Observed: the checked-out CLI/runtime failed before the attachment-download "
-                f"boundary could be observed: {_jira_inline(observed_reason)}"
-            ),
-            (
-                f"# ⚪ Inspect the command output and local filesystem path "
-                f"{_jira_inline(expected_output_path)}. Observed: not reached because the "
-                "test/runtime failure prevented the command from completing."
-            ),
-        ]
-        actual_result_prefix = [
-            "* The command boundary was not exercised, so no filesystem assertion could be completed."
-        ]
-    else:
-        bug_steps = [
-            "h4. Steps to Reproduce",
-            (
-                f"# ✅ Create a local TrackState repository whose {_jira_inline('project.json')} sets "
-                f"{_jira_inline('attachmentStorage.mode = github-releases')} and whose "
-                f"{_jira_inline('attachments.json')} contains the release-backed entry "
-                f"{_jira_inline(_as_text(result.get('attachment_relative_path')))}. "
-                "Observed: the fixture repository opened normally and contained TS-123 with a release-backed manual.pdf attachment entry and no local download output file."
-            ),
-            (
-                f"# ❌ Execute CLI command: {_jira_inline(_as_text(result.get('ticket_command')))}. "
-                f"Observed: exit code {_as_text(result.get('exit_code'))}; visible output = "
-                f"{visible_error}"
-            ),
-            (
-                f"# ✅ Inspect the command output and local filesystem path "
-                f"{_jira_inline(expected_output_path)}. Observed: the file was not created, "
-                "stdout showed the repository error envelope below, and the repository stayed clean."
-            ),
-        ]
-        actual_result_prefix = [
-            "* The file was not written locally, so no download artifact was created."
-        ]
+        if BUG_DESCRIPTION_PATH.exists():
+            BUG_DESCRIPTION_PATH.unlink()
+        JIRA_COMMENT_PATH.write_text("\n".join(jira_lines) + "\n", encoding="utf-8")
+        PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+        RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
+        return
+
+    bug_steps = [
+        "h4. Steps to Reproduce",
+        (
+            f"# ✅ Create a local TrackState repository whose {_jira_inline('project.json')} sets "
+            f"{_jira_inline('attachmentStorage.mode = github-releases')} and whose "
+            f"{_jira_inline('attachments.json')} contains the release-backed entry "
+            f"{_jira_inline(_as_text(result.get('attachment_relative_path')))}. "
+            "Observed: the fixture repository opened normally and contained TS-123 with a release-backed manual.pdf attachment entry and no local download output file."
+        ),
+        (
+            f"# ❌ Execute CLI command: {_jira_inline(_as_text(result.get('ticket_command')))}. "
+            f"Observed: exit code {_as_text(result.get('exit_code'))}; visible output = "
+            f"{visible_error}"
+        ),
+        (
+            f"# ✅ Inspect the command output and local filesystem path "
+            f"{_jira_inline(expected_output_path)}. Observed: the file was not created, "
+            "stdout showed the repository error envelope below, and the repository stayed clean."
+        ),
+    ]
+    actual_result_prefix = [
+        "* The file was not written locally, so no download artifact was created."
+    ]
     bug_lines = [
         "h4. Environment",
         f"* Repository path: {_jira_inline(_as_text(result.get('repository_path')))}",
