@@ -666,6 +666,15 @@ class GitHubTrackStateProvider
       headers: _githubHeaders(token ?? _connection?.token),
     );
     if (response.statusCode == 404) {
+      final listedRelease = await _loadReleaseFromList(
+        repository: repository,
+        releaseTag: releaseTag,
+        issueKey: issueKey,
+        expectedTitle: expectedTitle,
+      );
+      if (listedRelease != null) {
+        return listedRelease;
+      }
       if (allowMissing) {
         return null;
       }
@@ -683,7 +692,57 @@ class GitHubTrackStateProvider
       );
     }
     final json = jsonDecode(response.body) as Map<String, Object?>;
-    final release = _parseReleaseSummary(json, fallbackTagName: releaseTag);
+    return _validateReleaseIdentity(
+      _parseReleaseSummary(json, fallbackTagName: releaseTag),
+      releaseTag: releaseTag,
+      issueKey: issueKey,
+      expectedTitle: expectedTitle,
+    );
+  }
+
+  Future<_GitHubReleaseSummary?> _loadReleaseFromList({
+    required String repository,
+    required String releaseTag,
+    required String? issueKey,
+    required String? expectedTitle,
+  }) async {
+    for (var page = 1; page <= 10; page++) {
+      final json = await _getGitHubJson(
+            '/repos/$repository/releases',
+            queryParameters: {'per_page': '100', 'page': '$page'},
+          )
+          as List<Object?>;
+      final matching = [
+        for (final entry in json.whereType<Map<String, Object?>>())
+          _parseReleaseSummary(entry, fallbackTagName: releaseTag),
+      ].where((release) => release.tagName == releaseTag).toList(growable: false);
+      if (matching.length > 1) {
+        throw TrackStateProviderException(
+          'GitHub release $releaseTag maps to multiple release containers and '
+          'requires manual cleanup.',
+        );
+      }
+      if (matching.length == 1) {
+        return _validateReleaseIdentity(
+          matching.single,
+          releaseTag: releaseTag,
+          issueKey: issueKey,
+          expectedTitle: expectedTitle,
+        );
+      }
+      if (json.length < 100) {
+        break;
+      }
+    }
+    return null;
+  }
+
+  _GitHubReleaseSummary _validateReleaseIdentity(
+    _GitHubReleaseSummary release, {
+    required String releaseTag,
+    required String? issueKey,
+    required String? expectedTitle,
+  }) {
     if (expectedTitle != null && release.title != expectedTitle) {
       throw TrackStateProviderException(
         'GitHub release $releaseTag does not match issue '
