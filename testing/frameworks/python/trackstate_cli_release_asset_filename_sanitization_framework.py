@@ -56,8 +56,8 @@ class PythonTrackStateCliReleaseAssetFilenameSanitizationFramework(
     ) -> TrackStateCliReleaseAssetFilenameSanitizationValidationResult:
         if not self._repository_client.token:
             raise AssertionError(
-                "TS-534 requires GH_TOKEN or GITHUB_TOKEN so the live GitHub Release "
-                "asset state can be verified.",
+                "Release asset sanitization scenarios require GH_TOKEN or "
+                "GITHUB_TOKEN so the live GitHub Release asset state can be verified.",
             )
 
         release_tag_prefix = f"{config.release_tag_prefix_base}{uuid.uuid4().hex[:8]}-"
@@ -70,10 +70,14 @@ class PythonTrackStateCliReleaseAssetFilenameSanitizationFramework(
             deleted_asset_names=(),
         )
 
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-534-bin-") as bin_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-release-sanitization-bin-",
+        ) as bin_dir:
             executable_path = Path(bin_dir) / "trackstate"
             self._compile_executable(executable_path)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-534-repo-") as temp_dir:
+            with tempfile.TemporaryDirectory(
+                prefix="trackstate-release-sanitization-repo-",
+            ) as temp_dir:
                 repository_path = Path(temp_dir)
                 self._seed_local_repository(
                     repository_path=repository_path,
@@ -205,7 +209,7 @@ updated: 2026-05-13T00:00:00Z
 
 # Description
 
-TS-534 local release asset sanitization fixture.
+Release asset sanitization fixture.
 """,
         )
         self._write_binary_file(
@@ -213,17 +217,23 @@ TS-534 local release asset sanitization fixture.
             config.source_file_bytes,
         )
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-534 Tester")
+        self._git(
+            repository_path,
+            "config",
+            "--local",
+            "user.name",
+            "TrackState Release Sanitization Tester",
+        )
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "ts534@example.com",
+            "release-sanitization@example.com",
         )
         self._git(repository_path, "remote", "add", "origin", remote_origin_url)
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-534 fixture")
+        self._git(repository_path, "commit", "-m", "Seed release asset sanitization fixture")
 
     def _capture_repository_state(
         self,
@@ -292,8 +302,9 @@ TS-534 local release asset sanitization fixture.
             executed_command=executed_command,
             fallback_reason=(
                 "Pinned execution to a temporary executable compiled from this checkout "
-                "and injected GitHub credentials so TS-534 can run the exact local "
-                "github-releases upload command from a disposable repository."
+                "and injected GitHub credentials so the release asset sanitization "
+                "scenario can run the exact local github-releases upload command "
+                "from a disposable repository."
             ),
             repository_path=str(repository_path),
             compiled_binary_path=str(executable_path),
@@ -354,7 +365,8 @@ TS-534 local release asset sanitization fixture.
         entries = json.loads(manifest_text)
         if not isinstance(entries, list):
             raise AssertionError(
-                f"TS-534 expected {config.manifest_path} to deserialize to a JSON array.",
+                "Release asset sanitization expected "
+                f"{config.manifest_path} to deserialize to a JSON array.",
             )
 
         matching_entries = [
