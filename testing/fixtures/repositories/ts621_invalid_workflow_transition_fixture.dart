@@ -1,19 +1,19 @@
 import 'invalid_workflow_transition_fixture.dart';
 
 const _scenario = InvalidWorkflowTransitionScenario(
-  tempDirectoryPrefix: 'trackstate-ts-599-',
-  projectName: 'TrackState TS-599',
-  issueKey: 'TRACK-599',
-  issueSummary: 'Block direct To Do to Done transitions',
-  assignee: 'ts599-user',
-  reporter: 'ts599-user',
-  seedAuthorName: 'TS-599 Tester',
-  seedAuthorEmail: 'ts599@example.com',
-  seedCommitSubject: 'Seed TS-599 invalid workflow transition fixture',
+  tempDirectoryPrefix: 'trackstate-ts-621-',
+  projectName: 'TrackState TS-621',
+  issueKey: 'TRACK-621',
+  issueSummary: 'Reject illegal To Do to Done workflow transition',
+  assignee: 'ts621-user',
+  reporter: 'ts621-user',
+  seedAuthorName: 'TS-621 Tester',
+  seedAuthorEmail: 'ts621@example.com',
+  seedCommitSubject: 'Seed TS-621 invalid workflow transition fixture',
 );
 
-class Ts599InvalidWorkflowTransitionFixture {
-  Ts599InvalidWorkflowTransitionFixture._(this._fixture);
+class Ts621InvalidWorkflowTransitionFixture {
+  Ts621InvalidWorkflowTransitionFixture._(this._fixture);
 
   final InvalidWorkflowTransitionFixture _fixture;
 
@@ -33,18 +33,18 @@ class Ts599InvalidWorkflowTransitionFixture {
 
   String get repositoryPath => _fixture.repositoryPath;
 
-  static Future<Ts599InvalidWorkflowTransitionFixture> create() async {
-    return Ts599InvalidWorkflowTransitionFixture._(
+  static Future<Ts621InvalidWorkflowTransitionFixture> create() async {
+    return Ts621InvalidWorkflowTransitionFixture._(
       await InvalidWorkflowTransitionFixture.create(_scenario),
     );
   }
 
   Future<void> dispose() => _fixture.dispose();
 
-  Future<Ts599PersistedRepositoryObservation>
+  Future<Ts621PersistedRepositoryObservation>
   observePersistedRepositoryState() {
     return _fixture.observePersistedRepositoryState();
   }
 }
 
-typedef Ts599PersistedRepositoryObservation = PersistedRepositoryObservation;
+typedef Ts621PersistedRepositoryObservation = PersistedRepositoryObservation;
