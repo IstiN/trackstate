@@ -20,6 +20,9 @@ from testing.components.pages.live_issue_detail_collaboration_page import (  # n
     AttachmentUploadControlsObservation,
     LiveIssueDetailCollaborationPage,
 )
+from testing.components.pages.live_project_settings_page import (  # noqa: E402
+    LiveProjectSettingsPage,
+)
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveHostedRelease,
     LiveHostedRepositoryFile,
@@ -53,6 +56,11 @@ HOSTED_LIMITED_UPLOAD_FRAGMENTS = (
 GENERIC_LFS_ERROR_FRAGMENT = "download-only for Git LFS attachments"
 GENERIC_ATTACHMENT_LIMITED_LABEL = "Attachments limited"
 GENERIC_SETTINGS_RECOVERY_LABEL = "Open settings"
+REPOSITORY_ACCESS_PRIMARY_TITLE = "Connected"
+REPOSITORY_ACCESS_SECONDARY_TITLE = "GitHub Releases attachment storage"
+REPOSITORY_ACCESS_SETTINGS_HINT = (
+    "Settings is the canonical place to review repository access and reconnect safely."
+)
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -79,6 +87,11 @@ class AttachmentPanelObservation:
     upload_button_enabled: bool
     loading_visible: bool
     open_settings_count: int
+
+
+@dataclass(frozen=True)
+class ReleaseWritePreconditionObservation:
+    body_text: str
 
 
 def main() -> None:
@@ -148,6 +161,7 @@ def main() -> None:
                 token=token,
             ) as tracker_page:
                 page = LiveIssueDetailCollaborationPage(tracker_page)
+                settings_page = LiveProjectSettingsPage(tracker_page)
                 try:
                     runtime = tracker_page.open()
                     result["runtime_state"] = runtime.kind
@@ -165,6 +179,73 @@ def main() -> None:
                         user_login=user.login,
                     )
                     page.dismiss_connection_banner()
+                    try:
+                        repository_access = _observe_release_write_precondition(
+                            settings_page,
+                        )
+                        result["repository_access_observation"] = (
+                            _release_write_precondition_payload(repository_access)
+                        )
+                        observed_release_tag_prefix = (
+                            _assert_release_write_precondition(
+                                repository_access,
+                                expected_release_tag_prefix=release_tag_prefix,
+                            )
+                        )
+                        result["repository_access_release_tag_prefix"] = (
+                            observed_release_tag_prefix
+                        )
+                        _record_step(
+                            result,
+                            step=0,
+                            status="passed",
+                            action=(
+                                "Verify the hosted Repository access surface exposes "
+                                "release-backed browser uploads before using the "
+                                "Attachments tab as product evidence."
+                            ),
+                            observed=(
+                                "browser_supported_release_copy_visible=true; "
+                                f"release_tag_prefix={observed_release_tag_prefix}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the visible Repository access section showed "
+                                "the browser-supported GitHub Releases upload copy "
+                                "required by the TS-509 precondition."
+                            ),
+                            observed=_repository_access_precondition_summary(
+                                repository_access,
+                            ),
+                        )
+                    except Exception as error:
+                        repository_access_body = settings_page.body_text()
+                        result["repository_access_body_text"] = repository_access_body
+                        _record_step(
+                            result,
+                            step=0,
+                            status="failed",
+                            action=(
+                                "Verify the hosted Repository access surface exposes "
+                                "release-backed browser uploads before using the "
+                                "Attachments tab as product evidence."
+                            ),
+                            observed=(
+                                f"{error}\n"
+                                f"Observed body text:\n{repository_access_body}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Observed the visible Repository access section before "
+                                "using the Attachments tab as TS-509 product evidence."
+                            ),
+                            observed=repository_access_body,
+                        )
+                        raise
                     page.open_issue(
                         issue_key=ISSUE_KEY,
                         issue_summary=ISSUE_SUMMARY,
@@ -489,6 +570,56 @@ def _build_release_tag_prefix() -> str:
 
 def _expected_release_tag(release_tag_prefix: str) -> str:
     return f"{release_tag_prefix}{ISSUE_KEY}"
+
+
+def _observe_release_write_precondition(
+    settings_page: LiveProjectSettingsPage,
+) -> ReleaseWritePreconditionObservation:
+    settings_body = settings_page.open_settings()
+    if "Project Settings" not in settings_body:
+        raise AssertionError(
+            "Precondition failed: the hosted session did not reach the Project Settings "
+            "surface needed to verify `supportsReleaseAttachmentWrites` through the "
+            "visible Repository access section.\n"
+            f"Observed body text:\n{settings_body}",
+        )
+    return ReleaseWritePreconditionObservation(
+        body_text=settings_body,
+    )
+
+
+def _assert_release_write_precondition(
+    observation: ReleaseWritePreconditionObservation,
+    expected_release_tag_prefix: str,
+) -> str:
+    expected_supported_copy = (
+        "New attachments resolve to release tag "
+        f"{expected_release_tag_prefix}<ISSUE_KEY>, and this hosted session can "
+        "complete release-backed uploads in the browser."
+    )
+    if expected_supported_copy not in observation.body_text:
+        raise AssertionError(
+            "Precondition failed: the hosted Repository access section did not expose "
+            "browser-supported GitHub Releases upload capability before the "
+            "Attachments flow began.\n"
+            f"Expected visible text fragment:\n{expected_supported_copy}\n\n"
+            f"Observed body text:\n{observation.body_text}",
+        )
+    return expected_release_tag_prefix
+
+
+def _release_write_precondition_payload(
+    observation: ReleaseWritePreconditionObservation,
+) -> dict[str, object]:
+    return {
+        "body_text": observation.body_text,
+    }
+
+
+def _repository_access_precondition_summary(
+    observation: ReleaseWritePreconditionObservation,
+) -> str:
+    return observation.body_text
 
 
 def _observe_attachment_panel(

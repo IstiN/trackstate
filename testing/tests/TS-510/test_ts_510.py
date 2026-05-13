@@ -8,6 +8,7 @@ import traceback
 import urllib.error
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -35,7 +36,7 @@ PROJECT_JSON_PATH = "DEMO/project.json"
 MANIFEST_PATH = f"{ISSUE_PATH}/attachments.json"
 ATTACHMENT_NAME = "manual.pdf"
 ATTACHMENT_PATH = f"{ISSUE_PATH}/attachments/{ATTACHMENT_NAME}"
-RELEASE_TAG_PREFIX = "ts510-attachments-"
+RELEASE_TAG_PREFIX = f"ts510-attachments-{uuid4().hex[:8]}-"
 EXPECTED_RELEASE_TAG = f"{RELEASE_TAG_PREFIX}{ISSUE_KEY}"
 LEGACY_ATTACHMENT_TEXT = (
     "%PDF-1.4\n"
@@ -78,7 +79,12 @@ def main() -> None:
 
     user = service.fetch_authenticated_user()
     project_json_text = service.fetch_repo_text(PROJECT_JSON_PATH)
-    original_release = service.fetch_release_by_tag(EXPECTED_RELEASE_TAG)
+    original_release = service.fetch_release_by_tag_any_state(EXPECTED_RELEASE_TAG)
+    if original_release is not None:
+        raise RuntimeError(
+            f"TS-510 requires a unique hosted release tag `{EXPECTED_RELEASE_TAG}`, but "
+            "that tag already exists. Refusing to overwrite shared live release state.",
+        )
     mutations = _collect_original_files(
         service,
         (PROJECT_JSON_PATH, ATTACHMENT_PATH, MANIFEST_PATH),
@@ -100,7 +106,7 @@ def main() -> None:
         "steps": [],
         "human_verification": [],
         "precondition_project_json_before": project_json_text,
-        "original_release_present": original_release is not None,
+        "original_release_present": False,
     }
 
     scenario_error: Exception | None = None
@@ -346,7 +352,6 @@ def main() -> None:
             cleanup = _restore_fixture(
                 service=service,
                 mutations=mutations,
-                original_release=original_release,
             )
             result["cleanup"] = cleanup
         except Exception as error:
@@ -402,7 +407,6 @@ def _fetch_repo_file_if_exists(
 
 
 def _seed_fixture(service: LiveSetupRepositoryService) -> dict[str, object]:
-    _delete_release_if_present(service, service.fetch_release_by_tag(EXPECTED_RELEASE_TAG))
     project_payload = json.loads(service.fetch_repo_text(PROJECT_JSON_PATH))
     if not isinstance(project_payload, dict):
         raise AssertionError(
@@ -503,7 +507,7 @@ def _observe_manifest_state(service: LiveSetupRepositoryService) -> dict[str, ob
         for entry in entries
         if isinstance(entry, dict) and str(entry.get("name", "")) == ATTACHMENT_NAME
     ]
-    release = service.fetch_release_by_tag(EXPECTED_RELEASE_TAG)
+    release = service.fetch_release_by_tag_any_state(EXPECTED_RELEASE_TAG)
     release_asset_names = [
         asset.name
         for asset in (release.assets if release is not None else [])
@@ -531,7 +535,6 @@ def _restore_fixture(
     *,
     service: LiveSetupRepositoryService,
     mutations: list[RepoMutation],
-    original_release: LiveHostedRelease | None,
 ) -> dict[str, object]:
     restored_paths: list[str] = []
     deleted_paths: list[str] = []
@@ -554,16 +557,13 @@ def _restore_fixture(
             )
         restored_paths.append(mutation.path)
 
-    release_after_test = service.fetch_release_by_tag(EXPECTED_RELEASE_TAG)
-    if original_release is None:
-        _delete_release_if_present(service, release_after_test)
-        release_cleanup = "deleted-seeded-release"
-    else:
-        release_cleanup = (
-            "kept-original-release"
-            if release_after_test is not None
-            else "original-release-missing"
-        )
+    release_after_test = service.fetch_release_by_tag_any_state(EXPECTED_RELEASE_TAG)
+    _delete_release_if_present(service, release_after_test)
+    release_cleanup = (
+        "deleted-seeded-release"
+        if release_after_test is not None
+        else "no-seeded-release"
+    )
 
     return {
         "status": "restored",
@@ -579,19 +579,30 @@ def _delete_release_if_present(
 ) -> None:
     if release is None:
         return
-    for asset in release.assets:
-        service.delete_release_asset(asset.id)
-    service.delete_release(release.id)
-    matched, _ = poll_until(
-        probe=lambda: service.fetch_release_by_tag(release.tag_name),
-        is_satisfied=lambda value: value is None,
-        timeout_seconds=60,
-        interval_seconds=3,
+    matched, remaining = poll_until(
+        probe=lambda: _delete_release_pass(service, release.tag_name),
+        is_satisfied=lambda value: not value,
+        timeout_seconds=120,
+        interval_seconds=5,
     )
     if not matched:
         raise AssertionError(
-            f"Cleanup failed: release tag {release.tag_name} still exists after delete.",
+            "Cleanup failed: release tag "
+            f"{release.tag_name} still exists after delete.\nRemaining releases: {remaining}",
         )
+
+
+def _delete_release_pass(
+    service: LiveSetupRepositoryService,
+    tag_name: str,
+) -> list[int]:
+    matches = service.fetch_releases_by_tag_any_state(tag_name)
+    for release in matches:
+        for asset in release.assets:
+            service.delete_release_asset(asset.id)
+        service.delete_release(release.id)
+    remaining = service.fetch_releases_by_tag_any_state(tag_name)
+    return [release.id for release in remaining]
 
 
 def _record_step(
@@ -806,7 +817,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            "# TS-510 - Legacy attachment replacement still surfaces duplicate or stale active entries",
+            "# TS-510 - Hosted legacy attachment replacement is blocked in the Attachments tab",
             "",
             "## Steps to reproduce",
             "1. Open 'TS-477' in the Issue Detail Attachments tab.",
