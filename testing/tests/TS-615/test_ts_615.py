@@ -31,6 +31,7 @@ from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
 
 TICKET_KEY = "TS-615"
 RUN_COMMAND = "python testing/tests/TS-615/test_ts_615.py"
+EXPECTED_CONTROL_HEIGHT = 32.0
 HEIGHT_TOLERANCE = 1.0
 CENTER_TOLERANCE = 1.0
 ACTION_GAP = 8.0
@@ -157,7 +158,7 @@ def main() -> None:
 
                 step_errors: list[str] = []
                 try:
-                    _assert_visual_parity(rendered_observation)
+                    _assert_visual_parity(observation, rendered_observation)
                 except AssertionError as error:
                     _record_step(
                         result,
@@ -181,7 +182,7 @@ def main() -> None:
                             "alignment against the adjacent JQL search field and "
                             "'Create issue' button."
                         ),
-                        observed=_parity_summary(rendered_observation),
+                        observed=_parity_summary(observation, rendered_observation),
                     )
 
                 try:
@@ -210,7 +211,7 @@ def main() -> None:
                         "Verified the repository access label was legible and visually sat "
                         "on the same centered baseline as the neighboring desktop controls."
                     ),
-                    observed=_parity_summary(rendered_observation),
+                    observed=_parity_summary(observation, rendered_observation),
                 )
                 if step_errors:
                     raise AssertionError("\n\n".join(step_errors))
@@ -243,51 +244,60 @@ def _assert_repository_access_button(observation: DesktopHeaderObservation) -> N
         )
 
 
-def _assert_visual_parity(observation: RenderedHeaderObservation) -> None:
-    repository_access = observation.repository_access
-    search_field = observation.search_field
-    create_issue = observation.create_issue
+def _assert_visual_parity(
+    semantic_observation: DesktopHeaderObservation,
+    rendered_observation: RenderedHeaderObservation,
+) -> None:
+    repository_access = rendered_observation.repository_access
+    create_issue = rendered_observation.create_issue
+    search_input = semantic_observation.search_input
     errors: list[str] = []
 
-    if not _within(repository_access.height, search_field.height, HEIGHT_TOLERANCE):
+    if not _within(search_input.height, EXPECTED_CONTROL_HEIGHT, HEIGHT_TOLERANCE):
+        errors.append(
+            "the visible Search issues input measured "
+            f"{search_input.height:.1f}px instead of the documented "
+            f"{EXPECTED_CONTROL_HEIGHT:.1f}px control height"
+        )
+    if not _within(repository_access.height, EXPECTED_CONTROL_HEIGHT, HEIGHT_TOLERANCE):
         errors.append(
             "repository access rendered height was "
-            f"{repository_access.height:.1f}px instead of matching the search field "
-            f"height ({search_field.height:.1f}px)"
+            f"{repository_access.height:.1f}px instead of the documented "
+            f"{EXPECTED_CONTROL_HEIGHT:.1f}px"
         )
-    if not _within(create_issue.height, search_field.height, HEIGHT_TOLERANCE):
+    if not _within(create_issue.height, EXPECTED_CONTROL_HEIGHT, HEIGHT_TOLERANCE):
         errors.append(
             "Create issue rendered height was "
-            f"{create_issue.height:.1f}px instead of matching the search field "
-            f"height ({search_field.height:.1f}px)"
+            f"{create_issue.height:.1f}px instead of the documented "
+            f"{EXPECTED_CONTROL_HEIGHT:.1f}px"
         )
     if not _within(
         repository_access.center_y,
-        search_field.center_y,
+        search_input.center_y,
         CENTER_TOLERANCE,
     ):
         errors.append(
             "repository access rendered vertical center "
-            f"({repository_access.center_y:.1f}px) drifted from the search field center "
-            f"({search_field.center_y:.1f}px)"
+            f"({repository_access.center_y:.1f}px) drifted from the visible Search issues "
+            f"input center ({search_input.center_y:.1f}px)"
         )
     if not _within(
         create_issue.center_y,
-        search_field.center_y,
+        search_input.center_y,
         CENTER_TOLERANCE,
     ):
         errors.append(
             "Create issue rendered vertical center "
-            f"({create_issue.center_y:.1f}px) drifted from the search field center "
-            f"({search_field.center_y:.1f}px)"
+            f"({create_issue.center_y:.1f}px) drifted from the visible Search issues "
+            f"input center ({search_input.center_y:.1f}px)"
         )
 
     if errors:
         raise AssertionError(
-            "Step 3 failed: the desktop header controls did not keep the rendered "
-            "visual parity for the `Attachments limited` repository access state.\n"
+            "Step 3 failed: the desktop header controls did not keep the documented "
+            "32px visual parity for the `Attachments limited` repository access state.\n"
             f"{'; '.join(errors)}.\n"
-            f"Observed metrics: {_parity_summary(observation)}",
+            f"Observed metrics: {_parity_summary(semantic_observation, rendered_observation)}",
         )
 
 
@@ -525,9 +535,10 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Actual vs Expected",
             (
-                "- Expected: the desktop header shows `Attachments limited` with the same "
-                "rendered height and vertical alignment as the adjacent search field and "
-                "`Create issue` button, while keeping the shared 8px action-cluster spacing."
+                "- Expected: the desktop header keeps `Attachments limited` at the "
+                "documented 32px control height, vertically centered with the visible "
+                "Search issues input and `Create issue` button, while keeping the shared "
+                "8px action-cluster spacing."
             ),
             (
                 "- Actual: "
@@ -628,14 +639,18 @@ def _semantic_summary(observation: DesktopHeaderObservation) -> str:
     )
 
 
-def _parity_summary(observation: RenderedHeaderObservation) -> str:
+def _parity_summary(
+    semantic_observation: DesktopHeaderObservation,
+    rendered_observation: RenderedHeaderObservation,
+) -> str:
     return (
-        f"search_field_height={observation.search_field.height:.1f}px; "
-        f"create_issue_height={observation.create_issue.height:.1f}px; "
-        f"repository_access_height={observation.repository_access.height:.1f}px; "
-        f"search_field_center_y={observation.search_field.center_y:.1f}px; "
-        f"create_issue_center_y={observation.create_issue.center_y:.1f}px; "
-        f"repository_access_center_y={observation.repository_access.center_y:.1f}px"
+        f"expected_control_height={EXPECTED_CONTROL_HEIGHT:.1f}px; "
+        f"search_input_height={semantic_observation.search_input.height:.1f}px; "
+        f"create_issue_height={rendered_observation.create_issue.height:.1f}px; "
+        f"repository_access_height={rendered_observation.repository_access.height:.1f}px; "
+        f"search_input_center_y={semantic_observation.search_input.center_y:.1f}px; "
+        f"create_issue_center_y={rendered_observation.create_issue.center_y:.1f}px; "
+        f"repository_access_center_y={rendered_observation.repository_access.center_y:.1f}px"
     )
 
 

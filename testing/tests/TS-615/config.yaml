@@ -5,4 +5,4 @@ platform: chromium
 dependencies: []
 notes:
   - Opens the deployed hosted TrackState web app and connects a real GitHub session until the desktop header exposes the `Attachments limited` repository access state.
-  - Measures the live search field, Create issue button, and `Attachments limited` control from the rendered desktop top bar without modifying production code.
+  - Verifies the documented 32px parity rule by comparing the live `Search issues` input baseline with the rendered `Create issue` and `Attachments limited` controls without modifying production code.
