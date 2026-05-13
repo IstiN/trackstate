@@ -107,6 +107,12 @@ class LiveWorkspaceManagementPage:
               };
               const visibleElements = (root, selector = '*') =>
                 Array.from(root.querySelectorAll(selector)).filter((candidate) => isVisible(candidate));
+              const actionNodeLabels = (root) =>
+                visibleElements(root, 'flt-semantics[role="button"],[role="button"],button')
+                  .map((element) => normalize(element.getAttribute('aria-label') || element.innerText || ''))
+                  .filter((label) => label.length > 0);
+              const hasSelectedSemantics = (root) =>
+                visibleElements(root, 'flt-semantics[aria-selected="true"],[aria-selected="true"]').length > 0;
               const findStyledElement = (element) => {
                 if (!element) {
                   return null;
@@ -172,6 +178,9 @@ class LiveWorkspaceManagementPage:
                 return null;
               }
 
+              const openLabels = ['Open', 'Open workspace'];
+              const activeLabels = ['Active', 'Active workspace'];
+              const actionLabels = [...openLabels, ...activeLabels, 'Delete'];
               const headings = visibleElements(document, 'flt-semantics,[aria-label]')
                 .map((element) => ({
                   element,
@@ -193,13 +202,11 @@ class LiveWorkspaceManagementPage:
                 let current = heading.element;
                 while (current && current !== document.body) {
                   const text = normalize(current.innerText || '');
+                  const buttonLabels = actionNodeLabels(current);
                   if (
                     text.includes('Saved workspaces')
-                    && (
-                      text.includes('Delete')
-                      || text.includes('Open workspace')
-                      || text.includes('Active workspace')
-                    )
+                    && buttonLabels.includes('Delete')
+                    && buttonLabels.some((label) => openLabels.includes(label))
                   ) {
                     section = current;
                     break;
@@ -221,22 +228,26 @@ class LiveWorkspaceManagementPage:
                 };
               }
 
-              const actionLabels = ['Open workspace', 'Active workspace', 'Delete'];
               const rowCandidates = visibleElements(section)
                 .map((element) => {
                   const text = normalize(element.innerText || '');
                   const rect = element.getBoundingClientRect();
+                  const buttonLabels = actionNodeLabels(element);
                   return {
                     element,
                     text,
                     area: rect.width * rect.height,
+                    buttonLabels,
+                    selected:
+                      hasSelectedSemantics(element)
+                      || activeLabels.some((label) => text.includes(label)),
                   };
                 })
                 .filter((candidate) =>
-                  candidate.text.includes('Delete')
+                  candidate.buttonLabels.includes('Delete')
                   && (
-                    candidate.text.includes('Open workspace')
-                    || candidate.text.includes('Active workspace')
+                    candidate.buttonLabels.some((label) => openLabels.includes(label))
+                    || candidate.selected
                   )
                 )
                 .sort((left, right) => left.area - right.area);
@@ -294,9 +305,7 @@ class LiveWorkspaceManagementPage:
                 const titleColor = titleElement ? toHex(window.getComputedStyle(titleElement).color) : null;
                 const detailColor = detailElement ? toHex(window.getComputedStyle(detailElement).color) : null;
                 const typeColor = typeElement ? toHex(window.getComputedStyle(typeElement).color) : null;
-                const buttonLabels = visibleElements(rowElement, 'flt-semantics[role="button"],[role="button"]')
-                  .map((element) => normalize(element.getAttribute('aria-label') || element.innerText || ''))
-                  .filter((label) => label.length > 0);
+                const buttonLabels = actionNodeLabels(rowElement);
                 const backgroundColor = rowStyles?.backgroundColor ?? null;
                 return {
                   semanticsLabel,
@@ -304,7 +313,7 @@ class LiveWorkspaceManagementPage:
                   targetTypeLabel: typeLabel,
                   detailText,
                   visibleText,
-                  selected: visibleText.includes('Active workspace'),
+                  selected: hasSelectedSemantics(rowElement) || rowActionLabels.some((label) => activeLabels.includes(label)),
                   backgroundColor,
                   borderColor: rowStyles?.borderColor ?? null,
                   titleColor,
