@@ -2295,6 +2295,7 @@ class TrackStateCli {
       final repository = _repositoryFactory.createLocal(
         repositoryPath: target.value,
         dataRef: branch,
+        client: _httpClient,
       );
       await repository.connect(
         RepositoryConnection(
@@ -2448,6 +2449,7 @@ class TrackStateCli {
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
       dataRef: branch,
+      client: _httpClient,
     );
     try {
       final response = await _buildReadResponse(
@@ -3163,6 +3165,7 @@ class TrackStateCli {
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
       dataRef: branch,
+      client: _httpClient,
     );
     try {
       await repository.connect(
@@ -3265,6 +3268,7 @@ class TrackStateCli {
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
       dataRef: branch,
+      client: _httpClient,
     );
     try {
       await repository.connect(
@@ -3365,6 +3369,7 @@ class TrackStateCli {
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
       dataRef: branch,
+      client: _httpClient,
     );
     try {
       await repository.connect(
@@ -3854,6 +3859,7 @@ class TrackStateCli {
     final repository = _repositoryFactory.createLocal(
       repositoryPath: target.value,
       dataRef: target.branch.ifEmpty('HEAD'),
+      client: _httpClient,
     );
     try {
       final page = await repository.searchIssuePage(
@@ -6165,6 +6171,7 @@ abstract interface class TrackStateCliRepositoryFactory {
   TrackStateRepository createLocal({
     required String repositoryPath,
     required String dataRef,
+    http.Client? client,
   });
 
   TrackStateRepository createHosted({
@@ -6185,6 +6192,7 @@ class _ProviderBackedTrackStateCliRepositoryFactory
   TrackStateRepository createLocal({
     required String repositoryPath,
     required String dataRef,
+    http.Client? client,
   }) => ProviderBackedTrackStateRepository(
     provider: providerFactory.createLocal(
       repositoryPath: repositoryPath,
@@ -6192,6 +6200,7 @@ class _ProviderBackedTrackStateCliRepositoryFactory
     ),
     usesLocalPersistence: true,
     supportsGitHubAuth: false,
+    githubClient: client,
   );
 
   @override
