@@ -1776,6 +1776,13 @@ size 6
           }
           if (path ==
                   '/repos/${SetupTrackStateRepository.repositoryName}/releases' &&
+              request.method == 'GET') {
+            expect(request.url.queryParameters['per_page'], '100');
+            expect(request.url.queryParameters['page'], '1');
+            return http.Response('[]', 200);
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases' &&
               request.method == 'POST') {
             return http.Response(
               jsonEncode({
@@ -2175,6 +2182,13 @@ Nested release-backed attachment issue.
           }
           if (path ==
                   '/repos/${SetupTrackStateRepository.repositoryName}/releases' &&
+              request.method == 'GET') {
+            expect(request.url.queryParameters['per_page'], '100');
+            expect(request.url.queryParameters['page'], '1');
+            return http.Response('[]', 200);
+          }
+          if (path ==
+                  '/repos/${SetupTrackStateRepository.repositoryName}/releases' &&
               request.method == 'POST') {
             return http.Response(
               jsonEncode({
@@ -2399,6 +2413,89 @@ Nested release-backed attachment issue.
         issue.attachments.single,
       );
       expect(utf8.decode(restoredBytes), 'legacy');
+    },
+  );
+
+  test(
+    'github provider reuses a matching draft release when tag lookup misses it',
+    () async {
+      var createdDuplicateRelease = false;
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/repos/IstiN/trackstate' && request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path == '/user' && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path ==
+                  '/repos/IstiN/trackstate/releases/tags/trackstate-attachments-DEMO-1' &&
+              request.method == 'GET') {
+            return http.Response('', 404);
+          }
+          if (path == '/repos/IstiN/trackstate/releases' &&
+              request.method == 'GET') {
+            expect(request.url.queryParameters['per_page'], '100');
+            expect(request.url.queryParameters['page'], '1');
+            return http.Response(
+              jsonEncode([
+                {
+                  'id': 10,
+                  'tag_name': 'trackstate-attachments-DEMO-1',
+                  'name': 'Attachments for DEMO-1',
+                  'body': 'Manual Notes',
+                  'draft': true,
+                  'assets': const <Object?>[],
+                },
+              ]),
+              200,
+            );
+          }
+          if (path == '/repos/IstiN/trackstate/releases' &&
+              request.method == 'POST') {
+            createdDuplicateRelease = true;
+            return http.Response('{"message":"unexpected duplicate create"}', 500);
+          }
+          if (request.url.host == 'uploads.github.com' &&
+              path == '/repos/IstiN/trackstate/releases/10/assets' &&
+              request.method == 'POST') {
+            expect(request.url.queryParameters['name'], 'design.png');
+            return http.Response(
+              jsonEncode({'id': 2, 'name': 'design.png', 'size': 4}),
+              201,
+            );
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final result = await provider.writeReleaseAttachment(
+        RepositoryReleaseAttachmentWriteRequest(
+          issueKey: 'DEMO-1',
+          releaseTag: 'trackstate-attachments-DEMO-1',
+          releaseTitle: 'Attachments for DEMO-1',
+          assetName: 'design.png',
+          bytes: Uint8List.fromList(const [1, 2, 3, 4]),
+          mediaType: 'image/png',
+          branch: 'main',
+        ),
+      );
+
+      expect(createdDuplicateRelease, isFalse);
+      expect(result.assetId, '2');
     },
   );
 
