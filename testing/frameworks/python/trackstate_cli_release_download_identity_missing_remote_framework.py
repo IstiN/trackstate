@@ -37,10 +37,14 @@ class PythonTrackStateCliReleaseDownloadIdentityMissingRemoteFramework(
         *,
         config: TrackStateCliReleaseDownloadIdentityMissingRemoteConfig,
     ) -> TrackStateCliReleaseDownloadIdentityMissingRemoteValidationResult:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-543-bin-") as bin_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-release-download-identity-missing-remote-bin-"
+        ) as bin_dir:
             executable_path = Path(bin_dir) / "trackstate"
             self._compile_executable(executable_path)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-543-repo-") as temp_dir:
+            with tempfile.TemporaryDirectory(
+                prefix="trackstate-release-download-identity-missing-remote-repo-"
+            ) as temp_dir:
                 repository_path = Path(temp_dir)
                 self._seed_local_repository(repository_path, config=config)
                 initial_state = self._capture_repository_state(
@@ -79,7 +83,7 @@ class PythonTrackStateCliReleaseDownloadIdentityMissingRemoteFramework(
             for variable in ("GH_TOKEN", "GITHUB_TOKEN", "TRACKSTATE_TOKEN")
             if env.pop(variable, None) is not None
         )
-        sandbox_home = repository_path / ".ts543-home"
+        sandbox_home = repository_path / ".trackstate-release-download-identity-home"
         sandbox_home.mkdir(parents=True, exist_ok=True)
         env["HOME"] = str(sandbox_home)
         env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
@@ -98,9 +102,9 @@ class PythonTrackStateCliReleaseDownloadIdentityMissingRemoteFramework(
             executed_command=executed_command,
             fallback_reason=(
                 "Pinned execution to a temporary executable compiled from this checkout "
-                "and stripped ambient GitHub credentials so TS-543 runs the local "
-                "release-backed download flow deterministically from a repository with "
-                "no Git remotes configured."
+                "and stripped ambient GitHub credentials so the local release-backed "
+                "download flow runs deterministically from a repository with no Git "
+                "remotes configured."
             ),
             repository_path=str(repository_path),
             compiled_binary_path=str(executable_path),
