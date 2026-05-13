@@ -850,17 +850,30 @@ class LiveIssueDetailCollaborationPage:
     def attachment_download_button_count(self, attachment_name: str) -> int:
         payload = self._session.evaluate(
             """
-            ({ downloadLabel }) => Array.from(
-              document.querySelectorAll('flt-semantics[role="button"][aria-label]')
-            ).filter((element) => {
-              const label = element.getAttribute('aria-label') ?? '';
-              const rect = element.getBoundingClientRect();
-              return (
-                label === downloadLabel
-                && rect.width > 0
-                && rect.height > 0
-              );
-            }).length
+            ({ downloadLabel }) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  return false;
+                }
+                const style = window.getComputedStyle(element);
+                return style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const hasVisibleSurface = (element) =>
+                isVisible(element)
+                || Array.from(
+                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label]')
+                ).some(isVisible);
+              return Array.from(
+                document.querySelectorAll('flt-semantics[aria-label]')
+              ).filter((element) => {
+                const label = element.getAttribute('aria-label') ?? '';
+                return label === downloadLabel && hasVisibleSurface(element);
+              }).length;
+            }
             """,
             arg={"downloadLabel": self._download_button_label(attachment_name)},
         )
@@ -875,20 +888,33 @@ class LiveIssueDetailCollaborationPage:
         download_label = self._download_button_label(attachment_name)
         payload = self._session.evaluate(
             """
-            ({ downloadLabel }) => Array.from(
-              document.querySelectorAll('flt-semantics[role="button"][aria-label]')
-            ).map((element) => {
-              const label = element.getAttribute('aria-label') ?? '';
-              const rect = element.getBoundingClientRect();
-              if (
-                label !== downloadLabel
-                || rect.width <= 0
-                || rect.height <= 0
-              ) {
-                return '';
-              }
-              return label;
-            }).find((label) => label.length > 0) ?? ''
+            ({ downloadLabel }) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  return false;
+                }
+                const style = window.getComputedStyle(element);
+                return style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const hasVisibleSurface = (element) =>
+                isVisible(element)
+                || Array.from(
+                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label]')
+                ).some(isVisible);
+              return Array.from(
+                document.querySelectorAll('flt-semantics[aria-label]')
+              ).map((element) => {
+                const label = element.getAttribute('aria-label') ?? '';
+                if (label !== downloadLabel || !hasVisibleSurface(element)) {
+                  return '';
+                }
+                return label;
+              }).find((label) => label.length > 0) ?? '';
+            }
             """,
             arg={"downloadLabel": download_label},
         )
@@ -919,39 +945,44 @@ class LiveIssueDetailCollaborationPage:
                   return false;
                 }
                 const rect = element.getBoundingClientRect();
-                return rect.width > 0 && rect.height > 0;
+                if (rect.width <= 0 || rect.height <= 0) {
+                  return false;
+                }
+                const style = window.getComputedStyle(element);
+                return style.visibility !== 'hidden' && style.display !== 'none';
               };
-              const isEnabled = (element) =>
-                !!element &&
-                isVisible(element) &&
-                element.getAttribute('aria-disabled') !== 'true';
-              const countButtons = (fragment) => Array.from(
-                document.querySelectorAll('flt-semantics[role="button"][aria-label]')
-              ).filter((element) => {
-                const label = element.getAttribute('aria-label') || '';
-                return isVisible(element) && label.includes(fragment);
-              }).length;
+              const controlRoots = (label) => Array.from(
+                document.querySelectorAll(`flt-semantics[aria-label="${label}"]`)
+              ).filter((element) =>
+                isVisible(element)
+                || Array.from(
+                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label]')
+                ).some(isVisible)
+              );
+              const controlTrigger = (element) => [
+                element,
+                element?.querySelector('flt-semantics[flt-tappable]'),
+                element?.querySelector('[flt-tappable]'),
+                element?.querySelector('flt-semantics[role="button"]'),
+                element?.querySelector('[role="button"]'),
+              ].find((candidate) => !!candidate && isVisible(candidate)) ?? null;
+              const isEnabled = (element) => {
+                const trigger = controlTrigger(element);
+                return (
+                  !!trigger
+                  && element?.getAttribute('aria-disabled') !== 'true'
+                  && trigger.getAttribute('aria-disabled') !== 'true'
+                );
+              };
 
-              const chooseButton = document.querySelector(
-                'flt-semantics[aria-label="Choose attachment"]'
-              );
-              const chooseTrigger = document.querySelector(
-                'flt-semantics[aria-label="Choose attachment"] flt-semantics'
-              );
-              const uploadButton = document.querySelector(
-                'flt-semantics[aria-label="Upload attachment"]'
-              );
-              const uploadTrigger = document.querySelector(
-                'flt-semantics[aria-label="Upload attachment"] flt-semantics'
-              );
+              const chooseButtons = controlRoots('Choose attachment');
+              const uploadButtons = controlRoots('Upload attachment');
 
               return {
-                chooseButtonCount: countButtons('Choose attachment'),
-                chooseButtonEnabled:
-                  isEnabled(chooseTrigger) || isEnabled(chooseButton),
-                uploadButtonCount: countButtons('Upload attachment'),
-                uploadButtonEnabled:
-                  isEnabled(uploadTrigger) || isEnabled(uploadButton),
+                chooseButtonCount: chooseButtons.length,
+                chooseButtonEnabled: chooseButtons.some(isEnabled),
+                uploadButtonCount: uploadButtons.length,
+                uploadButtonEnabled: uploadButtons.some(isEnabled),
               };
             }
             """,
@@ -1068,8 +1099,29 @@ class LiveIssueDetailCollaborationPage:
         download_label = self._download_button_label(attachment_name)
         self._session.wait_for_function(
             """
-            ({ downloadLabel }) => Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
-              .some((element) => (element.getAttribute('aria-label') ?? '') === downloadLabel)
+            ({ downloadLabel }) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  return false;
+                }
+                const style = window.getComputedStyle(element);
+                return style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const hasVisibleSurface = (element) =>
+                isVisible(element)
+                || Array.from(
+                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label]')
+                ).some(isVisible);
+              return Array.from(document.querySelectorAll('flt-semantics[aria-label]')).some(
+                (element) =>
+                  (element.getAttribute('aria-label') ?? '') === downloadLabel
+                  && hasVisibleSurface(element)
+              );
+            }
             """,
             arg={"downloadLabel": download_label},
             timeout_ms=timeout_ms,
@@ -1077,8 +1129,27 @@ class LiveIssueDetailCollaborationPage:
         payload = self._session.evaluate(
             """
             ({ attachmentName, downloadLabel }) => {
-              const button = Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
-                .find((element) => (element.getAttribute('aria-label') ?? '') === downloadLabel);
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  return false;
+                }
+                const style = window.getComputedStyle(element);
+                return style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const hasVisibleSurface = (element) =>
+                isVisible(element)
+                || Array.from(
+                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label]')
+                ).some(isVisible);
+              const button = Array.from(document.querySelectorAll('flt-semantics[aria-label]'))
+                .find((element) =>
+                  (element.getAttribute('aria-label') ?? '') === downloadLabel
+                  && hasVisibleSurface(element)
+                );
               if (!button) {
                 return '';
               }
@@ -1112,7 +1183,7 @@ class LiveIssueDetailCollaborationPage:
             """
             () => {
               const trigger = document.querySelector(
-                'flt-semantics[aria-label="Choose attachment"] flt-semantics'
+                'flt-semantics[aria-label="Choose attachment"] flt-semantics[flt-tappable]'
               );
               return !!trigger && trigger.getAttribute('aria-disabled') !== 'true';
             }
@@ -1209,7 +1280,7 @@ class LiveIssueDetailCollaborationPage:
                 /\\b\\d+(?:\\.\\d+)?\\s*(?:KB|MB|bytes?)\\b/i
               );
               const uploadTrigger = document.querySelector(
-                'flt-semantics[aria-label="Upload attachment"] flt-semantics'
+                'flt-semantics[aria-label="Upload attachment"] flt-semantics[flt-tappable]'
               );
               const firstDownload = Array.from(
                 document.querySelectorAll('flt-semantics, [aria-label]')
