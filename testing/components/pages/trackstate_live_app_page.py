@@ -22,6 +22,10 @@ class TrackStateLiveAppPage:
     LOAD_ERROR_TEXT = (
         "TrackState data was not found in the configured repository runtime."
     )
+    LOAD_ERROR_TEXT_VARIANTS = (
+        LOAD_ERROR_TEXT,
+        "TrackState data was not found",
+    )
     CONNECT_READY_TEXT = "Connect GitHub"
     TOKEN_INPUT_SELECTOR = 'input[aria-label="Fine-grained token"]'
     CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"]'
@@ -44,7 +48,7 @@ class TrackStateLiveAppPage:
     def wait_for_runtime_state(self, timeout_seconds: int = 90) -> RuntimeState:
         try:
             wait_match = self.session.wait_for_any_text(
-                [self.LOAD_ERROR_TEXT, self.CONNECT_READY_TEXT],
+                [*self.LOAD_ERROR_TEXT_VARIANTS, self.CONNECT_READY_TEXT],
                 timeout_ms=timeout_seconds * 1_000,
             )
         except WebAppTimeoutError:
@@ -53,7 +57,7 @@ class TrackStateLiveAppPage:
                 body_text=self.session.body_text(),
             )
 
-        if wait_match.matched_text == self.LOAD_ERROR_TEXT:
+        if wait_match.matched_text in self.LOAD_ERROR_TEXT_VARIANTS:
             return RuntimeState(kind="data-load-failed", body_text=wait_match.body_text)
         return RuntimeState(kind="connect-ready", body_text=wait_match.body_text)
 
