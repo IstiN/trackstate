@@ -33,7 +33,7 @@ from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
 TICKET_KEY = "TS-531"
 ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
 PROJECT_JSON_PATH = "DEMO/project.json"
-EXPECTED_STORAGE_MODE = "github-releases"
+SEEDED_STORAGE_MODE_LABEL = "default"
 EXPECTED_RESTRICTION_TITLE = "Attachments stay download-only in the browser"
 EXPECTED_RESTRICTION_MESSAGE = (
     "Attachment upload is unavailable in this browser session. Existing "
@@ -54,7 +54,6 @@ UPLOAD_ATTACHMENT_TEXT = (
     "TS-531 selected attachment payload.\n"
     "Used to verify the hosted upload UI remains interactive.\n"
 )
-RELEASE_TAG_PREFIX = "ts531-visible-controls-"
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -104,9 +103,18 @@ def main() -> None:
     scenario_error: Exception | None = None
     cleanup_error: Exception | None = None
     try:
-        seeded_project_json = _seed_github_releases_fixture(service)
+        original_project_json = service.fetch_repo_text(PROJECT_JSON_PATH)
+        result["project_json_before"] = original_project_json
+        result["attachment_storage_mode_before"] = _resolved_attachment_mode(
+            original_project_json,
+        )
+
+        seeded_project_json = _seed_default_storage_fixture(service)
         result["project_json"] = seeded_project_json
-        result["attachment_storage_mode"] = _project_attachment_mode(seeded_project_json)
+        result["attachment_storage_mode"] = _resolved_attachment_mode(
+            seeded_project_json,
+        )
+        result["attachment_storage_configuration"] = SEEDED_STORAGE_MODE_LABEL
 
         attachment_name = Path(issue_fixture.attachment_paths[0]).name
         result["attachment_name"] = attachment_name
@@ -185,6 +193,7 @@ def main() -> None:
 
                     controls_before = _wait_for_unrestricted_surface(
                         page,
+                        step_number=2,
                         require_upload_enabled=False,
                         timeout_seconds=30,
                     )
@@ -233,6 +242,7 @@ def main() -> None:
                     attachments_after = page.current_body_text()
                     controls_after = _wait_for_unrestricted_surface(
                         page,
+                        step_number=3,
                         require_upload_enabled=True,
                         timeout_seconds=30,
                     )
@@ -285,7 +295,7 @@ def main() -> None:
     except Exception as error:
         scenario_error = error
         failed_step = _extract_failed_step_number(str(error))
-        if failed_step is not None and _step_status(result, failed_step) == "failed":
+        if failed_step is not None and _step_status(result, failed_step) != "failed":
             _record_step(
                 result,
                 step=failed_step,
@@ -352,6 +362,13 @@ def _project_attachment_mode(project_json_text: str) -> str:
     return str(attachment_storage.get("mode", "")).strip()
 
 
+def _resolved_attachment_mode(project_json_text: str) -> str:
+    mode = _project_attachment_mode(project_json_text)
+    if mode:
+        return mode
+    return "repository-path (implicit default)"
+
+
 def _collect_original_files(
     service: LiveSetupRepositoryService,
     paths: tuple[str, ...],
@@ -374,33 +391,30 @@ def _fetch_repo_file_if_exists(
         raise
 
 
-def _seed_github_releases_fixture(service: LiveSetupRepositoryService) -> str:
+def _seed_default_storage_fixture(service: LiveSetupRepositoryService) -> str:
     project_payload = json.loads(service.fetch_repo_text(PROJECT_JSON_PATH))
     if not isinstance(project_payload, dict):
         raise AssertionError(
             f"Precondition failed: {PROJECT_JSON_PATH} did not deserialize to a JSON object.",
         )
-    project_payload["attachmentStorage"] = {
-        "mode": EXPECTED_STORAGE_MODE,
-        "githubReleases": {"tagPrefix": RELEASE_TAG_PREFIX},
-    }
+    project_payload.pop("attachmentStorage", None)
     _write_repo_text_with_retry(
         service=service,
         path=PROJECT_JSON_PATH,
         content=json.dumps(project_payload, indent=2) + "\n",
-        message=f"{TICKET_KEY}: enable github-releases attachment storage",
+        message=f"{TICKET_KEY}: seed default attachment storage configuration",
     )
 
     matched, observed_project_json = poll_until(
         probe=lambda: service.fetch_repo_text(PROJECT_JSON_PATH),
-        is_satisfied=lambda text: _project_attachment_mode(text) == EXPECTED_STORAGE_MODE,
+        is_satisfied=lambda text: _project_attachment_mode(text) == "",
         timeout_seconds=120,
         interval_seconds=4,
     )
     if not matched:
         raise AssertionError(
             "Precondition failed: the live setup repository did not expose the expected "
-            "`github-releases` project configuration within the timeout.\n"
+            "default attachment-storage configuration within the timeout.\n"
             f"Observed project.json:\n{observed_project_json}",
         )
     return observed_project_json
@@ -409,6 +423,7 @@ def _seed_github_releases_fixture(service: LiveSetupRepositoryService) -> str:
 def _wait_for_unrestricted_surface(
     page: LiveIssueDetailCollaborationPage,
     *,
+    step_number: int,
     require_upload_enabled: bool,
     timeout_seconds: int,
 ) -> AttachmentUploadControlsObservation:
@@ -425,8 +440,8 @@ def _wait_for_unrestricted_surface(
         return observation
     latest = page.observe_attachment_upload_controls()
     raise AssertionError(
-        "The hosted Attachments tab did not settle into the expected unrestricted upload "
-        "state within the timeout.\n"
+        f"Step {step_number} failed: the hosted Attachments tab did not settle into "
+        "the expected unrestricted upload state within the timeout.\n"
         f"Observed choose button count: {latest.choose_button_count}\n"
         f"Observed choose button enabled: {latest.choose_button_enabled}\n"
         f"Observed upload button count: {latest.upload_button_count}\n"
@@ -803,12 +818,12 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "*Automation coverage*",
         (
-            f"* Switched {{{{{PROJECT_JSON_PATH}}}}} to "
-            f"`attachmentStorage.mode = {EXPECTED_STORAGE_MODE}` for the live run and restored the original file afterward."
+            f"* Removed {{{{{PROJECT_JSON_PATH}}}}} {{attachmentStorage}} for the live run to exercise the product's "
+            f"{{default}} attachment path, then restored the original file afterward."
         ),
         "* Opened the deployed hosted TrackState app, connected GitHub, and navigated to the live issue Attachments tab.",
         (
-            "* Verified the repository-path restriction title/message and the "
+            "* Verified the storage restriction title/message and the "
             "{{Open settings}} recovery action stayed hidden while visible "
             "{{Choose attachment}} and {{Upload attachment}} controls were rendered."
         ),
@@ -823,7 +838,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             "standard upload controls stayed visible, and selecting a file enabled the "
             "upload action."
             if passed
-            else "* Did not match the expected result."
+            else "* Did not match the expected result: the hosted default path still resolved to the repository-path download-only state instead of exposing the standard upload UI."
         ),
         (
             f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
@@ -859,18 +874,17 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "### Automation",
         (
-            f"- Switched `{PROJECT_JSON_PATH}` to "
-            f"`attachmentStorage.mode = {EXPECTED_STORAGE_MODE}` for the live run and restored the original file afterward."
+            f"- Removed `{PROJECT_JSON_PATH}` `attachmentStorage` for the live run to exercise the product's `default` attachment path, then restored the original file afterward."
         ),
         "- Opened the deployed hosted TrackState app, connected GitHub, and navigated to the live issue Attachments tab.",
-        "- Verified the repository-path restriction title/message and the `Open settings` recovery action stayed hidden while visible `Choose attachment` and `Upload attachment` controls were rendered.",
+        "- Verified the storage restriction title/message and the `Open settings` recovery action stayed hidden while visible `Choose attachment` and `Upload attachment` controls were rendered.",
         "- Chose a real temporary file in the browser to verify the user-visible selected-file summary and Upload attachment enablement.",
         "",
         "### Observed result",
         (
             "- Matched the expected result: no storage restriction UI was shown, the standard upload controls stayed visible, and selecting a file enabled the upload action."
             if passed
-            else "- Did not match the expected result."
+            else "- Did not match the expected result: the hosted default path still resolved to the repository-path download-only state instead of exposing the standard upload UI."
         ),
         (
             f"- Environment: URL `{result['app_url']}`, repository `{result['repository']}` "
@@ -904,7 +918,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         f"# {TICKET_KEY} {status}",
         "",
         (
-            "Ran the live hosted unrestricted Attachments scenario and checked that the "
+            "Ran the live hosted default-path Attachments scenario and checked that the "
             "storage restriction UI stayed hidden while the standard upload controls "
             "remained visible and interactive."
         ),
@@ -953,8 +967,16 @@ def _bug_description(result: dict[str, object]) -> str:
                 "- Actual: "
                 + str(
                     result.get("error")
-                    or "the hosted Attachments tab still showed restriction UI or did not keep the standard upload controls interactive."
+                    or "the hosted default attachment path still resolved to the repository-path restriction UI and did not keep the standard upload controls interactive."
                 )
+            ),
+            (
+                "- Missing production capability: when `project.json` uses the ticket's "
+                "`default` attachment configuration (no `attachmentStorage` object), the "
+                "hosted app still resolves the issue page to the repository-path "
+                "download-only flow. From `testing/`, there is no production-visible "
+                "non-release hosted attachment mode that exposes the standard browser "
+                "upload surface this ticket requires."
             ),
             "",
             "## Exact error message or assertion failure",
