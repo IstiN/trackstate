@@ -252,7 +252,7 @@ void main() {
         expect(find.text('GitHub Releases attachment storage'), findsOneWidget);
         expect(
           find.text(
-            'New attachments resolve to release tag trackstate-attachments-<ISSUE_KEY>, but this hosted session cannot complete release-backed uploads in the browser yet.',
+            'New attachments resolve to release tag trackstate-attachments-<ISSUE_KEY>, but browser-based GitHub Release asset uploads are not supported in this hosted session (uploads.github.com does not allow browser requests). Use the desktop app or CLI to upload attachments.',
           ),
           findsOneWidget,
         );
@@ -302,7 +302,7 @@ void main() {
       expect(find.text('GitHub Releases attachment storage'), findsOneWidget);
       expect(
         find.text(
-          'New attachments resolve to release tag trackstate-attachments-<ISSUE_KEY>, but this hosted session cannot complete release-backed uploads in the browser yet.',
+          'New attachments resolve to release tag trackstate-attachments-<ISSUE_KEY>, but browser-based GitHub Release asset uploads are not supported in this hosted session (uploads.github.com does not allow browser requests). Use the desktop app or CLI to upload attachments.',
         ),
         findsOneWidget,
       );
