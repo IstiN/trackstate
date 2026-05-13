@@ -240,7 +240,7 @@ class LiveProjectSettingsPage:
               }
               return {
                 bodyText,
-                selectedTabLabel: (tab.innerText || '').trim(),
+                selectedTabLabel: ((tab.innerText || '').trim() || (tab.getAttribute('aria-label') ?? '')).trim(),
                 selectedTabSemantics: tab.getAttribute('aria-label') ?? '',
                 attachmentStorageVisible: bodyText.includes(attachmentStorageLabel),
                 addStatusVisible: bodyText.includes('Add status'),

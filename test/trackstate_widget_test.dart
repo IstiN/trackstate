@@ -636,6 +636,60 @@ void main() {
   );
 
   testWidgets(
+    'hosted default attachment storage keeps standard upload controls visible',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'default-upload-token',
+      });
+
+      try {
+        tester.view.physicalSize = const Size(1440, 960);
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: _hostedReleaseUploadPermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find
+              .bySemanticsLabel(
+                RegExp('Open TRACK-12 Implement Git sync service'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.bySemanticsLabel(RegExp('Attachments')).first);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Attachments stay download-only in the browser'),
+          findsNothing,
+        );
+        expect(find.widgetWithText(OutlinedButton, 'Open settings'), findsNothing);
+        expect(find.bySemanticsLabel('Choose attachment'), findsOneWidget);
+        expect(find.bySemanticsLabel('Upload attachment'), findsOneWidget);
+        expect(
+          tester
+              .widget<OutlinedButton>(
+                find.widgetWithText(OutlinedButton, 'Choose attachment'),
+              )
+              .onPressed,
+          isNotNull,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
     'attachments tab lets users choose and upload files from issue detail',
     (tester) async {
       SharedPreferences.setMockInitialValues({
@@ -718,7 +772,7 @@ void main() {
         await tester.tap(uploadAttachmentSemantics);
         await tester.pumpAndSettle();
 
-        expect(find.text('release-notes.pdf'), findsOneWidget);
+        expect(find.text('release notes.pdf'), findsOneWidget);
         expect(
           find.text('Choose a file to review its size before upload.'),
           findsOneWidget,
@@ -788,7 +842,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Replace attachment?'), findsNothing);
-        expect(find.text('sync-sequence.svg'), findsOneWidget);
+        expect(find.text('sync sequence.svg'), findsOneWidget);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();

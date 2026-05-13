@@ -41,14 +41,22 @@ class PythonTrackStateCliCompiledLocalFramework:
                 f"stderr:\n{completed.stderr}"
             )
 
-    def _run(self, command: tuple[str, ...], *, cwd: Path) -> CliCommandResult:
-        env = os.environ.copy()
-        env.setdefault("CI", "true")
-        env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
+    def _run(
+        self,
+        command: tuple[str, ...],
+        *,
+        cwd: Path,
+        env: dict[str, str] | None = None,
+    ) -> CliCommandResult:
+        effective_env = os.environ.copy()
+        effective_env.setdefault("CI", "true")
+        effective_env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
+        if env:
+            effective_env.update(env)
         completed = subprocess.run(
             command,
             cwd=cwd,
-            env=env,
+            env=effective_env,
             capture_output=True,
             text=True,
             check=False,
