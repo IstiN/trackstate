@@ -272,7 +272,6 @@ TS-535 local github-releases attachment download fixture.
     def _git_head_count(self, repository_path: Path) -> int:
         output = self._git_output(repository_path, "rev-list", "--count", "HEAD").strip()
         return int(output) if output else 0
-
     def _export_main_snapshot(self, *, destination: Path) -> None:
         completed = subprocess.run(
             (
