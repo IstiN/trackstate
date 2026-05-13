@@ -51,7 +51,7 @@
   "attachments": "Attachments",
   "attachmentsDownloadOnlyMessage": "Attachment upload is unavailable in this browser session. Existing attachments remain available for download.",
   "attachmentsLimitedUploadMessage": "Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.",
-  "attachmentsGitHubReleasesUnsupportedMessage": "This project stores new attachments in GitHub Releases. Existing attachments remain available for download, but hosted release-backed uploads are not available in this browser session yet.",
+  "attachmentsGitHubReleasesUnsupportedMessage": "This project stores new attachments in GitHub Releases. Browser upload is handled through the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main. Existing attachments remain available for download here.",
   "attachmentsAccessMessageDisconnected": "Connect GitHub with repository write access to enable Git-backed attachment changes. Existing attachments remain available for download.",
   "attachmentsAccessMessageReadOnly": "This repository connection cannot push attachment changes. Existing attachments remain available for download.",
   "chooseAttachment": "Choose attachment",
@@ -166,7 +166,7 @@
       }
     }
   },
-  "attachmentStorageGitHubReleasesRestrictedMessage": "New attachments resolve to release tag {tagPrefix}<ISSUE_KEY>, but browser-based GitHub Release asset uploads are not supported in this hosted session (uploads.github.com does not allow browser requests). Use the desktop app or CLI to upload attachments.",
+  "attachmentStorageGitHubReleasesRestrictedMessage": "New attachments resolve to release tag {tagPrefix}<ISSUE_KEY>. Browser sessions cannot upload directly to GitHub Releases, so use the repository inbox workflow: commit to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main.",
   "@attachmentStorageGitHubReleasesRestrictedMessage": {
     "placeholders": {
       "tagPrefix": {
@@ -285,7 +285,7 @@
   "repositoryAccessAttachmentLimitedTitle": "Some attachment uploads still require local Git",
   "repositoryAccessAttachmentLimitedMessage": "Issue edits, comments, and browser-supported attachment uploads can continue here. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.",
   "repositoryAccessReleaseRestrictedTitle": "GitHub Releases uploads are unavailable in the browser",
-  "repositoryAccessReleaseRestrictedMessage": "Issue edits and comments can continue, but this project stores new attachments in GitHub Releases and this hosted session cannot complete release-backed uploads yet.",
+  "repositoryAccessReleaseRestrictedMessage": "Issue edits and comments can continue. For new attachments, use the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main so GitHub Actions uploads them to Releases.",
   "repositoryAccessSettingsHint": "Settings is the canonical place to review repository access and reconnect safely.",
   "savedWorkspaces": "Saved workspaces",
   "activeWorkspace": "Active",

@@ -325,7 +325,7 @@ abstract class AppLocalizations {
   /// No description provided for @attachmentsGitHubReleasesUnsupportedMessage.
   ///
   /// In en, this message translates to:
-  /// **'This project stores new attachments in GitHub Releases. Existing attachments remain available for download, but hosted release-backed uploads are not available in this browser session yet.'**
+  /// **'This project stores new attachments in GitHub Releases. Browser upload is handled through the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main. Existing attachments remain available for download here.'**
   String get attachmentsGitHubReleasesUnsupportedMessage;
 
   /// No description provided for @attachmentsAccessMessageDisconnected.
@@ -703,7 +703,7 @@ abstract class AppLocalizations {
   /// No description provided for @attachmentStorageGitHubReleasesRestrictedMessage.
   ///
   /// In en, this message translates to:
-  /// **'New attachments resolve to release tag {tagPrefix}<ISSUE_KEY>, but browser-based GitHub Release asset uploads are not supported in this hosted session (uploads.github.com does not allow browser requests). Use the desktop app or CLI to upload attachments.'**
+  /// **'New attachments resolve to release tag {tagPrefix}<ISSUE_KEY>. Browser sessions cannot upload directly to GitHub Releases, so use the repository inbox workflow: commit to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main.'**
   String attachmentStorageGitHubReleasesRestrictedMessage(String tagPrefix);
 
   /// No description provided for @language.
@@ -1189,7 +1189,7 @@ abstract class AppLocalizations {
   /// No description provided for @repositoryAccessReleaseRestrictedMessage.
   ///
   /// In en, this message translates to:
-  /// **'Issue edits and comments can continue, but this project stores new attachments in GitHub Releases and this hosted session cannot complete release-backed uploads yet.'**
+  /// **'Issue edits and comments can continue. For new attachments, use the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main so GitHub Actions uploads them to Releases.'**
   String get repositoryAccessReleaseRestrictedMessage;
 
   /// No description provided for @repositoryAccessSettingsHint.

@@ -35,6 +35,7 @@ class PythonDartProbeRuntime(DartProbeRuntime):
                 succeeded=False,
                 analyze_output=self._combine_output(analyze),
                 run_output=None,
+                run_stderr=None,
                 session_payload=None,
             )
 
@@ -46,6 +47,7 @@ class PythonDartProbeRuntime(DartProbeRuntime):
             succeeded=True,
             analyze_output=self._combine_output(analyze),
             run_output=self._combine_output(execution),
+            run_stderr=execution.stderr.strip(),
             session_payload=json.loads(execution.stdout),
         )
 
