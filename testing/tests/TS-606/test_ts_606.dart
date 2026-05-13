@@ -1,3 +1,4 @@
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -187,7 +188,8 @@ String? _exactFocusOrderFailure(
 }
 
 List<String> _focusedSemanticsLabels(WidgetTester tester) {
-  final root = tester.binding.pipelineOwner.semanticsOwner?.rootSemanticsNode;
+  final root =
+      RendererBinding.instance.rootPipelineOwner.semanticsOwner?.rootSemanticsNode;
   if (root == null) {
     return const <String>['<no semantics tree>'];
   }
