@@ -1,0 +1,8 @@
+test_id: TS-391
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Seeds two live comment markdown files for DEMO-2 so the hosted Comments tab has one untouched comment and one edited comment.
+  - Verifies the deployed UI shows only the created timestamp for the untouched comment and renders the Edited timestamp marker only for the modified comment.
