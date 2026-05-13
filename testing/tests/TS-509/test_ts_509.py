@@ -167,18 +167,82 @@ def main() -> None:
                     result["runtime_state"] = runtime.kind
                     result["runtime_body_text"] = runtime.body_text
                     if runtime.kind != "ready":
+                        _record_step(
+                            result,
+                            step=-1,
+                            status="failed",
+                            action="Open the hosted app and reach the ready tracker shell.",
+                            observed=(
+                                f"runtime_state={runtime.kind}\n"
+                                f"Observed body text:\n{runtime.body_text}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check="Observed the hosted app body before any GitHub connection flow began.",
+                            observed=runtime.body_text,
+                        )
                         raise AssertionError(
                             "Precondition failed: the deployed app did not reach the hosted "
                             "tracker shell before the TS-509 scenario began.\n"
                             f"Observed body text:\n{runtime.body_text}",
                         )
 
-                    page.ensure_connected(
-                        token=token,
-                        repository=service.repository,
-                        user_login=user.login,
-                    )
-                    page.dismiss_connection_banner()
+                    try:
+                        page.ensure_connected(
+                            token=token,
+                            repository=service.repository,
+                            user_login=user.login,
+                        )
+                        page.dismiss_connection_banner()
+                        connected_body = page.current_body_text()
+                        result["connected_body_text"] = connected_body
+                        _record_step(
+                            result,
+                            step=-1,
+                            status="passed",
+                            action=(
+                                "Connect the hosted session to GitHub and wait for the "
+                                "ready tracker shell."
+                            ),
+                            observed=(
+                                f"connected_repository={service.repository}; "
+                                f"user_login={user.login}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the hosted app reached the connected tracker shell "
+                                "before checking Repository access."
+                            ),
+                            observed=connected_body,
+                        )
+                    except Exception as error:
+                        connected_body = page.current_body_text()
+                        result["connected_body_text"] = connected_body
+                        _record_step(
+                            result,
+                            step=-1,
+                            status="failed",
+                            action=(
+                                "Connect the hosted session to GitHub and wait for the "
+                                "ready tracker shell."
+                            ),
+                            observed=(
+                                f"{error}\n"
+                                f"Observed body text:\n{connected_body}"
+                            ),
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Observed the hosted app after the GitHub connection wait "
+                                "timed out, before Repository access or Attachments were reached."
+                            ),
+                            observed=connected_body,
+                        )
+                        raise
                     try:
                         repository_access = _observe_release_write_precondition(
                             settings_page,
@@ -1037,6 +1101,113 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
+def _expected_repository_access_copy(result: dict[str, object]) -> str:
+    release_tag_prefix = str(result.get("release_tag_prefix", ""))
+    return (
+        "New attachments resolve to release tag "
+        f"{release_tag_prefix}<ISSUE_KEY>, and this hosted session can complete "
+        "release-backed uploads in the browser."
+    )
+
+
+def _observed_repository_access_copy(result: dict[str, object]) -> str:
+    observation = result.get("repository_access_observation")
+    if isinstance(observation, dict):
+        body_text = observation.get("body_text")
+        if body_text:
+            return str(body_text)
+    body_text = result.get("repository_access_body_text")
+    if body_text:
+        return str(body_text)
+    return "No Repository access body text was recorded."
+
+
+def _observed_setup_body_text(result: dict[str, object]) -> str:
+    for key in ("connected_body_text", "runtime_body_text"):
+        body_text = result.get(key)
+        if body_text:
+            return str(body_text)
+    return "No hosted app body text was recorded."
+
+
+def _stopped_before_repository_access(result: dict[str, object]) -> bool:
+    return _step_status(result, -1) == "failed"
+
+
+def _stopped_at_repository_access_precondition(result: dict[str, object]) -> bool:
+    return _step_status(result, 0) == "failed"
+
+
+def _failure_result_summary(result: dict[str, object], *, jira: bool) -> str:
+    bullet = "*" if jira else "-"
+    if _stopped_before_repository_access(result):
+        return (
+            f"{bullet} Did not reach the TS-509 precondition: the hosted app never converged "
+            "to the connected tracker shell, so Repository access and Attachments were not reached."
+        )
+    if _stopped_at_repository_access_precondition(result):
+        return (
+            f"{bullet} Did not match the TS-509 precondition: the visible Repository "
+            "access section never exposed browser-supported GitHub Releases upload "
+            "capability, so the Attachments file-selection/upload steps were not reached."
+        )
+    return f"{bullet} Did not match the expected result."
+
+
+def _repository_access_failure_lines(
+    result: dict[str, object],
+    *,
+    jira: bool,
+) -> list[str]:
+    if not _stopped_at_repository_access_precondition(result):
+        return []
+    bullet = "*" if jira else "-"
+    opening = "*Repository access precondition*" if jira else "### Repository access precondition"
+    return [
+        "",
+        opening,
+        (
+            f"{bullet} Missing capability boundary: the hosted session did not expose "
+            "`supportsReleaseAttachmentWrites` through the visible Repository access copy."
+        ),
+        f"{bullet} Expected visible copy:",
+        "{code}" if jira else "```text",
+        _expected_repository_access_copy(result),
+        "{code}" if jira else "```",
+        f"{bullet} Actual visible copy:",
+        "{code}" if jira else "```text",
+        _observed_repository_access_copy(result),
+        "{code}" if jira else "```",
+        (
+            f"{bullet} Resulting boundary: the scenario stopped in Project Settings before "
+            "opening the Attachments tab file-selection/upload flow."
+        ),
+    ]
+
+
+def _setup_failure_lines(
+    result: dict[str, object],
+    *,
+    jira: bool,
+) -> list[str]:
+    if not _stopped_before_repository_access(result):
+        return []
+    bullet = "*" if jira else "-"
+    opening = "*Hosted app setup*" if jira else "### Hosted app setup"
+    return [
+        "",
+        opening,
+        (
+            f"{bullet} Missing boundary: the hosted app never reached the connected shell "
+            "needed before Repository access or Attachments could be validated."
+        ),
+        f"{bullet} Actual visible copy/state:",
+        "{code}" if jira else "```text",
+        _observed_setup_body_text(result),
+        "{code}" if jira else "```",
+    ]
+
+
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
     status = "PASSED" if passed else "FAILED"
     screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
@@ -1052,7 +1223,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             "upload controls stayed enabled, and the uploaded file was persisted as a "
             "github-releases attachment."
             if passed
-            else "* Did not match the expected result."
+            else _failure_result_summary(result, jira=True)
         ),
         (
             f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
@@ -1066,6 +1237,8 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "*Human-style verification*",
         *_human_lines(result, jira=True),
+        *([] if passed else _setup_failure_lines(result, jira=True)),
+        *([] if passed else _repository_access_failure_lines(result, jira=True)),
     ]
     if not passed:
         lines.extend(
@@ -1095,7 +1268,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             "upload controls stayed enabled, and the uploaded file was persisted as a "
             "`github-releases` attachment."
             if passed
-            else "- Did not match the expected result."
+            else _failure_result_summary(result, jira=False)
         ),
         (
             f"- Environment: URL `{result['app_url']}`, repository `{result['repository']}` "
@@ -1108,6 +1281,8 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "### Human-style verification",
         *_human_lines(result, jira=False),
+        *([] if passed else _setup_failure_lines(result, jira=False)),
+        *([] if passed else _repository_access_failure_lines(result, jira=False)),
     ]
     if not passed:
         lines.extend(
@@ -1132,6 +1307,19 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             "Ran the live hosted TS-509 scenario after switching the project to "
             "`github-releases`, then captured the visible Attachments state and any "
             "manifest / GitHub Release evidence reached by the flow."
+            if passed
+            else "Ran the live hosted TS-509 scenario after switching the project to "
+            "`github-releases`, then stopped before Repository access because the hosted "
+            "app never reached the connected tracker shell."
+            if _stopped_before_repository_access(result)
+            else "Ran the live hosted TS-509 scenario after switching the project to "
+            "`github-releases`, then stopped at the visible Project Settings / Repository "
+            "access precondition when the hosted session never exposed browser-supported "
+            "GitHub Releases upload capability."
+            if _stopped_at_repository_access_precondition(result)
+            else "Ran the live hosted TS-509 scenario after switching the project to "
+            "`github-releases`, then captured the visible Attachments state and any "
+            "manifest / GitHub Release evidence reached by the flow."
         ),
         "",
         "## Observed",
@@ -1143,6 +1331,41 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         lines.extend(
             [
                 "",
+                "## Failure mode",
+                (
+                    "- Hosted app setup failure: the GitHub-connected tracker shell never "
+                    "became ready, so Repository access and the Attachments flow were not reached."
+                    if _stopped_before_repository_access(result)
+                    else
+                    "- Repository access precondition failure: the hosted session did not "
+                    "expose `supportsReleaseAttachmentWrites`, so the Attachments "
+                    "file-selection/upload steps were never reached."
+                    if _stopped_at_repository_access_precondition(result)
+                    else "- Attachments upload flow failure after the precondition passed."
+                ),
+                "",
+                *(
+                    [
+                        "## Hosted app setup evidence",
+                        "```text",
+                        _observed_setup_body_text(result),
+                        "```",
+                        "",
+                    ]
+                    if _stopped_before_repository_access(result)
+                    else [
+                        "## Repository access evidence",
+                        "### Expected visible copy",
+                        "```text",
+                        _expected_repository_access_copy(result),
+                        "```",
+                        "### Actual visible copy",
+                        "```text",
+                        _observed_repository_access_copy(result),
+                        "```",
+                        "",
+                    ]
+                ),
                 "## Error",
                 "```text",
                 str(result.get("traceback", result.get("error", ""))),
@@ -1153,6 +1376,10 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    if _stopped_before_repository_access(result):
+        return _setup_failure_bug_description(result)
+    if _stopped_at_repository_access_precondition(result):
+        return _precondition_bug_description(result)
     release_tag = str(result.get("release_tag", ""))
     return "\n".join(
         [
@@ -1235,6 +1462,148 @@ def _bug_description(result: dict[str, object]) -> str:
     ) + "\n"
 
 
+def _setup_failure_bug_description(result: dict[str, object]) -> str:
+    return "\n".join(
+        [
+            "# TS-509 - Hosted app never reached the connected tracker shell",
+            "",
+            "## Steps to reproduce",
+            "1. Configure the project with `attachmentStorage.mode = github-releases` and a release tag prefix.",
+            (
+                "2. Open the hosted app and wait for the GitHub-connected tracker shell "
+                "that should appear before Repository access and Attachments can be exercised."
+            ),
+            f"   - ❌ {_step_observation(result, -1)}",
+            "3. Continue to Project Settings / Repository access only after the connected shell is visible.",
+            "   - ❌ Not reached because the hosted shell never became ready.",
+            "4. Continue to the Attachments tab only after Repository access is available.",
+            "   - ❌ Not reached because the hosted shell never became ready.",
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Actual vs Expected",
+            (
+                "- **Expected:** the hosted app should reach the connected tracker shell so "
+                "Repository access can be checked and the TS-509 Attachments flow can begin."
+            ),
+            (
+                "- **Actual:** the hosted app timed out before showing any of the expected "
+                "connected or recoverable GitHub access states, so the test never reached "
+                "Repository access or Attachments."
+            ),
+            "",
+            "## Missing or broken production capability",
+            (
+                "The public hosted app did not expose a ready connected shell or a visible "
+                "recoverable connection state within the timeout window. This blocks TS-509 "
+                "before any Repository access or Attachments behavior can be evaluated."
+            ),
+            "",
+            "## Environment details",
+            f"- URL: `{result.get('app_url')}`",
+            f"- Repository: `{result.get('repository')}` @ `{result.get('repository_ref')}`",
+            f"- Issue: `{result.get('issue_key')}` (`{result.get('issue_summary')}`)",
+            f"- Browser: `Chromium (Playwright)`",
+            f"- OS: `{platform.platform()}`",
+            f"- Project config path: `{PROJECT_JSON_PATH}`",
+            f"- Release tag prefix: `{result.get('release_tag_prefix')}`",
+            "",
+            "## Failing command/output",
+            "```text",
+            str(result.get("error", "")),
+            "```",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
+            "### Hosted app body text",
+            "```text",
+            _observed_setup_body_text(result),
+            "```",
+            f"- Cleanup: `{result.get('cleanup')}`",
+            f"- Cleanup error: `{result.get('cleanup_error', '')}`",
+        ],
+    ) + "\n"
+
+
+def _precondition_bug_description(result: dict[str, object]) -> str:
+    return "\n".join(
+        [
+            "# TS-509 - Hosted Repository access does not expose browser-supported release uploads",
+            "",
+            "## Steps to reproduce",
+            "1. Configure the project with `attachmentStorage.mode = github-releases` and a release tag prefix.",
+            (
+                "2. Open the hosted app and navigate to **Project Settings** so the visible "
+                "**Repository access** section can be inspected before opening the "
+                "**Attachments** tab."
+            ),
+            f"   - {'✅' if _step_status(result, 0) == 'passed' else '❌'} {_step_observation(result, 0)}",
+            (
+                "3. Check whether the Repository access section shows the browser-supported "
+                "GitHub Releases upload copy required for `supportsReleaseAttachmentWrites`."
+            ),
+            f"   - Expected visible copy:\n```text\n{_expected_repository_access_copy(result)}\n```",
+            f"   - Actual visible copy:\n```text\n{_observed_repository_access_copy(result)}\n```",
+            (
+                "4. Continue to the **Attachments** tab only if that precondition is visible."
+            ),
+            "   - ❌ Not reached because the Repository access precondition failed.",
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Actual vs Expected",
+            (
+                "- **Expected:** before using the Attachments tab as TS-509 product evidence, "
+                "the visible Repository access section should confirm that new attachments "
+                "resolve to the seeded GitHub Release tag and that the hosted session can "
+                "complete release-backed uploads in the browser."
+            ),
+            (
+                "- **Actual:** the hosted Project Settings / Repository access section never "
+                "showed that browser-supported GitHub Releases capability, so the Attachments "
+                "file-selection/upload steps could not be exercised."
+            ),
+            "",
+            "## Missing or broken production capability",
+            (
+                "The public hosted Repository access surface does not expose the "
+                "`supportsReleaseAttachmentWrites` capability needed by TS-509. This is a "
+                "product-visible capability gap, not an automation-only issue, because the "
+                "test must stop before the Attachments flow when that visible precondition is absent."
+            ),
+            "",
+            "## Environment details",
+            f"- URL: `{result.get('app_url')}`",
+            f"- Repository: `{result.get('repository')}` @ `{result.get('repository_ref')}`",
+            f"- Issue: `{result.get('issue_key')}` (`{result.get('issue_summary')}`)",
+            f"- Browser: `Chromium (Playwright)`",
+            f"- OS: `{platform.platform()}`",
+            f"- Project config path: `{PROJECT_JSON_PATH}`",
+            f"- Release tag prefix: `{result.get('release_tag_prefix')}`",
+            "",
+            "## Failing command/output",
+            "```text",
+            str(result.get("error", "")),
+            "```",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
+            "### Repository access body text",
+            "```text",
+            _observed_repository_access_copy(result),
+            "```",
+            f"- Cleanup: `{result.get('cleanup')}`",
+            f"- Cleanup error: `{result.get('cleanup_error', '')}`",
+        ],
+    ) + "\n"
+
+
 def _automation_coverage_lines(
     result: dict[str, object],
     *,
@@ -1248,6 +1617,15 @@ def _automation_coverage_lines(
             "github-releases` with a ticket-specific release tag prefix."
         )
     ]
+    if _step_status(result, -1) in {"passed", "failed"}:
+        lines.append(
+            f"{bullet} Opened the hosted app and waited for the GitHub-connected tracker shell."
+        )
+    if _step_status(result, 0) in {"passed", "failed"}:
+        lines.append(
+            f"{bullet} Verified the visible Project Settings / Repository access copy "
+            "for browser-supported GitHub Releases uploads before using the Attachments tab."
+        )
     if _step_status(result, 1) in {"passed", "failed"}:
         lines.append(
             f"{bullet} Opened the deployed hosted TrackState app, connected GitHub, "
@@ -1270,6 +1648,13 @@ def _automation_coverage_lines(
             "to verify whether the upload was routed to release-backed storage."
         )
     return lines
+
+
+def _find_step(result: dict[str, object], step_number: int) -> dict[str, object] | None:
+    for step in result.get("steps", []):
+        if isinstance(step, dict) and int(step.get("step", -1)) == step_number:
+            return step
+    return None
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
@@ -1305,18 +1690,21 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
 
 
 def _step_status(result: dict[str, object], step_number: int) -> str:
-    for step in result.get("steps", []):
-        if isinstance(step, dict) and int(step.get("step", -1)) == step_number:
-            return str(step.get("status", "failed"))
-    return "failed"
+    step = _find_step(result, step_number)
+    if step is None:
+        return "not_run"
+    return str(step.get("status", "failed"))
 
 
 def _step_observation(result: dict[str, object], step_number: int) -> str:
-    for step in result.get("steps", []):
-        if isinstance(step, dict) and int(step.get("step", -1)) == step_number:
-            return str(step.get("observed", "No observation recorded."))
+    step = _find_step(result, step_number)
+    if step is not None:
+        return str(step.get("observed", "No observation recorded."))
     previous_step = step_number - 1
-    if previous_step >= 1 and _step_status(result, previous_step) != "passed":
+    if previous_step >= 0 and _find_step(result, previous_step) is not None and _step_status(
+        result,
+        previous_step,
+    ) != "passed":
         return (
             f"Not reached because Step {previous_step} failed: "
             f"{_step_observation(result, previous_step)}"

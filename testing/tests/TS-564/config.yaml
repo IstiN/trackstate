@@ -1,0 +1,56 @@
+test_id: TS-564
+type: cli
+framework: python
+platform: local
+dependencies:
+  - Flutter Linux desktop build dependencies available on the runner
+  - xvfb-run available on PATH
+  - git CLI available on PATH
+notes:
+  - Executes the local release-backed attachment download flow against a disposable TrackState repository with GitHub credentials removed from the runtime environment.
+  - Verifies the JSON error category and error.exitCode from the pre-flight auth failure are not still masked as the generic repository contract.
+runtime_inputs:
+  ticket_command: trackstate attachment download --issue TS-123 --file manual.pdf --target local --output json
+  requested_command:
+    - trackstate
+    - attachment
+    - download
+    - --attachment-id
+    - TS/TS-123/attachments/manual.pdf
+    - --out
+    - ./downloads/manual.pdf
+    - --target
+    - local
+    - --output
+    - json
+  project_key: TS
+  project_name: TS-564 Project
+  issue_key: TS-123
+  issue_summary: Release-backed local attachment download auth-category fixture
+  attachment_name: manual.pdf
+  attachment_relative_path: TS/TS-123/attachments/manual.pdf
+  attachment_media_type: application/pdf
+  attachment_size_bytes: 19
+  attachment_revision_or_oid: "84"
+  attachment_created_at: "2026-05-12T00:00:00Z"
+  attachment_author: tester
+  attachment_tag_prefix: ts564-
+  attachment_release_tag: ts564-TS-123
+  attachment_release_asset_name: manual.pdf
+  remote_origin_url: https://github.com/IstiN/trackstate.git
+  output_file_argument: ./downloads/manual.pdf
+  expected_output_relative_path: downloads/manual.pdf
+  expected_release_fragments:
+    - github releases
+    - github-releases
+    - release-backed
+  expected_auth_fragments:
+    - github access
+    - github authentication
+    - authentication
+    - token
+    - credential
+    - configuration
+  provider_capability_fragments:
+    - does not support github releases attachment downloads
+    - repository provider
