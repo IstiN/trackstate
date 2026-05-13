@@ -29,6 +29,7 @@ RUN_COMMAND = "python testing/tests/TS-616/test_ts_616.py"
 BASE_VIEWPORT = {"width": 1600, "height": 960}
 RESIZED_VIEWPORT = {"width": 1500, "height": 960}
 GEOMETRY_TOLERANCE = 1.0
+STANDARDIZED_CONTROL_HEIGHT = 32.0
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
@@ -87,16 +88,28 @@ def main() -> None:
 
                 baseline = page.observe_header()
                 result["baseline_observation"] = _observation_payload(baseline)
-                _assert_baseline_header(baseline=baseline, user_login=user.login)
+                baseline_action = (
+                    "Open the deployed hosted app on desktop and verify the visible "
+                    "header controls are ready for interaction."
+                )
+                baseline_summary = _header_summary(baseline)
+                try:
+                    _assert_baseline_header(baseline=baseline, user_login=user.login)
+                except AssertionError as error:
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=baseline_action,
+                        observed=f"{baseline_summary}; error={_trimmed(str(error), limit=600)}",
+                    )
+                    raise
                 _record_step(
                     result,
                     step=1,
                     status="passed",
-                    action=(
-                        "Open the deployed hosted app on desktop and verify the visible "
-                        "header controls are ready for interaction."
-                    ),
-                    observed=_header_summary(baseline),
+                    action=baseline_action,
+                    observed=baseline_summary,
                 )
                 _record_human_verification(
                     result,
@@ -317,6 +330,11 @@ def _assert_baseline_header(
         step_number=1,
         context="initial desktop header state",
     )
+    _assert_standardized_control_heights(
+        observation=baseline,
+        step_number=1,
+        context="the initial desktop header state",
+    )
 
 
 def _assert_search_focus(observation: DesktopHeaderObservation) -> None:
@@ -421,6 +439,11 @@ def _assert_geometry_stable(
         step_number=step_number,
         context=context,
     )
+    _assert_standardized_control_heights(
+        observation=observed,
+        step_number=step_number,
+        context=context,
+    )
 
 
 def _assert_resize_layout(
@@ -457,6 +480,11 @@ def _assert_resize_layout(
             metric="center_y",
         )
     _assert_primary_row_alignment(
+        observation=resized,
+        step_number=step_number,
+        context="the resized desktop header state",
+    )
+    _assert_standardized_control_heights(
         observation=resized,
         step_number=step_number,
         context="the resized desktop header state",
@@ -508,6 +536,30 @@ def _assert_primary_row_alignment(
             control_name=control_name,
             metric="center_y",
         )
+
+
+def _assert_standardized_control_heights(
+    *,
+    observation: DesktopHeaderObservation,
+    step_number: int,
+    context: str,
+) -> None:
+    mismatches: list[str] = []
+    for control_name in ("sync", "search", "create", "access", "theme", "profile"):
+        control = getattr(observation, control_name)
+        if abs(control.height - STANDARDIZED_CONTROL_HEIGHT) <= GEOMETRY_TOLERANCE:
+            continue
+        mismatches.append(
+            f"{control_name} observed {control.height:.1f}px ({_control_summary(control)})"
+        )
+    if not mismatches:
+        return
+    raise AssertionError(
+        f"Step {step_number} failed: {context} did not keep every audited desktop "
+        "header control at the required standardized 32px height.\n"
+        f"Expected height: {STANDARDIZED_CONTROL_HEIGHT:.1f}px +/- {GEOMETRY_TOLERANCE:.1f}px\n"
+        + "\n".join(mismatches),
+    )
 
 
 def _assert_close(
@@ -679,9 +731,10 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "*Observed result*",
         (
-            "* Matched the expected result: hover/focus/theme/resize interactions did not "
-            "change the desktop header control heights or vertical alignment, and the "
-            "resized header controls stayed in a single non-overlapping row."
+            "* Matched the expected result: the audited desktop header controls stayed at "
+            "the required 32px standardized height, preserved their vertical alignment "
+            "during hover/focus/theme interactions, and remained in a single "
+            "non-overlapping row after the desktop resize."
             if passed
             else "* Did not match the expected result."
         ),
@@ -736,9 +789,10 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "### Observed result",
         (
-            "- Matched the expected result: hover/focus/theme/resize interactions did not "
-            "change the desktop header control heights or vertical alignment, and the "
-            "resized header controls stayed in a single non-overlapping row."
+            "- Matched the expected result: the audited desktop header controls stayed at "
+            "the required 32px standardized height, preserved their vertical alignment "
+            "during hover/focus/theme interactions, and remained in a single "
+            "non-overlapping row after the desktop resize."
             if passed
             else "- Did not match the expected result."
         ),
@@ -819,9 +873,10 @@ def _bug_description(result: dict[str, object]) -> str:
         "",
         "## Actual vs Expected",
         (
-            "- Expected: interactive desktop-header states keep the same control height and "
-            "vertical alignment, and resizing within the desktop range preserves a stable "
-            "single-row header without overlap."
+            "- Expected: the audited desktop header controls render at the required 32px "
+            "standardized height, keep their vertical alignment during hover/focus/theme "
+            "state changes, and remain in a stable single row without overlap across the "
+            "desktop breakpoint range."
         ),
         (
             "- Actual: "
