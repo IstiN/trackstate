@@ -6,6 +6,7 @@ from testing.components.pages.live_jql_search_page import LiveJqlSearchPage
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
 from testing.core.interfaces.web_app_session import (
     FocusedElementObservation,
+    NewPageObservation,
     WebAppTimeoutError,
 )
 
@@ -931,6 +932,15 @@ class LiveIssueDetailCollaborationPage:
         return self._session.wait_for_download_after_keypress(
             "Enter",
             timeout_ms=60_000,
+        )
+
+    def activate_focused_control_in_new_page(
+        self,
+        *,
+        timeout_ms: int = 8_000,
+    ) -> NewPageObservation:
+        return self._session.wait_for_new_page_after_active_element_click(
+            timeout_ms=timeout_ms,
         )
 
     def download_attachment(self, attachment_name: str) -> str:

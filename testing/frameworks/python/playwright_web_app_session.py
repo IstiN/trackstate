@@ -10,6 +10,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from testing.core.interfaces.web_app_session import (
     ElementBoundingBox,
     FocusedElementObservation,
+    NewPageObservation,
     WaitMatch,
     WaitState,
     WebAppSession,
@@ -482,6 +483,101 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out waiting for a download after clicking selector "{selector}".',
             ) from error
         return download.suggested_filename
+
+    def wait_for_new_page_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> NewPageObservation:
+        context = self._page.context
+        page_count_before = len(context.pages)
+        try:
+            with context.expect_page(timeout=timeout_ms) as page_info:
+                self._page.keyboard.press(key)
+            new_page = page_info.value
+            try:
+                new_page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+            except PlaywrightTimeoutError:
+                pass
+            new_page_url = new_page.url
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a new page after pressing "{key}".',
+            ) from error
+        finally:
+            page_count_after = len(context.pages)
+        return NewPageObservation(
+            url=new_page_url,
+            page_count_before=page_count_before,
+            page_count_after=page_count_after,
+        )
+
+    def wait_for_new_page_after_active_element_click(
+        self,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> NewPageObservation:
+        context = self._page.context
+        page_count_before = len(context.pages)
+        try:
+            payload = self._page.evaluate(
+                """
+                () => {
+                    const isVisible = (element) => {
+                        if (!element) {
+                            return false;
+                        }
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return (
+                            rect.width > 0
+                            && rect.height > 0
+                            && style.visibility !== 'hidden'
+                            && style.display !== 'none'
+                        );
+                    };
+                    const active = document.activeElement;
+                    if (!active) {
+                        return null;
+                    }
+                    const candidates = [
+                        active,
+                        ...Array.from(active.querySelectorAll('*')),
+                    ];
+                    const target = candidates.find((element) => isVisible(element)) ?? null;
+                    if (!target) {
+                        return null;
+                    }
+                    const rect = target.getBoundingClientRect();
+                    return {
+                        x: rect.left + (rect.width / 2),
+                        y: rect.top + (rect.height / 2),
+                    };
+                }
+                """,
+            )
+            if not isinstance(payload, dict):
+                raise WebAppTimeoutError("No visible focused element was available to click.")
+            with context.expect_page(timeout=timeout_ms) as page_info:
+                self._page.mouse.click(float(payload["x"]), float(payload["y"]))
+            new_page = page_info.value
+            try:
+                new_page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+            except PlaywrightTimeoutError:
+                pass
+            new_page_url = new_page.url
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                "Timed out waiting for a new page after clicking the focused element.",
+            ) from error
+        finally:
+            page_count_after = len(context.pages)
+        return NewPageObservation(
+            url=new_page_url,
+            page_count_before=page_count_before,
+            page_count_after=page_count_after,
+        )
 
     def select_files_after_click(
         self,

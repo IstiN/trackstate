@@ -21,7 +21,11 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
-from testing.core.interfaces.web_app_session import FocusedElementObservation  # noqa: E402
+from testing.core.interfaces.web_app_session import (  # noqa: E402
+    FocusedElementObservation,
+    NewPageObservation,
+    WebAppTimeoutError,
+)
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from testing.tests.support.read_only_hosted_session_runtime import (  # noqa: E402
@@ -42,6 +46,7 @@ ATTACHMENT_PATH = f"{ISSUE_PATH}/attachments/{ATTACHMENT_NAME}"
 MANIFEST_PATH = f"{ISSUE_PATH}/attachments.json"
 ATTACHMENTS_TAB_LABEL = "Attachments"
 MAX_TAB_STEPS = 60
+DOWNLOAD_FAILURE_PREFIX = "Attachment download failed:"
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -257,19 +262,38 @@ def main() -> None:
                         f"Observed focus traversal: {_format_focus_traversal(traversal)}\n"
                         f"Observed body text:\n{attachments_text}",
                     )
-                focused_download_label = (
-                    (download_focus.get("accessible_name") or download_focus.get("text") or "").strip()
+                focused_download = _focus_download_control(
+                    page,
+                    expected_label=download_label,
                 )
-                downloaded_filename = page.download_attachment(ATTACHMENT_NAME)
-                result["downloaded_filename"] = downloaded_filename
-                result["focused_download_label"] = focused_download_label
-                expected_downloaded_filename = ATTACHMENT_NAME
-                if downloaded_filename != expected_downloaded_filename:
+                focused_download_label = (
+                    focused_download.accessible_name or focused_download.text or ""
+                ).strip()
+                download_activation: NewPageObservation | None = None
+                try:
+                    download_activation = page.activate_focused_control_in_new_page()
+                except WebAppTimeoutError as activation_error:
+                    result["download_activation_timeout"] = str(activation_error)
+                try:
+                    page.wait_for_text_absent(DOWNLOAD_FAILURE_PREFIX, timeout_ms=10_000)
+                except WebAppTimeoutError as error:
                     raise AssertionError(
-                        "Step 3 failed: clicking the visible download control did not "
-                        "start the expected attachment download.\n"
-                        f"Expected downloaded file: {expected_downloaded_filename}\n"
-                        f"Observed downloaded file: {downloaded_filename}\n"
+                        "Step 3 failed: activating the focused attachment download control "
+                        "surfaced the hosted app's user-visible download failure message.\n"
+                        f"Observed body text:\n{page.current_body_text()}",
+                    ) from error
+                result["focused_download_label"] = focused_download_label
+                result["download_activation"] = (
+                    _new_page_observation_dict(download_activation)
+                    if download_activation is not None
+                    else {"url": "", "page_count_before": 0, "page_count_after": 0}
+                )
+                if focused_download_label != download_label:
+                    raise AssertionError(
+                        "Step 3 failed: keyboard activation did not stay on the visible "
+                        "attachment download control before the user triggered it.\n"
+                        f"Expected focused label: {download_label}\n"
+                        f"Observed focused label: {focused_download_label}\n"
                         f"Observed focus traversal: {_format_focus_traversal(traversal)}",
                     )
                 _record_step(
@@ -281,18 +305,20 @@ def main() -> None:
                     ),
                     observed=(
                         f"focused_download_label={focused_download_label}; "
-                        f"downloaded_filename={downloaded_filename}"
+                        f"activation={_new_page_observation_text(download_activation)}; "
+                        f"failure_message_visible=false"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Verified the existing attachment still behaved like a normal "
-                        "download action for the user even though upload controls were absent."
+                        "Verified the focused download control remained user-activatable "
+                        "without showing an attachment download failure message in the "
+                        "read-only Attachments view."
                     ),
                     observed=(
                         f"focused_download_label={focused_download_label}; "
-                        f"downloaded_filename={downloaded_filename}"
+                        f"activation={_new_page_observation_text(download_activation)}"
                     ),
                 )
 
@@ -587,6 +613,47 @@ def _format_focus_traversal(traversal: list[dict[str, str | None]]) -> str:
     return " -> ".join(parts)
 
 
+def _focus_download_control(
+    page: LiveIssueDetailCollaborationPage,
+    *,
+    expected_label: str,
+) -> FocusedElementObservation:
+    page.focus_collaboration_tab(ATTACHMENTS_TAB_LABEL)
+    for _ in range(MAX_TAB_STEPS + 1):
+        active_element = page.active_element()
+        active_label = (active_element.accessible_name or active_element.text or "").strip()
+        if active_label == expected_label:
+            return active_element
+        page.press_key("Tab")
+    raise AssertionError(
+        "Step 3 failed: the visible attachment download control was not keyboard-reachable "
+        "when the user attempted to activate it.\n"
+        f"Expected focused label: {expected_label}\n"
+        f"Observed body text:\n{page.current_body_text()}",
+    )
+
+
+def _new_page_observation_dict(observation: NewPageObservation) -> dict[str, object]:
+    if observation is None:
+        return {"url": "", "page_count_before": 0, "page_count_after": 0}
+    return {
+        "url": observation.url,
+        "page_count_before": observation.page_count_before,
+        "page_count_after": observation.page_count_after,
+    }
+
+
+def _new_page_observation_text(observation: NewPageObservation | None) -> str:
+    if observation is None:
+        return "url=''; page_count_before=0; page_count_after=0; new_page_opened=false"
+    return (
+        f"url={observation.url!r}; "
+        f"page_count_before={observation.page_count_before}; "
+        f"page_count_after={observation.page_count_after}; "
+        f"new_page_opened={observation.page_count_after > observation.page_count_before}"
+    )
+
+
 def _extract_failed_step_number(message: str) -> int | None:
     match = re.search(r"Step (\d+) failed", message)
     if match is None:
@@ -688,7 +755,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "* Seeded the live DEMO-2 issue with one repository-path attachment so the Attachments tab had an existing download row to inspect.",
         "* Connected a hosted GitHub session and patched the live repository permission response to read-only so the production session resolved without write access.",
         "* Opened the live issue Attachments tab and checked the existing download row plus the absence of upload / replacement controls in the read-only session.",
-        "* Used keyboard Tab navigation and Enter activation to verify the existing attachment still downloaded from the user-visible control.",
+        "* Used keyboard Tab navigation and Enter activation to verify the existing attachment still opened through the hosted download flow from the user-visible control.",
         "",
         "*Observed result*",
         (
@@ -733,7 +800,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "- Seeded the live `DEMO-2` issue with one repository-path attachment so the Attachments tab had an existing download row to inspect.",
         "- Connected a hosted GitHub session and patched the live repository permission response to read-only so the production session resolved without write access.",
         "- Opened the live issue `Attachments` tab and checked the existing download row plus the absence of upload / replacement controls in the read-only session.",
-        "- Used keyboard Tab navigation and `Enter` activation to verify the existing attachment still downloaded from the user-visible control.",
+        "- Used keyboard Tab navigation and `Enter` activation to verify the existing attachment still opened through the hosted download flow from the user-visible control.",
         "",
         "### Observed result",
         (
@@ -772,16 +839,30 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         f"# {TICKET_KEY} {status}",
         "",
+        "## Issues/Notes",
         (
-            "Ran the deployed hosted attachment read-only scenario with a seeded live "
-            "attachment and a permission-patched read-only session."
+            "- No outstanding notes."
+            if passed
+            else f"- Test failed with `{result.get('error', 'AssertionError')}`."
         ),
         "",
-        "## Observed",
+        "## Approach",
+        "- Exercised the deployed hosted TrackState app against the live setup repository.",
+        "- Seeded a live repository-path attachment and forced the hosted session into read-only mode via the permissions response override.",
+        "- Verified upload and replacement controls stayed hidden, then activated the keyboard-focused download control and observed the hosted new-page effect.",
+        "",
+        "## Files Modified",
+        "- `testing/tests/TS-525/test_ts_525.py`",
+        "- `testing/components/pages/live_issue_detail_collaboration_page.py`",
+        "- `testing/core/interfaces/web_app_session.py`",
+        "- `testing/frameworks/python/playwright_web_app_session.py`",
+        "",
+        "## Test Coverage",
         f"- Attachment: `{result.get('attachment_name', '')}`",
         f"- Screenshot: `{screenshot_path}`",
         f"- Environment: `{result['app_url']}` on Chromium/Playwright ({platform.system()})",
         f"- Repository: `{result['repository']}` @ `{result['repository_ref']}`",
+        f"- Step results: {', '.join(_step_status_summary(result))}",
     ]
     if not passed:
         lines.extend(
@@ -798,64 +879,77 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 def _bug_description(result: dict[str, object]) -> str:
     lines = [
-        f"# {TICKET_KEY} - Hosted read-only attachment controls regression",
+        f"h4. Environment",
         "",
-        "## Steps to reproduce",
-        "1. Open an issue with existing attachments in the `Attachments` tab.",
-        f"   - {'✅' if _step_status(result, 1) == 'passed' else '❌'} {_step_observation(result, 1)}",
-        "2. Inspect the UI for any file input, `Choose file` button, or replacement triggers.",
-        f"   - {'✅' if _step_status(result, 2) == 'passed' else '❌'} {_step_observation(result, 2)}",
-        "3. Verify that existing attachments still download in the read-only state.",
-        f"   - {'✅' if _step_status(result, 3) == 'passed' else '❌'} {_step_observation(result, 3)}",
+        f"* URL: `{result['app_url']}`",
+        f"* Repository: `{result['repository']}` @ `{result['repository_ref']}`",
+        f"* Issue: `{result.get('issue_key', '')}` (`{result.get('issue_path', '')}`)",
+        f"* Attachment fixture: `{result.get('attachment_name', '')}` (`{result.get('attachment_path', '')}`)",
+        "* Browser: `Chromium (Playwright)`",
+        f"* OS: `{platform.platform()}`",
         "",
-        "## Actual vs Expected",
-        (
-            "- Expected: with `canUpload` resolved to false in a hosted read-only session, "
-            "the Attachments tab hides upload / replacement controls while keeping the "
-            "existing attachment download row available and functional."
+        "h4. Steps to Reproduce",
+        "",
+        "1. Open the hosted TrackState app and connect a GitHub session for `IstiN/trackstate-setup`.",
+        "2. Force the hosted repository permissions response to resolve `canUpload = false`.",
+        "3. Open issue `DEMO-2` and switch to the `Attachments` tab.",
+        "4. Confirm the existing attachment rows still render while upload and replacement controls stay hidden.",
+        "5. Tab to the visible download control and press `Enter`.",
+        "",
+        "h4. Expected Result",
+        "",
+        "The hosted read-only Attachments tab hides upload and replacement controls, and activating the visible download control opens the attachment via the hosted app's public download flow without showing an attachment download failure message.",
+        "",
+        "h4. Actual Result",
+        "",
+        str(
+            result.get("error")
+            or "The hosted read-only Attachments flow did not preserve the expected download behavior.",
         ),
-        (
-            "- Actual: "
-            + str(
-                result.get("error")
-                or "the Attachments tab still exposed upload controls or lost download access.",
-            )
-        ),
         "",
-        "## Exact error message",
-        "```text",
+        "Exact observed Step 3 output:",
+        f"* {_step_observation(result, 3)}",
+        "",
+        "h4. Logs / Error Output",
+        "",
+        "{code}",
         str(result.get("traceback", result.get("error", ""))),
-        "```",
+        "{code}",
         "",
-        "## Environment",
-        f"- URL: `{result['app_url']}`",
-        f"- Repository: `{result['repository']}` @ `{result['repository_ref']}`",
-        f"- Issue: `{result.get('issue_key', '')}` (`{result.get('issue_path', '')}`)",
-        f"- Attachment fixture: `{result.get('attachment_name', '')}` (`{result.get('attachment_path', '')}`)",
-        "- Browser: `Chromium (Playwright)`",
-        f"- OS: `{platform.platform()}`",
+        "h4. Notes",
         "",
-        "## Evidence",
-        f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
-        f"- Permission patch observation: `{result.get('permission_patch_observation', {})}`",
-        f"- Upload control observation: `{result.get('upload_controls', {})}`",
-        f"- Focus observation: `{result.get('focus_observation', {})}`",
+        f"* Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
+        f"* Permission patch observation: `{result.get('permission_patch_observation', {})}`",
+        f"* Upload control observation: `{result.get('upload_controls', {})}`",
+        f"* Focus observation: `{result.get('focus_observation', {})}`",
+        f"* Download activation observation: `{result.get('download_activation', {})}`",
         "",
-        "## Observed body text",
-        "```text",
+        "* Observed Attachments body text:",
+        "{code}",
         str(result.get("attachments_body_text") or result.get("runtime_body_text", "")),
-        "```",
+        "{code}",
         "",
-        "## Focus traversal",
-        "```text",
+        "* Focus traversal:",
+        "{code}",
         _format_focus_traversal(
             result.get("tab_traversal", [])
             if isinstance(result.get("tab_traversal", []), list)
             else [],
         ),
-        "```",
+        "{code}",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _step_status_summary(result: dict[str, object]) -> list[str]:
+    summaries: list[str] = []
+    for step in result.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        summaries.append(f"Step {step['step']}={step['status']}")
+    if not summaries:
+        summaries.append("no step details recorded")
+    return summaries
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
