@@ -10,3 +10,38 @@ notes:
   - Creates a real GitHub Release asset named manual.pdf in the live setup repository and points a disposable local-git attachment manifest entry at that release tag.
   - Executes the current supported equivalent of the ticket command by using --attachment-id plus --out for the TS-540 local download success path.
   - Passes only when the local provider bypasses its native capability gate, downloads the release asset bytes successfully, and reports a JSON success envelope for the local-git download path.
+runtime_inputs:
+  ticket_command: trackstate attachment download --attachment-id TS/TS-123/attachments/manual.pdf --out ./downloads/manual.pdf --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - download
+    - --attachment-id
+    - TS/TS-123/attachments/manual.pdf
+    - --out
+    - ./downloads/manual.pdf
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-540 Project
+  issue_key: TS-123
+  issue_summary: Release-backed local attachment download success fixture
+  attachment_name: manual.pdf
+  attachment_relative_path: TS/TS-123/attachments/manual.pdf
+  attachment_media_type: application/pdf
+  attachment_created_at: "2026-05-13T00:00:00Z"
+  attachment_author: tester
+  attachment_revision_or_oid: ts540-release-download-success
+  attachment_text: |-
+    %PDF-1.4
+    TS-540 successful release-backed local download fixture.
+    This file proves the local provider delegated to GitHub Releases.
+  attachment_tag_prefix: ts540-
+  attachment_release_tag: ts540-TS-123
+  attachment_release_title: TS-540 local download fixture for TS-123
+  attachment_release_body: TrackState TS-540 release-backed local download success fixture.
+  output_file_argument: ./downloads/manual.pdf
+  expected_output_relative_path: downloads/manual.pdf
+  provider_capability_fragments:
+    - does not support github releases attachment downloads
+    - repository provider
