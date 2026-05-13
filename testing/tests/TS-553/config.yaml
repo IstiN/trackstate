@@ -1,0 +1,14 @@
+test_id: TS-553
+type: cli
+framework: python
+platform: local-git
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+  - gh CLI available on PATH
+  - GH_TOKEN or GITHUB_TOKEN with release upload access to the hosted setup repository
+notes:
+  - Seeds a disposable local TrackState repository configured for github-releases attachment storage and pointed at the live setup repository as origin.
+  - Pre-creates a GitHub Release containing doc.pdf and a matching local attachments.json entry for TS-123.
+  - Executes the exact local CLI command `trackstate attachment upload --issue TS-123 --file doc.pdf --target local`.
+  - Passes only when the old release asset is replaced deterministically, the release still exposes exactly one doc.pdf asset, and attachments.json updates to the new asset identifier.
