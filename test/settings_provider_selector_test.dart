@@ -205,6 +205,7 @@ void main() {
             openLocalRepository:
                 ({
                   required String repositoryPath,
+                  required String defaultBranch,
                   required String writeBranch,
                 }) async {
                   openAttempts += 1;

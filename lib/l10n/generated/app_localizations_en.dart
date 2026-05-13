@@ -617,6 +617,23 @@ class AppLocalizationsEn extends AppLocalizations {
       'Settings is the canonical place to review repository access and reconnect safely.';
 
   @override
+  String get savedWorkspaces => 'Saved workspaces';
+
+  @override
+  String get activeWorkspace => 'Active';
+
+  @override
+  String get openWorkspace => 'Open';
+
+  @override
+  String get workspaceDeleteConfirmationTitle => 'Delete saved workspace';
+
+  @override
+  String workspaceDeleteConfirmationMessage(String workspaceName) {
+    return 'Delete $workspaceName and remove its stored credentials? This action cannot be undone.';
+  }
+
+  @override
   String get startupRecovery => 'Startup recovery';
 
   @override
