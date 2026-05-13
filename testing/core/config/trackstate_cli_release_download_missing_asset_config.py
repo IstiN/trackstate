@@ -8,42 +8,45 @@ import yaml
 
 
 @dataclass(frozen=True)
-class TrackStateCliReleaseAuthFailureConfig:
+class TrackStateCliReleaseDownloadMissingAssetConfig:
     ticket_command: str
     requested_command: tuple[str, ...]
     project_key: str
     project_name: str
     issue_key: str
     issue_summary: str
-    source_file_name: str
-    source_file_text: str
+    attachment_name: str
+    attachment_relative_path: str
+    attachment_media_type: str
+    attachment_size_bytes: int
+    attachment_revision_or_oid: str
+    attachment_created_at: str
+    attachment_author: str
     attachment_tag_prefix: str
+    attachment_release_tag: str
+    attachment_release_asset_name: str
     remote_origin_url: str
-    token_source_environment_variable: str | None
-    expected_issue_key: str
-    expected_attachment_name: str
-    expected_attachment_relative_path: str
-    expected_release_fragments: tuple[str, ...]
-    expected_auth_fragments: tuple[str, ...]
+    output_file_argument: str
+    expected_output_relative_path: str
+    expected_missing_asset_fragments: tuple[str, ...]
     provider_capability_fragments: tuple[str, ...]
 
-    @property
-    def source_file_bytes(self) -> bytes:
-        return self.source_file_text.encode("utf-8")
-
     @classmethod
-    def from_file(cls, path: Path) -> "TrackStateCliReleaseAuthFailureConfig":
+    def from_file(
+        cls,
+        path: Path,
+    ) -> "TrackStateCliReleaseDownloadMissingAssetConfig":
         payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         if not isinstance(payload, dict):
             raise ValueError(
-                "TS-500 config must deserialize to a mapping: "
+                "TS-535 config must deserialize to a mapping: "
                 f"{path}"
             )
 
         runtime_inputs = payload.get("runtime_inputs") or {}
         if not isinstance(runtime_inputs, dict):
             raise ValueError(
-                "TS-500 config runtime_inputs must deserialize to a mapping: "
+                "TS-535 config runtime_inputs must deserialize to a mapping: "
                 f"{path}"
             )
 
@@ -58,14 +61,39 @@ class TrackStateCliReleaseAuthFailureConfig:
             project_name=cls._require_string(runtime_inputs, "project_name", path),
             issue_key=cls._require_string(runtime_inputs, "issue_key", path),
             issue_summary=cls._require_string(runtime_inputs, "issue_summary", path),
-            source_file_name=cls._require_string(
+            attachment_name=cls._require_string(
                 runtime_inputs,
-                "source_file_name",
+                "attachment_name",
                 path,
             ),
-            source_file_text=cls._require_string(
+            attachment_relative_path=cls._require_string(
                 runtime_inputs,
-                "source_file_text",
+                "attachment_relative_path",
+                path,
+            ),
+            attachment_media_type=cls._require_string(
+                runtime_inputs,
+                "attachment_media_type",
+                path,
+            ),
+            attachment_size_bytes=cls._require_int(
+                runtime_inputs,
+                "attachment_size_bytes",
+                path,
+            ),
+            attachment_revision_or_oid=cls._require_string(
+                runtime_inputs,
+                "attachment_revision_or_oid",
+                path,
+            ),
+            attachment_created_at=cls._require_string(
+                runtime_inputs,
+                "attachment_created_at",
+                path,
+            ),
+            attachment_author=cls._require_string(
+                runtime_inputs,
+                "attachment_author",
                 path,
             ),
             attachment_tag_prefix=cls._require_string(
@@ -73,39 +101,34 @@ class TrackStateCliReleaseAuthFailureConfig:
                 "attachment_tag_prefix",
                 path,
             ),
+            attachment_release_tag=cls._require_string(
+                runtime_inputs,
+                "attachment_release_tag",
+                path,
+            ),
+            attachment_release_asset_name=cls._require_string(
+                runtime_inputs,
+                "attachment_release_asset_name",
+                path,
+            ),
             remote_origin_url=cls._require_string(
                 runtime_inputs,
                 "remote_origin_url",
                 path,
             ),
-            token_source_environment_variable=cls._optional_string(
+            output_file_argument=cls._require_string(
                 runtime_inputs,
-                "token_source_environment_variable",
+                "output_file_argument",
                 path,
             ),
-            expected_issue_key=cls._require_string(
+            expected_output_relative_path=cls._require_string(
                 runtime_inputs,
-                "expected_issue_key",
+                "expected_output_relative_path",
                 path,
             ),
-            expected_attachment_name=cls._require_string(
+            expected_missing_asset_fragments=cls._require_string_list(
                 runtime_inputs,
-                "expected_attachment_name",
-                path,
-            ),
-            expected_attachment_relative_path=cls._require_string(
-                runtime_inputs,
-                "expected_attachment_relative_path",
-                path,
-            ),
-            expected_release_fragments=cls._require_string_list(
-                runtime_inputs,
-                "expected_release_fragments",
-                path,
-            ),
-            expected_auth_fragments=cls._require_string_list(
-                runtime_inputs,
-                "expected_auth_fragments",
+                "expected_missing_asset_fragments",
                 path,
             ),
             provider_capability_fragments=cls._optional_string_list(
@@ -119,17 +142,19 @@ class TrackStateCliReleaseAuthFailureConfig:
     def _require_string(payload: dict[str, Any], key: str, path: Path) -> str:
         value = payload.get(key)
         if not isinstance(value, str) or not value:
-            raise ValueError(f"TS-500 config runtime_inputs.{key} must be a string in {path}.")
+            raise ValueError(
+                f"TS-535 config runtime_inputs.{key} must be a string in {path}."
+            )
         return value
 
     @staticmethod
-    def _optional_string(payload: dict[str, Any], key: str, path: Path) -> str | None:
+    def _require_int(payload: dict[str, Any], key: str, path: Path) -> int:
         value = payload.get(key)
-        if value is None:
-            return None
-        if not isinstance(value, str) or not value:
-            raise ValueError(f"TS-500 config runtime_inputs.{key} must be a string in {path}.")
-        return value
+        if isinstance(value, int):
+            return value
+        raise ValueError(
+            f"TS-535 config runtime_inputs.{key} must be an integer in {path}."
+        )
 
     @staticmethod
     def _require_string_list(
@@ -140,13 +165,13 @@ class TrackStateCliReleaseAuthFailureConfig:
         value = payload.get(key)
         if not isinstance(value, list) or not value:
             raise ValueError(
-                f"TS-500 config runtime_inputs.{key} must be a non-empty list in {path}."
+                f"TS-535 config runtime_inputs.{key} must be a non-empty list in {path}."
             )
-        items = []
+        items: list[str] = []
         for index, item in enumerate(value):
             if not isinstance(item, str) or not item:
                 raise ValueError(
-                    "TS-500 config runtime_inputs."
+                    "TS-535 config runtime_inputs."
                     f"{key}[{index}] must be a non-empty string in {path}."
                 )
             items.append(item)
@@ -163,13 +188,13 @@ class TrackStateCliReleaseAuthFailureConfig:
             return ()
         if not isinstance(value, list):
             raise ValueError(
-                f"TS-500 config runtime_inputs.{key} must be a list in {path}."
+                f"TS-535 config runtime_inputs.{key} must be a list in {path}."
             )
-        items = []
+        items: list[str] = []
         for index, item in enumerate(value):
             if not isinstance(item, str) or not item:
                 raise ValueError(
-                    "TS-500 config runtime_inputs."
+                    "TS-535 config runtime_inputs."
                     f"{key}[{index}] must be a non-empty string in {path}."
                 )
             items.append(item)

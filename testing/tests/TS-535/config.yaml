@@ -1,0 +1,49 @@
+test_id: TS-535
+type: cli
+framework: python
+platform: local
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+  - network access to read the public GitHub release metadata for cli/cli tag v2.74.0
+notes:
+  - Executes the local attachment download flow from a disposable TrackState repository whose attachment metadata points at github-releases storage on a real public GitHub repository release.
+  - Uses the current supported CLI form of the ticket scenario (`--attachment-id` plus `--out`) to reproduce downloading `manual.pdf` for TS-123 from a local target.
+  - Expects an explicit missing-release-asset error and treats the current local-provider capability gate as a product-visible failure.
+runtime_inputs:
+  ticket_command: trackstate attachment download --attachment-id TS/TS-123/attachments/manual.pdf --out ./downloads/manual.pdf --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - download
+    - --attachment-id
+    - TS/TS-123/attachments/manual.pdf
+    - --out
+    - ./downloads/manual.pdf
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-535 Project
+  issue_key: TS-123
+  issue_summary: Release-backed local attachment download missing-asset fixture
+  attachment_name: manual.pdf
+  attachment_relative_path: TS/TS-123/attachments/manual.pdf
+  attachment_media_type: application/pdf
+  attachment_size_bytes: 19
+  attachment_revision_or_oid: missing-asset-535
+  attachment_created_at: "2026-05-13T00:00:00Z"
+  attachment_author: tester
+  attachment_tag_prefix: ts535-
+  attachment_release_tag: v2.74.0
+  attachment_release_asset_name: manual.pdf
+  remote_origin_url: https://github.com/cli/cli.git
+  output_file_argument: ./downloads/manual.pdf
+  expected_output_relative_path: downloads/manual.pdf
+  expected_missing_asset_fragments:
+    - github release
+    - does not contain asset
+    - v2.74.0
+    - manual.pdf
+  provider_capability_fragments:
+    - does not support github releases attachment downloads
+    - repository provider

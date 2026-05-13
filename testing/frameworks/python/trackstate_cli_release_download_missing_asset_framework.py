@@ -1,50 +1,46 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
 from pathlib import Path
 
-from testing.core.config.trackstate_cli_release_auth_failure_config import (
-    TrackStateCliReleaseAuthFailureConfig,
+from testing.core.config.trackstate_cli_release_download_missing_asset_config import (
+    TrackStateCliReleaseDownloadMissingAssetConfig,
 )
-from testing.core.interfaces.trackstate_cli_release_auth_failure_probe import (
-    TrackStateCliReleaseAuthFailureProbe,
+from testing.core.interfaces.trackstate_cli_release_download_missing_asset_probe import (
+    TrackStateCliReleaseDownloadMissingAssetProbe,
 )
 from testing.core.models.cli_command_result import CliCommandResult
 from testing.core.models.trackstate_cli_command_observation import (
     TrackStateCliCommandObservation,
 )
-from testing.core.models.trackstate_cli_release_auth_failure_result import (
-    TrackStateCliReleaseAuthFailureRepositoryState,
-    TrackStateCliReleaseAuthFailureStoredFile,
-    TrackStateCliReleaseAuthFailureValidationResult,
+from testing.core.models.trackstate_cli_release_download_missing_asset_result import (
+    TrackStateCliReleaseDownloadMissingAssetRepositoryState,
+    TrackStateCliReleaseDownloadMissingAssetValidationResult,
 )
 from testing.frameworks.python.trackstate_cli_compiled_local_framework import (
     PythonTrackStateCliCompiledLocalFramework,
 )
 
 
-class PythonTrackStateCliReleaseAuthFailureFramework(
+class PythonTrackStateCliReleaseDownloadMissingAssetFramework(
     PythonTrackStateCliCompiledLocalFramework,
-    TrackStateCliReleaseAuthFailureProbe,
+    TrackStateCliReleaseDownloadMissingAssetProbe,
 ):
     def __init__(self, repository_root: Path) -> None:
         super().__init__(repository_root)
 
-    def observe_release_auth_failure(
+    def observe_release_download_missing_asset(
         self,
         *,
-        config: TrackStateCliReleaseAuthFailureConfig,
-    ) -> TrackStateCliReleaseAuthFailureValidationResult:
-        with tempfile.TemporaryDirectory(
-            prefix="trackstate-release-auth-bin-"
-        ) as bin_dir:
+        config: TrackStateCliReleaseDownloadMissingAssetConfig,
+    ) -> TrackStateCliReleaseDownloadMissingAssetValidationResult:
+        with tempfile.TemporaryDirectory(prefix="trackstate-ts-535-bin-") as bin_dir:
             executable_path = Path(bin_dir) / "trackstate"
             self._compile_executable(executable_path)
-            with tempfile.TemporaryDirectory(
-                prefix="trackstate-release-auth-repo-"
-            ) as temp_dir:
+            with tempfile.TemporaryDirectory(prefix="trackstate-ts-535-repo-") as temp_dir:
                 repository_path = Path(temp_dir)
                 self._seed_local_repository(repository_path, config=config)
                 initial_state = self._capture_repository_state(
@@ -52,7 +48,6 @@ class PythonTrackStateCliReleaseAuthFailureFramework(
                     config=config,
                 )
                 observation, stripped_environment_variables = self._observe_command(
-                    config=config,
                     requested_command=config.requested_command,
                     repository_path=repository_path,
                     executable_path=executable_path,
@@ -61,7 +56,7 @@ class PythonTrackStateCliReleaseAuthFailureFramework(
                     repository_path=repository_path,
                     config=config,
                 )
-                return TrackStateCliReleaseAuthFailureValidationResult(
+                return TrackStateCliReleaseDownloadMissingAssetValidationResult(
                     initial_state=initial_state,
                     final_state=final_state,
                     observation=observation,
@@ -71,19 +66,12 @@ class PythonTrackStateCliReleaseAuthFailureFramework(
     def _observe_command(
         self,
         *,
-        config: TrackStateCliReleaseAuthFailureConfig,
         requested_command: tuple[str, ...],
         repository_path: Path,
         executable_path: Path,
     ) -> tuple[TrackStateCliCommandObservation, tuple[str, ...]]:
         executed_command = (str(executable_path), *requested_command[1:])
         env = os.environ.copy()
-        token_source_name = config.token_source_environment_variable
-        injected_token = (
-            env.get(token_source_name)
-            if isinstance(token_source_name, str) and token_source_name
-            else None
-        )
         env.setdefault("CI", "true")
         env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
         stripped = tuple(
@@ -91,14 +79,7 @@ class PythonTrackStateCliReleaseAuthFailureFramework(
             for variable in ("GH_TOKEN", "GITHUB_TOKEN", "TRACKSTATE_TOKEN")
             if env.pop(variable, None) is not None
         )
-        if token_source_name:
-            if not injected_token:
-                raise ValueError(
-                    "Configured token source environment variable is missing or empty: "
-                    f"{token_source_name}"
-                )
-            env["TRACKSTATE_TOKEN"] = injected_token
-        sandbox_home = repository_path / ".trackstate-release-auth-home"
+        sandbox_home = repository_path / ".ts535-home"
         sandbox_home.mkdir(parents=True, exist_ok=True)
         env["HOME"] = str(sandbox_home)
         env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
@@ -117,16 +98,8 @@ class PythonTrackStateCliReleaseAuthFailureFramework(
             executed_command=executed_command,
             fallback_reason=(
                 "Pinned execution to a temporary executable compiled from this checkout "
-                + (
-                    "and injected a GitHub token from "
-                    f"{token_source_name} into TRACKSTATE_TOKEN for a deterministic "
-                    "permission-checked upload attempt."
-                    if token_source_name
-                    else "and stripped GitHub credentials from the environment so the "
-                    "test runs the exact local command without ambient auth."
-                )
-                + " The current local provider path may still fail before GitHub auth "
-                "is consulted."
+                "and stripped ambient GitHub credentials so TS-535 runs the exact local "
+                "download flow deterministically."
             ),
             repository_path=str(repository_path),
             compiled_binary_path=str(executable_path),
@@ -144,7 +117,7 @@ class PythonTrackStateCliReleaseAuthFailureFramework(
         self,
         repository_path: Path,
         *,
-        config: TrackStateCliReleaseAuthFailureConfig,
+        config: TrackStateCliReleaseDownloadMissingAssetConfig,
     ) -> None:
         repository_path.mkdir(parents=True, exist_ok=True)
         self._write_file(
@@ -184,81 +157,100 @@ status: todo
 summary: "{config.issue_summary}"
 assignee: tester
 reporter: tester
-updated: 2026-05-12T00:00:00Z
+updated: 2026-05-13T00:00:00Z
 ---
 
 # Description
 
-{config.issue_summary}
+TS-535 local github-releases attachment download fixture.
 """,
         )
-        self._write_binary_file(
-            repository_path / config.source_file_name,
-            config.source_file_bytes,
+        self._write_file(
+            repository_path / config.project_key / config.issue_key / "attachments.json",
+            json.dumps(
+                [
+                    {
+                        "id": config.attachment_relative_path,
+                        "name": config.attachment_name,
+                        "mediaType": config.attachment_media_type,
+                        "sizeBytes": config.attachment_size_bytes,
+                        "author": config.attachment_author,
+                        "createdAt": config.attachment_created_at,
+                        "storagePath": config.attachment_relative_path,
+                        "revisionOrOid": config.attachment_revision_or_oid,
+                        "storageBackend": "github-releases",
+                        "githubReleaseTag": config.attachment_release_tag,
+                        "githubReleaseAssetName": config.attachment_release_asset_name,
+                    }
+                ],
+                indent=2,
+            )
+            + "\n",
         )
         self._git(repository_path, "init", "-b", "main")
-        self._git(
-            repository_path,
-            "config",
-            "--local",
-            "user.name",
-            "TrackState Release Auth Tester",
-        )
+        self._git(repository_path, "config", "--local", "user.name", "TS-535 Tester")
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "trackstate-release-auth@example.com",
+            "ts535@example.com",
         )
         self._git(repository_path, "remote", "add", "origin", config.remote_origin_url)
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed release auth fixture")
+        self._git(repository_path, "commit", "-m", "Seed TS-535 fixture")
 
     def _capture_repository_state(
         self,
         *,
         repository_path: Path,
-        config: TrackStateCliReleaseAuthFailureConfig,
-    ) -> TrackStateCliReleaseAuthFailureRepositoryState:
+        config: TrackStateCliReleaseDownloadMissingAssetConfig,
+    ) -> TrackStateCliReleaseDownloadMissingAssetRepositoryState:
         issue_main = repository_path / config.project_key / config.issue_key / "main.md"
-        attachment_directory = (
-            repository_path / config.project_key / config.issue_key / "attachments"
+        attachments_metadata_path = (
+            repository_path / config.project_key / config.issue_key / "attachments.json"
         )
-        expected_attachment = repository_path / config.expected_attachment_relative_path
-        stored_files = (
-            tuple(
-                sorted(
-                    (
-                        TrackStateCliReleaseAuthFailureStoredFile(
-                            relative_path=str(path.relative_to(repository_path)),
-                            size_bytes=path.stat().st_size,
-                        )
-                        for path in attachment_directory.rglob("*")
-                        if path.is_file()
-                    ),
-                    key=lambda observation: observation.relative_path,
-                )
-            )
-            if attachment_directory.is_dir()
-            else ()
-        )
+        metadata_attachment_ids = self._metadata_attachment_ids(attachments_metadata_path)
+        expected_output = repository_path / config.expected_output_relative_path
+        downloads_directory = expected_output.parent
         remote_origin_url = self._git_output(
             repository_path,
             "remote",
             "get-url",
             "origin",
         ).strip()
-        return TrackStateCliReleaseAuthFailureRepositoryState(
+        return TrackStateCliReleaseDownloadMissingAssetRepositoryState(
             issue_main_exists=issue_main.is_file(),
-            attachment_directory_exists=attachment_directory.is_dir(),
-            expected_attachment_exists=expected_attachment.is_file(),
-            stored_files=stored_files,
+            attachments_metadata_exists=attachments_metadata_path.is_file(),
+            metadata_attachment_ids=metadata_attachment_ids,
+            expected_output_exists=expected_output.is_file(),
+            expected_output_size_bytes=(
+                expected_output.stat().st_size if expected_output.is_file() else None
+            ),
+            downloads_directory_exists=downloads_directory.is_dir(),
             git_status_lines=self._git_status_lines(repository_path),
             remote_origin_url=remote_origin_url or None,
             head_commit_subject=self._git_head_subject(repository_path),
             head_commit_count=self._git_head_count(repository_path),
         )
+
+    def _metadata_attachment_ids(self, metadata_path: Path) -> tuple[str, ...]:
+        if not metadata_path.is_file():
+            return ()
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return ()
+        if not isinstance(payload, list):
+            return ()
+        attachment_ids: list[str] = []
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            attachment_id = entry.get("id")
+            if isinstance(attachment_id, str) and attachment_id:
+                attachment_ids.append(attachment_id)
+        return tuple(attachment_ids)
 
     def _git_status_lines(self, repository_path: Path) -> tuple[str, ...]:
         output = self._git_output(repository_path, "status", "--short")
