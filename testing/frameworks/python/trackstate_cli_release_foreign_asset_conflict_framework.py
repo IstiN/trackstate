@@ -67,8 +67,8 @@ class PythonTrackStateCliReleaseForeignAssetConflictFramework(
             deleted_assets=(),
         )
 
-        self._seed_release_fixture(config=config, release_tag=release_tag)
         try:
+            self._seed_release_fixture(config=config, release_tag=release_tag)
             with tempfile.TemporaryDirectory(prefix="trackstate-ts-552-bin-") as bin_dir:
                 executable_path = Path(bin_dir) / "trackstate"
                 self._compile_executable(executable_path)
