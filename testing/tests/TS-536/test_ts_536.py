@@ -87,8 +87,8 @@ def main() -> None:
             "Releases attachment flow.",
         )
 
-    original_release = service.fetch_release_by_tag_any_state(EXPECTED_RELEASE_TAG)
-    release_snapshot = _snapshot_release(original_release)
+    original_releases = service.fetch_releases_by_tag_any_state(EXPECTED_RELEASE_TAG)
+    release_snapshots = _snapshot_releases(original_releases)
     mutations = _collect_original_files(
         service,
         (PROJECT_JSON_PATH, INDEX_PATH, ISSUE_MAIN_PATH, MANIFEST_PATH),
@@ -113,7 +113,12 @@ def main() -> None:
         "allowed_release_bodies": [SEEDED_RELEASE_BODY, STANDARD_RELEASE_BODY],
         "steps": [],
         "human_verification": [],
-        "original_release": _release_payload(original_release),
+        "initial_release_candidates": [
+            _release_payload(release) for release in original_releases
+        ],
+        "pre_upload_release_candidates": [
+            _release_payload(release) for release in original_releases
+        ],
     }
 
     scenario_error: Exception | None = None
@@ -121,10 +126,11 @@ def main() -> None:
     try:
         fixture_setup = _seed_fixture(
             service=service,
-            original_release=original_release,
+            original_releases=original_releases,
         )
         result["fixture_setup"] = fixture_setup
         result["seeded_release_id"] = fixture_setup["release_id"]
+        result["pre_upload_release_candidates"] = fixture_setup["pre_upload_release_candidates"]
 
         execution = _run_probe(
             probe=probe,
@@ -163,7 +169,7 @@ def main() -> None:
             cleanup = _restore_fixture(
                 service=service,
                 mutations=mutations,
-                original_release=release_snapshot,
+                original_releases=release_snapshots,
             )
             result["cleanup"] = cleanup
         except Exception as error:
@@ -199,8 +205,21 @@ def main() -> None:
 def _seed_fixture(
     *,
     service: LiveSetupRepositoryService,
-    original_release: LiveHostedRelease | None,
+    original_releases: list[LiveHostedRelease],
 ) -> dict[str, object]:
+    initial_release_candidates = [
+        _release_payload(release) for release in original_releases
+    ]
+    if len(original_releases) > 1:
+        raise AssertionError(
+            "Precondition failed: the shared fixture already exposes more than one "
+            "release candidate for the expected tag before Step 1, so this run cannot "
+            "prove whether the product created a duplicate.\n"
+            "Observed pre-upload release candidates before setup: "
+            f"{json.dumps(initial_release_candidates, indent=2, sort_keys=True)}",
+        )
+    original_release = original_releases[0] if original_releases else None
+
     project_payload = json.loads(service.fetch_repo_text(PROJECT_JSON_PATH))
     if not isinstance(project_payload, dict):
         raise AssertionError(
@@ -277,21 +296,29 @@ def _seed_fixture(
             f"Observed issue fixture: {issue_fixture}",
         )
 
-    matched_release, observed_release = poll_until(
-        probe=lambda: service.fetch_release_by_tag(EXPECTED_RELEASE_TAG),
-        is_satisfied=lambda value: value is not None
-        and value.name == EXPECTED_RELEASE_TITLE
-        and value.body == SEEDED_RELEASE_BODY
-        and value.draft is True,
+    matched_release_candidates, observed_release_candidates = poll_until(
+        probe=lambda: service.fetch_releases_by_tag_any_state(EXPECTED_RELEASE_TAG),
+        is_satisfied=lambda value: len(value) == 1
+        and _is_seeded_release_candidate(value[0], expected_release_id=seeded_release.id),
         timeout_seconds=120,
         interval_seconds=4,
     )
-    if not matched_release or observed_release is None:
+    pre_upload_release_candidates = [
+        _release_payload(release) for release in observed_release_candidates
+    ]
+    if (
+        not matched_release_candidates
+        or len(observed_release_candidates) != 1
+    ):
         raise AssertionError(
-            "Precondition failed: the seeded draft release with manual body text was not "
-            "visible through the live GitHub API.\n"
-            f"Observed release: {_release_payload(observed_release)}",
+            "Precondition failed: setup did not stabilize to exactly one seeded draft "
+            "release with the expected tag, title, and manual body before Step 1.\n"
+            "Observed pre-upload release candidates before setup: "
+            f"{json.dumps(initial_release_candidates, indent=2, sort_keys=True)}\n"
+            "Observed pre-upload release candidates after setup: "
+            f"{json.dumps(pre_upload_release_candidates, indent=2, sort_keys=True)}",
         )
+    observed_release = observed_release_candidates[0]
 
     matched_manifest, manifest_text = poll_until(
         probe=lambda: service.fetch_repo_text(MANIFEST_PATH),
@@ -312,6 +339,7 @@ def _seed_fixture(
         "release_setup": release_setup,
         "project_attachment_storage": project_payload["attachmentStorage"],
         "manifest_text": manifest_text,
+        "pre_upload_release_candidates": pre_upload_release_candidates,
         "release_id": observed_release.id,
         "release_tag": observed_release.tag_name,
         "release_title": observed_release.name,
@@ -598,7 +626,7 @@ def _restore_fixture(
     *,
     service: LiveSetupRepositoryService,
     mutations: list[RepoMutation],
-    original_release: ReleaseSnapshot | None,
+    original_releases: tuple[ReleaseSnapshot, ...],
 ) -> dict[str, object]:
     restored_paths: list[str] = []
     deleted_paths: list[str] = []
@@ -624,7 +652,7 @@ def _restore_fixture(
 
     release_actions: list[str] = []
     current_releases = service.fetch_releases_by_tag_any_state(EXPECTED_RELEASE_TAG)
-    if original_release is None:
+    if not original_releases:
         for current_release in current_releases:
             for asset in current_release.assets:
                 service.delete_release_asset(asset.id)
@@ -645,14 +673,11 @@ def _restore_fixture(
                 f"Remaining releases: {json.dumps([_release_payload(item) for item in remaining_releases], indent=2, sort_keys=True)}",
             )
     else:
-        if not current_releases:
-            raise AssertionError(
-                f"Cleanup failed: original release {EXPECTED_RELEASE_TAG} disappeared and could not be restored.",
-            )
-        current_release = None
+        original_releases_by_id = {
+            release.id: release for release in original_releases
+        }
         for candidate in current_releases:
-            if candidate.id == original_release.id:
-                current_release = candidate
+            if candidate.id in original_releases_by_id:
                 continue
             for asset in candidate.assets:
                 service.delete_release_asset(asset.id)
@@ -661,41 +686,49 @@ def _restore_fixture(
                 )
             service.delete_release(candidate.id)
             release_actions.append(f"deleted duplicate release {candidate.id}")
-        if current_release is None:
-            raise AssertionError(
-                f"Cleanup failed: original release id {original_release.id} could not be found among current releases.",
-            )
-        original_asset_names = set(original_release.asset_names)
-        for asset in current_release.assets:
-            if asset.name not in original_asset_names:
-                service.delete_release_asset(asset.id)
-                release_actions.append(f"deleted test asset {asset.name}")
         remaining_releases = service.fetch_releases_by_tag_any_state(EXPECTED_RELEASE_TAG)
-        current_release = next(
-            (candidate for candidate in remaining_releases if candidate.id == original_release.id),
-            None,
-        )
-        if current_release is None:
+        remaining_releases_by_id = {
+            release.id: release for release in remaining_releases
+        }
+        missing_original_release_ids = [
+            release.id
+            for release in original_releases
+            if release.id not in remaining_releases_by_id
+        ]
+        if missing_original_release_ids:
             raise AssertionError(
-                f"Cleanup failed: release {EXPECTED_RELEASE_TAG} disappeared after asset cleanup.",
+                "Cleanup failed: one or more original releases disappeared and could not "
+                "be restored.\n"
+                f"Missing release ids: {missing_original_release_ids}\n"
+                "Remaining releases: "
+                f"{json.dumps([_release_payload(item) for item in remaining_releases], indent=2, sort_keys=True)}",
             )
-        if (
-            current_release.name != original_release.name
-            or current_release.body != original_release.body
-            or current_release.draft != original_release.draft
-            or current_release.target_commitish != original_release.target_commitish
-        ):
-            restored_release = service.update_release(
-                current_release.id,
-                name=original_release.name,
-                body=original_release.body,
-                target_commitish=original_release.target_commitish,
-                draft=original_release.draft,
-            )
-            release_actions.append(
-                f"restored release {restored_release.id} metadata to "
-                f"name={restored_release.name!r}, body={restored_release.body!r}, draft={restored_release.draft}"
-            )
+        for original_release in original_releases:
+            current_release = remaining_releases_by_id[original_release.id]
+            original_asset_names = set(original_release.asset_names)
+            for asset in current_release.assets:
+                if asset.name not in original_asset_names:
+                    service.delete_release_asset(asset.id)
+                    release_actions.append(
+                        f"deleted test asset {asset.name} from release {current_release.id}",
+                    )
+            if (
+                current_release.name != original_release.name
+                or current_release.body != original_release.body
+                or current_release.draft != original_release.draft
+                or current_release.target_commitish != original_release.target_commitish
+            ):
+                restored_release = service.update_release(
+                    current_release.id,
+                    name=original_release.name,
+                    body=original_release.body,
+                    target_commitish=original_release.target_commitish,
+                    draft=original_release.draft,
+                )
+                release_actions.append(
+                    f"restored release {restored_release.id} metadata to "
+                    f"name={restored_release.name!r}, body={restored_release.body!r}, draft={restored_release.draft}"
+                )
 
     return {
         "status": "restored",
@@ -716,6 +749,31 @@ def _snapshot_release(release: LiveHostedRelease | None) -> ReleaseSnapshot | No
         draft=release.draft,
         target_commitish=release.target_commitish,
         asset_names=tuple(asset.name for asset in release.assets),
+    )
+
+
+def _snapshot_releases(
+    releases: list[LiveHostedRelease],
+) -> tuple[ReleaseSnapshot, ...]:
+    return tuple(
+        snapshot
+        for release in releases
+        for snapshot in [_snapshot_release(release)]
+        if snapshot is not None
+    )
+
+
+def _is_seeded_release_candidate(
+    release: LiveHostedRelease,
+    *,
+    expected_release_id: int,
+) -> bool:
+    return (
+        release.id == expected_release_id
+        and release.tag_name == EXPECTED_RELEASE_TAG
+        and release.name == EXPECTED_RELEASE_TITLE
+        and release.body == SEEDED_RELEASE_BODY
+        and release.draft is True
     )
 
 
@@ -880,6 +938,11 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "*Step results*",
         *_step_lines(result, jira=True),
         "",
+        "*Pre-upload release candidates*",
+        "{code}",
+        json.dumps(result.get("pre_upload_release_candidates", []), indent=2, sort_keys=True),
+        "{code}",
+        "",
         "*Human-style verification*",
         *_human_lines(result, jira=True),
     ]
@@ -928,6 +991,11 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "### Step results",
         *_step_lines(result, jira=False),
+        "",
+        "### Pre-upload release candidates",
+        "```json",
+        json.dumps(result.get("pre_upload_release_candidates", []), indent=2, sort_keys=True),
+        "```",
         "",
         "### Human-style verification",
         *_human_lines(result, jira=False),
@@ -1017,6 +1085,10 @@ def _bug_description(result: dict[str, object]) -> str:
             "### Manifest after upload",
             "```json",
             str(result.get("manifest_after_upload", "")),
+            "```",
+            "### Pre-upload release candidates",
+            "```json",
+            json.dumps(result.get("pre_upload_release_candidates", []), indent=2, sort_keys=True),
             "```",
             "### Matching manifest entries",
             "```json",
