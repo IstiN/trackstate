@@ -1,17 +1,26 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:trackstate/data/providers/local/local_git_trackstate_provider.dart';
-import 'package:trackstate/data/providers/trackstate_provider.dart';
-import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 import '../../../components/services/issue_aggregate_probe.dart';
+import '../../../components/services/issue_link_storage_probe.dart';
+import '../../../core/interfaces/local_git_repository_factory.dart';
+import '../../../frameworks/providers/provider_backed_local_git_repository_factory.dart';
+import '../../../frameworks/providers/trackstate_provider_dirty_local_issue_write_client.dart';
 
 class Ts627NonCanonicalLinkStorageFixture {
-  Ts627NonCanonicalLinkStorageFixture._(this.directory);
+  Ts627NonCanonicalLinkStorageFixture._(this.directory)
+    : _repositoryFactory = const ProviderBackedLocalGitRepositoryFactory(),
+      _storageProbe = IssueLinkStorageProbe(
+        writeClient: TrackStateProviderDirtyLocalIssueWriteClient.local(
+          repositoryPath: directory.path,
+        ),
+      );
 
   final Directory directory;
+  final LocalGitRepositoryFactory _repositoryFactory;
+  final IssueLinkStorageProbe _storageProbe;
 
   static const projectKey = 'DEMO';
   static const epicKey = 'DEMO-1';
@@ -46,9 +55,13 @@ class Ts627NonCanonicalLinkStorageFixture {
   Future<void> dispose() => directory.delete(recursive: true);
 
   Future<Ts627RepositoryObservation> observeRepositoryState() async {
-    final opened = await _openRepository();
-    final sourceIssue = await opened.issueLoader.loadIssue(sourceIssueKey);
-    final projectSearchResults = await opened.repository.searchIssues(
+    final repository = await _repositoryFactory.create(
+      repositoryPath: repositoryPath,
+    );
+    final sourceIssue = await IssueAggregateProbe(
+      repository,
+    ).loadIssue(sourceIssueKey);
+    final projectSearchResults = await repository.searchIssues(
       'project = $projectKey',
     );
     final linksFile = File('$repositoryPath/$sourceLinksPath');
@@ -77,57 +90,21 @@ class Ts627NonCanonicalLinkStorageFixture {
   }
 
   Future<Ts627StorageAttemptObservation> attemptInvalidLinksWrite() async {
-    final opened = await _openRepository();
-    final branch = await opened.provider.resolveWriteBranch();
-    RepositoryWriteResult? writeResult;
-    String? errorType;
-    String? errorMessage;
-
-    try {
-      writeResult = await opened.provider.writeTextFile(
-        RepositoryWriteRequest(
-          path: sourceLinksPath,
-          content: invalidLinksJsonContent,
-          message: writeMessage,
-          branch: branch,
-          expectedRevision: null,
-        ),
-      );
-    } catch (error) {
-      errorType = error.runtimeType.toString();
-      errorMessage = error.toString();
-    }
+    final writeResult = await _storageProbe.attemptWrite(
+      path: sourceLinksPath,
+      content: invalidLinksJsonContent,
+      message: writeMessage,
+      expectedRevision: null,
+    );
 
     return Ts627StorageAttemptObservation(
-      branch: branch,
+      branch: writeResult.branch,
       attemptedPath: sourceLinksPath,
       attemptedContent: invalidLinksJsonContent,
-      writeResult: writeResult,
-      errorType: errorType,
-      errorMessage: errorMessage,
+      writeRevision: writeResult.writeRevision,
+      errorType: writeResult.errorType,
+      errorMessage: writeResult.errorMessage,
       afterObservation: await observeRepositoryState(),
-    );
-  }
-
-  Future<_OpenedRepository> _openRepository() async {
-    final provider = LocalGitTrackStateProvider(repositoryPath: repositoryPath);
-    final repository = ProviderBackedTrackStateRepository(
-      provider: provider,
-      usesLocalPersistence: true,
-      supportsGitHubAuth: false,
-    );
-    final snapshot = await repository.loadSnapshot();
-    await repository.connect(
-      RepositoryConnection(
-        repository: snapshot.project.repository,
-        branch: snapshot.project.branch,
-        token: '',
-      ),
-    );
-    return _OpenedRepository(
-      repository: repository,
-      provider: provider,
-      issueLoader: IssueAggregateProbe(repository),
     );
   }
 
@@ -316,7 +293,7 @@ class Ts627StorageAttemptObservation {
     required this.branch,
     required this.attemptedPath,
     required this.attemptedContent,
-    required this.writeResult,
+    required this.writeRevision,
     required this.errorType,
     required this.errorMessage,
     required this.afterObservation,
@@ -325,20 +302,8 @@ class Ts627StorageAttemptObservation {
   final String branch;
   final String attemptedPath;
   final String attemptedContent;
-  final RepositoryWriteResult? writeResult;
+  final String? writeRevision;
   final String? errorType;
   final String? errorMessage;
   final Ts627RepositoryObservation afterObservation;
-}
-
-class _OpenedRepository {
-  const _OpenedRepository({
-    required this.repository,
-    required this.provider,
-    required this.issueLoader,
-  });
-
-  final ProviderBackedTrackStateRepository repository;
-  final LocalGitTrackStateProvider provider;
-  final IssueAggregateProbe issueLoader;
 }

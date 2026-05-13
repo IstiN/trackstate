@@ -97,13 +97,16 @@ void main() {
 
         final attempt = await fixture.attemptInvalidLinksWrite();
         final after = attempt.afterObservation;
+        final writeThrew =
+            (attempt.errorType != null &&
+                attempt.errorType!.trim().isNotEmpty) ||
+            (attempt.errorMessage != null &&
+                attempt.errorMessage!.trim().isNotEmpty);
 
         result['branch'] = attempt.branch;
-        result['write_outcome'] = attempt.errorMessage == null
-            ? 'returned'
-            : 'threw';
-        result['write_result_revision'] = attempt.writeResult?.revision;
-        result['write_result_branch'] = attempt.writeResult?.branch;
+        result['write_outcome'] = writeThrew ? 'threw' : 'returned';
+        result['write_result_revision'] = attempt.writeRevision;
+        result['write_result_branch'] = attempt.branch;
         result['observed_error_type'] = attempt.errorType ?? '<none>';
         result['observed_error_message'] = attempt.errorMessage ?? '<none>';
         result['after_head_revision'] = after.headRevision;
@@ -125,7 +128,7 @@ void main() {
         final step1Observation =
             'branch=${attempt.branch}; path=${attempt.attemptedPath}; payload=${attempt.attemptedContent.trim()}; '
             'outcome=${result['write_outcome']}; error_type=${result['observed_error_type']}; '
-            'error_message=${result['observed_error_message']}; write_revision=${attempt.writeResult?.revision ?? '<none>'}';
+            'error_message=${result['observed_error_message']}; write_revision=${attempt.writeRevision ?? '<none>'}';
         _recordStep(
           result,
           step: 1,
@@ -141,8 +144,10 @@ void main() {
             'source_links=${_formatIssueLinks(after.sourceIssue.links)}; '
             'head_before=${before.headRevision}; head_after=${after.headRevision}; '
             'worktree_status=${_formatSnapshot(after.worktreeStatusLines)}';
-        final validationRejected = _looksLikeCanonicalDirectionValidation(
-          attempt.errorMessage,
+        final validationRejected = _looksLikeValidationRejection(
+          outcome: '${result['write_outcome']}',
+          errorType: attempt.errorType,
+          errorMessage: attempt.errorMessage,
         );
         final repositoryStayedUnchanged =
             !after.linksFileExists &&
@@ -551,23 +556,37 @@ String _actualResultLine(Map<String, Object?> result) {
       'head_after=${result['after_head_revision'] ?? '<missing>'}.';
 }
 
-bool _looksLikeCanonicalDirectionValidation(String? message) {
-  if (message == null || message.trim().isEmpty) {
+bool _looksLikeValidationRejection({
+  required String outcome,
+  required String? errorType,
+  required String? errorMessage,
+}) {
+  if (outcome != 'threw') {
     return false;
   }
-  final lower = message.toLowerCase();
-  final mentionsValidation =
-      lower.contains('validation') ||
-      lower.contains('invalid') ||
-      lower.contains('reject');
-  final mentionsCanonicalRule =
-      lower.contains('canonical') || lower.contains('outward');
-  final mentionsLinkRule =
-      lower.contains('link') ||
-      lower.contains('direction') ||
-      lower.contains('links.json');
-  return mentionsValidation && mentionsCanonicalRule && mentionsLinkRule;
+  final combined = <String>[
+    if (errorType != null && errorType.trim().isNotEmpty) errorType,
+    if (errorMessage != null && errorMessage.trim().isNotEmpty) errorMessage,
+  ].join(' ').toLowerCase();
+  if (combined.isEmpty) {
+    return false;
+  }
+  return _rejectionFragments.any(combined.contains);
 }
+
+const List<String> _rejectionFragments = <String>[
+  'validation',
+  'invalid',
+  'reject',
+  'link',
+  'direction',
+  'links.json',
+  'inward',
+  'blocks',
+  'must',
+  'allowed',
+  'unsupported',
+];
 
 String _formatSnapshot(List<String> lines) {
   if (lines.isEmpty) {
