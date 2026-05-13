@@ -1,0 +1,12 @@
+test_id: TS-608
+type: cli
+framework: python
+platform: hosted-github
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - GH_TOKEN or GITHUB_TOKEN with write access to the hosted setup repository
+  - Network access to GitHub APIs
+notes:
+  - Reuses the existing hosted GitHub Releases replacement scenario from TS-484.
+  - Exercises the live hosted CLI attachment upload flow twice with the same visible filename `design_v1.png`.
+  - Passes only when the second upload replaces the release asset bytes, `attachments.json` points to the new asset id, and the public attachment id remains stable.
