@@ -3715,6 +3715,19 @@ class TrackStateCli {
       return _mapCompatibilityError(error);
     }
     if (error is TrackStateProviderException) {
+      if (target.type == TrackStateCliTargetType.local &&
+          _looksLikeAttachmentStorageValidationFailure(error.message)) {
+        return _TrackStateCliException(
+          code: 'INVALID_REQUEST',
+          category: TrackStateCliErrorCategory.validation,
+          message: error.message,
+          exitCode: 4,
+          details: <String, Object?>{
+            'path': target.value,
+            'reason': error.message,
+          },
+        );
+      }
       if (_looksLikeAuthenticationFailure(error.message)) {
         return _TrackStateCliException(
           code: 'AUTHENTICATION_FAILED',
@@ -5471,6 +5484,9 @@ class TrackStateCli {
         normalized.contains('trackstate_token') ||
         normalized.contains('credential');
   }
+
+  bool _looksLikeAttachmentStorageValidationFailure(String message) =>
+      message.startsWith('project.json attachmentStorage.');
 
   Map<String, Object?> _permissionJson(RepositoryPermission permission) =>
       <String, Object?>{

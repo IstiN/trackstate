@@ -535,6 +535,7 @@ def _assert_primary_row_alignment(
 ) -> None:
     row_controls = (
         ("sync", observation.sync),
+        ("search", observation.search),
         ("create", observation.create),
         ("access", observation.access),
         ("theme", observation.theme),
