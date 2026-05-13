@@ -29,6 +29,13 @@ class TabChipObservation:
 
 
 @dataclass(frozen=True)
+class CommentCardObservation:
+    body_fragment: str
+    visible_text: str
+    accessible_label: str
+
+
+@dataclass(frozen=True)
 class AttachmentSelectionSummaryObservation:
     summary_text: str
     file_name_visible: bool
@@ -36,6 +43,14 @@ class AttachmentSelectionSummaryObservation:
     upload_enabled: bool
     summary_top: float
     first_attachment_top: float | None
+
+
+@dataclass(frozen=True)
+class AttachmentUploadControlsObservation:
+    choose_button_count: int
+    choose_button_enabled: bool
+    upload_button_count: int
+    upload_button_enabled: bool
 
 
 @dataclass(frozen=True)
@@ -53,8 +68,18 @@ class LiveIssueDetailCollaborationPage:
     _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
-    _choose_attachment_button_selector = '[aria-label*="Choose attachment"]'
-    _upload_attachment_button_selector = '[aria-label*="Upload attachment"]'
+    _choose_attachment_button_selector = (
+        'flt-semantics[aria-label="Choose attachment"] flt-semantics[flt-tappable]'
+    )
+    _upload_attachment_button_selector = (
+        'flt-semantics[aria-label="Upload attachment"] flt-semantics[flt-tappable]'
+    )
+    _replace_attachment_button_selector = (
+        'flt-semantics[aria-label="Replace attachment"] flt-semantics[flt-tappable]'
+    )
+    _keep_attachment_button_selector = (
+        'flt-semantics[aria-label="Keep current attachment"] flt-semantics[flt-tappable]'
+    )
     _selected_button_selector = _active_tab_button_selector
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
@@ -442,6 +467,122 @@ class LiveIssueDetailCollaborationPage:
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
 
+    def wait_for_comment_card(
+        self,
+        body_fragment: str,
+        *,
+        required_fragments: tuple[str, ...] = (),
+        timeout_ms: int = 60_000,
+    ) -> CommentCardObservation:
+        expected_fragments = tuple(
+            fragment.strip()
+            for fragment in (body_fragment, *required_fragments)
+            if fragment.strip()
+        )
+        self.wait_for_text(body_fragment, timeout_ms=timeout_ms)
+        payload = self._session.wait_for_function(
+            """
+            ({ bodyFragment, expectedFragments }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const descriptionCache = new WeakMap();
+              const describe = (element) => {
+                const cached = descriptionCache.get(element);
+                if (cached) {
+                  return cached;
+                }
+
+                const rect = element.getBoundingClientRect();
+                const label = normalize(element.getAttribute('aria-label') ?? '');
+                const text = normalize(element.innerText || element.textContent || '');
+                const described = {
+                  label,
+                  text,
+                  combined: [text, label].filter((value) => value.length > 0).join("\\n"),
+                  width: rect.width,
+                  height: rect.height,
+                  area: rect.width * rect.height,
+                };
+                descriptionCache.set(element, described);
+                return described;
+              };
+              const isVisible = (element) => {
+                const rect = element.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+              };
+
+              const visibleSemantics = Array.from(document.querySelectorAll('flt-semantics'))
+                .filter((element) => isVisible(element));
+              const subtreeContainsFragment = (container, fragment) =>
+                visibleSemantics.some((element) =>
+                  container.contains(element) && describe(element).combined.includes(fragment)
+                );
+
+              const matches = [];
+              const seen = new Set();
+              for (const element of visibleSemantics) {
+                if (!describe(element).combined.includes(bodyFragment)) {
+                  continue;
+                }
+
+                let current = element;
+                while (current) {
+                  if (current.matches?.('flt-semantics') && isVisible(current) && !seen.has(current)) {
+                    if (
+                      expectedFragments.every((fragment) =>
+                        subtreeContainsFragment(current, fragment)
+                      )
+                    ) {
+                      seen.add(current);
+                      matches.push(describe(current));
+                    }
+                  }
+                  current = current.parentElement;
+                }
+              }
+
+              matches.sort((left, right) => left.area - right.area || left.text.length - right.text.length);
+              return matches[0] ?? null;
+            }
+            """,
+            arg={
+                "bodyFragment": body_fragment,
+                "expectedFragments": list(expected_fragments),
+            },
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 3 failed: the live Comments tab did not expose a visible comment "
+                f"row for {body_fragment!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        visible_text = str(payload.get("text", "")).strip()
+        accessible_label = str(payload.get("label", "")).strip()
+        if not visible_text:
+            raise AssertionError(
+                "Step 3 failed: the live Comments tab rendered an empty comment row for "
+                f"{body_fragment!r}.\n"
+                f"Observed payload: {payload}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        missing_fragments = [
+            fragment for fragment in expected_fragments if fragment not in visible_text
+        ]
+        if missing_fragments:
+            raise AssertionError(
+                "Step 3 failed: the live Comments tab did not keep the expected comment "
+                f"metadata in the same visible row for {body_fragment!r}.\n"
+                f"Missing visible fragments: {missing_fragments}\n"
+                f"Observed row text: {visible_text}\n"
+                f"Observed accessibility label: {accessible_label}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return CommentCardObservation(
+            body_fragment=body_fragment,
+            visible_text=visible_text,
+            accessible_label=accessible_label,
+        )
+
     def issue_detail_accessible_label(
         self,
         issue_key: str,
@@ -707,16 +848,84 @@ class LiveIssueDetailCollaborationPage:
         )
 
     def attachment_download_button_count(self, attachment_name: str) -> int:
-        return self._visible_button_count_by_label(
-            self._download_button_label(attachment_name),
+        payload = self._session.evaluate(
+            """
+            ({ downloadLabel }) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  return false;
+                }
+                const style = window.getComputedStyle(element);
+                return style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const hasVisibleSurface = (element) =>
+                isVisible(element)
+                || Array.from(
+                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label]')
+                ).some(isVisible);
+              return Array.from(
+                document.querySelectorAll('flt-semantics[aria-label]')
+              ).filter((element) => {
+                const label = element.getAttribute('aria-label') ?? '';
+                return label === downloadLabel && hasVisibleSurface(element);
+              }).length;
+            }
+            """,
+            arg={"downloadLabel": self._download_button_label(attachment_name)},
         )
+        if not isinstance(payload, int):
+            raise AssertionError(
+                "Step 1 failed: unable to count the visible attachment download controls.\n"
+                f"Observed payload: {payload!r}",
+            )
+        return payload
 
     def attachment_download_button_label(self, attachment_name: str) -> str:
-        return self._session.read_text(
-            self._button_selector,
-            has_text=self._download_button_label(attachment_name),
-            timeout_ms=30_000,
-        ).strip()
+        download_label = self._download_button_label(attachment_name)
+        payload = self._session.evaluate(
+            """
+            ({ downloadLabel }) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  return false;
+                }
+                const style = window.getComputedStyle(element);
+                return style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const hasVisibleSurface = (element) =>
+                isVisible(element)
+                || Array.from(
+                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label]')
+                ).some(isVisible);
+              return Array.from(
+                document.querySelectorAll('flt-semantics[aria-label]')
+              ).map((element) => {
+                const label = element.getAttribute('aria-label') ?? '';
+                if (label !== downloadLabel || !hasVisibleSurface(element)) {
+                  return '';
+                }
+                return label;
+              }).find((label) => label.length > 0) ?? '';
+            }
+            """,
+            arg={"downloadLabel": download_label},
+        )
+        label = str(payload).strip()
+        if not label:
+            raise AssertionError(
+                "Step 1 failed: the Attachments tab did not expose the expected "
+                f"download button for {attachment_name!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return label
 
     def trigger_focused_download(self) -> str:
         return self._session.wait_for_download_after_keypress(
@@ -727,18 +936,79 @@ class LiveIssueDetailCollaborationPage:
     def visible_button_count(self, label: str) -> int:
         return self._visible_button_count_by_label(label)
 
+    def observe_attachment_upload_controls(self) -> AttachmentUploadControlsObservation:
+        payload = self._session.evaluate(
+            """
+            () => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  return false;
+                }
+                const style = window.getComputedStyle(element);
+                return style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const controlRoots = (label) => Array.from(
+                document.querySelectorAll(`flt-semantics[aria-label="${label}"]`)
+              ).filter((element) =>
+                isVisible(element)
+                || Array.from(
+                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label]')
+                ).some(isVisible)
+              );
+              const controlTrigger = (element) => [
+                element,
+                element?.querySelector('flt-semantics[flt-tappable]'),
+                element?.querySelector('[flt-tappable]'),
+                element?.querySelector('flt-semantics[role="button"]'),
+                element?.querySelector('[role="button"]'),
+              ].find((candidate) => !!candidate && isVisible(candidate)) ?? null;
+              const isEnabled = (element) => {
+                const trigger = controlTrigger(element);
+                return (
+                  !!trigger
+                  && element?.getAttribute('aria-disabled') !== 'true'
+                  && trigger.getAttribute('aria-disabled') !== 'true'
+                );
+              };
+
+              const chooseButtons = controlRoots('Choose attachment');
+              const uploadButtons = controlRoots('Upload attachment');
+
+              return {
+                chooseButtonCount: chooseButtons.length,
+                chooseButtonEnabled: chooseButtons.some(isEnabled),
+                uploadButtonCount: uploadButtons.length,
+                uploadButtonEnabled: uploadButtons.some(isEnabled),
+              };
+            }
+            """,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 1 failed: unable to inspect the hosted attachment upload controls.\n"
+                f"Observed payload: {payload!r}",
+            )
+        return AttachmentUploadControlsObservation(
+            choose_button_count=int(payload.get("chooseButtonCount", 0)),
+            choose_button_enabled=bool(payload.get("chooseButtonEnabled")),
+            upload_button_count=int(payload.get("uploadButtonCount", 0)),
+            upload_button_enabled=bool(payload.get("uploadButtonEnabled")),
+        )
+
     def choose_attachment_file(self, file_path: str) -> None:
         self._session.click_and_set_files(
-            self._button_selector,
+            self._choose_attachment_button_selector,
             [file_path],
-            has_text="Choose attachment",
             timeout_ms=30_000,
         )
 
     def click_upload_attachment(self) -> None:
         self._session.click(
-            self._button_selector,
-            has_text="Upload attachment",
+            self._upload_attachment_button_selector,
             timeout_ms=30_000,
         )
 
@@ -754,18 +1024,31 @@ class LiveIssueDetailCollaborationPage:
         )
         self._session.wait_for_function(
             """
-            ({ expectedLabel }) => Array.from(document.querySelectorAll('[aria-label]'))
-              .map((element) => element.getAttribute('aria-label') ?? '')
-              .some((label) => label.includes(expectedLabel))
+            ({ expectedLabel }) => {
+              const labels = Array.from(document.querySelectorAll('[aria-label]'))
+                .map((element) => element.getAttribute('aria-label') ?? '');
+              if (labels.some((label) => label.includes(expectedLabel))) {
+                return true;
+              }
+              const bodyText = document.body?.innerText ?? '';
+              return bodyText.includes(expectedLabel);
+            }
             """,
             arg={"expectedLabel": expected_label},
             timeout_ms=timeout_ms,
         )
         payload = self._session.evaluate(
             """
-            ({ expectedLabel }) => Array.from(document.querySelectorAll('[aria-label]'))
-              .map((element) => element.getAttribute('aria-label') ?? '')
-              .find((label) => label.includes(expectedLabel)) ?? ''
+            ({ expectedLabel }) => {
+              const labelMatch = Array.from(document.querySelectorAll('[aria-label]'))
+                .map((element) => element.getAttribute('aria-label') ?? '')
+                .find((label) => label.includes(expectedLabel));
+              if (labelMatch) {
+                return labelMatch;
+              }
+              const bodyText = document.body?.innerText ?? '';
+              return bodyText.includes(expectedLabel) ? expectedLabel : '';
+            }
             """,
             arg={"expectedLabel": expected_label},
         )
@@ -820,8 +1103,29 @@ class LiveIssueDetailCollaborationPage:
         download_label = self._download_button_label(attachment_name)
         self._session.wait_for_function(
             """
-            ({ downloadLabel }) => Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
-              .some((element) => (element.getAttribute('aria-label') ?? '').includes(downloadLabel))
+            ({ downloadLabel }) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  return false;
+                }
+                const style = window.getComputedStyle(element);
+                return style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const hasVisibleSurface = (element) =>
+                isVisible(element)
+                || Array.from(
+                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label]')
+                ).some(isVisible);
+              return Array.from(document.querySelectorAll('flt-semantics[aria-label]')).some(
+                (element) =>
+                  (element.getAttribute('aria-label') ?? '') === downloadLabel
+                  && hasVisibleSurface(element)
+              );
+            }
             """,
             arg={"downloadLabel": download_label},
             timeout_ms=timeout_ms,
@@ -829,8 +1133,27 @@ class LiveIssueDetailCollaborationPage:
         payload = self._session.evaluate(
             """
             ({ attachmentName, downloadLabel }) => {
-              const button = Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
-                .find((element) => (element.getAttribute('aria-label') ?? '').includes(downloadLabel));
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  return false;
+                }
+                const style = window.getComputedStyle(element);
+                return style.visibility !== 'hidden' && style.display !== 'none';
+              };
+              const hasVisibleSurface = (element) =>
+                isVisible(element)
+                || Array.from(
+                  element.querySelectorAll('flt-semantics, flt-semantics-img, [aria-label]')
+                ).some(isVisible);
+              const button = Array.from(document.querySelectorAll('flt-semantics[aria-label]'))
+                .find((element) =>
+                  (element.getAttribute('aria-label') ?? '') === downloadLabel
+                  && hasVisibleSurface(element)
+                );
               if (!button) {
                 return '';
               }
@@ -864,7 +1187,7 @@ class LiveIssueDetailCollaborationPage:
             """
             () => {
               const trigger = document.querySelector(
-                'flt-semantics[aria-label="Choose attachment"] flt-semantics'
+                'flt-semantics[aria-label="Choose attachment"] flt-semantics[flt-tappable]'
               );
               return !!trigger && trigger.getAttribute('aria-disabled') !== 'true';
             }
@@ -961,7 +1284,7 @@ class LiveIssueDetailCollaborationPage:
                 /\\b\\d+(?:\\.\\d+)?\\s*(?:KB|MB|bytes?)\\b/i
               );
               const uploadTrigger = document.querySelector(
-                'flt-semantics[aria-label="Upload attachment"] flt-semantics'
+                'flt-semantics[aria-label="Upload attachment"] flt-semantics[flt-tappable]'
               );
               const firstDownload = Array.from(
                 document.querySelectorAll('flt-semantics, [aria-label]')

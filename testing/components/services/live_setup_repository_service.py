@@ -4,9 +4,10 @@ import base64
 import json
 import os
 import urllib.error
-from typing import Iterable
+from urllib.parse import quote
 import urllib.request
 from dataclasses import dataclass
+from typing import Iterable
 
 from testing.core.config.live_setup_test_config import (
     LiveSetupTestConfig,
@@ -81,6 +82,9 @@ class LiveHostedRelease:
     tag_name: str
     name: str
     assets: list[LiveHostedReleaseAsset]
+    body: str = ""
+    draft: bool = False
+    target_commitish: str = ""
 
 
 class LiveSetupRepositoryService:
@@ -166,6 +170,32 @@ class LiveSetupRepositoryService:
                 self._markdown_body(self._read_repo_text(path)) for path in comment_paths
             ],
         )
+
+    def fetch_issue_type_config_entries(
+        self,
+        project_key: str = "DEMO",
+    ) -> list[dict[str, object]]:
+        payload = self._read_repo_json(f"{project_key}/config/issue-types.json")
+        if not isinstance(payload, list):
+            raise RuntimeError(
+                f"GitHub response for {project_key}/config/issue-types.json was not a list.",
+            )
+        return [entry for entry in payload if isinstance(entry, dict)]
+
+    def fetch_workflow_config_map(
+        self,
+        project_key: str = "DEMO",
+    ) -> dict[str, dict[str, object]]:
+        payload = self._read_repo_json(f"{project_key}/config/workflows.json")
+        if not isinstance(payload, dict):
+            raise RuntimeError(
+                f"GitHub response for {project_key}/config/workflows.json was not an object.",
+            )
+        return {
+            str(key): value
+            for key, value in payload.items()
+            if isinstance(key, str) and isinstance(value, dict)
+        }
 
     def fetch_project_locale_configuration(
         self,
@@ -342,25 +372,82 @@ class LiveSetupRepositoryService:
             )
         except urllib.error.HTTPError as error:
             if error.code == 404:
+                releases = self._read_json(
+                    f"/repos/{self.repository}/releases?per_page=100",
+                )
+                if not isinstance(releases, list):
+                    raise RuntimeError(
+                        "GitHub response for repository releases was not a list.",
+                    )
+                for candidate in releases:
+                    if not isinstance(candidate, dict):
+                        continue
+                    if str(candidate.get("tag_name", "")).strip() == tag_name:
+                        return self._parse_release(candidate, fallback_tag_name=tag_name)
                 return None
             raise
         if not isinstance(payload, dict):
             raise RuntimeError(
                 f"GitHub response for release tag {tag_name} was not an object.",
             )
-        return LiveHostedRelease(
-            id=int(payload.get("id", 0)),
-            tag_name=str(payload.get("tag_name", "")).strip(),
-            name=str(payload.get("name", "")).strip(),
-            assets=[
-                LiveHostedReleaseAsset(
-                    id=int(asset.get("id", 0)),
-                    name=str(asset.get("name", "")).strip(),
+        return self._parse_release(payload, fallback_tag_name=tag_name)
+
+    def fetch_releases_by_tag_any_state(
+        self,
+        tag_name: str,
+        *,
+        max_pages: int = 5,
+    ) -> list[LiveHostedRelease]:
+        matches_by_id: dict[int, LiveHostedRelease] = {}
+        for page in range(1, max_pages + 1):
+            releases = self._read_json(
+                f"/repos/{self.repository}/releases?per_page=100&page={page}",
+            )
+            if not isinstance(releases, list):
+                raise RuntimeError("GitHub response for repository releases was not a list.")
+            if not releases:
+                break
+            for candidate in releases:
+                if not isinstance(candidate, dict):
+                    continue
+                if str(candidate.get("tag_name", "")).strip() != tag_name:
+                    continue
+                release_id = int(candidate.get("id", 0))
+                if release_id <= 0 or release_id in matches_by_id:
+                    continue
+                detail = self._read_json(f"/repos/{self.repository}/releases/{release_id}")
+                matches_by_id[release_id] = self._parse_release(
+                    detail,
+                    context=f"release {release_id}",
                 )
-                for asset in payload.get("assets", [])
-                if isinstance(asset, dict)
-            ],
+        return list(matches_by_id.values())
+
+    def fetch_release_by_tag_any_state(self, tag_name: str) -> LiveHostedRelease | None:
+        matches = self.fetch_releases_by_tag_any_state(tag_name)
+        if matches:
+            return matches[0]
+        return self.fetch_release_by_tag(tag_name)
+
+    def download_release_asset_bytes(self, asset_id: int) -> bytes:
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{self.repository}/releases/assets/{asset_id}",
+            headers={
+                "Accept": "application/octet-stream",
+                "X-GitHub-Api-Version": "2022-11-28",
+                **(
+                    {"Authorization": f"Bearer {self.token}"}
+                    if self.token
+                    else {}
+                ),
+            },
         )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            if response.status != 200:
+                raise RuntimeError(
+                    f"GitHub release asset download for {asset_id} returned unexpected "
+                    f"status {response.status}.",
+                )
+            return response.read()
 
     def delete_release_asset(self, asset_id: int) -> None:
         request = urllib.request.Request(
@@ -404,6 +491,80 @@ class LiveSetupRepositoryService:
                     f"{response.status}.",
                 )
 
+    def create_release(
+        self,
+        *,
+        tag_name: str,
+        name: str,
+        body: str = "",
+        target_commitish: str | None = None,
+        draft: bool = True,
+        prerelease: bool = False,
+    ) -> LiveHostedRelease:
+        payload = self._write_json(
+            f"/repos/{self.repository}/releases",
+            payload={
+                "tag_name": tag_name,
+                "name": name,
+                "body": body,
+                "target_commitish": target_commitish or self.ref,
+                "draft": draft,
+                "prerelease": prerelease,
+            },
+            method="POST",
+        )
+        return self._parse_release(payload, context=f"create release {tag_name}")
+
+    def update_release_name(self, release_id: int, *, name: str) -> LiveHostedRelease:
+        payload = self._write_json(
+            f"/repos/{self.repository}/releases/{release_id}",
+            payload={"name": name},
+            method="PATCH",
+        )
+        return self._parse_release(payload, context=f"update release {release_id}")
+
+    def upload_release_asset(
+        self,
+        *,
+        release_id: int,
+        asset_name: str,
+        content_type: str,
+        content: bytes,
+    ) -> LiveHostedReleaseAsset:
+        request = urllib.request.Request(
+            (
+                f"https://uploads.github.com/repos/{self.repository}/releases/"
+                f"{release_id}/assets?name={quote(asset_name)}"
+            ),
+            data=content,
+            method="POST",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Content-Type": content_type,
+                "Content-Length": str(len(content)),
+                **(
+                    {"Authorization": f"Bearer {self.token}"}
+                    if self.token
+                    else {}
+                ),
+            },
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            if response.status != 201:
+                raise RuntimeError(
+                    f"GitHub release asset upload for {asset_name} returned unexpected "
+                    f"status {response.status}.",
+                )
+            raw_payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(raw_payload, dict):
+            raise RuntimeError(
+                f"GitHub release asset upload for {asset_name} did not return an object payload.",
+            )
+        return LiveHostedReleaseAsset(
+            id=int(raw_payload.get("id", 0)),
+            name=str(raw_payload.get("name", "")).strip(),
+        )
     def _read_config_names(self, path: str) -> list[str]:
         values = self._read_repo_json(path)
         return [
@@ -527,6 +688,54 @@ class LiveSetupRepositoryService:
         )
         with urllib.request.urlopen(request, timeout=60) as response:
             return json.loads(response.read().decode("utf-8"))
+
+    def _write_json(self, path: str, *, payload: dict[str, object], method: str):
+        request = urllib.request.Request(
+            f"https://api.github.com{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            method=method,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Content-Type": "application/json",
+                **(
+                    {"Authorization": f"Bearer {self.token}"}
+                    if self.token
+                    else {}
+                ),
+            },
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def _parse_release(
+        self,
+        payload: object,
+        *,
+        context: str | None = None,
+        fallback_tag_name: str = "",
+    ) -> LiveHostedRelease:
+        if not isinstance(payload, dict):
+            release_context = context or (
+                f"release tag {fallback_tag_name}" if fallback_tag_name else "release"
+            )
+            raise RuntimeError(f"GitHub response for {release_context} was not an object.")
+        return LiveHostedRelease(
+            id=int(payload.get("id", 0)),
+            tag_name=str(payload.get("tag_name", "")).strip() or fallback_tag_name,
+            name=str(payload.get("name", "")).strip(),
+            assets=[
+                LiveHostedReleaseAsset(
+                    id=int(asset.get("id", 0)),
+                    name=str(asset.get("name", "")).strip(),
+                )
+                for asset in payload.get("assets", [])
+                if isinstance(asset, dict)
+            ],
+            body=str(payload.get("body", "")),
+            draft=bool(payload.get("draft", False)),
+            target_commitish=str(payload.get("target_commitish", "")).strip(),
+        )
 
 
 LiveHostedRepositoryFile = HostedRepositoryFile

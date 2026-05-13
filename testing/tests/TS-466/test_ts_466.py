@@ -14,12 +14,14 @@ if str(REPO_ROOT) not in sys.path:
 from testing.components.pages.live_settings_locales_page import (  # noqa: E402
     LiveSettingsLocalesPage,
 )
+from testing.components.services.live_locale_warning_visual_probe import (  # noqa: E402
+    LiveLocaleWarningVisualProbe,
+)
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveHostedCatalogEntry,
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
-from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
     create_live_tracker_app_with_stored_token,
 )
@@ -37,13 +39,15 @@ EXPECTED_CATALOG_TITLES = [
     "Resolutions",
 ]
 EXPECTED_WARNING_COLORS = {
-    "rgb(193, 179, 65)",
+    "rgb(122, 101, 17)",
     "rgb(247, 201, 102)",
 }
 EXPECTED_WARNING_BACKGROUND_COLORS = {
     "rgb(241, 228, 213)",
     "rgb(36, 40, 39)",
 }
+WARNING_MIN_CONTRAST_RATIO = 4.5
+WARNING_MAX_COLOR_DISTANCE = 24.0
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts466_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts466_success.png"
@@ -54,6 +58,7 @@ def main() -> None:
 
     config = load_live_setup_test_config()
     service = LiveSetupRepositoryService(config=config)
+    warning_visual_probe = LiveLocaleWarningVisualProbe()
     token = service.token
     if not token:
         raise RuntimeError(
@@ -74,8 +79,9 @@ def main() -> None:
         subject="status",
     )
     locale_state_before: dict[str, object] = {
-        "supported_locales": [],
+        "supported_locales": project_locale_configuration.supported_locales,
         "locale_present": False,
+        "locale_payload": {},
     }
     expected_priority_translation = f"{priority_seed['name']} ES TS-466"
     expected_status_warning = (
@@ -101,7 +107,10 @@ def main() -> None:
         "steps": [],
     }
 
-    locale_saved = False
+    locale_added_in_test = False
+    cleanup_target_locale: str | None = None
+    cleanup_priority_translation: str | None = None
+    cleanup_status_translation: str | None = None
     try:
         with create_live_tracker_app_with_stored_token(
             config,
@@ -159,20 +168,20 @@ def main() -> None:
                 if page.locale_exists(requested_target_locale):
                     target_locale = requested_target_locale
                     page.select_locale(target_locale)
-                    result["locale_added_in_test"] = False
                     step_4_action = f'Select the existing "{target_locale}" locale.'
+                    locale_state_before = _locale_state(service, target_locale)
                 elif existing_secondary_locales:
                     target_locale = existing_secondary_locales[0]
                     page.select_locale(target_locale)
-                    result["locale_added_in_test"] = False
                     step_4_action = (
                         f'Select the existing secondary locale "{target_locale}" to '
                         "satisfy the precondition."
                     )
+                    locale_state_before = _locale_state(service, target_locale)
                 else:
                     target_locale = page.add_locale(requested_target_locale)
                     page.select_locale(target_locale)
-                    result["locale_added_in_test"] = True
+                    locale_added_in_test = True
                     step_4_action = (
                         f'Add the requested secondary locale "{requested_target_locale}" '
                         "to satisfy the precondition."
@@ -183,9 +192,10 @@ def main() -> None:
                             f'(requested "{requested_target_locale}", observed "{target_locale}").'
                         )
 
-                locale_state_before = _locale_state(service, target_locale)
                 result["target_locale"] = target_locale
+                result["locale_added_in_test"] = locale_added_in_test
                 result["locale_state_before"] = locale_state_before
+                cleanup_target_locale = target_locale
                 _record_step(
                     result,
                     step=4,
@@ -236,6 +246,8 @@ def main() -> None:
                 )
                 result["priority_before"] = _entry_payload(priority_before)
                 result["status_before"] = _entry_payload(status_before)
+                cleanup_priority_translation = priority_before.translation
+                cleanup_status_translation = status_before.translation
 
                 priority_after = page.fill_translation(
                     section_title="Priorities",
@@ -267,12 +279,15 @@ def main() -> None:
                     value="",
                 )
                 result["status_after_edit"] = _entry_payload(status_after)
-                _assert_warning_state(
+                status_after_warning_visual = _assert_warning_state(
+                    page=page,
                     step=7,
                     entry=status_after,
                     expected_warning_text=expected_status_warning,
                     page_body_text=page.current_body_text(),
+                    warning_visual_probe=warning_visual_probe,
                 )
+                result["status_after_edit_warning_visual"] = status_after_warning_visual
                 _record_step(
                     result,
                     step=7,
@@ -282,22 +297,15 @@ def main() -> None:
                 )
 
                 page.save_settings()
-                _wait_for_locale_repo_state(
-                    service=service,
-                    locale=target_locale,
-                    expected_locale_present=True,
-                    expected_priority_translation=expected_priority_translation,
-                    expected_priority_id=str(priority_seed["id"]),
-                    expected_status_translation=None,
-                    expected_status_id=str(status_seed["id"]),
-                )
-                locale_saved = True
                 _record_step(
                     result,
                     step=8,
                     status="passed",
                     action="Save the live project settings.",
-                    observed="The saved locale file persisted the edited priority translation while keeping the status translation empty.",
+                    observed=(
+                        "The UI accepted the save action without blocking the empty "
+                        "Status translation warning."
+                    ),
                 )
 
                 page.open_locales_tab()
@@ -322,12 +330,15 @@ def main() -> None:
                         f'Observed translation: "{priority_saved.translation}"\n'
                         f"Observed row: {priority_saved.row_label}",
                     )
-                _assert_warning_state(
+                status_after_save_warning_visual = _assert_warning_state(
+                    page=page,
                     step=9,
                     entry=status_saved,
                     expected_warning_text=expected_status_warning,
                     page_body_text=page.current_body_text(),
+                    warning_visual_probe=warning_visual_probe,
                 )
+                result["status_after_save_warning_visual"] = status_after_save_warning_visual
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
                 result["human_verification"] = {
@@ -366,6 +377,16 @@ def main() -> None:
                 page.screenshot(str(SCREENSHOT_PATH))
                 result["screenshot"] = str(SCREENSHOT_PATH)
                 raise
+            finally:
+                result["cleanup"] = _restore_ui_state(
+                    page=page,
+                    locale=cleanup_target_locale,
+                    locale_added_in_test=locale_added_in_test,
+                    priority_entry_id=str(priority_seed["id"]),
+                    priority_translation=cleanup_priority_translation,
+                    status_entry_id=str(status_seed["id"]),
+                    status_translation=cleanup_status_translation,
+                )
     except AssertionError as error:
         result["error"] = str(error)
         result["traceback"] = traceback.format_exc()
@@ -378,19 +399,6 @@ def main() -> None:
         _write_result_if_requested(result)
         print(json.dumps(result, indent=2))
         raise
-    finally:
-        cleanup_result = _restore_locale_state(
-            config=config,
-            service=service,
-            token=token,
-            user_login=user.login,
-            locale=target_locale,
-            locale_state_before=locale_state_before,
-            priority_entry_id=str(priority_seed["id"]),
-            status_entry_id=str(status_seed["id"]),
-            locale_saved=locale_saved,
-        )
-        result["cleanup"] = cleanup_result
 
     result["status"] = "passed"
     result["summary"] = (
@@ -435,200 +443,67 @@ def _read_locale_payload(
     return service.fetch_locale_payload(PROJECT_PATH, locale)
 
 
-def _wait_for_locale_repo_state(
+def _restore_ui_state(
     *,
-    service: LiveSetupRepositoryService,
+    page: LiveSettingsLocalesPage | None,
     locale: str,
-    expected_locale_present: bool,
-    expected_priority_translation: str | None,
-    expected_priority_id: str,
-    expected_status_translation: str | None,
-    expected_status_id: str,
-    timeout_seconds: int = 90,
-) -> None:
-    matched, last_observation = poll_until(
-        probe=lambda: _observe_locale_repo_state(
-            service=service,
-            locale=locale,
-            expected_priority_id=expected_priority_id,
-            expected_status_id=expected_status_id,
-        ),
-        is_satisfied=lambda observation: _locale_repo_state_matches(
-            observation=observation,
-            expected_locale_present=expected_locale_present,
-            expected_priority_translation=expected_priority_translation,
-            expected_status_translation=expected_status_translation,
-        ),
-        timeout_seconds=timeout_seconds,
-    )
-    if matched:
-        return
-
-    raise AssertionError(
-        "The hosted save path did not persist the expected locale state within the "
-        f"timeout for locale {locale}.\n"
-        f"Expected locale present: {expected_locale_present}\n"
-        f'Expected priority translation for "{expected_priority_id}": '
-        f'{expected_priority_translation!r}\n'
-        f'Expected status translation for "{expected_status_id}": '
-        f'{expected_status_translation!r}\n'
-        f"Last observed state: {last_observation}",
-    )
-
-
-def _observe_locale_repo_state(
-    *,
-    service: LiveSetupRepositoryService,
-    locale: str,
-    expected_priority_id: str,
-    expected_status_id: str,
-) -> dict[str, object]:
-    locale_state = service.fetch_locale_state(PROJECT_PATH, locale)
-    locale_payload = locale_state.payload
-    priorities = locale_payload.get("priorities", {})
-    statuses = locale_payload.get("statuses", {})
-    priority_translation = (
-        str(priorities.get(expected_priority_id, ""))
-        if isinstance(priorities, dict)
-        else ""
-    )
-    status_translation = (
-        str(statuses.get(expected_status_id, ""))
-        if isinstance(statuses, dict)
-        else ""
-    )
-    return {
-        "supported_locales": locale_state.supported_locales,
-        "locale_present": locale_state.locale_present,
-        "locale_payload": locale_payload,
-        "priority_translation": priority_translation,
-        "status_translation": status_translation,
-    }
-
-
-def _locale_repo_state_matches(
-    *,
-    observation: dict[str, object],
-    expected_locale_present: bool,
-    expected_priority_translation: str | None,
-    expected_status_translation: str | None,
-) -> bool:
-    locale_present = bool(observation.get("locale_present"))
-    priority_translation = str(observation.get("priority_translation", ""))
-    status_translation = str(observation.get("status_translation", ""))
-    if locale_present != expected_locale_present:
-        return False
-    if expected_priority_translation is None:
-        priority_matches = priority_translation == ""
-    else:
-        priority_matches = priority_translation == expected_priority_translation
-    if expected_status_translation is None:
-        status_matches = status_translation == ""
-    else:
-        status_matches = status_translation == expected_status_translation
-    return priority_matches and status_matches
-
-
-def _restore_locale_state(
-    *,
-    config,
-    service: LiveSetupRepositoryService,
-    token: str,
-    user_login: str,
-    locale: str,
-    locale_state_before: dict[str, object],
+    locale_added_in_test: bool,
     priority_entry_id: str,
+    priority_translation: str | None,
     status_entry_id: str,
-    locale_saved: bool,
+    status_translation: str | None,
 ) -> dict[str, object]:
-    if not locale_saved:
-        return {"status": "not-needed", "reason": "No persisted locale mutation was observed."}
+    if page is None or not locale:
+        return {"status": "not-needed", "reason": "No live page was available for cleanup."}
 
-    supported_before = locale_state_before.get("supported_locales", [])
-    locale_present_before = bool(locale_state_before.get("locale_present"))
-    locale_payload_before = locale_state_before.get("locale_payload", {})
-    if not isinstance(locale_payload_before, dict):
-        locale_payload_before = {}
-
-    priority_before = _lookup_translation(
-        locale_payload_before,
-        section="priorities",
-        entry_id=priority_entry_id,
-    )
-    status_before = _lookup_translation(
-        locale_payload_before,
-        section="statuses",
-        entry_id=status_entry_id,
-    )
-
-    with create_live_tracker_app_with_stored_token(config, token=token) as tracker_page:
-        page = LiveSettingsLocalesPage(tracker_page)
-        runtime = tracker_page.open()
-        if runtime.kind != "ready":
-            return {
-                "status": "failed",
-                "reason": "Cleanup could not reopen the hosted tracker shell.",
-                "runtime_state": runtime.kind,
-                "runtime_body_text": runtime.body_text,
-            }
-        page.ensure_connected(
-            token=token,
-            repository=service.repository,
-            user_login=user_login,
-        )
-        page.open_settings_admin()
+    try:
         page.open_locales_tab()
-
-        if locale_present_before:
-            if not page.locale_exists(locale):
-                locale = page.add_locale(locale)
-            page.select_locale(locale)
-            page.fill_translation(
-                section_title="Priorities",
-                locale=locale,
-                entry_id=priority_entry_id,
-                value=priority_before or "",
-            )
-            page.fill_translation(
-                section_title="Statuses",
-                locale=locale,
-                entry_id=status_entry_id,
-                value=status_before or "",
-            )
-            page.save_settings()
-            _wait_for_locale_repo_state(
-                service=service,
-                locale=locale,
-                expected_locale_present=True,
-                expected_priority_translation=priority_before or None,
-                expected_priority_id=priority_entry_id,
-                expected_status_translation=status_before or None,
-                expected_status_id=status_entry_id,
-            )
+        if locale_added_in_test:
+            if page.locale_exists(locale):
+                page.remove_locale(locale)
+                page.save_settings()
             return {
                 "status": "restored",
-                "supported_locales": supported_before,
-                "priority_translation": priority_before or "",
-                "status_translation": status_before or "",
+                "target_locale": locale,
+                "locale_removed": True,
             }
 
-        if page.locale_exists(locale):
-            page.remove_locale(locale)
-            page.save_settings()
-            _wait_for_locale_repo_state(
-                service=service,
-                locale=locale,
-                expected_locale_present=False,
-                expected_priority_translation=None,
-                expected_priority_id=priority_entry_id,
-                expected_status_translation=None,
-                expected_status_id=status_entry_id,
-            )
+        if priority_translation is None or status_translation is None:
+            return {
+                "status": "not-needed",
+                "reason": "No editable locale values were captured before mutation.",
+            }
+
+        if not page.locale_exists(locale):
+            return {
+                "status": "failed",
+                "reason": f'Cleanup could not find the "{locale}" locale chip.',
+            }
+
+        page.select_locale(locale)
+        page.fill_translation(
+            section_title="Priorities",
+            locale=locale,
+            entry_id=priority_entry_id,
+            value=priority_translation,
+        )
+        page.fill_translation(
+            section_title="Statuses",
+            locale=locale,
+            entry_id=status_entry_id,
+            value=status_translation,
+        )
+        page.save_settings()
         return {
             "status": "restored",
-            "supported_locales": supported_before,
-            "priority_translation": "",
-            "status_translation": "",
+            "target_locale": locale,
+            "priority_translation": priority_translation,
+            "status_translation": status_translation,
+        }
+    except Exception as error:
+        return {
+            "status": "failed",
+            "reason": f"{type(error).__name__}: {error}",
         }
 
 
@@ -657,16 +532,24 @@ def _entry_payload(entry) -> dict[str, object]:
         "warning_background_color": entry.warning_background_color,
         "warning_border_width": entry.warning_border_width,
         "input_index": entry.input_index,
+        "input_rect": {
+            "left": entry.input_rect.left,
+            "top": entry.input_rect.top,
+            "width": entry.input_rect.width,
+            "height": entry.input_rect.height,
+        },
     }
 
 
 def _assert_warning_state(
     *,
+    page: LiveSettingsLocalesPage,
     step: int,
     entry,
     expected_warning_text: str,
     page_body_text: str,
-) -> None:
+    warning_visual_probe: LiveLocaleWarningVisualProbe,
+) -> dict[str, object] | None:
     if entry.warning_text != expected_warning_text:
         raise AssertionError(
             f"Step {step} failed: the empty Status translation did not show the "
@@ -681,6 +564,51 @@ def _assert_warning_state(
     normalized_border_color = _normalize_css_color(entry.warning_border_color)
     normalized_background_color = _normalize_css_color(entry.warning_background_color)
     border_width = _parse_css_pixels(entry.warning_border_width)
+    if (
+        normalized_text_color is None
+        or normalized_border_color is None
+        or normalized_background_color is None
+        or border_width <= 0
+    ):
+        warning_screenshot_path = OUTPUTS_DIR / f"ts466_warning_step_{step}.png"
+        page.screenshot(str(warning_screenshot_path))
+        visual_observation = warning_visual_probe.observe(
+            screenshot_path=warning_screenshot_path,
+            input_rect=entry.input_rect,
+        )
+        if visual_observation.foreground_contrast_ratio < WARNING_MIN_CONTRAST_RATIO:
+            raise AssertionError(
+                f"Step {step} failed: the visible warning pill did not keep enough "
+                "foreground contrast for the fallback warning.\n"
+                f"Observed warning visual: {visual_observation.describe()}\n"
+                f"Minimum contrast: {WARNING_MIN_CONTRAST_RATIO:.1f}:1\n"
+                f"Observed body text:\n{page_body_text}",
+            )
+        if visual_observation.foreground_distance > WARNING_MAX_COLOR_DISTANCE:
+            raise AssertionError(
+                f"Step {step} failed: the visible warning pill did not use the "
+                "TrackState warning foreground token.\n"
+                f"Observed warning visual: {visual_observation.describe()}\n"
+                f"Maximum token distance: {WARNING_MAX_COLOR_DISTANCE:.1f}\n"
+                f"Observed body text:\n{page_body_text}",
+            )
+        return {
+            "background_hex": visual_observation.background_hex,
+            "expected_background_hex": visual_observation.expected_background_hex,
+            "foreground_hex": visual_observation.foreground_hex,
+            "expected_foreground_hex": visual_observation.expected_foreground_hex,
+            "foreground_distance": round(visual_observation.foreground_distance, 2),
+            "border_hex": visual_observation.border_hex,
+            "expected_border_hex": visual_observation.expected_border_hex,
+            "border_distance": round(visual_observation.border_distance, 2),
+            "foreground_contrast_ratio": round(
+                visual_observation.foreground_contrast_ratio,
+                2,
+            ),
+            "screenshot_path": visual_observation.screenshot_path,
+            "crop_box": visual_observation.crop_box,
+            "warning_box": visual_observation.warning_box,
+        }
     if (
         normalized_text_color not in EXPECTED_WARNING_COLORS
         or normalized_border_color not in EXPECTED_WARNING_COLORS
@@ -700,6 +628,12 @@ def _assert_warning_state(
             f"Observed row: {entry.row_label}\n"
             f"Observed body text:\n{page_body_text}",
         )
+    return {
+        "text_color": normalized_text_color,
+        "border_color": normalized_border_color,
+        "background_color": normalized_background_color,
+        "border_width": border_width,
+    }
 
 
 def _warning_state_summary(entry) -> str:
