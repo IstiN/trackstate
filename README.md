@@ -53,3 +53,13 @@ End users should not fork this full source repository. They should fork `IstiN/t
 That setup workflow checks out a selected `IstiN/trackstate` ref (`main`, tag, or commit SHA), builds the Flutter web app with the fork repository as runtime context, and deploys it to the fork's GitHub Pages site. Runtime project data is read from the target repository through the GitHub API.
 
 Maintainers should mark `IstiN/trackstate-setup` as a GitHub template repository in repository settings.
+
+### Hosted `github-releases` attachment note
+
+For hosted browser sessions, direct upload to GitHub Release assets is not a browser-safe path. `IstiN/trackstate-setup` now includes `process-attachment-inbox.yml` to handle this server-side:
+
+1. Commit file to `<PROJECT>/.trackstate/upload-inbox/<ISSUE-KEY>/<file>`.
+2. Push to `main`.
+3. Workflow uploads the file to the issue release, updates `<issue-root>/attachments.json`, and removes the inbox file.
+
+This preserves release-backed storage without relying on direct browser upload to `uploads.github.com`.

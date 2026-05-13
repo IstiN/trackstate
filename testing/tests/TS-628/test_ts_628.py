@@ -165,8 +165,9 @@ class TrackStateCliInverseCloneLinkCanonicalStorageTest(unittest.TestCase):
         for fragment in (
             '"command": "ticket-link"',
             f'"key": "{self.config.issue_a_key}"',
-            f'"target": "{self.config.issue_b_key}"',
-            '"type": "clones"',
+            f'"target": "{self.config.expected_canonical_link_payload["target"]}"',
+            f'"type": "{self.config.expected_canonical_link_payload["type"]}"',
+            f'"direction": "{self.config.expected_canonical_link_payload["direction"]}"',
         ):
             self.assertIn(
                 fragment,

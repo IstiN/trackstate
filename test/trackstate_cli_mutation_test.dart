@@ -646,7 +646,8 @@ void main() {
       final link = linkData['link']! as Map<String, Object?>;
       expect(linkResult.exitCode, 0);
       expect(link['type'], 'blocks');
-      expect(link['direction'], 'inward');
+      expect(link['target'], 'DEMO-2');
+      expect(link['direction'], 'outward');
       expect(
         File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
         isFalse,
