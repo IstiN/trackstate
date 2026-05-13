@@ -264,16 +264,19 @@ class TrackerViewModel extends ChangeNotifier {
     IssueMutationService? issueMutationService,
     TrackStateAuthStore authStore =
         const SharedPreferencesTrackStateAuthStore(),
+    String? workspaceId,
   }) : _repository = repository,
-       _issueMutationService =
-           issueMutationService ?? IssueMutationService(repository: repository),
-       _authStore = authStore {
+        _issueMutationService =
+            issueMutationService ?? IssueMutationService(repository: repository),
+        _authStore = authStore,
+        _workspaceId = workspaceId {
     _bindProviderSession();
   }
 
   final TrackStateRepository _repository;
   final IssueMutationService _issueMutationService;
   final TrackStateAuthStore _authStore;
+  String? _workspaceId;
   ProviderSession? _boundProviderSession;
 
   TrackerSnapshot? _snapshot;
@@ -634,6 +637,16 @@ class TrackerViewModel extends ChangeNotifier {
     _projectSettingsTabRequest = previous._projectSettingsTabRequest;
   }
 
+  void updateWorkspaceScope(String? workspaceId) {
+    final normalizedWorkspaceId = workspaceId?.trim();
+    if (_workspaceId == normalizedWorkspaceId) {
+      return;
+    }
+    _workspaceId = normalizedWorkspaceId == null || normalizedWorkspaceId.isEmpty
+        ? null
+        : normalizedWorkspaceId;
+  }
+
   void dismissMessage() {
     if (_message == null) {
       return;
@@ -686,7 +699,11 @@ class TrackerViewModel extends ChangeNotifier {
         ),
       );
       if (remember) {
-        await _authStore.saveToken(target.repository, normalizedToken);
+        await _authStore.saveToken(
+          normalizedToken,
+          repository: _workspaceId == null ? target.repository : null,
+          workspaceId: _workspaceId,
+        );
       }
       _isConnected = true;
       _connectedUser = user;
@@ -1584,7 +1601,11 @@ class TrackerViewModel extends ChangeNotifier {
     if (target == null || _isConnected) return;
     final callbackToken = _callbackToken();
     final storedToken =
-        callbackToken ?? await _authStore.readToken(target.repository);
+        callbackToken ??
+        await _authStore.readToken(
+          repository: _workspaceId == null ? target.repository : null,
+          workspaceId: _workspaceId,
+        );
     if (storedToken == null || storedToken.isEmpty) {
       if (_callbackCode() != null) {
         _message = TrackerMessage.githubAuthorizationCodeReturned();
@@ -1602,7 +1623,11 @@ class TrackerViewModel extends ChangeNotifier {
       _connectedUser = user;
       _isConnected = true;
       if (callbackToken != null) {
-        await _authStore.saveToken(target.repository, callbackToken);
+        await _authStore.saveToken(
+          callbackToken,
+          repository: _workspaceId == null ? target.repository : null,
+          workspaceId: _workspaceId,
+        );
       }
       await _resumeStartupRecoveryAfterAuthentication();
       _message = TrackerMessage.githubConnected(
@@ -1611,7 +1636,10 @@ class TrackerViewModel extends ChangeNotifier {
       );
     } on Object catch (error) {
       _message = TrackerMessage.storedGitHubTokenInvalid(error);
-      await _authStore.clearToken(target.repository);
+      await _authStore.clearToken(
+        repository: _workspaceId == null ? target.repository : null,
+        workspaceId: _workspaceId,
+      );
     } finally {
       _bindProviderSession();
     }

@@ -213,6 +213,22 @@ void main() {
     expect(viewModel.connectedUser?.initials, 'DU');
   });
 
+  test('view model restores a workspace-scoped GitHub token', () async {
+    SharedPreferences.setMockInitialValues({
+      'trackstate.githubToken.workspace.hosted%3Atrackstate%2Ftrackstate%40main':
+          'workspace-token',
+    });
+    final viewModel = TrackerViewModel(
+      repository: const DemoTrackStateRepository(),
+      workspaceId: 'hosted:trackstate/trackstate@main',
+    );
+
+    await viewModel.load();
+
+    expect(viewModel.isConnected, isTrue);
+    expect(viewModel.connectedUser?.login, 'demo-user');
+  });
+
   test(
     'view model resumes startup recovery once after GitHub authentication succeeds',
     () async {

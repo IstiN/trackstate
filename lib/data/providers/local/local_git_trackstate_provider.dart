@@ -23,15 +23,18 @@ class LocalGitTrackStateProvider
   LocalGitTrackStateProvider({
     required this.repositoryPath,
     this.dataRef = 'HEAD',
+    String? writeBranch,
     GitProcessRunner? processRunner,
     LocalGitHostedProviderFactory? hostedProviderFactory,
   }) : _processRunner = processRunner ?? const IoGitProcessRunner(),
+       _writeBranch = writeBranch?.trim(),
        _hostedProviderFactory =
-           hostedProviderFactory ?? _defaultLocalGitHostedProviderFactory;
+            hostedProviderFactory ?? _defaultLocalGitHostedProviderFactory;
 
   final String repositoryPath;
   final GitProcessRunner _processRunner;
   final LocalGitHostedProviderFactory _hostedProviderFactory;
+  final String? _writeBranch;
   RepositoryConnection? _connection;
 
   @override
@@ -45,10 +48,11 @@ class LocalGitTrackStateProvider
 
   @override
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
-    final branch = await getBranch(connection.branch);
+    final resolvedBranch = _writeBranch ?? connection.branch;
+    final branch = await getBranch(resolvedBranch);
     if (!branch.exists) {
       throw TrackStateProviderException(
-        'Local branch ${connection.branch} was not found in $repositoryPath.',
+        'Local branch $resolvedBranch was not found in $repositoryPath.',
       );
     }
     _connection = connection;
@@ -94,6 +98,10 @@ class LocalGitTrackStateProvider
 
   @override
   Future<String> resolveWriteBranch() async {
+    final configuredWriteBranch = _writeBranch;
+    if (configuredWriteBranch != null && configuredWriteBranch.isNotEmpty) {
+      return configuredWriteBranch;
+    }
     final result = await _runGit(['rev-parse', '--abbrev-ref', 'HEAD']);
     return result.stdout.trim();
   }
