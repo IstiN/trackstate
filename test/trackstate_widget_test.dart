@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -12,6 +13,34 @@ import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../testing/components/factories/testing_dependencies.dart';
 import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
+
+const String _hostedReleaseProjectJson = '''
+{
+  "key": "TRACK",
+  "name": "TrackState.AI",
+  "defaultLocale": "en",
+  "issueKeyPattern": "TRACK-{number}",
+  "dataModel": "nested-tree",
+  "configPath": "config",
+  "attachmentStorage": {
+    "mode": "github-releases",
+    "githubReleases": {
+      "tagPrefix": "widget-test-assets-"
+    }
+  }
+}
+''';
+
+const RepositoryPermission _hostedReleaseUploadPermission = RepositoryPermission(
+  canRead: true,
+  canWrite: true,
+  isAdmin: false,
+  canCreateBranch: true,
+  canManageAttachments: true,
+  attachmentUploadMode: AttachmentUploadMode.full,
+  supportsReleaseAttachmentWrites: true,
+  canCheckCollaborators: false,
+);
 
 void main() {
   setUp(() {
@@ -624,7 +653,12 @@ void main() {
         tester.view.devicePixelRatio = 1;
         await tester.pumpWidget(
           TrackStateApp(
-            repository: ReactiveIssueDetailTrackStateRepository(),
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: _hostedReleaseUploadPermission,
+              textFixtures: const <String, String>{
+                'project.json': _hostedReleaseProjectJson,
+              },
+            ),
             attachmentPicker: pickAttachment,
           ),
         );
@@ -715,7 +749,12 @@ void main() {
         tester.view.devicePixelRatio = 1;
         await tester.pumpWidget(
           TrackStateApp(
-            repository: ReactiveIssueDetailTrackStateRepository(),
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: _hostedReleaseUploadPermission,
+              textFixtures: const <String, String>{
+                'project.json': _hostedReleaseProjectJson,
+              },
+            ),
             attachmentPicker: pickAttachment,
           ),
         );

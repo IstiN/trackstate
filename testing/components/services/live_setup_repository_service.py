@@ -565,7 +565,6 @@ class LiveSetupRepositoryService:
             id=int(raw_payload.get("id", 0)),
             name=str(raw_payload.get("name", "")).strip(),
         )
-
     def _read_config_names(self, path: str) -> list[str]:
         values = self._read_repo_json(path)
         return [

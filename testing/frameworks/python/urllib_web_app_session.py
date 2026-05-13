@@ -286,6 +286,19 @@ class UrllibWebAppSession(WebAppSession):
             "Download capture is not supported by the urllib web session fallback."
         )
 
+    def wait_for_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        del selector, has_text, index, timeout_ms
+        raise NotImplementedError(
+            "Download capture is not supported by the urllib web session fallback."
+        )
+
     def screenshot(self, path: str) -> None:
         del path
         return None
