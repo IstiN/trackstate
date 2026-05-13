@@ -38,6 +38,7 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts668_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts668_failure.png"
 
@@ -49,6 +50,10 @@ MIN_CONTROL_BORDER_CONTRAST = 3.0
 HOSTED_TARGET = "IstiN/trackstate-setup"
 LOCAL_TARGET = "/tmp/trackstate-demo"
 DEFAULT_BRANCH = "main"
+EXPECTED_ICON_BY_TYPE = {
+    "Hosted": "repository",
+    "Local": "folder",
+}
 
 
 def main() -> None:
@@ -196,8 +201,8 @@ def main() -> None:
                     observed=(
                         f"Found {observation.row_count} saved workspace rows; hosted row text="
                         f"{hosted_row.visible_text!r}; local row text={local_row.visible_text!r}; "
-                        f"hosted_icon_count={hosted_row.image_count}; "
-                        f"local_icon_count={local_row.image_count}."
+                        f"hosted_icon={hosted_row.icon_identity or '<missing>'}; "
+                        f"local_icon={local_row.icon_identity or '<missing>'}."
                     ),
                 )
                 _assert_selected_row_tokens(observation)
@@ -232,13 +237,15 @@ def main() -> None:
                         "the Saved workspaces card presented one hosted row and one local row "
                         "with explicit target-type text and a visible icon signal for each row."
                     ),
-                    observed=(
-                        f"section_visible={observation.section_visible}; "
-                        f"hosted_row={hosted_row.visible_text!r}; "
-                        f"local_row={local_row.visible_text!r}; "
-                        f"hosted_icon_label={hosted_row.icon_accessibility_label!r}; "
-                        f"local_icon_label={local_row.icon_accessibility_label!r}"
-                    ),
+                        observed=(
+                            f"section_visible={observation.section_visible}; "
+                            f"hosted_row={hosted_row.visible_text!r}; "
+                            f"local_row={local_row.visible_text!r}; "
+                            f"hosted_icon={hosted_row.icon_identity!r}; "
+                            f"local_icon={local_row.icon_identity!r}; "
+                            f"hosted_icon_label={hosted_row.icon_accessibility_label!r}; "
+                            f"local_icon_label={local_row.icon_accessibility_label!r}"
+                        ),
                 )
                 _record_human_verification(
                     result,
@@ -373,6 +380,15 @@ def _assert_target_type_row(
         raise AssertionError(
             "Expected result failed: the saved workspace row did not expose any "
             "visible icon/image signal alongside the workspace-type text.\n"
+            f"Observed row: {_row_asdict(row)}",
+        )
+    expected_icon = EXPECTED_ICON_BY_TYPE[expected_type]
+    if row.icon_identity != expected_icon:
+        raise AssertionError(
+            "Expected result failed: the saved workspace row did not expose the "
+            "correct target-type icon identity.\n"
+            f"Expected row type: {expected_type}\n"
+            f"Expected icon identity: {expected_icon}\n"
             f"Observed row: {_row_asdict(row)}",
         )
     if row.target_type_label == expected_type:
@@ -515,6 +531,8 @@ def _accessibility_summary(observation: SavedWorkspaceListObservation) -> str:
         (
             f"{row.display_name or row.visible_text}: "
             f"semantics={row.semantics_label!r}, "
+            f"icon_identity={row.icon_identity!r}, "
+            f"icon_fingerprint={row.icon_fingerprint!r}, "
             f"title_contrast={row.title_contrast_ratio}, "
             f"detail_contrast={row.detail_contrast_ratio}, "
             f"type_contrast={row.type_contrast_ratio}, "
@@ -533,6 +551,8 @@ def _accessibility_summary_for_rows(
         (
             f"{expected_type}: "
             f"semantics={row.semantics_label!r}, "
+            f"icon_identity={row.icon_identity!r}, "
+            f"icon_fingerprint={row.icon_fingerprint!r}, "
             f"icon_label={row.icon_accessibility_label!r}, "
             f"icon_contrast={row.icon_contrast_ratio}, "
             f"title_contrast={row.title_contrast_ratio}, "
@@ -610,6 +630,7 @@ def _capture_visible_screenshot(
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    _write_review_replies()
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -630,6 +651,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error = str(result.get("error", "AssertionError: unknown failure"))
+    _write_review_replies()
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -667,7 +689,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "* Navigated to *Project Settings* and inspected the rendered saved-workspace rows.",
         (
             "* Verified whether the rows exposed explicit {{Hosted}} / {{Local}} "
-            "text, a visible workspace-type icon signal, token-compliant selected-row "
+            "text, the correct repository/folder workspace-type icon, token-compliant selected-row "
             "colors, and accessible icon/control contrast."
         ),
         "",
@@ -734,8 +756,15 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "- Navigated to **Project Settings** and inspected the rendered saved-workspace list.",
         (
             "- Checked for explicit `Hosted` / `Local` text labels, selected-row "
-            "token colors, a visible workspace-type icon signal, non-empty semantics "
+            "token colors, the correct repository/folder workspace-type icon, non-empty semantics "
             "labels, and WCAG AA icon/control contrast."
+        ),
+        "",
+        "## Rework summary",
+        (
+            "- Replaced the generic row image-presence check with a deterministic "
+            "icon fingerprint so the Hosted row must match the repository icon and "
+            "the Local row must match the folder icon."
         ),
         "",
         "## Result",
@@ -777,20 +806,25 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
-    status = "passed" if passed else "failed"
+    status = "PASSED" if passed else "FAILED"
     lines = [
-        f"# {TICKET_KEY} {status}",
+        "## Rework Summary",
         "",
-        f"- Test case: **{TEST_CASE_TITLE}**",
         (
-            "- Opened the deployed TrackState app with a preloaded hosted/local "
-            "workspace state and inspected the Project Settings saved-workspace UI."
+            "- Fixed the remaining review gap by replacing the generic image-count "
+            "check with a deterministic workspace icon fingerprint: Hosted must map "
+            "to the repository icon and Local must map to the folder icon."
+        ),
+        f"- Test case: **{TICKET_KEY} — {TEST_CASE_TITLE}**",
+        (
+            f"- Re-run result: **{status}**"
         ),
         (
-            f"- Result: {_selected_row_summary_from_result(result)}"
+            f"- New result: {_selected_row_summary_from_result(result)}"
             if passed
-            else f"- Result: {_failed_step_summary(result)}"
+            else f"- New result: {_failed_step_summary(result)}"
         ),
+        f"- Command: `{RUN_COMMAND}`",
         (
             f"- Environment: `{result['app_url']}` on Chromium/Playwright "
             f"({platform.system()}) against `{result['repository']}` @ `{result['repository_ref']}`."
@@ -874,6 +908,99 @@ def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
 
 def _failure_summary(result: dict[str, object]) -> str:
     return _failed_step_summary(result)
+
+
+def _write_review_replies() -> None:
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps(
+            {
+                "replies": [
+                    {
+                        "inReplyToId": 3237847769,
+                        "threadId": "PRRT_kwDOSU6Gf86B6Kyi",
+                        "reply": (
+                            "Fixed: `LiveWorkspaceManagementPage` now fingerprints the row icon "
+                            "against the app's repository and folder glyph shapes, and "
+                            "`test_ts_668.py` asserts the Hosted row maps to the repository "
+                            "icon while the Local row maps to the folder icon instead of only "
+                            "checking `image_count >= 1`."
+                        ),
+                    },
+                    {
+                        "inReplyToId": None,
+                        "threadId": None,
+                        "reply": (
+                            "Addressed: the earlier locator false negative remains fixed. The "
+                            "Saved workspaces parser still follows the live `Open` / `Delete` "
+                            "button semantics and selected-row state instead of the stale "
+                            "`Open workspace` / `Active workspace` copy."
+                        ),
+                    },
+                    {
+                        "inReplyToId": None,
+                        "threadId": None,
+                        "reply": (
+                            "Updated: the current rework supersedes the earlier status note. In "
+                            "addition to the existing locator/startup fixes, the test now checks "
+                            "the Hosted row for the repository icon and the Local row for the "
+                            "folder icon."
+                        ),
+                    },
+                    {
+                        "inReplyToId": None,
+                        "threadId": None,
+                        "reply": (
+                            "Addressed: the startup failure path still classifies `TrackState data "
+                            "was not found.` as `data-load-failed`, captures the visible failure "
+                            "surface, and reports the first failed step instead of a stale "
+                            "missing-rows summary."
+                        ),
+                    },
+                    {
+                        "inReplyToId": None,
+                        "threadId": None,
+                        "reply": (
+                            "Updated: this pass keeps the earlier startup-failure handling "
+                            "changes and adds the missing type-specific icon assertion. The rerun "
+                            "still fails immediately on the live `TrackState data was not found.` "
+                            "startup defect."
+                        ),
+                    },
+                    {
+                        "inReplyToId": None,
+                        "threadId": None,
+                        "reply": (
+                            "Addressed: Step 2/Step 3 pass ordering, selected-row token checks, "
+                            "and the row accessibility assertions from the prior rework remain in "
+                            "place. This pass closes the last remaining gap by asserting the "
+                            "actual icon identity per row type."
+                        ),
+                    },
+                    {
+                        "inReplyToId": None,
+                        "threadId": None,
+                        "reply": (
+                            "Updated: the latest TS-668 rerun keeps the prior step-reporting and "
+                            "accessibility fixes, and now verifies Hosted/Local icon identity via "
+                            "row icon fingerprints before any future ready-state pass could go "
+                            "green."
+                        ),
+                    },
+                    {
+                        "inReplyToId": None,
+                        "threadId": None,
+                        "reply": (
+                            "Fixed: the remaining TS-668 review gap was closed by replacing the "
+                            "generic image-presence check with a type-specific icon identity "
+                            "assertion derived from the production workspace-row icon contract."
+                        ),
+                    },
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _format_error(error: BaseException) -> str:

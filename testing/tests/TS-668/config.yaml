@@ -7,4 +7,4 @@ dependencies:
   - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
 notes:
   - Opens the deployed TrackState web app with preloaded hosted/local saved workspace profiles.
-  - Verifies the Settings workspace list shows compact rows with explicit Hosted/Local text, accessible semantics labels, and selected-row token colors.
+  - Verifies the Settings workspace list shows compact rows with explicit Hosted/Local text, repository/folder type icons, accessible semantics labels, and selected-row token colors.

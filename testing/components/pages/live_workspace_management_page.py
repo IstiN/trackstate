@@ -33,6 +33,8 @@ class SavedWorkspaceRowObservation:
     detail_contrast_ratio: float | None
     type_contrast_ratio: float | None
     image_count: int
+    icon_identity: str | None
+    icon_fingerprint: str | None
     icon_accessibility_label: str | None
     icon_color: str | None
     icon_contrast_ratio: float | None
@@ -150,6 +152,149 @@ class LiveWorkspaceManagementPage:
                 visibleElements(root, 'flt-semantics[role="button"],[role="button"],button')
                   .map((element) => accessibleLabel(element))
                   .filter((label) => label.length > 0);
+              const renderReferenceIcon = (kind) => {
+                const size = 32;
+                const canvas = document.createElement('canvas');
+                canvas.width = size;
+                canvas.height = size;
+                const context = canvas.getContext('2d', { willReadFrequently: true });
+                if (!context) {
+                  return null;
+                }
+                context.clearRect(0, 0, size, size);
+                context.strokeStyle = '#111111';
+                context.fillStyle = '#111111';
+                context.lineWidth = size * 0.08;
+                context.lineCap = 'round';
+                context.lineJoin = 'round';
+                if (kind === 'repository') {
+                  context.beginPath();
+                  context.roundRect(size * 0.18, size * 0.16, size * 0.64, size * 0.68, size * 0.08);
+                  context.stroke();
+                  context.beginPath();
+                  context.moveTo(size * 0.18, size * 0.34);
+                  context.lineTo(size * 0.82, size * 0.34);
+                  context.stroke();
+                  context.beginPath();
+                  context.arc(size * 0.3, size * 0.25, size * 0.03, 0, Math.PI * 2);
+                  context.fill();
+                  context.beginPath();
+                  context.moveTo(size * 0.32, size * 0.54);
+                  context.lineTo(size * 0.66, size * 0.54);
+                  context.stroke();
+                  context.beginPath();
+                  context.moveTo(size * 0.32, size * 0.68);
+                  context.lineTo(size * 0.58, size * 0.68);
+                  context.stroke();
+                  return canvas;
+                }
+                if (kind === 'folder') {
+                  context.beginPath();
+                  context.moveTo(size * 0.14, size * 0.32);
+                  context.lineTo(size * 0.38, size * 0.32);
+                  context.lineTo(size * 0.46, size * 0.22);
+                  context.lineTo(size * 0.84, size * 0.22);
+                  context.lineTo(size * 0.78, size * 0.78);
+                  context.lineTo(size * 0.18, size * 0.78);
+                  context.closePath();
+                  context.stroke();
+                  return canvas;
+                }
+                return null;
+              };
+              const iconFingerprint = (source) => {
+                if (!source) {
+                  return null;
+                }
+                const size = 32;
+                const canvas = document.createElement('canvas');
+                canvas.width = size;
+                canvas.height = size;
+                const context = canvas.getContext('2d', { willReadFrequently: true });
+                if (!context) {
+                  return null;
+                }
+                context.clearRect(0, 0, size, size);
+                try {
+                  context.drawImage(source, 0, 0, size, size);
+                } catch (error) {
+                  return null;
+                }
+                const imageData = context.getImageData(0, 0, size, size).data;
+                const cells = 8;
+                const bits = [];
+                for (let rowIndex = 0; rowIndex < cells; rowIndex += 1) {
+                  for (let columnIndex = 0; columnIndex < cells; columnIndex += 1) {
+                    const startX = Math.floor((columnIndex * size) / cells);
+                    const endX = Math.floor(((columnIndex + 1) * size) / cells);
+                    const startY = Math.floor((rowIndex * size) / cells);
+                    const endY = Math.floor(((rowIndex + 1) * size) / cells);
+                    let inkPixels = 0;
+                    let totalPixels = 0;
+                    for (let y = startY; y < endY; y += 1) {
+                      for (let x = startX; x < endX; x += 1) {
+                        const offset = ((y * size) + x) * 4;
+                        const alpha = imageData[offset + 3];
+                        if (alpha < 24) {
+                          totalPixels += 1;
+                          continue;
+                        }
+                        const luminance = (
+                          (0.2126 * imageData[offset])
+                          + (0.7152 * imageData[offset + 1])
+                          + (0.0722 * imageData[offset + 2])
+                        ) / 255;
+                        if (luminance < 0.96) {
+                          inkPixels += 1;
+                        }
+                        totalPixels += 1;
+                      }
+                    }
+                    bits.push(totalPixels > 0 && (inkPixels / totalPixels) >= 0.08 ? '1' : '0');
+                  }
+                }
+                return bits.join('');
+              };
+              const hammingDistance = (left, right) => {
+                if (!left || !right || left.length !== right.length) {
+                  return null;
+                }
+                let distance = 0;
+                for (let index = 0; index < left.length; index += 1) {
+                  if (left[index] !== right[index]) {
+                    distance += 1;
+                  }
+                }
+                return distance;
+              };
+              const referenceFingerprints = {
+                repository: iconFingerprint(renderReferenceIcon('repository')),
+                folder: iconFingerprint(renderReferenceIcon('folder')),
+              };
+              const classifyIcon = (element) => {
+                if (!element) {
+                  return { identity: null, fingerprint: null };
+                }
+                const drawable =
+                  element.matches?.('canvas,img')
+                    ? element
+                    : element.querySelector?.('canvas,img');
+                const fingerprint = iconFingerprint(drawable);
+                if (!fingerprint) {
+                  return { identity: null, fingerprint: null };
+                }
+                const distances = Object.entries(referenceFingerprints)
+                  .map(([identity, referenceFingerprint]) => ({
+                    identity,
+                    distance: hammingDistance(fingerprint, referenceFingerprint),
+                  }))
+                  .filter((candidate) => candidate.distance != null)
+                  .sort((left, right) => left.distance - right.distance);
+                return {
+                  identity: distances[0]?.identity ?? null,
+                  fingerprint,
+                };
+              };
               const hasSelectedSemantics = (root) =>
                 visibleElements(root, 'flt-semantics[aria-selected="true"],[aria-selected="true"]').length > 0;
               const resolveForegroundColor = (element) => {
@@ -449,6 +594,7 @@ class LiveWorkspaceManagementPage:
                 const iconAccessibilityLabel = imageElements
                   .map((element) => accessibleLabel(element))
                   .find((label) => label.length > 0) ?? null;
+                const iconClassification = classifyIcon(iconElement);
                 const iconColor = iconElement
                   ? (
                     resolveForegroundColor(iconElement)
@@ -471,6 +617,8 @@ class LiveWorkspaceManagementPage:
                   detailContrastRatio: contrastRatio(detailColor, backgroundColor),
                   typeContrastRatio: contrastRatio(typeColor, backgroundColor),
                   imageCount: imageElements.length,
+                  iconIdentity: iconClassification.identity,
+                  iconFingerprint: iconClassification.fingerprint,
                   iconAccessibilityLabel,
                   iconColor,
                   iconContrastRatio: contrastRatio(iconColor, backgroundColor),
@@ -560,6 +708,16 @@ class LiveWorkspaceManagementPage:
                     else None
                 ),
                 image_count=int(row.get("imageCount", 0)),
+                icon_identity=(
+                    str(row.get("iconIdentity"))
+                    if row.get("iconIdentity") is not None
+                    else None
+                ),
+                icon_fingerprint=(
+                    str(row.get("iconFingerprint"))
+                    if row.get("iconFingerprint") is not None
+                    else None
+                ),
                 icon_accessibility_label=(
                     str(row.get("iconAccessibilityLabel"))
                     if row.get("iconAccessibilityLabel") is not None

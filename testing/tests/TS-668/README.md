@@ -9,9 +9,11 @@ The automation:
 2. navigates to **Project Settings**
 3. verifies the **Saved workspaces** section renders both rows with explicit
    `Hosted` / `Local` text labels
-4. checks the selected row uses the `primarySoft` background and `primary`
+4. verifies the Hosted row uses the repository icon and the Local row uses the
+   folder icon
+5. checks the selected row uses the `primarySoft` background and `primary`
    outline token colors
-5. checks each row exposes a non-empty semantics label plus accessible action
+6. checks each row exposes a non-empty semantics label plus accessible action
    labels, and that visible row text meets WCAG AA contrast expectations
 
 ## Install dependencies
@@ -42,8 +44,9 @@ PYTHONPATH=. python3 testing/tests/TS-668/test_ts_668.py
 
 ```text
 Pass: Project Settings shows a Saved workspaces card with one Hosted row and one
-Local row, both with non-empty semantics labels, visible Hosted/Local text, and
-token-compliant selected-row colors/contrast.
+Local row, both with the correct repository/folder icon, non-empty semantics
+labels, visible Hosted/Local text, and token-compliant selected-row
+colors/contrast.
 
 Fail: the Saved workspaces card is missing, one of the target rows is missing,
 type labels are absent, semantics labels are empty, or the selected row does
