@@ -314,11 +314,12 @@ class RepositoryPermission {
     bool? canManageAttachments,
     AttachmentUploadMode? attachmentUploadMode,
     this.supportsReleaseAttachmentWrites = false,
+    this.releaseAttachmentWriteFailureReason,
     bool? canCheckCollaborators,
   }) : canCreateBranch = canCreateBranch ?? canWrite,
-       canManageAttachments = canManageAttachments ?? canWrite,
-       attachmentUploadMode =
-           attachmentUploadMode ??
+        canManageAttachments = canManageAttachments ?? canWrite,
+        attachmentUploadMode =
+            attachmentUploadMode ??
            ((canManageAttachments ?? canWrite)
                ? AttachmentUploadMode.full
                : AttachmentUploadMode.none),
@@ -331,6 +332,7 @@ class RepositoryPermission {
   final bool canManageAttachments;
   final AttachmentUploadMode attachmentUploadMode;
   final bool supportsReleaseAttachmentWrites;
+  final String? releaseAttachmentWriteFailureReason;
   final bool canCheckCollaborators;
 }
 
