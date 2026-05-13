@@ -37,10 +37,14 @@ class PythonTrackStateCliReleaseIdentityMissingRemoteFramework(
         *,
         config: TrackStateCliReleaseIdentityMissingRemoteConfig,
     ) -> TrackStateCliReleaseIdentityMissingRemoteValidationResult:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-523-bin-") as bin_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-release-identity-bin-"
+        ) as bin_dir:
             executable_path = Path(bin_dir) / "trackstate"
             self._compile_executable(executable_path)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-523-repo-") as temp_dir:
+            with tempfile.TemporaryDirectory(
+                prefix="trackstate-release-identity-repo-"
+            ) as temp_dir:
                 repository_path = Path(temp_dir)
                 self._seed_local_repository(repository_path, config=config)
                 initial_state = self._capture_repository_state(
@@ -79,7 +83,7 @@ class PythonTrackStateCliReleaseIdentityMissingRemoteFramework(
             for variable in ("GH_TOKEN", "GITHUB_TOKEN", "TRACKSTATE_TOKEN")
             if env.pop(variable, None) is not None
         )
-        sandbox_home = repository_path / ".ts523-home"
+        sandbox_home = repository_path / ".release-identity-home"
         sandbox_home.mkdir(parents=True, exist_ok=True)
         env["HOME"] = str(sandbox_home)
         env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
@@ -98,8 +102,9 @@ class PythonTrackStateCliReleaseIdentityMissingRemoteFramework(
             executed_command=executed_command,
             fallback_reason=(
                 "Pinned execution to a temporary executable compiled from this checkout "
-                "and stripped GitHub credentials from the environment so TS-523 runs "
-                "the exact local command from a repository with no Git remotes."
+                "and stripped GitHub credentials from the environment so the missing-"
+                "remote release-identity scenario runs the exact local command from a "
+                "repository with no Git remotes."
             ),
             repository_path=str(repository_path),
             compiled_binary_path=str(executable_path),
@@ -162,7 +167,7 @@ updated: 2026-05-12T00:00:00Z
 
 # Description
 
-TS-523 local github-releases missing-remote fixture.
+Release identity missing-remote fixture.
 """,
         )
         self._write_binary_file(
@@ -170,16 +175,22 @@ TS-523 local github-releases missing-remote fixture.
             config.source_file_bytes,
         )
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-523 Tester")
+        self._git(
+            repository_path,
+            "config",
+            "--local",
+            "user.name",
+            "Release Identity Tester",
+        )
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "ts523@example.com",
+            "release-identity@example.com",
         )
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-523 fixture")
+        self._git(repository_path, "commit", "-m", "Seed missing-remote fixture")
 
     def _capture_repository_state(
         self,
