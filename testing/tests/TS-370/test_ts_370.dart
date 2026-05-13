@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -34,15 +33,13 @@ void main() {
           phaseLabel: 'disconnected',
         );
 
-        final disconnectedBanner = _globalBanner(
-          Ts370RepositoryAccessBannerFixture.disconnectedTitle,
-          Ts370RepositoryAccessBannerFixture.disconnectedMessage,
-        );
-        final connectAction = _calloutAction(
-          disconnectedBanner,
-          Ts370RepositoryAccessBannerFixture.disconnectedAction,
-        );
-        if (connectAction.evaluate().isEmpty) {
+        final connectActionVisible = await app
+            .isRepositoryAccessBannerTextVisible(
+              title: Ts370RepositoryAccessBannerFixture.disconnectedTitle,
+              message: Ts370RepositoryAccessBannerFixture.disconnectedMessage,
+              text: Ts370RepositoryAccessBannerFixture.disconnectedAction,
+            );
+        if (!connectActionVisible) {
           failures.add(
             'Step 2 failed: the disconnected global banner did not expose a visible '
             '"${Ts370RepositoryAccessBannerFixture.disconnectedAction}" recovery CTA. '
@@ -50,8 +47,11 @@ void main() {
             'Visible semantics: ${_formatSnapshot(app.visibleSemanticsLabelsSnapshot())}.',
           );
         } else {
-          await tester.tap(connectAction.first, warnIfMissed: false);
-          await tester.pumpAndSettle();
+          await app.tapRepositoryAccessBannerAction(
+            title: Ts370RepositoryAccessBannerFixture.disconnectedTitle,
+            message: Ts370RepositoryAccessBannerFixture.disconnectedMessage,
+            actionLabel: Ts370RepositoryAccessBannerFixture.disconnectedAction,
+          );
         }
 
         final connectDialogVisible =
@@ -71,11 +71,10 @@ void main() {
             'Fine-grained token',
             text: Ts370RepositoryAccessBannerFixture.readOnlyToken,
           );
-          final connectToken = find.widgetWithText(
-            FilledButton,
+          final connectTokenVisible = await app.isDialogTextVisible(
             'Connect token',
           );
-          if (connectToken.evaluate().isEmpty) {
+          if (!connectTokenVisible) {
             failures.add(
               'Step 4 failed: the PAT recovery dialog did not keep a visible '
               '"Connect token" submit action after the user typed a read-only token. '
@@ -83,14 +82,14 @@ void main() {
               'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
             );
           } else {
-            await tester.tap(connectToken.first, warnIfMissed: false);
+            await app.tapDialogControlWithoutSettling('Connect token');
             await tester.pump();
 
             final submitErrors = _drainFrameworkErrors(tester);
             if (submitErrors.isNotEmpty) {
               failures.add(
-                'Step 4 failed: submitting a read-only PAT crashed the repository-access recovery flow '
-                'before the banner could update to the read-only state. '
+                'Step 4 failed: submitting a read-only PAT raised framework errors during the repository-access recovery flow, '
+                'so the read-only transition did not complete cleanly. '
                 'Observed framework errors: ${submitErrors.join(' || ')}. '
                 'Visible dialog texts: ${_formatSnapshot(app.visibleDialogTextsSnapshot())}. '
                 'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
@@ -103,10 +102,11 @@ void main() {
                       app,
                       Ts370RepositoryAccessBannerFixture.readOnlyLabel,
                     ) &&
-                    _globalBanner(
-                      Ts370RepositoryAccessBannerFixture.readOnlyTitle,
-                      Ts370RepositoryAccessBannerFixture.readOnlyMessage,
-                    ).evaluate().isNotEmpty,
+                    await app.isRepositoryAccessBannerVisible(
+                      title: Ts370RepositoryAccessBannerFixture.readOnlyTitle,
+                      message:
+                          Ts370RepositoryAccessBannerFixture.readOnlyMessage,
+                    ),
                 failureMessage:
                     'Step 4 failed: submitting a read-only PAT did not update the global repository-access banner to the read-only state. '
                     'Top bar texts: ${_formatSnapshot(app.topBarVisibleTextsSnapshot())}. '
@@ -130,23 +130,24 @@ void main() {
             phaseLabel: 'read-only',
           );
 
-          final readOnlyBanner = _globalBanner(
-            Ts370RepositoryAccessBannerFixture.readOnlyTitle,
-            Ts370RepositoryAccessBannerFixture.readOnlyMessage,
-          );
-          final reconnectAction = _calloutAction(
-            readOnlyBanner,
-            Ts370RepositoryAccessBannerFixture.readOnlyAction,
-          );
-          if (reconnectAction.evaluate().isEmpty) {
+          final reconnectActionVisible = await app
+              .isRepositoryAccessBannerTextVisible(
+                title: Ts370RepositoryAccessBannerFixture.readOnlyTitle,
+                message: Ts370RepositoryAccessBannerFixture.readOnlyMessage,
+                text: Ts370RepositoryAccessBannerFixture.readOnlyAction,
+              );
+          if (!reconnectActionVisible) {
             failures.add(
               'Step 5 failed: the read-only global banner did not expose the '
               '"${Ts370RepositoryAccessBannerFixture.readOnlyAction}" recovery CTA. '
               'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
             );
           } else {
-            await tester.tap(reconnectAction.first, warnIfMissed: false);
-            await tester.pumpAndSettle();
+            await app.tapRepositoryAccessBannerAction(
+              title: Ts370RepositoryAccessBannerFixture.readOnlyTitle,
+              message: Ts370RepositoryAccessBannerFixture.readOnlyMessage,
+              actionLabel: Ts370RepositoryAccessBannerFixture.readOnlyAction,
+            );
 
             final authDialogVisible =
                 await app.isDialogTextVisible('Manage GitHub access') &&
@@ -195,7 +196,7 @@ Future<void> _verifyBannerAcrossIssueFlows(
   for (final section in sections) {
     await app.openSection(section);
     await tester.pumpAndSettle();
-    _verifyVisibleBannerState(
+    await _verifyVisibleBannerState(
       app: app,
       failures: failures,
       location: section,
@@ -217,7 +218,7 @@ Future<void> _verifyBannerAcrossIssueFlows(
     Ts370RepositoryAccessBannerFixture.issueSummary,
   );
 
-  _verifyVisibleBannerState(
+  await _verifyVisibleBannerState(
     app: app,
     failures: failures,
     location: 'issue detail for ${Ts370RepositoryAccessBannerFixture.issueKey}',
@@ -229,7 +230,7 @@ Future<void> _verifyBannerAcrossIssueFlows(
   );
 }
 
-void _verifyVisibleBannerState({
+Future<void> _verifyVisibleBannerState({
   required TrackStateAppComponent app,
   required List<String> failures,
   required String location,
@@ -238,9 +239,11 @@ void _verifyVisibleBannerState({
   required String title,
   required String message,
   required String actionLabel,
-}) {
-  final banner = _globalBanner(title, message);
-  if (banner.evaluate().isEmpty) {
+}) async {
+  if (!await app.isRepositoryAccessBannerVisible(
+    title: title,
+    message: message,
+  )) {
     failures.add(
       'Expected Result failed: the $phaseLabel global repository-access banner was not visible in $location. '
       'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}. '
@@ -259,11 +262,11 @@ void _verifyVisibleBannerState({
   }
 
   for (final requiredText in <String>[title, message, actionLabel]) {
-    final visibleMatch = find.descendant(
-      of: banner,
-      matching: find.text(requiredText, findRichText: true),
-    );
-    if (visibleMatch.evaluate().isEmpty) {
+    if (!await app.isRepositoryAccessBannerTextVisible(
+      title: title,
+      message: message,
+      text: requiredText,
+    )) {
       failures.add(
         'Expected Result failed: the $phaseLabel global repository-access banner in $location '
         'did not render "$requiredText" in the visible banner surface. '
@@ -271,24 +274,6 @@ void _verifyVisibleBannerState({
       );
     }
   }
-}
-
-Finder _globalBanner(String title, String message) => find.byWidgetPredicate(
-  (widget) =>
-      widget is Semantics &&
-      widget.properties.label == '$title $title $message',
-  description: 'global repository-access banner for "$title"',
-);
-
-Finder _calloutAction(Finder callout, String label) {
-  final outlinedButton = find.descendant(
-    of: callout,
-    matching: find.widgetWithText(OutlinedButton, label),
-  );
-  if (outlinedButton.evaluate().isNotEmpty) {
-    return outlinedButton.first;
-  }
-  return find.descendant(of: callout, matching: find.text(label));
 }
 
 Future<bool> _isTopBarLabelVisible(
