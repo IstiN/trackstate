@@ -11,7 +11,11 @@ import '../testing/fixtures/issue_detail_accessibility_screen_fixture.dart';
 const String _hostedTokenKey = 'trackstate.githubToken.trackstate.trackstate';
 const String _issueKey = 'TRACK-12';
 const String _issueSummary = 'Implement Git sync service';
-const String _restrictionTitle = 'Attachments stay download-only in the browser';
+const String _limitedTitle = 'Some attachment uploads still require local Git';
+const String _limitedMessage =
+    'Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.';
+const String _restrictionTitle =
+    'Attachments stay download-only in the browser';
 const String _restrictionMessage =
     'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.';
 const String _openSettingsLabel = 'Open settings';
@@ -51,7 +55,7 @@ void main() {
   });
 
   testWidgets(
-    'hosted repository-path attachments stay download-only and route Open settings to Attachments settings',
+    'hosted repository-path attachments keep limited browser uploads available and route Open settings to Attachments settings',
     (tester) async {
       final settingsRobot = SettingsScreenRobot(tester);
 
@@ -76,16 +80,16 @@ void main() {
         expect(
           screen.showsAttachmentsRestrictionCallout(
             _issueKey,
-            title: _restrictionTitle,
-            message: _restrictionMessage,
+            title: _limitedTitle,
+            message: _limitedMessage,
           ),
           isTrue,
         );
         expect(
           screen.showsAttachmentsRestrictionAction(
             _issueKey,
-            title: _restrictionTitle,
-            message: _restrictionMessage,
+            title: _limitedTitle,
+            message: _limitedMessage,
             actionLabel: _openSettingsLabel,
           ),
           isTrue,
@@ -101,17 +105,17 @@ void main() {
         );
         expect(
           find.widgetWithText(OutlinedButton, 'Choose attachment'),
-          findsNothing,
+          findsOneWidget,
         );
         expect(
           find.widgetWithText(FilledButton, 'Upload attachment'),
-          findsNothing,
+          findsOneWidget,
         );
 
         await screen.tapAttachmentsRestrictionAction(
           _issueKey,
-          title: _restrictionTitle,
-          message: _restrictionMessage,
+          title: _limitedTitle,
+          message: _limitedMessage,
           actionLabel: _openSettingsLabel,
         );
 
@@ -186,7 +190,7 @@ void main() {
   );
 
   testWidgets(
-    'repository-path Attachments notice exposes a tappable Open settings semantics node',
+    'repository-path limited Attachments notice exposes a tappable Open settings semantics node',
     (tester) async {
       try {
         final screen = await launchIssueDetailAccessibilityFixture(
@@ -198,7 +202,7 @@ void main() {
               isAdmin: false,
               canCreateBranch: true,
               canManageAttachments: true,
-              attachmentUploadMode: AttachmentUploadMode.full,
+              attachmentUploadMode: AttachmentUploadMode.noLfs,
               canCheckCollaborators: false,
             ),
             textFixtures: const <String, String>{
@@ -215,7 +219,9 @@ void main() {
         await screen.selectCollaborationTab(_issueKey, 'Attachments');
 
         final openSettingsNode = tester.getSemantics(
-          find.bySemanticsLabel(RegExp('^${RegExp.escape(_openSettingsLabel)}\$')),
+          find.bySemanticsLabel(
+            RegExp('^${RegExp.escape(_openSettingsLabel)}\$'),
+          ),
         );
         expect(
           openSettingsNode.getSemanticsData().hasAction(SemanticsAction.tap),
@@ -229,7 +235,7 @@ void main() {
   );
 
   testWidgets(
-    'repository-path Attachments notice does not wrap Open settings in a redundant custom button semantics node',
+    'repository-path limited Attachments notice does not wrap Open settings in a redundant custom button semantics node',
     (tester) async {
       try {
         final screen = await launchIssueDetailAccessibilityFixture(
@@ -241,7 +247,7 @@ void main() {
               isAdmin: false,
               canCreateBranch: true,
               canManageAttachments: true,
-              attachmentUploadMode: AttachmentUploadMode.full,
+              attachmentUploadMode: AttachmentUploadMode.noLfs,
               canCheckCollaborators: false,
             ),
             textFixtures: const <String, String>{
@@ -260,8 +266,8 @@ void main() {
         final action = _attachmentsRestrictionActionFinder(
           tester,
           _issueKey,
-          title: _restrictionTitle,
-          message: _restrictionMessage,
+          title: _limitedTitle,
+          message: _limitedMessage,
           actionLabel: _openSettingsLabel,
         );
 
