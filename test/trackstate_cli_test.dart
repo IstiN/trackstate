@@ -673,41 +673,51 @@ void main() {
       },
     );
 
-    test('read ticket exposes Jira issue link metadata', () async {
-      final cli = TrackStateCli(
-        environment: const TrackStateCliEnvironment(
-          workingDirectory: '/workspace/repo',
-        ),
-        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
-          localRepository: _FakeSearchRepository(
-            snapshot: _sampleSnapshotWithInwardLink(),
-            page: const TrackStateIssueSearchPage.empty(),
+    test(
+      'read ticket exposes Jira issue link metadata and canonical links',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
           ),
-        ),
-      );
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshotWithInwardLink(),
+              page: const TrackStateIssueSearchPage.empty(),
+            ),
+          ),
+        );
 
-      final result = await cli.run(const <String>[
-        'read',
-        'ticket',
-        '--key',
-        'TRACK-2',
-      ]);
-      final json = jsonDecode(result.stdout) as Map<String, Object?>;
-      final fields = json['fields']! as Map<String, Object?>;
+        final result = await cli.run(const <String>[
+          'read',
+          'ticket',
+          '--key',
+          'TRACK-2',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final fields = json['fields']! as Map<String, Object?>;
 
-      expect(result.exitCode, 0);
-      expect(fields['issuelinks'], <Map<String, Object?>>[
-        <String, Object?>{
-          'type': <String, Object?>{
-            'id': 'relates-to',
-            'name': 'Relates',
-            'inward': 'relates to',
-            'outward': 'relates to',
+        expect(result.exitCode, 0);
+        expect(json['links'], <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'relates to',
+            'target': 'TRACK-1',
+            'direction': 'inward',
           },
-          'inwardIssue': <String, Object?>{'id': '1', 'key': 'TRACK-1'},
-        },
-      ]);
-    });
+        ]);
+        expect(fields['issuelinks'], <Map<String, Object?>>[
+          <String, Object?>{
+            'type': <String, Object?>{
+              'id': 'relates-to',
+              'name': 'Relates',
+              'inward': 'relates to',
+              'outward': 'relates to',
+            },
+            'inwardIssue': <String, Object?>{'id': '1', 'key': 'TRACK-1'},
+          },
+        ]);
+      },
+    );
 
     test(
       'supports compatibility aliases and returns Jira field metadata',
