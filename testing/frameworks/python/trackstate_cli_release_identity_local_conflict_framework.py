@@ -58,8 +58,8 @@ class PythonTrackStateCliReleaseIdentityLocalConflictFramework(
     ) -> TrackStateCliReleaseIdentityLocalConflictValidationResult:
         if not self._repository_client.token:
             raise AssertionError(
-                "TS-551 requires GH_TOKEN or GITHUB_TOKEN so the live GitHub release "
-                "identity conflict can be exercised against the local CLI flow.",
+                "A GitHub token is required so the live GitHub release identity "
+                "conflict can be exercised against the local CLI flow.",
             )
 
         setup_actions: list[str] = []
@@ -87,10 +87,14 @@ class PythonTrackStateCliReleaseIdentityLocalConflictFramework(
 
         try:
             initial_remote_state = self._capture_remote_state(config=config)
-            with tempfile.TemporaryDirectory(prefix="trackstate-ts-551-bin-") as bin_dir:
+            with tempfile.TemporaryDirectory(
+                prefix="trackstate-release-identity-bin-",
+            ) as bin_dir:
                 executable_path = Path(bin_dir) / "trackstate"
                 self._compile_executable(executable_path)
-                with tempfile.TemporaryDirectory(prefix="trackstate-ts-551-repo-") as temp_dir:
+                with tempfile.TemporaryDirectory(
+                    prefix="trackstate-release-identity-repo-",
+                ) as temp_dir:
                     repository_path = Path(temp_dir)
                     local_attachment_path = self._seed_local_repository(
                         repository_path=repository_path,
@@ -132,7 +136,7 @@ class PythonTrackStateCliReleaseIdentityLocalConflictFramework(
             or observation is None
         ):
             raise AssertionError(
-                "TS-551 did not complete the local release identity conflict observation.\n"
+                "The local release identity conflict observation did not complete.\n"
                 f"Cleanup error: {cleanup_error or '<none>'}",
             )
 
@@ -159,7 +163,7 @@ class PythonTrackStateCliReleaseIdentityLocalConflictFramework(
             created = self._repository_client.create_release(
                 tag_name=config.expected_release_tag,
                 name=config.conflicting_release_title,
-                body="TS-551 mismatched local release fixture",
+                body="Local release identity conflict fixture",
                 target_commitish=config.branch,
                 draft=False,
             )
@@ -246,23 +250,29 @@ updated: 2026-05-13T00:00:00Z
 
 # Description
 
-TS-551 local github-releases release identity conflict fixture.
+Local github-releases release identity conflict fixture.
 """,
         )
         local_attachment_path = repository_path / config.source_file_name
         self._write_binary_file(local_attachment_path, config.source_file_bytes)
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-551 Tester")
+        self._git(
+            repository_path,
+            "config",
+            "--local",
+            "user.name",
+            "Release Identity Tester",
+        )
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "ts551@example.com",
+            "release-identity@example.com",
         )
         self._git(repository_path, "remote", "add", "origin", config.remote_origin_url)
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-551 fixture")
+        self._git(repository_path, "commit", "-m", "Seed release identity fixture")
         return str(local_attachment_path)
 
     def _capture_repository_state(
@@ -352,7 +362,7 @@ TS-551 local github-releases release identity conflict fixture.
         env.setdefault("CI", "true")
         env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
         env["TRACKSTATE_TOKEN"] = access_token
-        sandbox_home = repository_path / ".ts551-home"
+        sandbox_home = repository_path / ".trackstate-release-identity-home"
         sandbox_home.mkdir(parents=True, exist_ok=True)
         env["HOME"] = str(sandbox_home)
         env["XDG_CONFIG_HOME"] = str(sandbox_home / ".config")
@@ -371,7 +381,7 @@ TS-551 local github-releases release identity conflict fixture.
             executed_command=executed_command,
             fallback_reason=(
                 "Pinned execution to a temporary executable compiled from this checkout "
-                "and injected TRACKSTATE_TOKEN so TS-551 runs the exact local CLI upload "
+                "and injected TRACKSTATE_TOKEN so the exact local CLI upload runs "
                 "against a live GitHub release identity conflict."
             ),
             repository_path=str(repository_path),
