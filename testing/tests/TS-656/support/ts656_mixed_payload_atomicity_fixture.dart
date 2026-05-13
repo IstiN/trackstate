@@ -1,19 +1,11 @@
 import 'dart:convert';
 
-import '../../../components/services/issue_link_storage_probe.dart';
-import '../../../frameworks/providers/trackstate_provider_dirty_local_issue_write_client.dart';
 import '../../TS-627/support/ts627_noncanonical_link_storage_fixture.dart';
 
 class Ts656MixedPayloadAtomicityFixture {
-  Ts656MixedPayloadAtomicityFixture._(this._baseFixture)
-    : _storageProbe = IssueLinkStorageProbe(
-        writeClient: TrackStateProviderDirtyLocalIssueWriteClient.local(
-          repositoryPath: _baseFixture.repositoryPath,
-        ),
-      );
+  Ts656MixedPayloadAtomicityFixture._(this._baseFixture);
 
   final Ts627NonCanonicalLinkStorageFixture _baseFixture;
-  final IssueLinkStorageProbe _storageProbe;
 
   static const projectKey = Ts627NonCanonicalLinkStorageFixture.projectKey;
   static const epicKey = Ts627NonCanonicalLinkStorageFixture.epicKey;
@@ -55,11 +47,9 @@ class Ts656MixedPayloadAtomicityFixture {
       _baseFixture.observeRepositoryState();
 
   Future<Ts656StorageAttemptObservation> attemptMixedLinksWrite() async {
-    final writeResult = await _storageProbe.attemptWrite(
-      path: sourceLinksPath,
+    final writeResult = await _baseFixture.attemptLinksWrite(
       content: mixedLinksJsonContent,
       message: writeMessage,
-      expectedRevision: null,
     );
 
     return Ts656StorageAttemptObservation(

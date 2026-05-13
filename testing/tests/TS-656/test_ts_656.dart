@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
-import '../TS-627/support/ts627_noncanonical_link_storage_fixture.dart';
 import 'support/ts656_mixed_payload_atomicity_fixture.dart';
 
 const String _ticketKey = 'TS-656';
@@ -12,6 +11,9 @@ const String _ticketSummary =
     'Persist mixed payload with non-canonical link - storage layer rejects write and maintains integrity';
 const String _runCommand =
     'flutter test testing/tests/TS-656/test_ts_656.dart -r expanded';
+const String _expectedValidationErrorType = 'TrackStateProviderException';
+const String _expectedValidationErrorMessage =
+    'Validation failed for ${Ts656MixedPayloadAtomicityFixture.sourceLinksPath}: standardized links.json records must use the canonical outward form. Found type "blocks" with direction "inward".';
 
 void main() {
   test(
@@ -123,6 +125,8 @@ void main() {
         result['write_outcome'] = writeThrew ? 'threw' : 'returned';
         result['write_result_revision'] = attempt.writeRevision;
         result['write_result_branch'] = attempt.branch;
+        result['expected_error_type'] = _expectedValidationErrorType;
+        result['expected_error_message'] = _expectedValidationErrorMessage;
         result['observed_error_type'] = attempt.errorType ?? '<none>';
         result['observed_error_message'] = attempt.errorMessage ?? '<none>';
         result['after_head_revision'] = after.headRevision;
@@ -153,14 +157,16 @@ void main() {
               'error_message=${result['observed_error_message']}; write_revision=${attempt.writeRevision ?? '<none>'}',
         );
 
-        final validationRejected = _looksLikeValidationRejection(
+        final validationRejected = _matchesCanonicalBlocksValidationFailure(
           outcome: '${result['write_outcome']}',
           errorType: attempt.errorType,
           errorMessage: attempt.errorMessage,
         );
         final validationObservation =
-            'outcome=${result['write_outcome']}; error_type=${result['observed_error_type']}; '
-            'error_message=${result['observed_error_message']}';
+            'outcome=${result['write_outcome']}; expected_error_type=$_expectedValidationErrorType; '
+            'observed_error_type=${result['observed_error_type']}; '
+            'expected_error_message=$_expectedValidationErrorMessage; '
+            'observed_error_message=${result['observed_error_message']}';
         if (!validationRejected) {
           _recordStep(
             result,
@@ -171,9 +177,11 @@ void main() {
             observed: validationObservation,
           );
           throw AssertionError(
-            'Step 3 failed: the storage layer did not reject the mixed payload with a validation-style error.\n'
+            'Step 3 failed: the storage layer did not reject the mixed payload with the expected canonical-outward validation failure for type "blocks" and direction "inward".\n'
             'Observed outcome: ${result['write_outcome']}\n'
+            'Expected error type: $_expectedValidationErrorType\n'
             'Observed error type: ${result['observed_error_type']}\n'
+            'Expected error message: $_expectedValidationErrorMessage\n'
             'Observed error message: ${result['observed_error_message']}',
           );
         }
@@ -603,37 +611,15 @@ String _actualResultLine(Map<String, Object?> result) {
       'head_after=${result['after_head_revision'] ?? '<missing>'}.';
 }
 
-bool _looksLikeValidationRejection({
+bool _matchesCanonicalBlocksValidationFailure({
   required String outcome,
   required String? errorType,
   required String? errorMessage,
 }) {
-  if (outcome != 'threw') {
-    return false;
-  }
-  final combined = <String>[
-    if (errorType != null && errorType.trim().isNotEmpty) errorType,
-    if (errorMessage != null && errorMessage.trim().isNotEmpty) errorMessage,
-  ].join(' ').toLowerCase();
-  if (combined.isEmpty) {
-    return false;
-  }
-  return _rejectionFragments.any(combined.contains);
+  return outcome == 'threw' &&
+      errorType == _expectedValidationErrorType &&
+      errorMessage == _expectedValidationErrorMessage;
 }
-
-const List<String> _rejectionFragments = <String>[
-  'validation',
-  'invalid',
-  'reject',
-  'link',
-  'direction',
-  'links.json',
-  'inward',
-  'blocks',
-  'must',
-  'allowed',
-  'unsupported',
-];
 
 String _formatSnapshot(List<String> lines) {
   if (lines.isEmpty) {
