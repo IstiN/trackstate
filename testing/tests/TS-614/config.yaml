@@ -1,0 +1,9 @@
+test_id: TS-614
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Opens the deployed hosted TrackState tracker in a desktop Chromium viewport and connects the live setup repository with a real GitHub token.
+  - Measures the rendered desktop header controls visible to a user: sync status, search field, Create issue, repository access, theme toggle, and profile identity.
+  - Fails when any measured control is not 32px tall or when the smallest covering header container exposed by the live DOM is not a flex container using align-items center.
