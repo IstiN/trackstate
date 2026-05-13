@@ -512,9 +512,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             "* Matched the expected result: the hosted UI showed a clear visible error "
             "instead of a success state when the provider could no longer handle the upload."
             if passed
-            else "* Did not match the expected result: the hosted Attachments tab only "
-            "showed {{Open settings}} plus existing download rows, with no visible "
-            "{{Choose attachment}} or {{Upload attachment}} controls."
+            else f"* Did not match the expected result: {_jira_failure_summary(result)}"
         ),
         (
             f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
@@ -564,9 +562,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             "- Matched the expected result: the hosted UI showed a clear visible error "
             "instead of a success state when the provider could no longer handle the upload."
             if passed
-            else "- Did not match the expected result: the hosted Attachments tab only "
-            "showed `Open settings` plus existing download rows, with no visible "
-            "`Choose attachment` or `Upload attachment` controls."
+            else f"- Did not match the expected result: {_markdown_failure_summary(result)}"
         ),
         (
             f"- Environment: URL `{result['app_url']}`, repository `{result['repository']}` "
@@ -613,6 +609,12 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         f"- Screenshot: `{screenshot_path}`",
         f"- Environment: `{result['app_url']}` on Chromium/Playwright ({platform.system()})",
         (
+            "- Failure boundary: "
+            f"{_markdown_failure_summary(result)}"
+            if not passed
+            else "- Failure boundary: none"
+        ),
+        (
             "- Permission patch observation: "
             f"`{result.get('permission_patch_observation')}`"
         ),
@@ -631,9 +633,10 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    failure_mode = _failure_mode(result)
     return "\n".join(
         [
-            "# TS-567 - Upload attempt while storage provider is uninitialized does not surface the expected visible error",
+            f"# {_bug_title(failure_mode)}",
             "",
             "## Steps to reproduce",
             "1. Navigate to the 'Attachments' tab of any issue.",
@@ -641,25 +644,22 @@ def _bug_description(result: dict[str, object]) -> str:
             "2. Select a file and attempt to trigger an upload.",
             f"   - {'✅' if _step_status(result, 2) == 'passed' else '❌'} {_step_observation(result, 2)}",
             "",
+            "## Failing command",
+            "```bash",
+            "python testing/tests/TS-567/test_ts_567.py",
+            "```",
+            "",
             "## Exact error message or assertion failure",
             "```text",
             str(result.get("traceback", result.get("error", ""))),
             "```",
             "",
             "## Actual vs Expected",
-            (
-                "- **Expected:** after the upload is triggered while the active storage "
-                "provider cannot handle the request, the hosted UI should display a clear "
-                f"visible error such as `{EXPECTED_ERROR_MESSAGE}` and should not show a "
-                "successful completion state."
-            ),
-            (
-                "- **Actual:** "
-                + str(
-                    result.get("error")
-                    or "the hosted UI did not show the expected visible error state."
-                )
-            ),
+            f"- **Expected:** {_expected_failure_behavior(failure_mode)}",
+            f"- **Actual:** {_actual_failure_behavior(result, failure_mode)}",
+            "",
+            "## Missing or broken production capability",
+            _missing_production_capability(failure_mode),
             "",
             "## Environment details",
             f"- URL: `{result.get('app_url')}`",
@@ -756,6 +756,155 @@ def _find_step(result: dict[str, object], step_number: int) -> dict[str, object]
         if isinstance(step, dict) and int(step.get("step", -1)) == step_number:
             return step
     return None
+
+
+def _first_failed_step(result: dict[str, object]) -> int | None:
+    for step_number in (1, 2, 3):
+        if _step_status(result, step_number) != "passed":
+            return step_number
+    return None
+
+
+def _failure_mode(result: dict[str, object]) -> str:
+    failed_step = _first_failed_step(result)
+    if failed_step == 1:
+        return "missing_upload_controls"
+    if failed_step == 2:
+        return "missing_selected_file_state"
+    if failed_step == 3:
+        return "missing_visible_runtime_error"
+    return "unexpected_failure"
+
+
+def _bug_title(failure_mode: str) -> str:
+    return {
+        "missing_upload_controls": (
+            "TS-567 - Hosted Attachments tab does not expose the upload controls "
+            "needed to attempt the uninitialized-provider scenario"
+        ),
+        "missing_selected_file_state": (
+            "TS-567 - Hosted Attachments flow does not reach the selected-file state "
+            "needed to trigger the uninitialized-provider scenario"
+        ),
+        "missing_visible_runtime_error": (
+            "TS-567 - Upload attempt while storage provider is uninitialized does "
+            "not surface the expected visible error"
+        ),
+    }.get(
+        failure_mode,
+        "TS-567 - Hosted upload error-state automation failed before the expected result was proven",
+    )
+
+
+def _expected_failure_behavior(failure_mode: str) -> str:
+    return {
+        "missing_upload_controls": (
+            "the hosted `Attachments` tab should expose visible `Choose attachment` "
+            "and `Upload attachment` controls so the user can reach the upload attempt "
+            "and the TS-567 runtime-check scenario can be exercised."
+        ),
+        "missing_selected_file_state": (
+            "after file selection, the hosted `Attachments` tab should show the "
+            "selected-file summary and leave `Upload attachment` enabled so the "
+            "runtime-check scenario can be triggered."
+        ),
+        "missing_visible_runtime_error": (
+            "after the upload is triggered while the active storage provider cannot "
+            "handle the request, the hosted UI should display a clear visible error "
+            f"such as `{EXPECTED_ERROR_MESSAGE}` and should not show a successful "
+            "completion state."
+        ),
+    }.get(
+        failure_mode,
+        "the hosted TS-567 scenario should complete deterministically and prove the expected user-visible outcome.",
+    )
+
+
+def _actual_failure_behavior(result: dict[str, object], failure_mode: str) -> str:
+    observed_error = str(
+        result.get("error") or "the hosted UI failed before the expected result was proven."
+    )
+    return {
+        "missing_upload_controls": (
+            "the hosted `Attachments` tab stopped the scenario at Step 1 and only "
+            "showed `Open settings` plus existing download rows, with no visible "
+            "`Choose attachment` or `Upload attachment` controls. "
+            f"{observed_error}"
+        ),
+        "missing_selected_file_state": (
+            "the hosted UI accepted navigation into the `Attachments` tab but did not "
+            "surface the selected-file summary with an enabled `Upload attachment` "
+            f"action after file selection. {observed_error}"
+        ),
+        "missing_visible_runtime_error": (
+            "the upload attempt was triggered after forcing the provider unavailable, "
+            "but the hosted UI did not show the expected visible runtime error. "
+            f"{observed_error}"
+        ),
+    }.get(failure_mode, observed_error)
+
+
+def _missing_production_capability(failure_mode: str) -> str:
+    return {
+        "missing_upload_controls": (
+            "The hosted product does not currently expose a browser upload surface for "
+            "this issue state, so the user cannot even attempt the upload action that "
+            "TS-567 is meant to validate."
+        ),
+        "missing_selected_file_state": (
+            "The hosted product does not reliably preserve the selected-file/upload-ready "
+            "state after file selection, so the user cannot reach the upload attempt."
+        ),
+        "missing_visible_runtime_error": (
+            "The hosted product does not surface a clear visible runtime error when the "
+            "active attachment provider becomes unavailable during the upload attempt."
+        ),
+    }.get(
+        failure_mode,
+        "The hosted product does not currently provide the production-visible behavior needed to prove TS-567.",
+    )
+
+
+def _markdown_failure_summary(result: dict[str, object]) -> str:
+    failure_mode = _failure_mode(result)
+    return {
+        "missing_upload_controls": (
+            "the hosted Attachments tab only showed `Open settings` plus existing "
+            "download rows, with no visible `Choose attachment` or `Upload attachment` controls."
+        ),
+        "missing_selected_file_state": (
+            "the hosted Attachments tab never reached the selected-file state with an "
+            "enabled `Upload attachment` action after file selection."
+        ),
+        "missing_visible_runtime_error": (
+            "after the upload attempt, the hosted UI did not show the expected visible "
+            f"runtime error `{EXPECTED_ERROR_MESSAGE}`."
+        ),
+    }.get(
+        failure_mode,
+        str(result.get("error") or "the hosted UI failed before the expected result was proven."),
+    )
+
+
+def _jira_failure_summary(result: dict[str, object]) -> str:
+    failure_mode = _failure_mode(result)
+    return {
+        "missing_upload_controls": (
+            "the hosted Attachments tab only showed {{Open settings}} plus existing "
+            "download rows, with no visible {{Choose attachment}} or {{Upload attachment}} controls."
+        ),
+        "missing_selected_file_state": (
+            "the hosted Attachments tab never reached the selected-file state with an "
+            "enabled {{Upload attachment}} action after file selection."
+        ),
+        "missing_visible_runtime_error": (
+            "after the upload attempt, the hosted UI did not show the expected visible "
+            f"runtime error {{{{{EXPECTED_ERROR_MESSAGE}}}}}."
+        ),
+    }.get(
+        failure_mode,
+        str(result.get("error") or "the hosted UI failed before the expected result was proven."),
+    )
 
 
 if __name__ == "__main__":
