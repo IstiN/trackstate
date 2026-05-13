@@ -25,22 +25,28 @@ jobs:
       github.event.inputs.build_macos == 'true'
     runs-on: [self-hosted, macos]
     timeout-minutes: 30
+    env:
+      FLUTTER_ROOT: /Users/uladzimir_klyshevich/development/flutter
 
     steps:
+      - name: Add Flutter to PATH
+        run: echo "$FLUTTER_ROOT/bin" >> "$GITHUB_PATH"
+
       - uses: actions/checkout@v4
         with:
           submodules: true
           fetch-depth: 0
 
+      - name: Verify Flutter
+        run: flutter --version
+
       - name: Compute version
         id: version
         run: |
-          # Get latest version tag, default to v0.0.0 if none
           LATEST=$(git tag -l 'v*' --sort=-v:refname | head -1)
           if [ -z "$LATEST" ]; then
             LATEST="v0.0.0"
           fi
-          # Increment patch: v0.0.1 → v0.0.2
           MAJOR=$(echo "$LATEST" | sed 's/v//' | cut -d. -f1)
           MINOR=$(echo "$LATEST" | sed 's/v//' | cut -d. -f2)
           PATCH=$(echo "$LATEST" | sed 's/v//' | cut -d. -f3)
@@ -51,13 +57,6 @@ jobs:
           echo "build_name=${MAJOR}.${MINOR}.${NEXT_PATCH}" >> "$GITHUB_OUTPUT"
           echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
           echo "Next version: $VERSION (build $BUILD_NUMBER)"
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.35.3'
-          channel: 'stable'
-          cache: true
 
       - name: Install dependencies
         run: flutter pub get
@@ -70,21 +69,17 @@ jobs:
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           CERT_PATH=$RUNNER_TEMP/certificate.p12
 
-          # Decode certificate
           echo "$CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
 
-          # Create temporary keychain
           security create-keychain -p "" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "" "$KEYCHAIN_PATH"
 
-          # Import certificate
           security import "$CERT_PATH" -P "$CERTIFICATE_PASSWORD" \
             -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple: \
             -k "" "$KEYCHAIN_PATH"
 
-          # Add to search list
           security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain
 
       - name: Build macOS app
@@ -99,10 +94,9 @@ jobs:
           if [ ! -d "$APP_PATH" ]; then
             APP_PATH=$(find build/macos/Build/Products/Release -name "*.app" -maxdepth 1 | head -1)
           fi
-          DMG_PATH="build/TrackState-macOS.dmg"
           hdiutil create -volname "TrackState" \
             -srcfolder "$APP_PATH" \
-            -ov -format UDZO "$DMG_PATH"
+            -ov -format UDZO "build/TrackState-macOS.dmg"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -131,18 +125,19 @@ jobs:
       github.event.inputs.build_ios == 'true'
     runs-on: [self-hosted, macos]
     timeout-minutes: 30
+    env:
+      FLUTTER_ROOT: /Users/uladzimir_klyshevich/development/flutter
 
     steps:
+      - name: Add Flutter to PATH
+        run: echo "$FLUTTER_ROOT/bin" >> "$GITHUB_PATH"
+
       - uses: actions/checkout@v4
         with:
           submodules: true
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.35.3'
-          channel: 'stable'
-          cache: true
+      - name: Verify Flutter
+        run: flutter --version
 
       - name: Install dependencies
         run: flutter pub get
