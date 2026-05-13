@@ -108,7 +108,7 @@ class TrackStateCli {
         'jira_post_comment' => await _runJiraPostComment(
           arguments.skip(1).toList(),
         ),
-        'jira_link_issues' => await _runJiraLinkIssues(
+        'jira_link_issues' || 'jira-link-issues' => await _runJiraLinkIssues(
           arguments.skip(1).toList(),
         ),
         'jira_delete_ticket' => await _runJiraDeleteTicket(
@@ -2102,7 +2102,9 @@ class TrackStateCli {
     return _runMutationCommand(
       arguments: _normalizeLegacyJiraArguments(arguments, const {
         '--sourceKey': '--issueKey',
+        '--key': '--issueKey',
         '--anotherKey': '--targetIssueKey',
+        '--target-key': '--targetIssueKey',
         '--relationship': '--type',
       }),
       parser: parser,
@@ -5029,8 +5031,7 @@ class TrackStateCli {
         return null;
       }
 
-      final expectedDirection =
-          normalizedType == inward ? 'inward' : 'outward';
+      final expectedDirection = normalizedType == inward ? 'inward' : 'outward';
       if (normalizedDirection == expectedDirection) {
         return null;
       }
@@ -5048,10 +5049,33 @@ class TrackStateCli {
     required String issueKey,
     required String targetKey,
   }) => IssueLink(
-    type: normalizedLink?.canonicalKey ?? requestedType,
+    type: _canonicalCliLinkType(
+      normalizedLink: normalizedLink,
+      requestedType: requestedType,
+    ),
     targetKey: normalizedLink?.direction == 'inward' ? issueKey : targetKey,
     direction: 'outward',
   );
+
+  String _canonicalCliLinkType({
+    required _ResolvedMutationField? normalizedLink,
+    required String requestedType,
+  }) {
+    final canonicalKey = normalizedLink?.canonicalKey.trim().toLowerCase();
+    if (canonicalKey == null || canonicalKey.isEmpty) {
+      return requestedType;
+    }
+
+    for (final linkType in _jiraLinkTypes) {
+      final id = linkType['id']!.toString().trim().toLowerCase();
+      if (id != canonicalKey) {
+        continue;
+      }
+      return linkType['outward']!.toString();
+    }
+
+    return requestedType;
+  }
 
   Map<String, Object?> _deletedIssuePayload(DeletedIssueTombstone tombstone) =>
       <String, Object?>{
