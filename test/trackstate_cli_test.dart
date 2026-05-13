@@ -1142,6 +1142,58 @@ void main() {
     );
 
     test(
+      'local release-backed upload without a git remote reports an explicit repository identity error',
+      () async {
+        final repo = await _createCliLocalRepository();
+        addTearDown(() => repo.delete(recursive: true));
+        final uploadFile = File('${repo.path}/release-plan.txt');
+        await uploadFile.writeAsString('roadmap');
+        await _writeCliTestFile(
+          repo,
+          'DEMO/project.json',
+          '{"key":"DEMO","name":"Local Demo","attachmentStorage":{"mode":"github-releases","githubReleases":{"tagPrefix":"trackstate-attachments-"}}}\n',
+        );
+        await _gitCliTest(repo.path, ['add', 'DEMO/project.json']);
+        await _gitCliTest(repo.path, [
+          'commit',
+          '-m',
+          'Configure release-backed attachment storage',
+        ]);
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: repo.path,
+            resolvePath: (path) => path,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--issue',
+          'DEMO-1',
+          '--file',
+          uploadFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final details = error['details']! as Map<String, Object?>;
+
+        expect(result.exitCode, 4);
+        expect(error['code'], 'REPOSITORY_OPEN_FAILED');
+        expect(
+          details['reason'],
+          contains(
+            'GitHub repository identity cannot be resolved from the local Git configuration because no remote is configured.',
+          ),
+        );
+      },
+    );
+
+    test(
       'matches uploaded attachment metadata by sanitized stored name',
       () async {
         final sampleSnapshot = _sampleSnapshot();
@@ -2139,5 +2191,89 @@ class _UnexpectedGitProcessRunner implements GitProcessRunner {
     bool binaryOutput = false,
   }) {
     throw StateError('Unexpected git invocation: $args');
+  }
+}
+
+Future<Directory> _createCliLocalRepository() async {
+  final directory = await Directory.systemTemp.createTemp('trackstate-cli-local-');
+  await _writeCliTestFile(
+    directory,
+    '.gitattributes',
+    '*.png filter=lfs diff=lfs merge=lfs -text\n',
+  );
+  await _writeCliTestFile(
+    directory,
+    'DEMO/project.json',
+    '{"key":"DEMO","name":"Local Demo"}\n',
+  );
+  await _writeCliTestFile(
+    directory,
+    'DEMO/config/statuses.json',
+    '[{"name":"To Do"},{"name":"Done"}]\n',
+  );
+  await _writeCliTestFile(
+    directory,
+    'DEMO/config/issue-types.json',
+    '[{"name":"Story"}]\n',
+  );
+  await _writeCliTestFile(
+    directory,
+    'DEMO/config/fields.json',
+    '[{"name":"Summary"},{"name":"Priority"}]\n',
+  );
+  await _writeCliTestFile(directory, 'DEMO/DEMO-1/main.md', '''
+---
+key: DEMO-1
+project: DEMO
+issueType: Story
+status: In Progress
+priority: High
+summary: Local issue
+assignee: local-user
+reporter: local-admin
+updated: 2026-05-05T00:00:00Z
+---
+
+# Description
+
+Loaded from local git.
+''');
+  await _writeCliTestFile(
+    directory,
+    'DEMO/DEMO-1/acceptance_criteria.md',
+    '- Can be loaded from local Git\n',
+  );
+  await _gitCliTest(directory.path, ['init', '-b', 'main']);
+  await _gitCliTest(directory.path, [
+    'config',
+    '--local',
+    'user.name',
+    'Local Tester',
+  ]);
+  await _gitCliTest(directory.path, [
+    'config',
+    '--local',
+    'user.email',
+    'local@example.com',
+  ]);
+  await _gitCliTest(directory.path, ['add', '.']);
+  await _gitCliTest(directory.path, ['commit', '-m', 'Initial import']);
+  return directory;
+}
+
+Future<void> _writeCliTestFile(
+  Directory root,
+  String relativePath,
+  String content,
+) async {
+  final file = File('${root.path}/$relativePath');
+  await file.parent.create(recursive: true);
+  await file.writeAsString(content);
+}
+
+Future<void> _gitCliTest(String repositoryPath, List<String> args) async {
+  final result = await Process.run('git', ['-C', repositoryPath, ...args]);
+  if (result.exitCode != 0) {
+    throw StateError('git ${args.join(' ')} failed: ${result.stderr}');
   }
 }
