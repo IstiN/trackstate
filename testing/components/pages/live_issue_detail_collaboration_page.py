@@ -61,8 +61,18 @@ class LiveIssueDetailCollaborationPage:
     _connect_button_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
-    _choose_attachment_button_selector = '[aria-label*="Choose attachment"]'
-    _upload_attachment_button_selector = '[aria-label*="Upload attachment"]'
+    _choose_attachment_button_selector = (
+        'flt-semantics[aria-label="Choose attachment"] flt-semantics[flt-tappable]'
+    )
+    _upload_attachment_button_selector = (
+        'flt-semantics[aria-label="Upload attachment"] flt-semantics[flt-tappable]'
+    )
+    _replace_attachment_button_selector = (
+        'flt-semantics[aria-label="Replace attachment"] flt-semantics[flt-tappable]'
+    )
+    _keep_attachment_button_selector = (
+        'flt-semantics[aria-label="Keep current attachment"] flt-semantics[flt-tappable]'
+    )
     _selected_button_selector = _active_tab_button_selector
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
@@ -715,17 +725,58 @@ class LiveIssueDetailCollaborationPage:
         )
 
     def attachment_download_button_count(self, attachment_name: str) -> int:
-        return self._session.count(
-            self._button_selector,
-            has_text=self._download_button_label(attachment_name),
+        payload = self._session.evaluate(
+            """
+            ({ downloadLabel }) => Array.from(
+              document.querySelectorAll('flt-semantics[role="button"][aria-label]')
+            ).filter((element) => {
+              const label = element.getAttribute('aria-label') ?? '';
+              const rect = element.getBoundingClientRect();
+              return (
+                label === downloadLabel
+                && rect.width > 0
+                && rect.height > 0
+              );
+            }).length
+            """,
+            arg={"downloadLabel": self._download_button_label(attachment_name)},
         )
+        if not isinstance(payload, int):
+            raise AssertionError(
+                "Step 1 failed: unable to count the visible attachment download controls.\n"
+                f"Observed payload: {payload!r}",
+            )
+        return payload
 
     def attachment_download_button_label(self, attachment_name: str) -> str:
-        return self._session.read_text(
-            self._button_selector,
-            has_text=self._download_button_label(attachment_name),
-            timeout_ms=30_000,
-        ).strip()
+        download_label = self._download_button_label(attachment_name)
+        payload = self._session.evaluate(
+            """
+            ({ downloadLabel }) => Array.from(
+              document.querySelectorAll('flt-semantics[role="button"][aria-label]')
+            ).map((element) => {
+              const label = element.getAttribute('aria-label') ?? '';
+              const rect = element.getBoundingClientRect();
+              if (
+                label !== downloadLabel
+                || rect.width <= 0
+                || rect.height <= 0
+              ) {
+                return '';
+              }
+              return label;
+            }).find((label) => label.length > 0) ?? ''
+            """,
+            arg={"downloadLabel": download_label},
+        )
+        label = str(payload).strip()
+        if not label:
+            raise AssertionError(
+                "Step 1 failed: the Attachments tab did not expose the expected "
+                f"download button for {attachment_name!r}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return label
 
     def trigger_focused_download(self) -> str:
         return self._session.wait_for_download_after_keypress(
@@ -796,16 +847,14 @@ class LiveIssueDetailCollaborationPage:
 
     def choose_attachment_file(self, file_path: str) -> None:
         self._session.click_and_set_files(
-            self._button_selector,
+            self._choose_attachment_button_selector,
             [file_path],
-            has_text="Choose attachment",
             timeout_ms=30_000,
         )
 
     def click_upload_attachment(self) -> None:
         self._session.click(
-            self._button_selector,
-            has_text="Upload attachment",
+            self._upload_attachment_button_selector,
             timeout_ms=30_000,
         )
 
@@ -821,18 +870,31 @@ class LiveIssueDetailCollaborationPage:
         )
         self._session.wait_for_function(
             """
-            ({ expectedLabel }) => Array.from(document.querySelectorAll('[aria-label]'))
-              .map((element) => element.getAttribute('aria-label') ?? '')
-              .some((label) => label.includes(expectedLabel))
+            ({ expectedLabel }) => {
+              const labels = Array.from(document.querySelectorAll('[aria-label]'))
+                .map((element) => element.getAttribute('aria-label') ?? '');
+              if (labels.some((label) => label.includes(expectedLabel))) {
+                return true;
+              }
+              const bodyText = document.body?.innerText ?? '';
+              return bodyText.includes(expectedLabel);
+            }
             """,
             arg={"expectedLabel": expected_label},
             timeout_ms=timeout_ms,
         )
         payload = self._session.evaluate(
             """
-            ({ expectedLabel }) => Array.from(document.querySelectorAll('[aria-label]'))
-              .map((element) => element.getAttribute('aria-label') ?? '')
-              .find((label) => label.includes(expectedLabel)) ?? ''
+            ({ expectedLabel }) => {
+              const labelMatch = Array.from(document.querySelectorAll('[aria-label]'))
+                .map((element) => element.getAttribute('aria-label') ?? '')
+                .find((label) => label.includes(expectedLabel));
+              if (labelMatch) {
+                return labelMatch;
+              }
+              const bodyText = document.body?.innerText ?? '';
+              return bodyText.includes(expectedLabel) ? expectedLabel : '';
+            }
             """,
             arg={"expectedLabel": expected_label},
         )
@@ -870,11 +932,7 @@ class LiveIssueDetailCollaborationPage:
         return self.current_body_text()
 
     def confirm_replace_attachment(self) -> None:
-        self._session.click(
-            self._button_selector,
-            has_text="Replace attachment",
-            timeout_ms=30_000,
-        )
+        self._session.click(self._replace_attachment_button_selector, timeout_ms=30_000)
 
     def wait_for_replace_attachment_dialog_to_close(
         self,
@@ -888,7 +946,7 @@ class LiveIssueDetailCollaborationPage:
         self._session.wait_for_function(
             """
             ({ downloadLabel }) => Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
-              .some((element) => (element.getAttribute('aria-label') ?? '').includes(downloadLabel))
+              .some((element) => (element.getAttribute('aria-label') ?? '') === downloadLabel)
             """,
             arg={"downloadLabel": download_label},
             timeout_ms=timeout_ms,
@@ -897,7 +955,7 @@ class LiveIssueDetailCollaborationPage:
             """
             ({ attachmentName, downloadLabel }) => {
               const button = Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
-                .find((element) => (element.getAttribute('aria-label') ?? '').includes(downloadLabel));
+                .find((element) => (element.getAttribute('aria-label') ?? '') === downloadLabel);
               if (!button) {
                 return '';
               }
