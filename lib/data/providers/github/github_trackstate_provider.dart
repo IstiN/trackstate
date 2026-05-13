@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 import '../../../domain/models/trackstate_models.dart';
@@ -1284,7 +1285,7 @@ RepositoryPermission _permissionFromRepoJson(Map<String, Object?> json) {
     attachmentUploadMode: canWrite
         ? AttachmentUploadMode.noLfs
         : AttachmentUploadMode.none,
-    supportsReleaseAttachmentWrites: canWrite,
+    supportsReleaseAttachmentWrites: canWrite && !kIsWeb,
   );
 }
 
