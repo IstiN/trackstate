@@ -468,7 +468,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         )
         actual_result_line = (
             "* However, the command only surfaced the generic release-backed "
-            f"auth/configuration message {_jira_inline(_as_text(result.get('observed_error_message')) or visible_error)} "
+            "auth/configuration output "
+            f"{_jira_inline(visible_error)} "
+            f"(error code/category {_jira_inline(_as_text(result.get('observed_error_code')))} / "
+            f"{_jira_inline(_as_text(result.get('observed_error_category')))}) "
             "instead of explicit permission-denied guidance."
         )
     else:
@@ -484,8 +487,8 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         actual_result_line = (
             "* The command failed with repository/provider output "
             f"({_jira_inline(_as_text(result.get('observed_error_code')))} / "
-            f"{_jira_inline(_as_text(result.get('observed_error_category')))}) and message "
-            f"{_jira_inline(_as_text(result.get('observed_error_message')) or visible_error)} instead of explicit "
+            f"{_jira_inline(_as_text(result.get('observed_error_category')))}) and visible output "
+            f"{_jira_inline(visible_error)} instead of explicit "
             "release-permission guidance."
         )
 
@@ -569,6 +572,8 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"* OS: {platform.system()}",
         f"* Remote origin: {_jira_inline(_as_text(result.get('remote_origin_url')))}",
         f"* Token setup: mirrored {_jira_inline(token_source)} into {_jira_inline('TRACKSTATE_TOKEN')} for the command under test.",
+        f"* Provider/output: {_jira_inline(observed_provider)} / {_jira_inline(_as_text(result.get('observed_output_format')))}",
+        f"* Exit code: {_jira_inline(_as_text(result.get('exit_code')))}",
         "",
         "h4. Steps to Reproduce",
         (
