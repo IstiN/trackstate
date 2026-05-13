@@ -21,6 +21,7 @@ class TrackStateCliAttachmentStorageModeValidationConfig:
     unsupported_attachment_mode: str
     expected_provider: str
     expected_target_type: str
+    expected_error_categories: tuple[str, ...]
     expected_exit_code: int
     expected_reason_message: str
     expected_visible_reason_fragments: tuple[str, ...]
@@ -83,6 +84,11 @@ class TrackStateCliAttachmentStorageModeValidationConfig:
             expected_target_type=cls._require_string(
                 runtime_inputs,
                 "expected_target_type",
+                path,
+            ),
+            expected_error_categories=cls._require_string_list(
+                runtime_inputs,
+                "expected_error_categories",
                 path,
             ),
             expected_exit_code=cls._require_int(

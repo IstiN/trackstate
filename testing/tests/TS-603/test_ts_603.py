@@ -89,6 +89,7 @@ class Ts603AttachmentStorageModeValidationScenario:
             "project_key": self.config.project_key,
             "issue_key": self.config.issue_key,
             "unsupported_attachment_mode": self.config.unsupported_attachment_mode,
+            "expected_error_categories": list(self.config.expected_error_categories),
             "stdout": validation.observation.result.stdout,
             "stderr": validation.observation.result.stderr,
             "process_exit_code": validation.observation.result.exit_code,
@@ -301,6 +302,14 @@ class Ts603AttachmentStorageModeValidationScenario:
         observed_code = error_dict.get("code")
         observed_category = error_dict.get("category")
         observed_message = str(error_dict.get("message") or "")
+        if observed_category not in self.config.expected_error_categories:
+            failures.append(
+                "Step 2 failed: the machine-readable error category did not classify the "
+                "unsupported attachment storage mode as a validation/provider failure.\n"
+                f"Expected category in: {list(self.config.expected_error_categories)}\n"
+                f"Observed error.category: {observed_category}\n"
+                f"Observed payload: {json.dumps(payload_dict, indent=2, sort_keys=True)}"
+            )
         if (
             observed_code == self.config.disallowed_error_code
             and observed_category == self.config.disallowed_error_category
@@ -401,6 +410,8 @@ def main() -> None:
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
+    if BUG_DESCRIPTION_PATH.exists():
+        BUG_DESCRIPTION_PATH.unlink()
     RESULT_PATH.write_text(
         json.dumps(
             {

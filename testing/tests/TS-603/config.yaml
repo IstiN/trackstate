@@ -34,6 +34,8 @@ runtime_inputs:
   unsupported_attachment_mode: unsupported-mode
   expected_provider: local-git
   expected_target_type: local
+  expected_error_categories:
+    - validation
   expected_exit_code: 4
   expected_reason_message: "project.json attachmentStorage.mode must be one of: repository-path, github-releases."
   expected_visible_reason_fragments:
