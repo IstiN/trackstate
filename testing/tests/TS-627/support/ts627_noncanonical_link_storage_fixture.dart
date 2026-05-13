@@ -90,17 +90,27 @@ class Ts627NonCanonicalLinkStorageFixture {
   }
 
   Future<Ts627StorageAttemptObservation> attemptInvalidLinksWrite() async {
-    final writeResult = await _storageProbe.attemptWrite(
-      path: sourceLinksPath,
+    return attemptLinksWrite(
       content: invalidLinksJsonContent,
       message: writeMessage,
+    );
+  }
+
+  Future<Ts627StorageAttemptObservation> attemptLinksWrite({
+    required String content,
+    required String message,
+  }) async {
+    final writeResult = await _storageProbe.attemptWrite(
+      path: sourceLinksPath,
+      content: content,
+      message: message,
       expectedRevision: null,
     );
 
     return Ts627StorageAttemptObservation(
       branch: writeResult.branch,
       attemptedPath: sourceLinksPath,
-      attemptedContent: invalidLinksJsonContent,
+      attemptedContent: content,
       writeRevision: writeResult.writeRevision,
       errorType: writeResult.errorType,
       errorMessage: writeResult.errorMessage,
