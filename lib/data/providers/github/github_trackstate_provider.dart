@@ -204,6 +204,7 @@ class GitHubTrackStateProvider
   Future<RepositoryWriteResult> writeTextFile(
     RepositoryWriteRequest request,
   ) async {
+    validateRepositoryTextWrite(request);
     final connection = _requireConnection();
     final response = await _http.put(
       _githubUri('/repos/${connection.repository}/contents/${request.path}'),
@@ -290,6 +291,7 @@ class GitHubTrackStateProvider
     for (final change in request.changes) {
       switch (change) {
         case RepositoryTextFileChange():
+          validateRepositoryTextChange(change);
           treeEntries.add({
             'path': change.path,
             'mode': '100644',

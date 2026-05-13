@@ -126,6 +126,7 @@ class LocalGitTrackStateProvider
   Future<RepositoryWriteResult> writeTextFile(
     RepositoryWriteRequest request,
   ) async {
+    validateRepositoryTextWrite(request);
     await _ensureOnBranch(request.branch);
     await _ensurePathClean(request.path);
     _ensureExpectedRevisionMatches(
@@ -184,6 +185,7 @@ class LocalGitTrackStateProvider
       await _ensurePathClean(change.path);
       switch (change) {
         case RepositoryTextFileChange():
+          validateRepositoryTextChange(change);
           _ensureExpectedRevisionMatches(
             path: change.path,
             expectedRevision: change.expectedRevision,
@@ -428,7 +430,8 @@ class LocalGitTrackStateProvider
         return const _LocalReleaseAttachmentCapability.supported();
       }
       return _LocalReleaseAttachmentCapability.unsupported(
-        permission.releaseAttachmentWriteFailureReason?.trim().isNotEmpty == true
+        permission.releaseAttachmentWriteFailureReason?.trim().isNotEmpty ==
+                true
             ? permission.releaseAttachmentWriteFailureReason!.trim()
             : 'GitHub authentication for $remoteIdentity does not permit '
                   'GitHub Release uploads.',
@@ -499,9 +502,8 @@ class LocalGitTrackStateProvider
               .where((line) => line.isNotEmpty)
               .toList(growable: false);
     for (final remoteName in remoteNames) {
-      final remoteUrl = (await _tryGit(['remote', 'get-url', remoteName]))
-              ?.stdout
-              .trim() ??
+      final remoteUrl =
+          (await _tryGit(['remote', 'get-url', remoteName]))?.stdout.trim() ??
           '';
       final identity = _githubRepositoryIdentityFromRemoteUrl(remoteUrl);
       if (identity != null) {
@@ -550,8 +552,9 @@ class LocalGitTrackStateProvider
 
   @override
   Future<String?> releaseAttachmentIdentityFailureReason() async =>
-      (await _releaseAttachmentCapability(branch: await resolveWriteBranch()))
-          .failureReason;
+      (await _releaseAttachmentCapability(
+        branch: await resolveWriteBranch(),
+      )).failureReason;
 
   String? _githubRepositoryIdentityFromRemoteUrl(String remoteUrl) {
     final normalized = remoteUrl.trim();
