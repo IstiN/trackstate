@@ -1,0 +1,53 @@
+test_id: TS-542
+type: cli
+framework: python
+platform: local
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+  - network access to read the public GitHub release asset for cli/cli tag v2.74.0
+notes:
+  - Automates the TS-542 multiple-remote release-backed download scenario from a disposable local TrackState repository.
+  - The ticket step uses the older `--issue` plus `--file` wording, but the live CLI only supports `--attachment-id` plus `--out` for downloads, so the test executes that supported equivalent against the deployed implementation.
+  - Verifies a non-GitHub `origin` does not block repository identity resolution when a GitHub `upstream` remote is present.
+runtime_inputs:
+  ticket_command: trackstate attachment download --issue TS-123 --file manual.pdf --target local
+  supported_ticket_command: trackstate attachment download --attachment-id TS/TS-123/attachments/manual.pdf --out ./downloads/manual.pdf --target local
+  requested_command:
+    - trackstate
+    - attachment
+    - download
+    - --attachment-id
+    - TS/TS-123/attachments/manual.pdf
+    - --out
+    - ./downloads/manual.pdf
+    - --target
+    - local
+  project_key: TS
+  project_name: TS-542 Project
+  issue_key: TS-123
+  issue_summary: Release-backed local attachment download multi-remote fixture
+  attachment_name: manual.pdf
+  attachment_relative_path: TS/TS-123/attachments/manual.pdf
+  attachment_media_type: text/plain
+  attachment_size_bytes: 1950
+  attachment_revision_or_oid: ts542-live-release-asset
+  attachment_created_at: "2026-05-13T00:00:00Z"
+  attachment_author: tester
+  attachment_tag_prefix: ts542-
+  attachment_release_tag: v2.74.0
+  attachment_release_asset_name: gh_2.74.0_checksums.txt
+  origin_remote_name: origin
+  origin_remote_url: https://gitlab.com/example/trackstate.git
+  upstream_remote_name: upstream
+  upstream_remote_url: https://github.com/cli/cli.git
+  output_file_argument: ./downloads/manual.pdf
+  expected_output_relative_path: downloads/manual.pdf
+  expected_download_sha256: 88860261dd71f6753c6dd30ed2ede2a17d227a8fcef541e24cb1a5f073761571
+  expected_download_size_bytes: 1950
+  expected_output_fragments:
+    - gh_2.74.0_linux_386.deb
+    - gh_2.74.0_linux_amd64.deb
+  provider_capability_fragments:
+    - does not support github releases attachment downloads
+    - repository provider
