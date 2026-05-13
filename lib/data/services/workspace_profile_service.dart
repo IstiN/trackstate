@@ -318,12 +318,9 @@ class SharedPreferencesWorkspaceProfileService
       if (profile.targetType == candidate.targetType &&
           profile.normalizedTarget == candidate.normalizedTarget &&
           profile.normalizedDefaultBranch ==
-              candidate.normalizedDefaultBranch &&
-          profile.normalizedWriteBranch == candidate.normalizedWriteBranch) {
+              candidate.normalizedDefaultBranch) {
         throw WorkspaceProfileException(
-          candidate.normalizedWriteBranch == candidate.normalizedDefaultBranch
-              ? 'A saved workspace already exists for ${candidate.target} on ${candidate.defaultBranch}.'
-              : 'A saved workspace already exists for ${candidate.target} on ${candidate.defaultBranch} -> ${candidate.writeBranch}.',
+          'A saved workspace already exists for ${candidate.target} on ${candidate.defaultBranch}.',
         );
       }
     }
