@@ -6,4 +6,4 @@ dependencies: []
 notes:
   - Uses the deployed hosted TrackState app against the live setup repository.
   - Temporarily switches the live DEMO project to github-releases storage with a deterministic tag prefix, then restores the original project.json after the run.
-  - Applies the linked TS-520 production fix semantics: in hosted browser sessions, GitHub Releases uploads must be blocked with the CORS explanation and hidden upload controls rather than attempting a browser upload.
+  - Selects and submits a real hosted attachment upload, then verifies the visible attachment row plus the corresponding GitHub Release asset and attachments.json manifest entry.

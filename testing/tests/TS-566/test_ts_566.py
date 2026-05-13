@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import platform
 import sys
+import tempfile
 import traceback
 import urllib.error
 import uuid
@@ -14,11 +15,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from testing.components.pages.live_issue_detail_collaboration_page import (  # noqa: E402
+    AttachmentSelectionSummaryObservation,
     AttachmentUploadControlsObservation,
     LiveIssueDetailCollaborationPage,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveHostedIssueFixture,
+    LiveHostedRelease,
     LiveHostedRepositoryFile,
     LiveSetupRepositoryService,
 )
@@ -29,15 +32,23 @@ from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
 )
 
 TICKET_KEY = "TS-566"
-LINKED_BUG_KEY = "TS-520"
+TICKET_SUMMARY = (
+    "Hosted release-backed upload submission creates the attachment row, "
+    "GitHub Release asset, and attachments manifest entry"
+)
 ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
+ISSUE_KEY = "DEMO-2"
 PROJECT_JSON_PATH = "DEMO/project.json"
-RELEASE_TAG_PREFIX_BASE = "ts566-release-browser-"
-EXPECTED_STORAGE_MODE = "github-releases"
-EXPECTED_RESTRICTION_TITLE = "GitHub Releases uploads are unavailable in the browser"
-EXPECTED_OPEN_SETTINGS_LABEL = "Open settings"
-UNEXPECTED_LEGACY_TITLE = "Some attachment uploads still require local Git"
-UNEXPECTED_REPOSITORY_PATH_TITLE = "Attachments stay download-only in the browser"
+MANIFEST_PATH = f"{ISSUE_PATH}/attachments.json"
+RELEASE_TAG_PREFIX_BASE = "ts566-release-upload-"
+RUN_SUFFIX = uuid.uuid4().hex[:8]
+UPLOAD_FILE_NAME = f"ts566-release-upload-{RUN_SUFFIX}.txt"
+UPLOAD_FILE_TEXT = (
+    f"TS-566 hosted release-backed upload probe {RUN_SUFFIX}.\n"
+    "This file verifies the hosted browser upload path creates the visible "
+    "attachment row, the GitHub Release asset, and the attachments.json entry.\n"
+)
+UPLOAD_REPO_PATH = f"{ISSUE_PATH}/attachments/{UPLOAD_FILE_NAME}"
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -69,12 +80,17 @@ def main() -> None:
     user = service.fetch_authenticated_user()
     issue_fixture = service.fetch_issue_fixture(ISSUE_PATH)
     _assert_preconditions(issue_fixture)
-    mutations = _collect_original_files(service, (PROJECT_JSON_PATH,))
-    requested_release_tag_prefix = _build_release_tag_prefix()
+    existing_attachment_name = Path(issue_fixture.attachment_paths[0]).name
+    release_tag_prefix = _build_release_tag_prefix()
+    expected_release_tag = _expected_release_tag(release_tag_prefix)
+    mutations = _collect_original_files(
+        service,
+        (PROJECT_JSON_PATH, MANIFEST_PATH, UPLOAD_REPO_PATH),
+    )
 
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
-        "linked_bug": LINKED_BUG_KEY,
+        "ticket_summary": TICKET_SUMMARY,
         "app_url": config.app_url,
         "repository": service.repository,
         "repository_ref": service.ref,
@@ -82,7 +98,13 @@ def main() -> None:
         "issue_summary": issue_fixture.summary,
         "issue_path": issue_fixture.path,
         "project_json_path": PROJECT_JSON_PATH,
-        "requested_release_tag_prefix": requested_release_tag_prefix,
+        "manifest_path": MANIFEST_PATH,
+        "release_tag_prefix": release_tag_prefix,
+        "release_tag": expected_release_tag,
+        "upload_name": UPLOAD_FILE_NAME,
+        "upload_repo_path": UPLOAD_REPO_PATH,
+        "upload_size_bytes": len(UPLOAD_FILE_TEXT.encode("utf-8")),
+        "existing_attachment_name": existing_attachment_name,
         "steps": [],
         "human_verification": [],
     }
@@ -90,207 +112,217 @@ def main() -> None:
     scenario_error: Exception | None = None
     cleanup_error: Exception | None = None
     try:
-        original_project_json = service.fetch_repo_text(PROJECT_JSON_PATH)
-        result["project_json_before"] = original_project_json
-        result["attachment_storage_mode_before"] = _project_attachment_mode(
-            original_project_json,
+        fixture_setup = _seed_fixture(
+            service=service,
+            release_tag_prefix=release_tag_prefix,
+            expected_release_tag=expected_release_tag,
         )
+        result["fixture_setup"] = fixture_setup
+        result["project_json"] = fixture_setup["project_json"]
+        result["attachment_storage_mode"] = fixture_setup["attachment_storage_mode"]
 
-        seeded_project_json = _seed_github_releases_fixture(
-            service,
-            requested_release_tag_prefix=requested_release_tag_prefix,
-        )
-        release_tag_prefix = _project_release_tag_prefix(seeded_project_json)
-        restriction_message = _expected_restriction_message(release_tag_prefix)
-        attachment_name = Path(issue_fixture.attachment_paths[0]).name
+        with tempfile.TemporaryDirectory(prefix="ts566-", dir=OUTPUTS_DIR) as temp_dir:
+            upload_path = Path(temp_dir) / UPLOAD_FILE_NAME
+            upload_path.write_text(UPLOAD_FILE_TEXT, encoding="utf-8")
+            result["selected_file_path"] = str(upload_path)
 
-        result["project_json"] = seeded_project_json
-        result["attachment_storage_mode"] = _project_attachment_mode(seeded_project_json)
-        result["release_tag_prefix"] = release_tag_prefix
-        result["expected_restriction_title"] = EXPECTED_RESTRICTION_TITLE
-        result["expected_restriction_message"] = restriction_message
-        result["attachment_name"] = attachment_name
+            with create_live_tracker_app_with_stored_token(
+                config,
+                token=token,
+            ) as tracker_page:
+                page = LiveIssueDetailCollaborationPage(tracker_page)
+                try:
+                    runtime = tracker_page.open()
+                    result["runtime_state"] = runtime.kind
+                    result["runtime_body_text"] = runtime.body_text
+                    if runtime.kind != "ready":
+                        raise AssertionError(
+                            "Step 1 failed: the deployed app did not reach the hosted "
+                            "tracker shell before the TS-566 upload scenario began.\n"
+                            f"Observed body text:\n{runtime.body_text}",
+                        )
 
-        with create_live_tracker_app_with_stored_token(
-            config,
-            token=token,
-        ) as tracker_page:
-            page = LiveIssueDetailCollaborationPage(tracker_page)
-            try:
-                runtime = tracker_page.open()
-                result["runtime_state"] = runtime.kind
-                result["runtime_body_text"] = runtime.body_text
-                if runtime.kind != "ready":
-                    raise AssertionError(
-                        "Step 1 failed: the deployed app did not reach the hosted tracker "
-                        "shell before the GitHub Releases browser-restriction scenario began.\n"
-                        f"Observed body text:\n{runtime.body_text}",
+                    page.ensure_connected(
+                        token=token,
+                        repository=service.repository,
+                        user_login=user.login,
+                    )
+                    page.dismiss_connection_banner()
+                    page.search_and_select_issue(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                        query=issue_fixture.key,
+                    )
+                    if page.issue_detail_count(issue_fixture.key) == 0:
+                        raise AssertionError(
+                            "Step 1 failed: selecting the live issue did not open the hosted "
+                            "issue detail view.\n"
+                            f"Observed body text:\n{page.current_body_text()}",
+                        )
+
+                    page.open_collaboration_tab("Attachments")
+                    attachments_before = page.wait_for_text(
+                        existing_attachment_name,
+                        timeout_ms=60_000,
+                    )
+                    result["attachments_text_before_upload"] = attachments_before
+                    _record_step(
+                        result,
+                        step=1,
+                        status="passed",
+                        action="Open the hosted issue detail screen and switch to the Attachments tab.",
+                        observed=(
+                            f"opened_issue={issue_fixture.key}; "
+                            f"existing_attachment={existing_attachment_name!r}"
+                        ),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Verified the visible Attachments panel loaded for the live issue "
+                            "and still showed the existing attachment row before the new upload."
+                        ),
+                        observed=_normalize_whitespace(attachments_before),
                     )
 
-                page.ensure_connected(
-                    token=token,
-                    repository=service.repository,
-                    user_login=user.login,
-                )
-                page.dismiss_connection_banner()
-                page.search_and_select_issue(
-                    issue_key=issue_fixture.key,
-                    issue_summary=issue_fixture.summary,
-                    query=issue_fixture.key,
-                )
-                if page.issue_detail_count(issue_fixture.key) == 0:
-                    raise AssertionError(
-                        "Step 1 failed: selecting the live issue did not open the hosted "
-                        "issue detail view.\n"
-                        f"Observed body text:\n{page.current_body_text()}",
+                    controls = _wait_for_upload_controls(page)
+                    result["controls_before_selection"] = _controls_payload(controls)
+                    _choose_attachment_or_raise(
+                        page,
+                        file_path=str(upload_path),
+                        controls=controls,
+                    )
+                    selection = page.wait_for_attachment_selection_summary(
+                        file_name=UPLOAD_FILE_NAME,
+                        timeout_ms=60_000,
+                    )
+                    _assert_selection_summary(selection, UPLOAD_FILE_NAME)
+                    attachments_after_selection = page.current_body_text()
+                    result["selection_summary"] = _selection_payload(selection)
+                    result["attachments_text_after_selection"] = attachments_after_selection
+                    _record_step(
+                        result,
+                        step=2,
+                        status="passed",
+                        action="Choose a file and prepare the hosted upload submission.",
+                        observed=_selection_text(selection),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Verified the selected file name and size appeared in the same "
+                            "Attachments panel and the Upload attachment action became enabled."
+                        ),
+                        observed=_selection_text(selection),
                     )
 
-                page.open_collaboration_tab("Attachments")
-                attachments_body = page.wait_for_text(attachment_name, timeout_ms=60_000)
-                attachment_row_text = page.attachment_row_text(
-                    attachment_name,
-                    timeout_ms=30_000,
-                )
-                download_count = page.attachment_download_button_count(attachment_name)
-                result["attachments_body_text"] = attachments_body
-                result["attachment_row_text"] = attachment_row_text
-                result["download_count"] = download_count
-                if download_count != 1:
-                    raise AssertionError(
-                        "Step 1 failed: the Attachments tab did not keep exactly one visible "
-                        f"download row for `{attachment_name}` after switching the live "
-                        "project to github-releases storage.\n"
-                        f"Observed download control count: {download_count}\n"
-                        f"Observed body text:\n{attachments_body}",
+                    page.upload_attachment()
+                    upload_completion = _wait_for_uploaded_attachment(
+                        page,
+                        attachment_name=UPLOAD_FILE_NAME,
                     )
-                _record_step(
-                    result,
-                    step=1,
-                    status="passed",
-                    action=(
-                        "Navigate to the live issue Attachments tab with "
-                        "`attachmentStorage.mode = github-releases`."
-                    ),
-                    observed=(
-                        f"opened_issue={issue_fixture.key}; attachment_name={attachment_name}; "
-                        f"download_count={download_count}; "
-                        f"attachment_row={_normalize_whitespace(attachment_row_text)!r}"
-                    ),
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Verified the visible Attachments panel still showed the existing "
-                        "attachment download row after switching the live project to "
-                        "`github-releases` storage."
-                    ),
-                    observed=_normalize_whitespace(attachment_row_text),
-                )
+                    result["attachments_text_after_upload"] = upload_completion["body_text"]
+                    result["uploaded_attachment_row_text"] = upload_completion["row_text"]
+                    result["visible_download_count_after_upload"] = upload_completion[
+                        "download_count"
+                    ]
+                    _record_step(
+                        result,
+                        step=3,
+                        status="passed",
+                        action=(
+                            "Submit the upload and wait for the hosted UI to show the new "
+                            "attachment row."
+                        ),
+                        observed=(
+                            f"download_count={upload_completion['download_count']}; "
+                            f"attachment_row={upload_completion['row_text']!r}"
+                        ),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Verified the newly uploaded file appeared as a visible completed "
+                            "attachment row in the hosted UI after clicking Upload attachment."
+                        ),
+                        observed=_normalize_whitespace(str(upload_completion["body_text"])),
+                    )
 
-                controls = page.observe_attachment_upload_controls()
-                open_settings_count = page.button_label_fragment_count(
-                    EXPECTED_OPEN_SETTINGS_LABEL,
-                )
-                result["choose_button_count"] = controls.choose_button_count
-                result["choose_button_enabled"] = controls.choose_button_enabled
-                result["upload_button_count"] = controls.upload_button_count
-                result["upload_button_enabled"] = controls.upload_button_enabled
-                result["open_settings_count"] = open_settings_count
-                result["restriction_notice_state"] = _observe_release_notice(
-                    page,
-                    expected_message=restriction_message,
-                )
-                notice_state = _wait_for_release_notice(
-                    page,
-                    expected_message=restriction_message,
-                )
-                restriction_accessible_text = _wait_for_accessible_fragments(
-                    page,
-                    (EXPECTED_RESTRICTION_TITLE, restriction_message),
-                    timeout_ms=5_000,
-                )
-                result["restriction_notice_state"] = notice_state
-                result["restriction_accessible_text"] = restriction_accessible_text
+                    release_candidates = _wait_for_release_asset(
+                        service,
+                        expected_release_tag=expected_release_tag,
+                        attachment_name=UPLOAD_FILE_NAME,
+                    )
+                    result["release_candidates_after_upload"] = [
+                        _release_payload(candidate) for candidate in release_candidates
+                    ]
+                    _record_step(
+                        result,
+                        step=4,
+                        status="passed",
+                        action="Verify the uploaded file exists as a GitHub Release asset.",
+                        observed=(
+                            f"release_tag={expected_release_tag}; "
+                            f"release_assets={[asset.name for asset in release_candidates[0].assets]!r}"
+                        ),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Verified through the repository API that the issue release now "
+                            "exposes exactly one asset with the uploaded file name."
+                        ),
+                        observed=json.dumps(
+                            result["release_candidates_after_upload"],
+                            indent=2,
+                            sort_keys=True,
+                        ),
+                    )
 
-                _assert_release_browser_restriction(
-                    page=page,
-                    attachments_body=page.current_body_text(),
-                    controls=controls,
-                    open_settings_count=open_settings_count,
-                    expected_message=restriction_message,
-                )
-                _record_step(
-                    result,
-                    step=2,
-                    status="passed",
-                    action=(
-                        "Verify the exact hosted GitHub Releases restriction notice from the "
-                        f"{LINKED_BUG_KEY} fix."
-                    ),
-                    observed=(
-                        f"restriction_notice={restriction_accessible_text!r}; "
-                        f"release_tag_prefix={release_tag_prefix}; "
-                        f"open_settings_count={open_settings_count}"
-                    ),
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Verified the visible Attachments panel showed the exact browser CORS "
-                        "warning title and message, including the seeded release tag prefix "
-                        "and the `uploads.github.com` explanation."
-                    ),
-                    observed=restriction_accessible_text,
-                )
+                    manifest_state = _wait_for_manifest_entry(
+                        service,
+                        attachment_name=UPLOAD_FILE_NAME,
+                        expected_release_tag=expected_release_tag,
+                    )
+                    result["manifest_after_upload"] = manifest_state["manifest_text"]
+                    result["matching_manifest_entries"] = manifest_state["matching_entries"]
+                    _record_step(
+                        result,
+                        step=5,
+                        status="passed",
+                        action="Verify attachments.json contains the matching release-backed metadata.",
+                        observed=json.dumps(
+                            manifest_state["matching_entries"][0],
+                            sort_keys=True,
+                        ),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Verified the repository-visible attachments manifest now contains "
+                            "one matching release-backed entry for the uploaded file."
+                        ),
+                        observed=manifest_state["manifest_text"],
+                    )
 
-                _record_step(
-                    result,
-                    step=3,
-                    status="passed",
-                    action=(
-                        "Verify existing downloads remain visible while browser upload "
-                        "controls are hidden."
-                    ),
-                    observed=(
-                        f"download_count={download_count}; "
-                        f"choose_button_count={controls.choose_button_count}; "
-                        f"choose_button_enabled={controls.choose_button_enabled}; "
-                        f"upload_button_count={controls.upload_button_count}; "
-                        f"upload_button_enabled={controls.upload_button_enabled}"
-                    ),
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Verified the user still saw the existing attachment download row and "
-                        "the inline `Open settings` recovery action, while `Choose attachment` "
-                        "and `Upload attachment` were not rendered anywhere in the panel."
-                    ),
-                    observed=_normalize_whitespace(attachment_row_text),
-                )
-
-                page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
-                result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
-            except Exception:
-                page.screenshot(str(FAILURE_SCREENSHOT_PATH))
-                result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
-                raise
+                    page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
+                    result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
+                except Exception:
+                    page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                    result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
+                    raise
     except Exception as error:
         scenario_error = error
-        failed_step = _extract_failed_step_number(str(error))
-        if failed_step is not None and _step_status(result, failed_step) != "failed":
-            _record_step(
-                result,
-                step=failed_step,
-                status="failed",
-                action=_ticket_step_action(failed_step),
-                observed=str(error),
-            )
+        _record_failed_step_from_error(result, str(error))
         result["error"] = f"{type(error).__name__}: {error}"
         result["traceback"] = traceback.format_exc()
     finally:
         try:
-            cleanup = _restore_fixture(service=service, mutations=mutations)
+            cleanup = _restore_fixture(
+                service=service,
+                mutations=mutations,
+                expected_release_tag=expected_release_tag,
+            )
             result["cleanup"] = cleanup
         except Exception as error:
             cleanup_error = error
@@ -323,14 +355,15 @@ def main() -> None:
 
 
 def _assert_preconditions(issue_fixture: LiveHostedIssueFixture) -> None:
-    if issue_fixture.key != "DEMO-2":
+    if issue_fixture.key != ISSUE_KEY:
         raise AssertionError(
             "Precondition failed: TS-566 expected the seeded DEMO-2 issue fixture.\n"
             f"Observed issue key: {issue_fixture.key}",
         )
     if not issue_fixture.attachment_paths:
         raise AssertionError(
-            "Precondition failed: TS-566 requires a live issue with visible attachments.\n"
+            "Precondition failed: TS-566 requires an existing issue attachment row so the "
+            "Attachments tab can be validated before the new upload.\n"
             f"Issue path: {issue_fixture.path}",
         )
 
@@ -339,36 +372,8 @@ def _build_release_tag_prefix() -> str:
     return f"{RELEASE_TAG_PREFIX_BASE}{uuid.uuid4().hex[:8]}-"
 
 
-def _expected_restriction_message(release_tag_prefix: str) -> str:
-    return (
-        f"New attachments resolve to release tag {release_tag_prefix}<ISSUE_KEY>, but "
-        "browser-based GitHub Release asset uploads are not supported in this hosted "
-        "session (uploads.github.com does not allow browser requests). Use the desktop "
-        "app or CLI to upload attachments."
-    )
-
-
-def _project_attachment_mode(project_json_text: str) -> str:
-    payload = json.loads(project_json_text)
-    if not isinstance(payload, dict):
-        return ""
-    attachment_storage = payload.get("attachmentStorage")
-    if not isinstance(attachment_storage, dict):
-        return ""
-    return str(attachment_storage.get("mode", "")).strip()
-
-
-def _project_release_tag_prefix(project_json_text: str) -> str:
-    payload = json.loads(project_json_text)
-    if not isinstance(payload, dict):
-        return ""
-    attachment_storage = payload.get("attachmentStorage")
-    if not isinstance(attachment_storage, dict):
-        return ""
-    release_config = attachment_storage.get("githubReleases")
-    if not isinstance(release_config, dict):
-        return ""
-    return str(release_config.get("tagPrefix", "")).strip()
+def _expected_release_tag(release_tag_prefix: str) -> str:
+    return f"{release_tag_prefix}{ISSUE_KEY}"
 
 
 def _collect_original_files(
@@ -393,19 +398,22 @@ def _fetch_repo_file_if_exists(
         raise
 
 
-def _seed_github_releases_fixture(
-    service: LiveSetupRepositoryService,
+def _seed_fixture(
     *,
-    requested_release_tag_prefix: str,
-) -> str:
+    service: LiveSetupRepositoryService,
+    release_tag_prefix: str,
+    expected_release_tag: str,
+) -> dict[str, object]:
+    _delete_releases_by_tag_if_present(service, expected_release_tag)
     project_payload = json.loads(service.fetch_repo_text(PROJECT_JSON_PATH))
     if not isinstance(project_payload, dict):
         raise AssertionError(
             f"Precondition failed: {PROJECT_JSON_PATH} did not deserialize to a JSON object.",
         )
+
     project_payload["attachmentStorage"] = {
-        "mode": EXPECTED_STORAGE_MODE,
-        "githubReleases": {"tagPrefix": requested_release_tag_prefix},
+        "mode": "github-releases",
+        "githubReleases": {"tagPrefix": release_tag_prefix},
     }
     _write_repo_text_with_retry(
         service=service,
@@ -416,8 +424,8 @@ def _seed_github_releases_fixture(
 
     matched, observed_project_json = poll_until(
         probe=lambda: service.fetch_repo_text(PROJECT_JSON_PATH),
-        is_satisfied=lambda text: _project_attachment_mode(text) == EXPECTED_STORAGE_MODE
-        and _project_release_tag_prefix(text) == requested_release_tag_prefix,
+        is_satisfied=lambda text: _project_attachment_mode(text) == "github-releases"
+        and _project_release_tag_prefix(text) == release_tag_prefix,
         timeout_seconds=120,
         interval_seconds=4,
     )
@@ -427,7 +435,36 @@ def _seed_github_releases_fixture(
             "github-releases project configuration within the timeout.\n"
             f"Observed project.json:\n{observed_project_json}",
         )
-    return observed_project_json
+
+    return {
+        "project_json": observed_project_json,
+        "attachment_storage_mode": _project_attachment_mode(observed_project_json),
+        "release_tag_prefix": _project_release_tag_prefix(observed_project_json),
+        "expected_release_tag": expected_release_tag,
+    }
+
+
+def _project_attachment_mode(project_json_text: str) -> str:
+    payload = json.loads(project_json_text)
+    if not isinstance(payload, dict):
+        return ""
+    attachment_storage = payload.get("attachmentStorage")
+    if not isinstance(attachment_storage, dict):
+        return ""
+    return str(attachment_storage.get("mode", "")).strip()
+
+
+def _project_release_tag_prefix(project_json_text: str) -> str:
+    payload = json.loads(project_json_text)
+    if not isinstance(payload, dict):
+        return ""
+    attachment_storage = payload.get("attachmentStorage")
+    if not isinstance(attachment_storage, dict):
+        return ""
+    release_config = attachment_storage.get("githubReleases")
+    if not isinstance(release_config, dict):
+        return ""
+    return str(release_config.get("tagPrefix", "")).strip()
 
 
 def _write_repo_text_with_retry(
@@ -514,10 +551,244 @@ def _try_delete_repo_file(
         return f"HTTP 409 conflict while deleting {path}"
 
 
+def _wait_for_upload_controls(
+    page: LiveIssueDetailCollaborationPage,
+) -> AttachmentUploadControlsObservation:
+    matched, observation = poll_until(
+        probe=page.observe_attachment_upload_controls,
+        is_satisfied=lambda current: (
+            current.choose_button_count == 1
+            and current.upload_button_count == 1
+            and current.choose_button_enabled
+        ),
+        timeout_seconds=30,
+        interval_seconds=2,
+    )
+    latest = observation or page.observe_attachment_upload_controls()
+    if not matched:
+        raise AssertionError(
+            "Step 2 failed: the hosted Attachments tab did not expose the visible "
+            "`Choose attachment` / `Upload attachment` controls required for the TS-566 "
+            "browser upload flow.\n"
+            f"Observed controls: {latest}\n"
+            f"Observed body text:\n{page.current_body_text()}",
+        )
+    return latest
+
+
+def _assert_selection_summary(
+    summary: AttachmentSelectionSummaryObservation,
+    file_name: str,
+) -> None:
+    if not summary.file_name_visible:
+        raise AssertionError(
+            "Step 2 failed: the selected-file summary did not show the chosen file name "
+            "before upload submission.\n"
+            f"Observed summary text: {summary.summary_text}",
+        )
+    if not summary.size_label:
+        raise AssertionError(
+            "Step 2 failed: the selected-file summary did not show a visible file size "
+            "before upload submission.\n"
+            f"Observed summary text: {summary.summary_text}",
+        )
+    if file_name not in summary.summary_text:
+        raise AssertionError(
+            "Step 2 failed: the selected-file summary did not preserve the exact chosen "
+            "file name.\n"
+            f"Observed summary text: {summary.summary_text}",
+        )
+    if not summary.upload_enabled:
+        raise AssertionError(
+            "Step 2 failed: the Upload attachment action stayed disabled after choosing "
+            "the file.\n"
+            f"Observed summary text: {summary.summary_text}",
+        )
+
+
+def _choose_attachment_or_raise(
+    page: LiveIssueDetailCollaborationPage,
+    *,
+    file_path: str,
+    controls: AttachmentUploadControlsObservation,
+) -> None:
+    try:
+        page.choose_attachment(file_path, timeout_ms=30_000)
+    except Exception as error:
+        raise AssertionError(
+            "Step 2 failed: the hosted Attachments tab exposed the upload surface text but "
+            "did not provide a working browser file picker for `Choose attachment`.\n"
+            f"Observed controls: {controls}\n"
+            f"Observed body text:\n{page.current_body_text()}\n"
+            f"Underlying error: {type(error).__name__}: {error}",
+        ) from error
+
+
+def _wait_for_uploaded_attachment(
+    page: LiveIssueDetailCollaborationPage,
+    *,
+    attachment_name: str,
+) -> dict[str, object]:
+    matched, observation = poll_until(
+        probe=lambda: {
+            "download_count": page.attachment_download_button_count(attachment_name),
+            "body_text": page.current_body_text(),
+        },
+        is_satisfied=lambda state: int(state["download_count"]) == 1,
+        timeout_seconds=120,
+        interval_seconds=4,
+    )
+    latest = observation or {
+        "download_count": page.attachment_download_button_count(attachment_name),
+        "body_text": page.current_body_text(),
+    }
+    if not matched:
+        raise AssertionError(
+            "Step 3 failed: submitting the hosted upload did not surface the new "
+            "attachment row within the timeout.\n"
+            f"Observed download control count: {latest['download_count']}\n"
+            f"Observed body text:\n{latest['body_text']}",
+        )
+
+    row_text = page.attachment_row_text(attachment_name, timeout_ms=30_000)
+    return {
+        "download_count": int(latest["download_count"]),
+        "body_text": str(latest["body_text"]),
+        "row_text": row_text,
+    }
+
+
+def _wait_for_release_asset(
+    service: LiveSetupRepositoryService,
+    *,
+    expected_release_tag: str,
+    attachment_name: str,
+) -> list[LiveHostedRelease]:
+    matched, release_candidates = poll_until(
+        probe=lambda: service.fetch_releases_by_tag_any_state(expected_release_tag),
+        is_satisfied=lambda candidates: any(
+            attachment_name in [asset.name for asset in candidate.assets]
+            for candidate in candidates
+        ),
+        timeout_seconds=120,
+        interval_seconds=4,
+    )
+    latest = release_candidates or service.fetch_releases_by_tag_any_state(expected_release_tag)
+    if not matched:
+        raise AssertionError(
+            "Step 4 failed: the hosted upload did not create a GitHub Release asset with "
+            "the uploaded file name within the timeout.\n"
+            f"Observed release candidates: {json.dumps([_release_payload(item) for item in latest], indent=2, sort_keys=True)}",
+        )
+
+    matching = [
+        candidate
+        for candidate in latest
+        if attachment_name in [asset.name for asset in candidate.assets]
+    ]
+    if len(matching) != 1 or len(latest) != 1:
+        raise AssertionError(
+            "Step 4 failed: the hosted upload did not converge to exactly one matching "
+            "GitHub Release candidate for the issue tag.\n"
+            f"Observed release candidates: {json.dumps([_release_payload(item) for item in latest], indent=2, sort_keys=True)}",
+        )
+    return latest
+
+
+def _observe_manifest_state(
+    service: LiveSetupRepositoryService,
+    *,
+    attachment_name: str,
+    expected_release_tag: str,
+) -> dict[str, object]:
+    manifest_file = _fetch_repo_file_if_exists(service, MANIFEST_PATH)
+    manifest_text = manifest_file.content if manifest_file is not None else "[]\n"
+    entries = json.loads(manifest_text)
+    if not isinstance(entries, list):
+        raise AssertionError(
+            f"{MANIFEST_PATH} was not a JSON array.\nObserved text:\n{manifest_text}",
+        )
+
+    matching_entries = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict) and str(entry.get("name", "")) == attachment_name
+    ]
+    expected_storage_path = f"{ISSUE_PATH}/attachments/{attachment_name}"
+    return {
+        "manifest_text": manifest_text,
+        "matching_entries": matching_entries,
+        "single_matching_entry": len(matching_entries) == 1
+        and str(matching_entries[0].get("storageBackend", "")) == "github-releases"
+        and str(matching_entries[0].get("githubReleaseTag", "")) == expected_release_tag
+        and str(matching_entries[0].get("githubReleaseAssetName", "")) == attachment_name
+        and str(matching_entries[0].get("storagePath", "")) == expected_storage_path,
+    }
+
+
+def _wait_for_manifest_entry(
+    service: LiveSetupRepositoryService,
+    *,
+    attachment_name: str,
+    expected_release_tag: str,
+) -> dict[str, object]:
+    matched, manifest_state = poll_until(
+        probe=lambda: _observe_manifest_state(
+            service,
+            attachment_name=attachment_name,
+            expected_release_tag=expected_release_tag,
+        ),
+        is_satisfied=lambda state: state["single_matching_entry"] is True,
+        timeout_seconds=120,
+        interval_seconds=4,
+    )
+    latest = manifest_state or _observe_manifest_state(
+        service,
+        attachment_name=attachment_name,
+        expected_release_tag=expected_release_tag,
+    )
+    if not matched:
+        raise AssertionError(
+            "Step 5 failed: the hosted upload did not create exactly one matching "
+            "attachments.json entry for the uploaded file within the timeout.\n"
+            f"Observed manifest text:\n{latest['manifest_text']}\n"
+            f"Observed matching entries: {latest['matching_entries']}",
+        )
+    return latest
+
+
+def _delete_releases_by_tag_if_present(
+    service: LiveSetupRepositoryService,
+    tag_name: str,
+) -> None:
+    releases = service.fetch_releases_by_tag_any_state(tag_name)
+    for release in releases:
+        for asset in release.assets:
+            service.delete_release_asset(asset.id)
+        service.delete_release(release.id)
+    for ref in service.list_matching_tag_refs(tag_name):
+        if ref.endswith(f"/{tag_name}"):
+            service.delete_tag_ref(tag_name)
+
+    if releases:
+        matched, latest = poll_until(
+            probe=lambda: service.fetch_releases_by_tag_any_state(tag_name),
+            is_satisfied=lambda value: not value,
+            timeout_seconds=60,
+            interval_seconds=3,
+        )
+        if not matched:
+            raise AssertionError(
+                f"Cleanup failed: release tag {tag_name} still exists after delete.\n"
+                f"Observed releases: {json.dumps([_release_payload(item) for item in latest], indent=2, sort_keys=True)}",
+            )
+
+
 def _restore_fixture(
     *,
     service: LiveSetupRepositoryService,
     mutations: list[RepoMutation],
+    expected_release_tag: str,
 ) -> dict[str, object]:
     restored_paths: list[str] = []
     deleted_paths: list[str] = []
@@ -532,6 +803,7 @@ def _restore_fixture(
                 )
                 deleted_paths.append(mutation.path)
             continue
+
         current = service.fetch_repo_text(mutation.path)
         if current != mutation.original_file.content:
             _write_repo_text_with_retry(
@@ -541,6 +813,8 @@ def _restore_fixture(
                 message=f"{TICKET_KEY}: restore original fixture",
             )
         restored_paths.append(mutation.path)
+
+    _delete_releases_by_tag_if_present(service, expected_release_tag)
     return {
         "status": "restored",
         "restored_paths": restored_paths,
@@ -548,126 +822,51 @@ def _restore_fixture(
     }
 
 
-def _wait_for_accessible_fragments(
-    page: LiveIssueDetailCollaborationPage,
-    fragments: tuple[str, ...],
-    *,
-    timeout_ms: int,
-) -> str:
-    labels: list[str] = []
-    for fragment in fragments:
-        label = page.wait_for_visible_accessible_label_fragment(
-            fragment,
-            timeout_ms=timeout_ms,
-        )
-        if label:
-            labels.append(label)
-    combined = " ".join(labels)
-    normalized = _normalize_whitespace(combined)
-    missing = [fragment for fragment in fragments if fragment not in normalized]
-    if missing:
-        raise AssertionError(
-            "Step 2 failed: the Attachments tab did not expose the expected GitHub "
-            "Releases browser restriction notice in the visible accessibility tree.\n"
-            f"Missing fragments: {missing}\n"
-            f"Observed labels:\n{combined}",
-        )
-    return combined
-
-
-def _wait_for_release_notice(
-    page: LiveIssueDetailCollaborationPage,
-    *,
-    expected_message: str,
-) -> dict[str, object]:
-    matched, notice_state = poll_until(
-        probe=lambda: _observe_release_notice(page, expected_message=expected_message),
-        is_satisfied=lambda state: (
-            int(state["title_count"]) > 0
-            and int(state["message_count"]) > 0
-            and int(state["visible_accessible_title_count"]) > 0
-            and int(state["visible_accessible_message_count"]) > 0
-        ),
-        timeout_seconds=10,
-        interval_seconds=1,
-    )
-    if not matched:
-        raise AssertionError(
-            "Step 2 failed: the Attachments tab did not render the expected GitHub "
-            "Releases browser restriction notice after switching the live project to "
-            "`github-releases` storage.\n"
-            f"Observed notice state: {json.dumps(notice_state, sort_keys=True)}\n"
-            f"Observed body text:\n{page.current_body_text()}",
-        )
-    return notice_state
-
-
-def _observe_release_notice(
-    page: LiveIssueDetailCollaborationPage,
-    *,
-    expected_message: str,
-) -> dict[str, object]:
+def _release_payload(release: LiveHostedRelease | None) -> dict[str, object]:
+    if release is None:
+        return {}
     return {
-        "title_count": page.text_fragment_count(EXPECTED_RESTRICTION_TITLE),
-        "message_count": page.text_fragment_count(expected_message),
-        "visible_accessible_title_count": page.visible_accessible_label_count_containing(
-            EXPECTED_RESTRICTION_TITLE,
-        ),
-        "visible_accessible_message_count": page.visible_accessible_label_count_containing(
-            expected_message,
-        ),
-        "open_settings_count": page.button_label_fragment_count(EXPECTED_OPEN_SETTINGS_LABEL),
+        "id": release.id,
+        "tag_name": release.tag_name,
+        "name": release.name,
+        "draft": release.draft,
+        "prerelease": release.prerelease,
+        "target_commitish": release.target_commitish,
+        "assets": [{"id": asset.id, "name": asset.name} for asset in release.assets],
     }
 
 
-def _assert_release_browser_restriction(
-    *,
-    page: LiveIssueDetailCollaborationPage,
-    attachments_body: str,
-    controls: AttachmentUploadControlsObservation,
-    open_settings_count: int,
-    expected_message: str,
-) -> None:
-    for expected_fragment in (EXPECTED_RESTRICTION_TITLE, expected_message):
-        if page.text_fragment_count(expected_fragment) == 0:
-            raise AssertionError(
-                "Step 2 failed: the Attachments tab did not render the expected GitHub "
-                f"Releases browser restriction copy.\nMissing fragment: {expected_fragment}\n"
-                f"Observed body text:\n{attachments_body}",
-            )
-    if open_settings_count != 1:
-        raise AssertionError(
-            "Step 2 failed: the GitHub Releases browser restriction state did not expose "
-            "exactly one visible `Open settings` recovery action.\n"
-            f"Observed Open settings count: {open_settings_count}\n"
-            f"Observed body text:\n{attachments_body}",
-        )
-    normalized_attachments_body = _normalize_whitespace(attachments_body)
-    for unexpected_title in (UNEXPECTED_LEGACY_TITLE, UNEXPECTED_REPOSITORY_PATH_TITLE):
-        if unexpected_title in normalized_attachments_body:
-            raise AssertionError(
-                "Step 2 failed: the Attachments tab rendered restriction copy for a "
-                "different attachment mode instead of the GitHub Releases browser CORS "
-                "warning.\n"
-                f"Unexpected title: {unexpected_title}\n"
-                f"Observed body text:\n{attachments_body}",
-            )
-    if (
-        controls.choose_button_count != 0
-        or controls.upload_button_count != 0
-        or controls.choose_button_enabled
-        or controls.upload_button_enabled
-    ):
-        raise AssertionError(
-            "Step 3 failed: the hosted Attachments tab still exposed browser upload "
-            "controls even though the deployed GitHub Releases web flow must stay "
-            "blocked by the TS-520 fix.\n"
-            f"Observed choose button count: {controls.choose_button_count}\n"
-            f"Observed choose button enabled: {controls.choose_button_enabled}\n"
-            f"Observed upload button count: {controls.upload_button_count}\n"
-            f"Observed upload button enabled: {controls.upload_button_enabled}\n"
-            f"Observed body text:\n{attachments_body}",
-        )
+def _controls_payload(
+    observation: AttachmentUploadControlsObservation,
+) -> dict[str, object]:
+    return {
+        "choose_button_count": observation.choose_button_count,
+        "choose_button_enabled": observation.choose_button_enabled,
+        "upload_button_count": observation.upload_button_count,
+        "upload_button_enabled": observation.upload_button_enabled,
+    }
+
+
+def _selection_payload(
+    selection: AttachmentSelectionSummaryObservation,
+) -> dict[str, object]:
+    return {
+        "summary_text": selection.summary_text,
+        "file_name_visible": selection.file_name_visible,
+        "size_label": selection.size_label,
+        "upload_enabled": selection.upload_enabled,
+        "summary_top": selection.summary_top,
+        "first_attachment_top": selection.first_attachment_top,
+    }
+
+
+def _selection_text(selection: AttachmentSelectionSummaryObservation) -> str:
+    return (
+        f"summary={selection.summary_text!r}; "
+        f"file_name_visible={selection.file_name_visible}; "
+        f"size_label={selection.size_label!r}; "
+        f"upload_enabled={selection.upload_enabled}"
+    )
 
 
 def _normalize_whitespace(value: str) -> str:
@@ -703,6 +902,72 @@ def _record_human_verification(
     checks = result.setdefault("human_verification", [])
     assert isinstance(checks, list)
     checks.append({"check": check, "observed": observed})
+
+
+def _record_failed_step_from_error(result: dict[str, object], error_text: str) -> None:
+    failed_step = _extract_failed_step_number(error_text)
+    if failed_step is None or _find_step(result, failed_step) is not None:
+        return
+    _record_step(
+        result,
+        step=failed_step,
+        status="failed",
+        action=_ticket_step_action(failed_step),
+        observed=error_text,
+    )
+
+
+def _find_step(result: dict[str, object], step_number: int) -> dict[str, object] | None:
+    for step in result.get("steps", []):
+        if isinstance(step, dict) and int(step.get("step", -1)) == step_number:
+            return step
+    return None
+
+
+def _step_status(result: dict[str, object], step_number: int) -> str:
+    step = _find_step(result, step_number)
+    if step is None:
+        return "failed"
+    return str(step.get("status", "failed"))
+
+
+def _step_observation(result: dict[str, object], step_number: int) -> str:
+    step = _find_step(result, step_number)
+    if step is not None:
+        return str(step.get("observed", "No observation recorded."))
+    previous_step = step_number - 1
+    if previous_step >= 1 and _step_status(result, previous_step) != "passed":
+        return (
+            f"Not reached because Step {previous_step} failed: "
+            f"{_step_observation(result, previous_step)}"
+        )
+    return str(result.get("error", "No observation recorded."))
+
+
+def _extract_failed_step_number(message: str) -> int | None:
+    marker = "Step "
+    if marker not in message:
+        return None
+    after = message.split(marker, 1)[1]
+    digits = []
+    for char in after:
+        if char.isdigit():
+            digits.append(char)
+            continue
+        break
+    if not digits:
+        return None
+    return int("".join(digits))
+
+
+def _ticket_step_action(step_number: int) -> str:
+    return {
+        1: "Open the hosted issue detail screen and switch to the Attachments tab.",
+        2: "Choose a file and prepare the hosted upload submission.",
+        3: "Submit the upload and wait for the hosted UI to show the new attachment row.",
+        4: "Verify the uploaded file exists as a GitHub Release asset.",
+        5: "Verify attachments.json contains the matching release-backed metadata.",
+    }.get(step_number, "Execute the TS-566 hosted release-backed upload scenario.")
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -756,28 +1021,22 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "*Automation coverage*",
         (
             f"* Switched {{{{{PROJECT_JSON_PATH}}}}} to "
-            f"`attachmentStorage.mode = {EXPECTED_STORAGE_MODE}` with tag prefix "
+            f"`attachmentStorage.mode = github-releases` with tag prefix "
             f"`{result.get('release_tag_prefix')}` for the live run, then restored the original file afterward."
-        ),
-        (
-            f"* Applied the linked {{{{{LINKED_BUG_KEY}}}}} fix semantics: hosted browser "
-            "sessions must show the GitHub Releases CORS restriction state instead of "
-            "attempting a browser upload."
         ),
         "* Opened the deployed hosted TrackState app, connected GitHub, and navigated to the live issue Attachments tab.",
         (
-            "* Checked the exact restriction title/message, the {{Open settings}} recovery "
-            "action, the visible existing download row, and the absence of visible "
-            "{{Choose attachment}} / {{Upload attachment}} controls."
+            f"* Selected and submitted `{result.get('upload_name')}`, then waited for the "
+            "hosted UI, GitHub Release API, and attachments manifest to converge."
         ),
         "",
         "*Observed result*",
         (
-            "* Matched the expected deployed result: the GitHub Releases browser restriction "
-            "notice was visible, the existing attachment download row stayed available, and "
-            "no hosted upload controls were rendered."
+            "* Matched the expected result: the hosted upload completed, the new attachment row "
+            "appeared, the issue release exposed the asset, and attachments.json recorded the "
+            "matching release-backed entry."
             if passed
-            else "* Did not match the expected deployed result."
+            else f"* Did not match the expected result: {_jira_failure_summary(result)}"
         ),
         (
             f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
@@ -811,23 +1070,24 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         f"## {TICKET_KEY} {status}",
         "",
+        "### Rework",
+        "- Replaced the old TS-520 restriction-only assertions with the real TS-566 hosted upload flow.",
+        "- Updated the ticket config notes to describe the upload-success scenario.",
+        "- Added `testing/tests/TS-566/README.md`.",
+        "",
         "### Automation",
         (
-            f"- Switched `{PROJECT_JSON_PATH}` to `attachmentStorage.mode = {EXPECTED_STORAGE_MODE}` "
+            f"- Switched `{PROJECT_JSON_PATH}` to `attachmentStorage.mode = github-releases` "
             f"with tag prefix `{result.get('release_tag_prefix')}` for the live run, then restored the original file afterward."
         ),
-        (
-            f"- Applied the linked `{LINKED_BUG_KEY}` fix semantics: hosted browser sessions "
-            "must show the GitHub Releases CORS restriction state instead of attempting a browser upload."
-        ),
-        "- Opened the deployed hosted TrackState app, connected GitHub, and navigated to the live issue Attachments tab.",
-        "- Checked the exact restriction title/message, the `Open settings` recovery action, the visible existing download row, and the absence of visible `Choose attachment` / `Upload attachment` controls.",
+        f"- Selected and submitted `{result.get('upload_name')}` from the hosted Attachments tab.",
+        "- Verified the visible attachment row, the GitHub Release asset, and the `attachments.json` manifest entry.",
         "",
         "### Observed result",
         (
-            "- Matched the expected deployed result: the GitHub Releases browser restriction notice was visible, the existing attachment download row stayed available, and no hosted upload controls were rendered."
+            "- Matched the expected result: the hosted upload completed end-to-end and all required postconditions converged."
             if passed
-            else "- Did not match the expected deployed result."
+            else f"- Did not match the expected result: {_markdown_failure_summary(result)}"
         ),
         (
             f"- Environment: URL `{result['app_url']}`, repository `{result['repository']}` "
@@ -837,9 +1097,6 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "### Step results",
         *_step_lines(result, jira=False),
-        "",
-        "### Human-style verification",
-        *_human_lines(result, jira=False),
     ]
     if not passed:
         lines.extend(
@@ -856,24 +1113,23 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
 
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     status = "passed" if passed else "failed"
-    screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
     lines = [
         f"# {TICKET_KEY} {status}",
         "",
         (
-            "Ran the live hosted GitHub Releases Attachments scenario using the linked "
-            "TS-520 resolution and checked the exact CORS warning, visible download row, "
-            "and hidden upload controls."
+            "Reworked TS-566 around the actual hosted upload-success path: file selection, "
+            "upload submission, visible attachment row, GitHub Release asset, and "
+            "`attachments.json` verification."
         ),
         "",
-        "## Observed",
-        f"- Screenshot: `{screenshot_path}`",
-        f"- Environment: `{result['app_url']}` on Chromium/Playwright ({platform.system()})",
+        "## Result",
         (
-            "- Attachment storage mode: "
-            f"`{result.get('attachment_storage_mode')}` with tag prefix "
-            f"`{result.get('release_tag_prefix')}`"
+            "- Passed: the hosted upload completed and both repository-visible postconditions matched."
+            if passed
+            else f"- Failed: {_markdown_failure_summary(result)}"
         ),
+        f"- Run command: `python testing/tests/TS-566/test_ts_566.py`",
+        f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
         f"- Cleanup: `{result.get('cleanup')}`",
     ]
     if not passed:
@@ -892,34 +1148,38 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            "# TS-566 - Hosted GitHub Releases Attachments tab does not stay in the browser-restricted state",
+            "# TS-566 - Hosted GitHub Releases upload does not complete the required end-to-end flow",
             "",
             "## Steps to reproduce",
-            "1. Navigate to the live issue Attachments tab with `attachmentStorage.mode = github-releases`.",
+            "1. Open the hosted issue detail screen and switch to the `Attachments` tab.",
             f"   - {'✅' if _step_status(result, 1) == 'passed' else '❌'} {_step_observation(result, 1)}",
-            "2. Verify the exact hosted GitHub Releases restriction notice from the TS-520 fix.",
+            "2. Choose a file and prepare the hosted upload submission.",
             f"   - {'✅' if _step_status(result, 2) == 'passed' else '❌'} {_step_observation(result, 2)}",
-            "3. Verify existing downloads remain visible while browser upload controls are hidden.",
+            "3. Submit the upload and wait for the hosted UI to show the new attachment row.",
             f"   - {'✅' if _step_status(result, 3) == 'passed' else '❌'} {_step_observation(result, 3)}",
+            "4. Verify the uploaded file exists as a GitHub Release asset.",
+            f"   - {'✅' if _step_status(result, 4) == 'passed' else '❌'} {_step_observation(result, 4)}",
+            "5. Verify `attachments.json` contains the matching release-backed metadata.",
+            f"   - {'✅' if _step_status(result, 5) == 'passed' else '❌'} {_step_observation(result, 5)}",
             "",
-            "## Actual vs Expected",
+            "## Expected result",
             (
-                "- Expected: after the TS-520 fix, a hosted browser session configured for "
-                "`github-releases` storage should show the exact `GitHub Releases uploads are "
-                "unavailable in the browser` callout, include the seeded release tag prefix "
-                "in the CORS explanation, keep the existing attachment download row visible, "
-                "show one `Open settings` action, and render zero visible `Choose attachment` "
-                "/ `Upload attachment` controls."
-            ),
-            (
-                "- Actual: "
-                + str(
-                    result.get("error")
-                    or "the hosted github-releases Attachments tab did not remain in the deployed browser-restricted state."
-                )
+                "- The hosted browser flow exposes `Choose attachment` / `Upload attachment`, "
+                "lets the user submit the file, shows the uploaded file as a visible "
+                "attachment row, creates exactly one matching asset on the issue release, and "
+                "adds exactly one matching release-backed entry to `attachments.json`."
             ),
             "",
-            "## Exact error message or assertion failure",
+            "## Actual result",
+            f"- {_product_gap_summary(result)}",
+            "",
+            "## Missing or broken production capability",
+            f"- {_missing_capability(result)}",
+            "",
+            "## Failing command/output",
+            "```bash",
+            "mkdir -p outputs && python testing/tests/TS-566/test_ts_566.py",
+            "```",
             "```text",
             str(result.get("traceback", result.get("error", ""))),
             "```",
@@ -928,48 +1188,97 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- URL: `{result.get('app_url')}`",
             f"- Repository: `{result.get('repository')}` @ `{result.get('repository_ref')}`",
             f"- Issue: `{result.get('issue_key')}` (`{result.get('issue_summary')}`)",
-            f"- Linked bug basis: `{LINKED_BUG_KEY}`",
-            f"- Project config path: `{result.get('project_json_path')}`",
-            f"- Attachment storage mode: `{result.get('attachment_storage_mode')}`",
-            f"- Release tag prefix: `{result.get('release_tag_prefix')}`",
+            f"- Project config path: `{PROJECT_JSON_PATH}`",
+            f"- Manifest path: `{MANIFEST_PATH}`",
+            f"- Release tag: `{result.get('release_tag')}`",
+            f"- Selected file: `{result.get('selected_file_path')}`",
             f"- Browser: `Chromium (Playwright)`",
             f"- OS: `{platform.platform()}`",
             "",
-            "## Screenshots or logs",
+            "## Logs and observations",
             f"- Screenshot: `{result.get('screenshot', FAILURE_SCREENSHOT_PATH)}`",
-            "### Project configuration",
+            "### Attachments tab before upload",
+            "```text",
+            str(result.get("attachments_text_before_upload", "")),
+            "```",
+            "### Attachments tab after selection",
+            "```text",
+            str(result.get("attachments_text_after_selection", "")),
+            "```",
+            "### Attachments tab after upload",
+            "```text",
+            str(result.get("attachments_text_after_upload", "")),
+            "```",
+            "### Release candidates after upload",
             "```json",
-            str(result.get("project_json", "")),
+            json.dumps(result.get("release_candidates_after_upload", []), indent=2, sort_keys=True),
             "```",
-            "### Attachments tab body text",
-            "```text",
-            str(result.get("attachments_body_text", "")),
-            "```",
-            "### Restriction accessible text",
-            "```text",
-            str(result.get("restriction_accessible_text", "")),
-            "```",
-            "### Visible attachment row",
-            "```text",
-            str(result.get("attachment_row_text", "")),
-            "```",
-            "### Upload control observation",
+            "### Manifest after upload",
             "```json",
-            json.dumps(
-                {
-                    "choose_button_count": result.get("choose_button_count"),
-                    "choose_button_enabled": result.get("choose_button_enabled"),
-                    "upload_button_count": result.get("upload_button_count"),
-                    "upload_button_enabled": result.get("upload_button_enabled"),
-                    "open_settings_count": result.get("open_settings_count"),
-                    "restriction_notice_state": result.get("restriction_notice_state"),
-                },
-                indent=2,
-                sort_keys=True,
-            ),
+            str(result.get("manifest_after_upload", "")),
+            "```",
+            "### Matching manifest entries",
+            "```json",
+            json.dumps(result.get("matching_manifest_entries", []), indent=2, sort_keys=True),
             "```",
         ],
     ) + "\n"
+
+
+def _product_gap_summary(result: dict[str, object]) -> str:
+    if _step_status(result, 2) != "passed":
+        return (
+            "The hosted Attachments tab never reached the file-selection state required to "
+            "submit a browser upload."
+        )
+    if _step_status(result, 3) != "passed":
+        return (
+            "The hosted upload was submitted but the UI never converged to a completed "
+            "attachment row for the new file."
+        )
+    if _step_status(result, 4) != "passed":
+        return (
+            "The hosted upload showed a UI success path, but no single matching GitHub "
+            "Release asset was created for the issue tag."
+        )
+    if _step_status(result, 5) != "passed":
+        return (
+            "The hosted upload progressed far enough to create the visible UI/release state, "
+            "but `attachments.json` never converged to a single matching release-backed entry."
+        )
+    return str(result.get("error") or "The hosted upload did not complete the expected flow.")
+
+
+def _missing_capability(result: dict[str, object]) -> str:
+    if _step_status(result, 2) != "passed":
+        return (
+            "The production hosted Attachments surface does not expose the browser upload "
+            "controls or selected-file state needed for a `github-releases` upload."
+        )
+    if _step_status(result, 3) != "passed":
+        return (
+            "The production hosted upload path does not complete the browser submission into "
+            "a visible attachment row."
+        )
+    if _step_status(result, 4) != "passed":
+        return (
+            "The production hosted upload path does not persist the submitted file as a "
+            "GitHub Release asset for the issue release."
+        )
+    if _step_status(result, 5) != "passed":
+        return (
+            "The production hosted upload path does not write the required release-backed "
+            "metadata into `attachments.json`."
+        )
+    return "Unknown; inspect the failing command output."
+
+
+def _jira_failure_summary(result: dict[str, object]) -> str:
+    return _product_gap_summary(result)
+
+
+def _markdown_failure_summary(result: dict[str, object]) -> str:
+    return _product_gap_summary(result)
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
@@ -1006,51 +1315,6 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
             else "1. No human-style verification data was recorded."
         )
     return lines
-
-
-def _step_status(result: dict[str, object], step_number: int) -> str:
-    for step in result.get("steps", []):
-        if isinstance(step, dict) and int(step.get("step", -1)) == step_number:
-            return str(step.get("status", "failed"))
-    return "failed"
-
-
-def _step_observation(result: dict[str, object], step_number: int) -> str:
-    for step in result.get("steps", []):
-        if isinstance(step, dict) and int(step.get("step", -1)) == step_number:
-            return str(step.get("observed", "No observation recorded."))
-    previous_step = step_number - 1
-    if previous_step >= 1 and _step_status(result, previous_step) != "passed":
-        return (
-            f"Not reached because Step {previous_step} failed: "
-            f"{_step_observation(result, previous_step)}"
-        )
-    return str(result.get("error", "No observation recorded."))
-
-
-def _extract_failed_step_number(message: str) -> int | None:
-    for prefix in ("Step ", "step "):
-        index = message.find(prefix)
-        if index == -1:
-            continue
-        tail = message[index + len(prefix) :]
-        digits = []
-        for character in tail:
-            if character.isdigit():
-                digits.append(character)
-                continue
-            break
-        if digits:
-            return int("".join(digits))
-    return None
-
-
-def _ticket_step_action(step_number: int) -> str:
-    return {
-        1: "Navigate to the live issue Attachments tab with `attachmentStorage.mode = github-releases`.",
-        2: f"Verify the exact hosted GitHub Releases restriction notice from the {LINKED_BUG_KEY} fix.",
-        3: "Verify existing downloads remain visible while browser upload controls are hidden.",
-    }.get(step_number, "Run the linked GitHub Releases browser-restriction scenario.")
 
 
 if __name__ == "__main__":
