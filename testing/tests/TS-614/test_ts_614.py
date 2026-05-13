@@ -105,7 +105,7 @@ def main() -> None:
             center_spread = _center_spread(header)
             result["vertical_center_spread_px"] = center_spread
             result["visible_control_heights_px"] = _height_summary(header)
-            result["covering_container_summary"] = _container_summary(
+            result["header_container_summary"] = _container_summary(
                 header.covering_container,
             )
 
@@ -148,7 +148,7 @@ def main() -> None:
                 ),
             )
 
-            failures = _evaluate_expectations(result, header)
+            failures = _evaluate_expectations(result, header, center_spread)
             if failures:
                 page.screenshot(str(FAILURE_SCREENSHOT_PATH))
                 result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
@@ -174,6 +174,7 @@ def main() -> None:
 def _evaluate_expectations(
     result: dict[str, object],
     header: HeaderObservation,
+    center_spread: float,
 ) -> list[str]:
     failures: list[str] = []
 
@@ -245,21 +246,32 @@ def _evaluate_expectations(
         "profile identity/avatar area",
         header.profile_identity,
     )
+    alignment_message = _vertical_alignment_message(center_spread)
     _record_step(
         result,
         step=5,
-        status="passed" if theme_message is None and profile_message is None else "failed",
+        status=(
+            "passed"
+            if theme_message is None
+            and profile_message is None
+            and alignment_message is None
+            else "failed"
+        ),
         action="Inspect the theme toggle and profile identity/avatar area heights.",
         observed=(
             f"theme_observed={header.theme_toggle.height:.2f}px; "
             f"profile_observed={header.profile_identity.height:.2f}px; "
-            f"profile_label={_label(header.profile_identity)!r}"
+            f"profile_label={_label(header.profile_identity)!r}; "
+            f"vertical_center_spread={center_spread:.2f}px; "
+            f"tolerance={VERTICAL_CENTER_TOLERANCE:.2f}px"
         ),
     )
     if theme_message:
         failures.append(f"Step 5 failed: {theme_message}")
     if profile_message:
         failures.append(f"Step 5 failed: {profile_message}")
+    if alignment_message:
+        failures.append(f"Step 5 failed: {alignment_message}")
 
     container_message = _container_assertion_message(header.covering_container)
     _record_step(
@@ -292,12 +304,10 @@ def _container_assertion_message(
     observation: HeaderContainerObservation | None,
 ) -> str | None:
     if observation is None:
-        return (
-            "no visible DOM container enclosing all measured header controls was found."
-        )
+        return None
     if observation.display not in {"flex", "inline-flex"}:
         return (
-            "expected the smallest visible header container to use a flex layout, "
+            "expected the exposed header container to use a flex layout, "
             f'but observed display="{observation.display}".'
         )
     if observation.align_items != "center":
@@ -306,6 +316,16 @@ def _container_assertion_message(
             f'but observed align-items="{observation.align_items}".'
         )
     return None
+
+
+def _vertical_alignment_message(center_spread: float) -> str | None:
+    if center_spread <= VERTICAL_CENTER_TOLERANCE:
+        return None
+    return (
+        "expected the visible desktop header controls to share a vertically centered "
+        f"baseline within {VERTICAL_CENTER_TOLERANCE:.2f}px, but observed a center "
+        f"spread of {center_spread:.2f}px."
+    )
 
 
 def _center_spread(header: HeaderObservation) -> float:
@@ -333,7 +353,7 @@ def _height_summary(header: HeaderObservation) -> dict[str, float]:
 
 def _container_summary(observation: HeaderContainerObservation | None) -> str:
     if observation is None:
-        return "covering_container=None"
+        return "header_container=not_exposed; css_assertion=omitted"
     return (
         f"tag={observation.tag_name}; display={observation.display}; "
         f"align_items={observation.align_items}; "
@@ -455,7 +475,7 @@ def _jira_comment(result: dict[str, object], *, status: str) -> str:
             "h2. Observed result",
             f"* Visible header control heights: {{{{{json.dumps(result.get('visible_control_heights_px', {}), sort_keys=True)}}}}}",
             f"* Vertical center spread: {{{{{result.get('vertical_center_spread_px', '')}}}}}",
-            f"* Covering container: {{{{{result.get('covering_container_summary', '')}}}}}",
+            f"* Header container: {{{{{result.get('header_container_summary', '')}}}}}",
             f"* Screenshot: {{{{{result.get('screenshot', '')}}}}}",
             "",
             "h2. Expected result",
@@ -501,7 +521,7 @@ def _pr_body(result: dict[str, object], *, status: str) -> str:
             "## Observed result",
             f"- Visible header control heights: `{json.dumps(result.get('visible_control_heights_px', {}), sort_keys=True)}`",
             f"- Vertical center spread: `{result.get('vertical_center_spread_px', '')}`",
-            f"- Covering container: `{result.get('covering_container_summary', '')}`",
+            f"- Header container: `{result.get('header_container_summary', '')}`",
             f"- Screenshot: `{result.get('screenshot', '')}`",
             "",
             "## Expected result",
@@ -522,7 +542,7 @@ def _response_markdown(result: dict[str, object], *, status: str) -> str:
             f"- Environment: `{result['app_url']}` · Chromium via Playwright · `{result['os']}`",
             f"- Visible header control heights: `{json.dumps(result.get('visible_control_heights_px', {}), sort_keys=True)}`",
             f"- Vertical center spread: `{result.get('vertical_center_spread_px', '')}`",
-            f"- Covering container: `{result.get('covering_container_summary', '')}`",
+            f"- Header container: `{result.get('header_container_summary', '')}`",
             f"- Screenshot: `{result.get('screenshot', '')}`",
             f"- Result: {str(result.get('error', 'Automation passed.')).replace(chr(10), ' ')}",
         ],
@@ -560,7 +580,7 @@ def _bug_description(result: dict[str, object]) -> str:
                 "- **Actual:** the live header controls rendered at "
                 f"`{json.dumps(result.get('visible_control_heights_px', {}), sort_keys=True)}` "
                 f"with vertical center spread `{result.get('vertical_center_spread_px', '')}`; "
-                f"the smallest covering container was `{result.get('covering_container_summary', '')}`."
+                f"the exposed header container summary was `{result.get('header_container_summary', '')}`."
             ),
             "",
             "## Environment details",

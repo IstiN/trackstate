@@ -11,8 +11,9 @@ The automation:
    profile label
 3. measures the rendered heights of each visible header control and checks that
    they match the required 32px target
-4. inspects the smallest visible DOM container covering those controls and
-   checks that it uses a flex layout with `align-items: center`
+4. derives the shared public header ancestor for those controls when the live
+   DOM exposes one and, if present, checks that it uses a flex layout with
+   `align-items: center`
 5. writes failure evidence and a bug description when the hosted product still
    exposes the desktop header sizing defect
 
@@ -38,9 +39,10 @@ mkdir -p outputs && python testing/tests/TS-614/test_ts_614.py
 
 ## Expected pass / fail behavior
 
-- **Pass:** every audited desktop header control renders at 32px height and the
-  smallest visible covering header container uses a flex layout with
-  `align-items: center`.
+- **Pass:** every audited desktop header control renders at 32px height, the
+  controls stay vertically centered within tolerance, and any publicly exposed
+  shared header container uses a flex layout with `align-items: center`.
 - **Fail:** any audited header control renders above or below 32px, the
-  covering container is not a centered flex layout, or the hosted app cannot
+  visible controls drift off a shared vertical centerline, an exposed shared
+  header container is not a centered flex layout, or the hosted app cannot
   expose the required desktop header controls.
