@@ -1,0 +1,24 @@
+test_id: TS-597
+type: cli
+framework: python
+platform: repository-source
+dependencies:
+  - Python 3 available on PATH
+notes:
+  - Scans the live repository checkout under `lib/data/` and `lib/domain/` for direct `package:flutter/` imports.
+  - Inspects `lib/data/providers/github/github_trackstate_provider.dart` to confirm the deployed fix uses the provider compatibility shim instead of Flutter foundation.
+  - Treats language-level `required` usage as valid replacement evidence when no `package:meta` import is needed.
+runtime_inputs:
+  search_roots:
+    - lib/data
+    - lib/domain
+  provider_relative_path: lib/data/providers/github/github_trackstate_provider.dart
+  disallowed_flutter_import_literal: "import 'package:flutter/"
+  expected_provider_import_fragment: "import '../foundation_compat.dart' show kIsWeb;"
+  forbidden_provider_import_fragments:
+    - "import 'package:flutter/"
+    - "package:flutter/foundation.dart"
+  meta_import_literal: "import 'package:meta/"
+  replacement_keyword_literal: "required this."
+  provider_excerpt_end_line: 12
+
