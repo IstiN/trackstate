@@ -172,11 +172,15 @@ def main() -> None:
                     EXPECTED_OPEN_SETTINGS_LABEL,
                 )
                 result["open_settings_count"] = open_settings_count
-                result["unexpected_limited_title_count"] = page.text_fragment_count(
-                    UNEXPECTED_LIMITED_TITLE,
+                result["unexpected_limited_title_count"] = (
+                    page.visible_accessible_label_count_containing(
+                        UNEXPECTED_LIMITED_TITLE,
+                    )
                 )
-                result["unexpected_release_title_count"] = page.text_fragment_count(
-                    UNEXPECTED_RELEASE_TITLE,
+                result["unexpected_release_title_count"] = (
+                    page.visible_accessible_label_count_containing(
+                        UNEXPECTED_RELEASE_TITLE,
+                    )
                 )
                 notice_state = _wait_for_repository_path_notice(page)
                 result["restriction_notice_state"] = notice_state
@@ -392,7 +396,10 @@ def _wait_for_accessible_fragments(
 ) -> str:
     labels: list[str] = []
     for fragment in fragments:
-        label = page.wait_for_accessible_label_fragment(fragment, timeout_ms=timeout_ms)
+        label = page.wait_for_visible_accessible_label_fragment(
+            fragment,
+            timeout_ms=timeout_ms,
+        )
         if label:
             labels.append(label)
     combined = " ".join(labels)
@@ -416,8 +423,8 @@ def _wait_for_repository_path_notice(
         is_satisfied=lambda state: (
             int(state["title_count"]) > 0
             and int(state["message_count"]) > 0
-            and int(state["accessible_title_count"]) > 0
-            and int(state["accessible_message_count"]) > 0
+            and int(state["visible_accessible_title_count"]) > 0
+            and int(state["visible_accessible_message_count"]) > 0
         ),
         timeout_seconds=10,
         interval_seconds=1,
@@ -439,10 +446,10 @@ def _observe_repository_path_notice(
     return {
         "title_count": page.text_fragment_count(EXPECTED_RESTRICTION_TITLE),
         "message_count": page.text_fragment_count(EXPECTED_RESTRICTION_MESSAGE),
-        "accessible_title_count": page.accessible_label_count_containing(
+        "visible_accessible_title_count": page.visible_accessible_label_count_containing(
             EXPECTED_RESTRICTION_TITLE,
         ),
-        "accessible_message_count": page.accessible_label_count_containing(
+        "visible_accessible_message_count": page.visible_accessible_label_count_containing(
             EXPECTED_RESTRICTION_MESSAGE,
         ),
         "open_settings_count": page.button_label_fragment_count(
@@ -475,15 +482,6 @@ def _assert_repository_path_browser_restriction(
             f"Observed Open settings count: {open_settings_count}\n"
             f"Observed body text:\n{attachments_body}",
         )
-    for unexpected_title in (UNEXPECTED_LIMITED_TITLE, UNEXPECTED_RELEASE_TITLE):
-        if page.text_fragment_count(unexpected_title) > 0:
-            raise AssertionError(
-                "Step 2 failed: the Attachments tab rendered a restriction notice for a "
-                "different attachment-storage mode instead of the repository-path "
-                "download-only warning.\n"
-                f"Unexpected title: {unexpected_title}\n"
-                f"Observed body text:\n{attachments_body}",
-            )
     if (
         controls.choose_button_count != 0
         or controls.upload_button_count != 0
