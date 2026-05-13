@@ -14,7 +14,6 @@ from testing.core.config.live_setup_test_config import (
     load_live_setup_test_config,
 )
 from testing.core.models.hosted_repository_file import HostedRepositoryFile
-from testing.core.models.hosted_repository_file import HostedRepositoryFile
 
 
 @dataclass(frozen=True)
@@ -86,6 +85,8 @@ class LiveHostedRelease:
     body: str = ""
     draft: bool = False
     target_commitish: str = ""
+
+
 class LiveSetupRepositoryService:
     def __init__(
         self,
@@ -169,6 +170,32 @@ class LiveSetupRepositoryService:
                 self._markdown_body(self._read_repo_text(path)) for path in comment_paths
             ],
         )
+
+    def fetch_issue_type_config_entries(
+        self,
+        project_key: str = "DEMO",
+    ) -> list[dict[str, object]]:
+        payload = self._read_repo_json(f"{project_key}/config/issue-types.json")
+        if not isinstance(payload, list):
+            raise RuntimeError(
+                f"GitHub response for {project_key}/config/issue-types.json was not a list.",
+            )
+        return [entry for entry in payload if isinstance(entry, dict)]
+
+    def fetch_workflow_config_map(
+        self,
+        project_key: str = "DEMO",
+    ) -> dict[str, dict[str, object]]:
+        payload = self._read_repo_json(f"{project_key}/config/workflows.json")
+        if not isinstance(payload, dict):
+            raise RuntimeError(
+                f"GitHub response for {project_key}/config/workflows.json was not an object.",
+            )
+        return {
+            str(key): value
+            for key, value in payload.items()
+            if isinstance(key, str) and isinstance(value, dict)
+        }
 
     def fetch_project_locale_configuration(
         self,
@@ -292,6 +319,7 @@ class LiveSetupRepositoryService:
                 raise RuntimeError(
                     f"GitHub delete for {path} returned unexpected status {response.status}.",
                 )
+
     def fetch_locale_payload(self, project_path: str, locale: str) -> dict[str, object]:
         try:
             payload = self._read_repo_json(f"{project_path}/config/i18n/{locale}.json")
