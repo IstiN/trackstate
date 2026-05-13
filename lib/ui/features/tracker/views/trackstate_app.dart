@@ -606,25 +606,50 @@ class _TopBar extends StatelessWidget {
                   ),
                 ),
               ] else ...[
-                _SyncPill(label: l10n.syncStatus),
+                _SyncPill(
+                  label: l10n.syncStatus,
+                  height: _desktopTopBarControlHeight,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Semantics(
-                    label: l10n.searchIssues,
-                    textField: true,
-                    child: TextField(
-                      controller: TextEditingController(text: viewModel.jql),
-                      onSubmitted: viewModel.updateQuery,
-                      decoration: InputDecoration(
-                        prefixIcon: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: TrackStateIcon(
-                            TrackStateIconGlyph.search,
-                            color: colors.muted,
-                            semanticLabel: l10n.searchIssues,
+                  child: SizedBox(
+                    height: _desktopTopBarControlHeight,
+                    child: Semantics(
+                      label: l10n.searchIssues,
+                      textField: true,
+                      child: TextField(
+                        controller: TextEditingController(text: viewModel.jql),
+                        onSubmitted: viewModel.updateQuery,
+                        maxLines: 1,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.copyWith(height: 1),
+                        textAlignVertical: TextAlignVertical.center,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          isCollapsed: true,
+                          constraints: const BoxConstraints.tightFor(
+                            height: _desktopTopBarControlHeight,
                           ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          prefixIcon: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: TrackStateIcon(
+                              TrackStateIconGlyph.search,
+                              color: colors.muted,
+                              size: _desktopTopBarIconSize,
+                              semanticLabel: l10n.searchIssues,
+                            ),
+                          ),
+                          prefixIconConstraints: const BoxConstraints.tightFor(
+                            width: _desktopTopBarControlHeight,
+                            height: _desktopTopBarControlHeight,
+                          ),
+                          hintText: l10n.jqlPlaceholder,
                         ),
-                        hintText: l10n.jqlPlaceholder,
                       ),
                     ),
                   ),
@@ -636,12 +661,14 @@ class _TopBar extends StatelessWidget {
                   label: l10n.createIssue,
                   glyph: TrackStateIconGlyph.plus,
                   onPressed: openCreateIssue,
+                  size: compact ? null : _desktopTopBarControlHeight,
                 )
               else
                 _PrimaryButton(
                   label: l10n.createIssue,
                   icon: TrackStateIconGlyph.plus,
                   onPressed: openCreateIssue,
+                  height: _desktopTopBarControlHeight,
                 ),
               const SizedBox(width: 8),
               if (iconOnlyActions)
@@ -651,6 +678,7 @@ class _TopBar extends StatelessWidget {
                   onPressed: viewModel.isSaving
                       ? null
                       : () => _showRepositoryAccessDialog(context, viewModel),
+                  size: compact ? null : _desktopTopBarControlHeight,
                 )
               else
                 _PrimaryButton(
@@ -659,6 +687,7 @@ class _TopBar extends StatelessWidget {
                   onPressed: viewModel.isSaving
                       ? null
                       : () => _showRepositoryAccessDialog(context, viewModel),
+                  height: _desktopTopBarControlHeight,
                 ),
               const SizedBox(width: 8),
               _IconButtonSurface(
@@ -669,65 +698,55 @@ class _TopBar extends StatelessWidget {
                     ? TrackStateIconGlyph.sun
                     : TrackStateIconGlyph.moon,
                 onPressed: viewModel.toggleTheme,
+                size: compact ? null : _desktopTopBarControlHeight,
               ),
               const SizedBox(width: 8),
-              if (_hasVisibleProfileIdentity(viewModel) &&
-                  !compact &&
-                  !condensedDesktop) ...[
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 180),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Semantics(
-                        container: true,
-                        label: _profileDisplayName(viewModel),
-                        child: ExcludeSemantics(
-                          child: Text(
-                            _profileDisplayName(viewModel),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelLarge
-                                ?.copyWith(
-                                  color: colors.text,
-                                  fontWeight: FontWeight.w600,
-                                ),
+              Semantics(
+                container: true,
+                label: _profileDisplayName(viewModel),
+                child: ExcludeSemantics(
+                  child: SizedBox(
+                    height: compact ? null : _desktopTopBarControlHeight,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        if (_hasVisibleProfileIdentity(viewModel) &&
+                            !compact &&
+                            !condensedDesktop) ...[
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 180),
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: Text(
+                                _profileDisplayName(viewModel),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelLarge
+                                    ?.copyWith(
+                                      color: colors.text,
+                                      fontWeight: FontWeight.w600,
+                                      height: 1,
+                                    ),
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                      if (_profileLogin(viewModel) case final login?)
-                        Semantics(
-                          container: true,
-                          label: login,
-                          child: ExcludeSemantics(
-                            child: Text(
-                              login,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: colors.muted),
+                          const SizedBox(width: 8),
+                        ],
+                        CircleAvatar(
+                          radius: compact ? 18 : _desktopTopBarAvatarRadius,
+                          backgroundColor: colors.primarySoft,
+                          child: Text(
+                            _profileInitials(l10n, viewModel),
+                            style: TextStyle(
+                              color: colors.text,
+                              fontWeight: FontWeight.w700,
+                              fontSize: compact ? null : 12,
+                              height: 1,
                             ),
                           ),
                         ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
-              Semantics(
-                label: _profileDisplayName(viewModel),
-                image: true,
-                child: ExcludeSemantics(
-                  child: CircleAvatar(
-                    radius: 18,
-                    backgroundColor: colors.primarySoft,
-                    child: Text(
-                      _profileInitials(l10n, viewModel),
-                      style: TextStyle(
-                        color: colors.text,
-                        fontWeight: FontWeight.w700,
-                      ),
+                      ],
                     ),
                   ),
                 ),
@@ -739,6 +758,10 @@ class _TopBar extends StatelessWidget {
     );
   }
 }
+
+const double _desktopTopBarControlHeight = 32;
+const double _desktopTopBarIconSize = 14;
+const double _desktopTopBarAvatarRadius = _desktopTopBarControlHeight / 2;
 
 Future<void> _showRepositoryAccessDialog(
   BuildContext context,
@@ -5860,7 +5883,6 @@ class _HostedProviderConfigurationState
     extends State<_HostedProviderConfiguration> {
   late final TextEditingController _tokenController;
   late final FocusNode _tokenFocusNode;
-  late final FocusNode _rememberTokenFocusNode;
   late final FocusNode _connectTokenFocusNode;
   bool _rememberToken = true;
 
@@ -5869,9 +5891,6 @@ class _HostedProviderConfigurationState
     super.initState();
     _tokenController = TextEditingController();
     _tokenFocusNode = FocusNode(debugLabel: 'repository-access-token');
-    _rememberTokenFocusNode = FocusNode(
-      debugLabel: 'repository-access-remember-token',
-    );
     _connectTokenFocusNode = FocusNode(debugLabel: 'repository-access-connect');
   }
 
@@ -5879,7 +5898,6 @@ class _HostedProviderConfigurationState
   void dispose() {
     _tokenController.dispose();
     _tokenFocusNode.dispose();
-    _rememberTokenFocusNode.dispose();
     _connectTokenFocusNode.dispose();
     super.dispose();
   }
@@ -5937,25 +5955,13 @@ class _HostedProviderConfigurationState
                 FocusTraversalOrder(
                   order: const NumericFocusOrder(4),
                   child: Semantics(
-                    container: true,
-                    label: l10n.rememberOnThisBrowser,
                     sortKey: OrdinalSortKey(4),
                     child: CheckboxListTile(
                       checkboxSemanticLabel: l10n.rememberOnThisBrowser,
                       contentPadding: EdgeInsets.zero,
                       value: _rememberToken,
-                      title: FocusableActionDetector(
-                        focusNode: _rememberTokenFocusNode,
-                        child: Semantics(
-                          label: l10n.rememberOnThisBrowser,
-                          child: ExcludeSemantics(
-                            child: Text(l10n.rememberOnThisBrowser),
-                          ),
-                        ),
-                      ),
-                      subtitle: ExcludeSemantics(
-                        child: Text(l10n.rememberOnThisBrowserHelp),
-                      ),
+                      title: Text(l10n.rememberOnThisBrowser),
+                      subtitle: Text(l10n.rememberOnThisBrowserHelp),
                       onChanged: viewModel.isSaving
                           ? null
                           : (value) => setState(
@@ -6155,11 +6161,13 @@ class _PrimaryButton extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onPressed,
+    this.height,
   });
 
   final String label;
   final TrackStateIconGlyph icon;
   final VoidCallback? onPressed;
+  final double? height;
 
   @override
   Widget build(BuildContext context) {
@@ -6168,16 +6176,26 @@ class _PrimaryButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
-      child: FilledButton.icon(
-        onPressed: onPressed,
-        style: FilledButton.styleFrom(
-          backgroundColor: colors.primary,
-          foregroundColor: onPrimary,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: SizedBox(
+        height: height,
+        child: FilledButton.icon(
+          onPressed: onPressed,
+          style: FilledButton.styleFrom(
+            backgroundColor: colors.primary,
+            foregroundColor: onPrimary,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+          ),
+          icon: TrackStateIcon(
+            icon,
+            size: height == null ? 16 : _desktopTopBarIconSize,
+            color: onPrimary,
+          ),
+          label: Text(label, style: TextStyle(color: onPrimary, height: 1)),
         ),
-        icon: TrackStateIcon(icon, size: 16, color: onPrimary),
-        label: Text(label, style: TextStyle(color: onPrimary)),
       ),
     );
   }
@@ -6188,11 +6206,13 @@ class _IconButtonSurface extends StatelessWidget {
     required this.label,
     required this.glyph,
     required this.onPressed,
+    this.size,
   });
 
   final String label;
   final TrackStateIconGlyph glyph;
   final VoidCallback? onPressed;
+  final double? size;
 
   @override
   Widget build(BuildContext context) {
@@ -6203,25 +6223,28 @@ class _IconButtonSurface extends StatelessWidget {
       enabled: enabled,
       label: label,
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         onTap: onPressed,
         child: Container(
-          padding: const EdgeInsets.all(11),
+          width: size,
+          height: size,
+          alignment: Alignment.center,
+          padding: size == null ? const EdgeInsets.all(11) : null,
           decoration: BoxDecoration(
             color: colors.surface,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(color: colors.border),
           ),
           foregroundDecoration: enabled
               ? null
               : BoxDecoration(
                   color: colors.page.withValues(alpha: 0.45),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                 ),
           child: TrackStateIcon(
             glyph,
             color: enabled ? colors.text : colors.muted,
-            size: 18,
+            size: size == null ? 18 : _desktopTopBarIconSize,
           ),
         ),
       ),
@@ -7841,17 +7864,23 @@ class _BottomNavigation extends StatelessWidget {
 }
 
 class _SyncPill extends StatelessWidget {
-  const _SyncPill({required this.label});
+  const _SyncPill({required this.label, this.height});
 
   final String label;
+  final double? height;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
     return Semantics(
+      container: true,
       label: label,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        constraints: height == null
+            ? null
+            : BoxConstraints.tightFor(height: height),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
           color: colors.secondarySoft,
           borderRadius: BorderRadius.circular(999),
@@ -7862,7 +7891,7 @@ class _SyncPill extends StatelessWidget {
             TrackStateIcon(
               TrackStateIconGlyph.sync,
               color: colors.secondary,
-              size: 16,
+              size: height == null ? 16 : _desktopTopBarIconSize,
             ),
             const SizedBox(width: 6),
             Flexible(
@@ -7872,6 +7901,7 @@ class _SyncPill extends StatelessWidget {
                 style: TextStyle(
                   color: colors.text,
                   fontWeight: FontWeight.w600,
+                  height: 1,
                 ),
               ),
             ),

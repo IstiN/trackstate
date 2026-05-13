@@ -1317,6 +1317,61 @@ void main() {
     );
 
     test(
+      'local attachment upload with an unsupported storage mode returns a validation error',
+      () async {
+        final repo = await _createCliLocalRepository();
+        addTearDown(() => repo.delete(recursive: true));
+        final uploadFile = File('${repo.path}/sample.txt');
+        await uploadFile.writeAsString('sample');
+        await _writeCliTestFile(
+          repo,
+          'DEMO/project.json',
+          '{"key":"DEMO","name":"Local Demo","attachmentStorage":{"mode":"unsupported-mode"}}\n',
+        );
+        await _gitCliTest(repo.path, ['add', 'DEMO/project.json']);
+        await _gitCliTest(repo.path, [
+          'commit',
+          '-m',
+          'Configure invalid attachment storage mode',
+        ]);
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: repo.path,
+            resolvePath: (path) => path,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--issue',
+          'DEMO-1',
+          '--file',
+          uploadFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final details = error['details']! as Map<String, Object?>;
+
+        expect(result.exitCode, 4);
+        expect(error['code'], 'INVALID_REQUEST');
+        expect(error['category'], 'validation');
+        expect(
+          error['message'],
+          'project.json attachmentStorage.mode must be one of: repository-path, github-releases.',
+        );
+        expect(
+          details['reason'],
+          'project.json attachmentStorage.mode must be one of: repository-path, github-releases.',
+        );
+      },
+    );
+
+    test(
       'local release-backed upload without a git remote does not query gh auth before preflight validation',
       () async {
         final repo = await _createCliLocalRepository();
