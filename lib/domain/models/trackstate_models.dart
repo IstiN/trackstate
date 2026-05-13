@@ -132,6 +132,7 @@ class TrackStateIssue {
     bool? hasCommentsLoaded,
     bool? hasAttachmentsLoaded,
     List<IssueComment>? comments,
+    List<IssueLink>? links,
     List<IssueAttachment>? attachments,
   }) {
     return TrackStateIssue(
@@ -160,7 +161,7 @@ class TrackStateIssue {
       updatedLabel: updatedLabel ?? this.updatedLabel,
       acceptanceCriteria: acceptanceCriteria,
       comments: comments ?? this.comments,
-      links: links,
+      links: links ?? this.links,
       attachments: attachments ?? this.attachments,
       isArchived: isArchived ?? this.isArchived,
       hasDetailLoaded: hasDetailLoaded ?? this.hasDetailLoaded,
