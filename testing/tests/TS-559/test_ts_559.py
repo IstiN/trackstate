@@ -33,6 +33,7 @@ from testing.tests.support.trackstate_cli_release_asset_filename_sanitization_sc
     record_human_verification,
     record_step,
     serialize,
+    validation_remote_origin,
 )
 
 TICKET_KEY = "TS-559"
@@ -112,7 +113,31 @@ class Ts559DraftReleaseCreationScenario(
         return result
 
     def _assert_initial_fixture(self, initial_state) -> list[str]:
-        failures = super()._assert_initial_fixture(initial_state)
+        failures: list[str] = []
+        if not initial_state.issue_main_exists:
+            failures.append(
+                "Precondition failed: the seeded repository did not contain "
+                f"{self.config.issue_key} before running {TICKET_KEY}.\n"
+                f"Observed state:\n{json.dumps(serialize(initial_state), indent=2, sort_keys=True)}"
+            )
+        if not initial_state.source_file_exists:
+            failures.append(
+                "Precondition failed: the seeded repository did not contain the requested "
+                f"attachment file `{self.config.source_file_name}` before running {TICKET_KEY}.\n"
+                f"Observed state:\n{json.dumps(serialize(initial_state), indent=2, sort_keys=True)}"
+            )
+        if initial_state.manifest_exists:
+            failures.append(
+                "Precondition failed: the seeded repository already contained "
+                f"`{self.config.manifest_path}` before {TICKET_KEY} ran.\n"
+                f"Observed state:\n{json.dumps(serialize(initial_state), indent=2, sort_keys=True)}"
+            )
+        if initial_state.remote_origin_url != validation_remote_origin(self.config.repository):
+            failures.append(
+                "Precondition failed: the seeded repository origin URL did not match the "
+                "live hosted repository used for draft release verification.\n"
+                f"Observed state:\n{json.dumps(serialize(initial_state), indent=2, sort_keys=True)}"
+            )
         pre_run_cleanup = self.release_probe.pre_run_cleanup
         if pre_run_cleanup.get("release_present_after_cleanup") is True:
             failures.append(
@@ -127,6 +152,121 @@ class Ts559DraftReleaseCreationScenario(
                 f"Observed cleanup: {json.dumps(pre_run_cleanup, indent=2, sort_keys=True)}"
             )
         return failures
+
+    def _validate_runtime(
+        self,
+        validation: TrackStateCliReleaseAssetFilenameSanitizationValidationResult,
+        result: dict[str, object],
+    ) -> tuple[list[str], bool]:
+        failures: list[str] = []
+        observation = validation.observation
+        payload = observation.result.json_payload
+        data = payload.get("data") if isinstance(payload, dict) else None
+        attachment = data.get("attachment") if isinstance(data, dict) else None
+        visible = compact_text(
+            as_text(result.get("visible_output"))
+            or as_text(result.get("observed_error_message"))
+            or as_text(payload)
+            or (observation.result.stdout.strip() or observation.result.stderr.strip())
+        )
+        if not visible:
+            visible = compact_text(
+                "\n".join(
+                    part
+                    for part in (
+                        observation.result.stdout.strip(),
+                        observation.result.stderr.strip(),
+                    )
+                    if part
+                )
+            )
+        result["visible_output"] = visible
+
+        if observation.result.exit_code != 0:
+            result["failure_mode"] = "upload_failed_before_draft_release_creation"
+            result["product_gap"] = (
+                "The production local github-releases upload path still fails before it "
+                "creates the missing draft release container for the target issue."
+            )
+            failures.append(
+                "Step 2 failed: the exact local upload command returned a failure before "
+                "the draft release for this issue could be created.\n"
+                f"Observed exit code: {observation.result.exit_code}\n"
+                f"Observed provider/output: {result.get('observed_provider')} / "
+                f"{result.get('observed_output_format')}\n"
+                f"Observed error code/category: {result.get('observed_error_code')} / "
+                f"{result.get('observed_error_category')}\n"
+                f"Visible output:\n{visible}\n"
+                f"{observed_command_output(observation.result.stdout, observation.result.stderr)}"
+            )
+            return failures, False
+
+        if not isinstance(payload, dict):
+            failures.append(
+                "Step 2 failed: the local upload command succeeded, but it did not return "
+                "a machine-readable JSON payload.\n"
+                f"{observed_command_output(observation.result.stdout, observation.result.stderr)}"
+            )
+            return failures, False
+
+        if payload.get("ok") is not True:
+            failures.append(
+                "Step 2 failed: the local upload command returned exit code 0 but did not "
+                "report `ok: true`.\n"
+                f"Observed payload:\n{json.dumps(payload, indent=2, sort_keys=True)}"
+            )
+            return failures, False
+
+        if not isinstance(data, dict):
+            failures.append(
+                "Step 2 failed: the successful upload payload did not include a `data` object.\n"
+                f"Observed payload:\n{json.dumps(payload, indent=2, sort_keys=True)}"
+            )
+            return failures, False
+
+        if data.get("command") != "attachment-upload":
+            failures.append(
+                "Step 2 failed: the success payload did not identify the attachment upload "
+                "command.\n"
+                f"Observed payload:\n{json.dumps(payload, indent=2, sort_keys=True)}"
+            )
+            return failures, False
+
+        if data.get("issue") != self.config.issue_key:
+            failures.append(
+                "Step 2 failed: the success payload did not preserve the requested issue key.\n"
+                f"Observed payload:\n{json.dumps(payload, indent=2, sort_keys=True)}"
+            )
+            return failures, False
+
+        if not isinstance(attachment, dict):
+            failures.append(
+                "Step 2 failed: the success payload did not include attachment metadata.\n"
+                f"Observed payload:\n{json.dumps(payload, indent=2, sort_keys=True)}"
+            )
+            return failures, False
+
+        record_step(
+            result,
+            step=2,
+            status="passed",
+            action=self.config.ticket_command,
+            observed=(
+                f"exit_code={observation.result.exit_code}; "
+                f"attachment_issue={data.get('issue')}; "
+                f"attachment_name={attachment.get('name')}; "
+                f"attachment_revision_or_oid={attachment.get('revisionOrOid')}"
+            ),
+        )
+        record_human_verification(
+            result,
+            check=(
+                "Verified the exact local upload command completed successfully from a "
+                "user-visible CLI perspective."
+            ),
+            observed=visible,
+        )
+        return failures, True
 
     def _validate_manifest(
         self,
