@@ -381,13 +381,18 @@ Release asset sanitization fixture.
             for entry in entries
             if isinstance(entry, dict)
         )
+        asset_name_changed = (
+            config.expected_sanitized_asset_name != config.source_file_name
+        )
         matches_expected = (
             matching_entry is not None
             and str(matching_entry.get("storageBackend", "")) == "github-releases"
             and str(matching_entry.get("githubReleaseTag", "")) == expected_release_tag
             and str(matching_entry.get("githubReleaseAssetName", ""))
             == config.expected_sanitized_asset_name
-            and config.source_file_name not in raw_asset_names
+            and (
+                not asset_name_changed or config.source_file_name not in raw_asset_names
+            )
         )
         return TrackStateCliReleaseAssetFilenameSanitizationManifestObservation(
             manifest_exists=True,
@@ -436,10 +441,13 @@ Release asset sanitization fixture.
                 downloaded_asset_size_bytes = len(asset_bytes)
 
         expected_sha256 = hashlib.sha256(config.source_file_bytes).hexdigest()
+        asset_name_changed = (
+            config.expected_sanitized_asset_name != config.source_file_name
+        )
         matches_expected = (
             release.tag_name == expected_release_tag
             and asset_names == (config.expected_sanitized_asset_name,)
-            and config.source_file_name not in asset_names
+            and (not asset_name_changed or config.source_file_name not in asset_names)
             and downloaded_asset_sha256 == expected_sha256
             and downloaded_asset_size_bytes == len(config.source_file_bytes)
             and not download_error
