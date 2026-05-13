@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -1246,6 +1247,7 @@ class _AccessCallout extends StatelessWidget {
     required this.title,
     required this.message,
     this.tone = _AccessCalloutTone.warning,
+    this.sortOrder,
     this.primaryActionLabel,
     this.onPrimaryAction,
     this.secondaryActionLabel,
@@ -1256,6 +1258,7 @@ class _AccessCallout extends StatelessWidget {
   final String title;
   final String message;
   final _AccessCalloutTone tone;
+  final double? sortOrder;
   final String? primaryActionLabel;
   final VoidCallback? onPrimaryAction;
   final String? secondaryActionLabel;
@@ -1270,6 +1273,9 @@ class _AccessCallout extends StatelessWidget {
     };
     return Semantics(
       container: true,
+      focusable: true,
+      readOnly: true,
+      sortKey: sortOrder == null ? null : OrdinalSortKey(sortOrder!),
       label: '$semanticLabel $title $message',
       child: Container(
         width: double.infinity,
@@ -1282,28 +1288,29 @@ class _AccessCallout extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TrackStateIcon(
-                  TrackStateIconGlyph.gitBranch,
-                  size: 18,
-                  color: accentColor,
-                  semanticLabel: title,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+            ExcludeSemantics(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TrackStateIcon(
+                    TrackStateIconGlyph.gitBranch,
+                    size: 18,
+                    color: accentColor,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 8),
-            Text(message),
+            ExcludeSemantics(child: Text(message)),
             if ((primaryActionLabel != null && onPrimaryAction != null) ||
                 (secondaryActionLabel != null &&
                     onSecondaryAction != null)) ...[
@@ -5823,7 +5830,7 @@ class _SettingsProviderButton extends StatelessWidget {
 
   ButtonStyle _connectedStyle(BuildContext context, TrackStateColors colors) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final foreground = isDark ? colors.page : colors.text;
+    final foreground = isDark ? colors.page : colors.page;
 
     return FilledButton.styleFrom(
       backgroundColor: colors.success,
@@ -5852,17 +5859,28 @@ class _HostedProviderConfiguration extends StatefulWidget {
 class _HostedProviderConfigurationState
     extends State<_HostedProviderConfiguration> {
   late final TextEditingController _tokenController;
+  late final FocusNode _tokenFocusNode;
+  late final FocusNode _rememberTokenFocusNode;
+  late final FocusNode _connectTokenFocusNode;
   bool _rememberToken = true;
 
   @override
   void initState() {
     super.initState();
     _tokenController = TextEditingController();
+    _tokenFocusNode = FocusNode(debugLabel: 'repository-access-token');
+    _rememberTokenFocusNode = FocusNode(
+      debugLabel: 'repository-access-remember-token',
+    );
+    _connectTokenFocusNode = FocusNode(debugLabel: 'repository-access-connect');
   }
 
   @override
   void dispose() {
     _tokenController.dispose();
+    _tokenFocusNode.dispose();
+    _rememberTokenFocusNode.dispose();
+    _connectTokenFocusNode.dispose();
     super.dispose();
   }
 
@@ -5870,85 +5888,137 @@ class _HostedProviderConfigurationState
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final viewModel = widget.viewModel;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _AccessCallout(
-          semanticLabel: l10n.manageGitHubAccess,
-          title: _repositoryAccessTitle(l10n, viewModel),
-          message:
-              '${_repositoryAccessMessage(l10n, viewModel)} '
-              '${l10n.repositoryAccessSettingsHint}',
-          tone: _repositoryAccessCalloutTone(viewModel),
-        ),
-        const SizedBox(height: 12),
-        _AccessCallout(
-          semanticLabel: l10n.attachments,
-          title: _attachmentStorageCalloutTitle(l10n, viewModel),
-          message: _attachmentStorageCalloutMessage(l10n, viewModel),
-          tone: _attachmentStorageCalloutTone(viewModel),
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          controller: _tokenController,
-          obscureText: true,
-          decoration: InputDecoration(
-            labelText: l10n.fineGrainedToken,
-            helperText: l10n.fineGrainedTokenHelper,
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _AccessCallout(
+            semanticLabel: l10n.manageGitHubAccess,
+            title: _repositoryAccessTitle(l10n, viewModel),
+            message:
+                '${_repositoryAccessMessage(l10n, viewModel)} '
+                '${l10n.repositoryAccessSettingsHint}',
+            tone: _repositoryAccessCalloutTone(viewModel),
+            sortOrder: 1,
           ),
-        ),
-        const SizedBox(height: 8),
-        CheckboxListTile(
-          contentPadding: EdgeInsets.zero,
-          value: _rememberToken,
-          title: Text(l10n.rememberOnThisBrowser),
-          subtitle: Text(l10n.rememberOnThisBrowserHelp),
-          onChanged: viewModel.isSaving
-              ? null
-              : (value) =>
-                    setState(() => _rememberToken = value ?? _rememberToken),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            Semantics(
-              button: true,
-              label: l10n.connectToken,
-              child: FilledButton(
-                onPressed: viewModel.isSaving
-                    ? null
-                    : () => viewModel.connectGitHub(
-                        _tokenController.text,
-                        remember: _rememberToken,
-                      ),
-                child: Text(l10n.connectToken),
-              ),
-            ),
-            if (viewModel.isGitHubAppAuthAvailable)
-              Semantics(
-                button: true,
-                label: l10n.continueWithGitHubApp,
-                child: OutlinedButton(
-                  onPressed: viewModel.isSaving
-                      ? null
-                      : viewModel.startGitHubAppLogin,
-                  child: Text(l10n.continueWithGitHubApp),
-                ),
-              ),
-          ],
-        ),
-        if (viewModel.connectedUser != null) ...[
           const SizedBox(height: 12),
-          Text(
-            l10n.githubConnected(
-              viewModel.connectedUser!.login,
-              viewModel.project!.repository,
+          _AccessCallout(
+            semanticLabel: l10n.attachments,
+            title: _attachmentStorageCalloutTitle(l10n, viewModel),
+            message: _attachmentStorageCalloutMessage(l10n, viewModel),
+            tone: _attachmentStorageCalloutTone(viewModel),
+            sortOrder: 2,
+          ),
+          const SizedBox(height: 12),
+          FocusTraversalGroup(
+            policy: OrderedTraversalPolicy(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(3),
+                  child: Semantics(
+                    sortKey: OrdinalSortKey(3),
+                    child: TextFormField(
+                      controller: _tokenController,
+                      focusNode: _tokenFocusNode,
+                      obscureText: true,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(
+                        labelText: l10n.fineGrainedToken,
+                        helperText: l10n.fineGrainedTokenHelper,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(4),
+                  child: Semantics(
+                    container: true,
+                    label: l10n.rememberOnThisBrowser,
+                    sortKey: OrdinalSortKey(4),
+                    child: CheckboxListTile(
+                      checkboxSemanticLabel: l10n.rememberOnThisBrowser,
+                      contentPadding: EdgeInsets.zero,
+                      value: _rememberToken,
+                      title: FocusableActionDetector(
+                        focusNode: _rememberTokenFocusNode,
+                        child: Semantics(
+                          label: l10n.rememberOnThisBrowser,
+                          child: ExcludeSemantics(
+                            child: Text(l10n.rememberOnThisBrowser),
+                          ),
+                        ),
+                      ),
+                      subtitle: ExcludeSemantics(
+                        child: Text(l10n.rememberOnThisBrowserHelp),
+                      ),
+                      onChanged: viewModel.isSaving
+                          ? null
+                          : (value) => setState(
+                              () => _rememberToken = value ?? _rememberToken,
+                            ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(5),
+                  child: Semantics(
+                    sortKey: OrdinalSortKey(5),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        Semantics(
+                          button: true,
+                          label: l10n.connectToken,
+                          sortKey: OrdinalSortKey(5),
+                          child: FilledButton(
+                            focusNode: _connectTokenFocusNode,
+                            onPressed: viewModel.isSaving
+                                ? null
+                                : () => viewModel.connectGitHub(
+                                    _tokenController.text,
+                                    remember: _rememberToken,
+                                  ),
+                            child: ExcludeSemantics(
+                              child: Text(l10n.connectToken),
+                            ),
+                          ),
+                        ),
+                        if (viewModel.isGitHubAppAuthAvailable)
+                          Semantics(
+                            button: true,
+                            label: l10n.continueWithGitHubApp,
+                            child: OutlinedButton(
+                              onPressed: viewModel.isSaving
+                                  ? null
+                                  : viewModel.startGitHubAppLogin,
+                              child: Text(l10n.continueWithGitHubApp),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
+          if (viewModel.connectedUser != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              l10n.githubConnected(
+                viewModel.connectedUser!.login,
+                viewModel.project!.repository,
+              ),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
@@ -8145,25 +8215,15 @@ class _AttachmentsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
-    final hostedRepositoryPathDownloadOnly =
-        viewModel.exposesHostedAccessGates &&
-        !viewModel.usesGitHubReleasesAttachmentStorage;
-    final accessTitle = hostedRepositoryPathDownloadOnly
-        ? l10n.repositoryAccessAttachmentRestrictedTitle
-        : _repositoryAccessTitle(l10n, viewModel);
-    final accessMessage = hostedRepositoryPathDownloadOnly
-        ? l10n.attachmentsDownloadOnlyMessage
-        : _attachmentsAccessMessage(l10n, viewModel);
+    final accessTitle = _repositoryAccessTitle(l10n, viewModel);
+    final accessMessage = _attachmentsAccessMessage(l10n, viewModel);
     final attachmentDownloadOnly =
-        hostedRepositoryPathDownloadOnly ||
-        (viewModel.hostedRepositoryAccessMode ==
-                HostedRepositoryAccessMode.attachmentRestricted &&
-            !viewModel.canUploadIssueAttachments);
+        viewModel.hostedRepositoryAccessMode ==
+            HostedRepositoryAccessMode.attachmentRestricted &&
+        !viewModel.canUploadIssueAttachments;
     final showSettingsAction =
-        attachmentDownloadOnly ||
-        (viewModel.hostedRepositoryAccessMode ==
-                HostedRepositoryAccessMode.attachmentRestricted &&
-            viewModel.usesGitHubReleasesAttachmentStorage);
+        viewModel.hostedRepositoryAccessMode ==
+        HostedRepositoryAccessMode.attachmentRestricted;
     final canChooseAttachment =
         !attachmentDownloadOnly &&
         !isSaving &&
@@ -8246,7 +8306,7 @@ class _AttachmentsTab extends StatelessWidget {
                   message: uploadNotice!,
                 ),
               ],
-              if (!hostedRepositoryPathDownloadOnly) ...[
+              if (!attachmentDownloadOnly) ...[
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
@@ -8254,7 +8314,9 @@ class _AttachmentsTab extends StatelessWidget {
                   children: [
                     _IssueDetailActionButton(
                       label: l10n.chooseAttachment,
-                      onPressed: canChooseAttachment ? onChooseAttachment : null,
+                      onPressed: canChooseAttachment
+                          ? onChooseAttachment
+                          : null,
                     ),
                     _IssueDetailActionButton(
                       label: l10n.uploadAttachment,
