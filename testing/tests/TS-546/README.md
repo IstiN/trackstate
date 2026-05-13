@@ -4,9 +4,9 @@ Validates that a local `trackstate attachment upload --target local` run uploads
 a filename with special characters to GitHub Releases using the repository's
 attachment-name sanitization rules.
 
-This ticket reuses the same live release-backed upload flow already proven for
-TS-534, but keeps TS-546 isolated with its own config, release tag prefix, and
-reporting entrypoint.
+This ticket uses the shared release-asset sanitization support flow under
+`testing/tests/support/`, while keeping TS-546 isolated with its own config,
+release tag prefix, and reporting entrypoint.
 
 The automation:
 1. creates a disposable local TrackState repository configured for

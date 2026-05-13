@@ -1,16 +1,24 @@
 from __future__ import annotations
 
-import importlib.util
 import json
-import platform
 import sys
 import traceback
 from pathlib import Path
-from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from testing.tests.support.trackstate_cli_release_asset_filename_sanitization_scenario import (  # noqa: E402
+    TrackStateCliReleaseAssetFilenameSanitizationScenario,
+    as_dict,
+    as_text,
+    compact_text,
+    jira_inline,
+    json_inline,
+    json_text,
+    observed_command_output,
+)
 
 TICKET_KEY = "TS-546"
 TICKET_SUMMARY = "Local upload sanitizes special-character filenames before creating GitHub Release assets"
@@ -24,41 +32,15 @@ TEST_FILE_PATH = "testing/tests/TS-546/test_ts_546.py"
 RUN_COMMAND = "python testing/tests/TS-546/test_ts_546.py"
 
 
-def _load_ts_534_module() -> ModuleType:
-    module_path = REPO_ROOT / "testing/tests/TS-534/test_ts_534.py"
-    spec = importlib.util.spec_from_file_location(
-        "testing.tests.ts_534_shared",
-        module_path,
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Unable to load TS-534 helper module from {module_path}.")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-TS534 = _load_ts_534_module()
-TS534.TICKET_KEY = TICKET_KEY
-TS534.TICKET_SUMMARY = TICKET_SUMMARY
-TS534.TEST_FILE_PATH = TEST_FILE_PATH
-TS534.RUN_COMMAND = RUN_COMMAND
-
-
 class Ts546ReleaseAssetFilenameSanitizationScenario(
-    TS534.Ts534ReleaseAssetFilenameSanitizationScenario,
+    TrackStateCliReleaseAssetFilenameSanitizationScenario,
 ):
     def __init__(self) -> None:
-        self.repository_root = REPO_ROOT
-        self.config_path = self.repository_root / "testing/tests/TS-546/config.yaml"
-        self.config = (
-            TS534.TrackStateCliReleaseAssetFilenameSanitizationConfig.from_file(
-                self.config_path,
-            )
-        )
-        self.validator = TS534.TrackStateCliReleaseAssetFilenameSanitizationValidator(
-            probe=TS534.create_trackstate_cli_release_asset_filename_sanitization_probe(
-                self.repository_root,
-            ),
+        super().__init__(
+            repository_root=REPO_ROOT,
+            test_directory="TS-546",
+            ticket_key=TICKET_KEY,
+            ticket_summary=TICKET_SUMMARY,
         )
 
 
@@ -103,21 +85,21 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         encoding="utf-8",
     )
 
-    expected_asset_name = _as_text(result.get("expected_sanitized_asset_name"))
-    ticket_command = _as_text(result.get("ticket_command"))
-    source_file_name = _as_text(result.get("source_file_name"))
-    release_tag = _as_text(result.get("release_tag"))
-    remote_origin_url = _as_text(result.get("remote_origin_url"))
-    manifest_state = _dict(result.get("manifest_state"))
-    gh_release_view = _dict(result.get("gh_release_view"))
-    matching_entry = _json_inline(manifest_state.get("matching_entry"))
+    expected_asset_name = as_text(result.get("expected_sanitized_asset_name"))
+    ticket_command = as_text(result.get("ticket_command"))
+    source_file_name = as_text(result.get("source_file_name"))
+    release_tag = as_text(result.get("release_tag"))
+    remote_origin_url = as_text(result.get("remote_origin_url"))
+    manifest_state = as_dict(result.get("manifest_state"))
+    gh_release_view = as_dict(result.get("gh_release_view"))
+    matching_entry = json_inline(manifest_state.get("matching_entry"))
     gh_assets = ", ".join(
         str(asset) for asset in gh_release_view.get("asset_names", []) if str(asset)
     )
-    visible_output = _as_text(result.get("visible_output")) or "<empty>"
-    gh_stdout = _as_text(gh_release_view.get("stdout")).strip() or "<empty>"
-    summary_visible_output = _compact_text(visible_output)
-    summary_gh_stdout = _compact_text(gh_stdout)
+    visible = as_text(result.get("visible_output")) or "<empty>"
+    gh_stdout = as_text(gh_release_view.get("stdout")).strip() or "<empty>"
+    summary_visible_output = compact_text(visible)
+    summary_gh_stdout = compact_text(gh_stdout)
 
     jira_lines = [
         "h3. Test Automation Result",
@@ -127,25 +109,25 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         "",
         "h4. What was tested",
         (
-            f"* Executed {_jira_inline(ticket_command)} from a disposable local TrackState "
-            f"repository configured for {_jira_inline('attachmentStorage.mode = github-releases')} "
-            f"with Git origin {_jira_inline(remote_origin_url)}."
+            f"* Executed {jira_inline(ticket_command)} from a disposable local TrackState "
+            f"repository configured for {jira_inline('attachmentStorage.mode = github-releases')} "
+            f"with Git origin {jira_inline(remote_origin_url)}."
         ),
         (
-            f"* Verified local {_jira_inline('attachments.json')} persisted "
-            f"{_jira_inline('githubReleaseAssetName = ' + expected_asset_name)} for "
-            f"{_jira_inline(source_file_name)}."
+            f"* Verified local {jira_inline('attachments.json')} persisted "
+            f"{jira_inline('githubReleaseAssetName = ' + expected_asset_name)} for "
+            f"{jira_inline(source_file_name)}."
         ),
         (
-            f"* Verified the live GitHub Release {_jira_inline(release_tag)} through "
-            f"{_jira_inline('gh release view')} and checked the user-visible asset name."
+            f"* Verified the live GitHub Release {jira_inline(release_tag)} through "
+            f"{jira_inline('gh release view')} and checked the user-visible asset name."
         ),
         "",
         "h4. Result",
         "* ✅ Step 1 passed: the disposable local-git repository was seeded with the requested special-character file and github-releases storage configuration.",
-        f"* ✅ Step 2 passed: the CLI upload succeeded. Visible output: {_jira_inline(summary_visible_output)}",
-        f"* ✅ Step 3 passed: local metadata stored the sanitized asset name. Matching entry: {_jira_inline(matching_entry)}",
-        f"* ✅ Step 4 passed: {_jira_inline('gh release view')} showed only {_jira_inline(gh_assets or expected_asset_name)}.",
+        f"* ✅ Step 2 passed: the CLI upload succeeded. Visible output: {jira_inline(summary_visible_output)}",
+        f"* ✅ Step 3 passed: local metadata stored the sanitized asset name. Matching entry: {jira_inline(matching_entry)}",
+        f"* ✅ Step 4 passed: {jira_inline('gh release view')} showed only {jira_inline(gh_assets or expected_asset_name)}.",
         (
             "* Human-style verification passed: from a user's perspective the CLI finished "
             "successfully, the uploaded attachment remained associated with the original "
@@ -154,8 +136,8 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         ),
         "",
         "h4. Human-style verification",
-        f"* CLI-visible output: {_jira_inline(summary_visible_output)}",
-        f"* {_jira_inline('gh release view')} output: {_jira_inline(summary_gh_stdout)}",
+        f"* CLI-visible output: {jira_inline(summary_visible_output)}",
+        f"* {jira_inline('gh release view')} output: {jira_inline(summary_gh_stdout)}",
         "",
         "h4. Test file",
         "{code}",
@@ -217,7 +199,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
-    error_message = _as_text(result.get("error")) or "AssertionError: unknown failure"
+    error_message = as_text(result.get("error")) or "AssertionError: unknown failure"
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -233,27 +215,27 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         encoding="utf-8",
     )
 
-    ticket_command = _as_text(result.get("ticket_command"))
-    source_file_name = _as_text(result.get("source_file_name"))
-    expected_asset_name = _as_text(result.get("expected_sanitized_asset_name"))
-    remote_origin_url = _as_text(result.get("remote_origin_url"))
-    release_tag = _as_text(result.get("release_tag"))
-    observed_provider = _as_text(result.get("observed_provider")) or "local-git"
-    observed_output_format = _as_text(result.get("observed_output_format")) or "json"
-    observed_error_code = _as_text(result.get("observed_error_code"))
-    observed_error_category = _as_text(result.get("observed_error_category"))
-    observed_reason = _as_text(result.get("observed_error_reason")) or _as_text(
+    ticket_command = as_text(result.get("ticket_command"))
+    source_file_name = as_text(result.get("source_file_name"))
+    expected_asset_name = as_text(result.get("expected_sanitized_asset_name"))
+    remote_origin_url = as_text(result.get("remote_origin_url"))
+    release_tag = as_text(result.get("release_tag"))
+    observed_provider = as_text(result.get("observed_provider")) or "local-git"
+    observed_output_format = as_text(result.get("observed_output_format")) or "json"
+    observed_error_code = as_text(result.get("observed_error_code"))
+    observed_error_category = as_text(result.get("observed_error_category"))
+    observed_reason = as_text(result.get("observed_error_reason")) or as_text(
         result.get("observed_error_message"),
     )
-    visible_output = _as_text(result.get("visible_output")) or observed_reason
-    stdout = _as_text(result.get("stdout"))
-    stderr = _as_text(result.get("stderr"))
-    traceback_text = _as_text(result.get("traceback"))
-    summary_visible_output = _compact_text(visible_output)
-    manifest_state = _dict(result.get("manifest_state"))
-    release_state = _dict(result.get("release_state"))
-    gh_release_view = _dict(result.get("gh_release_view"))
-    cleanup_state = _dict(result.get("cleanup"))
+    visible = as_text(result.get("visible_output")) or observed_reason
+    stdout = as_text(result.get("stdout"))
+    stderr = as_text(result.get("stderr"))
+    traceback_text = as_text(result.get("traceback"))
+    summary_visible_output = compact_text(visible)
+    manifest_state = as_dict(result.get("manifest_state"))
+    release_state = as_dict(result.get("release_state"))
+    gh_release_view = as_dict(result.get("gh_release_view"))
+    cleanup_state = as_dict(result.get("cleanup"))
     final_state = {
         "final_state": result.get("final_state") or {},
         "manifest_state": manifest_state,
@@ -261,8 +243,8 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "gh_release_view": gh_release_view,
         "cleanup": cleanup_state,
     }
-    final_state_text = _json_text(final_state)
-    observed_output = TS534._observed_command_output(stdout, stderr)
+    final_state_text = json_text(final_state)
+    observed_output = observed_command_output(stdout, stderr)
 
     command_succeeded = bool(
         result.get("exit_code") == 0
@@ -270,8 +252,6 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         and (result.get("payload") or {}).get("ok") is True
     )
     manifest_matches = manifest_state.get("matches_expected") is True
-    release_matches = release_state.get("matches_expected") is True
-    gh_matches = gh_release_view.get("matches_expected") is True
 
     if not command_succeeded:
         failed_step = 2
@@ -284,7 +264,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         )
         step2 = (
             f"2. ❌ Execute `{ticket_command}`. Observed: exit code "
-            f"`{_as_text(result.get('exit_code'))}`, provider/output "
+            f"`{as_text(result.get('exit_code'))}`, provider/output "
             f"`{observed_provider}` / `{observed_output_format}`, visible output "
             f"`{summary_visible_output}`."
         )
@@ -307,10 +287,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         step3 = (
             "3. ❌ Inspect the local manifest and GitHub Release asset list. Observed: "
             f"`attachments.json` did not converge to the expected sanitized entry. "
-            f"Manifest state: `{_json_text(manifest_state)}`."
+            f"Manifest state: `{json_text(manifest_state)}`."
         )
     else:
-        failed_step = 3
+        failed_step = 4
         actual_vs_expected = (
             f"Expected the live GitHub Release `{release_tag}` and `gh release view` to show "
             f"only `{expected_asset_name}`. Actual result: the local upload and manifest "
@@ -323,8 +303,8 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         step3 = (
             "3. ❌ Inspect the local manifest and GitHub Release asset list. Observed: "
             f"manifest matched expected state, but release observation was "
-            f"`{_json_text(release_state)}` and `gh release view` was "
-            f"`{_json_text(gh_release_view)}`."
+            f"`{json_text(release_state)}` and `gh release view` was "
+            f"`{json_text(gh_release_view)}`."
         )
 
     jira_lines = [
@@ -335,18 +315,18 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         "",
         "h4. What was tested",
         (
-            f"* Executed {_jira_inline(ticket_command)} from a disposable local TrackState "
-            f"repository configured for {_jira_inline('attachmentStorage.mode = github-releases')} "
-            f"with Git origin {_jira_inline(remote_origin_url)}."
+            f"* Executed {jira_inline(ticket_command)} from a disposable local TrackState "
+            f"repository configured for {jira_inline('attachmentStorage.mode = github-releases')} "
+            f"with Git origin {jira_inline(remote_origin_url)}."
         ),
         "* Checked the caller-visible CLI output, local attachment metadata, and live GitHub Release asset visibility.",
         "",
         "h4. Result",
         "* ✅ Step 1 passed: the disposable local-git repository was seeded correctly.",
-        f"* ❌ Step {failed_step} failed: {_jira_inline(actual_vs_expected)}",
-        f"* Observed error code/category: {_jira_inline(observed_error_code)} / {_jira_inline(observed_error_category)}",
-        f"* Observed provider/output: {_jira_inline(observed_provider)} / {_jira_inline(observed_output_format)}",
-        f"* Observed visible output: {_jira_inline(summary_visible_output)}",
+        f"* ❌ Step {failed_step} failed: {jira_inline(actual_vs_expected)}",
+        f"* Observed error code/category: {jira_inline(observed_error_code)} / {jira_inline(observed_error_category)}",
+        f"* Observed provider/output: {jira_inline(observed_provider)} / {jira_inline(observed_output_format)}",
+        f"* Observed visible output: {jira_inline(summary_visible_output)}",
         (
             "* Human-style verification failed: from a user's perspective the release-backed "
             "upload flow did not expose the expected sanitized asset name in the final visible "
@@ -420,10 +400,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         f"# {TICKET_KEY} bug reproduction",
         "",
         "## Environment",
-        f"- Repository: `{_as_text(result.get('repository'))}` @ `{_as_text(result.get('repository_ref'))}`",
-        f"- Local repository path: `{_as_text(result.get('repository_path'))}`",
+        f"- Repository: `{as_text(result.get('repository'))}` @ `{as_text(result.get('repository_ref'))}`",
+        f"- Local repository path: `{as_text(result.get('repository_path'))}`",
         f"- Remote origin URL: `{remote_origin_url}`",
-        f"- OS: `{platform.system()}`",
+        f"- OS: `{as_text(result.get('os'))}`",
         f"- Command: `{ticket_command}`",
         f"- Expected release tag: `{release_tag}`",
         f"- Provider/output: `{observed_provider}` / `{observed_output_format}`",
@@ -433,7 +413,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
             f"1. ✅ Create a local TrackState repository configured with "
             f"`attachmentStorage.mode = github-releases`, add `{source_file_name}`, and set "
             f"Git `origin` to `{remote_origin_url}`. Observed: the seeded fixture contained "
-            f"`{_as_text(result.get('issue_key'))}`, the source file existed, and the remote "
+            f"`{as_text(result.get('issue_key'))}`, the source file existed, and the remote "
             "origin matched the hosted repository."
         ),
         step2,
@@ -466,32 +446,6 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     PR_BODY_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
     RESPONSE_PATH.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text("\n".join(bug_lines) + "\n", encoding="utf-8")
-
-
-def _dict(value: object) -> dict[str, object]:
-    return value if isinstance(value, dict) else {}
-
-
-def _json_text(value: object) -> str:
-    return json.dumps(value, indent=2, sort_keys=True)
-
-
-def _json_inline(value: object) -> str:
-    return json.dumps(value, sort_keys=True)
-
-
-def _as_text(value: object) -> str:
-    if value is None:
-        return ""
-    return str(value)
-
-
-def _compact_text(value: str) -> str:
-    return " ".join(value.split())
-
-
-def _jira_inline(value: str) -> str:
-    return "{{" + value.replace("{", "").replace("}", "") + "}}"
 
 
 if __name__ == "__main__":
