@@ -7,16 +7,18 @@ real GitHub Release that exists but does not contain the requested asset.
 The automation:
 1. creates a disposable local TrackState repository whose `attachments.json`
    contains `TS/TS-123/attachments/manual.pdf` backed by GitHub Releases
-2. points the fixture repository `origin` at `https://github.com/cli/cli.git`
+2. compiles the TrackState CLI from the current checkout so the probe exercises
+   the revision under test, consistent with the other local CLI automation
+3. points the fixture repository `origin` at `https://github.com/cli/cli.git`
    and references public release tag `v2.74.0`
-3. removes ambient GitHub credentials from the command environment
-4. runs the supported local CLI form
+4. removes ambient GitHub credentials from the command environment
+5. runs the supported local CLI form
    `trackstate attachment download --attachment-id TS/TS-123/attachments/manual.pdf --out ./downloads/manual.pdf --target local`
-5. checks the caller-visible CLI failure output for explicit guidance that the
+6. checks the caller-visible CLI failure output for explicit guidance that the
    remote release does not contain `manual.pdf`
-6. verifies no output file is created under `downloads/manual.pdf` and the local
+7. verifies no output file is created under `downloads/manual.pdf` and the local
    repository stays clean
-7. if the local provider still fails earlier at the GitHub Releases capability
+8. if the local provider still fails earlier at the GitHub Releases capability
    gate, reports that as the real product gap instead of pretending the
    missing-asset contract was verified
 

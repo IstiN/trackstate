@@ -97,9 +97,9 @@ class PythonTrackStateCliReleaseDownloadMissingAssetFramework(
             requested_command=requested_command,
             executed_command=executed_command,
             fallback_reason=(
-                "Pinned execution to a temporary executable compiled from this checkout "
-                "and stripped ambient GitHub credentials so TS-535 runs the exact local "
-                "download flow deterministically."
+                "Pinned execution to a temporary executable compiled from the current "
+                "checkout and stripped ambient GitHub credentials so TS-535 runs the "
+                "revision under test deterministically."
             ),
             repository_path=str(repository_path),
             compiled_binary_path=str(executable_path),
