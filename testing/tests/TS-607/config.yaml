@@ -1,0 +1,9 @@
+test_id: TS-607
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Reuses the local Project Settings Attachments fixture from TS-483.
+  - Verifies the GitHub Releases Attachments focus cycle stays inside the local workflow through Attachment storage mode, Release tag prefix, Reset, and Save settings.
+  - Requires keyboard focus to leave the Attachments workspace for a global navigation control only after Save settings.
