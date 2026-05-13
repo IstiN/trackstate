@@ -55,8 +55,9 @@ class TrackStateCliReleaseReplacementScenario:
                 step=0,
                 status="passed",
                 action=(
-                    "Prepare a local github-releases repository with an existing `doc.pdf` "
-                    "entry in `attachments.json` and the issue release container."
+                    "Prepare a local github-releases repository with an existing "
+                    f"`{self.config.expected_attachment_name}` entry in "
+                    "`attachments.json` and the issue release container."
                 ),
                 observed=(
                     f"release_tag={validation.expected_release_tag}; "
@@ -399,8 +400,9 @@ class TrackStateCliReleaseReplacementScenario:
         record_human_verification(
             result,
             check=(
-                "Verified the live release still exposed a single `doc.pdf` asset whose "
-                "downloaded bytes matched the replacement payload."
+                "Verified the live release still exposed a single "
+                f"`{self.config.expected_attachment_name}` asset whose downloaded bytes "
+                "matched the replacement payload."
             ),
             observed=(
                 f"asset_names={list(release.asset_names)}; "
