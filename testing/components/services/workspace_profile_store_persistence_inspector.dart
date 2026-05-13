@@ -1,84 +1,55 @@
 import 'dart:convert';
 
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 
-class WorkspaceProfileStoreSnapshot {
-  const WorkspaceProfileStoreSnapshot({
-    required this.rawJson,
-    required this.state,
-    required this.profiles,
-    required this.activeWorkspaceId,
-    required this.migrationComplete,
-  });
+import '../../core/interfaces/workspace_profile_store_persistence_probe.dart';
+import '../../core/models/workspace_profile_store_persistence_observation.dart';
 
-  final String rawJson;
-  final Map<String, Object?> state;
-  final List<Map<String, Object?>> profiles;
-  final String? activeWorkspaceId;
-  final bool migrationComplete;
+class WorkspaceProfileStorePersistenceInspector
+    implements WorkspaceProfileStorePersistenceProbe {
+  WorkspaceProfileStorePersistenceInspector({
+    required WorkspaceProfileService service,
+    required Future<void> Function() resetState,
+    required Future<String?> Function() readRawState,
+  }) : _service = service,
+       _resetState = resetState,
+       _readRawState = readRawState;
 
-  Map<String, Object?>? profileById(String workspaceId) {
-    for (final profile in profiles) {
-      if ('${profile['id'] ?? ''}' == workspaceId) {
-        return profile;
-      }
-    }
-    return null;
-  }
-}
+  final WorkspaceProfileService _service;
+  final Future<void> Function() _resetState;
+  final Future<String?> Function() _readRawState;
 
-class WorkspaceProfileStorePersistenceObservation {
-  const WorkspaceProfileStorePersistenceObservation({
-    required this.initialStorageValue,
-    required this.firstProfile,
-    required this.secondProfile,
-    required this.afterFirstCreate,
-    required this.afterSecondCreate,
-  });
-
-  final String? initialStorageValue;
-  final WorkspaceProfile firstProfile;
-  final WorkspaceProfile secondProfile;
-  final WorkspaceProfileStoreSnapshot afterFirstCreate;
-  final WorkspaceProfileStoreSnapshot afterSecondCreate;
-}
-
-class WorkspaceProfileStorePersistenceInspector {
-  const WorkspaceProfileStorePersistenceInspector({DateTime Function()? now})
-    : _now = now;
-
-  static const storageKey = 'trackstate.workspaceProfiles.state';
-
-  final DateTime Function()? _now;
-
+  @override
   Future<WorkspaceProfileStorePersistenceObservation> observeHostedPersistence({
     required String repository,
     required String firstDefaultBranch,
     required String secondDefaultBranch,
   }) async {
-    final preferences = await SharedPreferences.getInstance();
-    final initialStorageValue = preferences.getString(storageKey);
-    final service = SharedPreferencesWorkspaceProfileService(now: _now);
+    await _resetState();
+    final initialStorageValue = await _readRawState();
 
-    final firstProfile = await service.createProfile(
+    final firstProfile = await _service.createProfile(
       WorkspaceProfileInput(
         targetType: WorkspaceProfileTargetType.hosted,
         target: repository,
         defaultBranch: firstDefaultBranch,
       ),
     );
-    final afterFirstCreate = _readSnapshot(preferences);
+    final afterFirstCreate = _readSnapshot(
+      await _requireRawState('first hosted workspace profile creation'),
+    );
 
-    final secondProfile = await service.createProfile(
+    final secondProfile = await _service.createProfile(
       WorkspaceProfileInput(
         targetType: WorkspaceProfileTargetType.hosted,
         target: repository,
         defaultBranch: secondDefaultBranch,
       ),
     );
-    final afterSecondCreate = _readSnapshot(preferences);
+    final afterSecondCreate = _readSnapshot(
+      await _requireRawState('second hosted workspace profile creation'),
+    );
 
     return WorkspaceProfileStorePersistenceObservation(
       initialStorageValue: initialStorageValue,
@@ -89,8 +60,17 @@ class WorkspaceProfileStorePersistenceInspector {
     );
   }
 
-  WorkspaceProfileStoreSnapshot _readSnapshot(SharedPreferences preferences) {
-    final rawJson = preferences.getString(storageKey) ?? '';
+  Future<String> _requireRawState(String operation) async {
+    final rawJson = await _readRawState();
+    if (rawJson == null || rawJson.isEmpty) {
+      throw StateError(
+        'WorkspaceProfileStore did not persist $workspaceProfileStorePersistenceStorageKey after $operation.',
+      );
+    }
+    return rawJson;
+  }
+
+  WorkspaceProfileStoreSnapshot _readSnapshot(String rawJson) {
     final decoded = jsonDecode(rawJson);
     if (decoded is! Map) {
       throw StateError(

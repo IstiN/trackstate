@@ -2,14 +2,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 
-import '../../components/services/workspace_profile_store_persistence_inspector.dart';
+import '../../core/interfaces/workspace_profile_store_persistence_probe.dart';
+import '../../core/models/workspace_profile_store_persistence_observation.dart';
+import 'support/ts664_workspace_profile_store_persistence_probe.dart';
 
 const String _ticketKey = 'TS-664';
-const String _ticketSummary =
-    'Persist workspace profile — fields and deterministic ID are stored correctly';
 const String _repository = 'owner/repo';
 const String _firstBranch = 'main';
 const String _secondBranch = 'develop';
@@ -18,10 +17,6 @@ final DateTime _fixedClock = DateTime.utc(2026, 5, 14, 1, 5, 24);
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUp(() {
-    SharedPreferences.setMockInitialValues(const <String, Object>{});
-  });
-
   test(
     'TS-664 persists hosted workspace profiles with deterministic branch-specific ids',
     () async {
@@ -29,16 +24,15 @@ void main() {
         'ticket': _ticketKey,
         'environment': 'flutter service test',
         'os': Platform.operatingSystem,
-        'storage_key': WorkspaceProfileStorePersistenceInspector.storageKey,
+        'storage_key': workspaceProfileStorePersistenceStorageKey,
         'repository': _repository,
         'steps': <Map<String, Object?>>[],
         'human_verification': <Map<String, Object?>>[],
       };
 
       try {
-        final inspector = WorkspaceProfileStorePersistenceInspector(
-          now: () => _fixedClock,
-        );
+        final WorkspaceProfileStorePersistenceProbe inspector =
+            createWorkspaceProfileStorePersistenceProbe(now: () => _fixedClock);
         final observation = await inspector.observeHostedPersistence(
           repository: _repository,
           firstDefaultBranch: _firstBranch,
@@ -82,7 +76,7 @@ void main() {
           status: step1Failure == null ? 'passed' : 'failed',
           action: 'Initialize WorkspaceProfileService.',
           observed:
-              'storage_key=${WorkspaceProfileStorePersistenceInspector.storageKey}; initial_storage_empty=${observation.initialStorageValue == null}',
+              'storage_key=$workspaceProfileStorePersistenceStorageKey; initial_storage_empty=${observation.initialStorageValue == null}',
         );
         if (step1Failure != null) {
           failures.add(step1Failure);
@@ -164,7 +158,7 @@ void main() {
           check:
               'Inspected the raw SharedPreferences entry exactly as a developer or QA engineer would inspect device storage after saving the first hosted workspace.',
           observed:
-              'storage_key=${WorkspaceProfileStorePersistenceInspector.storageKey}; raw_state=${observation.afterFirstCreate.rawJson}',
+              'storage_key=$workspaceProfileStorePersistenceStorageKey; raw_state=${observation.afterFirstCreate.rawJson}',
         );
         _recordHumanVerification(
           result,
@@ -481,7 +475,7 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '',
     '*Automation coverage*',
     '* Initialized the production {code}SharedPreferencesWorkspaceProfileService{code} with mock device storage and a fixed UTC clock.',
-    "* Created hosted workspace profiles for {code}owner/repo{code} on {code}main{code} and {code}develop{code}, then inspected the raw {code}${WorkspaceProfileStorePersistenceInspector.storageKey}{code} value after each save.",
+    "* Created hosted workspace profiles for {code}owner/repo{code} on {code}main{code} and {code}develop{code}, then inspected the raw {code}$workspaceProfileStorePersistenceStorageKey{code} value after each save.",
     '* Verified the stored workspace identifier, display name, target type, repository coordinates, default branch, write branch, and {code}lastOpenedAt{code} values.',
     '',
     '*Observed result*',
@@ -522,7 +516,7 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '',
     '### Automation',
     '- Initialized the production `SharedPreferencesWorkspaceProfileService` with mock device storage and a fixed UTC clock.',
-    '- Created hosted workspace profiles for `owner/repo` on `main` and `develop`, then inspected the raw `${WorkspaceProfileStorePersistenceInspector.storageKey}` value after each save.',
+    '- Created hosted workspace profiles for `owner/repo` on `main` and `develop`, then inspected the raw `$workspaceProfileStorePersistenceStorageKey` value after each save.',
     '- Verified the stored workspace identifier, display name, target type, repository coordinates, default branch, write branch, and `lastOpenedAt` values.',
     '',
     '### Observed result',
@@ -567,7 +561,7 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
     '- Environment: `flutter service test` on `${Platform.operatingSystem}`',
     '- First workspace id: `${result['first_workspace_id'] ?? '<missing>'}`',
     '- Second workspace id: `${result['second_workspace_id'] ?? '<missing>'}`',
-    '- Storage key: `${result['storage_key'] ?? WorkspaceProfileStorePersistenceInspector.storageKey}`',
+    '- Storage key: `${result['storage_key'] ?? workspaceProfileStorePersistenceStorageKey}`',
   ];
   if (!passed) {
     lines.addAll(<String>[
@@ -610,7 +604,7 @@ String _bugDescription(Map<String, Object?> result) {
     '- Runtime: `flutter service test`',
     '- OS: `${Platform.operatingSystem}`',
     '- Repository target: `$_repository`',
-    '- Storage key: `${result['storage_key'] ?? WorkspaceProfileStorePersistenceInspector.storageKey}`',
+    '- Storage key: `${result['storage_key'] ?? workspaceProfileStorePersistenceStorageKey}`',
     '- First branch: `$_firstBranch`',
     '- Second branch: `$_secondBranch`',
     '',
