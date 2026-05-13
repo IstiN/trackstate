@@ -40,6 +40,28 @@ class RepositoryAccessSectionObservation:
 
 
 @dataclass(frozen=True)
+class RepositoryAccessControlsObservation:
+    body_text: str
+    section_text: str
+    project_settings_visible: bool
+    repository_access_visible: bool
+    fine_grained_token_visible: bool
+    remember_on_this_browser_visible: bool
+    connect_token_visible: bool
+
+
+@dataclass(frozen=True)
+class RepositoryAccessFocusObservation:
+    label: str | None
+    tag_name: str
+    role: str | None
+    accessible_name: str | None
+    text: str
+    outer_html: str
+    body_text: str
+
+
+@dataclass(frozen=True)
 class ProjectSettingsTabObservation:
     body_text: str
     selected_tab_label: str
@@ -63,6 +85,11 @@ class LiveProjectSettingsPage:
     _tab_selector = 'flt-semantics[role="tab"]'
     _connect_selector = 'flt-semantics[aria-label="Connect GitHub"]'
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
+    _remember_on_this_browser_selector = (
+        'flt-semantics[role="checkbox"][aria-label*="Remember on this browser"]'
+    )
+    _connect_token_selector = 'flt-semantics[role="button"][aria-label*="Connect token"]'
+    _repository_access_selector = 'flt-semantics[aria-label*="Repository access"]'
     _settings_nav_selector = 'flt-semantics[role="button"]'
     _settings_heading = "Project Settings"
     _settings_admin_heading = "Project settings administration"
@@ -377,6 +404,429 @@ class LiveProjectSettingsPage:
 
     def body_text(self) -> str:
         return self._tracker_page.body_text()
+
+    def observe_repository_access_controls(
+        self,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> RepositoryAccessControlsObservation:
+        payload = self._session.wait_for_function(
+            """
+            ({ settingsHeading, repositoryAccessLabel, repositoryAccessSelector, tokenSelector, rememberSelector, connectSelector }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const visibleMatches = (selector) => Array.from(document.querySelectorAll(selector))
+                .filter((candidate) => isVisible(candidate));
+              const visibleMatchesWithin = (root, selector) => {
+                const descendants = Array.from(root.querySelectorAll(selector))
+                  .filter((candidate) => isVisible(candidate));
+                if (
+                  typeof root.matches === 'function'
+                  && root.matches(selector)
+                  && isVisible(root)
+                ) {
+                  descendants.unshift(root);
+                }
+                return descendants;
+              };
+              const candidateRoots = [];
+              const seenRoots = new Set();
+              for (const repositoryAccessHeading of visibleMatches(repositoryAccessSelector)) {
+                let current = repositoryAccessHeading;
+                while (current && current !== document.body) {
+                  if (isVisible(current) && !seenRoots.has(current)) {
+                    seenRoots.add(current);
+                    candidateRoots.push(current);
+                  }
+                  current = current.parentElement;
+                }
+              }
+              const bodyText = document.body?.innerText ?? '';
+              const repositoryAccess = candidateRoots
+                .map((candidate) => {
+                  const sectionText = normalize(
+                    candidate.getAttribute('aria-label')
+                    ?? candidate.innerText
+                    ?? '',
+                  );
+                  const tokenVisible = visibleMatchesWithin(candidate, tokenSelector).length > 0;
+                  const rememberVisible =
+                    visibleMatchesWithin(candidate, rememberSelector).length > 0;
+                  const connectVisible =
+                    visibleMatchesWithin(candidate, connectSelector).length > 0;
+                  const rect = candidate.getBoundingClientRect();
+                  return {
+                    element: candidate,
+                    area: rect.width * rect.height,
+                    sectionText,
+                    tokenVisible,
+                    rememberVisible,
+                    connectVisible,
+                  };
+                })
+                .filter((candidate) =>
+                  candidate.sectionText.includes(repositoryAccessLabel)
+                  && candidate.tokenVisible
+                  && candidate.rememberVisible
+                  && candidate.connectVisible,
+                )
+                .sort((left, right) => left.area - right.area)[0] ?? null;
+              if (
+                !bodyText.includes(settingsHeading)
+                || !repositoryAccess
+              ) {
+                return null;
+              }
+              return {
+                bodyText,
+                sectionText: repositoryAccess.sectionText,
+                projectSettingsVisible: bodyText.includes(settingsHeading),
+                repositoryAccessVisible: repositoryAccess.sectionText.includes(repositoryAccessLabel),
+                fineGrainedTokenVisible: repositoryAccess.tokenVisible,
+                rememberOnThisBrowserVisible: repositoryAccess.rememberVisible,
+                connectTokenVisible: repositoryAccess.connectVisible,
+              };
+            }
+            """,
+            arg={
+                "settingsHeading": self._settings_heading,
+                "repositoryAccessLabel": "Repository access",
+                "repositoryAccessSelector": self._repository_access_selector,
+                "tokenSelector": self._token_input_selector,
+                "rememberSelector": self._remember_on_this_browser_selector,
+                "connectSelector": self._connect_token_selector,
+            },
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step 1 failed: the hosted Project Settings screen did not expose the "
+                "visible Repository access controls needed for keyboard traversal.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        return RepositoryAccessControlsObservation(
+            body_text=str(payload.get("bodyText", "")),
+            section_text=str(payload.get("sectionText", "")),
+            project_settings_visible=bool(payload.get("projectSettingsVisible")),
+            repository_access_visible=bool(payload.get("repositoryAccessVisible")),
+            fine_grained_token_visible=bool(payload.get("fineGrainedTokenVisible")),
+            remember_on_this_browser_visible=bool(
+                payload.get("rememberOnThisBrowserVisible")
+            ),
+            connect_token_visible=bool(payload.get("connectTokenVisible")),
+        )
+
+    def focus_repository_access_token_field(self, *, timeout_ms: int = 30_000) -> None:
+        focused = self._session.wait_for_function(
+            """
+            ({ repositoryAccessLabel, repositoryAccessSelector, tokenSelector, rememberSelector, connectSelector }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const visibleMatches = (selector) => Array.from(document.querySelectorAll(selector))
+                .filter((candidate) => isVisible(candidate));
+              const visibleMatchesWithin = (root, selector) => {
+                const descendants = Array.from(root.querySelectorAll(selector))
+                  .filter((candidate) => isVisible(candidate));
+                if (
+                  typeof root.matches === 'function'
+                  && root.matches(selector)
+                  && isVisible(root)
+                ) {
+                  descendants.unshift(root);
+                }
+                return descendants;
+              };
+              const candidateRoots = [];
+              const seenRoots = new Set();
+              for (const repositoryAccessHeading of visibleMatches(repositoryAccessSelector)) {
+                let current = repositoryAccessHeading;
+                while (current && current !== document.body) {
+                  if (isVisible(current) && !seenRoots.has(current)) {
+                    seenRoots.add(current);
+                    candidateRoots.push(current);
+                  }
+                  current = current.parentElement;
+                }
+              }
+              const repositoryAccess = candidateRoots
+                .map((candidate) => {
+                  const sectionText = normalize(
+                    candidate.getAttribute('aria-label')
+                    ?? candidate.innerText
+                    ?? '',
+                  );
+                  const tokenMatches = visibleMatchesWithin(candidate, tokenSelector);
+                  const rememberMatches = visibleMatchesWithin(candidate, rememberSelector);
+                  const connectMatches = visibleMatchesWithin(candidate, connectSelector);
+                  const rect = candidate.getBoundingClientRect();
+                  return {
+                    element: candidate,
+                    area: rect.width * rect.height,
+                    sectionText,
+                    tokenMatches,
+                    rememberMatches,
+                    connectMatches,
+                  };
+                })
+                .filter((candidate) =>
+                  candidate.sectionText.includes(repositoryAccessLabel)
+                  && candidate.tokenMatches.length > 0
+                  && candidate.rememberMatches.length > 0
+                  && candidate.connectMatches.length > 0,
+                )
+                .sort((left, right) => left.area - right.area)[0] ?? null;
+              const token = repositoryAccess?.tokenMatches[0] ?? null;
+              if (!token) {
+                return null;
+              }
+              token.scrollIntoView({ block: 'center', inline: 'center' });
+              token.focus();
+              return document.activeElement === token;
+            }
+            """,
+            arg={
+                "repositoryAccessLabel": "Repository access",
+                "repositoryAccessSelector": self._repository_access_selector,
+                "tokenSelector": self._token_input_selector,
+                "rememberSelector": self._remember_on_this_browser_selector,
+                "connectSelector": self._connect_token_selector,
+            },
+            timeout_ms=timeout_ms,
+        )
+        if focused is not True:
+            raise AssertionError(
+                "Step 2 failed: could not focus the visible Fine-grained token input inside "
+                "the Repository access section.\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+
+    def press_tab(self, *, timeout_ms: int = 30_000) -> None:
+        self._session.press_key("Tab", timeout_ms=timeout_ms)
+
+    def press_tab_from_repository_access_focus(
+        self,
+        current_label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        if current_label not in {
+            "Fine-grained token",
+            "Remember on this browser",
+            "Connect token",
+        }:
+            raise AssertionError(
+                f"Unsupported Repository access focus target for Tab navigation: {current_label!r}.",
+            )
+        self.wait_for_repository_access_focus(current_label, timeout_ms=timeout_ms)
+        self._session.press_key("Tab", timeout_ms=timeout_ms)
+
+    def wait_for_repository_access_focus(
+        self,
+        expected_label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> RepositoryAccessFocusObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ repositoryAccessLabel, repositoryAccessSelector, tokenSelector, rememberSelector, connectSelector, expectedLabel }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const visibleMatches = (selector) => Array.from(document.querySelectorAll(selector))
+                    .filter((candidate) => isVisible(candidate));
+                  const visibleMatchesWithin = (root, selector) => {
+                    const descendants = Array.from(root.querySelectorAll(selector))
+                      .filter((candidate) => isVisible(candidate));
+                    if (
+                      typeof root.matches === 'function'
+                      && root.matches(selector)
+                      && isVisible(root)
+                    ) {
+                      descendants.unshift(root);
+                    }
+                    return descendants;
+                  };
+                  const candidateRoots = [];
+                  const seenRoots = new Set();
+                  for (const repositoryAccessHeading of visibleMatches(repositoryAccessSelector)) {
+                    let current = repositoryAccessHeading;
+                    while (current && current !== document.body) {
+                      if (isVisible(current) && !seenRoots.has(current)) {
+                        seenRoots.add(current);
+                        candidateRoots.push(current);
+                      }
+                      current = current.parentElement;
+                    }
+                  }
+                  const repositoryAccess = candidateRoots
+                    .map((candidate) => {
+                      const sectionText = normalize(
+                        candidate.getAttribute('aria-label')
+                        ?? candidate.innerText
+                        ?? '',
+                      );
+                      const tokenMatches = visibleMatchesWithin(candidate, tokenSelector);
+                      const rememberMatches = visibleMatchesWithin(candidate, rememberSelector);
+                      const connectMatches = visibleMatchesWithin(candidate, connectSelector);
+                      const rect = candidate.getBoundingClientRect();
+                      return {
+                        element: candidate,
+                        area: rect.width * rect.height,
+                        sectionText,
+                        tokenMatches,
+                        rememberMatches,
+                        connectMatches,
+                      };
+                    })
+                    .filter((candidate) =>
+                      candidate.sectionText.includes(repositoryAccessLabel)
+                      && candidate.tokenMatches.length > 0
+                      && candidate.rememberMatches.length > 0
+                      && candidate.connectMatches.length > 0,
+                    )
+                    .sort((left, right) => left.area - right.area)[0] ?? null;
+                  if (!repositoryAccess) {
+                    return null;
+                  }
+                  const active = document.activeElement;
+                  const bodyText = document.body?.innerText ?? '';
+                  if (!active || !repositoryAccess.element.contains(active)) {
+                    return null;
+                  }
+                  const identify = (element) => {
+                    if (!element) {
+                      return null;
+                    }
+                    if (
+                      typeof element.matches === 'function'
+                      && element.matches(tokenSelector)
+                      && isVisible(element)
+                    ) {
+                      return 'Fine-grained token';
+                    }
+                    if (
+                      typeof element.matches === 'function'
+                      && element.matches(rememberSelector)
+                      && isVisible(element)
+                    ) {
+                      return 'Remember on this browser';
+                    }
+                    if (
+                      typeof element.matches === 'function'
+                      && element.matches(connectSelector)
+                      && isVisible(element)
+                    ) {
+                      return 'Connect token';
+                    }
+                    if (typeof element.closest === 'function') {
+                      const tokenMatch = element.closest(tokenSelector);
+                      if (
+                        tokenMatch
+                        && repositoryAccess.element.contains(tokenMatch)
+                        && isVisible(tokenMatch)
+                      ) {
+                        return 'Fine-grained token';
+                      }
+                      const rememberMatch = element.closest(rememberSelector);
+                      if (
+                        rememberMatch
+                        && repositoryAccess.element.contains(rememberMatch)
+                        && isVisible(rememberMatch)
+                      ) {
+                        return 'Remember on this browser';
+                      }
+                      const connectMatch = element.closest(connectSelector);
+                      if (
+                        connectMatch
+                        && repositoryAccess.element.contains(connectMatch)
+                        && isVisible(connectMatch)
+                      ) {
+                        return 'Connect token';
+                      }
+                    }
+                    return null;
+                  };
+                  const label = identify(active);
+                  if (label !== expectedLabel) {
+                    return null;
+                  }
+                  const text = (active.textContent ?? '').replace(/\\s+/g, ' ').trim();
+                  return {
+                    label,
+                    tagName: active.tagName,
+                    role: active.getAttribute('role'),
+                    accessibleName: active.getAttribute('aria-label') || text || null,
+                    text,
+                    outerHtml: active.outerHTML.slice(0, 400),
+                    bodyText,
+                  };
+                }
+                """,
+                arg={
+                    "repositoryAccessLabel": "Repository access",
+                    "repositoryAccessSelector": self._repository_access_selector,
+                    "tokenSelector": self._token_input_selector,
+                    "rememberSelector": self._remember_on_this_browser_selector,
+                    "connectSelector": self._connect_token_selector,
+                    "expectedLabel": expected_label,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError:
+            payload = None
+        if not isinstance(payload, dict):
+            active = self._session.active_element()
+            raise AssertionError(
+                f"Keyboard focus did not reach `{expected_label}` within the Repository "
+                "access controls.\n"
+                f"Observed active element label: {active.accessible_name!r}\n"
+                f"Observed active element role: {active.role!r}\n"
+                f"Observed active element HTML: {active.outer_html}\n"
+                f"Observed body text:\n{self.body_text()}",
+            )
+        return RepositoryAccessFocusObservation(
+            label=str(payload.get("label")) if payload.get("label") is not None else None,
+            tag_name=str(payload.get("tagName", "")),
+            role=str(payload.get("role")) if payload.get("role") is not None else None,
+            accessible_name=(
+                str(payload.get("accessibleName"))
+                if payload.get("accessibleName") is not None
+                else None
+            ),
+            text=str(payload.get("text", "")),
+            outer_html=str(payload.get("outerHtml", "")),
+            body_text=str(payload.get("bodyText", "")),
+        )
 
     def observe_repository_access_section(
         self,
