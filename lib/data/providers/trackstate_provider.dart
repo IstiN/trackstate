@@ -49,6 +49,18 @@ abstract interface class RepositoryAttachmentStore {
   Future<bool> isLfsTracked(String path);
 }
 
+abstract interface class RepositoryReleaseAttachmentStore {
+  Future<RepositoryAttachment> readReleaseAttachment(
+    RepositoryReleaseAttachmentReadRequest request,
+  );
+  Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
+    RepositoryReleaseAttachmentWriteRequest request,
+  );
+  Future<void> deleteReleaseAttachment(
+    RepositoryReleaseAttachmentDeleteRequest request,
+  );
+}
+
 abstract interface class RepositoryHistoryReader {
   Future<List<RepositoryHistoryCommit>> listHistory({
     required String ref,
@@ -86,6 +98,7 @@ class ProviderSession {
     required this.canCreateBranch,
     required this.canManageAttachments,
     required this.attachmentUploadMode,
+    required this.supportsReleaseAttachmentWrites,
     required this.canCheckCollaborators,
   });
 
@@ -97,6 +110,7 @@ class ProviderSession {
   bool canCreateBranch;
   bool canManageAttachments;
   AttachmentUploadMode attachmentUploadMode;
+  bool supportsReleaseAttachmentWrites;
   bool canCheckCollaborators;
   final Set<ProviderSessionListener> _listeners = <ProviderSessionListener>{};
 
@@ -126,6 +140,7 @@ class ProviderSession {
     required bool canCreateBranch,
     required bool canManageAttachments,
     required AttachmentUploadMode attachmentUploadMode,
+    required bool supportsReleaseAttachmentWrites,
     required bool canCheckCollaborators,
   }) {
     final changed =
@@ -137,6 +152,8 @@ class ProviderSession {
         this.canCreateBranch != canCreateBranch ||
         this.canManageAttachments != canManageAttachments ||
         this.attachmentUploadMode != attachmentUploadMode ||
+        this.supportsReleaseAttachmentWrites !=
+            supportsReleaseAttachmentWrites ||
         this.canCheckCollaborators != canCheckCollaborators;
     if (!changed) {
       return;
@@ -149,6 +166,7 @@ class ProviderSession {
     this.canCreateBranch = canCreateBranch;
     this.canManageAttachments = canManageAttachments;
     this.attachmentUploadMode = attachmentUploadMode;
+    this.supportsReleaseAttachmentWrites = supportsReleaseAttachmentWrites;
     this.canCheckCollaborators = canCheckCollaborators;
     _notifyListeners();
   }
@@ -295,6 +313,7 @@ class RepositoryPermission {
     bool? canCreateBranch,
     bool? canManageAttachments,
     AttachmentUploadMode? attachmentUploadMode,
+    this.supportsReleaseAttachmentWrites = false,
     bool? canCheckCollaborators,
   }) : canCreateBranch = canCreateBranch ?? canWrite,
        canManageAttachments = canManageAttachments ?? canWrite,
@@ -311,6 +330,7 @@ class RepositoryPermission {
   final bool canCreateBranch;
   final bool canManageAttachments;
   final AttachmentUploadMode attachmentUploadMode;
+  final bool supportsReleaseAttachmentWrites;
   final bool canCheckCollaborators;
 }
 
@@ -356,6 +376,64 @@ class RepositoryAttachmentWriteResult {
   final String path;
   final String branch;
   final String? revision;
+}
+
+class RepositoryReleaseAttachmentReadRequest {
+  const RepositoryReleaseAttachmentReadRequest({
+    required this.releaseTag,
+    required this.assetName,
+    this.assetId,
+  });
+
+  final String releaseTag;
+  final String assetName;
+  final String? assetId;
+}
+
+class RepositoryReleaseAttachmentWriteRequest {
+  const RepositoryReleaseAttachmentWriteRequest({
+    required this.issueKey,
+    required this.releaseTag,
+    required this.releaseTitle,
+    required this.assetName,
+    required this.bytes,
+    required this.mediaType,
+    required this.branch,
+    this.allowedAssetNames = const <String>{},
+  });
+
+  final String issueKey;
+  final String releaseTag;
+  final String releaseTitle;
+  final String assetName;
+  final Uint8List bytes;
+  final String mediaType;
+  final String branch;
+  final Set<String> allowedAssetNames;
+}
+
+class RepositoryReleaseAttachmentWriteResult {
+  const RepositoryReleaseAttachmentWriteResult({
+    required this.releaseTag,
+    required this.assetName,
+    required this.assetId,
+  });
+
+  final String releaseTag;
+  final String assetName;
+  final String assetId;
+}
+
+class RepositoryReleaseAttachmentDeleteRequest {
+  const RepositoryReleaseAttachmentDeleteRequest({
+    required this.releaseTag,
+    required this.assetId,
+    required this.assetName,
+  });
+
+  final String releaseTag;
+  final String assetId;
+  final String assetName;
 }
 
 enum RepositoryHistoryChangeType { added, modified, removed, renamed }

@@ -907,7 +907,9 @@ String _repositoryAccessTitle(
     HostedRepositoryAccessMode.readOnly => l10n.repositoryAccessReadOnlyTitle,
     HostedRepositoryAccessMode.writable => l10n.repositoryAccessConnected,
     HostedRepositoryAccessMode.attachmentRestricted =>
-      viewModel.canUploadIssueAttachments
+      viewModel.usesGitHubReleasesAttachmentStorage
+          ? l10n.repositoryAccessReleaseRestrictedTitle
+          : viewModel.canUploadIssueAttachments
           ? l10n.repositoryAccessAttachmentLimitedTitle
           : l10n.repositoryAccessAttachmentRestrictedTitle,
   };
@@ -921,12 +923,23 @@ String _repositoryAccessMessage(
     HostedRepositoryAccessMode.disconnected =>
       l10n.repositoryAccessDisconnectedMessage,
     HostedRepositoryAccessMode.readOnly => l10n.repositoryAccessReadOnlyMessage,
-    HostedRepositoryAccessMode.writable => l10n.githubConnected(
-      viewModel.connectedUser?.login ?? '',
-      viewModel.project?.repository ?? l10n.configuredRepositoryFallback,
-    ),
+    HostedRepositoryAccessMode.writable =>
+      viewModel.usesGitHubReleasesAttachmentStorage
+          ? l10n.repositoryAccessConnectedGitHubReleasesMessage(
+              viewModel.connectedUser?.login ?? '',
+              viewModel.project?.repository ??
+                  l10n.configuredRepositoryFallback,
+              _attachmentReleaseTagPrefix(viewModel),
+            )
+          : l10n.repositoryAccessConnectedRepositoryPathMessage(
+              viewModel.connectedUser?.login ?? '',
+              viewModel.project?.repository ??
+                  l10n.configuredRepositoryFallback,
+            ),
     HostedRepositoryAccessMode.attachmentRestricted =>
-      viewModel.canUploadIssueAttachments
+      viewModel.usesGitHubReleasesAttachmentStorage
+          ? l10n.repositoryAccessReleaseRestrictedMessage
+          : viewModel.canUploadIssueAttachments
           ? l10n.repositoryAccessAttachmentLimitedMessage
           : l10n.repositoryAccessAttachmentRestrictedMessage,
   };
@@ -943,10 +956,72 @@ String _attachmentsAccessMessage(
       l10n.attachmentsAccessMessageReadOnly,
     HostedRepositoryAccessMode.writable => '',
     HostedRepositoryAccessMode.attachmentRestricted =>
-      viewModel.canUploadIssueAttachments
+      viewModel.usesGitHubReleasesAttachmentStorage
+          ? l10n.attachmentsGitHubReleasesUnsupportedMessage
+          : viewModel.canUploadIssueAttachments
           ? l10n.attachmentsLimitedUploadMessage
           : l10n.attachmentsDownloadOnlyMessage,
   };
+}
+
+_AccessCalloutTone _repositoryAccessCalloutTone(TrackerViewModel viewModel) {
+  return viewModel.hostedRepositoryAccessMode ==
+          HostedRepositoryAccessMode.writable
+      ? _AccessCalloutTone.success
+      : _AccessCalloutTone.warning;
+}
+
+_AccessCalloutTone _attachmentStorageCalloutTone(TrackerViewModel viewModel) {
+  return viewModel.hostedRepositoryAccessMode ==
+          HostedRepositoryAccessMode.writable
+      ? _AccessCalloutTone.success
+      : _AccessCalloutTone.warning;
+}
+
+String _attachmentStorageCalloutTitle(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  return viewModel.usesGitHubReleasesAttachmentStorage
+      ? l10n.attachmentStorageGitHubReleasesCalloutTitle
+      : l10n.attachmentStorageRepositoryPathCalloutTitle;
+}
+
+String _attachmentStorageCalloutMessage(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  if (viewModel.usesGitHubReleasesAttachmentStorage) {
+    final tagPrefix = _attachmentReleaseTagPrefix(viewModel);
+    return viewModel.hostedRepositoryAccessMode ==
+            HostedRepositoryAccessMode.writable
+        ? l10n.attachmentStorageGitHubReleasesSupportedMessage(tagPrefix)
+        : l10n.attachmentStorageGitHubReleasesRestrictedMessage(tagPrefix);
+  }
+  return switch (viewModel.hostedRepositoryAccessMode) {
+    HostedRepositoryAccessMode.writable =>
+      l10n.attachmentStorageRepositoryPathSupportedMessage,
+    HostedRepositoryAccessMode.attachmentRestricted =>
+      viewModel.canUploadIssueAttachments
+          ? l10n.attachmentStorageRepositoryPathLimitedMessage
+          : l10n.attachmentStorageRepositoryPathRestrictedMessage,
+    HostedRepositoryAccessMode.disconnected ||
+    HostedRepositoryAccessMode.readOnly =>
+      l10n.attachmentStorageRepositoryPathRestrictedMessage,
+  };
+}
+
+String _attachmentReleaseTagPrefix(TrackerViewModel viewModel) {
+  final configuredTagPrefix = viewModel
+      .project
+      ?.attachmentStorage
+      .githubReleases
+      ?.tagPrefix
+      .trim();
+  if (configuredTagPrefix != null && configuredTagPrefix.isNotEmpty) {
+    return configuredTagPrefix;
+  }
+  return GitHubReleasesAttachmentStorageSettings.defaultTagPrefix;
 }
 
 String _profileInitials(AppLocalizations l10n, TrackerViewModel viewModel) {
@@ -1156,7 +1231,9 @@ class _RepositoryAccessBanner extends StatelessWidget {
             ? l10n.openSettings
             : _repositoryAccessPrimaryActionLabel(l10n, viewModel),
         onPrimaryAction: attachmentDownloadOnly
-            ? () => viewModel.selectSection(TrackerSection.settings)
+            ? () => viewModel.openProjectSettings(
+                tab: ProjectSettingsTab.attachments,
+              )
             : () => _showRepositoryAccessDialog(context, viewModel),
       ),
     );
@@ -1168,6 +1245,7 @@ class _AccessCallout extends StatelessWidget {
     required this.semanticLabel,
     required this.title,
     required this.message,
+    this.tone = _AccessCalloutTone.warning,
     this.primaryActionLabel,
     this.onPrimaryAction,
     this.secondaryActionLabel,
@@ -1177,6 +1255,7 @@ class _AccessCallout extends StatelessWidget {
   final String semanticLabel;
   final String title;
   final String message;
+  final _AccessCalloutTone tone;
   final String? primaryActionLabel;
   final VoidCallback? onPrimaryAction;
   final String? secondaryActionLabel;
@@ -1185,6 +1264,10 @@ class _AccessCallout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final accentColor = switch (tone) {
+      _AccessCalloutTone.warning => colors.accent,
+      _AccessCalloutTone.success => colors.success,
+    };
     return Semantics(
       container: true,
       label: '$semanticLabel $title $message',
@@ -1192,9 +1275,9 @@ class _AccessCallout extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: colors.accent.withValues(alpha: .12),
+          color: accentColor.withValues(alpha: .12),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: colors.accent),
+          border: Border.all(color: accentColor),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1205,7 +1288,7 @@ class _AccessCallout extends StatelessWidget {
                 TrackStateIcon(
                   TrackStateIconGlyph.gitBranch,
                   size: 18,
-                  color: colors.accent,
+                  color: accentColor,
                   semanticLabel: title,
                 ),
                 const SizedBox(width: 10),
@@ -1237,7 +1320,7 @@ class _AccessCallout extends StatelessWidget {
                         onPressed: onPrimaryAction,
                         style: OutlinedButton.styleFrom(
                           foregroundColor: colors.text,
-                          side: BorderSide(color: colors.accent),
+                          side: BorderSide(color: accentColor),
                         ),
                         child: Text(primaryActionLabel!),
                       ),
@@ -1260,6 +1343,8 @@ class _AccessCallout extends StatelessWidget {
     );
   }
 }
+
+enum _AccessCalloutTone { warning, success }
 
 class _StartupRecoveryView extends StatelessWidget {
   const _StartupRecoveryView({required this.viewModel});
@@ -1486,6 +1571,8 @@ class _Board extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final grouped = viewModel.issuesByStatus;
+    final project = viewModel.project;
+    final metadataLocale = _projectMetadataLocale(context, project);
     final showBootstrapHint = viewModel.showsInitialBootstrapPlaceholders;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1502,8 +1589,11 @@ class _Board extends StatelessWidget {
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 900;
             final columns = IssueStatus.values.map((status) {
+              final title =
+                  project?.statusLabel(status.id, locale: metadataLocale) ??
+                  _statusLabel(l10n, status);
               return _BoardColumn(
-                title: _statusLabel(l10n, status),
+                title: title,
                 targetStatus: status,
                 issues: grouped[status]!,
                 onSelect: (issue) => viewModel.selectIssue(
@@ -1678,16 +1768,42 @@ String _projectFieldLabel(
 }
 
 String _projectMetadataLocale(BuildContext context, ProjectConfig? project) {
-  final locale = Localizations.maybeLocaleOf(context);
-  final normalized = switch ((locale?.languageCode, locale?.countryCode)) {
-    (final String languageCode?, final String countryCode?)
-        when languageCode.isNotEmpty && countryCode.isNotEmpty =>
-      '$languageCode-${countryCode.toUpperCase()}',
-    (final String languageCode?, _) when languageCode.isNotEmpty =>
-      languageCode,
-    _ => project?.defaultLocale ?? 'en',
-  };
-  return normalized;
+  final locales = <Locale>[
+    WidgetsBinding.instance.platformDispatcher.locale,
+    ...WidgetsBinding.instance.platformDispatcher.locales,
+    if (Localizations.maybeLocaleOf(context) case final locale?) locale,
+  ];
+  for (final locale in locales) {
+    final normalized = switch ((locale.languageCode, locale.countryCode)) {
+      (final String languageCode, final String countryCode?)
+          when languageCode.isNotEmpty && countryCode.isNotEmpty =>
+        '$languageCode-${countryCode.toUpperCase()}',
+      (final String languageCode, _) when languageCode.isNotEmpty =>
+        languageCode,
+      _ => '',
+    };
+    if (normalized.isNotEmpty) {
+      return normalized;
+    }
+  }
+  return project?.defaultLocale ?? 'en';
+}
+
+String _resolvedIssueStatusLabel(
+  BuildContext context,
+  ProjectConfig? project,
+  TrackStateIssue issue,
+) {
+  final resolved = project?.statusLabel(
+    issue.statusId,
+    locale: _projectMetadataLocale(context, project),
+  );
+  if (resolved == null ||
+      resolved.trim().isEmpty ||
+      resolved == issue.statusId) {
+    return issue.status.label;
+  }
+  return resolved;
 }
 
 class _CreateIssuePrefill {
@@ -2040,17 +2156,6 @@ class _SettingsState extends State<_Settings> {
 
 enum _SettingsProviderSelection { hosted, localGit }
 
-enum _SettingsCatalogTab {
-  statuses,
-  workflows,
-  issueTypes,
-  fields,
-  priorities,
-  components,
-  versions,
-  locales,
-}
-
 class _ProjectSettingsAdmin extends StatefulWidget {
   const _ProjectSettingsAdmin({required this.viewModel});
 
@@ -2066,12 +2171,14 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
   ProjectSettingsCatalog? _draftSettings;
   String? _projectSignature;
   String? _selectedLocale;
+  int _handledProjectSettingsRequest = 0;
+  final Map<String, FocusNode> _localeFocusNodes = {};
 
   @override
   void initState() {
     super.initState();
     _tabController =
-        TabController(length: _SettingsCatalogTab.values.length, vsync: this)
+        TabController(length: ProjectSettingsTab.values.length, vsync: this)
           ..addListener(() {
             if (_tabController.indexIsChanging) {
               return;
@@ -2082,6 +2189,9 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
 
   @override
   void dispose() {
+    for (final focusNode in _localeFocusNodes.values) {
+      focusNode.dispose();
+    }
     _tabController.dispose();
     super.dispose();
   }
@@ -2115,6 +2225,23 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       final locales = _draftSettings!.effectiveSupportedLocales;
       _selectedLocale = locales.isEmpty ? null : locales.first;
     });
+  }
+
+  FocusNode _localeFocusNode(String key) =>
+      _localeFocusNodes.putIfAbsent(key, FocusNode.new);
+
+  void _syncRequestedTab() {
+    final request = widget.viewModel.projectSettingsTabRequest;
+    if (request == 0 || request == _handledProjectSettingsRequest) {
+      return;
+    }
+    _handledProjectSettingsRequest = request;
+    final requestedTab =
+        widget.viewModel.projectSettingsTab ?? ProjectSettingsTab.statuses;
+    final requestedIndex = ProjectSettingsTab.values.indexOf(requestedTab);
+    if (_tabController.index != requestedIndex) {
+      _tabController.index = requestedIndex;
+    }
   }
 
   Future<T?> _showSettingsEditor<T>({
@@ -2654,6 +2781,97 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     );
   }
 
+  Widget _buildAttachmentsTab(
+    AppLocalizations l10n,
+    ProjectSettingsCatalog settings,
+    bool canEdit,
+  ) {
+    final attachmentStorage = settings.attachmentStorage;
+    final githubReleases = attachmentStorage.githubReleases;
+    final tagPrefix =
+        githubReleases?.tagPrefix ??
+        GitHubReleasesAttachmentStorageSettings.defaultTagPrefix;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          l10n.attachments,
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
+        const SizedBox(height: 12),
+        Text(l10n.attachmentStorageDescription),
+        const SizedBox(height: 16),
+        DropdownButtonFormField<AttachmentStorageMode>(
+          key: const ValueKey('attachment-storage-mode-field'),
+          initialValue: attachmentStorage.mode,
+          decoration: InputDecoration(labelText: l10n.attachmentStorageMode),
+          items: [
+            DropdownMenuItem(
+              value: AttachmentStorageMode.repositoryPath,
+              child: Text(l10n.repositoryPath),
+            ),
+            DropdownMenuItem(
+              value: AttachmentStorageMode.githubReleases,
+              child: Text(l10n.githubReleases),
+            ),
+          ],
+          onChanged: !canEdit
+              ? null
+              : (value) {
+                  if (value == null) {
+                    return;
+                  }
+                  _replaceDraft(
+                    settings.copyWith(
+                      attachmentStorage: settings.attachmentStorage.copyWith(
+                        mode: value,
+                        githubReleases:
+                            value == AttachmentStorageMode.githubReleases
+                            ? (settings.attachmentStorage.githubReleases ??
+                                  const GitHubReleasesAttachmentStorageSettings(
+                                    tagPrefix:
+                                        GitHubReleasesAttachmentStorageSettings
+                                            .defaultTagPrefix,
+                                  ))
+                            : null,
+                      ),
+                    ),
+                  );
+                },
+        ),
+        const SizedBox(height: 16),
+        if (attachmentStorage.mode == AttachmentStorageMode.repositoryPath)
+          Text(l10n.attachmentRepositoryPathSummary)
+        else ...[
+          TextFormField(
+            key: const ValueKey('attachment-release-tag-prefix-field'),
+            initialValue: tagPrefix,
+            enabled: canEdit,
+            decoration: InputDecoration(
+              labelText: l10n.attachmentReleaseTagPrefix,
+              helperText: l10n.attachmentReleaseTagPrefixHelper,
+            ),
+            onChanged: (value) {
+              _replaceDraft(
+                settings.copyWith(
+                  attachmentStorage: settings.attachmentStorage.copyWith(
+                    githubReleases: GitHubReleasesAttachmentStorageSettings(
+                      tagPrefix: value,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          Text(l10n.attachmentReleaseMappingSummary(tagPrefix.trim())),
+        ],
+        const SizedBox(height: 12),
+        Text(l10n.attachmentStorageImmutableNote),
+      ],
+    );
+  }
+
   Widget _buildLocalesTab(
     AppLocalizations l10n,
     ProjectSettingsCatalog settings,
@@ -2664,194 +2882,316 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     final canRemoveSelectedLocale =
         settings.effectiveSupportedLocales.length > 1 &&
         selectedLocale != settings.defaultLocale;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildCatalogHeader(
-          l10n: l10n,
-          title: l10n.locales,
-          addLabel: l10n.addLocale,
-          onAdd: canEdit ? () => _addLocale(l10n) : null,
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final locale in settings.effectiveSupportedLocales)
-              ChoiceChip(
-                label: Text(
-                  locale == settings.defaultLocale
-                      ? l10n.defaultLocaleChip(locale)
-                      : locale,
-                ),
-                selected: locale == selectedLocale,
-                onSelected: (_) {
-                  setState(() {
-                    _selectedLocale = locale;
-                  });
-                },
-              ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                initialValue: settings.defaultLocale,
-                decoration: InputDecoration(labelText: l10n.defaultLocale),
-                items: [
-                  for (final locale in settings.effectiveSupportedLocales)
-                    DropdownMenuItem(value: locale, child: Text(locale)),
-                ],
-                onChanged: !canEdit
-                    ? null
-                    : (value) {
-                        if (value != null) {
-                          _setDefaultLocale(value);
-                        }
-                      },
-              ),
-            ),
-            const SizedBox(width: 12),
-            Semantics(
-              button: true,
-              label: l10n.removeLocale(selectedLocale),
-              child: TextButton(
-                onPressed: canEdit && canRemoveSelectedLocale
-                    ? () => _removeLocale(selectedLocale)
-                    : null,
-                child: ExcludeSemantics(child: Text(l10n.removeLocaleAction)),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        _LocaleCatalogSection(
-          title: l10n.statuses,
-          locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          entries: settings.statusDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) {
-            _updateConfigEntryTranslation(
-              entries: settings.statusDefinitions,
-              onChanged: (entries) =>
-                  _replaceDraft(settings.copyWith(statusDefinitions: entries)),
-              id: id,
-              locale: selectedLocale,
-              value: value,
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        _LocaleCatalogSection(
-          title: l10n.issueTypes,
-          locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          entries: settings.issueTypeDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) {
-            _updateConfigEntryTranslation(
-              entries: settings.issueTypeDefinitions,
-              onChanged: (entries) => _replaceDraft(
-                settings.copyWith(issueTypeDefinitions: entries),
-              ),
-              id: id,
-              locale: selectedLocale,
-              value: value,
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        _LocaleFieldCatalogSection(
-          title: l10n.fields,
-          locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          fields: settings.fieldDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) => _updateFieldTranslation(
+    final statusFocusStart = 0;
+    final issueTypeFocusStart =
+        statusFocusStart + settings.statusDefinitions.length;
+    final fieldFocusStart =
+        issueTypeFocusStart + settings.issueTypeDefinitions.length;
+    final priorityFocusStart =
+        fieldFocusStart + settings.fieldDefinitions.length;
+    final componentFocusStart =
+        priorityFocusStart + settings.priorityDefinitions.length;
+    final versionFocusStart =
+        componentFocusStart + settings.componentDefinitions.length;
+    final resolutionFocusStart =
+        versionFocusStart + settings.versionDefinitions.length;
+    final orderedLocaleFieldKeys = <String>[
+      for (final entry in settings.statusDefinitions) 'status:${entry.id}',
+      for (final entry in settings.issueTypeDefinitions)
+        'issueType:${entry.id}',
+      for (final field in settings.fieldDefinitions) 'field:${field.id}',
+      for (final entry in settings.priorityDefinitions) 'priority:${entry.id}',
+      for (final entry in settings.componentDefinitions)
+        'component:${entry.id}',
+      for (final entry in settings.versionDefinitions) 'version:${entry.id}',
+      for (final entry in settings.resolutionDefinitions)
+        'resolution:${entry.id}',
+    ];
+
+    FocusNode focusNodeForEntry(String entryKey) =>
+        _localeFocusNode('$selectedLocale:$entryKey');
+
+    FocusNode? previousFocusNodeForEntry(String entryKey) {
+      final index = orderedLocaleFieldKeys.indexOf(entryKey);
+      if (index <= 0) {
+        return null;
+      }
+      return focusNodeForEntry(orderedLocaleFieldKeys[index - 1]);
+    }
+
+    FocusNode? nextFocusNodeForEntry(String entryKey) {
+      final index = orderedLocaleFieldKeys.indexOf(entryKey);
+      if (index == -1 || index + 1 >= orderedLocaleFieldKeys.length) {
+        return null;
+      }
+      return focusNodeForEntry(orderedLocaleFieldKeys[index + 1]);
+    }
+
+    final localeCatalogTitles = <String>[
+      l10n.statuses,
+      l10n.issueTypes,
+      l10n.fields,
+      l10n.priorities,
+      l10n.components,
+      l10n.versions,
+      l10n.resolutions,
+    ];
+    final localeSections = <Widget>[
+      _LocaleCatalogSection(
+        title: l10n.statuses,
+        scopeKey: 'status',
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.statusDefinitions,
+        canEdit: canEdit,
+        focusStartOrder: statusFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('status:$id'),
+        previousFocusNodeForId: (id) => previousFocusNodeForEntry('status:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('status:$id'),
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.statusDefinitions,
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(statusDefinitions: entries)),
             id: id,
             locale: selectedLocale,
             value: value,
-          ),
-        ),
-        const SizedBox(height: 12),
-        _LocaleCatalogSection(
-          title: l10n.priorities,
+          );
+        },
+      ),
+      _LocaleCatalogSection(
+        title: l10n.issueTypes,
+        scopeKey: 'issueType',
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.issueTypeDefinitions,
+        canEdit: canEdit,
+        focusStartOrder: issueTypeFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('issueType:$id'),
+        previousFocusNodeForId: (id) =>
+            previousFocusNodeForEntry('issueType:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('issueType:$id'),
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.issueTypeDefinitions,
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(issueTypeDefinitions: entries)),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
+      ),
+      _LocaleFieldCatalogSection(
+        title: l10n.fields,
+        scopeKey: 'field',
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        fields: settings.fieldDefinitions,
+        canEdit: canEdit,
+        focusStartOrder: fieldFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('field:$id'),
+        previousFocusNodeForId: (id) => previousFocusNodeForEntry('field:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('field:$id'),
+        onChanged: (id, value) => _updateFieldTranslation(
+          id: id,
           locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          entries: settings.priorityDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) {
-            _updateConfigEntryTranslation(
-              entries: settings.priorityDefinitions,
-              onChanged: (entries) => _replaceDraft(
-                settings.copyWith(priorityDefinitions: entries),
+          value: value,
+        ),
+      ),
+      _LocaleCatalogSection(
+        title: l10n.priorities,
+        scopeKey: 'priority',
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.priorityDefinitions,
+        canEdit: canEdit,
+        focusStartOrder: priorityFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('priority:$id'),
+        previousFocusNodeForId: (id) =>
+            previousFocusNodeForEntry('priority:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('priority:$id'),
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.priorityDefinitions,
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(priorityDefinitions: entries)),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
+      ),
+      _LocaleCatalogSection(
+        title: l10n.components,
+        scopeKey: 'component',
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.componentDefinitions,
+        canEdit: canEdit,
+        focusStartOrder: componentFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('component:$id'),
+        previousFocusNodeForId: (id) =>
+            previousFocusNodeForEntry('component:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('component:$id'),
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.componentDefinitions,
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(componentDefinitions: entries)),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
+      ),
+      _LocaleCatalogSection(
+        title: l10n.versions,
+        scopeKey: 'version',
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.versionDefinitions,
+        canEdit: canEdit,
+        focusStartOrder: versionFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('version:$id'),
+        previousFocusNodeForId: (id) =>
+            previousFocusNodeForEntry('version:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('version:$id'),
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.versionDefinitions,
+            onChanged: (entries) =>
+                _replaceDraft(settings.copyWith(versionDefinitions: entries)),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
+      ),
+      _LocaleCatalogSection(
+        title: l10n.resolutions,
+        scopeKey: 'resolution',
+        locale: selectedLocale,
+        defaultLocale: settings.defaultLocale,
+        entries: settings.resolutionDefinitions,
+        canEdit: canEdit,
+        focusStartOrder: resolutionFocusStart,
+        focusNodeForId: (id) => focusNodeForEntry('resolution:$id'),
+        previousFocusNodeForId: (id) =>
+            previousFocusNodeForEntry('resolution:$id'),
+        nextFocusNodeForId: (id) => nextFocusNodeForEntry('resolution:$id'),
+        onChanged: (id, value) {
+          _updateConfigEntryTranslation(
+            entries: settings.resolutionDefinitions,
+            onChanged: (entries) => _replaceDraft(
+              settings.copyWith(resolutionDefinitions: entries),
+            ),
+            id: id,
+            locale: selectedLocale,
+            value: value,
+          );
+        },
+      ),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final useTwoColumns =
+            constraints.hasBoundedWidth && constraints.maxWidth >= 720;
+        final sectionWidth = useTwoColumns
+            ? (constraints.maxWidth - 12) / 2
+            : constraints.maxWidth;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildCatalogHeader(
+              l10n: l10n,
+              title: l10n.locales,
+              addLabel: l10n.addLocale,
+              onAdd: canEdit ? () => _addLocale(l10n) : null,
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final locale in settings.effectiveSupportedLocales)
+                  ChoiceChip(
+                    label: Text(
+                      locale == settings.defaultLocale
+                          ? l10n.defaultLocaleChip(locale)
+                          : locale,
+                    ),
+                    selected: locale == selectedLocale,
+                    onSelected: (_) {
+                      setState(() {
+                        _selectedLocale = locale;
+                      });
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: settings.defaultLocale,
+                    decoration: InputDecoration(labelText: l10n.defaultLocale),
+                    items: [
+                      for (final locale in settings.effectiveSupportedLocales)
+                        DropdownMenuItem(value: locale, child: Text(locale)),
+                    ],
+                    onChanged: !canEdit
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              _setDefaultLocale(value);
+                            }
+                          },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Semantics(
+                  button: true,
+                  label: l10n.removeLocale(selectedLocale),
+                  child: TextButton(
+                    onPressed: canEdit && canRemoveSelectedLocale
+                        ? () => _removeLocale(selectedLocale)
+                        : null,
+                    child: ExcludeSemantics(
+                      child: Text(l10n.removeLocaleAction),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final title in localeCatalogTitles)
+                  Semantics(
+                    container: true,
+                    label: '$title ${l10n.locales}\nsummary',
+                    child: ExcludeSemantics(child: Chip(label: Text(title))),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            FocusTraversalGroup(
+              policy: OrderedTraversalPolicy(),
+              child: Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  for (final section in localeSections)
+                    SizedBox(width: sectionWidth, child: section),
+                ],
               ),
-              id: id,
-              locale: selectedLocale,
-              value: value,
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        _LocaleCatalogSection(
-          title: l10n.components,
-          locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          entries: settings.componentDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) {
-            _updateConfigEntryTranslation(
-              entries: settings.componentDefinitions,
-              onChanged: (entries) => _replaceDraft(
-                settings.copyWith(componentDefinitions: entries),
-              ),
-              id: id,
-              locale: selectedLocale,
-              value: value,
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        _LocaleCatalogSection(
-          title: l10n.versions,
-          locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          entries: settings.versionDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) {
-            _updateConfigEntryTranslation(
-              entries: settings.versionDefinitions,
-              onChanged: (entries) =>
-                  _replaceDraft(settings.copyWith(versionDefinitions: entries)),
-              id: id,
-              locale: selectedLocale,
-              value: value,
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        _LocaleCatalogSection(
-          title: l10n.resolutions,
-          locale: selectedLocale,
-          defaultLocale: settings.defaultLocale,
-          entries: settings.resolutionDefinitions,
-          canEdit: canEdit,
-          onChanged: (id, value) {
-            _updateConfigEntryTranslation(
-              entries: settings.resolutionDefinitions,
-              onChanged: (entries) => _replaceDraft(
-                settings.copyWith(resolutionDefinitions: entries),
-              ),
-              id: id,
-              locale: selectedLocale,
-              value: value,
-            );
-          },
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -2859,6 +3199,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
   Widget build(BuildContext context) {
     final project = widget.viewModel.project!;
     _syncDraft(project);
+    _syncRequestedTab();
     final l10n = AppLocalizations.of(context)!;
     final settings = _draftSettings!;
     final canEdit =
@@ -2876,23 +3217,24 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         Tab(text: l10n.priorities),
         Tab(text: l10n.components),
         Tab(text: l10n.versions),
+        Tab(text: l10n.attachments),
         Tab(text: l10n.locales),
       ],
     );
-    final content = switch (_SettingsCatalogTab.values[_tabController.index]) {
-      _SettingsCatalogTab.statuses => _buildStatusTab(l10n, settings, canEdit),
-      _SettingsCatalogTab.workflows => _buildWorkflowTab(
+    final content = switch (ProjectSettingsTab.values[_tabController.index]) {
+      ProjectSettingsTab.statuses => _buildStatusTab(l10n, settings, canEdit),
+      ProjectSettingsTab.workflows => _buildWorkflowTab(
         l10n,
         settings,
         canEdit,
       ),
-      _SettingsCatalogTab.issueTypes => _buildIssueTypeTab(
+      ProjectSettingsTab.issueTypes => _buildIssueTypeTab(
         l10n,
         settings,
         canEdit,
       ),
-      _SettingsCatalogTab.fields => _buildFieldTab(l10n, settings, canEdit),
-      _SettingsCatalogTab.priorities => _buildSimpleEntryTab(
+      ProjectSettingsTab.fields => _buildFieldTab(l10n, settings, canEdit),
+      ProjectSettingsTab.priorities => _buildSimpleEntryTab(
         l10n: l10n,
         title: l10n.priorities,
         addLabel: l10n.addPriority,
@@ -2911,7 +3253,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         onChanged: (entries) =>
             _replaceDraft(settings.copyWith(priorityDefinitions: entries)),
       ),
-      _SettingsCatalogTab.components => _buildSimpleEntryTab(
+      ProjectSettingsTab.components => _buildSimpleEntryTab(
         l10n: l10n,
         title: l10n.components,
         addLabel: l10n.addComponent,
@@ -2930,7 +3272,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         onChanged: (entries) =>
             _replaceDraft(settings.copyWith(componentDefinitions: entries)),
       ),
-      _SettingsCatalogTab.versions => _buildSimpleEntryTab(
+      ProjectSettingsTab.versions => _buildSimpleEntryTab(
         l10n: l10n,
         title: l10n.versions,
         addLabel: l10n.addVersion,
@@ -2949,7 +3291,12 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         onChanged: (entries) =>
             _replaceDraft(settings.copyWith(versionDefinitions: entries)),
       ),
-      _SettingsCatalogTab.locales => _buildLocalesTab(l10n, settings, canEdit),
+      ProjectSettingsTab.attachments => _buildAttachmentsTab(
+        l10n,
+        settings,
+        canEdit,
+      ),
+      ProjectSettingsTab.locales => _buildLocalesTab(l10n, settings, canEdit),
     };
     return _SurfaceCard(
       semanticLabel: l10n.projectSettingsAdmin,
@@ -3169,18 +3516,28 @@ class _LocaleCodeEditorState extends State<_LocaleCodeEditor> {
 class _LocaleCatalogSection extends StatelessWidget {
   const _LocaleCatalogSection({
     required this.title,
+    required this.scopeKey,
     required this.locale,
     required this.defaultLocale,
     required this.entries,
     required this.canEdit,
+    required this.focusStartOrder,
+    required this.focusNodeForId,
+    required this.previousFocusNodeForId,
+    required this.nextFocusNodeForId,
     required this.onChanged,
   });
 
   final String title;
+  final String scopeKey;
   final String locale;
   final String defaultLocale;
   final List<TrackStateConfigEntry> entries;
   final bool canEdit;
+  final int focusStartOrder;
+  final FocusNode Function(String id) focusNodeForId;
+  final FocusNode? Function(String id) previousFocusNodeForId;
+  final FocusNode? Function(String id) nextFocusNodeForId;
   final void Function(String id, String value) onChanged;
 
   @override
@@ -3192,18 +3549,23 @@ class _LocaleCatalogSection extends StatelessWidget {
         children: [
           _SectionTitle(title),
           const SizedBox(height: 8),
-          for (final entry in entries) ...[
+          for (var index = 0; index < entries.length; index++) ...[
             _LocaleEntryRow(
-              label: entry.name,
-              id: entry.id,
+              label: entries[index].name,
+              scopeKey: scopeKey,
+              id: entries[index].id,
               locale: locale,
-              translation: entry.localizedLabels[locale] ?? '',
-              resolution: entry.resolveLabel(
+              translation: entries[index].localizedLabels[locale] ?? '',
+              resolution: entries[index].resolveLabel(
                 locale: locale,
                 defaultLocale: defaultLocale,
               ),
               canEdit: canEdit,
-              onChanged: (value) => onChanged(entry.id, value),
+              focusOrder: (focusStartOrder + index).toDouble(),
+              focusNode: focusNodeForId(entries[index].id),
+              previousFocusNode: previousFocusNodeForId(entries[index].id),
+              nextFocusNode: nextFocusNodeForId(entries[index].id),
+              onChanged: (value) => onChanged(entries[index].id, value),
             ),
             const SizedBox(height: 12),
           ],
@@ -3216,18 +3578,28 @@ class _LocaleCatalogSection extends StatelessWidget {
 class _LocaleFieldCatalogSection extends StatelessWidget {
   const _LocaleFieldCatalogSection({
     required this.title,
+    required this.scopeKey,
     required this.locale,
     required this.defaultLocale,
     required this.fields,
     required this.canEdit,
+    required this.focusStartOrder,
+    required this.focusNodeForId,
+    required this.previousFocusNodeForId,
+    required this.nextFocusNodeForId,
     required this.onChanged,
   });
 
   final String title;
+  final String scopeKey;
   final String locale;
   final String defaultLocale;
   final List<TrackStateFieldDefinition> fields;
   final bool canEdit;
+  final int focusStartOrder;
+  final FocusNode Function(String id) focusNodeForId;
+  final FocusNode? Function(String id) previousFocusNodeForId;
+  final FocusNode? Function(String id) nextFocusNodeForId;
   final void Function(String id, String value) onChanged;
 
   @override
@@ -3239,18 +3611,23 @@ class _LocaleFieldCatalogSection extends StatelessWidget {
         children: [
           _SectionTitle(title),
           const SizedBox(height: 8),
-          for (final field in fields) ...[
+          for (var index = 0; index < fields.length; index++) ...[
             _LocaleEntryRow(
-              label: field.name,
-              id: field.id,
+              label: fields[index].name,
+              scopeKey: scopeKey,
+              id: fields[index].id,
               locale: locale,
-              translation: field.localizedLabels[locale] ?? '',
-              resolution: field.resolveLabel(
+              translation: fields[index].localizedLabels[locale] ?? '',
+              resolution: fields[index].resolveLabel(
                 locale: locale,
                 defaultLocale: defaultLocale,
               ),
               canEdit: canEdit,
-              onChanged: (value) => onChanged(field.id, value),
+              focusOrder: (focusStartOrder + index).toDouble(),
+              focusNode: focusNodeForId(fields[index].id),
+              previousFocusNode: previousFocusNodeForId(fields[index].id),
+              nextFocusNode: nextFocusNodeForId(fields[index].id),
+              onChanged: (value) => onChanged(fields[index].id, value),
             ),
             const SizedBox(height: 12),
           ],
@@ -3263,38 +3640,66 @@ class _LocaleFieldCatalogSection extends StatelessWidget {
 class _LocaleEntryRow extends StatelessWidget {
   const _LocaleEntryRow({
     required this.label,
+    required this.scopeKey,
     required this.id,
     required this.locale,
     required this.translation,
     required this.resolution,
     required this.canEdit,
+    required this.focusOrder,
+    required this.focusNode,
+    required this.previousFocusNode,
+    required this.nextFocusNode,
     required this.onChanged,
   });
 
   final String label;
+  final String scopeKey;
   final String id;
   final String locale;
   final String translation;
   final LocalizedLabelResolution resolution;
   final bool canEdit;
+  final double focusOrder;
+  final FocusNode focusNode;
+  final FocusNode? previousFocusNode;
+  final FocusNode? nextFocusNode;
   final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
+    final warningMessage = l10n.translationFallbackWarning(
+      resolution.displayName,
+      resolution.fallbackLocale ?? l10n.canonicalNameFallback,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('$label · $id', style: Theme.of(context).textTheme.labelLarge),
         const SizedBox(height: 8),
-        KeyedSubtree(
-          key: ValueKey('locale-$locale-$id'),
-          child: _SettingsTextField(
-            label: l10n.translationField(locale),
-            initialValue: translation,
-            enabled: canEdit,
-            onChanged: onChanged,
+        CallbackShortcuts(
+          bindings: <ShortcutActivator, VoidCallback>{
+            if (nextFocusNode != null)
+              const SingleActivator(LogicalKeyboardKey.tab): () =>
+                  nextFocusNode!.requestFocus(),
+            if (previousFocusNode != null)
+              const SingleActivator(LogicalKeyboardKey.tab, shift: true): () =>
+                  previousFocusNode!.requestFocus(),
+          },
+          child: FocusTraversalOrder(
+            order: NumericFocusOrder(focusOrder),
+            child: KeyedSubtree(
+              key: ValueKey('locale-$locale-$scopeKey-$id'),
+              child: _SettingsTextField(
+                label: l10n.translationField(locale),
+                initialValue: translation,
+                focusNode: focusNode,
+                enabled: canEdit,
+                onChanged: onChanged,
+              ),
+            ),
           ),
         ),
         if (resolution.usedFallback) ...[
@@ -3306,14 +3711,25 @@ class _LocaleEntryRow extends StatelessWidget {
               borderRadius: BorderRadius.circular(999),
               border: Border.all(color: colors.warning),
             ),
-            child: Text(
-              l10n.translationFallbackWarning(
-                resolution.displayName,
-                resolution.fallbackLocale ?? l10n.canonicalNameFallback,
-              ),
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: colors.warning),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.warning_amber_rounded,
+                  size: 16,
+                  color: colors.warning,
+                  semanticLabel: warningMessage,
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    warningMessage,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: colors.warning),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -3946,6 +4362,9 @@ ProjectSettingsCatalog _cloneProjectSettings(ProjectSettingsCatalog settings) {
   return ProjectSettingsCatalog(
     defaultLocale: settings.defaultLocale,
     supportedLocales: [...settings.effectiveSupportedLocales],
+    attachmentStorage: settings.attachmentStorage.copyWith(
+      githubReleases: settings.attachmentStorage.githubReleases?.copyWith(),
+    ),
     statusDefinitions: [
       for (final status in settings.statusDefinitions) status.copyWith(),
     ],
@@ -3990,6 +4409,7 @@ ProjectSettingsCatalog _cloneProjectSettings(ProjectSettingsCatalog settings) {
 String _projectSettingsSignature(ProjectSettingsCatalog settings) {
   return [
     'locale:${settings.defaultLocale}:${settings.effectiveSupportedLocales.join(',')}',
+    'attachmentStorage:${settings.attachmentStorage.mode.persistedValue}:${settings.attachmentStorage.githubReleases?.tagPrefix ?? ''}',
     for (final status in settings.statusDefinitions)
       'status:${status.id}:${status.name}:${status.category ?? ''}:${status.localizedLabels}',
     for (final workflow in settings.workflowDefinitions)
@@ -4226,8 +4646,7 @@ class _IssueDetailState extends State<_IssueDetail> {
     if (!mounted) {
       return;
     }
-    if (widget.viewModel.hasAttachmentUploadRestriction &&
-        inspection.isLfsTracked) {
+    if (inspection.requiresLocalGitUpload) {
       setState(() {
         _attachmentUploadNotice = l10n.attachmentRequiresLocalGitUpload(
           inspection.resolvedName,
@@ -4331,7 +4750,14 @@ class _IssueDetailState extends State<_IssueDetail> {
           ),
         const SizedBox(height: 18),
         _SectionTitle(l10n.details),
-        _DetailGrid(issue: issue),
+        _DetailGrid(
+          issue: issue,
+          statusLabel: _resolvedIssueStatusLabel(
+            context,
+            widget.viewModel.project,
+            issue,
+          ),
+        ),
       ],
     );
   }
@@ -4419,7 +4845,14 @@ class _IssueDetailState extends State<_IssueDetail> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _StatusBadge(status: issue.status),
+              _StatusBadge(
+                status: issue.status,
+                label: _resolvedIssueStatusLabel(
+                  context,
+                  widget.viewModel.project,
+                  issue,
+                ),
+              ),
               _PriorityBadge(priority: issue.priority),
               for (final label in issue.labels) _Chip(label: label),
             ],
@@ -4639,6 +5072,7 @@ class _IssueList extends StatelessWidget {
                 order: NumericFocusOrder(index + 2.0),
                 child: _IssueListRow(
                   issue: visibleResults[index],
+                  project: viewModel.project,
                   onSelect: viewModel.selectIssue,
                   trailingAction: showSearchBootstrapLoading
                       ? _LoadingPill(
@@ -4813,7 +5247,13 @@ class _BoardColumn extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(title, style: Theme.of(context).textTheme.titleMedium),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleMedium,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     _TinyCount('${issues.length}'),
                   ],
@@ -4940,11 +5380,13 @@ class _IssueListRow extends StatelessWidget {
   const _IssueListRow({
     required this.issue,
     required this.onSelect,
+    this.project,
     this.trailingAction,
   });
 
   final TrackStateIssue issue;
   final ValueChanged<TrackStateIssue> onSelect;
+  final ProjectConfig? project;
   final Widget? trailingAction;
 
   @override
@@ -4981,7 +5423,14 @@ class _IssueListRow extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         Expanded(child: Text(issue.summary)),
-                        _StatusBadge(status: issue.status),
+                        _StatusBadge(
+                          status: issue.status,
+                          label: _resolvedIssueStatusLabel(
+                            context,
+                            project,
+                            issue,
+                          ),
+                        ),
                         const SizedBox(width: 8),
                         _Avatar(name: issue.assignee),
                       ],
@@ -5396,6 +5845,14 @@ class _HostedProviderConfigurationState
           message:
               '${_repositoryAccessMessage(l10n, viewModel)} '
               '${l10n.repositoryAccessSettingsHint}',
+          tone: _repositoryAccessCalloutTone(viewModel),
+        ),
+        const SizedBox(height: 12),
+        _AccessCallout(
+          semanticLabel: l10n.attachments,
+          title: _attachmentStorageCalloutTitle(l10n, viewModel),
+          message: _attachmentStorageCalloutMessage(l10n, viewModel),
+          tone: _attachmentStorageCalloutTone(viewModel),
         ),
         const SizedBox(height: 12),
         TextFormField(
@@ -7344,9 +7801,10 @@ class _GitInfoCard extends StatelessWidget {
 }
 
 class _DetailGrid extends StatelessWidget {
-  const _DetailGrid({required this.issue});
+  const _DetailGrid({required this.issue, required this.statusLabel});
 
   final TrackStateIssue issue;
+  final String statusLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -7355,7 +7813,7 @@ class _DetailGrid extends StatelessWidget {
       spacing: 12,
       runSpacing: 12,
       children: [
-        _KeyValue(label: l10n.status, value: issue.status.label),
+        _KeyValue(label: l10n.status, value: statusLabel),
         _KeyValue(label: l10n.priority, value: issue.priority.label),
         _KeyValue(label: l10n.assignee, value: issue.assignee),
         _KeyValue(label: l10n.reporter, value: issue.reporter),
@@ -7674,7 +8132,9 @@ class _AttachmentsTab extends StatelessWidget {
                 ? l10n.openSettings
                 : null,
             onPrimaryAction: attachmentDownloadOnly
-                ? () => viewModel.selectSection(TrackerSection.settings)
+                ? () => viewModel.openProjectSettings(
+                    tab: ProjectSettingsTab.attachments,
+                  )
                 : null,
           ),
           const SizedBox(height: 12),
@@ -7853,22 +8313,21 @@ class _AttachmentRow extends StatelessWidget {
               Semantics(
                 button: true,
                 label: downloadLabel,
-                child: ExcludeSemantics(
-                  child: IconButton(
-                    onPressed: () => onDownload(attachment),
-                    tooltip: downloadLabel,
-                    iconSize: 18,
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 32,
-                      minHeight: 32,
-                    ),
-                    icon: TrackStateIcon(
+                child: IconButton(
+                  onPressed: () => onDownload(attachment),
+                  tooltip: downloadLabel,
+                  iconSize: 18,
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
+                  icon: ExcludeSemantics(
+                    child: TrackStateIcon(
                       TrackStateIconGlyph.attachment,
                       size: 18,
                       color: colors.text,
-                      semanticLabel: downloadLabel,
                     ),
                   ),
                 ),
@@ -8129,9 +8588,10 @@ String _formatAttachmentFileSize(int sizeBytes) {
 }
 
 class _StatusBadge extends StatelessWidget {
-  const _StatusBadge({required this.status});
+  const _StatusBadge({required this.status, required this.label});
 
   final IssueStatus status;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -8148,7 +8608,7 @@ class _StatusBadge extends StatelessWidget {
       IssueStatus.inReview => colors.primary,
       IssueStatus.done => colors.secondary,
     };
-    return _Pill(label: status.label, background: bg, foreground: fg);
+    return _Pill(label: label, background: bg, foreground: fg);
   }
 }
 

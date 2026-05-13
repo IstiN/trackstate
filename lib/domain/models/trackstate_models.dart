@@ -255,6 +255,10 @@ class IssueAttachment {
     required this.createdAt,
     required this.storagePath,
     required this.revisionOrOid,
+    this.storageBackend = AttachmentStorageMode.repositoryPath,
+    this.repositoryPath,
+    this.githubReleaseTag,
+    this.githubReleaseAssetName,
   });
 
   final String id;
@@ -265,7 +269,118 @@ class IssueAttachment {
   final String createdAt;
   final String storagePath;
   final String revisionOrOid;
+  final AttachmentStorageMode storageBackend;
+  final String? repositoryPath;
+  final String? githubReleaseTag;
+  final String? githubReleaseAssetName;
+
+  IssueAttachment copyWith({
+    String? id,
+    String? name,
+    String? mediaType,
+    int? sizeBytes,
+    String? author,
+    String? createdAt,
+    String? storagePath,
+    String? revisionOrOid,
+    AttachmentStorageMode? storageBackend,
+    Object? repositoryPath = _issueAttachmentUnset,
+    Object? githubReleaseTag = _issueAttachmentUnset,
+    Object? githubReleaseAssetName = _issueAttachmentUnset,
+  }) {
+    return IssueAttachment(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      mediaType: mediaType ?? this.mediaType,
+      sizeBytes: sizeBytes ?? this.sizeBytes,
+      author: author ?? this.author,
+      createdAt: createdAt ?? this.createdAt,
+      storagePath: storagePath ?? this.storagePath,
+      revisionOrOid: revisionOrOid ?? this.revisionOrOid,
+      storageBackend: storageBackend ?? this.storageBackend,
+      repositoryPath: identical(repositoryPath, _issueAttachmentUnset)
+          ? this.repositoryPath
+          : repositoryPath as String?,
+      githubReleaseTag: identical(githubReleaseTag, _issueAttachmentUnset)
+          ? this.githubReleaseTag
+          : githubReleaseTag as String?,
+      githubReleaseAssetName:
+          identical(githubReleaseAssetName, _issueAttachmentUnset)
+          ? this.githubReleaseAssetName
+          : githubReleaseAssetName as String?,
+    );
+  }
+
+  String get resolvedRepositoryPath => repositoryPath ?? storagePath;
 }
+
+const Object _issueAttachmentUnset = Object();
+
+enum AttachmentStorageMode {
+  repositoryPath('repository-path'),
+  githubReleases('github-releases');
+
+  const AttachmentStorageMode(this.persistedValue);
+
+  final String persistedValue;
+
+  static AttachmentStorageMode? tryParse(Object? value) {
+    final normalized = value?.toString().trim();
+    if (normalized == null || normalized.isEmpty) {
+      return null;
+    }
+    for (final mode in values) {
+      if (mode.persistedValue == normalized) {
+        return mode;
+      }
+    }
+    return null;
+  }
+}
+
+class GitHubReleasesAttachmentStorageSettings {
+  const GitHubReleasesAttachmentStorageSettings({required this.tagPrefix});
+
+  static const String defaultTagPrefix = 'trackstate-attachments-';
+
+  final String tagPrefix;
+
+  GitHubReleasesAttachmentStorageSettings copyWith({String? tagPrefix}) {
+    return GitHubReleasesAttachmentStorageSettings(
+      tagPrefix: tagPrefix ?? this.tagPrefix,
+    );
+  }
+
+  String releaseTagForIssue(String issueKey) =>
+      '$tagPrefix${issueKey.trim().toUpperCase()}';
+
+  String releaseTitleForIssue(String issueKey) =>
+      'Attachments for ${issueKey.trim().toUpperCase()}';
+}
+
+class ProjectAttachmentStorageSettings {
+  const ProjectAttachmentStorageSettings({
+    this.mode = AttachmentStorageMode.repositoryPath,
+    this.githubReleases,
+  });
+
+  final AttachmentStorageMode mode;
+  final GitHubReleasesAttachmentStorageSettings? githubReleases;
+
+  ProjectAttachmentStorageSettings copyWith({
+    AttachmentStorageMode? mode,
+    Object? githubReleases = _projectAttachmentStorageNoop,
+  }) {
+    return ProjectAttachmentStorageSettings(
+      mode: mode ?? this.mode,
+      githubReleases: identical(githubReleases, _projectAttachmentStorageNoop)
+          ? this.githubReleases
+          : githubReleases as GitHubReleasesAttachmentStorageSettings?,
+    );
+  }
+}
+
+const Object _projectAttachmentStorageNoop = Object();
 
 enum IssueHistoryChangeType {
   created,
@@ -602,6 +717,7 @@ class ProjectSettingsCatalog {
     this.versionDefinitions = const [],
     this.componentDefinitions = const [],
     this.resolutionDefinitions = const [],
+    this.attachmentStorage = const ProjectAttachmentStorageSettings(),
   });
 
   final String defaultLocale;
@@ -614,6 +730,7 @@ class ProjectSettingsCatalog {
   final List<TrackStateConfigEntry> versionDefinitions;
   final List<TrackStateConfigEntry> componentDefinitions;
   final List<TrackStateConfigEntry> resolutionDefinitions;
+  final ProjectAttachmentStorageSettings attachmentStorage;
 
   List<String> get effectiveSupportedLocales {
     final locales = <String>[];
@@ -642,6 +759,7 @@ class ProjectSettingsCatalog {
     List<TrackStateConfigEntry>? versionDefinitions,
     List<TrackStateConfigEntry>? componentDefinitions,
     List<TrackStateConfigEntry>? resolutionDefinitions,
+    ProjectAttachmentStorageSettings? attachmentStorage,
   }) {
     return ProjectSettingsCatalog(
       defaultLocale: defaultLocale ?? this.defaultLocale,
@@ -655,6 +773,7 @@ class ProjectSettingsCatalog {
       componentDefinitions: componentDefinitions ?? this.componentDefinitions,
       resolutionDefinitions:
           resolutionDefinitions ?? this.resolutionDefinitions,
+      attachmentStorage: attachmentStorage ?? this.attachmentStorage,
     );
   }
 }
@@ -798,6 +917,7 @@ class ProjectConfig {
     this.versionDefinitions = const [],
     this.componentDefinitions = const [],
     this.resolutionDefinitions = const [],
+    this.attachmentStorage = const ProjectAttachmentStorageSettings(),
   });
 
   final String key;
@@ -814,6 +934,7 @@ class ProjectConfig {
   final List<TrackStateConfigEntry> versionDefinitions;
   final List<TrackStateConfigEntry> componentDefinitions;
   final List<TrackStateConfigEntry> resolutionDefinitions;
+  final ProjectAttachmentStorageSettings attachmentStorage;
 
   List<String> get issueTypes => [
     for (final definition in issueTypeDefinitions) definition.name,
@@ -849,11 +970,12 @@ class ProjectConfig {
     statusDefinitions: statusDefinitions,
     workflowDefinitions: workflowDefinitions,
     issueTypeDefinitions: issueTypeDefinitions,
-    fieldDefinitions: fieldDefinitions,
+    fieldDefinitions: _settingsFieldDefinitions(fieldDefinitions),
     priorityDefinitions: priorityDefinitions,
     versionDefinitions: versionDefinitions,
     componentDefinitions: componentDefinitions,
     resolutionDefinitions: resolutionDefinitions,
+    attachmentStorage: attachmentStorage,
   );
 
   String issueTypeLabel(String id, {String? locale}) =>
@@ -954,6 +1076,84 @@ class ProjectConfig {
     );
   }
 }
+
+List<TrackStateFieldDefinition> _settingsFieldDefinitions(
+  List<TrackStateFieldDefinition> fields,
+) {
+  final fieldIds = {for (final field in fields) field.id};
+  return [
+    ...fields,
+    for (final field in _reservedSettingsFieldDefinitions)
+      if (!fieldIds.contains(field.id)) field,
+  ];
+}
+
+const _reservedSettingsFieldDefinitions = [
+  TrackStateFieldDefinition(
+    id: 'summary',
+    name: 'Summary',
+    type: 'string',
+    required: true,
+    reserved: true,
+    localizedLabels: {'en': 'Summary'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'description',
+    name: 'Description',
+    type: 'markdown',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Description'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'acceptanceCriteria',
+    name: 'Acceptance Criteria',
+    type: 'markdown',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Acceptance Criteria'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'priority',
+    name: 'Priority',
+    type: 'option',
+    required: false,
+    options: _reservedPriorityFieldOptions,
+    reserved: true,
+    localizedLabels: {'en': 'Priority'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'assignee',
+    name: 'Assignee',
+    type: 'user',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Assignee'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'labels',
+    name: 'Labels',
+    type: 'array',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Labels'},
+  ),
+  TrackStateFieldDefinition(
+    id: 'storyPoints',
+    name: 'Story Points',
+    type: 'number',
+    required: false,
+    reserved: true,
+    localizedLabels: {'en': 'Story Points'},
+  ),
+];
+
+const _reservedPriorityFieldOptions = [
+  TrackStateFieldOption(id: 'highest', name: 'Highest'),
+  TrackStateFieldOption(id: 'high', name: 'High'),
+  TrackStateFieldOption(id: 'medium', name: 'Medium'),
+  TrackStateFieldOption(id: 'low', name: 'Low'),
+];
 
 class TrackerSnapshot {
   const TrackerSnapshot({

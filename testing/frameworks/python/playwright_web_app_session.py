@@ -149,6 +149,26 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out pressing page key "{key}".',
             ) from error
 
+    def click_and_set_files(
+        self,
+        selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_file_chooser(timeout=timeout_ms) as chooser_info:
+                locator.click(timeout=timeout_ms)
+            chooser_info.value.set_files(list(files))
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out setting files via selector "{selector}".',
+            ) from error
+
     def count(
         self,
         selector: str,
@@ -197,6 +217,26 @@ class PlaywrightWebAppSession(WebAppSession):
         except PlaywrightTimeoutError as error:
             raise WebAppTimeoutError(
                 f'Timed out reading the value for selector "{selector}".',
+            ) from error
+
+    def click_and_choose_file(
+        self,
+        selector: str,
+        file_paths: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_file_chooser(timeout=timeout_ms) as chooser_info:
+                locator.click(timeout=timeout_ms)
+            chooser_info.value.set_files(list(file_paths))
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out choosing files for selector "{selector}".',
             ) from error
 
     def focus(
@@ -422,6 +462,27 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out waiting for a download after pressing "{key}".',
             ) from error
         return download.suggested_filename
+
+    def select_files_after_click(
+        self,
+        trigger_selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(trigger_selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_file_chooser(timeout=timeout_ms) as file_chooser_info:
+                locator.click(timeout=timeout_ms)
+            file_chooser = file_chooser_info.value
+            file_chooser.set_files(list(files), timeout=timeout_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out selecting files after clicking selector "{trigger_selector}".',
+            ) from error
 
     def screenshot(self, path: str) -> None:
         self._page.screenshot(path=path, full_page=True)

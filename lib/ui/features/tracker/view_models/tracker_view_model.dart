@@ -13,6 +13,18 @@ import '../../../../domain/models/trackstate_models.dart';
 
 enum TrackerSection { dashboard, board, search, hierarchy, settings }
 
+enum ProjectSettingsTab {
+  statuses,
+  workflows,
+  issueTypes,
+  fields,
+  priorities,
+  components,
+  versions,
+  attachments,
+  locales,
+}
+
 enum RepositoryAccessState { localGit, connected, connectGitHub }
 
 enum HostedRepositoryAccessMode {
@@ -233,12 +245,14 @@ class AttachmentUploadInspection {
     required this.storagePath,
     required this.resolvedName,
     required this.isLfsTracked,
+    required this.requiresLocalGitUpload,
     this.existingAttachment,
   });
 
   final String storagePath;
   final String resolvedName;
   final bool isLfsTracked;
+  final bool requiresLocalGitUpload;
   final IssueAttachment? existingAttachment;
 }
 
@@ -279,6 +293,8 @@ class TrackerViewModel extends ChangeNotifier {
   final Set<String> _loadingIssueComments = <String>{};
   final Set<String> _loadingIssueAttachments = <String>{};
   TrackerSection? _issueDetailReturnSection;
+  ProjectSettingsTab? _projectSettingsTab;
+  int _projectSettingsTabRequest = 0;
   bool _isLoading = false;
   bool _isSaving = false;
   TrackerMessage? _message;
@@ -299,6 +315,8 @@ class TrackerViewModel extends ChangeNotifier {
   bool get isLoadingMoreSearchResults => _isLoadingMoreSearchResults;
   TrackStateIssue? get selectedIssue => _selectedIssue;
   TrackerSection? get issueDetailReturnSection => _issueDetailReturnSection;
+  ProjectSettingsTab? get projectSettingsTab => _projectSettingsTab;
+  int get projectSettingsTabRequest => _projectSettingsTabRequest;
   bool get isLoading => _isLoading;
   bool get hasLoadedInitialSearchResults => _hasLoadedInitialSearchResults;
   bool get hasPublishedBootstrapSnapshot => _snapshot != null;
@@ -338,6 +356,29 @@ class TrackerViewModel extends ChangeNotifier {
   };
   bool get exposesHostedAccessGates =>
       !usesLocalPersistence && providerSession != null;
+  ProjectAttachmentStorageSettings get attachmentStorageSettings =>
+      project?.attachmentStorage ?? const ProjectAttachmentStorageSettings();
+  bool get usesGitHubReleasesAttachmentStorage =>
+      attachmentStorageSettings.mode == AttachmentStorageMode.githubReleases;
+  bool get supportsHostedReleaseAttachmentWrites =>
+      !usesLocalPersistence &&
+      (providerSession?.supportsReleaseAttachmentWrites ?? false);
+  bool get hasFullySupportedHostedAttachmentWrites {
+    if (usesLocalPersistence || !exposesHostedAccessGates) {
+      return true;
+    }
+    final session = providerSession;
+    if (session == null ||
+        session.connectionState != ProviderConnectionState.connected ||
+        !session.canWrite) {
+      return false;
+    }
+    if (usesGitHubReleasesAttachmentStorage) {
+      return session.supportsReleaseAttachmentWrites;
+    }
+    return session.attachmentUploadMode == AttachmentUploadMode.full;
+  }
+
   HostedRepositoryAccessMode get hostedRepositoryAccessMode {
     if (usesLocalPersistence) {
       return HostedRepositoryAccessMode.writable;
@@ -350,7 +391,7 @@ class TrackerViewModel extends ChangeNotifier {
     if (!session.canWrite) {
       return HostedRepositoryAccessMode.readOnly;
     }
-    if (session.attachmentUploadMode != AttachmentUploadMode.full) {
+    if (!hasFullySupportedHostedAttachmentWrites) {
       return HostedRepositoryAccessMode.attachmentRestricted;
     }
     return HostedRepositoryAccessMode.writable;
@@ -365,10 +406,15 @@ class TrackerViewModel extends ChangeNotifier {
       return true;
     }
     final session = providerSession;
-    return session != null &&
-        session.connectionState == ProviderConnectionState.connected &&
-        session.canWrite &&
-        session.canManageAttachments;
+    if (session == null ||
+        session.connectionState != ProviderConnectionState.connected ||
+        !session.canWrite) {
+      return false;
+    }
+    if (usesGitHubReleasesAttachmentStorage) {
+      return session.supportsReleaseAttachmentWrites;
+    }
+    return session.canManageAttachments;
   }
 
   bool get hasBlockedWriteAccess =>
@@ -539,6 +585,14 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void openProjectSettings({ProjectSettingsTab? tab}) {
+    _projectSettingsTab = tab;
+    _projectSettingsTabRequest += 1;
+    _section = TrackerSection.settings;
+    _issueDetailReturnSection = null;
+    notifyListeners();
+  }
+
   void selectIssue(TrackStateIssue issue, {TrackerSection? returnSection}) {
     _selectedIssue = issue;
     _section = TrackerSection.search;
@@ -579,6 +633,8 @@ class TrackerViewModel extends ChangeNotifier {
     _themePreference = previous._themePreference;
     _jql = previous._jql;
     _issueDetailReturnSection = previous._issueDetailReturnSection;
+    _projectSettingsTab = previous._projectSettingsTab;
+    _projectSettingsTabRequest = previous._projectSettingsTabRequest;
   }
 
   void dismissMessage() {
@@ -1411,6 +1467,10 @@ class TrackerViewModel extends ChangeNotifier {
     String name,
   ) async {
     final storagePath = _repository.resolveIssueAttachmentPath(issue, name);
+    final isLfsTracked = await _repository.isIssueAttachmentLfsTracked(
+      issue,
+      name,
+    );
     IssueAttachment? existingAttachment;
     for (final candidate in issue.attachments) {
       if (candidate.storagePath == storagePath) {
@@ -1421,7 +1481,11 @@ class TrackerViewModel extends ChangeNotifier {
     return AttachmentUploadInspection(
       storagePath: storagePath,
       resolvedName: storagePath.split('/').last,
-      isLfsTracked: await _repository.isIssueAttachmentLfsTracked(issue, name),
+      isLfsTracked: isLfsTracked,
+      requiresLocalGitUpload:
+          !usesGitHubReleasesAttachmentStorage &&
+          hasAttachmentUploadRestriction &&
+          isLfsTracked,
       existingAttachment: existingAttachment,
     );
   }

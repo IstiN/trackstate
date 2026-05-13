@@ -1,0 +1,8 @@
+test_id: TS-371
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Uses a live hosted TrackState session with a Playwright GitHub API route override that patches the repository permissions response to read-only.
+  - Verifies the production-visible Create issue flow opens a guided access gate with explanatory copy and an Open settings recovery CTA.

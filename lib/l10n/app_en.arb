@@ -51,6 +51,7 @@
   "attachments": "Attachments",
   "attachmentsDownloadOnlyMessage": "Attachment upload is unavailable in this browser session. Existing attachments remain available for download.",
   "attachmentsLimitedUploadMessage": "Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.",
+  "attachmentsGitHubReleasesUnsupportedMessage": "This project stores new attachments in GitHub Releases. Existing attachments remain available for download, but hosted release-backed uploads are not available in this browser session yet.",
   "attachmentsAccessMessageDisconnected": "Connect GitHub with repository write access to enable Git-backed attachment changes. Existing attachments remain available for download.",
   "attachmentsAccessMessageReadOnly": "This repository connection cannot push attachment changes. Existing attachments remain available for download.",
   "chooseAttachment": "Choose attachment",
@@ -137,6 +138,42 @@
   "versions": "Versions",
   "resolutions": "Resolutions",
   "locales": "Locales",
+  "githubReleases": "GitHub Releases",
+  "attachmentStorageDescription": "Choose where new attachments are stored. Existing attachments keep the backend recorded when they were created.",
+  "attachmentStorageMode": "Attachment storage mode",
+  "attachmentRepositoryPathSummary": "Repository-path mode keeps attachments in <issue-root>/attachments/<file> inside the project repository.",
+  "attachmentReleaseTagPrefix": "Release tag prefix",
+  "attachmentReleaseTagPrefixHelper": "TrackState derives the issue release tag as <tagPrefix><ISSUE_KEY>.",
+  "attachmentReleaseMappingSummary": "Each issue resolves to the release tag {tagPrefix}<ISSUE_KEY>. Release title stays \"Attachments for <ISSUE_KEY>\", and the asset name is the sanitized file name.",
+  "@attachmentReleaseMappingSummary": {
+    "placeholders": {
+      "tagPrefix": {
+        "type": "String"
+      }
+    }
+  },
+  "attachmentStorageImmutableNote": "Switching project storage only affects new attachments. Existing attachments keep their original backend metadata.",
+  "attachmentStorageRepositoryPathCalloutTitle": "Repository-path attachment storage",
+  "attachmentStorageRepositoryPathSupportedMessage": "New attachments are stored in <issue-root>/attachments/<file> inside the project repository, and this hosted session can upload them directly.",
+  "attachmentStorageRepositoryPathLimitedMessage": "New attachments are stored in <issue-root>/attachments/<file>. Browser uploads work for repository files, but Git LFS attachments still need a local Git runtime.",
+  "attachmentStorageRepositoryPathRestrictedMessage": "New attachments are stored in <issue-root>/attachments/<file>, but this hosted session cannot upload them in the browser.",
+  "attachmentStorageGitHubReleasesCalloutTitle": "GitHub Releases attachment storage",
+  "attachmentStorageGitHubReleasesSupportedMessage": "New attachments resolve to release tag {tagPrefix}<ISSUE_KEY>, and this hosted session can complete release-backed uploads in the browser.",
+  "@attachmentStorageGitHubReleasesSupportedMessage": {
+    "placeholders": {
+      "tagPrefix": {
+        "type": "String"
+      }
+    }
+  },
+  "attachmentStorageGitHubReleasesRestrictedMessage": "New attachments resolve to release tag {tagPrefix}<ISSUE_KEY>, but this hosted session cannot complete release-backed uploads in the browser yet.",
+  "@attachmentStorageGitHubReleasesRestrictedMessage": {
+    "placeholders": {
+      "tagPrefix": {
+        "type": "String"
+      }
+    }
+  },
   "language": "Language",
   "defaultLocale": "Default locale",
   "defaultLocaleChip": "{locale} (default)",
@@ -247,6 +284,8 @@
   "repositoryAccessAttachmentRestrictedMessage": "Issue edits and comments can continue, but attachment upload is unavailable in this browser session because Git LFS upload is not supported here yet.",
   "repositoryAccessAttachmentLimitedTitle": "Some attachment uploads still require local Git",
   "repositoryAccessAttachmentLimitedMessage": "Issue edits, comments, and browser-supported attachment uploads can continue here. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.",
+  "repositoryAccessReleaseRestrictedTitle": "GitHub Releases uploads are unavailable in the browser",
+  "repositoryAccessReleaseRestrictedMessage": "Issue edits and comments can continue, but this project stores new attachments in GitHub Releases and this hosted session cannot complete release-backed uploads yet.",
   "repositoryAccessSettingsHint": "Settings is the canonical place to review repository access and reconnect safely.",
   "startupRecovery": "Startup recovery",
   "startupRateLimitRecoveryTitle": "GitHub startup limit reached",
@@ -367,6 +406,31 @@
         "type": "String"
       },
       "repository": {
+        "type": "String"
+      }
+    }
+  },
+  "repositoryAccessConnectedRepositoryPathMessage": "Connected as {login} to {repository}. New attachments use repository-path storage in this repository.",
+  "@repositoryAccessConnectedRepositoryPathMessage": {
+    "placeholders": {
+      "login": {
+        "type": "String"
+      },
+      "repository": {
+        "type": "String"
+      }
+    }
+  },
+  "repositoryAccessConnectedGitHubReleasesMessage": "Connected as {login} to {repository}. New attachments use GitHub Releases tags derived as {tagPrefix}<ISSUE_KEY>.",
+  "@repositoryAccessConnectedGitHubReleasesMessage": {
+    "placeholders": {
+      "login": {
+        "type": "String"
+      },
+      "repository": {
+        "type": "String"
+      },
+      "tagPrefix": {
         "type": "String"
       }
     }
