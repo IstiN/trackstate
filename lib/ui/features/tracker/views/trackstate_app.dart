@@ -606,25 +606,41 @@ class _TopBar extends StatelessWidget {
                   ),
                 ),
               ] else ...[
-                _SyncPill(label: l10n.syncStatus),
+                _SyncPill(
+                  label: l10n.syncStatus,
+                  height: _desktopTopBarControlHeight,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Semantics(
-                    label: l10n.searchIssues,
-                    textField: true,
-                    child: TextField(
-                      controller: TextEditingController(text: viewModel.jql),
-                      onSubmitted: viewModel.updateQuery,
-                      decoration: InputDecoration(
-                        prefixIcon: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: TrackStateIcon(
-                            TrackStateIconGlyph.search,
-                            color: colors.muted,
-                            semanticLabel: l10n.searchIssues,
+                  child: SizedBox(
+                    height: _desktopTopBarControlHeight,
+                    child: Semantics(
+                      label: l10n.searchIssues,
+                      textField: true,
+                      child: TextField(
+                        controller: TextEditingController(text: viewModel.jql),
+                        onSubmitted: viewModel.updateQuery,
+                        textAlignVertical: TextAlignVertical.center,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 0,
                           ),
+                          prefixIcon: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: TrackStateIcon(
+                              TrackStateIconGlyph.search,
+                              color: colors.muted,
+                              semanticLabel: l10n.searchIssues,
+                            ),
+                          ),
+                          prefixIconConstraints: const BoxConstraints(
+                            minWidth: 48,
+                            minHeight: _desktopTopBarControlHeight,
+                          ),
+                          hintText: l10n.jqlPlaceholder,
                         ),
-                        hintText: l10n.jqlPlaceholder,
                       ),
                     ),
                   ),
@@ -636,12 +652,14 @@ class _TopBar extends StatelessWidget {
                   label: l10n.createIssue,
                   glyph: TrackStateIconGlyph.plus,
                   onPressed: openCreateIssue,
+                  size: compact ? null : _desktopTopBarControlHeight,
                 )
               else
                 _PrimaryButton(
                   label: l10n.createIssue,
                   icon: TrackStateIconGlyph.plus,
                   onPressed: openCreateIssue,
+                  height: _desktopTopBarControlHeight,
                 ),
               const SizedBox(width: 8),
               if (iconOnlyActions)
@@ -651,6 +669,7 @@ class _TopBar extends StatelessWidget {
                   onPressed: viewModel.isSaving
                       ? null
                       : () => _showRepositoryAccessDialog(context, viewModel),
+                  size: compact ? null : _desktopTopBarControlHeight,
                 )
               else
                 _PrimaryButton(
@@ -659,6 +678,7 @@ class _TopBar extends StatelessWidget {
                   onPressed: viewModel.isSaving
                       ? null
                       : () => _showRepositoryAccessDialog(context, viewModel),
+                  height: _desktopTopBarControlHeight,
                 ),
               const SizedBox(width: 8),
               _IconButtonSurface(
@@ -669,65 +689,86 @@ class _TopBar extends StatelessWidget {
                     ? TrackStateIconGlyph.sun
                     : TrackStateIconGlyph.moon,
                 onPressed: viewModel.toggleTheme,
+                size: compact ? null : _desktopTopBarControlHeight,
               ),
               const SizedBox(width: 8),
-              if (_hasVisibleProfileIdentity(viewModel) &&
-                  !compact &&
-                  !condensedDesktop) ...[
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 180),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Semantics(
-                        container: true,
-                        label: _profileDisplayName(viewModel),
-                        child: ExcludeSemantics(
-                          child: Text(
-                            _profileDisplayName(viewModel),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelLarge
-                                ?.copyWith(
-                                  color: colors.text,
-                                  fontWeight: FontWeight.w600,
+              Semantics(
+                container: true,
+                label: _profileDisplayName(viewModel),
+                child: ExcludeSemantics(
+                  child: SizedBox(
+                    height: compact ? null : _desktopTopBarControlHeight,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        if (_hasVisibleProfileIdentity(viewModel) &&
+                            !compact &&
+                            !condensedDesktop) ...[
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 180),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Semantics(
+                                  container: true,
+                                  label: _profileDisplayName(viewModel),
+                                  child: ExcludeSemantics(
+                                    child: Text(
+                                      _profileDisplayName(viewModel),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelLarge
+                                          ?.copyWith(
+                                            color: colors.text,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                  ),
                                 ),
+                                if (_profileLogin(viewModel) case final login?)
+                                  Semantics(
+                                    container: true,
+                                    label: login,
+                                    child: ExcludeSemantics(
+                                      child: Text(
+                                        login,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(color: colors.muted),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ),
-                      if (_profileLogin(viewModel) case final login?)
+                          const SizedBox(width: 8),
+                        ],
                         Semantics(
-                          container: true,
-                          label: login,
+                          label: _profileDisplayName(viewModel),
+                          image: true,
                           child: ExcludeSemantics(
-                            child: Text(
-                              login,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: colors.muted),
+                            child: CircleAvatar(
+                              radius: 18,
+                              backgroundColor: colors.primarySoft,
+                              child: Text(
+                                _profileInitials(l10n, viewModel),
+                                style: TextStyle(
+                                  color: colors.text,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
-              Semantics(
-                label: _profileDisplayName(viewModel),
-                image: true,
-                child: ExcludeSemantics(
-                  child: CircleAvatar(
-                    radius: 18,
-                    backgroundColor: colors.primarySoft,
-                    child: Text(
-                      _profileInitials(l10n, viewModel),
-                      style: TextStyle(
-                        color: colors.text,
-                        fontWeight: FontWeight.w700,
-                      ),
+                      ],
                     ),
                   ),
                 ),
@@ -739,6 +780,8 @@ class _TopBar extends StatelessWidget {
     );
   }
 }
+
+const double _desktopTopBarControlHeight = 58;
 
 Future<void> _showRepositoryAccessDialog(
   BuildContext context,
@@ -6155,11 +6198,13 @@ class _PrimaryButton extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onPressed,
+    this.height,
   });
 
   final String label;
   final TrackStateIconGlyph icon;
   final VoidCallback? onPressed;
+  final double? height;
 
   @override
   Widget build(BuildContext context) {
@@ -6173,6 +6218,7 @@ class _PrimaryButton extends StatelessWidget {
         style: FilledButton.styleFrom(
           backgroundColor: colors.primary,
           foregroundColor: onPrimary,
+          minimumSize: height == null ? null : Size(0, height!),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         ),
@@ -6188,11 +6234,13 @@ class _IconButtonSurface extends StatelessWidget {
     required this.label,
     required this.glyph,
     required this.onPressed,
+    this.size,
   });
 
   final String label;
   final TrackStateIconGlyph glyph;
   final VoidCallback? onPressed;
+  final double? size;
 
   @override
   Widget build(BuildContext context) {
@@ -6206,7 +6254,10 @@ class _IconButtonSurface extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         onTap: onPressed,
         child: Container(
-          padding: const EdgeInsets.all(11),
+          width: size,
+          height: size,
+          alignment: Alignment.center,
+          padding: size == null ? const EdgeInsets.all(11) : null,
           decoration: BoxDecoration(
             color: colors.surface,
             borderRadius: BorderRadius.circular(10),
@@ -7841,16 +7892,20 @@ class _BottomNavigation extends StatelessWidget {
 }
 
 class _SyncPill extends StatelessWidget {
-  const _SyncPill({required this.label});
+  const _SyncPill({required this.label, this.height});
 
   final String label;
+  final double? height;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
     return Semantics(
+      container: true,
       label: label,
       child: Container(
+        constraints: height == null ? null : BoxConstraints(minHeight: height!),
+        alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: colors.secondarySoft,
