@@ -34,6 +34,25 @@ class Ts667ProbeWorkspaceProfileService implements WorkspaceProfileService {
   }
 
   @override
+  Future<WorkspaceProfilesState> saveHostedAccessMode(
+    String workspaceId,
+    HostedWorkspaceAccessMode? accessMode,
+  ) async {
+    _state = WorkspaceProfilesState(
+      profiles: [
+        for (final profile in _state.profiles)
+          if (profile.id == workspaceId && profile.isHosted)
+            profile.copyWith(hostedAccessMode: accessMode)
+          else
+            profile,
+      ],
+      activeWorkspaceId: _state.activeWorkspaceId,
+      migrationComplete: _state.migrationComplete,
+    );
+    return _state;
+  }
+
+  @override
   Future<WorkspaceProfile?> ensureLegacyContextMigrated(
     WorkspaceProfileInput? input,
   ) async => _state.activeWorkspace;
