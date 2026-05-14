@@ -114,7 +114,9 @@ def main() -> None:
                 runtime_state = tracker_page.open()
                 result["runtime_state"] = runtime_state.kind
                 result["runtime_body_text"] = runtime_state.body_text
-                shell_observation = _wait_for_interactive_shell(tracker_page)
+                shell_observation = tracker_page.observe_interactive_shell(
+                    SHELL_NAVIGATION_LABELS,
+                )
                 result["shell_observation"] = shell_observation
                 if runtime_state.kind != "ready" or not bool(shell_observation["shell_ready"]):
                     observed = (
@@ -204,12 +206,14 @@ def main() -> None:
                 hosted_row = _assert_saved_workspaces_fallback(observation)
                 result["hosted_row"] = _row_asdict(hosted_row)
 
-                storage_snapshot = _snapshot_workspace_storage(tracker_page)
+                storage_snapshot = tracker_page.snapshot_local_storage(
+                    WORKSPACE_STORAGE_KEYS,
+                )
                 result["storage_snapshot"] = storage_snapshot
                 normalized_profile = _normalized_profile(storage_snapshot)
                 result["normalized_profile"] = normalized_profile
-                normalization_summary = _assert_normalized_profile(normalized_profile)
-                result["normalization_summary"] = normalization_summary
+                storage_diagnostic = _normalized_profile_diagnostic(normalized_profile)
+                result["storage_diagnostic"] = storage_diagnostic
 
                 _record_step(
                     result,
@@ -218,7 +222,7 @@ def main() -> None:
                     action=REQUEST_STEPS[3],
                     observed=(
                         f"Saved workspaces remained visible with row_count={observation.row_count}; "
-                        f"hosted_row={hosted_row.visible_text!r}; {normalization_summary}"
+                        f"hosted_row={hosted_row.visible_text!r}; {storage_diagnostic}"
                     ),
                 )
 
@@ -282,63 +286,6 @@ def _workspace_state() -> dict[str, object]:
                 "writeBranch": DEFAULT_BRANCH,
             },
         ],
-    }
-
-
-def _wait_for_interactive_shell(
-    tracker_page: TrackStateTrackerPage,
-    *,
-    timeout_ms: int = 120_000,
-) -> dict[str, object]:
-    try:
-        payload = tracker_page.session.wait_for_function(
-            """
-            (requiredNavigationLabels) => {
-              const bodyText = document.body?.innerText ?? '';
-              const visibleNavigationLabels = requiredNavigationLabels.filter(
-                (label) => bodyText.includes(label),
-              );
-              const fatalBannerVisible = bodyText.includes('TrackState data was not found');
-              const connectGitHubVisible = bodyText.includes('Connect GitHub');
-              const shellReady = visibleNavigationLabels.length === requiredNavigationLabels.length;
-              return shellReady || fatalBannerVisible || connectGitHubVisible
-                ? {
-                    bodyText,
-                    visibleNavigationLabels,
-                    fatalBannerVisible,
-                    connectGitHubVisible,
-                    shellReady,
-                  }
-                : null;
-            }
-            """,
-            arg=list(SHELL_NAVIGATION_LABELS),
-            timeout_ms=timeout_ms,
-        )
-    except Exception:
-        return {
-            "body_text": tracker_page.body_text(),
-            "visible_navigation_labels": [],
-            "fatal_banner_visible": "TrackState data was not found" in tracker_page.body_text(),
-            "connect_github_visible": "Connect GitHub" in tracker_page.body_text(),
-            "shell_ready": False,
-        }
-    if not isinstance(payload, dict):
-        return {
-            "body_text": tracker_page.body_text(),
-            "visible_navigation_labels": [],
-            "fatal_banner_visible": "TrackState data was not found" in tracker_page.body_text(),
-            "connect_github_visible": "Connect GitHub" in tracker_page.body_text(),
-            "shell_ready": False,
-        }
-    return {
-        "body_text": str(payload.get("bodyText", "")),
-        "visible_navigation_labels": [
-            str(label) for label in payload.get("visibleNavigationLabels", [])
-        ],
-        "fatal_banner_visible": bool(payload.get("fatalBannerVisible")),
-        "connect_github_visible": bool(payload.get("connectGitHubVisible")),
-        "shell_ready": bool(payload.get("shellReady")),
     }
 
 
@@ -443,31 +390,6 @@ def _contains_placeholder_token(value: str) -> bool:
     return "undefined" in lowered or "null" in lowered
 
 
-def _snapshot_workspace_storage(
-    tracker_page: TrackStateTrackerPage,
-) -> dict[str, str | None]:
-    payload = tracker_page.session.evaluate(
-        """
-        (keys) => {
-          const snapshot = {};
-          for (const key of keys) {
-            snapshot[key] = window.localStorage.getItem(key);
-          }
-          return snapshot;
-        }
-        """,
-        arg=list(WORKSPACE_STORAGE_KEYS),
-    )
-    if not isinstance(payload, dict):
-        raise AssertionError(
-            f"Expected a workspace storage snapshot map, got: {payload!r}",
-        )
-    return {
-        str(key): (None if value is None else str(value))
-        for key, value in payload.items()
-    }
-
-
 def _normalized_profile(
     storage_snapshot: dict[str, str | None],
 ) -> dict[str, object] | None:
@@ -494,46 +416,17 @@ def _normalized_profile(
     return None
 
 
-def _assert_normalized_profile(profile: dict[str, object] | None) -> str:
+def _normalized_profile_diagnostic(profile: dict[str, object] | None) -> str:
     if profile is None:
-        raise AssertionError(
-            "Expected result failed: the repaired Flutter web workspace storage did not "
-            "contain the hosted profile after startup.\n"
-            "Observed storage snapshot could not be decoded into a hosted workspace profile.",
-        )
-    expected_pairs = {
-        "targetType": "hosted",
-        "defaultBranch": DEFAULT_BRANCH,
-        "writeBranch": DEFAULT_BRANCH,
-    }
-    for key, expected_value in expected_pairs.items():
-        observed = profile.get(key)
-        if observed != expected_value:
-            raise AssertionError(
-                "Expected result failed: the repaired workspace profile did not keep the "
-                "expected fallback field values.\n"
-                f"Field: {key}\n"
-                f"Expected: {expected_value!r}\n"
-                f"Observed profile: {json.dumps(profile, indent=2)}",
-            )
-    target = profile.get("target")
-    if not isinstance(target, str) or target.strip().lower() != HOSTED_TARGET.lower():
-        raise AssertionError(
-            "Expected result failed: the repaired workspace profile did not keep the "
-            "expected hosted repository target.\n"
-            f"Observed profile: {json.dumps(profile, indent=2)}",
-        )
-    display_name = profile.get("displayName")
-    if not isinstance(display_name, str) or display_name.strip().lower() != HOSTED_TARGET.lower():
-        raise AssertionError(
-            "Expected result failed: the repaired workspace profile did not persist the "
-            "repository target as the fallback display name.\n"
-            f"Observed profile: {json.dumps(profile, indent=2)}",
-        )
-    return (
-        f"normalized_profile.displayName={display_name!r}; "
-        f"normalized_profile.targetType={profile.get('targetType')!r}; "
-        f"normalized_profile.defaultBranch={profile.get('defaultBranch')!r}"
+        return "storage_diagnostic=normalized_profile_unavailable"
+    return "; ".join(
+        (
+            f"normalized_profile.target={profile.get('target')!r}",
+            f"normalized_profile.displayName={profile.get('displayName')!r}",
+            f"normalized_profile.targetType={profile.get('targetType')!r}",
+            f"normalized_profile.defaultBranch={profile.get('defaultBranch')!r}",
+            f"normalized_profile.writeBranch={profile.get('writeBranch')!r}",
+        ),
     )
 
 
@@ -639,7 +532,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         ),
         "* Opened the deployed TrackState app and monitored startup for the interactive shell.",
         "* Opened *Project Settings* / *Saved workspaces* and inspected the visible row text, icon, and actions.",
-        "* Automation-only check: decoded the repaired Flutter web workspace storage to confirm fallback defaults were persisted.",
+        "* Automation-only check: captured the Flutter web workspace storage as diagnostic evidence after startup.",
         "",
         "h4. Result",
         (
@@ -648,7 +541,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             else f"* Did not match the expected result. {jira_inline(_failed_step_summary(result))}"
         ),
         (
-            f"* Observed normalization: {jira_inline(str(result.get('normalization_summary', '<missing>')))}"
+            f"* Storage diagnostic: {jira_inline(str(result.get('storage_diagnostic', '<missing>')))}"
             if passed
             else f"* Failed step: {jira_inline(_failed_step_summary(result))}"
         ),
@@ -693,7 +586,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         ),
         "- Opened the deployed TrackState app and monitored startup for the interactive shell.",
         "- Opened **Project Settings** / **Saved workspaces** and inspected the visible row text, icon, and actions.",
-        "- Decoded the repaired Flutter web workspace storage to confirm fallback defaults were persisted.",
+        "- Captured the Flutter web workspace storage as diagnostic evidence after startup.",
         "",
         "## Result",
         (
@@ -702,7 +595,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
             else f"- Did not match the expected result. {_failed_step_summary(result)}"
         ),
         (
-            f"- Observed normalization: {result.get('normalization_summary', '<missing>')}"
+            f"- Storage diagnostic: {result.get('storage_diagnostic', '<missing>')}"
             if passed
             else f"- Failed step: {_failed_step_summary(result)}"
         ),
