@@ -1,0 +1,28 @@
+test_id: TS-708
+type: api
+framework: python
+platform: github-release
+dependencies:
+  - gh CLI available on PATH
+  - file utility available on PATH
+  - GH_TOKEN or GITHUB_TOKEN recommended for GitHub API access
+notes:
+  - Selects the latest stable published version-tag release in IstiN/trackstate unless TS708_RELEASE_TAG pins a specific tag.
+  - Verifies the GitHub Release exposes exactly one app archive, one standalone CLI archive, and one .sha256 manifest.
+  - Downloads the required archives, inspects the embedded binaries with `file`, and checks the checksum manifest against the downloaded bytes.
+  - Fails if forbidden installer assets such as .dmg or .pkg are published instead of the MVP unsigned archives.
+runtime_inputs:
+  repository: IstiN/trackstate
+  default_branch: main
+  release_tag_pattern: "^v\\d+\\.\\d+\\.\\d+$"
+  expected_architecture_fragment: "Mach-O 64-bit executable arm64"
+  archive_extensions:
+    - .zip
+    - .tar.gz
+    - .tgz
+    - .tar
+  checksum_extensions:
+    - .sha256
+  forbidden_extensions:
+    - .dmg
+    - .pkg
