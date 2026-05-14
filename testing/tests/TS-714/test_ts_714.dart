@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../components/factories/testing_dependencies.dart';
 import '../../components/screens/settings_screen_robot.dart';
-import '../../components/screens/trackstate_app_screen.dart';
+import '../../core/interfaces/trackstate_app_component.dart';
 import 'support/ts714_background_sync_deferred_repository.dart';
 
 const String _pendingLabel = 'Updates pending';
@@ -23,9 +23,8 @@ void main() {
       final failures = <String>[];
       final repository = Ts714BackgroundSyncDeferredRepository();
       final robot = SettingsScreenRobot(tester);
-      final app =
-          defaultTestingDependencies.createTrackStateAppScreen(tester)
-              as TrackStateAppScreen;
+      final TrackStateAppComponent app = defaultTestingDependencies
+          .createTrackStateAppScreen(tester);
 
       await robot.pumpApp(
         repository: repository,
