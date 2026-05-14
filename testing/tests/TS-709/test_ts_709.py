@@ -35,6 +35,8 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 REQUEST_STEPS = [
     "Push a standard commit (no tag) to the `main` branch of `IstiN/trackstate`.",
@@ -185,11 +187,13 @@ def main() -> None:
         result.setdefault("error", f"{type(error).__name__}: {error}")
         result.setdefault("traceback", traceback.format_exc())
         _record_failed_step_from_error(result, str(error))
-        result["product_failure"] = True
+        result["product_failure"] = _is_product_failure(result.get("error"))
         _write_failure_outputs(result)
+        _write_review_replies(result, passed=False)
         raise
 
     _write_pass_outputs(result)
+    _write_review_replies(result, passed=True)
     print("TS-709 passed")
 
 
@@ -235,19 +239,11 @@ def _assert_main_ci_scope(
 ) -> None:
     if default_branch not in workflow.push_branches:
         raise AssertionError(
-            "Step 3 failed: the general CI workflow no longer listens to pushes on the "
+            "Step 2 failed: the general CI workflow no longer listens to pushes on the "
             f"default branch `{default_branch}`.\n"
             f"Observed push branches: {workflow.push_branches}\n"
             f"Workflow URL: {workflow.html_url}\n"
             f"Raw workflow:\n{workflow.raw_file_text}"
-        )
-    if workflow.push_tags:
-        raise AssertionError(
-            "Step 3 failed: the general CI workflow unexpectedly declared tag push "
-            "filters, which would blur the isolation between release and non-release "
-            "validation.\n"
-            f"Observed push tags: {workflow.push_tags}\n"
-            f"Workflow URL: {workflow.html_url}"
         )
 
 
@@ -346,7 +342,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
-    BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    if result.get("product_failure") is True:
+        BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    else:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -591,6 +590,70 @@ def _bug_description(result: dict[str, object]) -> str:
     ) + "\n"
 
 
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies: list[dict[str, object]] = []
+    for thread in _discussion_threads():
+        if thread.get("resolved") is True:
+            continue
+        root_comment_id = thread.get("rootCommentId")
+        thread_id = thread.get("threadId")
+        if not isinstance(root_comment_id, int) or not isinstance(thread_id, str):
+            continue
+        replies.append(
+            {
+                "inReplyToId": root_comment_id,
+                "threadId": thread_id,
+                "reply": _review_reply_text(
+                    root_comment_id=root_comment_id,
+                    result=result,
+                    passed=passed,
+                ),
+            }
+        )
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [thread for thread in threads if isinstance(thread, dict)]
+
+
+def _review_reply_text(
+    *,
+    root_comment_id: int,
+    result: dict[str, object],
+    passed: bool,
+) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error', 'unknown error')}`."
+    )
+    if root_comment_id == 3243237791:
+        return (
+            "Fixed: TS-709 now marks `product_failure` only for ticket-facing `Step N "
+            "failed:` assertions, so setup/runtime issues like missing Playwright, "
+            "unauthenticated `gh`, or log-read failures still fail the test without "
+            f"emitting `bug_description.md` as a product defect. {rerun_summary}"
+        )
+    if root_comment_id == 3243237920:
+        return (
+            "Fixed: `_assert_main_ci_scope()` now only requires `Flutter CI` to keep "
+            "listening to pushes on `main`; it no longer fails just because the general "
+            "CI workflow also declares tag filters. Pass/fail is now scoped to main-push "
+            f"isolation plus positive Apple tag-trigger evidence. {rerun_summary}"
+        )
+    return f"Fixed in the latest TS-709 rework. {rerun_summary}"
+
+
 def _workflow_as_dict(workflow: WorkflowDefinitionObservation) -> dict[str, object]:
     return asdict(workflow)
 
@@ -710,6 +773,10 @@ def _record_failed_step_from_error(result: dict[str, object], message: str) -> N
     observed = match.group(0).strip()
     action = REQUEST_STEPS[step - 1] if 1 <= step <= len(REQUEST_STEPS) else f"Step {step}"
     _record_step(result, step=step, status="failed", action=action, observed=observed)
+
+
+def _is_product_failure(error: object) -> bool:
+    return re.search(r"(^|\n)Step \d+ failed:", str(error), flags=re.MULTILINE) is not None
 
 
 def _step_exists(result: dict[str, object], step_number: int) -> bool:
