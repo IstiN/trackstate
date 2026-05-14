@@ -4,6 +4,7 @@ import json
 import unittest
 
 from testing.components.services.github_actions_preflight_gate_probe import (
+    GitHubActionsPreflightGatePreconditionError,
     GitHubActionsPreflightGateProbeError,
     GitHubActionsPreflightGateProbeService,
 )
@@ -264,7 +265,7 @@ jobs:
         )
 
         with self.assertRaisesRegex(
-            GitHubActionsPreflightGateProbeError,
+            GitHubActionsPreflightGatePreconditionError,
             "Precondition failed: TS-706 could not reproduce the no-runner failure condition",
         ) as raised:
             probe.validate()

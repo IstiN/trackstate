@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from testing.components.pages.github_actions_page import GitHubActionsPageObservation  # noqa: E402
 from testing.components.services.github_actions_preflight_gate_probe import (  # noqa: E402
+    GitHubActionsPreflightGatePreconditionError,
     GitHubActionsPreflightGateProbeError,
 )
 from testing.core.config.github_actions_preflight_gate_config import (  # noqa: E402
@@ -205,6 +206,16 @@ def main() -> None:
                 f"Job screenshot: `{job_page.screenshot_path}`."
             ),
         )
+    except GitHubActionsPreflightGatePreconditionError as error:
+        _merge_probe_error_context(result, error)
+        result.setdefault("error", f"{type(error).__name__}: {error}")
+        result.setdefault("traceback", traceback.format_exc())
+        _record_failed_step_from_error(result, str(error))
+        result["precondition_failure"] = True
+        result["product_failure"] = False
+        _write_failure_outputs(result)
+        print("TS-706 precondition not met")
+        return
     except Exception as error:
         _merge_probe_error_context(result, error)
         result.setdefault("error", f"{type(error).__name__}: {error}")
@@ -382,7 +393,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
-    status = "✅ PASSED" if passed else "❌ FAILED"
+    status = _status_text(result, passed=passed, jira=True)
     lines = [
         "h3. Test Automation Result",
         "",
@@ -453,7 +464,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Result",
         "",
-        f"**Status:** {'✅ PASSED' if passed else '❌ FAILED'}",
+        f"**Status:** {_status_text(result, passed=passed, jira=False)}",
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## What was automated",
@@ -519,7 +530,7 @@ def _response(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Result",
         "",
-        f"**Status:** {'✅ PASSED' if passed else '❌ FAILED'}",
+        f"**Status:** {_status_text(result, passed=passed, jira=False)}",
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## Outcome",
@@ -723,6 +734,14 @@ def _review_reply_text(
             "fails for precondition reasons when the run proves a matching macOS runner "
             f"is available. {rerun_summary}"
         )
+    if root_comment_id == 3243584537:
+        return (
+            "Fixed: the runner-online path now raises a dedicated "
+            "`GitHubActionsPreflightGatePreconditionError`, and TS-706 reports that path "
+            "as `PRECONDITION NOT MET` / `BLOCKED` in the human-facing outputs instead of "
+            "classifying it as a ticket-facing product failure. The live run, job URLs, "
+            f"and partial observation context are still preserved for rerun triage. {rerun_summary}"
+        )
     return (
         "Fixed: added `testing/tests/TS-706/README.md`, removed hardcoded workflow "
         "contract values from the assertions, and threaded the config-backed UI timeout "
@@ -809,8 +828,9 @@ def _failed_step_summary(result: dict[str, object]) -> str:
     for entry in steps:
         if not isinstance(entry, dict):
             continue
-        if entry.get("status") == "failed":
-            return f"Step {entry.get('step')} failed: {entry.get('observed')}"
+        status = str(entry.get("status", "")).lower()
+        if status in {"failed", "blocked"}:
+            return f"Step {entry.get('step')} {status}: {entry.get('observed')}"
     return str(result.get("error", "Unknown failure"))
 
 
@@ -832,7 +852,7 @@ def _record_failed_step_from_error(result: dict[str, object], message: str) -> N
             _record_step(
                 result,
                 step=1,
-                status="failed",
+                status="blocked",
                 action=REQUEST_STEPS[0],
                 observed=message,
             )
@@ -863,6 +883,14 @@ def _step_exists(result: dict[str, object], step_number: int) -> bool:
     return any(
         isinstance(entry, dict) and entry.get("step") == step_number for entry in steps
     )
+
+
+def _status_text(result: dict[str, object], *, passed: bool, jira: bool) -> str:
+    if passed:
+        return "✅ PASSED" if jira else "✅ PASSED"
+    if result.get("precondition_failure") is True:
+        return "⚠️ PRECONDITION NOT MET"
+    return "❌ FAILED"
 
 
 def _jira_inline(value: str) -> str:

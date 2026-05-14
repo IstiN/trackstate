@@ -37,6 +37,12 @@ class GitHubActionsPreflightGateProbeError(RuntimeError):
         self.partial_result = deepcopy(partial_result or {})
 
 
+class GitHubActionsPreflightGatePreconditionError(
+    GitHubActionsPreflightGateProbeError
+):
+    pass
+
+
 class GitHubActionsPreflightGateProbeService:
     def __init__(
         self,
@@ -129,7 +135,7 @@ class GitHubActionsPreflightGateProbeService:
             merged_partial_result = deepcopy(partial_result)
             if error.partial_result:
                 merged_partial_result.update(error.partial_result)
-            raise GitHubActionsPreflightGateProbeError(
+            raise type(error)(
                 str(error),
                 partial_result=merged_partial_result,
             ) from error
@@ -328,7 +334,7 @@ class GitHubActionsPreflightGateProbeService:
             return
         if downstream_job.status not in {"queued", "in_progress", "waiting"}:
             return
-        raise GitHubActionsPreflightGateProbeError(
+        raise GitHubActionsPreflightGatePreconditionError(
             "Precondition failed: TS-706 could not reproduce the no-runner failure "
             "condition through the live Apple Release Builds workflow because the "
             f"preflight job `{preflight_job.name}` succeeded and the downstream macOS "
