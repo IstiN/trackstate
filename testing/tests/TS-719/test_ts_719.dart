@@ -55,18 +55,9 @@ void main() {
       seedFile.writeAsStringSync('TS-719 reproduction fixture\n');
       result['directory_path'] = directory.path;
       result['directory_seed_file'] = seedFile.path;
-      final productionInspection = await tester.runAsync(
-        () => const LocalGitWorkspaceOnboardingService().inspectFolder(
-          directory.path,
-        ),
+      final onboardingService = _RecordingRealOnboardingService(
+        delegate: const LocalGitWorkspaceOnboardingService(),
       );
-      if (productionInspection == null) {
-        throw StateError(
-          'Timed out waiting for the production folder inspection result.',
-        );
-      }
-      result['production_inspection_state'] = productionInspection.state.name;
-      result['production_inspection_message'] = productionInspection.message;
 
       try {
         final screen =
@@ -75,9 +66,7 @@ void main() {
               workspaceProfileService: SharedPreferencesWorkspaceProfileService(
                 now: () => DateTime.utc(2026, 5, 14, 15, 40),
               ),
-              onboardingService: _PrecomputedInspectionOnboardingService(
-                inspection: productionInspection,
-              ),
+              onboardingService: onboardingService,
               directoryPicker:
                   ({
                     String? confirmButtonText,
@@ -122,6 +111,18 @@ void main() {
               'Timed out waiting for the Initialize folder flow to finish inspecting the selected folder.',
             ),
           );
+          final recordedInspection = onboardingService.lastInspection;
+          final inspectedFolderPaths = onboardingService.inspectedFolderPaths;
+          result['inspected_folder_paths'] = inspectedFolderPaths;
+          result['production_inspection_state'] =
+              recordedInspection?.state.name;
+          result['production_inspection_message'] = recordedInspection?.message;
+          if (recordedInspection == null) {
+            throw AssertionError(
+              'Step 2 failed: selecting "Initialize folder" did not invoke the real onboarding inspectFolder call.',
+            );
+          }
+
           final selectedState = screen.captureState();
           result['visible_texts'] = selectedState.visibleTexts;
           result['status_label'] = selectedState.statusLabel;
@@ -136,16 +137,29 @@ void main() {
           _recordStep(
             result,
             step: 2,
-            status: selectedState.folderPath == directory.path
+            status:
+                selectedState.folderPath == directory.path &&
+                    inspectedFolderPaths.length == 1 &&
+                    inspectedFolderPaths.single == directory.path
                 ? 'passed'
                 : 'failed',
             action: _requestSteps[1],
             observed:
                 'picked_folder=${selectedState.folderPath}; '
                 'expected_folder=${directory.path}; '
+                'inspected_paths=${inspectedFolderPaths.join(' | ')}; '
+                'inspection_state=${recordedInspection.state.name}; '
                 'status_label=${selectedState.statusLabel}; '
                 'visible_texts=${selectedState.visibleTexts.join(' | ')}',
           );
+          if (inspectedFolderPaths.length != 1 ||
+              inspectedFolderPaths.single != directory.path) {
+            throw AssertionError(
+              'Step 2 failed: the onboarding UI did not inspect the selected non-empty non-Git directory via the real onboarding service.\n'
+              'Expected inspected folder path: ${directory.path}\n'
+              'Observed inspected folder paths: ${inspectedFolderPaths.join(' | ')}',
+            );
+          }
           if (selectedState.folderPath != directory.path) {
             throw AssertionError(
               'Step 2 failed: the onboarding flow did not reflect the selected non-empty non-Git directory after using Initialize folder.\n'
@@ -545,14 +559,21 @@ Iterable<String> _markdownHumanVerificationLines(
   }
 }
 
-class _PrecomputedInspectionOnboardingService
+class _RecordingRealOnboardingService
     implements LocalWorkspaceOnboardingService {
-  const _PrecomputedInspectionOnboardingService({required this.inspection});
+  _RecordingRealOnboardingService({
+    required LocalWorkspaceOnboardingService delegate,
+  }) : _delegate = delegate;
 
-  final LocalWorkspaceInspection inspection;
+  final LocalWorkspaceOnboardingService _delegate;
+  final List<String> inspectedFolderPaths = <String>[];
+  LocalWorkspaceInspection? lastInspection;
 
   @override
   Future<LocalWorkspaceInspection> inspectFolder(String folderPath) async {
+    inspectedFolderPaths.add(folderPath);
+    final inspection = await _delegate.inspectFolder(folderPath);
+    lastInspection = inspection;
     return inspection;
   }
 
@@ -562,8 +583,10 @@ class _PrecomputedInspectionOnboardingService
     required String workspaceName,
     required String writeBranch,
   }) {
-    throw UnimplementedError(
-      'TS-719 should fail before initialization is attempted.',
+    return _delegate.initializeFolder(
+      inspection: inspection,
+      workspaceName: workspaceName,
+      writeBranch: writeBranch,
     );
   }
 }
