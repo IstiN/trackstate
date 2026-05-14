@@ -1,0 +1,15 @@
+test_id: TS-703
+type: ui
+framework: flutter_test
+platform: linux
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Verifies authenticated hosted onboarding shows accessible repository discovery.
+  - Verifies manual owner/repo fallback remains available from the same hosted onboarding form.
+  - Verifies the Branch field accepts free-text input and the manual repository details are used when opening the workspace.
+runtime_inputs:
+  initial_workspace: owner/current@main
+  suggestion_repository: owner/authenticated-discovery@release
+  manual_repository: manual-owner/manual-repo@feature/preview-42
+  run_command: flutter test testing/tests/TS-703/test_ts_703.dart --reporter expanded
