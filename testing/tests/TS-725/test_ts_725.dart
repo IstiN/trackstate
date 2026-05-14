@@ -11,6 +11,7 @@ const String _ticketSummary =
     'Inactive workspace state - deterministic display vs live active state';
 const String _runCommand =
     'flutter test testing/tests/TS-725/test_ts_725.dart --reporter expanded';
+const String _authToken = 'ghp_ts725_widget_token';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -167,30 +168,176 @@ void main() {
         await screen.closeWorkspaceSwitcher();
         await screen.openSettings();
 
-        final connectGitHubVisible = screen.isTextVisible('Connect GitHub');
-        final repositoryAccessVisible = screen.isTextVisible(
-          'Repository access',
-        );
+        final connectGitHubVisible =
+            screen.isControlVisible('Connect GitHub') ||
+            screen.isTextVisible('Connect GitHub') ||
+            screen.isSemanticsLabelVisible('Connect GitHub');
+        final repositoryAccessVisible =
+            screen.isTextVisible('Repository access') ||
+            screen.isSemanticsLabelVisible('Repository access');
         result['visible_texts_in_settings'] = screen.visibleTexts();
         result['visible_semantics_in_settings'] = screen
             .visibleSemanticsLabelsSnapshot();
 
+        var tappedConnectGitHub = false;
+        var tokenFieldVisible = false;
+        var connectTokenVisible = false;
+        var tappedConnectToken = false;
+        var postAuthAccessStateVisible = false;
+        var switcherReopenedAfterAuth = false;
+        var step4FailureReason =
+            'the active local workspace shows Repository access but exposes no production-visible Connect GitHub control, so TS-725 cannot perform the required sign-in step from the active local runtime.';
+        String? step5Observed;
+        var postAuthActiveLocalMatches = false;
+        var postAuthInactiveHostedMatches = false;
+
+        if (connectGitHubVisible) {
+          tappedConnectGitHub = await screen.tapVisibleControl(
+            'Connect GitHub',
+          );
+          if (!tappedConnectGitHub) {
+            step4FailureReason =
+                'the active local workspace exposed Connect GitHub text, but the production control could not be activated to start the ticketed sign-in flow.';
+          } else {
+            final authFormVisible = await screen.waitForAnyVisibleText(const [
+              'Fine-grained token',
+              'Connect token',
+            ]);
+            tokenFieldVisible =
+                authFormVisible &&
+                screen.isLabeledTextFieldVisible('Fine-grained token');
+            connectTokenVisible =
+                authFormVisible && screen.isControlVisible('Connect token');
+
+            if (!tokenFieldVisible || !connectTokenVisible) {
+              step4FailureReason =
+                  'tapping Connect GitHub did not expose the production token form needed to complete the ticketed sign-in flow.';
+            } else {
+              await screen.enterLabeledTextField(
+                'Fine-grained token',
+                text: _authToken,
+              );
+              tappedConnectToken = await screen.tapVisibleControl(
+                'Connect token',
+              );
+              postAuthAccessStateVisible =
+                  tappedConnectToken &&
+                  await screen.waitForAnyVisibleText(const [
+                    'Connected',
+                    'Read-only',
+                    'Attachments limited',
+                  ]);
+
+              result['visible_texts_after_auth_attempt'] = screen
+                  .visibleTexts();
+              result['visible_semantics_after_auth_attempt'] = screen
+                  .visibleSemanticsLabelsSnapshot();
+
+              if (!postAuthAccessStateVisible) {
+                step4FailureReason =
+                    'submitting the production token form did not produce a visible post-auth repository access state, so the test could not prove the sign-in transition completed.';
+              } else {
+                try {
+                  await screen.openWorkspaceSwitcher();
+                  switcherReopenedAfterAuth = screen.isWorkspaceSwitcherVisible;
+                } on TestFailure {
+                  switcherReopenedAfterAuth = false;
+                }
+
+                if (!switcherReopenedAfterAuth) {
+                  step4FailureReason =
+                      'the sign-in controls completed, but Workspace switcher could not be reopened from the still-active local workspace.';
+                } else {
+                  final postAuthWorkspaceState = await fixture
+                      .loadWorkspaceState();
+                  result['active_workspace_id_after_sign_in'] =
+                      postAuthWorkspaceState.activeWorkspaceId;
+                  result['visible_texts_after_sign_in'] = screen.visibleTexts();
+                  result['visible_semantics_after_sign_in'] = screen
+                      .visibleSemanticsLabelsSnapshot();
+
+                  postAuthActiveLocalMatches =
+                      postAuthWorkspaceState.activeWorkspaceId ==
+                          fixture.activeLocalWorkspace.id &&
+                      screen.workspaceRowContainsText(
+                        fixture.activeLocalWorkspace.id,
+                        'Local',
+                      ) &&
+                      screen.workspaceRowContainsText(
+                        fixture.activeLocalWorkspace.id,
+                        'Local Git',
+                      ) &&
+                      screen.workspaceRowContainsText(
+                        fixture.activeLocalWorkspace.id,
+                        'Active',
+                      ) &&
+                      !screen.canOpenWorkspace(fixture.activeLocalWorkspace.id);
+                  postAuthInactiveHostedMatches =
+                      screen.workspaceRowContainsText(
+                        fixture.inactiveHostedWorkspace.id,
+                        'Hosted',
+                      ) &&
+                      screen.workspaceRowContainsText(
+                        fixture.inactiveHostedWorkspace.id,
+                        'Needs sign-in',
+                      ) &&
+                      screen.canOpenWorkspace(
+                        fixture.inactiveHostedWorkspace.id,
+                      ) &&
+                      !screen.workspaceRowContainsText(
+                        fixture.inactiveHostedWorkspace.id,
+                        'Connected',
+                      ) &&
+                      !screen.workspaceRowContainsText(
+                        fixture.inactiveHostedWorkspace.id,
+                        'Read-only',
+                      ) &&
+                      !screen.workspaceRowContainsText(
+                        fixture.inactiveHostedWorkspace.id,
+                        'Attachments limited',
+                      );
+
+                  step5Observed =
+                      'active_workspace=${postAuthWorkspaceState.activeWorkspaceId}; '
+                      'active_local_has_local_type=${screen.workspaceRowContainsText(fixture.activeLocalWorkspace.id, 'Local')}; '
+                      'active_local_has_local_git_state=${screen.workspaceRowContainsText(fixture.activeLocalWorkspace.id, 'Local Git')}; '
+                      'active_local_has_active_label=${screen.workspaceRowContainsText(fixture.activeLocalWorkspace.id, 'Active')}; '
+                      'active_local_has_open_button=${screen.canOpenWorkspace(fixture.activeLocalWorkspace.id)}; '
+                      'inactive_hosted_has_hosted_type=${screen.workspaceRowContainsText(fixture.inactiveHostedWorkspace.id, 'Hosted')}; '
+                      'inactive_hosted_has_needs_sign_in=${screen.workspaceRowContainsText(fixture.inactiveHostedWorkspace.id, 'Needs sign-in')}; '
+                      'inactive_hosted_has_open_button=${screen.canOpenWorkspace(fixture.inactiveHostedWorkspace.id)}; '
+                      'inactive_hosted_shows_connected=${screen.workspaceRowContainsText(fixture.inactiveHostedWorkspace.id, 'Connected')}; '
+                      'inactive_hosted_shows_read_only=${screen.workspaceRowContainsText(fixture.inactiveHostedWorkspace.id, 'Read-only')}; '
+                      'inactive_hosted_shows_attachments_limited=${screen.workspaceRowContainsText(fixture.inactiveHostedWorkspace.id, 'Attachments limited')}; '
+                      'visible_texts=${_formatList(screen.visibleTexts())}';
+                }
+              }
+            }
+          }
+        }
+
         final step4Observed =
             'connect_github_visible=$connectGitHubVisible; '
             'repository_access_visible=$repositoryAccessVisible; '
+            'tapped_connect_github=$tappedConnectGitHub; '
+            'token_field_visible=$tokenFieldVisible; '
+            'connect_token_visible=$connectTokenVisible; '
+            'tapped_connect_token=$tappedConnectToken; '
+            'post_auth_access_state_visible=$postAuthAccessStateVisible; '
+            'switcher_reopened_after_auth=$switcherReopenedAfterAuth; '
             'visible_texts=${_formatList(screen.visibleTexts())}; '
             'visible_semantics=${_formatList(screen.visibleSemanticsLabelsSnapshot())}';
         _recordStep(
           result,
           step: 4,
-          status: connectGitHubVisible ? 'passed' : 'failed',
+          status: switcherReopenedAfterAuth ? 'passed' : 'failed',
           action:
               'Sign in to GitHub from the active local workspace and re-open the switcher.',
           observed: step4Observed,
         );
-        if (!connectGitHubVisible) {
+        if (!switcherReopenedAfterAuth) {
           failures.add(
-            'Step 4 failed: the active local workspace shows Repository access but exposes no production-visible Connect GitHub control, so TS-725 cannot perform the required sign-in step from the active local runtime.\n'
+            'Step 4 failed: $step4FailureReason\n'
             'Observed: $step4Observed',
           );
         }
@@ -200,21 +347,41 @@ void main() {
           check:
               'Viewed the active local workspace Settings surface to find the GitHub sign-in action required by the ticket.',
           observed:
-              'connect_github_visible=$connectGitHubVisible; repository_access_visible=$repositoryAccessVisible',
+              'connect_github_visible=$connectGitHubVisible; repository_access_visible=$repositoryAccessVisible; switcher_reopened_after_auth=$switcherReopenedAfterAuth',
         );
-
-        if (failures.isNotEmpty) {
-          throw AssertionError(failures.join('\n\n'));
-        }
 
         _recordStep(
           result,
           step: 5,
-          status: 'passed',
+          status:
+              switcherReopenedAfterAuth &&
+                  postAuthActiveLocalMatches &&
+                  postAuthInactiveHostedMatches
+              ? 'passed'
+              : 'failed',
           action: 'Verify if the inactive hosted workspace state has changed.',
           observed:
-              'After signing in, the inactive hosted row stayed Needs sign-in while the active local row stayed Local Git.',
+              step5Observed ??
+              'Post-auth validation did not run because the test could not complete the production GitHub sign-in transition and re-open Workspace switcher from the active local workspace. '
+                  'Step 4 observed: $step4Observed',
         );
+
+        if (!switcherReopenedAfterAuth) {
+          failures.add(
+            'Step 5 failed: the test did not re-open Workspace switcher after a real GitHub sign-in, so it could not verify the inactive hosted row after auth.\n'
+            'Observed: ${step5Observed ?? step4Observed}',
+          );
+        } else if (!postAuthActiveLocalMatches ||
+            !postAuthInactiveHostedMatches) {
+          failures.add(
+            'Step 5 failed: after a real GitHub sign-in, the workspace switcher did not preserve the expected active local and inactive hosted states.\n'
+            'Observed: ${step5Observed ?? '<no post-auth observation recorded>'}',
+          );
+        }
+
+        if (failures.isNotEmpty) {
+          throw AssertionError(failures.join('\n\n'));
+        }
 
         _writePassOutputs(result);
       } catch (error, stackTrace) {
@@ -323,8 +490,7 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     'h4. What was automated',
     '* Launched the production tracker in a supported Flutter widget runtime with one active local workspace and one inactive hosted workspace saved.',
     '* Opened *Workspace switcher* and verified the active local row showed {{Local Git}} while the inactive hosted row showed {{Needs sign-in}}.',
-    '* Attempted the ticket'
-        's sign-in step from the active local workspace by opening the visible Settings surface and looking for the production GitHub auth controls.',
+    "* Attempted the ticket's sign-in step from the active local workspace and only treats the scenario as passed after a real auth transition re-opens *Workspace switcher* for the post-auth assertion.",
     '',
     'h4. Result',
     passed
@@ -361,8 +527,7 @@ String _markdownSummary(Map<String, Object?> result, {required bool passed}) {
     '## What was automated',
     '- Launched the production tracker in a supported Flutter widget runtime with one active local workspace and one inactive hosted workspace saved.',
     '- Opened **Workspace switcher** and verified the active local row showed `Local Git` while the inactive hosted row showed `Needs sign-in`.',
-    '- Attempted the ticket'
-        's sign-in step from the active local workspace by opening the visible Settings surface and looking for the production GitHub auth controls.',
+    "- Attempted the ticket's sign-in step from the active local workspace and only treats the scenario as passed after a real auth transition re-opens **Workspace switcher** for the post-auth assertion.",
     '',
     '## Result',
     passed
@@ -402,8 +567,7 @@ String _bugDescription(Map<String, Object?> result) {
     'The active local workspace should expose a production-visible GitHub sign-in path so the ticket can perform the auth step, re-open the workspace switcher, and verify the inactive hosted row still stays `Needs sign-in` instead of changing to `Connected` or `Read-only`.',
     '',
     '## Actual result',
-    'The active local workspace still renders the `Repository access` section in Settings, but it only shows `Local Git` and exposes no visible `Connect GitHub` control, so the ticket'
-        's sign-in step cannot be executed from the required active local scenario.',
+    "The active local workspace still renders the `Repository access` section in Settings, but it only shows `Local Git` and exposes no visible `Connect GitHub` control, so the ticket's sign-in step cannot be executed from the required active local scenario and the post-auth validation remains correctly failed.",
     '',
     '## Missing production capability',
     'When the active workspace is local (`supportsGitHubAuth == false` in production), the app hides the GitHub auth controls entirely. TS-725 requires signing in while that local workspace remains active, but the production UI does not expose any supported action to do that.',
@@ -427,6 +591,10 @@ String _bugDescription(Map<String, Object?> result) {
       'visible_texts_before_sign_in': result['visible_texts_before_sign_in'],
       'visible_texts_in_settings': result['visible_texts_in_settings'],
       'visible_semantics_in_settings': result['visible_semantics_in_settings'],
+      'visible_texts_after_auth_attempt':
+          result['visible_texts_after_auth_attempt'],
+      'visible_semantics_after_auth_attempt':
+          result['visible_semantics_after_auth_attempt'],
     }),
     '```',
   ].join('\n');

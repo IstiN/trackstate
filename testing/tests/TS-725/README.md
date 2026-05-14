@@ -12,8 +12,10 @@ The automation:
    `Local Git`
 4. checks the inactive hosted row shows `Needs sign-in` and does not show
    `Connected`, `Read-only`, or `Attachments limited`
-5. opens **Settings** from the active local workspace and looks for the
-   production GitHub sign-in controls needed to continue the ticket flow
+5. opens **Settings** from the active local workspace and only treats the flow
+   as successful if a production GitHub sign-in transition actually completes,
+   **Workspace switcher** is re-opened, and the inactive hosted row is checked
+   again afterward
 
 ## Run this test
 
@@ -31,7 +33,8 @@ mkdir -p outputs && flutter test testing/tests/TS-725/test_ts_725.dart --reporte
 ```text
 Pass: the active local row shows Local Git, the inactive hosted row shows
 Needs sign-in, and the app exposes a supported sign-in path from the active
-local workspace so the switcher can be rechecked after authentication.
+local workspace so the switcher can be re-opened and rechecked after
+authentication.
 ```
 
 ## Current product gap captured by this automation
@@ -39,5 +42,6 @@ local workspace so the switcher can be rechecked after authentication.
 ```text
 Fail: the supported active local runtime does not expose a visible Connect
 GitHub / Repository access control, so the sign-in step from the active local
-workspace cannot be executed.
+workspace cannot be executed and the post-auth switcher verification stays
+failed instead of passing synthetically.
 ```

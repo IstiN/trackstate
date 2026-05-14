@@ -202,6 +202,59 @@ class Ts725LocalHostedWorkspaceScreen {
   bool isTextVisible(String text) =>
       find.textContaining(text, findRichText: true).evaluate().isNotEmpty;
 
+  bool isSemanticsLabelVisible(String label) =>
+      _exactSemanticsLabel(label).evaluate().isNotEmpty;
+
+  bool isControlVisible(String label) => _control(label).evaluate().isNotEmpty;
+
+  bool isLabeledTextFieldVisible(String label) =>
+      _labeledTextField(label).evaluate().isNotEmpty;
+
+  Future<bool> tapVisibleControl(String label) async {
+    final control = _control(label);
+    if (control.evaluate().isEmpty) {
+      return false;
+    }
+    await _tester.ensureVisible(control.first);
+    await _tester.tap(control.first, warnIfMissed: false);
+    await _tester.pumpAndSettle();
+    return true;
+  }
+
+  Future<void> enterLabeledTextField(
+    String label, {
+    required String text,
+  }) async {
+    final field = _labeledTextField(label);
+    if (field.evaluate().isEmpty) {
+      throw TestFailure(
+        'TS-725 could not find the "$label" text field after opening the '
+        'GitHub sign-in flow.',
+      );
+    }
+    await _tester.ensureVisible(field.first);
+    await _tester.tap(field.first, warnIfMissed: false);
+    await _tester.pump();
+    await _tester.enterText(field.first, text);
+    await _tester.pumpAndSettle();
+  }
+
+  Future<bool> waitForAnyVisibleText(
+    Iterable<String> texts, {
+    Duration timeout = const Duration(seconds: 5),
+    Duration step = const Duration(milliseconds: 100),
+  }) async {
+    final end = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(end)) {
+      if (texts.any(_hasTextOrSemantics)) {
+        await _tester.pump();
+        return true;
+      }
+      await _tester.pump(step);
+    }
+    return texts.any(_hasTextOrSemantics);
+  }
+
   List<String> visibleTexts() => _robot.visibleTexts();
 
   List<String> visibleSemanticsLabelsSnapshot() =>
@@ -220,6 +273,9 @@ class Ts725LocalHostedWorkspaceScreen {
     return find.byKey(ValueKey<String>('workspace-open-$workspaceId'));
   }
 
+  Finder _exactSemanticsLabel(String label) =>
+      find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$'));
+
   Finder _descendantText(Finder scope, String text) {
     return find.descendant(
       of: scope,
@@ -233,6 +289,36 @@ class Ts725LocalHostedWorkspaceScreen {
       matching: find.textContaining(text, findRichText: true),
     );
   }
+
+  Finder _control(String label) {
+    final semantics = _exactSemanticsLabel(label);
+    if (semantics.evaluate().isNotEmpty) {
+      return semantics;
+    }
+    return find.text(label, findRichText: true);
+  }
+
+  Finder _labeledTextField(String label) {
+    final decorationMatch = find.byWidgetPredicate((widget) {
+      if (widget is TextField) {
+        return widget.decoration?.labelText == label;
+      }
+      return false;
+    }, description: 'text field labeled $label');
+    if (decorationMatch.evaluate().isNotEmpty) {
+      return decorationMatch;
+    }
+    return find.descendant(
+      of: _exactSemanticsLabel(label),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is EditableText || widget is TextField,
+        description: 'editable control labeled $label',
+      ),
+    );
+  }
+
+  bool _hasTextOrSemantics(String value) =>
+      isTextVisible(value) || isSemanticsLabelVisible(value);
 
   Future<void> _tap(Finder finder) async {
     await _tester.tap(finder, warnIfMissed: false);
