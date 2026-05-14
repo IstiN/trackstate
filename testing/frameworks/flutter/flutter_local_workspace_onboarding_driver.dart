@@ -33,6 +33,7 @@ class FlutterLocalWorkspaceOnboardingDriver
   static const _ignoredInspectionTexts = <String>{
     'Add workspace',
     'Choose a local folder or hosted repository to get started.',
+    'Choose a local folder to open an existing workspace or initialize TrackState in a new one.',
     'Open existing folder',
     'Initialize folder',
     'Folder',
@@ -45,6 +46,9 @@ class FlutterLocalWorkspaceOnboardingDriver
     'Use a short display name. It will be used in the folder name and starter project key.',
     'TrackState uses this branch for commits in the local repository.',
   };
+
+  static const Duration _defaultTimeout = Duration(seconds: 15);
+  static const Duration _pumpStep = Duration(milliseconds: 100);
 
   @override
   Future<void> launchApp({
@@ -76,7 +80,14 @@ class FlutterLocalWorkspaceOnboardingDriver
             ),
       ),
     );
-    await _tester.pumpAndSettle();
+    await _drainRealAsyncWork();
+    await _pumpUntil(
+      () =>
+          find.text('Add workspace').evaluate().isNotEmpty &&
+          find.byKey(_initializeFolderKey).evaluate().isNotEmpty,
+      failureMessage:
+          'Timed out waiting for the local workspace onboarding screen to render.',
+    );
   }
 
   @override
@@ -98,8 +109,10 @@ class FlutterLocalWorkspaceOnboardingDriver
           );
     return LocalWorkspaceOnboardingState(
       isOnboardingVisible: find.text('Add workspace').evaluate().isNotEmpty,
-      isInitializeActionVisible:
-          find.byKey(_initializeFolderKey).evaluate().isNotEmpty,
+      isInitializeActionVisible: find
+          .byKey(_initializeFolderKey)
+          .evaluate()
+          .isNotEmpty,
       statusLabel: _firstOrNull(
         visibleTexts.where((text) => _statusLabels.contains(text)),
       ),
@@ -165,8 +178,43 @@ class FlutterLocalWorkspaceOnboardingDriver
 
   Future<void> _tapAndSettle(Finder finder) async {
     await _tester.ensureVisible(finder);
-    await _tester.tap(finder, warnIfMissed: false);
-    await _tester.pumpAndSettle();
+    await _tester.runAsync(() async {
+      await _tester.tap(finder, warnIfMissed: false);
+      await _tester.pump();
+      await Future<void>.delayed(const Duration(seconds: 2));
+    });
+    await _tester.pump();
+    await _pumpUntil(
+      () =>
+          find.byKey(_submitKey).evaluate().isNotEmpty ||
+          _statusLabels.any((label) => find.text(label).evaluate().isNotEmpty),
+      failureMessage:
+          'Timed out waiting for the folder inspection result to appear after tapping the onboarding action.',
+    );
+  }
+
+  Future<void> _pumpUntil(
+    bool Function() predicate, {
+    Duration timeout = _defaultTimeout,
+    String? failureMessage,
+  }) async {
+    final maxAttempts = timeout.inMilliseconds ~/ _pumpStep.inMilliseconds;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      await _drainRealAsyncWork();
+      await _tester.pump(_pumpStep);
+      if (predicate()) {
+        return;
+      }
+    }
+    throw TestFailure(
+      failureMessage ?? 'Timed out waiting for the expected onboarding state.',
+    );
+  }
+
+  Future<void> _drainRealAsyncWork() async {
+    await _tester.runAsync(() async {
+      await Future<void>.delayed(_pumpStep);
+    });
   }
 
   List<String> _uniqueVisibleTexts(Finder finder) {

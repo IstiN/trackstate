@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/services/local_workspace_onboarding_service.dart';
 import 'package:trackstate/data/services/local_workspace_onboarding_service_io.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 
@@ -41,25 +43,53 @@ void main() {
         'human_verification': <Map<String, Object?>>[],
       };
 
-      final directory = await Directory.systemTemp.createTemp('ts719-non-git-');
-      addTearDown(() => directory.delete(recursive: true));
+      final directory = Directory(
+        '${Directory.systemTemp.path}/ts719-non-git-${DateTime.now().microsecondsSinceEpoch}',
+      )..createSync(recursive: true);
+      addTearDown(() {
+        if (directory.existsSync()) {
+          directory.deleteSync(recursive: true);
+        }
+      });
       final seedFile = File('${directory.path}/notes.txt');
-      await seedFile.writeAsString('TS-719 reproduction fixture\n');
+      seedFile.writeAsStringSync('TS-719 reproduction fixture\n');
       result['directory_path'] = directory.path;
       result['directory_seed_file'] = seedFile.path;
+      final productionInspection = await tester.runAsync(
+        () => const LocalGitWorkspaceOnboardingService().inspectFolder(
+          directory.path,
+        ),
+      );
+      if (productionInspection == null) {
+        throw StateError(
+          'Timed out waiting for the production folder inspection result.',
+        );
+      }
+      result['production_inspection_state'] = productionInspection.state.name;
+      result['production_inspection_message'] = productionInspection.message;
 
       try {
-        final screen = await launchLocalWorkspaceOnboardingFixture(
-          tester,
-          workspaceProfileService: SharedPreferencesWorkspaceProfileService(
-            now: () => DateTime.utc(2026, 5, 14, 15, 40),
-          ),
-          onboardingService: const LocalGitWorkspaceOnboardingService(),
-          directoryPicker:
-              ({String? confirmButtonText, String? initialDirectory}) async =>
-                  directory.path,
-          sharedPreferences: const <String, Object>{},
-        );
+        final screen =
+            await launchLocalWorkspaceOnboardingFixture(
+              tester,
+              workspaceProfileService: SharedPreferencesWorkspaceProfileService(
+                now: () => DateTime.utc(2026, 5, 14, 15, 40),
+              ),
+              onboardingService: _PrecomputedInspectionOnboardingService(
+                inspection: productionInspection,
+              ),
+              directoryPicker:
+                  ({
+                    String? confirmButtonText,
+                    String? initialDirectory,
+                  }) async => directory.path,
+              sharedPreferences: const <String, Object>{},
+            ).timeout(
+              const Duration(seconds: 20),
+              onTimeout: () => throw TimeoutException(
+                'Timed out waiting for the onboarding fixture to launch.',
+              ),
+            );
 
         try {
           final initialState = screen.captureState();
@@ -86,7 +116,12 @@ void main() {
             );
           }
 
-          await screen.chooseInitializeFolder();
+          await screen.chooseInitializeFolder().timeout(
+            const Duration(seconds: 20),
+            onTimeout: () => throw TimeoutException(
+              'Timed out waiting for the Initialize folder flow to finish inspecting the selected folder.',
+            ),
+          );
           final selectedState = screen.captureState();
           result['visible_texts'] = selectedState.visibleTexts;
           result['status_label'] = selectedState.statusLabel;
@@ -101,7 +136,9 @@ void main() {
           _recordStep(
             result,
             step: 2,
-            status: selectedState.folderPath == directory.path ? 'passed' : 'failed',
+            status: selectedState.folderPath == directory.path
+                ? 'passed'
+                : 'failed',
             action: _requestSteps[1],
             observed:
                 'picked_folder=${selectedState.folderPath}; '
@@ -256,13 +293,7 @@ void _writePassOutputs(Map<String, Object?> result) {
     _bugDescriptionFile.deleteSync();
   }
   _resultFile.writeAsStringSync(
-    '${jsonEncode(const <String, Object>{
-      'status': 'passed',
-      'passed': 1,
-      'failed': 0,
-      'skipped': 0,
-      'summary': '1 passed, 0 failed',
-    })}\n',
+    '${jsonEncode(const <String, Object>{'status': 'passed', 'passed': 1, 'failed': 0, 'skipped': 0, 'summary': '1 passed, 0 failed'})}\n',
   );
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
@@ -273,14 +304,7 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _outputsDir.createSync(recursive: true);
   final error = '${result['error'] ?? 'AssertionError: unknown failure'}';
   _resultFile.writeAsStringSync(
-    '${jsonEncode(<String, Object>{
-      'status': 'failed',
-      'passed': 0,
-      'failed': 1,
-      'skipped': 0,
-      'summary': '0 passed, 1 failed',
-      'error': error,
-    })}\n',
+    '${jsonEncode(<String, Object>{'status': 'failed', 'passed': 0, 'failed': 1, 'skipped': 0, 'summary': '0 passed, 1 failed', 'error': error})}\n',
   );
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
@@ -518,6 +542,29 @@ Iterable<String> _markdownHumanVerificationLines(
           .whereType<Map>()) {
     yield '- **Check:** ${item['check']}';
     yield '  - Observed: `${item['observed']}`';
+  }
+}
+
+class _PrecomputedInspectionOnboardingService
+    implements LocalWorkspaceOnboardingService {
+  const _PrecomputedInspectionOnboardingService({required this.inspection});
+
+  final LocalWorkspaceInspection inspection;
+
+  @override
+  Future<LocalWorkspaceInspection> inspectFolder(String folderPath) async {
+    return inspection;
+  }
+
+  @override
+  Future<LocalWorkspaceSetupResult> initializeFolder({
+    required LocalWorkspaceInspection inspection,
+    required String workspaceName,
+    required String writeBranch,
+  }) {
+    throw UnimplementedError(
+      'TS-719 should fail before initialization is attempted.',
+    );
   }
 }
 
