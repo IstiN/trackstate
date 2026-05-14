@@ -13,6 +13,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from testing.components.pages.github_actions_page import GitHubActionsPageObservation  # noqa: E402
+from testing.components.services.github_actions_preflight_gate_probe import (  # noqa: E402
+    GitHubActionsPreflightGateProbeError,
+)
 from testing.core.config.github_actions_preflight_gate_config import (  # noqa: E402
     GitHubActionsPreflightGateConfig,
 )
@@ -69,6 +72,12 @@ def main() -> None:
         "run_command": RUN_COMMAND,
         "test_file_path": TEST_FILE_PATH,
         "expected_result": EXPECTED_RESULT,
+        "repository": config.repository,
+        "default_branch": config.default_branch,
+        "workflow_name": config.workflow_name,
+        "expected_preflight_runner": config.expected_preflight_runner,
+        "expected_runner_labels": list(config.expected_runner_labels),
+        "expected_failure_markers": list(config.expected_failure_markers),
         "browser": "Chromium (Playwright)",
         "os": platform.platform(),
         "steps": [],
@@ -96,9 +105,9 @@ def main() -> None:
             observed=(
                 "Confirmed the live Apple release workflow still uses an Ubuntu "
                 f"preflight job with runner contract {observation.workflow.required_runner_labels} "
-                f"before the macOS release job. Direct runner inventory visibility was "
-                "not available via the repository runners API, so the offline/mismatch "
-                "precondition was exercised through the live workflow run itself."
+                "before the macOS release job, and the repository runner inventory "
+                f"showed no online matches for {config.expected_runner_labels}. "
+                f"Matching runners observed: {_format_matching_runners(observation.matching_runners)}."
             ),
         )
 
@@ -196,9 +205,11 @@ def main() -> None:
             ),
         )
     except Exception as error:
+        _merge_probe_error_context(result, error)
         result.setdefault("error", f"{type(error).__name__}: {error}")
         result.setdefault("traceback", traceback.format_exc())
         _record_failed_step_from_error(result, str(error))
+        result["precondition_failure"] = _is_precondition_failure(result.get("error"))
         result["product_failure"] = _is_product_failure(result.get("error"))
         _write_failure_outputs(result)
         raise
@@ -312,6 +323,39 @@ def _open_actions_page(
             screenshot_path=str(screenshot_path),
             timeout_seconds=timeout_seconds,
         )
+
+
+def _merge_probe_error_context(result: dict[str, object], error: Exception) -> None:
+    if not isinstance(error, GitHubActionsPreflightGateProbeError):
+        return
+    partial_result = getattr(error, "partial_result", None)
+    if not isinstance(partial_result, dict):
+        return
+    result.update(partial_result)
+
+
+def _format_matching_runners(matching_runners: object) -> str:
+    if not isinstance(matching_runners, list) or not matching_runners:
+        return "none"
+    descriptions: list[str] = []
+    for entry in matching_runners:
+        if hasattr(entry, "name") and hasattr(entry, "status"):
+            name = str(getattr(entry, "name"))
+            status = str(getattr(entry, "status", "unknown"))
+            busy = getattr(entry, "busy", None)
+            labels = getattr(entry, "labels", [])
+        elif isinstance(entry, dict):
+            name = str(entry.get("name", ""))
+            status = str(entry.get("status", "unknown"))
+            busy = entry.get("busy")
+            labels = entry.get("labels", [])
+        else:
+            descriptions.append(str(entry))
+            continue
+        descriptions.append(
+            f"{name} (status={status}, busy={busy}, labels={labels})"
+        )
+    return "; ".join(descriptions)
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -502,13 +546,7 @@ def _response(result: dict[str, object], *, passed: bool) -> str:
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## Outcome",
-        (
-            "- The live Apple release preflight gate failed fast with the expected "
-            "runner-availability message and suppressed the macOS build job."
-            if passed
-            else "- The live Apple release preflight gate did not expose the expected "
-            "runner-availability failure behavior."
-        ),
+        _outcome_summary(result, passed=passed),
         "",
         "## Step results",
         *_step_lines(result, jira=False),
@@ -527,6 +565,23 @@ def _response(result: dict[str, object], *, passed: bool) -> str:
             ]
         )
     return "\n".join(lines) + "\n"
+
+
+def _outcome_summary(result: dict[str, object], *, passed: bool) -> str:
+    if passed:
+        return (
+            "- The live Apple release preflight gate failed fast with the expected "
+            "runner-availability message and suppressed the macOS build job."
+        )
+    if result.get("precondition_failure") is True:
+        return (
+            "- TS-706 stopped before validating the live workflow because the "
+            "runner-availability precondition was not met or could not be verified."
+        )
+    return (
+        "- The live Apple release preflight gate did not expose the expected "
+        "runner-availability failure behavior."
+    )
 
 
 def _bug_description(result: dict[str, object]) -> str:
@@ -630,7 +685,14 @@ def _discussion_threads() -> list[dict[str, object]]:
     threads = raw.get("threads")
     if not isinstance(threads, list):
         return []
-    return [thread for thread in threads if isinstance(thread, dict)]
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
 
 
 def _review_reply_text(
@@ -661,6 +723,19 @@ def _review_reply_text(
         return (
             "Fixed: GitHub Actions page navigation now uses `ui_timeout_seconds` from the "
             f"TS-706 config instead of a hardcoded 60-second timeout. {rerun_summary}"
+        )
+    if root_comment_id == 3243481706:
+        return (
+            "Fixed: TS-706 now performs an explicit repository runner-inventory check "
+            "before creating the disposable tag and stops with a precondition failure if "
+            "the required macOS release runners are online or the runners API is not "
+            f"accessible. {rerun_summary}"
+        )
+    if root_comment_id == 3243481854:
+        return (
+            "Fixed: the test now seeds config-backed metadata before `probe.validate()` "
+            "and merges `GitHubActionsPreflightGateProbeError.partial_result` into the "
+            f"failure output so repository, branch, tag, workflow, and run/job context are preserved. {rerun_summary}"
         )
     return (
         "Fixed: added `testing/tests/TS-706/README.md`, removed hardcoded workflow "
@@ -766,6 +841,16 @@ def _annotated_step_line(result: dict[str, object], step_number: int, action: st
 
 
 def _record_failed_step_from_error(result: dict[str, object], message: str) -> None:
+    if message.startswith("Precondition failed:"):
+        if not _step_exists(result, 1):
+            _record_step(
+                result,
+                step=1,
+                status="failed",
+                action=REQUEST_STEPS[0],
+                observed=message,
+            )
+        return
     match = re.search(r"Step (\d+) failed:(.*)", message, flags=re.DOTALL)
     if match is None:
         return
@@ -779,6 +864,10 @@ def _record_failed_step_from_error(result: dict[str, object], message: str) -> N
 
 def _is_product_failure(error: object) -> bool:
     return re.search(r"(^|\n)Step \d+ failed:", str(error), flags=re.MULTILINE) is not None
+
+
+def _is_precondition_failure(error: object) -> bool:
+    return "Precondition failed:" in str(error)
 
 
 def _step_exists(result: dict[str, object], step_number: int) -> bool:

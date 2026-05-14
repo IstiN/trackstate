@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import asdict
 import json
 from datetime import datetime, timezone
 import re
@@ -14,6 +16,7 @@ from testing.core.config.github_actions_preflight_gate_config import (
 )
 from testing.core.interfaces.github_actions_preflight_gate_probe import (
     GitHubActionsPreflightGateObservation,
+    GitHubActionsSelfHostedRunnerObservation,
     GitHubActionsPreflightWorkflowObservation,
     GitHubActionsWorkflowJobObservation,
     GitHubActionsWorkflowRunObservation,
@@ -25,7 +28,14 @@ from testing.core.interfaces.github_workflow_run_log_reader import (
 
 
 class GitHubActionsPreflightGateProbeError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        partial_result: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.partial_result = deepcopy(partial_result or {})
 
 
 class GitHubActionsPreflightGateProbeService:
@@ -41,12 +51,19 @@ class GitHubActionsPreflightGateProbeService:
         self._workflow_run_log_reader = workflow_run_log_reader
 
     def validate(self) -> GitHubActionsPreflightGateObservation:
+        partial_result: dict[str, Any] = {
+            "repository": self._config.repository,
+            "default_branch": self._config.default_branch,
+            "workflow_name": self._config.workflow_name,
+            "expected_failure_markers": list(self._config.expected_failure_markers),
+        }
         repository_metadata = self._load_json_object(
             endpoint=f"/repos/{self._config.repository}"
         )
         default_branch = self._read_string(repository_metadata, "default_branch")
         if default_branch is None:
             default_branch = self._config.default_branch
+        partial_result["default_branch"] = default_branch
 
         workflow_metadata = self._load_json_object(
             endpoint=(
@@ -66,24 +83,55 @@ class GitHubActionsPreflightGateProbeService:
             metadata=workflow_metadata,
             raw_file_text=raw_file_text,
         )
+        partial_result["workflow"] = asdict(workflow_observation)
         head_sha = self._load_branch_sha(default_branch)
+        partial_result["head_sha"] = head_sha
+        matching_runners = self._load_matching_runners(partial_result=partial_result)
+        partial_result["matching_runners"] = [
+            asdict(runner) for runner in matching_runners
+        ]
+        online_matching_runners = [
+            runner
+            for runner in matching_runners
+            if (runner.status or "").lower() == "online"
+        ]
+        if online_matching_runners:
+            raise GitHubActionsPreflightGateProbeError(
+                "Precondition failed: TS-706 requires all repository runners matching "
+                f"{self._config.expected_runner_labels} to be offline before creating the "
+                "disposable release tag. Matching online runners: "
+                + ", ".join(
+                    f"{runner.name} (status={runner.status}, busy={runner.busy})"
+                    for runner in online_matching_runners
+                ),
+                partial_result=partial_result,
+            )
         baseline_run_ids = {
             run.id for run in self._list_workflow_runs(event="push", per_page=50)
         }
 
         tag_name = self._build_tag_name()
+        partial_result["tag_name"] = tag_name
         started_at = time.time()
-        self._create_tag(tag_name=tag_name, sha=head_sha)
         try:
+            self._create_tag(tag_name=tag_name, sha=head_sha)
             run = self._wait_for_new_push_run(
                 head_sha=head_sha,
                 started_at=started_at,
                 baseline_run_ids=baseline_run_ids,
             )
+            partial_result["run"] = asdict(run)
             completed_run = self._wait_for_completed_run(run.id)
+            partial_result["run"] = asdict(completed_run)
             jobs = self._read_jobs(completed_run.id)
             preflight_job = self._find_job(jobs, self._config.preflight_job_name)
             downstream_job = self._find_job(jobs, self._config.downstream_job_name)
+            partial_result["preflight_job"] = (
+                asdict(preflight_job) if preflight_job is not None else None
+            )
+            partial_result["downstream_job"] = (
+                asdict(downstream_job) if downstream_job is not None else None
+            )
             log_text = self._workflow_run_log_reader.read_run_log(completed_run.id)
             matched_failure_text = self._match_failure_text(log_text)
             log_excerpt = self._extract_log_excerpt(
@@ -94,6 +142,16 @@ class GitHubActionsPreflightGateProbeService:
                     "Unhandled error: HttpError",
                 ],
             )
+            partial_result["matched_failure_text"] = matched_failure_text
+            partial_result["log_excerpt"] = log_excerpt
+        except GitHubActionsPreflightGateProbeError as error:
+            merged_partial_result = deepcopy(partial_result)
+            if error.partial_result:
+                merged_partial_result.update(error.partial_result)
+            raise GitHubActionsPreflightGateProbeError(
+                str(error),
+                partial_result=merged_partial_result,
+            ) from error
         finally:
             self._delete_tag(tag_name)
 
@@ -104,6 +162,7 @@ class GitHubActionsPreflightGateProbeService:
             tag_name=tag_name,
             workflow_name=self._config.workflow_name,
             workflow=workflow_observation,
+            matching_runners=matching_runners,
             run=completed_run,
             preflight_job=preflight_job,
             downstream_job=downstream_job,
@@ -112,6 +171,43 @@ class GitHubActionsPreflightGateProbeService:
             log_text=log_text,
             expected_failure_markers=list(self._config.expected_failure_markers),
         )
+
+    def _load_matching_runners(
+        self,
+        *,
+        partial_result: dict[str, Any],
+    ) -> list[GitHubActionsSelfHostedRunnerObservation]:
+        try:
+            payload = self._load_json_object(
+                endpoint=(
+                    f"/repos/{self._config.repository}/actions/runners?per_page=100"
+                )
+            )
+        except GitHubActionsPreflightGateProbeError as error:
+            partial_result["runner_inventory_error"] = str(error)
+            raise GitHubActionsPreflightGateProbeError(
+                "Precondition failed: TS-706 could not verify whether the "
+                f"{self._config.expected_runner_labels} runners were offline before "
+                "creating the disposable release tag because the repository runners API "
+                "was not accessible.\n"
+                f"Inventory error: {error}",
+                partial_result=partial_result,
+            ) from error
+
+        runners = payload.get("runners")
+        if not isinstance(runners, list):
+            raise GitHubActionsPreflightGateProbeError(
+                "Precondition failed: TS-706 could not verify the repository runner "
+                "inventory because the GitHub API response did not include a runners list.",
+                partial_result=partial_result,
+            )
+        matching_runners = [
+            self._to_runner_observation(entry)
+            for entry in runners
+            if isinstance(entry, dict)
+            and self._runner_has_required_labels(entry)
+        ]
+        return matching_runners
 
     def _parse_workflow_observation(
         self,
@@ -266,7 +362,7 @@ class GitHubActionsPreflightGateProbeService:
             latest_run = self._read_run(run_id)
             if latest_run.status == "completed":
                 return latest_run
-            self._raise_if_runner_is_available(run_id)
+            self._raise_if_runner_is_available(latest_run)
             time.sleep(self._config.poll_interval_seconds)
 
         raise GitHubActionsPreflightGateProbeError(
@@ -275,8 +371,11 @@ class GitHubActionsPreflightGateProbeService:
             f"Run URL: {latest_run.html_url if latest_run is not None else f'https://github.com/{self._config.repository}/actions/runs/{run_id}'}"
         )
 
-    def _raise_if_runner_is_available(self, run_id: int) -> None:
-        jobs = self._read_jobs(run_id)
+    def _raise_if_runner_is_available(
+        self,
+        run: GitHubActionsWorkflowRunObservation,
+    ) -> None:
+        jobs = self._read_jobs(run.id)
         preflight_job = self._find_job(jobs, self._config.preflight_job_name)
         downstream_job = self._find_job(jobs, self._config.downstream_job_name)
         if preflight_job is None or downstream_job is None:
@@ -290,9 +389,17 @@ class GitHubActionsPreflightGateProbeService:
             f"preflight job `{preflight_job.name}` succeeded and the downstream macOS "
             f"job `{downstream_job.name}` entered `{downstream_job.status}`. This "
             "repository currently appears to have a matching online macOS release runner. "
-            f"Run URL: https://github.com/{self._config.repository}/actions/runs/{run_id}. "
+            f"Run URL: {run.html_url}. "
             f"Preflight job URL: {preflight_job.html_url}. "
-            f"Downstream job URL: {downstream_job.html_url}."
+            f"Downstream job URL: {downstream_job.html_url}.",
+            partial_result={
+                "repository": self._config.repository,
+                "default_branch": self._config.default_branch,
+                "workflow_name": self._config.workflow_name,
+                "run": asdict(run),
+                "preflight_job": asdict(preflight_job),
+                "downstream_job": asdict(downstream_job),
+            },
         )
 
     def _list_workflow_runs(
@@ -416,6 +523,26 @@ class GitHubActionsPreflightGateProbeService:
             display_title=self._read_string(payload, "display_title"),
         )
 
+    def _to_runner_observation(
+        self,
+        payload: dict[str, Any],
+    ) -> GitHubActionsSelfHostedRunnerObservation:
+        runner_id = payload.get("id")
+        if not isinstance(runner_id, int):
+            raise GitHubActionsPreflightGateProbeError(
+                f"GitHub Actions runner payload did not include an integer id: {payload}"
+            )
+        busy = payload.get("busy")
+        if not isinstance(busy, bool):
+            busy = None
+        return GitHubActionsSelfHostedRunnerObservation(
+            id=runner_id,
+            name=self._read_string(payload, "name") or "",
+            status=self._read_string(payload, "status"),
+            busy=busy,
+            labels=self._read_runner_labels(payload),
+        )
+
     def _load_json_object(self, *, endpoint: str) -> dict[str, Any]:
         try:
             response_text = self._github_api_client.request_text(endpoint=endpoint)
@@ -434,6 +561,24 @@ class GitHubActionsPreflightGateProbeService:
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
         return []
+
+    def _read_runner_labels(self, payload: dict[str, Any]) -> list[str]:
+        labels = payload.get("labels")
+        if not isinstance(labels, list):
+            return []
+        names: list[str] = []
+        for entry in labels:
+            if not isinstance(entry, dict):
+                continue
+            name = self._read_string(entry, "name")
+            if name is not None:
+                names.append(name)
+        return names
+
+    def _runner_has_required_labels(self, payload: dict[str, Any]) -> bool:
+        runner_labels = set(self._read_runner_labels(payload))
+        required_labels = set(self._config.expected_runner_labels)
+        return required_labels.issubset(runner_labels)
 
     def _split_csv(self, value: str) -> list[str]:
         return [item.strip() for item in value.split(",") if item.strip()]

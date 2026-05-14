@@ -5,6 +5,15 @@ from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
+class GitHubActionsSelfHostedRunnerObservation:
+    id: int
+    name: str
+    status: str | None
+    busy: bool | None
+    labels: list[str]
+
+
+@dataclass(frozen=True)
 class GitHubActionsWorkflowRunObservation:
     id: int
     event: str
@@ -48,6 +57,7 @@ class GitHubActionsPreflightGateObservation:
     tag_name: str
     workflow_name: str
     workflow: GitHubActionsPreflightWorkflowObservation
+    matching_runners: list[GitHubActionsSelfHostedRunnerObservation]
     run: GitHubActionsWorkflowRunObservation
     preflight_job: GitHubActionsWorkflowJobObservation | None
     downstream_job: GitHubActionsWorkflowJobObservation | None
