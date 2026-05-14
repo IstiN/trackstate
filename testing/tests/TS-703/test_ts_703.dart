@@ -31,6 +31,7 @@ const String _manualFallbackHint =
 const String _accessibleRepositoriesHeading = 'Accessible repositories';
 const String _branchLabel = 'Branch';
 const String _repositoryLabel = 'Repository';
+const String _manualBranchPreview = '$_branchLabel: $_manualBranch';
 
 const List<String> _requestSteps = <String>[
   "Navigate to Onboarding and select 'Hosted repository'.",
@@ -229,19 +230,41 @@ void main() {
               'Observed repository field: ${manualState.hostedRepositoryValue}',
             );
           }
-          if (manualState.hostedBranchValue != _manualBranch) {
+          if (!manualState.visibleTexts.contains(_manualFallbackHint)) {
             step3Failures.add(
+              'The hosted onboarding form did not keep the manual fallback helper visible while entering the owner/repo value.\n'
+              'Observed visible texts: ${manualState.visibleTexts.join(' | ')}',
+            );
+          }
+
+          final step4Failures = <String>[];
+          if (manualState.hostedBranchValue != _manualBranch) {
+            step4Failures.add(
               'The Branch field did not retain the custom free-text value.\n'
               'Observed branch field: ${manualState.hostedBranchValue}',
             );
           }
           if (!manualState.visibleTexts.contains(_repositoryLabel) ||
               !manualState.visibleTexts.contains(_branchLabel)) {
-            step3Failures.add(
+            step4Failures.add(
               'The hosted onboarding form did not keep the Repository and Branch labels visible while entering manual fallback values.\n'
               'Observed visible texts: ${manualState.visibleTexts.join(' | ')}',
             );
           }
+
+          final step5Failures = <String>[];
+          final missingManualPreviewTexts =
+              <String>[_manualRepository, _manualBranchPreview]
+                  .where((text) => !manualState.visibleTexts.contains(text))
+                  .toList(growable: false);
+          if (missingManualPreviewTexts.isNotEmpty) {
+            step5Failures.add(
+              'The manual fallback path did not show the required user-visible identity preview before submit.\n'
+              'Missing preview texts: ${missingManualPreviewTexts.join(', ')}\n'
+              'Observed visible texts: ${manualState.visibleTexts.join(' | ')}',
+            );
+          }
+
           _recordStep(
             result,
             step: 3,
@@ -253,7 +276,7 @@ void main() {
           _recordStep(
             result,
             step: 4,
-            status: step3Failures.isEmpty ? 'passed' : 'failed',
+            status: step4Failures.isEmpty ? 'passed' : 'failed',
             action: _requestSteps[3],
             observed:
                 'branch_value=${manualState.hostedBranchValue}; branch_label_visible=${manualState.visibleTexts.contains(_branchLabel)}',
@@ -261,13 +284,18 @@ void main() {
           _recordStep(
             result,
             step: 5,
-            status: step3Failures.isEmpty ? 'passed' : 'failed',
+            status: step5Failures.isEmpty ? 'passed' : 'failed',
             action: _requestSteps[4],
             observed:
-                'repository_value=${manualState.hostedRepositoryValue}; branch_value=${manualState.hostedBranchValue}; repository_label_visible=${manualState.visibleTexts.contains(_repositoryLabel)}; branch_label_visible=${manualState.visibleTexts.contains(_branchLabel)}',
+                'repository_value=${manualState.hostedRepositoryValue}; branch_value=${manualState.hostedBranchValue}; repository_preview_visible=${manualState.visibleTexts.contains(_manualRepository)}; branch_preview_visible=${manualState.visibleTexts.contains(_manualBranchPreview)}; visible_texts=${manualState.visibleTexts.join(' || ')}',
           );
-          if (step3Failures.isNotEmpty) {
-            throw AssertionError(step3Failures.join('\n'));
+          final manualPathFailures = <String>[
+            ...step3Failures,
+            ...step4Failures,
+            ...step5Failures,
+          ];
+          if (manualPathFailures.isNotEmpty) {
+            throw AssertionError(manualPathFailures.join('\n'));
           }
 
           await screen.submit();
@@ -316,9 +344,9 @@ void main() {
           _recordHumanVerification(
             result,
             check:
-                'Verified the manual fallback path from the user perspective by typing a custom owner/repo and free-text branch, confirming those exact values stayed visible in the labeled form fields, and opening the workspace with them.',
+                'Verified the manual fallback path from the user perspective by typing a custom owner/repo and free-text branch, confirming the required identity preview was visible before save, and opening the workspace with those exact values.',
             observed:
-                'repository_field=${manualState.hostedRepositoryValue}; branch_field=${manualState.hostedBranchValue}; repository_label_visible=${manualState.visibleTexts.contains(_repositoryLabel)}; branch_label_visible=${manualState.visibleTexts.contains(_branchLabel)}; active_workspace=${workspaceState.activeWorkspace?.target}@${workspaceState.activeWorkspace?.defaultBranch}',
+                'repository_field=${manualState.hostedRepositoryValue}; branch_field=${manualState.hostedBranchValue}; repository_preview_visible=${manualState.visibleTexts.contains(_manualRepository)}; branch_preview_visible=${manualState.visibleTexts.contains(_manualBranchPreview)}; active_workspace=${workspaceState.activeWorkspace?.target}@${workspaceState.activeWorkspace?.defaultBranch}',
           );
 
           _writePassOutputs(result);
