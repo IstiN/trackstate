@@ -132,26 +132,61 @@ class GitHubActionsPreflightGateProbeService:
         if not isinstance(jobs, dict):
             jobs = {}
 
-        preflight_job = jobs.get("verify-runner")
-        downstream_job = jobs.get("build-macos-release")
+        preflight_job = self._find_job_definition(
+            jobs,
+            expected_name=self._config.preflight_job_name,
+        )
+        downstream_job = self._find_job_definition(
+            jobs,
+            expected_name=self._config.downstream_job_name,
+        )
         if not isinstance(preflight_job, dict) or not isinstance(downstream_job, dict):
             raise GitHubActionsPreflightGateProbeError(
-                "TS-706 expected verify-runner and build-macos-release jobs in "
-                f"{self._config.workflow_path}."
+                "TS-706 expected workflow jobs named "
+                f"`{self._config.preflight_job_name}` and "
+                f"`{self._config.downstream_job_name}` in {self._config.workflow_path}."
             )
 
+        downstream_runs_on = self._normalize_runs_on(downstream_job.get("runs-on"))
         return GitHubActionsPreflightWorkflowObservation(
             html_url=self._read_string(metadata, "html_url") or "",
             state=self._read_string(metadata, "state") or "",
             path=self._read_string(metadata, "path") or self._config.workflow_path,
             updated_at=self._read_string(metadata, "updated_at"),
             preflight_runs_on=self._normalize_runs_on(preflight_job.get("runs-on")),
-            downstream_runs_on=self._normalize_runs_on(downstream_job.get("runs-on")),
-            required_runner_labels=self._split_csv(
-                self._read_string(env_payload, "required_runner_labels") or ""
+            downstream_runs_on=downstream_runs_on,
+            required_runner_labels=self._read_required_runner_labels(
+                env_payload=env_payload,
+                downstream_runs_on=downstream_runs_on,
             ),
             raw_file_text=raw_file_text,
         )
+
+    def _find_job_definition(
+        self,
+        jobs: dict[str, Any],
+        *,
+        expected_name: str,
+    ) -> dict[str, Any] | None:
+        for job_payload in jobs.values():
+            if not isinstance(job_payload, dict):
+                continue
+            if self._read_string(job_payload, "name") == expected_name:
+                return job_payload
+        return None
+
+    def _read_required_runner_labels(
+        self,
+        *,
+        env_payload: dict[str, Any],
+        downstream_runs_on: list[str],
+    ) -> list[str]:
+        configured_labels = self._split_csv(
+            self._read_string(env_payload, "required_runner_labels") or ""
+        )
+        if configured_labels:
+            return configured_labels
+        return downstream_runs_on
 
     def _build_tag_name(self) -> str:
         moment = datetime.now(tz=timezone.utc)
@@ -231,11 +266,33 @@ class GitHubActionsPreflightGateProbeService:
             latest_run = self._read_run(run_id)
             if latest_run.status == "completed":
                 return latest_run
+            self._raise_if_runner_is_available(run_id)
             time.sleep(self._config.poll_interval_seconds)
 
         raise GitHubActionsPreflightGateProbeError(
             "TS-706 timed out waiting for Apple Release Builds run "
-            f"{run_id} to complete. Last status={latest_run.status if latest_run else None}."
+            f"{run_id} to complete. Last status={latest_run.status if latest_run else None}. "
+            f"Run URL: {latest_run.html_url if latest_run is not None else f'https://github.com/{self._config.repository}/actions/runs/{run_id}'}"
+        )
+
+    def _raise_if_runner_is_available(self, run_id: int) -> None:
+        jobs = self._read_jobs(run_id)
+        preflight_job = self._find_job(jobs, self._config.preflight_job_name)
+        downstream_job = self._find_job(jobs, self._config.downstream_job_name)
+        if preflight_job is None or downstream_job is None:
+            return
+        if preflight_job.conclusion != "success":
+            return
+        if downstream_job.status not in {"queued", "in_progress", "waiting"}:
+            return
+        raise GitHubActionsPreflightGateProbeError(
+            "TS-706 could not reproduce the no-runner failure condition because the "
+            f"preflight job `{preflight_job.name}` succeeded and the downstream macOS "
+            f"job `{downstream_job.name}` entered `{downstream_job.status}`. This "
+            "repository currently appears to have a matching online macOS release runner. "
+            f"Run URL: https://github.com/{self._config.repository}/actions/runs/{run_id}. "
+            f"Preflight job URL: {preflight_job.html_url}. "
+            f"Downstream job URL: {downstream_job.html_url}."
         )
 
     def _list_workflow_runs(

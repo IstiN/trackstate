@@ -13,6 +13,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from testing.components.pages.github_actions_page import GitHubActionsPageObservation  # noqa: E402
+from testing.core.config.github_actions_preflight_gate_config import (  # noqa: E402
+    GitHubActionsPreflightGateConfig,
+)
 from testing.core.interfaces.github_actions_preflight_gate_probe import (  # noqa: E402
     GitHubActionsPreflightGateObservation,
     GitHubActionsPreflightWorkflowObservation,
@@ -31,11 +34,14 @@ TEST_CASE_TITLE = (
 )
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-706/test_ts_706.py"
 TEST_FILE_PATH = "testing/tests/TS-706/test_ts_706.py"
+CONFIG_PATH = REPO_ROOT / "testing/tests/TS-706/config.yaml"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input/TS-706/pr_discussions_raw.json"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 RUN_SCREENSHOT_PATH = OUTPUTS_DIR / "ts706_run_page.png"
 JOB_SCREENSHOT_PATH = OUTPUTS_DIR / "ts706_job_page.png"
@@ -55,7 +61,8 @@ EXPECTED_RESULT = (
 
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-    probe = create_github_actions_preflight_gate_probe(REPO_ROOT)
+    config = GitHubActionsPreflightGateConfig.from_file(CONFIG_PATH)
+    probe = create_github_actions_preflight_gate_probe(REPO_ROOT, config_path=CONFIG_PATH)
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
         "test_case_title": TEST_CASE_TITLE,
@@ -80,7 +87,7 @@ def main() -> None:
             asdict(observation.downstream_job) if observation.downstream_job else None
         )
 
-        _assert_workflow_contract(observation)
+        _assert_workflow_contract(observation, config)
         _record_step(
             result,
             step=1,
@@ -116,6 +123,7 @@ def main() -> None:
                 observation.preflight_job.name if observation.preflight_job else "",
                 observation.downstream_job.name if observation.downstream_job else "",
             ),
+            timeout_seconds=config.ui_timeout_seconds,
         )
         job_page = _open_actions_page(
             url=(
@@ -130,6 +138,7 @@ def main() -> None:
                 "failed",
                 "Resource not accessible by integration",
             ),
+            timeout_seconds=config.ui_timeout_seconds,
         )
         result["run_page"] = asdict(run_page)
         result["job_page"] = asdict(job_page)
@@ -198,41 +207,38 @@ def main() -> None:
     print("TS-706 passed")
 
 
-def _assert_workflow_contract(observation: GitHubActionsPreflightGateObservation) -> None:
+def _assert_workflow_contract(
+    observation: GitHubActionsPreflightGateObservation,
+    config: GitHubActionsPreflightGateConfig,
+) -> None:
     if observation.workflow.state != "active":
         raise AssertionError(
             "Step 1 failed: the live Apple release workflow was not active.\n"
             f"Workflow state: {observation.workflow.state}\n"
             f"Workflow URL: {observation.workflow.html_url}"
         )
-    if observation.workflow.preflight_runs_on != ["ubuntu-latest"]:
+    expected_preflight_runs_on = [config.expected_preflight_runner]
+    if observation.workflow.preflight_runs_on != expected_preflight_runs_on:
         raise AssertionError(
             "Step 1 failed: the live preflight gate no longer runs on Ubuntu.\n"
             f"Observed runs-on: {observation.workflow.preflight_runs_on}\n"
+            f"Expected runs-on: {expected_preflight_runs_on}\n"
             f"Workflow path: {observation.workflow.path}"
         )
-    if observation.workflow.required_runner_labels != [
-        "self-hosted",
-        "macOS",
-        "trackstate-release",
-        "ARM64",
-    ]:
+    if observation.workflow.required_runner_labels != config.expected_runner_labels:
         raise AssertionError(
             "Step 1 failed: the live workflow runner-label contract no longer matches the "
             "ticket precondition.\n"
             f"Observed labels: {observation.workflow.required_runner_labels}\n"
+            f"Expected labels: {config.expected_runner_labels}\n"
             f"Workflow path: {observation.workflow.path}"
         )
-    if observation.workflow.downstream_runs_on != [
-        "self-hosted",
-        "macOS",
-        "trackstate-release",
-        "ARM64",
-    ]:
+    if observation.workflow.downstream_runs_on != config.expected_runner_labels:
         raise AssertionError(
             "Step 1 failed: the downstream macOS job no longer targets the required "
             "runner labels.\n"
             f"Observed runs-on: {observation.workflow.downstream_runs_on}\n"
+            f"Expected runs-on: {config.expected_runner_labels}\n"
             f"Workflow path: {observation.workflow.path}"
         )
 
@@ -297,13 +303,14 @@ def _open_actions_page(
     url: str,
     screenshot_path: Path,
     expected_texts: tuple[str, ...],
+    timeout_seconds: int,
 ) -> GitHubActionsPageObservation:
     with create_github_actions_page() as actions_page:
         return actions_page.open_page(
             url=url,
             expected_texts=expected_texts,
             screenshot_path=str(screenshot_path),
-            timeout_seconds=60,
+            timeout_seconds=timeout_seconds,
         )
 
 
@@ -325,6 +332,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response(result, passed=True), encoding="utf-8")
+    _write_review_replies(result, passed=True)
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -349,6 +357,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response(result, passed=False), encoding="utf-8")
+    _write_review_replies(result, passed=False)
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -593,6 +602,71 @@ def _bug_description(result: dict[str, object]) -> str:
             "```",
         ]
     ) + "\n"
+
+
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(
+                root_comment_id=thread.get("rootCommentId"),
+                passed=passed,
+                result=result,
+            ),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [thread for thread in threads if isinstance(thread, dict)]
+
+
+def _review_reply_text(
+    *,
+    root_comment_id: object,
+    passed: bool,
+    result: dict[str, object],
+) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error', 'unknown error')}`."
+    )
+    if root_comment_id == 3243395899:
+        return (
+            "Fixed: the workflow parser now locates the preflight and downstream jobs by "
+            "their configured display names instead of hardcoded YAML job IDs, and it "
+            "falls back to the downstream runner contract when the label env value is not "
+            f"present. {rerun_summary}"
+        )
+    if root_comment_id == 3243396014:
+        return (
+            "Fixed: the workflow contract assertions now use "
+            "`GitHubActionsPreflightGateConfig` for the expected Ubuntu runner and "
+            f"runner-label contract, so config and env overrides remain authoritative. {rerun_summary}"
+        )
+    if root_comment_id == 3243396137:
+        return (
+            "Fixed: GitHub Actions page navigation now uses `ui_timeout_seconds` from the "
+            f"TS-706 config instead of a hardcoded 60-second timeout. {rerun_summary}"
+        )
+    return (
+        "Fixed: added `testing/tests/TS-706/README.md`, removed hardcoded workflow "
+        "contract values from the assertions, and threaded the config-backed UI timeout "
+        f"through the browser verification flow. {rerun_summary}"
+    )
 
 
 def _record_step(
