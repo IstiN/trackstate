@@ -47,7 +47,10 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         .evaluate()
         .toList();
     if (candidates.isEmpty) {
-      return find.byWidgetPredicate((_) => false, description: 'missing top bar');
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing top bar',
+      );
     }
 
     Element bestCandidate = candidates.first;
@@ -604,6 +607,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final detail = _issueDetail(key);
     await _waitForVisible(detail);
     expect(detail, findsOneWidget);
+  }
+
+  @override
+  Future<bool> isIssueDetailVisible(String key) async {
+    await tester.pump();
+    return _issueDetail(key).evaluate().isNotEmpty;
   }
 
   @override
