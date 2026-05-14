@@ -1,0 +1,10 @@
+test_id: TS-725
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with one active local workspace and one inactive hosted workspace preloaded in browser storage.
+  - Verifies the workspace switcher shows the live Local Git state only for the active local row and keeps the inactive hosted row in a deterministic non-live state before and after signing in from the active local workspace.
