@@ -1216,6 +1216,78 @@ abstract class AppLocalizations {
   /// **'No saved workspaces yet. Add one to switch between repositories faster.'**
   String get workspaceSwitcherEmptyState;
 
+  /// No description provided for @addWorkspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Add workspace'**
+  String get addWorkspace;
+
+  /// No description provided for @localFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Local folder'**
+  String get localFolder;
+
+  /// No description provided for @hostedRepository.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted repository'**
+  String get hostedRepository;
+
+  /// No description provided for @workspaceOnboardingDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose how TrackState should open the next workspace.'**
+  String get workspaceOnboardingDescription;
+
+  /// No description provided for @workspaceOnboardingFirstRunDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a local folder or hosted repository to get started.'**
+  String get workspaceOnboardingFirstRunDescription;
+
+  /// No description provided for @workspaceOnboardingRepositoryHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the repository as owner/repo.'**
+  String get workspaceOnboardingRepositoryHelper;
+
+  /// No description provided for @workspaceOnboardingLocalFolderHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the local Git folder path.'**
+  String get workspaceOnboardingLocalFolderHelper;
+
+  /// No description provided for @workspaceOnboardingBrowseRepositories.
+  ///
+  /// In en, this message translates to:
+  /// **'Accessible repositories'**
+  String get workspaceOnboardingBrowseRepositories;
+
+  /// No description provided for @workspaceOnboardingLoadingRepositories.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading accessible repositories...'**
+  String get workspaceOnboardingLoadingRepositories;
+
+  /// No description provided for @workspaceOnboardingBrowseUnavailableHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect GitHub in an existing hosted workspace to browse accessible repositories. You can still enter owner/repo manually here.'**
+  String get workspaceOnboardingBrowseUnavailableHint;
+
+  /// No description provided for @workspaceOnboardingRepositoryManualFallbackHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Select a repository from the current GitHub session or enter owner/repo manually.'**
+  String get workspaceOnboardingRepositoryManualFallbackHint;
+
+  /// No description provided for @workspaceOnboardingRepositoryLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Accessible repositories could not be loaded. Enter owner/repo manually instead. {error}'**
+  String workspaceOnboardingRepositoryLoadFailed(String error);
+
   /// No description provided for @workspaceTargetTypeHosted.
   ///
   /// In en, this message translates to:
@@ -1239,12 +1311,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Open'**
   String get openWorkspace;
-
-  /// No description provided for @addWorkspace.
-  ///
-  /// In en, this message translates to:
-  /// **'Add workspace'**
-  String get addWorkspace;
 
   /// No description provided for @workspaceSaveAndSwitch.
   ///

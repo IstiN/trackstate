@@ -1228,6 +1228,16 @@ class GitHubConnection extends RepositoryConnection {
   });
 }
 
+class HostedRepositoryReference {
+  const HostedRepositoryReference({
+    required this.fullName,
+    required this.defaultBranch,
+  });
+
+  final String fullName;
+  final String defaultBranch;
+}
+
 class RepositoryUser {
   const RepositoryUser({
     required this.login,
