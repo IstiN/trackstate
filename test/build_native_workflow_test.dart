@@ -37,6 +37,8 @@ void main() {
       workflow,
       contains('[self-hosted, macOS, trackstate-release, ARM64]'),
     );
+    expect(workflow, contains('Use runner Flutter SDK'));
+    expect(workflow, isNot(contains('subosito/flutter-action')));
     expect(
       workflow,
       contains('./tool/check_macos_release_runner.sh'),
