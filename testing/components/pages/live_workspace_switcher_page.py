@@ -5,10 +5,32 @@ from pathlib import Path
 import re
 
 from testing.components.pages.live_project_settings_page import LiveProjectSettingsPage
-from testing.core.utils.color_contrast import color_distance
-from testing.core.utils.png_image import RgbImage
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
 from testing.core.interfaces.web_app_session import WebAppTimeoutError
+from testing.core.utils.color_contrast import color_distance
+from testing.core.utils.png_image import RgbImage
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherRowObservation:
+    display_name: str | None
+    target_type_label: str | None
+    state_label: str | None
+    detail_text: str
+    visible_text: str
+    selected: bool
+    semantics_label: str | None
+    icon_accessibility_label: str | None
+    action_labels: tuple[str, ...]
+    button_labels: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherObservation:
+    body_text: str
+    switcher_text: str
+    row_count: int
+    rows: tuple[WorkspaceSwitcherRowObservation, ...]
 
 
 @dataclass(frozen=True)
@@ -50,6 +72,9 @@ class WorkspaceSwitcherPanelObservation:
 
 class LiveWorkspaceSwitcherPage:
     _settings_page = LiveProjectSettingsPage
+    _trigger_label_prefix = "Workspace switcher:"
+    _button_selector = 'flt-semantics[role="button"]'
+    _switcher_heading = "Workspace switcher"
 
     def __init__(self, tracker_page: TrackStateTrackerPage) -> None:
         self._tracker_page = tracker_page
@@ -129,6 +154,278 @@ class LiveWorkspaceSwitcherPage:
         except WebAppTimeoutError as error:
             raise AssertionError(
                 f'Clicking the "{label}" navigation entry did not activate that section.\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+
+    def open_and_observe(
+        self,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> WorkspaceSwitcherObservation:
+        self._click_trigger(timeout_ms=timeout_ms)
+        payload = self._session.wait_for_function(
+            """
+            ({ heading }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const accessibleLabel = (element) =>
+                normalize(
+                  element?.getAttribute?.('aria-label')
+                    || element?.getAttribute?.('alt')
+                    || element?.getAttribute?.('title')
+                    || element?.innerText
+                    || ''
+                );
+              const dedupeRepeatedLine = (value) => {
+                const normalized = normalize(value);
+                const match = normalized.match(/^(.+)\\s+\\1$/);
+                return match ? match[1] : normalized;
+              };
+              const visibleElements = (root, selector = '*') =>
+                Array.from(root.querySelectorAll(selector)).filter((candidate) => isVisible(candidate));
+              const bodyText = document.body?.innerText ?? '';
+              if (!bodyText.includes(heading)) {
+                return null;
+              }
+
+              let switcher = null;
+              const dialogCandidates = visibleElements(
+                document,
+                'flt-semantics[role="dialog"],[role="dialog"]',
+              )
+                .map((element) => ({
+                  element,
+                  text: normalize(element.innerText || ''),
+                  area: (() => {
+                    const rect = element.getBoundingClientRect();
+                    return rect.width * rect.height;
+                  })(),
+                }))
+                .filter((candidate) => candidate.text.includes(heading))
+                .sort((left, right) => left.area - right.area);
+              if (dialogCandidates.length > 0) {
+                switcher = dialogCandidates[0].element;
+              }
+              if (!switcher) {
+                const headings = visibleElements(document)
+                  .map((element) => ({
+                    element,
+                    label: normalize(element.getAttribute?.('aria-label') || ''),
+                    text: normalize(element.innerText || ''),
+                    area: (() => {
+                      const rect = element.getBoundingClientRect();
+                      return rect.width * rect.height;
+                    })(),
+                  }))
+                  .filter((candidate) =>
+                    candidate.label === heading
+                    || candidate.text === heading
+                    || (
+                      candidate.text.includes(heading)
+                      && (
+                        candidate.text.includes('Saved workspaces')
+                        || candidate.text.includes('Save and switch')
+                        || candidate.text.includes('Hosted Local')
+                      )
+                    )
+                  )
+                  .sort((left, right) => left.area - right.area);
+
+                for (const headingCandidate of headings) {
+                  let current = headingCandidate.element;
+                  while (current && current !== document.body) {
+                    const text = normalize(current.innerText || '');
+                    if (
+                      text.includes(heading)
+                      && (
+                        text.includes('Saved workspaces')
+                        || text.includes('Save and switch')
+                        || text.includes('Hosted Local')
+                      )
+                    ) {
+                      switcher = current;
+                      break;
+                    }
+                    current = current.parentElement;
+                  }
+                  if (switcher) {
+                    break;
+                  }
+                }
+              }
+              if (!switcher) {
+                return null;
+              }
+
+              const actionLabels = ['Open', 'Open workspace', 'Active', 'Delete'];
+              const stateLabels = [
+                'Local Git',
+                'Needs sign-in',
+                'Connected',
+                'Read-only',
+                'Saved hosted workspace',
+                'Unavailable',
+                'Attachments limited',
+              ];
+
+              const rowCandidates = visibleElements(switcher)
+                .map((element) => {
+                  const text = normalize(element.innerText || '');
+                  const rect = element.getBoundingClientRect();
+                  const branchCount = (text.match(/Branch:/g) || []).length;
+                  const deleteCount = (text.match(/Delete/g) || []).length;
+                  return {
+                    element,
+                    text,
+                    area: rect.width * rect.height,
+                    branchCount,
+                    deleteCount,
+                  };
+                })
+                .filter((candidate) =>
+                  candidate.branchCount === 1
+                  && candidate.deleteCount === 1
+                  && candidate.text.includes('Branch:')
+                  && candidate.text.includes('Delete')
+                  && (candidate.text.includes('Hosted') || candidate.text.includes('Local'))
+                  && (candidate.text.includes('Open') || candidate.text.includes('Active'))
+                )
+                .filter((candidate) => candidate)
+                .sort((left, right) => left.area - right.area);
+
+              const rows = [];
+              for (const candidate of rowCandidates) {
+                if (rows.some((accepted) => accepted.element.contains(candidate.element))) {
+                  continue;
+                }
+                rows.push(candidate);
+              }
+
+              return {
+                bodyText,
+                switcherText: normalize(switcher.innerText || ''),
+                rows: rows.map((rowCandidate) => {
+                  const rowElement = rowCandidate.element;
+                  const rawLines = (rowElement.innerText || '')
+                    .split(/\\n+/)
+                    .map((line) => dedupeRepeatedLine(line))
+                    .filter((line) => line.length > 0 && line !== heading && line !== 'Saved workspaces');
+                  const rowActionLabels = rawLines.filter((line) => actionLabels.includes(line));
+                  const contentLines = rawLines.filter((line) => !actionLabels.includes(line));
+                  const typeLabel =
+                    contentLines.find((line) => line === 'Hosted' || line === 'Local') ?? null;
+                  const stateLabel =
+                    contentLines.find((line) => stateLabels.includes(line)) ?? null;
+                  const detailText =
+                    contentLines.find((line) => line.includes('Branch:')) ?? '';
+                  const displayName =
+                    contentLines.find((line) =>
+                      line !== typeLabel
+                      && line !== stateLabel
+                      && line !== detailText
+                    ) ?? null;
+                  const semanticsLabels = [rowElement, ...visibleElements(rowElement, 'flt-semantics[aria-label],[aria-label]')]
+                    .map((element) => dedupeRepeatedLine(element.getAttribute('aria-label') || ''))
+                    .filter((label) =>
+                      label.length > 0
+                      && label !== 'repository'
+                      && label !== 'folder'
+                      && !actionLabels.includes(label)
+                    );
+                  const iconLabel =
+                    [rowElement, ...visibleElements(rowElement, 'flt-semantics[aria-label],[aria-label]')]
+                      .map((element) => dedupeRepeatedLine(element.getAttribute('aria-label') || ''))
+                      .find((label) => label === 'repository' || label === 'folder')
+                    ?? null;
+                  const buttonLabels = visibleElements(
+                    rowElement,
+                    'flt-semantics[role="button"],[role="button"],button',
+                  )
+                    .map((element) => accessibleLabel(element) || normalize(element.innerText || ''))
+                    .filter((label) => label.length > 0);
+                  const visibleText = normalize(rowElement.innerText || '');
+                  return {
+                    displayName,
+                    targetTypeLabel: typeLabel,
+                    stateLabel,
+                    detailText,
+                    visibleText,
+                    selected: visibleText.includes('Active'),
+                    semanticsLabel: semanticsLabels[0] ?? null,
+                    iconAccessibilityLabel: iconLabel,
+                    actionLabels: rowActionLabels,
+                    buttonLabels,
+                  };
+                }),
+              };
+            }
+            """,
+            arg={"heading": self._switcher_heading},
+            timeout_ms=timeout_ms,
+        )
+        rows = tuple(
+            WorkspaceSwitcherRowObservation(
+                display_name=row.get("displayName"),
+                target_type_label=row.get("targetTypeLabel"),
+                state_label=row.get("stateLabel"),
+                detail_text=str(row.get("detailText", "")),
+                visible_text=str(row.get("visibleText", "")),
+                selected=bool(row.get("selected")),
+                semantics_label=row.get("semanticsLabel"),
+                icon_accessibility_label=row.get("iconAccessibilityLabel"),
+                action_labels=tuple(str(label) for label in row.get("actionLabels", [])),
+                button_labels=tuple(str(label) for label in row.get("buttonLabels", [])),
+            )
+            for row in payload.get("rows", [])
+        )
+        if not rows:
+            rows = _rows_from_switcher_text(str(payload.get("switcherText", "")))
+        return WorkspaceSwitcherObservation(
+            body_text=str(payload.get("bodyText", "")),
+            switcher_text=str(payload.get("switcherText", "")),
+            row_count=len(rows),
+            rows=rows,
+        )
+
+    def close(self, *, timeout_ms: int = 15_000) -> None:
+        if self._session.count('flt-semantics[role="dialog"],[role="dialog"]') == 0:
+            return
+        self._session.press_key("Escape")
+        try:
+            self._session.wait_for_function(
+                """
+                () => {
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  return !Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  ).some((candidate) => isVisible(candidate));
+                }
+                """,
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Closing the Workspace switcher did not dismiss the dialog.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
 
@@ -339,6 +636,13 @@ class LiveWorkspaceSwitcherPage:
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
 
+    def _click_trigger(self, *, timeout_ms: int) -> None:
+        self._session.click(
+            self._button_selector,
+            has_text=self._trigger_label_prefix,
+            timeout_ms=timeout_ms,
+        )
+
 
 def _bright_surface_box(
     *,
@@ -384,3 +688,71 @@ def _background_dimmed(*, before: RgbImage, after: RgbImage) -> bool:
         if (before_brightness - after_brightness) >= 12 and color_distance(before_pixel, after_pixel) >= 14:
             darker_pixels += 1
     return darker_pixels >= int((after.width * after.height) * 0.08)
+
+
+def _rows_from_switcher_text(switcher_text: str) -> tuple[WorkspaceSwitcherRowObservation, ...]:
+    normalized = " ".join(switcher_text.split())
+    if not normalized:
+        return ()
+    normalized = normalized.replace("Workspace switcher Workspace switcher ", "", 1)
+    for trailer in (" Hosted Local Save and switch", " Save and switch"):
+        if trailer in normalized:
+            normalized = normalized.split(trailer, 1)[0].strip()
+            break
+    chunk_pattern = re.compile(r".+? Delete(?= .+? Delete|$)")
+    states = (
+        "Attachments limited",
+        "Saved hosted workspace",
+        "Needs sign-in",
+        "Read-only",
+        "Connected",
+        "Unavailable",
+        "Local Git",
+    )
+    rows: list[WorkspaceSwitcherRowObservation] = []
+    for chunk_match in chunk_pattern.finditer(normalized):
+        chunk = chunk_match.group(0).strip()
+        action = "Open workspace" if chunk.endswith("Open workspace Delete") else "Open" if chunk.endswith("Open Delete") else "Active"
+        suffix = f" {action} Delete"
+        if not chunk.endswith(suffix):
+            continue
+        chunk_without_action = chunk[: -len(suffix)].strip()
+        target_type = None
+        state_label = None
+        for candidate_state in states:
+            for candidate_type in ("Hosted", "Local"):
+                candidate_suffix = f" {candidate_type} {candidate_state}"
+                if chunk_without_action.endswith(candidate_suffix):
+                    target_type = candidate_type
+                    state_label = candidate_state
+                    chunk_without_action = chunk_without_action[: -len(candidate_suffix)].strip()
+                    break
+            if target_type is not None:
+                break
+        if target_type is None or state_label is None:
+            continue
+        detail_match = re.search(
+            r"(?P<detail>\S+\s+•\s+Branch:\s+\S+(?:\s+•\s+Write\s+Branch:\s+\S+)?)$",
+            chunk_without_action,
+        )
+        if detail_match is None:
+            continue
+        detail_text = detail_match.group("detail").strip()
+        target = detail_text.split(" • Branch:", 1)[0].strip()
+        display_name = chunk_without_action[: detail_match.start()].strip() or target
+        button_labels = ("Delete",) if action == "Active" else (action, "Delete")
+        rows.append(
+            WorkspaceSwitcherRowObservation(
+                display_name=display_name,
+                target_type_label=target_type,
+                state_label=state_label,
+                detail_text=detail_text,
+                visible_text=f"{display_name} {detail_text} {target_type} {state_label} {action} Delete",
+                selected=action == "Active",
+                semantics_label=None,
+                icon_accessibility_label=None,
+                action_labels=((action,) if action == "Active" else (action,)),
+                button_labels=button_labels,
+            ),
+        )
+    return tuple(rows)
