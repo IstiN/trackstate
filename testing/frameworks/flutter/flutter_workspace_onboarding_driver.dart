@@ -9,6 +9,7 @@ import 'package:trackstate/ui/features/tracker/services/workspace_directory_pick
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/workspace_onboarding_driver.dart';
+import '../../core/models/workspace_shell_entry_point_observation.dart';
 import '../../core/models/workspace_onboarding_state.dart';
 
 class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
@@ -135,6 +136,61 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
   }
 
   @override
+  WorkspaceShellEntryPointObservation observeShellEntryPoint({
+    required String workspaceDisplayName,
+  }) {
+    final addWorkspaceFinder = _addWorkspaceControl();
+    final workspaceSwitcherFinder = _workspaceSwitcherTrigger();
+    final interactiveLabels = _interactiveSemanticsLabels();
+    final hasAddWorkspace = addWorkspaceFinder.evaluate().isNotEmpty;
+    final hasWorkspaceSwitcher = workspaceSwitcherFinder.evaluate().isNotEmpty;
+
+    double? verticalCenterDelta;
+    double? horizontalGap;
+    var sharedTopBarRow = false;
+    var addWorkspaceBeforeSwitcher = false;
+    Map<String, double>? addWorkspaceRect;
+    Map<String, double>? workspaceSwitcherRect;
+
+    if (hasAddWorkspace && hasWorkspaceSwitcher) {
+      final addRect = _tester.getRect(addWorkspaceFinder.first);
+      final switcherRect = _tester.getRect(workspaceSwitcherFinder.first);
+      sharedTopBarRow = _sharesTopBarRow(
+        addWorkspaceFinder.first,
+        workspaceSwitcherFinder.first,
+      );
+      verticalCenterDelta = (addRect.center.dy - switcherRect.center.dy).abs();
+      horizontalGap = switcherRect.left - addRect.right;
+      addWorkspaceBeforeSwitcher = addRect.center.dx < switcherRect.center.dx;
+      addWorkspaceRect = _rectAsMap(addRect);
+      workspaceSwitcherRect = _rectAsMap(switcherRect);
+    }
+
+    return WorkspaceShellEntryPointObservation(
+      isAddWorkspaceVisible: hasAddWorkspace,
+      isWorkspaceSwitcherVisible: hasWorkspaceSwitcher,
+      addWorkspaceHasSemanticLabel: _containsSemanticLabel(
+        interactiveLabels,
+        'Add workspace',
+      ),
+      workspaceSwitcherHasSemanticLabel: _containsSemanticLabel(
+        interactiveLabels,
+        'Workspace switcher:',
+      ),
+      currentWorkspaceIncludedInSwitcherLabel: _containsSemanticLabel(
+        interactiveLabels,
+        workspaceDisplayName,
+      ),
+      sharedTopBarRow: sharedTopBarRow,
+      verticalCenterDelta: verticalCenterDelta,
+      horizontalGap: horizontalGap,
+      addWorkspaceBeforeSwitcher: addWorkspaceBeforeSwitcher,
+      addWorkspaceRect: addWorkspaceRect,
+      workspaceSwitcherRect: workspaceSwitcherRect,
+    );
+  }
+
+  @override
   bool isAccessCalloutVisible({
     required String title,
     required String message,
@@ -181,6 +237,21 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
             widget.properties.label == '$title $title $message',
         description: 'repository-access callout "$title"',
       );
+
+  Finder _addWorkspaceControl() {
+    final button = find.ancestor(
+      of: find.text('Add workspace'),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    if (button.evaluate().isNotEmpty) {
+      return button.first;
+    }
+    return find.bySemanticsLabel(RegExp('^Add workspace\$')).first;
+  }
+
+  Finder _workspaceSwitcherTrigger() {
+    return find.byKey(const ValueKey<String>('workspace-switcher-trigger'));
+  }
 
   Finder _submitButtonFinder() {
     final hostedFinder = find.byKey(
@@ -334,4 +405,30 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
     }
     return deduped;
   }
+
+  bool _containsSemanticLabel(List<String> labels, String fragment) {
+    return labels.any((label) => label.contains(fragment));
+  }
+
+  bool _sharesTopBarRow(Finder left, Finder right) {
+    final leftRows = find.ancestor(of: left, matching: find.byType(Row));
+    final rightRows = find.ancestor(of: right, matching: find.byType(Row));
+    for (final leftRow in leftRows.evaluate()) {
+      for (final rightRow in rightRows.evaluate()) {
+        if (identical(leftRow, rightRow)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  Map<String, double> _rectAsMap(Rect rect) => <String, double>{
+    'left': rect.left,
+    'top': rect.top,
+    'right': rect.right,
+    'bottom': rect.bottom,
+    'width': rect.width,
+    'height': rect.height,
+  };
 }
