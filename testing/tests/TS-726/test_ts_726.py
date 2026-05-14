@@ -479,8 +479,10 @@ def _assert_sheet_accessibility(
             f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
             f"Observed interactive labels: {[item.label for item in surface.interactive_elements]!r}",
         )
+    _assert_logical_sheet_focus_order(sequence)
     return (
         f"focus_sequence={_focus_sequence_summary(sequence)}; "
+        f"focus_groups={_focus_group_summary(sequence)}; "
         f"interactive_labels={[item.label for item in surface.interactive_elements]!r}; "
         f"semantics_labels={_semantics_summary(surface.semantics_nodes)}"
     )
@@ -769,6 +771,66 @@ def _focus_sequence_summary(sequence: tuple[FocusNavigationStep, ...]) -> str:
         f"{step.step}:{step.after_label or '<none>'}"
         for step in sequence
     )
+
+
+def _assert_logical_sheet_focus_order(
+    sequence: tuple[FocusNavigationStep, ...],
+) -> None:
+    ranked_groups: list[tuple[int, str, str]] = []
+    last_rank = -1
+    for step in sequence:
+        label = step.after_label or ""
+        group = _sheet_focus_group(label)
+        if group is None:
+            continue
+        rank = _sheet_focus_group_rank(group)
+        ranked_groups.append((step.step, label, group))
+        if rank < last_rank:
+            raise AssertionError(
+                "Step 3 failed: tabbing through the workspace switcher dialog did not keep "
+                "a logical focus order across the major control groups.\n"
+                f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
+                f"Observed focus groups: {_focus_group_summary(sequence)}"
+            )
+        last_rank = rank
+    if not ranked_groups:
+        raise AssertionError(
+            "Step 3 failed: the workspace switcher dialog did not expose enough labeled "
+            "focus targets to verify logical group order.\n"
+            f"Observed focus sequence: {_focus_sequence_summary(sequence)}"
+        )
+
+
+def _focus_group_summary(sequence: tuple[FocusNavigationStep, ...]) -> str:
+    grouped_steps = []
+    for step in sequence:
+        label = step.after_label or "<none>"
+        group = _sheet_focus_group(step.after_label or "")
+        if group is None:
+            grouped_steps.append(f"{step.step}:{label}[other]")
+            continue
+        grouped_steps.append(f"{step.step}:{label}[{group}]")
+    return " -> ".join(grouped_steps)
+
+
+def _sheet_focus_group(label: str) -> str | None:
+    if label in {"Open", "Delete", "Active"}:
+        return "workspace-list"
+    if label in {"Hosted", "Local", "Repository", "Branch"}:
+        return "add-workspace"
+    if label == "Save and switch":
+        return "save"
+    return None
+
+
+def _sheet_focus_group_rank(group: str) -> int:
+    if group == "workspace-list":
+        return 0
+    if group == "add-workspace":
+        return 1
+    if group == "save":
+        return 2
+    raise ValueError(f"Unknown sheet focus group: {group}")
 
 
 def _badge_summary(badges: tuple[WorkspaceSwitcherBadgeObservation, ...]) -> str:
