@@ -17,6 +17,16 @@ void main() {
     expect(workflow, contains("tags: ['v*']"));
     expect(workflow, contains('workflow_dispatch:'));
     expect(workflow, contains('release_ref:'));
+    expect(workflow, contains('default: auto'));
+    expect(workflow, contains('release_ref="v0.0.1"'));
+    expect(
+      workflow,
+      contains(r'release_ref="v${major}.${minor}.$((patch + 1))"'),
+    );
+    expect(
+      workflow,
+      contains(r'target_commitish: ${{ env.release_checkout_ref }}'),
+    );
     expect(workflow, isNot(contains('branches: [main]')));
     expect(workflow, contains('runs-on: ubuntu-latest'));
     expect(
