@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
+
+import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
 
 void main() {
   setUp(() {
@@ -151,6 +154,136 @@ void main() {
 
       expect(find.text('Read-only'), findsOneWidget);
       expect(find.text('Attachments limited'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'workspace switcher keeps visible workspace details on compact layouts',
+    (tester) async {
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: false,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => ReactiveIssueDetailTrackStateRepository(
+                permission: attachmentRestrictedPermission,
+              ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+      expect(trigger, findsOneWidget);
+      expect(
+        find.descendant(of: trigger, matching: find.text('alpha/repo')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: trigger,
+          matching: find.text('Hosted · Attachments limited'),
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'workspace switcher keeps visible workspace details on condensed desktop layouts',
+    (tester) async {
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: false,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1180, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => ReactiveIssueDetailTrackStateRepository(
+                permission: attachmentRestrictedPermission,
+              ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+      expect(trigger, findsOneWidget);
+      expect(
+        find.descendant(
+          of: trigger,
+          matching: find.text('alpha/repo · Hosted · Attachments limited'),
+        ),
+        findsOneWidget,
+      );
     },
   );
 
