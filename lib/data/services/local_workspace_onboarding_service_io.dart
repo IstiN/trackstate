@@ -71,13 +71,27 @@ class LocalGitWorkspaceOnboardingService
           needsGitInitialization: true,
         );
       }
+      final hasTrackStateArtifacts = await _containsTrackStateArtifacts(
+        directory,
+      );
+      if (hasTrackStateArtifacts) {
+        return LocalWorkspaceInspection(
+          folderPath: normalizedPath,
+          state: LocalWorkspaceInspectionState.blocked,
+          message:
+              'TrackState files already exist here, but Git is not initialized for this folder yet. Clean up the partial setup or choose a different folder before onboarding.',
+          suggestedWorkspaceName: suggestedWorkspaceName,
+          suggestedWriteBranch: _defaultBranchName,
+        );
+      }
       return LocalWorkspaceInspection(
         folderPath: normalizedPath,
-        state: LocalWorkspaceInspectionState.blocked,
+        state: LocalWorkspaceInspectionState.readyToInitialize,
         message:
-            'Non-empty folders are only supported when they are already Git repositories. Choose an existing repository or an empty folder.',
+            'This folder is not a Git repository yet. TrackState can initialize Git and create the starter workspace here.',
         suggestedWorkspaceName: suggestedWorkspaceName,
         suggestedWriteBranch: _defaultBranchName,
+        needsGitInitialization: true,
       );
     }
 

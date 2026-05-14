@@ -23,19 +23,45 @@ void main() {
     expect(inspection.detectedWriteBranch, 'main');
   });
 
-  test('inspectFolder blocks a non-empty non-git folder', () async {
-    final directory = await Directory.systemTemp.createTemp(
-      'trackstate-non-git-',
-    );
-    addTearDown(() => directory.delete(recursive: true));
-    await File('${directory.path}/notes.txt').writeAsString('hello');
+  test(
+    'inspectFolder allows initialization for a non-empty non-git folder',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'trackstate-non-git-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      await File('${directory.path}/notes.txt').writeAsString('hello');
 
-    final service = const LocalGitWorkspaceOnboardingService();
-    final inspection = await service.inspectFolder(directory.path);
+      final service = const LocalGitWorkspaceOnboardingService();
+      final inspection = await service.inspectFolder(directory.path);
 
-    expect(inspection.state, LocalWorkspaceInspectionState.blocked);
-    expect(inspection.message, contains('Non-empty folders'));
-  });
+      expect(inspection.state, LocalWorkspaceInspectionState.readyToInitialize);
+      expect(inspection.needsGitInitialization, isTrue);
+      expect(inspection.message, contains('not a Git repository yet'));
+    },
+  );
+
+  test(
+    'inspectFolder blocks a non-git folder with TrackState artifacts',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'trackstate-partial-trackstate-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      await File(
+        '${directory.path}/BROKEN/project.json',
+      ).create(recursive: true);
+
+      final service = const LocalGitWorkspaceOnboardingService();
+      final inspection = await service.inspectFolder(directory.path);
+
+      expect(inspection.state, LocalWorkspaceInspectionState.blocked);
+      expect(
+        inspection.message,
+        contains('TrackState files already exist here'),
+      );
+    },
+  );
 
   test('inspectFolder allows initialization for an empty folder', () async {
     final directory = await Directory.systemTemp.createTemp(
