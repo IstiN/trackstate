@@ -36,6 +36,9 @@ class LiveStartupRecoveryPage:
         self._tracker_page = tracker_page
         self._session = tracker_page.session
 
+    def open(self) -> None:
+        self._tracker_page.open_entrypoint()
+
     def wait_for_shell_routed_to_settings(
         self,
         *,
@@ -113,4 +116,3 @@ class LiveStartupRecoveryPage:
 
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
-
