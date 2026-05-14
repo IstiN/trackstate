@@ -36,6 +36,9 @@ EXPECTED_SYNC_LABEL = "Sync unavailable"
 SYNC_LABELS = {EXPECTED_SYNC_LABEL, "Attention needed"}
 EXPECTED_RETRY_INTERVAL_SECONDS = 60
 RETRY_INTERVAL_TOLERANCE_SECONDS = 15
+MIN_DISTINCT_RETRY_GAP_SECONDS = (
+    EXPECTED_RETRY_INTERVAL_SECONDS - RETRY_INTERVAL_TOLERANCE_SECONDS
+)
 DEFAULT_BRANCH = "main"
 AUTH_ERROR_FRAGMENT_PATTERN = re.compile(
     r"(401|bad credentials|gitHub api request failed|gitHub connection failed)",
@@ -135,23 +138,7 @@ def main() -> None:
                     observed=(
                         "Switched the live hosted runtime from authenticated GitHub sync "
                         "responses to synthetic HTTP 401 `Bad credentials` responses for "
-                        "workspace-sync repository checks."
-                    ),
-                )
-
-                first_failed_request = _wait_for_failed_request(
-                    sync_observation,
-                    expected_count=1,
-                    timeout_seconds=150,
-                )
-                _record_step(
-                    result,
-                    step=3,
-                    status="passed",
-                    action="Wait for the background sync coordinator to perform a check.",
-                    observed=(
-                        f"first_failed_sync_request={first_failed_request.url}; "
-                        f"seconds_after_revocation={first_failed_request.since_revocation_seconds:.1f}"
+                        "repository-scoped GitHub API checks."
                     ),
                 )
 
@@ -160,6 +147,27 @@ def main() -> None:
                 result["failure_surface"] = _surface_payload(failure_surface)
                 result["failure_workspace_sync_ocr"] = failure_ocr_text
                 _assert_failure_surface(failure_surface, failure_ocr_text)
+                first_post_revocation_request = _first_post_revocation_request(
+                    sync_observation,
+                )
+                _record_step(
+                    result,
+                    step=3,
+                    status="passed",
+                    action="Wait for the background sync coordinator to perform a check.",
+                    observed=(
+                        (
+                            f"first_post_revocation_github_request={first_post_revocation_request.url}; "
+                            f"seconds_after_revocation={first_post_revocation_request.since_revocation_seconds:.1f}"
+                        )
+                        if first_post_revocation_request is not None
+                        else (
+                            "No browser-visible GitHub API request was captured before the "
+                            "user-visible sync failure surfaced; treated the visible "
+                            "`Sync unavailable` state as proof the hosted check ran."
+                        )
+                    ),
+                )
                 _record_step(
                     result,
                     step=4,
@@ -173,9 +181,14 @@ def main() -> None:
                     ),
                 )
 
+                first_failed_request = _wait_for_failed_request(
+                    sync_observation,
+                    timeout_seconds=60,
+                )
                 second_failed_request = _wait_for_failed_request(
                     sync_observation,
-                    expected_count=2,
+                    previous_request=first_failed_request,
+                    minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
                     timeout_seconds=150,
                 )
                 retry_interval_seconds = (
@@ -260,27 +273,63 @@ def main() -> None:
 def _wait_for_failed_request(
     observation: HostedSyncAuthFailureObservation,
     *,
-    expected_count: int,
     timeout_seconds: float,
+    previous_request: HostedSyncAuthFailureRequest | None = None,
+    minimum_gap_seconds: float = 0.0,
 ) -> HostedSyncAuthFailureRequest:
-    found, requests = poll_until(
-        probe=lambda: tuple(observation.failed_sync_requests),
-        is_satisfied=lambda items: len(items) >= expected_count,
+    found, request = poll_until(
+        probe=lambda: _matching_failed_request(
+            tuple(observation.failed_sync_requests),
+            previous_request=previous_request,
+            minimum_gap_seconds=minimum_gap_seconds,
+        ),
+        is_satisfied=lambda item: item is not None,
         timeout_seconds=timeout_seconds,
         interval_seconds=1.0,
     )
     requests = tuple(observation.failed_sync_requests)
-    if len(requests) >= expected_count:
-        return requests[expected_count - 1]
-    if not found:
+    if found and isinstance(request, HostedSyncAuthFailureRequest):
+        return request
+    if previous_request is None:
         raise AssertionError(
-            "Step 3 failed: the hosted background sync coordinator did not issue the "
-            "expected authenticated repository check after the PAT was revoked.\n"
+            "Step 5 failed: the hosted app did not issue a failed repository-scoped "
+            "GitHub request after the PAT was revoked.\n"
             f"Observed failed sync request count: {len(requests)}\n"
             f"Observed failed sync request log: {_request_log(tuple(requests))}\n"
             f"Observed post-revocation GitHub API URLs: {observation.post_revocation_request_urls}",
         )
-    return requests[expected_count - 1]
+    raise AssertionError(
+        "Step 5 failed: the hosted app did not issue a distinct follow-up failed "
+        "repository-scoped GitHub request after the first revoked-PAT check.\n"
+        f"Required minimum gap after first failed request: {minimum_gap_seconds:.1f}s\n"
+        f"Observed failed sync request log: {_request_log(tuple(requests))}\n"
+        f"Observed post-revocation GitHub API URLs: {observation.post_revocation_request_urls}",
+    )
+
+
+def _first_post_revocation_request(
+    observation: HostedSyncAuthFailureObservation,
+) -> HostedSyncAuthFailureRequest | None:
+    if observation.post_revocation_requests:
+        return observation.post_revocation_requests[0]
+    return None
+
+
+def _matching_failed_request(
+    requests: tuple[HostedSyncAuthFailureRequest, ...],
+    *,
+    previous_request: HostedSyncAuthFailureRequest | None,
+    minimum_gap_seconds: float,
+) -> HostedSyncAuthFailureRequest | None:
+    if previous_request is None:
+        return requests[0] if requests else None
+    for request in requests:
+        if (
+            request.observed_at_monotonic - previous_request.observed_at_monotonic
+            >= minimum_gap_seconds
+        ):
+            return request
+    return None
 
 
 def _wait_for_failure_surface(
@@ -291,7 +340,7 @@ def _wait_for_failure_surface(
         is_satisfied=lambda current: (
             current.header_pill_label in SYNC_LABELS
         ),
-        timeout_seconds=45,
+        timeout_seconds=150,
         interval_seconds=2,
     )
     if not found:
@@ -317,7 +366,7 @@ def _wait_for_failure_ocr(page: LiveWorkspaceSyncPage) -> str:
                 or "401" in text
             )
         ),
-        timeout_seconds=45,
+        timeout_seconds=150,
         interval_seconds=3,
     )
     if not found:

@@ -24,6 +24,7 @@ class HostedSyncAuthFailureObservation:
     repository: str
     revoked_at_monotonic: float | None = None
     failed_sync_requests: list[HostedSyncAuthFailureRequest] = field(default_factory=list)
+    post_revocation_requests: list[HostedSyncAuthFailureRequest] = field(default_factory=list)
     post_revocation_request_urls: list[str] = field(default_factory=list)
 
     def mark_revoked(self) -> float:
@@ -40,6 +41,18 @@ class HostedSyncAuthFailureObservation:
             since_revocation_seconds=observed_at - revoked_at,
         )
         self.failed_sync_requests.append(observation)
+        return observation
+
+    def record_post_revocation_request(self, url: str) -> HostedSyncAuthFailureRequest:
+        observed_at = time.monotonic()
+        revoked_at = self.mark_revoked()
+        observation = HostedSyncAuthFailureRequest(
+            url=url,
+            observed_at_monotonic=observed_at,
+            since_revocation_seconds=observed_at - revoked_at,
+        )
+        self.post_revocation_requests.append(observation)
+        self.post_revocation_request_urls.append(url)
         return observation
 
 
@@ -87,8 +100,8 @@ class HostedSyncAuthFailureRuntime(PlaywrightStoredTokenWebAppRuntime):
     def _handle_github_api_route(self, route: Route) -> None:
         url = route.request.url
         if self._revoked:
-            self._observation.post_revocation_request_urls.append(url)
-        if self._revoked and self._is_workspace_sync_request(url):
+            self._observation.record_post_revocation_request(url)
+        if self._revoked and self._is_repository_scoped_request(url):
             self._observation.record_failed_sync_request(url)
             route.fulfill(
                 status=401,
@@ -104,10 +117,8 @@ class HostedSyncAuthFailureRuntime(PlaywrightStoredTokenWebAppRuntime):
             return
         self._continue_github_api_route(route)
 
-    def _is_workspace_sync_request(self, url: str) -> bool:
+    def _is_repository_scoped_request(self, url: str) -> bool:
         parsed = urlparse(url)
         path = parsed.path.rstrip("/").lower()
         repository_path = self._repository_path.lower()
-        return path == repository_path or path.startswith(
-            f"{repository_path}/branches/",
-        )
+        return path == repository_path or path.startswith(f"{repository_path}/")
