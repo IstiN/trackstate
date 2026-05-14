@@ -6,8 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       release_ref:
-        description: 'Semantic version tag to rebuild (for example v1.2.3)'
-        required: true
+        description: 'Semantic version tag to rebuild, or auto to create the next patch tag'
+        required: false
+        default: auto
         type: string
 
 permissions:
@@ -15,12 +16,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: apple-release-${{ github.event_name == 'push' && github.ref_name || github.event.inputs.release_ref }}
+  group: apple-release-${{ github.event_name == 'push' && github.ref_name || github.event.inputs.release_ref || 'auto' }}
   cancel-in-progress: false
 
 env:
   required_runner_labels: self-hosted,macOS,trackstate-release,ARM64
-  release_ref: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.release_ref }}
+  release_ref: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.release_ref || 'auto' }}
 
 jobs:
   verify-runner:
@@ -28,7 +29,14 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_tag: ${{ steps.release.outputs.tag }}
+      release_checkout_ref: ${{ steps.release.outputs.checkout_ref }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
       - name: Resolve release tag
         id: release
         shell: bash
@@ -36,29 +44,66 @@ jobs:
           set -euo pipefail
 
           release_ref="${{ env.release_ref }}"
+          git fetch --tags --force
+
+          if [[ -z "$release_ref" || "$release_ref" == "auto" ]]; then
+            latest_tag="$(
+              git tag --list 'v[0-9]*.[0-9]*.[0-9]*' |
+                sed -E 's/^v([0-9]+)\.([0-9]+)\.([0-9]+)$/\1 \2 \3 &/' |
+                sort -n -k1,1 -k2,2 -k3,3 |
+                tail -n 1 |
+                awk '{print $4}'
+            )"
+
+            if [[ -z "$latest_tag" ]]; then
+              release_ref="v0.0.1"
+            else
+              IFS=. read -r major minor patch <<< "${latest_tag#v}"
+              release_ref="v${major}.${minor}.$((patch + 1))"
+            fi
+
+            checkout_ref="$GITHUB_SHA"
+            echo "Resolved next release tag $release_ref for $checkout_ref"
+          else
+            checkout_ref="$release_ref"
+          fi
+
           if [[ ! "$release_ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Apple release workflow requires a semantic version tag such as v1.2.3."
+            echo "::error::Apple release workflow requires a semantic version tag such as v1.2.3, or auto."
             exit 1
           fi
 
           echo "tag=$release_ref" >> "$GITHUB_OUTPUT"
+          echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
 
       - name: Check configured macOS runner labels
         uses: actions/github-script@v7
-        env:
-          REQUIRED_LABELS: ${{ env.required_runner_labels }}
         with:
+          github-token: ${{ secrets.PAT_TOKEN || github.token }}
           script: |
             const requiredLabels = process.env.REQUIRED_LABELS.split(',');
             const { owner, repo } = context.repo;
-            const response = await github.request(
-              'GET /repos/{owner}/{repo}/actions/runners',
-              {
-                owner,
-                repo,
-                per_page: 100,
-              },
-            );
+
+            let response;
+            try {
+              response = await github.request(
+                'GET /repos/{owner}/{repo}/actions/runners',
+                {
+                  owner,
+                  repo,
+                  per_page: 100,
+                },
+              );
+            } catch (error) {
+              if (error.status === 403) {
+                core.warning(
+                  'Skipping macOS runner availability preflight because the token cannot read repository runners. ' +
+                  'The build job will still target the required self-hosted labels and GitHub Actions will queue it until a matching runner is available.',
+                );
+                return;
+              }
+              throw error;
+            }
 
             const matchingRunners = response.data.runners.filter((runner) =>
               requiredLabels.every((label) =>
@@ -92,6 +137,8 @@ jobs:
             core.notice(
               `Using TrackState release runner contract: ${onlineRunners.map((runner) => runner.name).join(', ')}`,
             );
+        env:
+          REQUIRED_LABELS: ${{ env.required_runner_labels }}
 
   build-macos-release:
     name: Build macOS desktop and CLI artifacts
@@ -100,12 +147,13 @@ jobs:
     timeout-minutes: 45
     env:
       release_tag: ${{ needs.verify-runner.outputs.release_tag }}
+      release_checkout_ref: ${{ needs.verify-runner.outputs.release_checkout_ref }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ env.release_tag }}
+          ref: ${{ env.release_checkout_ref }}
           submodules: true
 
       - name: Set up Flutter
@@ -207,6 +255,7 @@ jobs:
         with:
           tag_name: ${{ env.release_tag }}
           name: TrackState ${{ env.release_tag }}
+          target_commitish: ${{ env.release_checkout_ref }}
           generate_release_notes: true
           overwrite_files: true
           files: |

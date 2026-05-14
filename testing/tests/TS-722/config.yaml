@@ -1,0 +1,12 @@
+test_id: TS-722
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored hosted token.
+  - Verifies the app-shell workspace switcher replaces the legacy repository-access button across tracker sections.
+  - Verifies the switcher trigger and opened container adapt between desktop and compact/mobile layouts.
+

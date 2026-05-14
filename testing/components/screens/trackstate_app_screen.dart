@@ -33,9 +33,48 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   Finder get localGitAccessButton => find.bySemanticsLabel(RegExp('Local Git'));
 
-  Finder get topBar => find
-      .ancestor(of: repositoryAccessButton.first, matching: find.byType(Row))
-      .first;
+  Finder get topBar {
+    final repositoryAccess = repositoryAccessButton.evaluate().toList();
+    if (repositoryAccess.isEmpty) {
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing top bar scope',
+      );
+    }
+
+    final candidates = find
+        .ancestor(of: repositoryAccessButton.first, matching: find.byType(Row))
+        .evaluate()
+        .toList();
+    if (candidates.isEmpty) {
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing top bar',
+      );
+    }
+
+    Element bestCandidate = candidates.first;
+    var bestTextCount = -1;
+    for (final candidate in candidates) {
+      final candidateFinder = find.byElementPredicate(
+        (element) => element == candidate,
+        description: 'top bar candidate',
+      );
+      final textCount = find
+          .descendant(of: candidateFinder, matching: find.byType(Text))
+          .evaluate()
+          .length;
+      if (textCount > bestTextCount) {
+        bestCandidate = candidate;
+        bestTextCount = textCount;
+      }
+    }
+
+    return find.byElementPredicate(
+      (element) => element == bestCandidate,
+      description: 'top bar row',
+    );
+  }
 
   Finder get profileAvatar =>
       find.descendant(of: topBar, matching: find.byType(CircleAvatar));
@@ -568,6 +607,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final detail = _issueDetail(key);
     await _waitForVisible(detail);
     expect(detail, findsOneWidget);
+  }
+
+  @override
+  Future<bool> isIssueDetailVisible(String key) async {
+    await tester.pump();
+    return _issueDetail(key).evaluate().isNotEmpty;
   }
 
   @override

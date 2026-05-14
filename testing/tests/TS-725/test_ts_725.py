@@ -44,25 +44,26 @@ FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts725_failure.png"
 
 REQUEST_STEPS = [
     "Open the workspace switcher.",
-    "Inspect the active local workspace row.",
+    "Inspect the active hosted workspace row in the supported browser runtime.",
     "Inspect the inactive hosted workspace row.",
     "Sign in to GitHub and re-open the switcher.",
-    "Verify if the inactive hosted workspace state has changed.",
+    "Verify the inactive hosted workspace state stays deterministic after sign-in.",
 ]
 EXPECTED_RESULT = (
-    "The active local row shows its live 'Local Git' state. The inactive hosted "
-    "row shows 'Needs sign-in' but does not show 'Connected' or 'Read-only'. "
-    "Hosted workspace access only recalculates live when it becomes active or is "
-    "explicitly validated."
+    "The supported active hosted row starts at 'Needs sign-in', upgrades to a "
+    "live hosted access state after signing in, and the inactive hosted row "
+    "stays at 'Needs sign-in' instead of recalculating live access."
 )
 
-HOSTED_TARGET = "IstiN/trackstate-setup"
-HOSTED_DISPLAY_NAME = "Hosted workspace"
-LOCAL_TARGET = "/tmp/trackstate-demo"
-LOCAL_DISPLAY_NAME = "Local workspace"
+DEFAULT_ACTIVE_HOSTED_TARGET = "IstiN/trackstate-setup"
+ACTIVE_HOSTED_DISPLAY_NAME = "Active hosted workspace"
+INACTIVE_HOSTED_TARGET = "IstiN/trackstate"
+INACTIVE_HOSTED_DISPLAY_NAME = "Inactive hosted workspace"
 DEFAULT_BRANCH = "main"
 EXPECTED_INACTIVE_HOSTED_STATE = "Needs sign-in"
-DISALLOWED_HOSTED_STATES = ("Connected", "Read-only")
+EXPECTED_ACTIVE_HOSTED_SIGNED_OUT_STATE = "Needs sign-in"
+LIVE_ACTIVE_HOSTED_STATES = ("Connected", "Read-only", "Attachments limited")
+DISALLOWED_INACTIVE_HOSTED_STATES = LIVE_ACTIVE_HOSTED_STATES
 
 
 def main() -> None:
@@ -94,12 +95,15 @@ def main() -> None:
                 "TS-725 requires GH_TOKEN or GITHUB_TOKEN to sign in to the live app.",
             )
         authenticated_user = service.fetch_authenticated_user()
-        workspace_state = _workspace_state()
+        active_hosted_target = service.repository
+        workspace_state = _workspace_state(active_hosted_target=active_hosted_target)
         result.update(
             {
                 "app_url": config.app_url,
                 "repository": service.repository,
                 "repository_ref": service.ref,
+                "active_hosted_target": active_hosted_target,
+                "inactive_hosted_target": INACTIVE_HOSTED_TARGET,
                 "preloaded_workspace_state": workspace_state,
                 "authenticated_user": asdict(authenticated_user),
             },
@@ -123,7 +127,7 @@ def main() -> None:
                         action=REQUEST_STEPS[0],
                         observed=(
                             "The deployed app did not reach the interactive shell with the "
-                            "preloaded active local workspace state.\n"
+                            "supported active hosted workspace state.\n"
                             f"Observed runtime state: {runtime_state.kind}\n"
                             f"Observed body text:\n{runtime_state.body_text}"
                         ),
@@ -131,7 +135,7 @@ def main() -> None:
                     _record_human_verification(
                         result,
                         check=(
-                            "Viewed the deployed app after preloading one active local "
+                            "Viewed the deployed app after preloading one active hosted "
                             "workspace and one inactive hosted workspace while signed out."
                         ),
                         observed=(
@@ -143,7 +147,7 @@ def main() -> None:
                     result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
                     raise AssertionError(
                         "Step 1 failed: the deployed app did not reach the interactive "
-                        "shell with the preloaded local/hosted workspace state.\n"
+                        "shell with the supported hosted/hosted workspace state.\n"
                         f"Observed runtime state: {runtime_state.kind}\n"
                         f"Observed body text:\n{runtime_state.body_text}",
                     )
@@ -158,47 +162,47 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[0],
                     observed=(
-                        "Opened the live Workspace switcher with one active local row and "
+                        "Opened the live Workspace switcher with one active hosted row and "
                         f"one inactive hosted row. row_count={observation_before.row_count}; "
                         f"rows={[row.visible_text for row in observation_before.rows]!r}"
                     ),
                 )
 
-                local_row_before = _find_row(
+                active_hosted_row_before = _find_row(
                     observation_before,
-                    name=LOCAL_DISPLAY_NAME,
-                    target=LOCAL_TARGET,
+                    name=ACTIVE_HOSTED_DISPLAY_NAME,
+                    target=active_hosted_target,
                 )
-                _assert_active_local_row(local_row_before)
-                result["active_local_before"] = _row_asdict(local_row_before)
+                _assert_active_hosted_row_before_sign_in(active_hosted_row_before)
+                result["active_hosted_before"] = _row_asdict(active_hosted_row_before)
                 _record_step(
                     result,
                     step=2,
                     status="passed",
                     action=REQUEST_STEPS[1],
                     observed=(
-                        f"Active local row text={local_row_before.visible_text!r}; "
-                        f"state={local_row_before.state_label!r}; "
-                        f"actions={list(local_row_before.button_labels)!r}"
+                        f"Active hosted row text={active_hosted_row_before.visible_text!r}; "
+                        f"state={active_hosted_row_before.state_label!r}; "
+                        f"actions={list(active_hosted_row_before.button_labels)!r}"
                     ),
                 )
 
-                hosted_row_before = _find_row(
+                inactive_hosted_row_before = _find_row(
                     observation_before,
-                    name=HOSTED_DISPLAY_NAME,
-                    target=HOSTED_TARGET,
+                    name=INACTIVE_HOSTED_DISPLAY_NAME,
+                    target=INACTIVE_HOSTED_TARGET,
                 )
-                _assert_inactive_hosted_row(hosted_row_before)
-                result["inactive_hosted_before"] = _row_asdict(hosted_row_before)
+                _assert_inactive_hosted_row(inactive_hosted_row_before)
+                result["inactive_hosted_before"] = _row_asdict(inactive_hosted_row_before)
                 _record_step(
                     result,
                     step=3,
                     status="passed",
                     action=REQUEST_STEPS[2],
                     observed=(
-                        f"Inactive hosted row text={hosted_row_before.visible_text!r}; "
-                        f"state={hosted_row_before.state_label!r}; "
-                        f"actions={list(hosted_row_before.button_labels)!r}"
+                        f"Inactive hosted row text={inactive_hosted_row_before.visible_text!r}; "
+                        f"state={inactive_hosted_row_before.state_label!r}; "
+                        f"actions={list(inactive_hosted_row_before.button_labels)!r}"
                     ),
                 )
 
@@ -213,7 +217,7 @@ def main() -> None:
                 result["post_sign_in_body_text"] = connected_body
                 _wait_for_workspace_auth_persistence(
                     tracker_page=tracker_page,
-                    workspace_id=_local_workspace_id(),
+                    workspace_id=_hosted_workspace_id(active_hosted_target),
                 )
                 settings_page.dismiss_connection_banner()
 
@@ -225,34 +229,35 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[3],
                     observed=(
-                        "Signed in to GitHub from the active local workspace, dismissed the "
-                        "post-connect banner, and reopened the Workspace switcher."
+                        "Signed in to GitHub from the active hosted workspace, dismissed "
+                        "the post-connect banner, and reopened the Workspace switcher."
                     ),
                 )
 
-                local_row_after = _find_row(
+                active_hosted_row_after = _find_row(
                     observation_after,
-                    name=LOCAL_DISPLAY_NAME,
-                    target=LOCAL_TARGET,
+                    name=ACTIVE_HOSTED_DISPLAY_NAME,
+                    target=active_hosted_target,
                 )
-                _assert_active_local_row(local_row_after)
-                hosted_row_after = _find_row(
+                _assert_active_hosted_row_after_sign_in(active_hosted_row_after)
+                inactive_hosted_row_after = _find_row(
                     observation_after,
-                    name=HOSTED_DISPLAY_NAME,
-                    target=HOSTED_TARGET,
+                    name=INACTIVE_HOSTED_DISPLAY_NAME,
+                    target=INACTIVE_HOSTED_TARGET,
                 )
-                _assert_inactive_hosted_row(hosted_row_after)
-                result["active_local_after"] = _row_asdict(local_row_after)
-                result["inactive_hosted_after"] = _row_asdict(hosted_row_after)
+                _assert_inactive_hosted_row(inactive_hosted_row_after)
+                result["active_hosted_after"] = _row_asdict(active_hosted_row_after)
+                result["inactive_hosted_after"] = _row_asdict(inactive_hosted_row_after)
                 _record_step(
                     result,
                     step=5,
                     status="passed",
                     action=REQUEST_STEPS[4],
                     observed=(
-                        f"Inactive hosted state stayed {hosted_row_before.state_label!r} -> "
-                        f"{hosted_row_after.state_label!r}; active local state stayed "
-                        f"{local_row_before.state_label!r} -> {local_row_after.state_label!r}."
+                        f"Inactive hosted state stayed {inactive_hosted_row_before.state_label!r} -> "
+                        f"{inactive_hosted_row_after.state_label!r}; active hosted state changed "
+                        f"{active_hosted_row_before.state_label!r} -> "
+                        f"{active_hosted_row_after.state_label!r}."
                     ),
                 )
 
@@ -263,24 +268,24 @@ def main() -> None:
                         "checked the visible state pills on both rows."
                     ),
                     observed=(
-                        f"Active local row showed {local_row_before.target_type_label!r} and "
-                        f"{local_row_before.state_label!r}; inactive hosted row showed "
-                        f"{hosted_row_before.target_type_label!r} and "
-                        f"{hosted_row_before.state_label!r}."
+                        f"Active hosted row showed {active_hosted_row_before.target_type_label!r} "
+                        f"and {active_hosted_row_before.state_label!r}; inactive hosted row "
+                        f"showed {inactive_hosted_row_before.target_type_label!r} and "
+                        f"{inactive_hosted_row_before.state_label!r}."
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
                         "Viewed the Workspace switcher again after signing in from the "
-                        "active local workspace and checked whether the inactive hosted row "
+                        "active hosted workspace and checked whether the inactive hosted row "
                         "looked live to the user."
                     ),
                     observed=(
                         f"After sign-in the inactive hosted row still showed "
-                        f"{hosted_row_after.state_label!r} and never showed "
-                        f"{DISALLOWED_HOSTED_STATES!r}; the active local row still showed "
-                        f"{local_row_after.state_label!r}."
+                        f"{inactive_hosted_row_after.state_label!r} and never showed "
+                        f"{DISALLOWED_INACTIVE_HOSTED_STATES!r}; the active hosted row "
+                        f"upgraded to {active_hosted_row_after.state_label!r}."
                     ),
                 )
 
@@ -303,25 +308,25 @@ def main() -> None:
     print("TS-725 passed")
 
 
-def _workspace_state() -> dict[str, object]:
+def _workspace_state(*, active_hosted_target: str = DEFAULT_ACTIVE_HOSTED_TARGET) -> dict[str, object]:
     return {
-        "activeWorkspaceId": _local_workspace_id(),
+        "activeWorkspaceId": _hosted_workspace_id(active_hosted_target),
         "migrationComplete": True,
         "profiles": [
             {
-                "id": _local_workspace_id(),
-                "displayName": LOCAL_DISPLAY_NAME,
-                "targetType": "local",
-                "target": LOCAL_TARGET,
+                "id": _hosted_workspace_id(active_hosted_target),
+                "displayName": ACTIVE_HOSTED_DISPLAY_NAME,
+                "targetType": "hosted",
+                "target": active_hosted_target,
                 "defaultBranch": DEFAULT_BRANCH,
                 "writeBranch": DEFAULT_BRANCH,
                 "lastOpenedAt": "2026-05-14T13:00:00.000Z",
             },
             {
-                "id": _hosted_workspace_id(),
-                "displayName": HOSTED_DISPLAY_NAME,
+                "id": _hosted_workspace_id(INACTIVE_HOSTED_TARGET),
+                "displayName": INACTIVE_HOSTED_DISPLAY_NAME,
                 "targetType": "hosted",
-                "target": HOSTED_TARGET,
+                "target": INACTIVE_HOSTED_TARGET,
                 "defaultBranch": DEFAULT_BRANCH,
                 "writeBranch": DEFAULT_BRANCH,
                 "lastOpenedAt": "2026-05-14T12:00:00.000Z",
@@ -330,12 +335,8 @@ def _workspace_state() -> dict[str, object]:
     }
 
 
-def _hosted_workspace_id() -> str:
-    return f"hosted:{HOSTED_TARGET.lower()}@{DEFAULT_BRANCH}"
-
-
-def _local_workspace_id() -> str:
-    return f"local:{LOCAL_TARGET}@{DEFAULT_BRANCH}"
+def _hosted_workspace_id(target: str) -> str:
+    return f"hosted:{target.lower()}@{DEFAULT_BRANCH}"
 
 
 def _wait_for_workspace_auth_persistence(
@@ -390,13 +391,16 @@ def _find_row(
     name_lower = name.lower()
     target_lower = target.lower()
     for row in observation.rows:
-        haystacks = (
-            row.visible_text,
-            row.detail_text,
-            row.display_name or "",
-            row.semantics_label or "",
-        )
-        if any(name_lower in value.lower() or target_lower in value.lower() for value in haystacks):
+        display_name = (row.display_name or "").strip().lower()
+        detail_target = row.detail_text.split(" • ", 1)[0].strip().lower()
+        semantics_label = (row.semantics_label or "").strip().lower()
+        if (
+            display_name == name_lower
+            or display_name == target_lower
+            or detail_target == target_lower
+            or semantics_label == name_lower
+            or semantics_label == target_lower
+        ):
             return row
     raise AssertionError(
         "Expected result failed: the requested workspace row was not visible in the "
@@ -407,29 +411,57 @@ def _find_row(
     )
 
 
-def _assert_active_local_row(row: WorkspaceSwitcherRowObservation) -> None:
+def _assert_active_hosted_row_before_sign_in(row: WorkspaceSwitcherRowObservation) -> None:
     if not row.selected:
         raise AssertionError(
-            "Expected result failed: the local workspace row was not marked as the "
-            "active row in the Workspace switcher.\n"
+            "Expected result failed: the active hosted workspace row was not marked "
+            "as the active row in the Workspace switcher.\n"
             f"Observed row: {_row_asdict(row)}",
         )
-    if row.target_type_label != "Local":
+    if row.target_type_label != "Hosted":
         raise AssertionError(
-            "Expected result failed: the active local row did not show the `Local` "
+            "Expected result failed: the active hosted row did not show the `Hosted` "
             "type pill.\n"
             f"Observed row: {_row_asdict(row)}",
         )
-    if row.state_label != "Local Git":
+    if row.state_label != EXPECTED_ACTIVE_HOSTED_SIGNED_OUT_STATE:
         raise AssertionError(
-            "Expected result failed: the active local row did not show the live "
-            "`Local Git` state.\n"
+            "Expected result failed: the active hosted row did not begin in the "
+            "signed-out `Needs sign-in` state.\n"
             f"Observed row: {_row_asdict(row)}",
         )
     if "Active" not in row.visible_text and "Active" not in row.button_labels:
         raise AssertionError(
-            "Expected result failed: the active local row did not show the visible "
+            "Expected result failed: the active hosted row did not show the visible "
             "`Active` state to the user.\n"
+            f"Observed row: {_row_asdict(row)}",
+        )
+
+
+def _assert_active_hosted_row_after_sign_in(row: WorkspaceSwitcherRowObservation) -> None:
+    if not row.selected:
+        raise AssertionError(
+            "Expected result failed: the active hosted workspace row was not marked "
+            "as the active row after signing in.\n"
+            f"Observed row: {_row_asdict(row)}",
+        )
+    if row.target_type_label != "Hosted":
+        raise AssertionError(
+            "Expected result failed: the active hosted row did not show the `Hosted` "
+            "type pill after signing in.\n"
+            f"Observed row: {_row_asdict(row)}",
+        )
+    if row.state_label not in LIVE_ACTIVE_HOSTED_STATES:
+        raise AssertionError(
+            "Expected result failed: the active hosted row did not upgrade to a live "
+            "hosted access state after signing in.\n"
+            f"Expected one of: {LIVE_ACTIVE_HOSTED_STATES}\n"
+            f"Observed row: {_row_asdict(row)}",
+        )
+    if "Active" not in row.visible_text and "Active" not in row.button_labels:
+        raise AssertionError(
+            "Expected result failed: the active hosted row did not show the visible "
+            "`Active` state to the user after signing in.\n"
             f"Observed row: {_row_asdict(row)}",
         )
 
@@ -437,8 +469,8 @@ def _assert_active_local_row(row: WorkspaceSwitcherRowObservation) -> None:
 def _assert_inactive_hosted_row(row: WorkspaceSwitcherRowObservation) -> None:
     if row.selected:
         raise AssertionError(
-            "Expected result failed: the hosted workspace row unexpectedly appeared "
-            "as the active row.\n"
+            "Expected result failed: the inactive hosted workspace row unexpectedly "
+            "appeared as the active row.\n"
             f"Observed row: {_row_asdict(row)}",
         )
     if row.target_type_label != "Hosted":
@@ -454,7 +486,7 @@ def _assert_inactive_hosted_row(row: WorkspaceSwitcherRowObservation) -> None:
             f"Expected state: {EXPECTED_INACTIVE_HOSTED_STATE}\n"
             f"Observed row: {_row_asdict(row)}",
         )
-    for disallowed in DISALLOWED_HOSTED_STATES:
+    for disallowed in DISALLOWED_INACTIVE_HOSTED_STATES:
         if disallowed in row.visible_text or row.state_label == disallowed:
             raise AssertionError(
                 "Expected result failed: the inactive hosted row exposed a misleading "
@@ -462,10 +494,10 @@ def _assert_inactive_hosted_row(row: WorkspaceSwitcherRowObservation) -> None:
                 f"Disallowed state: {disallowed}\n"
                 f"Observed row: {_row_asdict(row)}",
             )
-    if "Open workspace" not in row.button_labels:
+    if "Open workspace" not in row.button_labels and "Open" not in row.button_labels:
         raise AssertionError(
             "Expected result failed: the inactive hosted row did not expose the "
-            "visible `Open workspace` action expected for an inactive row.\n"
+            "visible open action expected for an inactive row.\n"
             f"Observed row: {_row_asdict(row)}",
         )
 
@@ -566,12 +598,12 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "h4. What was automated",
         (
-            "* Preloaded browser storage with one active local workspace and one "
+            "* Preloaded browser storage with one supported active hosted workspace and one "
             "inactive hosted workspace while signed out."
         ),
         "* Opened the deployed TrackState app and inspected the visible rows in *Workspace switcher*.",
-        "* Signed in to GitHub from the active local workspace and reopened *Workspace switcher*.",
-        "* Verified the active local row kept {{Local Git}} and the inactive hosted row stayed {{Needs sign-in}} instead of changing to {{Connected}} or {{Read-only}}.",
+        "* Signed in to GitHub from the active hosted workspace and reopened *Workspace switcher*.",
+        "* Verified the inactive hosted row stayed {{Needs sign-in}} instead of recalculating to a live hosted access state while the active hosted row upgraded after sign-in.",
         "",
         "h4. Result",
         (
@@ -620,12 +652,12 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## What was automated",
         (
-            "- Preloaded browser storage with one active local workspace and one "
+            "- Preloaded browser storage with one supported active hosted workspace and one "
             "inactive hosted workspace while signed out."
         ),
         "- Opened the deployed TrackState app and inspected the visible rows in **Workspace switcher**.",
-        "- Signed in to GitHub from the active local workspace and reopened **Workspace switcher**.",
-        "- Verified the active local row kept `Local Git` and the inactive hosted row stayed `Needs sign-in` instead of changing to `Connected` or `Read-only`.",
+        "- Signed in to GitHub from the active hosted workspace and reopened **Workspace switcher**.",
+        "- Verified the inactive hosted row stayed `Needs sign-in` instead of recalculating to a live hosted access state while the active hosted row upgraded after sign-in.",
         "",
         "## Result",
         (
@@ -671,18 +703,18 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Inactive workspace state is not deterministic in Workspace switcher",
+            f"# {TICKET_KEY} - Inactive hosted workspace state is not deterministic in Workspace switcher",
             "",
             "## Exact steps to reproduce",
             "1. Open the workspace switcher.",
             f"   {'✅' if _step_status(result, 1) == 'passed' else '❌'} {_step_observation(result, 1)}",
-            "2. Inspect the active local workspace row.",
+            "2. Inspect the active hosted workspace row in the supported browser runtime.",
             f"   {'✅' if _step_status(result, 2) == 'passed' else '❌'} {_step_observation(result, 2)}",
             "3. Inspect the inactive hosted workspace row.",
             f"   {'✅' if _step_status(result, 3) == 'passed' else '❌'} {_step_observation(result, 3)}",
             "4. Sign in to GitHub and re-open the switcher.",
             f"   {'✅' if _step_status(result, 4) == 'passed' else '❌'} {_step_observation(result, 4)}",
-            "5. Verify if the inactive hosted workspace state has changed.",
+            "5. Verify the inactive hosted workspace state stays deterministic after sign-in.",
             f"   {'✅' if _step_status(result, 5) == 'passed' else '❌'} {_step_observation(result, 5)}",
             "",
             "## Exact error message or assertion failure",
@@ -762,10 +794,10 @@ def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
 def _switcher_summary(result: dict[str, object]) -> str:
     hosted_before = result.get("inactive_hosted_before", {})
     hosted_after = result.get("inactive_hosted_after", {})
-    local_before = result.get("active_local_before", {})
-    local_after = result.get("active_local_after", {})
+    active_before = result.get("active_hosted_before", {})
+    active_after = result.get("active_hosted_after", {})
     return (
-        f"active_local={local_before.get('state_label')!r}->{local_after.get('state_label')!r}; "
+        f"active_hosted={active_before.get('state_label')!r}->{active_after.get('state_label')!r}; "
         f"inactive_hosted={hosted_before.get('state_label')!r}->{hosted_after.get('state_label')!r}"
     )
 

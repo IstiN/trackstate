@@ -1,0 +1,9 @@
+test_id: TS-711
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Seeds two valid local workspaces and opens the production workspace switcher while Workspace-A is active.
+  - Uses recording local repositories that implement WorkspaceSyncRepository so the production WorkspaceSyncService lifecycle can be observed without modifying product code.
+  - Verifies Workspace-A stops scheduling sync checks after the switch, Workspace-B starts a new coordinator immediately, and Workspace-A's disposed 60-second timer never fires again.
