@@ -14,7 +14,18 @@ class LocalWorkspaceOnboardingScreen
   final void Function() _onDispose;
 
   @override
+  Future<void> chooseExistingFolder() => _driver.chooseExistingFolder();
+
+  @override
   Future<void> chooseInitializeFolder() => _driver.chooseInitializeFolder();
+
+  @override
+  Future<void> enterWorkspaceName(String value) =>
+      _driver.enterWorkspaceName(value);
+
+  @override
+  Future<void> enterWriteBranch(String value) =>
+      _driver.enterWriteBranch(value);
 
   @override
   LocalWorkspaceOnboardingState captureState() => _driver.captureState();
