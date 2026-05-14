@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -9,6 +10,7 @@ import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../../../components/screens/settings_screen_robot.dart';
 import '../../../core/utils/local_git_test_repository.dart';
 
 class Ts724WorkspaceSwitchValidationFixture {
@@ -78,8 +80,9 @@ class Ts724WorkspaceSwitchValidationFixture {
   bool get deletedWorkspaceExists =>
       Directory(deletedWorkspacePath).existsSync();
 
-  TrackStateApp buildApp() {
-    return TrackStateApp(
+  Future<Ts724WorkspaceSwitchValidationScreen> launch() async {
+    final screen = Ts724WorkspaceSwitchValidationScreen(tester);
+    await screen.launchApp(
       workspaceProfileService: workspaceProfileService,
       openLocalRepository:
           ({
@@ -96,6 +99,7 @@ class Ts724WorkspaceSwitchValidationFixture {
             );
           },
     );
+    return screen;
   }
 
   Future<WorkspaceProfilesState> loadWorkspaceState() {
@@ -104,6 +108,172 @@ class Ts724WorkspaceSwitchValidationFixture {
 
   Future<void> dispose() async {
     await _workspaceARepository.dispose();
+  }
+}
+
+class Ts724WorkspaceSwitchValidationScreen {
+  Ts724WorkspaceSwitchValidationScreen(this._tester)
+    : _robot = SettingsScreenRobot(_tester);
+
+  final WidgetTester _tester;
+  final SettingsScreenRobot _robot;
+
+  Finder get _boardNavigation => find.bySemanticsLabel(RegExp('^Board\$'));
+  Finder get _boardColumn => find.bySemanticsLabel(RegExp('To Do column'));
+  Finder get _workspaceSwitcherTrigger =>
+      find.byKey(const ValueKey<String>('workspace-switcher-trigger'));
+  Finder get _workspaceSwitcherSheet => find.text('Workspace switcher');
+
+  Future<void> launchApp({
+    required WorkspaceProfileService workspaceProfileService,
+    required LocalRepositoryLoader openLocalRepository,
+  }) async {
+    _tester.view.physicalSize = const Size(1440, 960);
+    _tester.view.devicePixelRatio = 1;
+    await _tester.pumpWidget(
+      TrackStateApp(
+        workspaceProfileService: workspaceProfileService,
+        openLocalRepository: openLocalRepository,
+      ),
+    );
+    await _tester.pumpAndSettle();
+  }
+
+  Future<void> waitForReady() {
+    return _pumpUntil(
+      condition: () =>
+          isWorkspaceSwitcherTriggerVisible && isBoardNavigationVisible,
+      timeout: const Duration(seconds: 10),
+      failureMessage:
+          'Precondition failed: Workspace-A did not finish rendering the workspace switcher trigger and Board navigation.',
+    );
+  }
+
+  Future<void> openBoardSection() async {
+    await _tap(_boardNavigation.first);
+    await _pumpUntil(
+      condition: () => isBoardVisible,
+      timeout: const Duration(seconds: 5),
+      failureMessage:
+          'Selecting Board did not reveal the board column for Workspace-A.',
+    );
+  }
+
+  Future<void> openWorkspaceSwitcher() async {
+    await _tap(_workspaceSwitcherTrigger.first);
+    await _pumpUntil(
+      condition: () => isWorkspaceSwitcherVisible,
+      timeout: const Duration(seconds: 5),
+      failureMessage:
+          'Workspace switcher did not become visible after tapping the trigger.',
+    );
+  }
+
+  Future<void> attemptWorkspaceOpen(String workspaceId) async {
+    await _tap(_workspaceOpenButton(workspaceId).first);
+  }
+
+  Future<void> waitForFailedWorkspaceSwitch(String workspaceName) {
+    return _pumpUntil(
+      condition: () =>
+          isWorkspaceSwitchFailureVisible(workspaceName) && isBoardVisible,
+      timeout: const Duration(seconds: 5),
+      failureMessage:
+          'Selecting the unavailable workspace did not surface the failure message while keeping the current board visible.',
+    );
+  }
+
+  bool get isWorkspaceSwitcherTriggerVisible =>
+      _workspaceSwitcherTrigger.evaluate().isNotEmpty;
+
+  bool get isWorkspaceSwitcherVisible =>
+      _workspaceSwitcherSheet.evaluate().isNotEmpty;
+
+  bool get isBoardNavigationVisible => _boardNavigation.evaluate().isNotEmpty;
+
+  bool get isBoardVisible => _boardColumn.evaluate().isNotEmpty;
+
+  bool triggerContainsText(String text) => _descendantTextContaining(
+    _workspaceSwitcherTrigger,
+    text,
+  ).evaluate().isNotEmpty;
+
+  bool workspaceRowContainsText(String workspaceId, String text) =>
+      _descendantText(_workspaceRow(workspaceId), text).evaluate().isNotEmpty;
+
+  bool workspaceRowContainsTextContaining(String workspaceId, String text) =>
+      _descendantTextContaining(
+        _workspaceRow(workspaceId),
+        text,
+      ).evaluate().isNotEmpty;
+
+  bool canOpenWorkspace(String workspaceId) =>
+      _workspaceOpenButton(workspaceId).evaluate().isNotEmpty;
+
+  bool isWorkspaceSwitchFailureVisible(String workspaceName) =>
+      _workspaceSwitchFailureMessage(workspaceName).evaluate().isNotEmpty;
+
+  bool isTextVisible(String text) =>
+      find.textContaining(text, findRichText: true).evaluate().isNotEmpty;
+
+  List<String> visibleTexts() => _robot.visibleTexts();
+
+  List<String> visibleSemanticsLabelsSnapshot() =>
+      _robot.visibleSemanticsLabelsSnapshot();
+
+  void dispose() {
+    _tester.view.resetPhysicalSize();
+    _tester.view.resetDevicePixelRatio();
+  }
+
+  Finder _workspaceRow(String workspaceId) {
+    return find.byKey(ValueKey<String>('workspace-$workspaceId'));
+  }
+
+  Finder _workspaceOpenButton(String workspaceId) {
+    return find.byKey(ValueKey<String>('workspace-open-$workspaceId'));
+  }
+
+  Finder _workspaceSwitchFailureMessage(String workspaceName) {
+    return find.textContaining('Could not open $workspaceName.');
+  }
+
+  Finder _descendantText(Finder scope, String text) {
+    return find.descendant(
+      of: scope,
+      matching: find.text(text, findRichText: true),
+    );
+  }
+
+  Finder _descendantTextContaining(Finder scope, String text) {
+    return find.descendant(
+      of: scope,
+      matching: find.textContaining(text, findRichText: true),
+    );
+  }
+
+  Future<void> _tap(Finder finder) async {
+    await _tester.tap(finder, warnIfMissed: false);
+    await _tester.pump();
+  }
+
+  Future<void> _pumpUntil({
+    required bool Function() condition,
+    required Duration timeout,
+    required String failureMessage,
+    Duration step = const Duration(milliseconds: 100),
+  }) async {
+    final end = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(end)) {
+      if (condition()) {
+        await _tester.pump();
+        return;
+      }
+      await _tester.pump(step);
+    }
+    if (!condition()) {
+      throw TestFailure(failureMessage);
+    }
   }
 }
 
