@@ -65,13 +65,7 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
     await _tap(
       find.byKey(const ValueKey('local-workspace-onboarding-open-existing')),
     );
-    await _waitForAnyVisible(<Finder>[
-      find.byKey(const ValueKey('local-workspace-onboarding-submit')),
-      find.byKey(const ValueKey('local-workspace-onboarding-name')),
-      find.byKey(const ValueKey('local-workspace-onboarding-change-folder')),
-      find.text('Ready to open'),
-      find.text('Workspace details'),
-    ]);
+    await _waitForLocalWorkspaceDetailsForm();
   }
 
   @override
@@ -224,6 +218,7 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
   }
 
   String? _visibleAccessLabel() {
+    final visibleTexts = _uniqueVisibleTexts();
     for (final label in const <String>[
       'Connect GitHub',
       'Read-only',
@@ -231,7 +226,8 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       'Attachments limited',
       'Local Git',
     ]) {
-      if (find.text(label).evaluate().isNotEmpty) {
+      if (find.text(label).evaluate().isNotEmpty ||
+          visibleTexts.any((text) => text == label || text.contains(label))) {
         return label;
       }
     }
@@ -317,6 +313,46 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       await _tester.pump(step);
       elapsed += step;
     }
+  }
+
+  Future<void> _waitForLocalWorkspaceDetailsForm() async {
+    final nameField = find.descendant(
+      of: find.byKey(const ValueKey('local-workspace-onboarding-name')),
+      matching: find.byType(EditableText),
+    );
+    final submitButton = find.byKey(
+      const ValueKey('local-workspace-onboarding-submit'),
+    );
+    final changeFolderButton = find.byKey(
+      const ValueKey('local-workspace-onboarding-change-folder'),
+    );
+    final detailsTitle = find.text('Workspace details');
+    final loadingIndicator = find.text('Loading...');
+    const step = Duration(milliseconds: 100);
+    const timeout = Duration(seconds: 10);
+    var elapsed = Duration.zero;
+
+    while (elapsed < timeout) {
+      if (nameField.evaluate().isNotEmpty &&
+          submitButton.evaluate().isNotEmpty &&
+          changeFolderButton.evaluate().isNotEmpty &&
+          detailsTitle.evaluate().isNotEmpty) {
+        return;
+      }
+      await _tester.pump(step);
+      elapsed += step;
+    }
+
+    throw StateError(
+      'Local workspace details did not render within ${timeout.inSeconds}s after folder selection. '
+      'Observed loading=${loadingIndicator.evaluate().isNotEmpty}; '
+      'name_field=${nameField.evaluate().isNotEmpty}; '
+      'submit_button=${submitButton.evaluate().isNotEmpty}; '
+      'change_folder=${changeFolderButton.evaluate().isNotEmpty}; '
+      'details_title=${detailsTitle.evaluate().isNotEmpty}; '
+      'selected_folder=${_selectedFolderPath() ?? '<none>'}; '
+      'visible_texts=${_uniqueVisibleTexts().join(' | ')}',
+    );
   }
 
   List<String> _uniqueVisibleTexts() {

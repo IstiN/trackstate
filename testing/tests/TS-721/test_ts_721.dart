@@ -4,11 +4,13 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/local_workspace_onboarding_service.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 
 import '../../fixtures/workspace_onboarding_screen_fixture.dart';
 import '../../frameworks/flutter/trackstate_test_runtime.dart';
+import 'support/ts721_cached_local_workspace_onboarding_service.dart';
 import 'support/ts721_local_workspace_fixture.dart';
 import 'support/ts721_recording_workspace_profile_service.dart';
 
@@ -51,6 +53,22 @@ void main() {
       if (fixture == null) {
         throw StateError('TS-721 fixture creation did not complete.');
       }
+      final localWorkspaceInspection = await tester.runAsync(
+        () => createLocalWorkspaceOnboardingService().inspectFolder(
+          fixture.repositoryPath,
+        ),
+      );
+      if (localWorkspaceInspection == null) {
+        throw StateError('TS-721 local workspace inspection did not complete.');
+      }
+      final localWorkspaceOnboardingService =
+          Ts721CachedLocalWorkspaceOnboardingService(
+            inspection: localWorkspaceInspection,
+          );
+      final localRepository = await createLocalGitTestRepository(
+        tester: tester,
+        repositoryPath: fixture.repositoryPath,
+      );
       final workspaceProfileService = Ts721RecordingWorkspaceProfileService(
         SharedPreferencesWorkspaceProfileService(
           now: () => DateTime.utc(2026, 5, 14, 12, 0),
@@ -63,6 +81,7 @@ void main() {
           tester,
           repositoryFactory: () => const DemoTrackStateRepository(),
           workspaceProfileService: workspaceProfileService,
+          localWorkspaceOnboardingService: localWorkspaceOnboardingService,
           workspaceDirectoryPicker:
               ({String? confirmButtonText, String? initialDirectory}) async {
                 result['directory_picker_confirm_button'] = confirmButtonText;
@@ -75,13 +94,15 @@ void main() {
                 required String defaultBranch,
                 required String writeBranch,
               }) async {
+                if (repositoryPath != fixture.repositoryPath) {
+                  throw StateError(
+                    'TS-721 expected to open "${fixture.repositoryPath}", but received "$repositoryPath".',
+                  );
+                }
                 openedRepositories.add(
                   '$repositoryPath@$defaultBranch@$writeBranch',
                 );
-                return createLocalGitTestRepository(
-                  tester: tester,
-                  repositoryPath: repositoryPath,
-                );
+                return localRepository;
               },
         );
 
@@ -293,6 +314,14 @@ void main() {
           }
 
           final step3Failures = <String>[];
+          final dashboardVisibleInTexts = _visibleTextContains(
+            postOpenState.visibleTexts,
+            _dashboardLabel,
+          );
+          final issueSummaryVisible = _visibleTextContains(
+            postOpenState.visibleTexts,
+            Ts721LocalWorkspaceFixture.expectedIssueSummary,
+          );
           if (!postOpenState.isDashboardVisible ||
               postOpenState.isOnboardingVisible) {
             step3Failures.add(
@@ -307,10 +336,7 @@ void main() {
               'Observed access label: ${postOpenState.repositoryAccessTopBarLabel}',
             );
           }
-          if (!postOpenState.visibleTexts.contains(_dashboardLabel) ||
-              !postOpenState.visibleTexts.contains(
-                Ts721LocalWorkspaceFixture.expectedIssueSummary,
-              )) {
+          if (!dashboardVisibleInTexts || !issueSummaryVisible) {
             step3Failures.add(
               'The Tracker UI did not show the expected local repository context after onboarding. '
               'Observed visible texts: ${postOpenState.visibleTexts.join(', ')}',
@@ -340,7 +366,7 @@ void main() {
             check:
                 'Verified the user-facing Tracker content from the selected local repository by checking the dashboard heading and the seeded issue summary rendered in the loaded workspace context.',
             observed:
-                'dashboard_label_present=${postOpenState.visibleTexts.contains(_dashboardLabel)}; issue_summary_present=${postOpenState.visibleTexts.contains(Ts721LocalWorkspaceFixture.expectedIssueSummary)}; visible_texts=${postOpenState.visibleTexts.join(' || ')}',
+                'dashboard_label_present=$dashboardVisibleInTexts; issue_summary_present=$issueSummaryVisible; visible_texts=${postOpenState.visibleTexts.join(' || ')}',
           );
 
           _writePassOutputs(result);
@@ -366,6 +392,12 @@ File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
+
+bool _visibleTextContains(List<String> visibleTexts, String expectedText) {
+  return visibleTexts.any(
+    (text) => text == expectedText || text.contains(expectedText),
+  );
+}
 
 void _recordStep(
   Map<String, Object?> result, {
