@@ -1,0 +1,14 @@
+test_id: TS-732
+type: ui
+framework: flutter_test
+platform: widget
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Uses a mutable hosted provider-backed repository so the production JQL Search, issue-detail, and workspace-sync refresh flows run unchanged.
+  - Removes the currently selected issue from the hosted issue index during a background sync and verifies the search surface stays active while the invalid selection is cleared.
+runtime_inputs:
+  issue_key: TRACK-12
+  remaining_issue_key: TRACK-11
+  expected_message_fragment: no longer available
+  run_command: flutter test testing/tests/TS-732/test_ts_732.dart --reporter expanded
