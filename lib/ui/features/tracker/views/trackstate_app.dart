@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -30,6 +31,14 @@ typedef HostedRepositoryLoader =
       required String defaultBranch,
       required String writeBranch,
     });
+typedef _HostedWorkspaceOpener =
+    Future<void> Function({
+      required String repository,
+      required String defaultBranch,
+      required String writeBranch,
+    });
+typedef _HostedRepositoryCatalogLoader =
+    Future<List<HostedRepositoryReference>> Function();
 typedef _CreateIssueLauncher = void Function([_CreateIssuePrefill? prefill]);
 
 typedef LocalRepositoryConfigurationApplier =
@@ -43,6 +52,7 @@ class TrackStateApp extends StatefulWidget {
   const TrackStateApp({
     super.key,
     this.repository,
+    this.repositoryFactory,
     this.openLocalRepository,
     this.openHostedRepository,
     this.workspaceProfileService =
@@ -51,6 +61,7 @@ class TrackStateApp extends StatefulWidget {
   });
 
   final TrackStateRepository? repository;
+  final TrackStateRepository Function()? repositoryFactory;
   final LocalRepositoryLoader? openLocalRepository;
   final HostedRepositoryLoader? openHostedRepository;
   final WorkspaceProfileService workspaceProfileService;
@@ -66,6 +77,8 @@ class _TrackStateAppState extends State<TrackStateApp> {
   _CreateIssuePrefill? _createIssuePrefill;
   String? _activeLocalGitConfigurationKey;
   String? _pendingLocalGitConfigurationKey;
+  bool _workspaceProfilesReady = false;
+  bool _showsWorkspaceOnboarding = false;
   WorkspaceProfilesState _workspaceState = const WorkspaceProfilesState();
 
   @override
@@ -87,6 +100,8 @@ class _TrackStateAppState extends State<TrackStateApp> {
     previousViewModel.dispose();
     _isCreateIssueVisible = false;
     _createIssuePrefill = null;
+    _workspaceProfilesReady = false;
+    _showsWorkspaceOnboarding = false;
     _workspaceState = const WorkspaceProfilesState();
     unawaited(_initializeWorkspaceProfiles());
   }
@@ -105,7 +120,10 @@ class _TrackStateAppState extends State<TrackStateApp> {
   }) {
     final nextViewModel = TrackerViewModel(
       repository:
-          repository ?? widget.repository ?? createTrackStateRepository(),
+          repository ??
+          widget.repository ??
+          widget.repositoryFactory?.call() ??
+          createTrackStateRepository(),
       workspaceId: workspaceId ?? _workspaceState.activeWorkspaceId,
     );
     if (previous != null) {
@@ -169,6 +187,9 @@ class _TrackStateAppState extends State<TrackStateApp> {
       if (loadedState.activeWorkspace case final activeWorkspace?) {
         viewModel.updateWorkspaceScope(activeWorkspace.id);
       }
+      setState(() {
+        _workspaceProfilesReady = true;
+      });
       await viewModel.load();
       return;
     }
@@ -177,8 +198,31 @@ class _TrackStateAppState extends State<TrackStateApp> {
       await _switchToWorkspace(activeWorkspace);
       return;
     }
+    if (_shouldShowWorkspaceOnboarding(loadedState)) {
+      setState(() {
+        _showsWorkspaceOnboarding = true;
+        _workspaceProfilesReady = true;
+      });
+      return;
+    }
     await viewModel.load();
     await _ensureCurrentContextWorkspaceMigration();
+    if (!mounted) {
+      return;
+    }
+    final migratedState = await widget.workspaceProfileService.loadState();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _workspaceState = migratedState;
+      _showsWorkspaceOnboarding = _shouldShowWorkspaceOnboarding(migratedState);
+      _workspaceProfilesReady = true;
+    });
+  }
+
+  bool _shouldShowWorkspaceOnboarding(WorkspaceProfilesState state) {
+    return !kIsWeb && widget.repository == null && !state.hasProfiles;
   }
 
   Future<void> _switchToLocalRepository({
@@ -257,6 +301,63 @@ class _TrackStateAppState extends State<TrackStateApp> {
     }
   }
 
+  Future<void> _switchToHostedRepository({
+    required String repository,
+    required String defaultBranch,
+    required String writeBranch,
+  }) async {
+    final normalizedRepository = normalizeWorkspaceTarget(
+      WorkspaceProfileTargetType.hosted,
+      repository,
+    );
+    final normalizedDefaultBranch = normalizeWorkspaceBranch(defaultBranch);
+    final normalizedWriteBranch = normalizeWorkspaceBranch(writeBranch);
+    if (normalizedRepository.isEmpty ||
+        normalizedDefaultBranch.isEmpty ||
+        normalizedWriteBranch.isEmpty) {
+      return;
+    }
+
+    final nextRepository = await _openHostedRepository(
+      repository: normalizedRepository,
+      defaultBranch: normalizedDefaultBranch,
+      writeBranch: normalizedWriteBranch,
+    );
+    WorkspaceProfile? workspace;
+    WorkspaceProfilesState? workspaceState;
+    if (widget.repository == null) {
+      final input = WorkspaceProfileInput(
+        targetType: WorkspaceProfileTargetType.hosted,
+        target: normalizedRepository,
+        defaultBranch: normalizedDefaultBranch,
+        writeBranch: normalizedWriteBranch,
+      );
+      try {
+        workspace = await widget.workspaceProfileService.createProfile(input);
+        workspaceState = await widget.workspaceProfileService.loadState();
+        workspace = workspaceState.activeWorkspace;
+      } on WorkspaceProfileException {
+        workspaceState = await widget.workspaceProfileService.loadState();
+        workspace = workspaceState.profiles.firstWhere(
+          (profile) =>
+              profile.targetType == WorkspaceProfileTargetType.hosted &&
+              profile.normalizedTarget == normalizedRepository &&
+              profile.normalizedDefaultBranch == normalizedDefaultBranch,
+        );
+        workspaceState = await widget.workspaceProfileService.selectProfile(
+          workspace.id,
+        );
+        workspace = workspaceState.activeWorkspace;
+      }
+    }
+    await _applyRepositorySwitch(
+      repository: nextRepository,
+      previousViewModel: viewModel,
+      workspace: workspace,
+      workspaceState: workspaceState,
+    );
+  }
+
   Future<void> _switchToWorkspace(WorkspaceProfile workspace) async {
     final nextRepository = workspace.isLocal
         ? await _openLocalRepository(
@@ -304,6 +405,8 @@ class _TrackStateAppState extends State<TrackStateApp> {
       _activeLocalGitConfigurationKey = localConfigurationKey;
       _isCreateIssueVisible = false;
       _createIssuePrefill = null;
+      _showsWorkspaceOnboarding = false;
+      _workspaceProfilesReady = true;
       if (workspaceState != null) {
         _workspaceState = workspaceState;
       } else if (workspace != null) {
@@ -368,10 +471,22 @@ class _TrackStateAppState extends State<TrackStateApp> {
     }
     setState(() {
       _workspaceState = nextState;
+      _showsWorkspaceOnboarding = _shouldShowWorkspaceOnboarding(nextState);
     });
     final nextActiveWorkspace = nextState.activeWorkspace;
     if (nextActiveWorkspace != null) {
       await _switchToWorkspace(nextActiveWorkspace);
+      return;
+    }
+    if (_shouldShowWorkspaceOnboarding(nextState)) {
+      viewModel.updateWorkspaceScope(null);
+      setState(() {
+        _activeLocalGitConfigurationKey = null;
+        _isCreateIssueVisible = false;
+        _createIssuePrefill = null;
+        _workspaceProfilesReady = true;
+        _showsWorkspaceOnboarding = true;
+      });
       return;
     }
     viewModel.updateWorkspaceScope(null);
@@ -385,9 +500,29 @@ class _TrackStateAppState extends State<TrackStateApp> {
       _activeLocalGitConfigurationKey = null;
       _isCreateIssueVisible = false;
       _createIssuePrefill = null;
+      _workspaceProfilesReady = true;
     });
     previousViewModel.dispose();
     await nextViewModel.load();
+  }
+
+  void _openWorkspaceOnboarding() {
+    if (_showsWorkspaceOnboarding) {
+      return;
+    }
+    setState(() {
+      _showsWorkspaceOnboarding = true;
+    });
+  }
+
+  void _closeWorkspaceOnboarding() {
+    if (!_showsWorkspaceOnboarding ||
+        _shouldShowWorkspaceOnboarding(_workspaceState)) {
+      return;
+    }
+    setState(() {
+      _showsWorkspaceOnboarding = false;
+    });
   }
 
   void _openCreateIssue([_CreateIssuePrefill? prefill]) {
@@ -431,18 +566,37 @@ class _TrackStateAppState extends State<TrackStateApp> {
             GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
-          home: _TrackerHome(
-            viewModel: viewModel,
-            workspaces: _workspaceState,
-            isCreateIssueVisible: _isCreateIssueVisible,
-            onOpenCreateIssue: _openCreateIssue,
-            onCloseCreateIssue: _closeCreateIssue,
-            createIssuePrefill: _createIssuePrefill,
-            onApplyLocalGitConfiguration: _switchToLocalRepository,
-            onSelectWorkspace: _selectWorkspaceProfile,
-            onDeleteWorkspace: _deleteWorkspaceProfile,
-            attachmentPicker: widget.attachmentPicker,
-          ),
+          home: !_workspaceProfilesReady
+              ? _WorkspaceInitializationView(viewModel: viewModel)
+              : _showsWorkspaceOnboarding
+              ? _WorkspaceOnboardingScreen(
+                  canCancel: _workspaceState.hasProfiles,
+                  canBrowseHostedRepositories:
+                      viewModel.canBrowseHostedRepositories,
+                  loadHostedRepositories: viewModel.canBrowseHostedRepositories
+                      ? viewModel.loadAccessibleHostedRepositories
+                      : null,
+                  onCancel: _workspaceState.hasProfiles
+                      ? _closeWorkspaceOnboarding
+                      : null,
+                  onOpenLocalWorkspace: _switchToLocalRepository,
+                  onOpenHostedWorkspace: _switchToHostedRepository,
+                )
+              : _TrackerHome(
+                  viewModel: viewModel,
+                  workspaces: _workspaceState,
+                  isCreateIssueVisible: _isCreateIssueVisible,
+                  onOpenCreateIssue: _openCreateIssue,
+                  onCloseCreateIssue: _closeCreateIssue,
+                  createIssuePrefill: _createIssuePrefill,
+                  onOpenWorkspaceOnboarding: _openWorkspaceOnboarding,
+                  canOpenWorkspaceOnboarding:
+                      !kIsWeb && widget.repository == null,
+                  onApplyLocalGitConfiguration: _switchToLocalRepository,
+                  onSelectWorkspace: _selectWorkspaceProfile,
+                  onDeleteWorkspace: _deleteWorkspaceProfile,
+                  attachmentPicker: widget.attachmentPicker,
+                ),
         );
       },
     );
@@ -457,6 +611,8 @@ class _TrackerHome extends StatelessWidget {
     required this.onOpenCreateIssue,
     required this.onCloseCreateIssue,
     required this.createIssuePrefill,
+    required this.onOpenWorkspaceOnboarding,
+    required this.canOpenWorkspaceOnboarding,
     required this.onApplyLocalGitConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
@@ -469,6 +625,8 @@ class _TrackerHome extends StatelessWidget {
   final _CreateIssueLauncher onOpenCreateIssue;
   final VoidCallback onCloseCreateIssue;
   final _CreateIssuePrefill? createIssuePrefill;
+  final VoidCallback onOpenWorkspaceOnboarding;
+  final bool canOpenWorkspaceOnboarding;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
@@ -550,6 +708,9 @@ class _TrackerHome extends StatelessWidget {
                           onOpenCreateIssue: onOpenCreateIssue,
                           onCloseCreateIssue: onCloseCreateIssue,
                           createIssuePrefill: createIssuePrefill,
+                          onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
+                          canOpenWorkspaceOnboarding:
+                              canOpenWorkspaceOnboarding,
                           onApplyLocalGitConfiguration:
                               onApplyLocalGitConfiguration,
                           onSelectWorkspace: onSelectWorkspace,
@@ -563,6 +724,9 @@ class _TrackerHome extends StatelessWidget {
                           onOpenCreateIssue: onOpenCreateIssue,
                           onCloseCreateIssue: onCloseCreateIssue,
                           createIssuePrefill: createIssuePrefill,
+                          onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
+                          canOpenWorkspaceOnboarding:
+                              canOpenWorkspaceOnboarding,
                           onApplyLocalGitConfiguration:
                               onApplyLocalGitConfiguration,
                           onSelectWorkspace: onSelectWorkspace,
@@ -582,6 +746,428 @@ class _TrackerHome extends StatelessWidget {
   }
 }
 
+class _WorkspaceInitializationView extends StatelessWidget {
+  const _WorkspaceInitializationView({required this.viewModel});
+
+  final TrackerViewModel viewModel;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final l10n = AppLocalizations.of(context)!;
+    return Scaffold(
+      backgroundColor: colors.page,
+      body: Center(
+        child: Semantics(
+          label: l10n.appTitle,
+          child: CircularProgressIndicator(color: colors.primary),
+        ),
+      ),
+    );
+  }
+}
+
+enum _WorkspaceOnboardingTarget { local, hosted }
+
+class _WorkspaceOnboardingScreen extends StatefulWidget {
+  const _WorkspaceOnboardingScreen({
+    required this.canCancel,
+    required this.canBrowseHostedRepositories,
+    required this.onOpenLocalWorkspace,
+    required this.onOpenHostedWorkspace,
+    this.loadHostedRepositories,
+    this.onCancel,
+  });
+
+  final bool canCancel;
+  final bool canBrowseHostedRepositories;
+  final _HostedRepositoryCatalogLoader? loadHostedRepositories;
+  final LocalRepositoryConfigurationApplier onOpenLocalWorkspace;
+  final _HostedWorkspaceOpener onOpenHostedWorkspace;
+  final VoidCallback? onCancel;
+
+  @override
+  State<_WorkspaceOnboardingScreen> createState() =>
+      _WorkspaceOnboardingScreenState();
+}
+
+class _WorkspaceOnboardingScreenState
+    extends State<_WorkspaceOnboardingScreen> {
+  final TextEditingController _localPathController = TextEditingController();
+  final TextEditingController _localBranchController = TextEditingController(
+    text: 'main',
+  );
+  final TextEditingController _hostedRepositoryController =
+      TextEditingController();
+  final TextEditingController _hostedBranchController = TextEditingController(
+    text: 'main',
+  );
+  _WorkspaceOnboardingTarget _selectedTarget = _WorkspaceOnboardingTarget.local;
+  List<HostedRepositoryReference> _hostedRepositories =
+      const <HostedRepositoryReference>[];
+  bool _isLoadingHostedRepositories = false;
+  bool _didLoadHostedRepositories = false;
+  bool _isSubmitting = false;
+  String? _errorText;
+  String? _hostedRepositoryLoadError;
+
+  @override
+  void dispose() {
+    _localPathController.dispose();
+    _localBranchController.dispose();
+    _hostedRepositoryController.dispose();
+    _hostedBranchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _selectTarget(_WorkspaceOnboardingTarget target) async {
+    if (_selectedTarget == target) {
+      return;
+    }
+    setState(() {
+      _selectedTarget = target;
+      _errorText = null;
+    });
+    if (target == _WorkspaceOnboardingTarget.hosted) {
+      await _loadHostedRepositories();
+    }
+  }
+
+  Future<void> _loadHostedRepositories() async {
+    if (_didLoadHostedRepositories || widget.loadHostedRepositories == null) {
+      return;
+    }
+    setState(() {
+      _isLoadingHostedRepositories = true;
+      _hostedRepositoryLoadError = null;
+    });
+    try {
+      final repositories = await widget.loadHostedRepositories!();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _hostedRepositories = repositories;
+        _didLoadHostedRepositories = true;
+      });
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _hostedRepositoryLoadError = '$error';
+        _didLoadHostedRepositories = true;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingHostedRepositories = false;
+        });
+      }
+    }
+  }
+
+  void _selectHostedRepositorySuggestion(HostedRepositoryReference repository) {
+    _hostedRepositoryController.text = repository.fullName;
+    _hostedBranchController.text = repository.defaultBranch;
+    setState(() {
+      _errorText = null;
+    });
+  }
+
+  Future<void> _submit() async {
+    if (_isSubmitting) {
+      return;
+    }
+    setState(() {
+      _isSubmitting = true;
+      _errorText = null;
+    });
+    try {
+      switch (_selectedTarget) {
+        case _WorkspaceOnboardingTarget.local:
+          await widget.onOpenLocalWorkspace(
+            repositoryPath: _localPathController.text,
+            defaultBranch: _localBranchController.text,
+            writeBranch: _localBranchController.text,
+          );
+        case _WorkspaceOnboardingTarget.hosted:
+          await widget.onOpenHostedWorkspace(
+            repository: _hostedRepositoryController.text,
+            defaultBranch: _hostedBranchController.text,
+            writeBranch: _hostedBranchController.text,
+          );
+      }
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorText = '$error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.ts;
+    final isHosted = _selectedTarget == _WorkspaceOnboardingTarget.hosted;
+    return Scaffold(
+      backgroundColor: colors.page,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _ScreenHeading(
+                          title: l10n.addWorkspace,
+                          subtitle: widget.canCancel
+                              ? l10n.workspaceOnboardingDescription
+                              : l10n.workspaceOnboardingFirstRunDescription,
+                        ),
+                      ),
+                      if (widget.canCancel && widget.onCancel != null)
+                        TextButton(
+                          key: const ValueKey('workspace-onboarding-cancel'),
+                          onPressed: _isSubmitting ? null : widget.onCancel,
+                          child: Text(l10n.cancel),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _SurfaceCard(
+                    semanticLabel: l10n.addWorkspace,
+                    explicitChildNodes: true,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _SettingsProviderButton(
+                                label: l10n.localFolder,
+                                selected:
+                                    _selectedTarget ==
+                                    _WorkspaceOnboardingTarget.local,
+                                onPressed: () => unawaited(
+                                  _selectTarget(
+                                    _WorkspaceOnboardingTarget.local,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _SettingsProviderButton(
+                                label: l10n.hostedRepository,
+                                selected:
+                                    _selectedTarget ==
+                                    _WorkspaceOnboardingTarget.hosted,
+                                onPressed: () => unawaited(
+                                  _selectTarget(
+                                    _WorkspaceOnboardingTarget.hosted,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        if (isHosted) ...[
+                          _SettingsTextField(
+                            fieldKey: const ValueKey(
+                              'workspace-onboarding-hosted-repository',
+                            ),
+                            label: l10n.repository,
+                            controller: _hostedRepositoryController,
+                            helperText:
+                                l10n.workspaceOnboardingRepositoryHelper,
+                          ),
+                          const SizedBox(height: 12),
+                          _SettingsTextField(
+                            fieldKey: const ValueKey(
+                              'workspace-onboarding-hosted-branch',
+                            ),
+                            label: l10n.branch,
+                            controller: _hostedBranchController,
+                          ),
+                          const SizedBox(height: 16),
+                          _HostedRepositorySuggestions(
+                            repositories: _hostedRepositories,
+                            isLoading: _isLoadingHostedRepositories,
+                            loadError: _hostedRepositoryLoadError,
+                            canBrowseRepositories:
+                                widget.canBrowseHostedRepositories,
+                            onSelectRepository:
+                                _selectHostedRepositorySuggestion,
+                          ),
+                        ] else ...[
+                          _SettingsTextField(
+                            fieldKey: const ValueKey(
+                              'workspace-onboarding-local-path',
+                            ),
+                            label: l10n.repositoryPath,
+                            controller: _localPathController,
+                            helperText:
+                                l10n.workspaceOnboardingLocalFolderHelper,
+                          ),
+                          const SizedBox(height: 12),
+                          _SettingsTextField(
+                            fieldKey: const ValueKey(
+                              'workspace-onboarding-local-branch',
+                            ),
+                            label: l10n.branch,
+                            controller: _localBranchController,
+                          ),
+                        ],
+                        if (_errorText != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            _errorText!,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: colors.error),
+                          ),
+                        ],
+                        const SizedBox(height: 20),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: FilledButton(
+                            key: const ValueKey('workspace-onboarding-open'),
+                            onPressed: _isSubmitting ? null : _submit,
+                            child: Text(l10n.openWorkspace),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HostedRepositorySuggestions extends StatelessWidget {
+  const _HostedRepositorySuggestions({
+    required this.repositories,
+    required this.isLoading,
+    required this.loadError,
+    required this.canBrowseRepositories,
+    required this.onSelectRepository,
+  });
+
+  final List<HostedRepositoryReference> repositories;
+  final bool isLoading;
+  final String? loadError;
+  final bool canBrowseRepositories;
+  final ValueChanged<HostedRepositoryReference> onSelectRepository;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.ts;
+    if (isLoading) {
+      return Row(
+        children: [
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: colors.primary,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(l10n.workspaceOnboardingLoadingRepositories),
+        ],
+      );
+    }
+    if (loadError != null) {
+      return Text(
+        l10n.workspaceOnboardingRepositoryLoadFailed(loadError!),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.error),
+      );
+    }
+    if (!canBrowseRepositories || repositories.isEmpty) {
+      return Text(
+        canBrowseRepositories
+            ? l10n.workspaceOnboardingRepositoryManualFallbackHint
+            : l10n.workspaceOnboardingBrowseUnavailableHint,
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.muted),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          l10n.workspaceOnboardingBrowseRepositories,
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          l10n.workspaceOnboardingRepositoryManualFallbackHint,
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: colors.muted),
+        ),
+        const SizedBox(height: 8),
+        for (final repository in repositories.take(6)) ...[
+          Semantics(
+            button: true,
+            label:
+                '${repository.fullName} ${l10n.branch}: ${repository.defaultBranch}',
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: OutlinedButton(
+                key: ValueKey(
+                  'workspace-onboarding-repository-${repository.fullName.replaceAll('/', '-')}',
+                ),
+                onPressed: () => onSelectRepository(repository),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                  alignment: Alignment.centerLeft,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(repository.fullName),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${l10n.branch}: ${repository.defaultBranch}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _SelectSectionIntent extends Intent {
   const _SelectSectionIntent(this.section);
   final TrackerSection section;
@@ -595,6 +1181,8 @@ class _DesktopShell extends StatelessWidget {
     required this.onOpenCreateIssue,
     required this.onCloseCreateIssue,
     required this.createIssuePrefill,
+    required this.onOpenWorkspaceOnboarding,
+    required this.canOpenWorkspaceOnboarding,
     required this.onApplyLocalGitConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
@@ -607,6 +1195,8 @@ class _DesktopShell extends StatelessWidget {
   final _CreateIssueLauncher onOpenCreateIssue;
   final VoidCallback onCloseCreateIssue;
   final _CreateIssuePrefill? createIssuePrefill;
+  final VoidCallback onOpenWorkspaceOnboarding;
+  final bool canOpenWorkspaceOnboarding;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
@@ -624,6 +1214,8 @@ class _DesktopShell extends StatelessWidget {
             onOpenCreateIssue: onOpenCreateIssue,
             onCloseCreateIssue: onCloseCreateIssue,
             createIssuePrefill: createIssuePrefill,
+            onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
+            canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
             onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
             workspaces: workspaces,
             onSelectWorkspace: onSelectWorkspace,
@@ -644,6 +1236,8 @@ class _MobileShell extends StatelessWidget {
     required this.onOpenCreateIssue,
     required this.onCloseCreateIssue,
     required this.createIssuePrefill,
+    required this.onOpenWorkspaceOnboarding,
+    required this.canOpenWorkspaceOnboarding,
     required this.onApplyLocalGitConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
@@ -656,6 +1250,8 @@ class _MobileShell extends StatelessWidget {
   final _CreateIssueLauncher onOpenCreateIssue;
   final VoidCallback onCloseCreateIssue;
   final _CreateIssuePrefill? createIssuePrefill;
+  final VoidCallback onOpenWorkspaceOnboarding;
+  final bool canOpenWorkspaceOnboarding;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
@@ -670,6 +1266,8 @@ class _MobileShell extends StatelessWidget {
       onOpenCreateIssue: onOpenCreateIssue,
       onCloseCreateIssue: onCloseCreateIssue,
       createIssuePrefill: createIssuePrefill,
+      onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
+      canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
       onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
       workspaces: workspaces,
       onSelectWorkspace: onSelectWorkspace,
@@ -686,6 +1284,8 @@ class _TrackerMainPane extends StatelessWidget {
     required this.onOpenCreateIssue,
     required this.onCloseCreateIssue,
     required this.createIssuePrefill,
+    required this.onOpenWorkspaceOnboarding,
+    required this.canOpenWorkspaceOnboarding,
     required this.onApplyLocalGitConfiguration,
     required this.workspaces,
     required this.onSelectWorkspace,
@@ -700,6 +1300,8 @@ class _TrackerMainPane extends StatelessWidget {
   final _CreateIssueLauncher onOpenCreateIssue;
   final VoidCallback onCloseCreateIssue;
   final _CreateIssuePrefill? createIssuePrefill;
+  final VoidCallback onOpenWorkspaceOnboarding;
+  final bool canOpenWorkspaceOnboarding;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final WorkspaceProfilesState workspaces;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
@@ -716,6 +1318,8 @@ class _TrackerMainPane extends StatelessWidget {
               viewModel: viewModel,
               compact: compact,
               onOpenCreateIssue: onOpenCreateIssue,
+              onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
+              canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
             ),
             _RepositoryAccessBanner(viewModel: viewModel),
             Expanded(
@@ -841,11 +1445,15 @@ class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.viewModel,
     required this.onOpenCreateIssue,
+    required this.onOpenWorkspaceOnboarding,
+    required this.canOpenWorkspaceOnboarding,
     this.compact = false,
   });
 
   final TrackerViewModel viewModel;
   final _CreateIssueLauncher onOpenCreateIssue;
+  final VoidCallback onOpenWorkspaceOnboarding;
+  final bool canOpenWorkspaceOnboarding;
   final bool compact;
 
   @override
@@ -858,11 +1466,17 @@ class _TopBar extends StatelessWidget {
         : () => onOpenCreateIssue(
             _CreateIssuePrefill(originSection: viewModel.section),
           );
+    final openWorkspaceOnboarding =
+        viewModel.isSaving || !canOpenWorkspaceOnboarding
+        ? null
+        : onOpenWorkspaceOnboarding;
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 12, 12, 6),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final condensedDesktop = !compact && constraints.maxWidth < 1080;
+          final condensedDesktop =
+              !compact &&
+              constraints.maxWidth < (canOpenWorkspaceOnboarding ? 1220 : 1080);
           final iconOnlyActions = compact || condensedDesktop;
           final actionGap = iconOnlyActions ? 8.0 : 12.0;
           return Row(
@@ -947,6 +1561,23 @@ class _TopBar extends StatelessWidget {
                   onPressed: openCreateIssue,
                   height: _desktopTopBarControlHeight,
                 ),
+              if (canOpenWorkspaceOnboarding) ...[
+                const SizedBox(width: 8),
+                if (iconOnlyActions)
+                  _IconButtonSurface(
+                    label: l10n.addWorkspace,
+                    glyph: TrackStateIconGlyph.repository,
+                    onPressed: openWorkspaceOnboarding,
+                    size: compact ? null : _desktopTopBarControlHeight,
+                  )
+                else
+                  _SecondaryButton(
+                    label: l10n.addWorkspace,
+                    icon: TrackStateIconGlyph.repository,
+                    onPressed: openWorkspaceOnboarding,
+                    height: _desktopTopBarControlHeight,
+                  ),
+              ],
               const SizedBox(width: 8),
               if (iconOnlyActions)
                 _IconButtonSurface(
@@ -6586,6 +7217,7 @@ class _LocalGitConfiguration extends StatelessWidget {
 
 class _SettingsTextField extends StatelessWidget {
   const _SettingsTextField({
+    this.fieldKey,
     required this.label,
     this.controller,
     this.initialValue,
@@ -6595,6 +7227,7 @@ class _SettingsTextField extends StatelessWidget {
     this.enabled = true,
   });
 
+  final Key? fieldKey;
   final String label;
   final TextEditingController? controller;
   final String? initialValue;
@@ -6606,6 +7239,7 @@ class _SettingsTextField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return TextFormField(
+      key: fieldKey,
       controller: controller,
       initialValue: controller == null ? initialValue : null,
       focusNode: focusNode,
@@ -6717,6 +7351,39 @@ class _PrimaryButton extends StatelessWidget {
           ),
           label: Text(label, style: TextStyle(color: onPrimary, height: 1)),
         ),
+      ),
+    );
+  }
+}
+
+class _SecondaryButton extends StatelessWidget {
+  const _SecondaryButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.height,
+  });
+
+  final String label;
+  final TrackStateIconGlyph icon;
+  final VoidCallback? onPressed;
+  final double? height;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return Semantics(
+      button: true,
+      label: label,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: colors.text,
+          minimumSize: height == null ? null : Size(0, height!),
+          side: BorderSide(color: colors.border),
+        ),
+        icon: TrackStateIcon(icon, size: 16, color: colors.text),
+        label: Text(label),
       ),
     );
   }

@@ -620,6 +620,51 @@ class AppLocalizationsEn extends AppLocalizations {
   String get savedWorkspaces => 'Saved workspaces';
 
   @override
+  String get addWorkspace => 'Add workspace';
+
+  @override
+  String get localFolder => 'Local folder';
+
+  @override
+  String get hostedRepository => 'Hosted repository';
+
+  @override
+  String get workspaceOnboardingDescription =>
+      'Choose how TrackState should open the next workspace.';
+
+  @override
+  String get workspaceOnboardingFirstRunDescription =>
+      'Choose a local folder or hosted repository to get started.';
+
+  @override
+  String get workspaceOnboardingRepositoryHelper =>
+      'Enter the repository as owner/repo.';
+
+  @override
+  String get workspaceOnboardingLocalFolderHelper =>
+      'Enter the local Git folder path.';
+
+  @override
+  String get workspaceOnboardingBrowseRepositories => 'Accessible repositories';
+
+  @override
+  String get workspaceOnboardingLoadingRepositories =>
+      'Loading accessible repositories...';
+
+  @override
+  String get workspaceOnboardingBrowseUnavailableHint =>
+      'Connect GitHub in an existing hosted workspace to browse accessible repositories. You can still enter owner/repo manually here.';
+
+  @override
+  String get workspaceOnboardingRepositoryManualFallbackHint =>
+      'Select a repository from the current GitHub session or enter owner/repo manually.';
+
+  @override
+  String workspaceOnboardingRepositoryLoadFailed(String error) {
+    return 'Accessible repositories could not be loaded. Enter owner/repo manually instead. $error';
+  }
+
+  @override
   String get workspaceTargetTypeHosted => 'Hosted';
 
   @override
