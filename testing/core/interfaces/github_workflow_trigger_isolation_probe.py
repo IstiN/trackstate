@@ -39,6 +39,13 @@ class WorkflowDefinitionObservation:
 
 
 @dataclass(frozen=True)
+class WorkflowRunTagEvidenceObservation:
+    run: WorkflowRunObservation
+    semantic_tags: list[str]
+    log_excerpt: str
+
+
+@dataclass(frozen=True)
 class GitHubWorkflowTriggerIsolationObservation:
     repository: str
     default_branch: str
@@ -50,6 +57,7 @@ class GitHubWorkflowTriggerIsolationObservation:
     main_ci_push_main_after_cutoff: list[WorkflowRunObservation]
     apple_push_main_current_sha: list[WorkflowRunObservation]
     main_ci_push_main_current_sha: list[WorkflowRunObservation]
+    apple_push_semver_tag_evidence: list[WorkflowRunTagEvidenceObservation]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

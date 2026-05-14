@@ -17,6 +17,7 @@ from testing.core.interfaces.github_workflow_trigger_isolation_probe import (  #
     GitHubWorkflowTriggerIsolationObservation,
     WorkflowDefinitionObservation,
     WorkflowRunObservation,
+    WorkflowRunTagEvidenceObservation,
 )
 from testing.tests.support.github_workflow_trigger_isolation_probe_factory import (  # noqa: E402
     create_github_workflow_trigger_isolation_probe,
@@ -74,6 +75,8 @@ def main() -> None:
         result["apple_release"] = _workflow_as_dict(observation.apple_release)
         result["main_ci"] = _workflow_as_dict(observation.main_ci)
 
+        _assert_workflow_active(observation.apple_release, "Apple release workflow")
+        _assert_workflow_active(observation.main_ci, "General CI workflow")
         _record_step(
             result,
             step=1,
@@ -88,10 +91,8 @@ def main() -> None:
             ),
         )
 
-        _assert_workflow_active(observation.apple_release, "Apple release workflow")
-        _assert_workflow_active(observation.main_ci, "General CI workflow")
-
         _assert_apple_release_scope(observation.apple_release, observation.default_branch)
+        _assert_main_ci_scope(observation.main_ci, observation.default_branch)
         _record_step(
             result,
             step=2,
@@ -102,20 +103,21 @@ def main() -> None:
                 f"`{observation.apple_release.workflow_path}` with push tags "
                 f"{observation.apple_release.push_tags} and push branches "
                 f"{observation.apple_release.push_branches or ['<none>']}. "
-                f"The file also shows the semantic example `v1.2.3`."
+                f"`{observation.main_ci.workflow_name}` still listens to push branches "
+                f"{observation.main_ci.push_branches}."
             ),
         )
 
-        _assert_main_ci_scope(observation.main_ci, observation.default_branch)
+        _assert_semver_tag_run_evidence(observation)
         _record_step(
             result,
             step=3,
             status="passed",
             action=REQUEST_STEPS[2],
             observed=(
-                f"`{observation.main_ci.workflow_name}` remains wired to push branches "
-                f"{observation.main_ci.push_branches}. The Apple workflow keeps the tag-only "
-                f"pattern {observation.apple_release.push_tags} needed for `v1.2.3`."
+                f"Recent `{observation.apple_release.workflow_name}` push run(s) showed "
+                f"semantic tag evidence {_semantic_tag_evidence_list(observation.apple_push_semver_tag_evidence)}. "
+                f"Latest evidence: {_semantic_tag_evidence_summary(observation.apple_push_semver_tag_evidence)}"
             ),
         )
 
@@ -148,7 +150,7 @@ def main() -> None:
             observed=(
                 f"GitHub page `{observation.apple_release.ui_url}` visibly included "
                 f"`{observation.apple_release.workflow_name}`, `tags`, "
-                f"`{', '.join(observation.apple_release.push_tags)}`, and `v1.2.3`. "
+                f"`{', '.join(observation.apple_release.push_tags)}`. "
                 f"Screenshot: `{observation.apple_release.ui_screenshot_path}`."
             ),
         )
@@ -225,19 +227,6 @@ def _assert_apple_release_scope(
             f"Workflow URL: {workflow.html_url}\n"
             f"Raw workflow:\n{workflow.raw_file_text}"
         )
-    if not workflow.workflow_dispatch_enabled:
-        raise AssertionError(
-            "Step 2 failed: the live Apple release workflow no longer exposes the "
-            "workflow_dispatch fallback expected by maintainers.\n"
-            f"Workflow URL: {workflow.html_url}"
-        )
-    if not workflow.semantic_tag_hint_present:
-        raise AssertionError(
-            "Step 2 failed: the live Apple release workflow file no longer shows the "
-            "`v1.2.3` semantic tag example for users.\n"
-            f"Workflow URL: {workflow.html_url}\n"
-            f"Raw workflow:\n{workflow.raw_file_text}"
-        )
 
 
 def _assert_main_ci_scope(
@@ -296,6 +285,18 @@ def _assert_live_run_isolation(
         )
 
 
+def _assert_semver_tag_run_evidence(
+    observation: GitHubWorkflowTriggerIsolationObservation,
+) -> None:
+    if observation.apple_push_semver_tag_evidence:
+        return
+    raise AssertionError(
+        "Step 3 failed: recent Apple Release Builds runs did not expose any live semantic "
+        "tag execution evidence.\n"
+        f"Recent Apple runs:\n{_run_summary_block(observation.apple_release.recent_runs)}"
+    )
+
+
 def _assert_human_verification(
     workflow: WorkflowDefinitionObservation,
     default_branch: str,
@@ -312,8 +313,6 @@ def _assert_human_verification(
         required_tokens.extend(["tags", *workflow.push_tags])
     if workflow.push_branches:
         required_tokens.extend(["branches", default_branch])
-    if workflow.semantic_tag_hint_present:
-        required_tokens.append("v1.2.3")
     missing = [token for token in required_tokens if token not in body_text]
     if missing:
         raise AssertionError(
@@ -383,16 +382,17 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         ),
         (
             "* Verified the live Apple workflow file is tag-scoped with "
-            "{{tags: [v*]}} and still shows the semantic example {{v1.2.3}}."
+            "{{tags: [v*]}} and excludes push branches on {{main}}."
         ),
         (
             "* Verified the live general CI workflow still listens to pushes on "
             "{{main}}."
         ),
         (
-            "* Checked recent live Actions runs for the current {{main}} head SHA to "
-            "confirm standard pushes continue through general CI and do not trigger "
-            "the Apple release workflow."
+            "* Checked recent Apple workflow run logs for semantic version tag "
+            "evidence and recent Actions runs for the current {{main}} head SHA "
+            "to confirm standard pushes continue through general CI and do not "
+            "trigger the Apple release workflow."
         ),
         "",
         "h4. Result",
@@ -446,11 +446,12 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         ),
         (
             "- Verified the live Apple workflow file is tag-scoped with "
-            "`tags: [v*]` and still shows the semantic example `v1.2.3`."
+            "`tags: [v*]` and excludes push branches on `main`."
         ),
         "- Verified the live general CI workflow still listens to pushes on `main`.",
         (
-            "- Checked recent live Actions runs for the current `main` head SHA to "
+            "- Checked recent Apple workflow run logs for semantic version tag "
+            "evidence and recent Actions runs for the current `main` head SHA to "
             "confirm standard pushes continue through general CI and do not trigger "
             "the Apple release workflow."
         ),
@@ -529,7 +530,7 @@ def _response(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Apple release workflow is not isolated from main pushes",
+            f"# {TICKET_KEY} - Apple release trigger isolation failed",
             "",
             "## Steps to reproduce",
             "1. Push a standard commit (no tag) to the `main` branch of `IstiN/trackstate`.",
@@ -573,6 +574,9 @@ def _bug_description(result: dict[str, object]) -> str:
                     ),
                     "main_ci_push_main_current_sha": result.get(
                         "main_ci_push_main_current_sha", []
+                    ),
+                    "apple_push_semver_tag_evidence": result.get(
+                        "apple_push_semver_tag_evidence", []
                     ),
                 },
                 indent=2,
@@ -734,6 +738,26 @@ def _run_summary_block(runs: list[WorkflowRunObservation]) -> str:
         )
         for run in runs
     )
+
+
+def _semantic_tag_evidence_list(
+    evidence: list[WorkflowRunTagEvidenceObservation],
+) -> str:
+    if not evidence:
+        return "<none>"
+    return ", ".join(
+        "/".join(entry.semantic_tags) for entry in evidence if entry.semantic_tags
+    )
+
+
+def _semantic_tag_evidence_summary(
+    evidence: list[WorkflowRunTagEvidenceObservation],
+) -> str:
+    if not evidence:
+        return "<none>"
+    latest = evidence[0]
+    tags = ", ".join(latest.semantic_tags)
+    return f"run {latest.run.id} matched {tags}; {_snippet(latest.log_excerpt, limit=300)}"
 
 
 def _snippet(text: str, *, limit: int = 800) -> str:

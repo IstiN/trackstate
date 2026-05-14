@@ -4,6 +4,7 @@ import json
 from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import Any, Callable
 from urllib.parse import quote
 
@@ -17,13 +18,18 @@ from testing.core.config.github_workflow_trigger_isolation_config import (
     GitHubWorkflowTriggerIsolationConfig,
 )
 from testing.core.interfaces.github_api_client import GitHubApiClient
+from testing.core.interfaces.github_workflow_run_log_reader import (
+    GitHubWorkflowRunLogReader,
+)
 from testing.core.interfaces.github_workflow_trigger_isolation_probe import (
     GitHubWorkflowTriggerIsolationObservation,
     WorkflowDefinitionObservation,
     WorkflowRunObservation,
+    WorkflowRunTagEvidenceObservation,
 )
 
 FilePageFactory = Callable[[], AbstractContextManager[GitHubRepositoryFilePage]]
+SEMVER_TAG_PATTERN = re.compile(r"\bv\d+\.\d+\.\d+\b")
 
 
 class GitHubWorkflowTriggerIsolationProbeService:
@@ -32,11 +38,13 @@ class GitHubWorkflowTriggerIsolationProbeService:
         config: GitHubWorkflowTriggerIsolationConfig,
         *,
         github_api_client: GitHubApiClient,
+        workflow_run_log_reader: GitHubWorkflowRunLogReader,
         file_page_factory: FilePageFactory,
         screenshot_directory: Path | None = None,
     ) -> None:
         self._config = config
         self._github_api_client = github_api_client
+        self._workflow_run_log_reader = workflow_run_log_reader
         self._file_page_factory = file_page_factory
         self._screenshot_directory = screenshot_directory
 
@@ -85,6 +93,7 @@ class GitHubWorkflowTriggerIsolationProbeService:
             branch=default_branch,
             minimum_timestamp=cutoff,
         )
+        semantic_tags_by_sha = self._load_semantic_tags_by_sha()
 
         return GitHubWorkflowTriggerIsolationObservation(
             repository=self._config.repository,
@@ -104,6 +113,10 @@ class GitHubWorkflowTriggerIsolationProbeService:
                 main_ci.recent_runs,
                 branch=default_branch,
                 head_sha=current_default_branch_sha,
+            ),
+            apple_push_semver_tag_evidence=self._collect_semver_tag_run_evidence(
+                apple_release.recent_runs,
+                semantic_tags_by_sha=semantic_tags_by_sha,
             ),
         )
 
@@ -235,6 +248,66 @@ class GitHubWorkflowTriggerIsolationProbeService:
             )
         return runs
 
+    def _load_semantic_tags_by_sha(self) -> dict[str, list[str]]:
+        payload = json.loads(
+            self._github_api_client.request_text(
+                endpoint=f"/repos/{self._config.repository}/git/matching-refs/tags/v"
+            )
+        )
+        if not isinstance(payload, list):
+            raise AssertionError(
+                "GitHub did not return a tag-ref list for semantic version lookups."
+            )
+
+        tags_by_sha: dict[str, list[str]] = {}
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            ref = entry.get("ref")
+            object_payload = entry.get("object")
+            if not isinstance(ref, str) or not isinstance(object_payload, dict):
+                continue
+            sha = object_payload.get("sha")
+            if not isinstance(sha, str) or not sha.strip():
+                continue
+            tag_name = ref.removeprefix("refs/tags/").strip()
+            if not SEMVER_TAG_PATTERN.fullmatch(tag_name):
+                continue
+            tags_by_sha.setdefault(sha.strip(), []).append(tag_name)
+
+        for tags in tags_by_sha.values():
+            tags.sort()
+        return tags_by_sha
+
+    def _collect_semver_tag_run_evidence(
+        self,
+        runs: list[WorkflowRunObservation],
+        *,
+        semantic_tags_by_sha: dict[str, list[str]],
+    ) -> list[WorkflowRunTagEvidenceObservation]:
+        evidence: list[WorkflowRunTagEvidenceObservation] = []
+        for run in runs:
+            if run.event != "push" or run.head_sha is None:
+                continue
+            candidate_tags = semantic_tags_by_sha.get(run.head_sha, [])
+            if not candidate_tags:
+                continue
+            log_text = self._workflow_run_log_reader.read_run_log(run.id)
+            log_tags = sorted({match.group(0) for match in SEMVER_TAG_PATTERN.finditer(log_text)})
+            matched_tags = [tag for tag in candidate_tags if tag in log_tags]
+            if not matched_tags:
+                continue
+            evidence.append(
+                WorkflowRunTagEvidenceObservation(
+                    run=run,
+                    semantic_tags=matched_tags,
+                    log_excerpt=self._extract_tag_log_excerpt(log_text, matched_tags),
+                )
+            )
+            if len(evidence) >= 3:
+                break
+        return evidence
+
     def _load_json(self, *, endpoint: str) -> dict[str, Any]:
         payload = json.loads(self._github_api_client.request_text(endpoint=endpoint))
         if not isinstance(payload, dict):
@@ -296,6 +369,18 @@ class GitHubWorkflowTriggerIsolationProbeService:
                 continue
             filtered.append(run)
         return filtered
+
+    @staticmethod
+    def _extract_tag_log_excerpt(log_text: str, tags: list[str]) -> str:
+        excerpt_lines: list[str] = []
+        for line in log_text.splitlines():
+            if any(tag in line for tag in tags):
+                excerpt_lines.append(line.strip())
+            if len(excerpt_lines) >= 4:
+                break
+        if excerpt_lines:
+            return "\n".join(excerpt_lines)
+        return "No semantic tag lines were captured from the workflow log."
 
     @staticmethod
     def _read_string(payload: dict[str, Any], key: str) -> str | None:
