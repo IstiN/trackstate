@@ -7,7 +7,7 @@ dependencies:
   - file utility available on PATH
   - GH_TOKEN or GITHUB_TOKEN recommended for GitHub API access
 notes:
-  - Selects the latest stable published version-tag release in IstiN/trackstate unless TS708_RELEASE_TAG pins a specific tag.
+  - Requires an explicit version tag from TS708_RELEASE_TAG, runtime_inputs.release_tag, or GitHub Actions CI metadata for the workflow under test.
   - Verifies the GitHub Release exposes exactly one app archive, one standalone CLI archive, and one .sha256 manifest.
   - Downloads the required archives, inspects the embedded binaries with `file`, and checks the checksum manifest against the downloaded bytes.
   - Fails if forbidden installer assets such as .dmg or .pkg are published instead of the MVP unsigned archives.

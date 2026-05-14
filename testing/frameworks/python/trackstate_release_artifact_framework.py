@@ -6,18 +6,17 @@ import io
 import json
 import os
 from pathlib import Path, PurePosixPath
-import re
 import subprocess
 import tarfile
 import tempfile
 import zipfile
 
-from testing.components.services.live_setup_repository_service import (
-    LiveSetupRepositoryService,
-)
-from testing.core.config.live_setup_test_config import LiveSetupTestConfig
 from testing.core.config.trackstate_release_artifact_config import (
     TrackStateReleaseArtifactConfig,
+)
+from testing.core.interfaces.github_api_client import GitHubApiClient
+from testing.core.interfaces.trackstate_release_asset_reader import (
+    TrackStateReleaseAssetReader,
 )
 from testing.core.interfaces.trackstate_release_artifact_probe import (
     TrackStateReleaseArtifactProbe,
@@ -27,15 +26,19 @@ from testing.core.models.trackstate_release_artifact_result import (
     TrackStateReleaseAssetObservation,
     TrackStateReleaseCandidateObservation,
 )
-from testing.frameworks.python.gh_cli_api_client import GhCliApiClient
 
 
 class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
-    _SEMVER_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
-
-    def __init__(self, repository_root: Path) -> None:
+    def __init__(
+        self,
+        repository_root: Path,
+        *,
+        github_api_client: GitHubApiClient,
+        release_asset_reader: TrackStateReleaseAssetReader,
+    ) -> None:
         self._repository_root = Path(repository_root)
-        self._github_api_client = GhCliApiClient(self._repository_root)
+        self._github_api_client = github_api_client
+        self._release_asset_reader = release_asset_reader
 
     def observe_release_artifacts(
         self,
@@ -54,19 +57,15 @@ class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
                 gh_release_view_command=(),
                 gh_release_view_exit_code=1,
                 gh_release_view_stdout="",
-                gh_release_view_stderr="No stable published release matched the configured selector.",
+                gh_release_view_stderr=(
+                    "No published release matched the explicit workflow tag "
+                    f"{config.release_tag}."
+                ),
                 checksum_manifest_text=None,
             )
 
         release_view_command, release_view_exit_code, release_view_stdout, release_view_stderr = (
             self._run_release_view(config.repository, selected_release.tag_name)
-        )
-        service = LiveSetupRepositoryService(
-            config=LiveSetupTestConfig(
-                app_url=config.releases_page_url,
-                repository=config.repository,
-                ref=config.default_branch,
-            )
         )
         checksum_manifest_text: str | None = None
 
@@ -78,14 +77,14 @@ class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
                 release_id=selected_release.id,
             ):
                 asset_observation = self._observe_asset(
-                    service=service,
+                    release_asset_reader=self._release_asset_reader,
                     config=config,
                     raw_asset=raw_asset,
                     temp_dir=temp_dir,
                 )
                 if asset_observation.classification == "checksum":
                     checksum_manifest_text = self._read_checksum_manifest(
-                        service=service,
+                        release_asset_reader=self._release_asset_reader,
                         asset_id=raw_asset["id"],
                     )
                 asset_observations.append(asset_observation)
@@ -150,40 +149,10 @@ class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
         releases: list[TrackStateReleaseCandidateObservation],
         config: TrackStateReleaseArtifactConfig,
     ) -> TrackStateReleaseCandidateObservation | None:
-        if config.release_tag:
-            for release in releases:
-                if release.tag_name == config.release_tag:
-                    return release
-            return None
-
-        tag_pattern = re.compile(config.release_tag_pattern)
-        candidates = [
-            release
-            for release in releases
-            if not release.draft
-            and not release.prerelease
-            and tag_pattern.match(release.tag_name) is not None
-        ]
-        if not candidates:
-            return None
-        return max(candidates, key=self._release_sort_key)
-
-    def _release_sort_key(
-        self,
-        release: TrackStateReleaseCandidateObservation,
-    ) -> tuple[tuple[int, int, int], datetime, str]:
-        semver_match = self._SEMVER_PATTERN.match(release.tag_name)
-        version_key = (
-            tuple(int(group) for group in semver_match.groups())
-            if semver_match is not None
-            else (0, 0, 0)
-        )
-        published_at = _parse_timestamp(release.published_at)
-        return (
-            version_key,
-            published_at or datetime.min.replace(tzinfo=timezone.utc),
-            release.tag_name,
-        )
+        for release in releases:
+            if release.tag_name == config.release_tag:
+                return release
+        return None
 
     def _selected_release_assets(
         self,
@@ -222,7 +191,7 @@ class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
     def _observe_asset(
         self,
         *,
-        service: LiveSetupRepositoryService,
+        release_asset_reader: TrackStateReleaseAssetReader,
         config: TrackStateReleaseArtifactConfig,
         raw_asset: dict[str, object],
         temp_dir: Path,
@@ -248,7 +217,7 @@ class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
             )
 
         try:
-            asset_bytes = service.download_release_asset_bytes(asset_id)
+            asset_bytes = release_asset_reader.download_release_asset_bytes(asset_id)
         except Exception as error:
             return TrackStateReleaseAssetObservation(
                 id=asset_id,
@@ -358,11 +327,11 @@ class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
     def _read_checksum_manifest(
         self,
         *,
-        service: LiveSetupRepositoryService,
+        release_asset_reader: TrackStateReleaseAssetReader,
         asset_id: int,
     ) -> str | None:
         try:
-            payload = service.download_release_asset_bytes(asset_id)
+            payload = release_asset_reader.download_release_asset_bytes(asset_id)
         except Exception:
             return None
         return payload.decode("utf-8", errors="replace")

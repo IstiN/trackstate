@@ -86,7 +86,7 @@ class Ts708ReleaseArtifactScenario:
                 result,
                 step=1,
                 status="failed",
-                action="Inspect the latest successful Apple release published from a version tag.",
+                action="Inspect the Apple release published for the explicit version tag under test.",
                 observed="\n".join(release_failures),
             )
         else:
@@ -94,7 +94,7 @@ class Ts708ReleaseArtifactScenario:
                 result,
                 step=1,
                 status="passed",
-                action="Inspect the latest successful Apple release published from a version tag.",
+                action="Inspect the Apple release published for the explicit version tag under test.",
                 observed=(
                     f"selected_release={result.get('selected_release_tag')}; "
                     f"published_at={result.get('selected_release_published_at')}; "
@@ -224,7 +224,12 @@ class Ts708ReleaseArtifactScenario:
             "repository": self.config.repository,
             "repository_url": f"https://github.com/{self.config.repository}",
             "releases_page_url": observation.releases_page_url,
+            "run_command": (
+                f"TS708_RELEASE_TAG={self.config.release_tag} "
+                "python testing/tests/TS-708/test_ts_708.py"
+            ),
             "os": platform.system(),
+            "expected_release_tag": self.config.release_tag,
             "selected_release_tag": selected_release.tag_name if selected_release else None,
             "selected_release_name": selected_release.name if selected_release else None,
             "selected_release_url": selected_release.html_url if selected_release else None,
@@ -259,8 +264,8 @@ class Ts708ReleaseArtifactScenario:
         if observation.selected_release is not None:
             return []
         return [
-            "Step 1 failed: no stable published version-tag release was available to verify "
-            f"in {self.config.repository}.\n"
+            "Step 1 failed: the explicit workflow release tag was not published in the "
+            f"selected repository.\nExpected release tag: {result.get('expected_release_tag')}\n"
             f"Candidate releases: {result.get('candidate_release_tags')}\n"
             f"Releases page: {result.get('releases_page_url')}"
         ]
@@ -376,7 +381,10 @@ class Ts708ReleaseArtifactScenario:
                 )
                 continue
             file_output = asset.file_output or ""
-            if self.config.expected_architecture_fragment not in file_output:
+            if not _matches_expected_architecture(
+                file_output,
+                expected_fragment=self.config.expected_architecture_fragment,
+            ):
                 failures.append(
                     f"Step 4 failed: the {label} binary was not reported as "
                     f"{self.config.expected_architecture_fragment}.\n"
@@ -457,6 +465,19 @@ def _parse_checksum_manifest(manifest_text: str) -> dict[str, str]:
     return entries
 
 
+def _matches_expected_architecture(file_output: str, *, expected_fragment: str) -> bool:
+    normalized_output = file_output.lower()
+    if expected_fragment.lower() in normalized_output:
+        return True
+    if "mach-o 64-bit" not in normalized_output:
+        return False
+    if "arm64" not in normalized_output:
+        return False
+    if "universal binary" in normalized_output or "x86_64" in normalized_output:
+        return False
+    return "arm64 executable" in normalized_output or "executable arm64" in normalized_output
+
+
 def _write_pass_outputs(result: dict[str, object]) -> None:
     RESULT_PATH.write_text(
         json.dumps(
@@ -518,8 +539,8 @@ def _jira_comment(result: dict[str, object], *, status: str) -> str:
         "",
         "h4. What was tested",
         (
-            "* Verified the latest stable version-tag release in the live "
-            "{IstiN/trackstate} repository against the Apple Silicon MVP artifact ticket."
+            "* Verified the explicit version-tag release selected for the live "
+            "{IstiN/trackstate} Apple artifact ticket."
         ),
         (
             "* Checked the user-visible release summary, the published asset list, the "
@@ -561,7 +582,7 @@ def _jira_comment(result: dict[str, object], *, status: str) -> str:
             "",
             "h4. Run command",
             "{code:bash}",
-            RUN_COMMAND,
+            _as_text(result.get("run_command")) or RUN_COMMAND,
             "{code}",
         ]
     )
@@ -580,8 +601,8 @@ def _markdown_summary(result: dict[str, object], *, status: str) -> str:
         "",
         "## What was automated",
         (
-            "- Verified the latest stable version-tag release in the live "
-            "`IstiN/trackstate` repository against the Apple Silicon MVP artifact ticket."
+            "- Verified the explicit version-tag release selected for the live "
+            "`IstiN/trackstate` Apple artifact ticket."
         ),
         (
             "- Checked the user-visible release summary, the published asset list, the "
@@ -617,11 +638,73 @@ def _markdown_summary(result: dict[str, object], *, status: str) -> str:
                 "```",
             ]
         )
-    lines.extend(["", "## How to run", "```bash", RUN_COMMAND, "```"])
+    lines.extend(
+        [
+            "",
+            "## How to run",
+            "```bash",
+            _as_text(result.get("run_command")) or RUN_COMMAND,
+            "```",
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    app_asset = result.get("app_asset") if isinstance(result.get("app_asset"), dict) else None
+    cli_asset = result.get("cli_asset") if isinstance(result.get("cli_asset"), dict) else None
+    checksum_asset = (
+        result.get("checksum_asset") if isinstance(result.get("checksum_asset"), dict) else None
+    )
+    other_assets = result.get("other_assets") if isinstance(result.get("other_assets"), list) else []
+    app_file_output = _as_text(result.get("app_file_output"))
+    cli_file_output = _as_text(result.get("cli_file_output"))
+    asset_names = result.get("asset_names")
+
+    if app_asset is not None and cli_asset is not None:
+        step_3_observation = (
+            "❌ The release published the desktop zip and CLI archive, but the checksum "
+            "manifest was not exposed as the required `.sha256` asset. "
+            f"Observed asset names: `{asset_names}`. "
+            f"Unexpected non-matching assets: `{other_assets}`."
+        )
+    else:
+        step_3_observation = (
+            "❌ The release did not expose the required zipped macOS `.app` bundle and "
+            "standalone CLI archive as specified. "
+            f"Observed asset names: `{asset_names}`."
+        )
+
+    if app_file_output or cli_file_output:
+        step_4_observation = (
+            "❌ Ran `file` on the extracted binaries and observed output that still "
+            "contradicts the ticket expectation. "
+            f"Desktop output: `{app_file_output}`. "
+            f"CLI output: `{cli_file_output}`."
+        )
+    else:
+        step_4_observation = (
+            "❌ This could not be completed as specified because the release did not provide "
+            "downloadable archives for both binaries."
+        )
+
+    if checksum_asset is None:
+        step_5_observation = (
+            "❌ No valid `.sha256` manifest was available for verification. "
+            f"Observed asset names: `{asset_names}`."
+        )
+    else:
+        step_5_observation = (
+            "❌ The checksum manifest was present but did not match the downloaded archive "
+            "bytes."
+        )
+
+    actual_summary = (
+        f"- **Actual:** release `{_release_label(result)}` exposed `{asset_names}`. "
+        "The desktop archive extracted to a non-arm64-only universal binary and the "
+        "checksum manifest was not published as the required `.sha256` asset."
+    )
+
     lines = [
         f"# Bug Report — {TICKET_KEY}",
         "",
@@ -638,28 +721,12 @@ def _bug_description(result: dict[str, object]) -> str:
             "✅ Opened the release with `gh release view` and confirmed the selected release "
             f"was `{_release_label(result)}`."
         ),
-        (
-            "3. **Download the published assets: the zipped macOS `.app` bundle and the standalone CLI archive.** "
-            "❌ The release did not publish the required archives. "
-            f"Observed asset names: `{result.get('asset_names')}`. "
-            f"Forbidden installer assets: `{result.get('forbidden_assets')}`."
-        ),
-        (
-            "4. **Execute `file [binary_name]` in a terminal for both the desktop binary and the CLI binary.** "
-            "❌ This could not be completed as specified because the release did not provide the "
-            "required app archive and CLI archive to download and extract."
-        ),
-        (
-            "5. **Verify the contents of the generated SHA256 checksum manifest.** "
-            "❌ No valid `.sha256` manifest was available for verification."
-        ),
+        f"3. **Download the published assets: the zipped macOS `.app` bundle and the standalone CLI archive.** {step_3_observation}",
+        f"4. **Execute `file [binary_name]` in a terminal for both the desktop binary and the CLI binary.** {step_4_observation}",
+        f"5. **Verify the contents of the generated SHA256 checksum manifest.** {step_5_observation}",
         "",
         "## Actual vs Expected",
-        (
-            f"- **Actual:** release `{_release_label(result)}` exposed `{result.get('asset_names')}`. "
-            "The release published a `.dmg` installer and did not provide a zipped `.app`, a "
-            "standalone CLI archive, or a `.sha256` manifest."
-        ),
+        actual_summary,
         (
             "- **Expected:** exactly three assets should be published: a zipped `.app`, a "
             "standalone CLI archive, and a `.sha256` file. Both extracted binaries should "
@@ -675,7 +742,7 @@ def _bug_description(result: dict[str, object]) -> str:
         f"- Repository: `{result.get('repository')}`",
         f"- Release URL: `{_as_text(result.get('selected_release_url'))}`",
         f"- OS: `{result.get('os')}`",
-        f"- Run command: `{RUN_COMMAND}`",
+        f"- Run command: `{_as_text(result.get('run_command')) or RUN_COMMAND}`",
         "",
         "## Logs",
         "### `gh release view` output",

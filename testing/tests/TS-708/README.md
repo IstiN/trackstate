@@ -5,10 +5,10 @@ unsigned Apple Silicon artifacts expected by the ticket: a zipped `.app`, a
 standalone CLI archive, and a `.sha256` manifest.
 
 The automation:
-1. selects the latest stable published version-tag release in `IstiN/trackstate`
+1. selects the explicit version-tag release produced by the workflow under test
 2. captures the user-visible release summary with `gh release view`
 3. verifies the release exposes exactly one app archive, one CLI archive, and
-   one checksum manifest, with no `.dmg` or `.pkg` assets
+    one checksum manifest, with no `.dmg` or `.pkg` assets
 4. downloads the archive assets, extracts the embedded binaries, and runs
    `file` on each executable
 5. verifies the checksum manifest contains the downloaded archive filenames and
@@ -17,7 +17,7 @@ The automation:
 ## Run this test
 
 ```bash
-mkdir -p outputs && python testing/tests/TS-708/test_ts_708.py
+mkdir -p outputs && TS708_RELEASE_TAG=vX.Y.Z python testing/tests/TS-708/test_ts_708.py
 ```
 
 ## Required environment / config
@@ -26,6 +26,8 @@ mkdir -p outputs && python testing/tests/TS-708/test_ts_708.py
 - `gh` CLI available on `PATH`
 - `file` utility available on `PATH`
 - `GH_TOKEN` or `GITHUB_TOKEN` recommended for GitHub API access
+- An explicit release tag via `TS708_RELEASE_TAG`, `runtime_inputs.release_tag`,
+  or GitHub Actions CI metadata for the workflow under test
 
 ## Expected pass / fail behavior
 
