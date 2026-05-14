@@ -1,3 +1,4 @@
+import '../models/workspace_onboarding_choice_observation.dart';
 import '../models/workspace_shell_entry_point_observation.dart';
 import '../models/workspace_onboarding_state.dart';
 
@@ -17,6 +18,8 @@ abstract interface class WorkspaceOnboardingScreenHandle {
   Future<void> submit();
 
   WorkspaceOnboardingState captureState();
+
+  WorkspaceOnboardingChoiceObservation observeTargetChoices();
 
   WorkspaceShellEntryPointObservation observeShellEntryPoint({
     required String workspaceDisplayName,
