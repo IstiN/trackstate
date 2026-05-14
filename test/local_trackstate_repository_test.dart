@@ -1836,6 +1836,24 @@ class _FakeHostedReleaseTrackStateProvider
       );
 
   @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => const RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: 'release-provider-revision',
+      sessionRevision: 'release-provider-session',
+      connectionState: ProviderConnectionState.connected,
+      permission: RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        supportsReleaseAttachmentWrites: true,
+      ),
+    ),
+  );
+
+  @override
   Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
     RepositoryReleaseAttachmentWriteRequest request,
   ) async {

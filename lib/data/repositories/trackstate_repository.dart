@@ -52,6 +52,11 @@ abstract interface class ProjectSettingsRepository {
   Future<TrackerSnapshot> saveProjectSettings(ProjectSettingsCatalog settings);
 }
 
+abstract interface class WorkspaceSyncRepository {
+  bool get usesLocalPersistence;
+  Future<RepositorySyncCheck> checkSync({RepositorySyncState? previousState});
+}
+
 abstract interface class HostedWorkspaceCatalogRepository {
   Future<List<HostedRepositoryReference>> listAccessibleHostedRepositories();
 }
@@ -90,6 +95,7 @@ class ProviderBackedTrackStateRepository
     implements
         TrackStateRepository,
         ProjectSettingsRepository,
+        WorkspaceSyncRepository,
         HostedWorkspaceCatalogRepository {
   static const RepositoryPermission _restrictedPermission =
       RepositoryPermission(
@@ -151,6 +157,31 @@ class ProviderBackedTrackStateRepository
   TrackStateProviderAdapter get providerAdapter => _provider;
   ProviderSession? get session => _session;
   TrackerSnapshot? get cachedSnapshot => _snapshot;
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async {
+    try {
+      final check = await _provider.checkSync(previousState: previousState);
+      final permission = check.state.permission;
+      if (permission != null) {
+        _syncProviderSession(
+          connectionState: check.state.connectionState,
+          resolvedUserIdentity: _session.resolvedUserIdentity,
+          permission: permission,
+        );
+      }
+      return check;
+    } on Object {
+      _syncProviderSession(
+        connectionState: ProviderConnectionState.error,
+        resolvedUserIdentity: _session.resolvedUserIdentity,
+        permission: _restrictedPermission,
+      );
+      rethrow;
+    }
+  }
 
   void replaceCachedState({
     TrackerSnapshot? snapshot,

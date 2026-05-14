@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../../data/repositories/local_trackstate_repository.dart';
 import '../../../../../data/repositories/trackstate_repository.dart';
@@ -76,7 +77,8 @@ class TrackStateApp extends StatefulWidget {
   State<TrackStateApp> createState() => _TrackStateAppState();
 }
 
-class _TrackStateAppState extends State<TrackStateApp> {
+class _TrackStateAppState extends State<TrackStateApp>
+    with WidgetsBindingObserver {
   late TrackerViewModel viewModel;
   bool _isCreateIssueVisible = false;
   _CreateIssuePrefill? _createIssuePrefill;
@@ -95,6 +97,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     viewModel = _createViewModel(autoLoad: false);
     unawaited(_initializeWorkspaceProfiles());
   }
@@ -120,8 +123,17 @@ class _TrackStateAppState extends State<TrackStateApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     viewModel.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      unawaited(viewModel.handleAppResumed());
+    }
   }
 
   TrackerViewModel _createViewModel({
@@ -1822,7 +1834,11 @@ class _Sidebar extends StatelessWidget {
             final footerSection = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _SyncPill(label: l10n.syncStatus),
+                _SyncPill(
+                  label: _workspaceSyncLabel(l10n, viewModel),
+                  tone: _workspaceSyncTone(viewModel),
+                  onPressed: () => viewModel.selectSection(TrackerSection.settings),
+                ),
                 const SizedBox(height: 12),
                 _GitInfoCard(project: viewModel.project!),
               ],
@@ -1909,10 +1925,19 @@ class _TopBar extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                const SizedBox(width: 8),
+                _IconButtonSurface(
+                  label: _workspaceSyncLabel(l10n, viewModel),
+                  glyph: TrackStateIconGlyph.sync,
+                  onPressed: () => viewModel.selectSection(TrackerSection.settings),
+                  size: _desktopTopBarControlHeight,
+                ),
               ] else ...[
                 _SyncPill(
-                  label: l10n.syncStatus,
+                  label: _workspaceSyncLabel(l10n, viewModel),
+                  tone: _workspaceSyncTone(viewModel),
                   height: _desktopTopBarControlHeight,
+                  onPressed: () => viewModel.selectSection(TrackerSection.settings),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -2341,6 +2366,93 @@ String _repositoryAccessLabel(
     RepositoryAccessState.connected => l10n.repositoryAccessConnected,
     RepositoryAccessState.connectGitHub => l10n.repositoryAccessConnectGitHub,
   };
+}
+
+_SyncPillTone _workspaceSyncTone(TrackerViewModel viewModel) {
+  final status = viewModel.workspaceSyncStatus;
+  if (status.hasPendingRefresh ||
+      status.health == WorkspaceSyncHealth.attentionNeeded) {
+    return _SyncPillTone.attention;
+  }
+  return switch (status.health) {
+    WorkspaceSyncHealth.synced => _SyncPillTone.healthy,
+    WorkspaceSyncHealth.checking => _SyncPillTone.checking,
+    WorkspaceSyncHealth.attentionNeeded => _SyncPillTone.attention,
+    WorkspaceSyncHealth.unavailable => _SyncPillTone.unavailable,
+  };
+}
+
+String _workspaceSyncLabel(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  final status = viewModel.workspaceSyncStatus;
+  if (status.hasPendingRefresh) {
+    return l10n.workspaceSyncPending;
+  }
+  return switch (status.health) {
+    WorkspaceSyncHealth.synced => l10n.syncStatus,
+    WorkspaceSyncHealth.checking => l10n.workspaceSyncChecking,
+    WorkspaceSyncHealth.attentionNeeded => l10n.workspaceSyncAttentionNeeded,
+    WorkspaceSyncHealth.unavailable => l10n.workspaceSyncUnavailable,
+  };
+}
+
+String _workspaceSyncMessage(
+  BuildContext context,
+  TrackerViewModel viewModel,
+) {
+  final l10n = AppLocalizations.of(context)!;
+  final status = viewModel.workspaceSyncStatus;
+  final lastSuccess = status.lastSuccessfulCheckAt;
+  final nextRetryAt = status.nextRetryAt;
+  if (status.hasPendingRefresh) {
+    return l10n.workspaceSyncPendingMessage;
+  }
+  if (status.latestError case final latestError?
+      when latestError.trim().isNotEmpty) {
+    final nextRetryText = nextRetryAt == null
+        ? ''
+        : ' ${l10n.workspaceSyncRetryAt(_formatSyncDateTime(context, nextRetryAt))}';
+    return '${l10n.workspaceSyncErrorMessage(latestError)}$nextRetryText';
+  }
+  if (status.health == WorkspaceSyncHealth.checking) {
+    return l10n.workspaceSyncCheckingMessage;
+  }
+  if (lastSuccess != null) {
+    return l10n.workspaceSyncLastSuccessful(
+      _formatSyncDateTime(context, lastSuccess),
+    );
+  }
+  return l10n.workspaceSyncIdleMessage;
+}
+
+String? _workspaceSyncPrimaryActionLabel(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  final status = viewModel.workspaceSyncStatus;
+  if (status.health == WorkspaceSyncHealth.attentionNeeded ||
+      status.hasPendingRefresh) {
+    return l10n.retry;
+  }
+  return null;
+}
+
+VoidCallback? _workspaceSyncPrimaryAction(TrackerViewModel viewModel) {
+  final status = viewModel.workspaceSyncStatus;
+  if (status.health == WorkspaceSyncHealth.attentionNeeded ||
+      status.hasPendingRefresh) {
+    return () {
+      unawaited(viewModel.retryWorkspaceSync());
+    };
+  }
+  return null;
+}
+
+String _formatSyncDateTime(BuildContext context, DateTime value) {
+  final locale = Localizations.localeOf(context).toLanguageTag();
+  return DateFormat.yMd(locale).add_jm().format(value.toLocal());
 }
 
 String _repositoryAccessPrimaryActionLabel(
@@ -3677,6 +3789,8 @@ class _SettingsState extends State<_Settings> {
           ),
           const SizedBox(height: 16),
         ],
+        _WorkspaceSyncSettingsCard(viewModel: widget.viewModel),
+        const SizedBox(height: 16),
         _SurfaceCard(
           semanticLabel: l10n.repositoryAccessSettings,
           child: Column(
@@ -3696,6 +3810,73 @@ class _SettingsState extends State<_Settings> {
 }
 
 enum _SettingsProviderSelection { hosted, localGit }
+
+class _WorkspaceSyncSettingsCard extends StatelessWidget {
+  const _WorkspaceSyncSettingsCard({required this.viewModel});
+
+  final TrackerViewModel viewModel;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final status = viewModel.workspaceSyncStatus;
+    return _SurfaceCard(
+      semanticLabel: l10n.workspaceSyncSettings,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionTitle(l10n.workspaceSyncSettings),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _workspaceSyncMessage(context, viewModel),
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+              const SizedBox(width: 12),
+              _SyncPill(
+                label: _workspaceSyncLabel(l10n, viewModel),
+                tone: _workspaceSyncTone(viewModel),
+              ),
+            ],
+          ),
+          if (status.lastCheckAt != null) ...[
+            const SizedBox(height: 12),
+            _KeyValue(
+              label: l10n.workspaceSyncLastCheckedLabel,
+              value: _formatSyncDateTime(context, status.lastCheckAt!),
+            ),
+          ],
+          if (status.lastSuccessfulCheckAt != null) ...[
+            const SizedBox(height: 8),
+            _KeyValue(
+              label: l10n.workspaceSyncLastSuccessfulLabel,
+              value: _formatSyncDateTime(
+                context,
+                status.lastSuccessfulCheckAt!,
+              ),
+            ),
+          ],
+          if (status.latestError case final latestError?
+              when latestError.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _KeyValue(label: l10n.workspaceSyncLatestError, value: latestError),
+          ],
+          if (_workspaceSyncPrimaryActionLabel(l10n, viewModel)
+                  case final actionLabel?) ...[
+            const SizedBox(height: 12),
+            _IssueDetailActionButton(
+              label: actionLabel,
+              onPressed: _workspaceSyncPrimaryAction(viewModel),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
 
 class _SavedWorkspaceList extends StatelessWidget {
   const _SavedWorkspaceList({
@@ -9202,6 +9383,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
   @override
   void initState() {
     super.initState();
+    widget.viewModel.beginEditSession();
     _summaryController = TextEditingController(text: widget.issue.summary);
     _descriptionController = TextEditingController(
       text: widget.issue.description,
@@ -9219,6 +9401,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
 
   @override
   void dispose() {
+    widget.viewModel.endEditSession();
     _summaryController.dispose();
     _descriptionController.dispose();
     _assigneeController.dispose();
@@ -9543,6 +9726,12 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                 _MessageBanner(
                                   message: widget.viewModel.message!,
                                   onDismiss: widget.viewModel.dismissMessage,
+                                ),
+                                const SizedBox(height: 12),
+                              ],
+                              if (widget.viewModel.hasPendingWorkspaceSyncRefresh) ...[
+                                _InlineInfoBanner(
+                                  message: l10n.workspaceSyncPendingMessage,
                                 ),
                                 const SizedBox(height: 12),
                               ],
@@ -9981,49 +10170,111 @@ class _BottomNavigation extends StatelessWidget {
   }
 }
 
+enum _SyncPillTone { healthy, checking, attention, unavailable }
+
 class _SyncPill extends StatelessWidget {
-  const _SyncPill({required this.label, this.height});
+  const _SyncPill({
+    required this.label,
+    required this.tone,
+    this.height,
+    this.onPressed,
+  });
 
   final String label;
+  final _SyncPillTone tone;
   final double? height;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final backgroundColor = switch (tone) {
+      _SyncPillTone.healthy => colors.secondarySoft,
+      _SyncPillTone.checking => colors.accentSoft,
+      _SyncPillTone.attention => colors.error.withValues(alpha: 0.14),
+      _SyncPillTone.unavailable => colors.surfaceAlt,
+    };
+    final iconColor = switch (tone) {
+      _SyncPillTone.healthy => colors.secondary,
+      _SyncPillTone.checking => colors.accent,
+      _SyncPillTone.attention => colors.error,
+      _SyncPillTone.unavailable => colors.muted,
+    };
+    return Semantics(
+      button: onPressed != null,
+      container: true,
+      label: label,
+      child: ExcludeSemantics(
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            key: const ValueKey('workspace-sync-pill'),
+            borderRadius: BorderRadius.circular(999),
+            onTap: onPressed,
+            child: Container(
+              constraints: height == null
+                  ? null
+                  : BoxConstraints.tightFor(height: height),
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: backgroundColor,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TrackStateIcon(
+                    TrackStateIconGlyph.sync,
+                    color: iconColor,
+                    size: height == null ? 16 : _desktopTopBarIconSize,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      label,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: colors.text,
+                        fontWeight: FontWeight.w600,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InlineInfoBanner extends StatelessWidget {
+  const _InlineInfoBanner({required this.message});
+
+  final String message;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
     return Semantics(
       container: true,
-      label: label,
+      label: message,
       child: Container(
-        constraints: height == null
-            ? null
-            : BoxConstraints.tightFor(height: height),
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: colors.secondarySoft,
-          borderRadius: BorderRadius.circular(999),
+          color: colors.accentSoft,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.accent),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TrackStateIcon(
-              TrackStateIconGlyph.sync,
-              color: colors.secondary,
-              size: height == null ? 16 : _desktopTopBarIconSize,
-            ),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                label,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: colors.text,
-                  fontWeight: FontWeight.w600,
-                  height: 1,
-                ),
-              ),
-            ),
-          ],
+        child: Text(
+          message,
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: colors.text),
         ),
       ),
     );

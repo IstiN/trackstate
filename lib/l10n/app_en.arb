@@ -20,6 +20,42 @@
   "transitionIssue": "Transition issue",
   "issueDetailReadOnlyMessage": "Write access is required to edit this issue or change its status.",
   "syncStatus": "Synced with Git",
+  "workspaceSyncSettings": "Workspace sync",
+  "workspaceSyncChecking": "Syncing",
+  "workspaceSyncAttentionNeeded": "Attention needed",
+  "workspaceSyncUnavailable": "Sync unavailable",
+  "workspaceSyncPending": "Updates pending",
+  "workspaceSyncPendingTitle": "Updates pending",
+  "workspaceSyncPendingMessage": "Background updates were detected while edits were open. TrackState will apply the latest refresh after you finish the current draft or save.",
+  "workspaceSyncCheckingMessage": "TrackState is checking the active workspace for Git and repository changes.",
+  "workspaceSyncIdleMessage": "Workspace sync is running in the background for the active workspace.",
+  "workspaceSyncLastSuccessful": "Last successful sync check: {timestamp}",
+  "@workspaceSyncLastSuccessful": {
+    "placeholders": {
+      "timestamp": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceSyncRetryAt": "Next retry at {timestamp}.",
+  "@workspaceSyncRetryAt": {
+    "placeholders": {
+      "timestamp": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceSyncErrorMessage": "The latest sync check failed: {error}",
+  "@workspaceSyncErrorMessage": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceSyncLastCheckedLabel": "Last checked",
+  "workspaceSyncLastSuccessfulLabel": "Last successful",
+  "workspaceSyncLatestError": "Latest error",
   "searchIssues": "Search issues",
   "loadMore": "Load more",
   "loadMoreIssues": "Load more issues",

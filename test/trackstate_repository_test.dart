@@ -3313,6 +3313,19 @@ class _FakeReleaseAttachmentProvider
   Future<RepositoryPermission> getPermission() async => permission;
 
   @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'fake-release-provider-revision',
+      sessionRevision: '${permission.canRead}:${permission.canWrite}',
+      connectionState: ProviderConnectionState.connected,
+      permission: permission,
+    ),
+  );
+
+  @override
   Future<RepositoryAttachment> readAttachment(
     String path, {
     required String ref,
@@ -3386,6 +3399,19 @@ class _FakeRemoteIdentityProvider
 
   @override
   String get dataRef => 'HEAD';
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'fake-remote-identity-revision',
+      sessionRevision: '${permission.canRead}:${permission.canWrite}',
+      connectionState: ProviderConnectionState.connected,
+      permission: permission,
+    ),
+  );
 
   @override
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async {

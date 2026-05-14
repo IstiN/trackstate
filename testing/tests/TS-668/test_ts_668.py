@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import json
+import os
 import platform
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -20,6 +22,9 @@ from testing.components.pages.live_workspace_management_page import (  # noqa: E
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage  # noqa: E402
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
+)
+from testing.components.services.live_saved_workspace_visual_probe import (  # noqa: E402
+    LiveSavedWorkspaceVisualProbe,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
@@ -161,6 +166,10 @@ def main() -> None:
                 )
 
                 observation = workspace_page.open_settings_and_observe_saved_workspaces()
+                observation = _enrich_visual_observation(
+                    workspace_page=workspace_page,
+                    observation=observation,
+                )
                 result["workspace_observation"] = _list_asdict(observation)
                 if not (observation.section_visible and observation.row_count >= 2):
                     failure_observation = (
@@ -608,6 +617,24 @@ def _record_human_verification(
     checks.append({"check": check, "observed": observed})
 
 
+def _enrich_visual_observation(
+    *,
+    workspace_page: LiveWorkspaceManagementPage,
+    observation: SavedWorkspaceListObservation,
+) -> SavedWorkspaceListObservation:
+    fd, temp_path = tempfile.mkstemp(prefix="ts668-visual-", suffix=".png")
+    os.close(fd)
+    screenshot_path = Path(temp_path)
+    try:
+        workspace_page.screenshot(str(screenshot_path))
+        return LiveSavedWorkspaceVisualProbe().observe(
+            screenshot_path=screenshot_path,
+            observation=observation,
+        )
+    finally:
+        screenshot_path.unlink(missing_ok=True)
+
+
 def _capture_visible_screenshot(
     *,
     tracker_page: TrackStateTrackerPage,
@@ -762,9 +789,9 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## Rework summary",
         (
-            "- Replaced the generic row image-presence check with a deterministic "
-            "icon fingerprint so the Hosted row must match the repository icon and "
-            "the Local row must match the folder icon."
+            "- Reworked icon verification so the Hosted/Local identity is derived "
+            "from the rendered icon pixels captured from the live UI, while the "
+            "accessibility label remains supporting evidence."
         ),
         "",
         "## Result",
@@ -811,9 +838,9 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Rework Summary",
         "",
         (
-            "- Fixed the remaining review gap by replacing the generic image-count "
-            "check with a deterministic workspace icon fingerprint: Hosted must map "
-            "to the repository icon and Local must map to the folder icon."
+            "- Fixed the remaining review gap by deriving workspace icon identity "
+            "from the rendered live icon pixels instead of falling back to the "
+            "icon accessibility label."
         ),
         f"- Test case: **{TICKET_KEY} — {TEST_CASE_TITLE}**",
         (
@@ -916,83 +943,26 @@ def _write_review_replies() -> None:
             {
                 "replies": [
                     {
-                        "inReplyToId": 3237847769,
-                        "threadId": "PRRT_kwDOSU6Gf86B6Kyi",
+                        "inReplyToId": 3240998774,
+                        "threadId": "PRRT_kwDOSU6Gf86CC5gc",
                         "reply": (
-                            "Fixed: `LiveWorkspaceManagementPage` now fingerprints the row icon "
-                            "against the app's repository and folder glyph shapes, and "
-                            "`test_ts_668.py` asserts the Hosted row maps to the repository "
-                            "icon while the Local row maps to the folder icon instead of only "
-                            "checking `image_count >= 1`."
+                            "Fixed: `LiveWorkspaceManagementPage` no longer treats the icon "
+                            "accessibility label as the primary identity signal. The TS-668 "
+                            "flow now captures the rendered row icon bounds, fingerprints the "
+                            "visible pixels from the live screenshot in "
+                            "`LiveSavedWorkspaceVisualProbe`, and only passes when the Hosted "
+                            "row matches the repository glyph and the Local row matches the "
+                            "folder glyph."
                         ),
                     },
                     {
                         "inReplyToId": None,
                         "threadId": None,
                         "reply": (
-                            "Addressed: the earlier locator false negative remains fixed. The "
-                            "Saved workspaces parser still follows the live `Open` / `Delete` "
-                            "button semantics and selected-row state instead of the stale "
-                            "`Open workspace` / `Active workspace` copy."
-                        ),
-                    },
-                    {
-                        "inReplyToId": None,
-                        "threadId": None,
-                        "reply": (
-                            "Updated: the current rework supersedes the earlier status note. In "
-                            "addition to the existing locator/startup fixes, the test now checks "
-                            "the Hosted row for the repository icon and the Local row for the "
-                            "folder icon."
-                        ),
-                    },
-                    {
-                        "inReplyToId": None,
-                        "threadId": None,
-                        "reply": (
-                            "Addressed: the startup failure path still classifies `TrackState data "
-                            "was not found.` as `data-load-failed`, captures the visible failure "
-                            "surface, and reports the first failed step instead of a stale "
-                            "missing-rows summary."
-                        ),
-                    },
-                    {
-                        "inReplyToId": None,
-                        "threadId": None,
-                        "reply": (
-                            "Updated: this pass keeps the earlier startup-failure handling "
-                            "changes and adds the missing type-specific icon assertion. The rerun "
-                            "still fails immediately on the live `TrackState data was not found.` "
-                            "startup defect."
-                        ),
-                    },
-                    {
-                        "inReplyToId": None,
-                        "threadId": None,
-                        "reply": (
-                            "Addressed: Step 2/Step 3 pass ordering, selected-row token checks, "
-                            "and the row accessibility assertions from the prior rework remain in "
-                            "place. This pass closes the last remaining gap by asserting the "
-                            "actual icon identity per row type."
-                        ),
-                    },
-                    {
-                        "inReplyToId": None,
-                        "threadId": None,
-                        "reply": (
-                            "Updated: the latest TS-668 rerun keeps the prior step-reporting and "
-                            "accessibility fixes, and now verifies Hosted/Local icon identity via "
-                            "row icon fingerprints before any future ready-state pass could go "
-                            "green."
-                        ),
-                    },
-                    {
-                        "inReplyToId": None,
-                        "threadId": None,
-                        "reply": (
-                            "Fixed: the remaining TS-668 review gap was closed by replacing the "
-                            "generic image-presence check with a type-specific icon identity "
-                            "assertion derived from the production workspace-row icon contract."
+                            "Addressed: the remaining review summary is resolved by the same "
+                            "change. TS-668 now verifies a stable visible-surface icon signal "
+                            "from the real rendered glyph instead of accepting semantics-only "
+                            "evidence."
                         ),
                     },
                 ]
