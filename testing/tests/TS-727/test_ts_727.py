@@ -116,12 +116,7 @@ def main() -> None:
         ) as tracker_page:
             page = LiveStartupRecoveryPage(tracker_page)
             try:
-                tracker_page.session.goto(
-                    config.app_url,
-                    wait_until="domcontentloaded",
-                    timeout_ms=120_000,
-                )
-                tracker_page.session.activate_accessibility()
+                page.open()
 
                 invalid_branch_observed, _ = poll_until(
                     probe=lambda: request_observation.invalid_branch_urls(
