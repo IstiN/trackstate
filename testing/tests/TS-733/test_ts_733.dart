@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -14,6 +15,8 @@ const String _ticketSummary =
 const String _testFilePath = 'testing/tests/TS-733/test_ts_733.dart';
 const String _runCommand =
     'flutter test testing/tests/TS-733/test_ts_733.dart -r expanded';
+const int _reviewCommentId = 3244106485;
+const String _reviewThreadId = 'PRRT_kwDOSU6Gf86CLpbl';
 const List<String> _requestSteps = <String>[
   "Simulate a background sync update that changes Issue-B's status to 'Closed'.",
   'Verify the content of the JQL query input.',
@@ -86,10 +89,7 @@ void main() {
         }
 
         repository.scheduleIssueBClosure();
-        await screen.waitWithoutInteraction(
-          Ts733SyncRefreshRepository.automaticSyncWait,
-        );
-        await tester.pumpAndSettle();
+        await _resumeApp(tester);
 
         final rowsAfterSync = screen.visibleIssueSearchResultLabelsSnapshot();
         final queryAfterSync = await screen.readJqlSearchFieldValue();
@@ -147,8 +147,8 @@ void main() {
             observed: stepOneObserved,
           );
           throw AssertionError(
-            'Step 1 failed: the automatic background sync refresh did not run '
-            'after Issue-B was changed to Closed.\n'
+            'Step 1 failed: the production app-resume workspace sync refresh '
+            'did not apply Issue-B\'s changed Closed status.\n'
             'Observed: $stepOneObserved',
           );
         }
@@ -265,7 +265,15 @@ File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
+File get _reviewRepliesFile => File('${_outputsDir.path}/review_replies.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
+
+Future<void> _resumeApp(WidgetTester tester) async {
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 250));
+  await tester.pumpAndSettle();
+}
 
 void _recordStep(
   Map<String, Object?> result, {
@@ -309,6 +317,7 @@ void _writePassOutputs(Map<String, Object?> result) {
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: true));
 }
 
 void _writeFailureOutputs(Map<String, Object?> result) {
@@ -320,6 +329,7 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
 }
 
@@ -328,14 +338,14 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
   final lines = <String>[
     'h3. Test Automation Result',
     '',
-    '*Status:* $statusLabel',
-    '*Test Case:* $_ticketKey - $_ticketSummary',
-    '',
-    'h4. What was tested',
-    '* Launched the production TrackStateApp and opened {noformat}JQL Search{noformat}.',
-    '* Submitted the visible query {noformat}${Ts733SyncRefreshRepository.query}{noformat} and selected {noformat}${Ts733SyncRefreshRepository.issueBKey}{noformat}.',
-    '* Simulated a background workspace sync refresh that changed {noformat}${Ts733SyncRefreshRepository.issueBKey}{noformat} from Open to Closed and waited ${Ts733SyncRefreshRepository.automaticSyncWait.inSeconds} seconds so the automatic refresh could run.',
-    '* Verified the visible query field, the rendered search-result rows, and whether any issue detail remained selected after the refresh.',
+     '*Status:* $statusLabel',
+     '*Test Case:* $_ticketKey - $_ticketSummary',
+     '',
+     'h4. What was tested',
+     '* Launched the production TrackStateApp and opened {noformat}JQL Search{noformat}.',
+     '* Submitted the visible query {noformat}${Ts733SyncRefreshRepository.query}{noformat} and selected {noformat}${Ts733SyncRefreshRepository.issueBKey}{noformat}.',
+     '* Simulated a background workspace sync update that changed {noformat}${Ts733SyncRefreshRepository.issueBKey}{noformat} from Open to Closed, then triggered the production app-resume workspace sync refresh path.',
+     '* Verified the visible query field, the rendered search-result rows, and whether any issue detail remained selected after the refresh.',
     '',
     'h4. Result',
     passed
@@ -385,11 +395,11 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '**Status:** $statusLabel  ',
     '**Test Case:** $_ticketKey - $_ticketSummary',
     '',
-    '### What was tested',
-    '- Launched the production TrackStateApp and opened `JQL Search`.',
-    '- Submitted the visible query `${Ts733SyncRefreshRepository.query}` and selected `${Ts733SyncRefreshRepository.issueBKey}`.',
-    '- Simulated a background workspace sync refresh that changed `${Ts733SyncRefreshRepository.issueBKey}` from Open to Closed and waited ${Ts733SyncRefreshRepository.automaticSyncWait.inSeconds} seconds so the automatic refresh could run.',
-    '- Verified the visible query field, the rendered search-result rows, and whether any issue detail remained selected after the refresh.',
+     '### What was tested',
+     '- Launched the production TrackStateApp and opened `JQL Search`.',
+     '- Submitted the visible query `${Ts733SyncRefreshRepository.query}` and selected `${Ts733SyncRefreshRepository.issueBKey}`.',
+     '- Simulated a background workspace sync update that changed `${Ts733SyncRefreshRepository.issueBKey}` from Open to Closed, then triggered the production app-resume workspace sync refresh path.',
+     '- Verified the visible query field, the rendered search-result rows, and whether any issue detail remained selected after the refresh.',
     '',
     '### Result',
     passed
@@ -435,33 +445,18 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
   final buffer = StringBuffer()
     ..writeln('# $_ticketKey')
     ..writeln()
-    ..writeln(
-      passed
-          ? 'Passed: the background sync refresh preserved the visible query and cleared the selected issue after Issue-B stopped matching the JQL filter.'
-          : 'Failed: the background sync refresh did not preserve the expected query-and-selection behavior after Issue-B stopped matching the JQL filter.',
-    )
+    ..writeln(passed ? 'Fixed the review blocker by driving refresh through the production app-resume sync path.' : 'Fixed the review blocker by driving refresh through the production app-resume sync path, but the ticket still fails against the product behavior.')
     ..writeln()
-    ..writeln('Environment: `flutter test / ${Platform.operatingSystem}`')
-    ..writeln('Query: `${result['query'] ?? Ts733SyncRefreshRepository.query}`')
-    ..writeln(
-      'Repository revision after refresh: `${result['repository_revision_after_sync'] ?? '<missing>'}`',
-    )
+    ..writeln('New test result: ${passed ? 'PASSED' : 'FAILED'}.')
     ..writeln()
-    ..writeln('## Step results')
-    ..writeln(_markdownStepLines(result).join('\n'))
-    ..writeln()
-    ..writeln('## Human-style verification')
-    ..writeln(_markdownHumanVerificationLines(result).join('\n'));
+    ..writeln('- Query: `${result['query'] ?? Ts733SyncRefreshRepository.query}`')
+    ..writeln('- Repository revision after refresh: `${result['repository_revision_after_sync'] ?? '<missing>'}`')
+    ..writeln('- Key observation: `${_headlineObservation(result)}`');
 
   if (!passed) {
     buffer
       ..writeln()
-      ..writeln('## Exact error')
-      ..writeln('```text')
-      ..writeln('${result['error'] ?? '<missing>'}')
-      ..writeln()
-      ..writeln('${result['traceback'] ?? '<missing>'}')
-      ..writeln('```');
+      ..writeln('- Error: `${result['error'] ?? '<missing>'}`');
   }
 
   return buffer.toString();
@@ -471,21 +466,24 @@ String _bugDescription(Map<String, Object?> result) {
   final lines = <String>[
     '# $_ticketKey - $_ticketSummary',
     '',
-    '## Steps to reproduce',
-    '1. ${_requestSteps[0]}',
-    '   - ${_stepOutcome(result, 1)}',
+     '## Steps to reproduce',
+     '1. ${_requestSteps[0]}',
+     '   - ${_stepOutcome(result, 1)}',
     '2. ${_requestSteps[1]}',
     '   - ${_stepOutcome(result, 2)}',
     '3. ${_requestSteps[2]}',
     '   - ${_stepOutcome(result, 3)}',
-    '',
-    '## Expected result',
-    'The visible JQL query `status = Open` should stay populated after the background sync refresh. Issue-B should disappear from the results because it is now Closed, Issue-A should remain visible as the refreshed Open result, and no issue should stay selected.',
-    '',
-    '## Actual result',
-    'After the background sync refresh, the visible query was `${result['query_after_sync'] ?? '<missing>'}`, the visible rows were `${_formatSnapshot((result['rows_after_sync'] as List?)?.cast<String>() ?? const <String>[])}`, Issue-A detail visible was `${result['issue_a_detail_visible_after_sync'] ?? '<missing>'}`, and Issue-B detail visible was `${result['issue_b_detail_visible_after_sync'] ?? '<missing>'}`.',
-    '',
-    '## Exact error message / stack trace',
+     '',
+     '## Expected result',
+     'The visible JQL query `status = Open` should stay populated after the production app-resume workspace sync refresh. Issue-B should disappear from the results because it is now Closed, Issue-A should remain visible as the refreshed Open result, and no issue should stay selected.',
+     '',
+     '## Actual result',
+     'After the background sync refresh, the visible query was `${result['query_after_sync'] ?? '<missing>'}`, the visible rows were `${_formatSnapshot((result['rows_after_sync'] as List?)?.cast<String>() ?? const <String>[])}`, Issue-A detail visible was `${result['issue_a_detail_visible_after_sync'] ?? '<missing>'}`, and Issue-B detail visible was `${result['issue_b_detail_visible_after_sync'] ?? '<missing>'}`.',
+     '',
+     '## Missing or broken production capability',
+     'After the test triggers the same app-resume workspace sync surface used by the production app, the search surface still does not satisfy TS-733 unless the refreshed JQL results remove Issue-B and clear any visible issue selection. The failing command/output below captures the product-visible gap if the rerun still fails.',
+     '',
+     '## Exact error message / stack trace',
     '```text',
     '${result['error'] ?? '<missing>'}',
     '',
@@ -524,6 +522,22 @@ String _bugDescription(Map<String, Object?> result) {
     '```',
   ];
   return '${lines.join('\n')}\n';
+}
+
+String _reviewReplies(Map<String, Object?> result, {required bool passed}) {
+  final reply =
+      passed
+          ? 'Fixed: TS-733 now triggers the production workspace sync refresh through `AppLifecycleState.resumed`, matching the existing TS-734 coverage instead of only advancing test time after mutating the fixture. The rerun now exercises the real sync path and passes.'
+          : 'Fixed: TS-733 now triggers the production workspace sync refresh through `AppLifecycleState.resumed`, matching the existing TS-734 coverage instead of only advancing test time after mutating the fixture. The rerun now exercises the real sync path; the remaining failure is product-visible: ${result['error'] ?? 'see attached failure output'}.';
+  return '${jsonEncode(<String, Object>{
+    'replies': <Map<String, Object>>[
+      <String, Object>{
+        'inReplyToId': _reviewCommentId,
+        'threadId': _reviewThreadId,
+        'reply': reply,
+      },
+    ],
+  })}\n';
 }
 
 List<String> _jiraStepLines(Map<String, Object?> result) {
@@ -593,6 +607,15 @@ String _stepOutcome(Map<String, Object?> result, int stepNumber) {
     }
   }
   return 'NOT EXECUTED — no observation was recorded.';
+}
+
+String _headlineObservation(Map<String, Object?> result) {
+  final steps =
+      (result['steps'] as List?)?.cast<Map<String, Object?>>() ?? const [];
+  if (steps.isEmpty) {
+    return 'no step result recorded';
+  }
+  return '${steps.last['observed'] ?? 'no observation recorded'}';
 }
 
 String _formatSnapshot(List<String> values, {int limit = 20}) {
