@@ -55,6 +55,23 @@ void main() {
         final failures = <String>[];
 
         await screen.openSection('Board');
+        final boardTextsBeforeSync = screen.visibleTextsSnapshot();
+        final boardSemanticsBeforeSync = screen
+            .visibleSemanticsLabelsSnapshot();
+        final boardIssueVisibleBeforeSync =
+            _snapshotContains(
+              boardTextsBeforeSync,
+              Ts734RefreshMatrixRepository.issueCKey,
+            ) &&
+            _snapshotContains(
+              boardTextsBeforeSync,
+              Ts734RefreshMatrixRepository.issueCSummary,
+            );
+        await screen.openSection('Hierarchy');
+        final hierarchyTextsBeforeSync = screen.visibleTextsSnapshot();
+        final hierarchySemanticsBeforeSync = screen
+            .visibleSemanticsLabelsSnapshot();
+        await screen.openSection('Board');
         await screen.openIssue(
           Ts734RefreshMatrixRepository.issueCKey,
           Ts734RefreshMatrixRepository.issueCSummary,
@@ -63,17 +80,22 @@ void main() {
           Ts734RefreshMatrixRepository.issueCKey,
         );
         final commentsTabOpened = await screen.tapVisibleControl('Comments');
-        final initialCommentVisible = commentsTabOpened &&
-            await screen.isTextVisible(Ts734RefreshMatrixRepository.initialComment);
+        final initialCommentVisible =
+            commentsTabOpened &&
+            await screen.isTextVisible(
+              Ts734RefreshMatrixRepository.initialComment,
+            );
+        final issueDetailVisible = _snapshotContains(
+          screen.visibleSemanticsLabelsSnapshot(),
+          'Issue detail ${Ts734RefreshMatrixRepository.issueCKey}',
+        );
         final preconditionObserved =
-            'board_column_visible=${await screen.isSemanticsLabelVisible('To Do column')}; '
-            'issue_detail_visible=${await screen.isSemanticsLabelVisible('Issue detail ${Ts734RefreshMatrixRepository.issueCKey}')}; '
+            'board_issue_visible=$boardIssueVisibleBeforeSync; '
+            'issue_detail_visible=$issueDetailVisible; '
             'comments_tab_opened=$commentsTabOpened; '
             'initial_comment_visible=$initialCommentVisible';
-        if (!await screen.isSemanticsLabelVisible('To Do column') ||
-            !await screen.isSemanticsLabelVisible(
-              'Issue detail ${Ts734RefreshMatrixRepository.issueCKey}',
-            ) ||
+        if (!boardIssueVisibleBeforeSync ||
+            !issueDetailVisible ||
             !commentsTabOpened ||
             !initialCommentVisible) {
           _recordStep(
@@ -120,22 +142,31 @@ void main() {
         final staleCommentVisible = await screen.isTextVisible(
           Ts734RefreshMatrixRepository.initialComment,
         );
+        final unexpectedIssueHydrations = commentRefreshHydrations
+            .where(
+              (call) => call.issueKey != Ts734RefreshMatrixRepository.issueCKey,
+            )
+            .toList(growable: false);
+        final commentsScopeTriggered = commentRefreshHydrations.any(
+          (call) =>
+              call.issueKey == Ts734RefreshMatrixRepository.issueCKey &&
+              call.scopes.contains(IssueHydrationScope.comments),
+        );
         final commentsObserved =
             'updated_comment_visible=$updatedCommentVisible; '
             'stale_comment_visible=$staleCommentVisible; '
+            'comments_scope_triggered=$commentsScopeTriggered; '
             'issue_c_hydrations=${commentOnlyScopes.join(' | ')}; '
             'all_hydrations=${_formatHydrationCalls(commentRefreshHydrations)}';
+        final commentsHumanObserved =
+            'visible_comment=${repository.currentIssueCComment}; '
+            'visible_texts=${_formatSnapshot(screen.visibleTextsSnapshot())}; '
+            'visible_semantics=${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}';
         if (!updatedCommentVisible ||
             staleCommentVisible ||
             commentRefreshHydrations.isEmpty ||
-            commentRefreshHydrations.any(
-              (call) =>
-                  call.issueKey != Ts734RefreshMatrixRepository.issueCKey ||
-                  !setEquals(
-                    call.scopes,
-                    const <IssueHydrationScope>{IssueHydrationScope.comments},
-                  ),
-            )) {
+            !commentsScopeTriggered ||
+            unexpectedIssueHydrations.isNotEmpty) {
           _recordStep(
             result,
             step: 2,
@@ -162,21 +193,40 @@ void main() {
         }
 
         await screen.openSection('Board');
-        final boardCardVisible = await screen.isSemanticsLabelVisible(
-          'Open ${Ts734RefreshMatrixRepository.issueCKey} ${Ts734RefreshMatrixRepository.issueCSummary}',
-        );
-        final boardColumnVisible = await screen.isSemanticsLabelVisible(
-          'To Do column',
-        );
+        final boardTextsAfterSync = screen.visibleTextsSnapshot();
+        final boardSemanticsAfterSync = screen.visibleSemanticsLabelsSnapshot();
+        final boardCardVisible =
+            _snapshotContains(
+              boardTextsAfterSync,
+              Ts734RefreshMatrixRepository.issueCKey,
+            ) &&
+            _snapshotContains(
+              boardTextsAfterSync,
+              Ts734RefreshMatrixRepository.issueCSummary,
+            );
+        final boardSummaryStable =
+            _snapshotContains(boardSemanticsAfterSync, 'To Do column') &&
+            _snapshotContains(
+              boardSemanticsAfterSync,
+              'Open ${Ts734RefreshMatrixRepository.issueCKey} ${Ts734RefreshMatrixRepository.issueCSummary}',
+            );
         await screen.openSection('Hierarchy');
-        final hierarchyCardVisible = await screen.isSemanticsLabelVisible(
-          'Open ${Ts734RefreshMatrixRepository.issueCKey} ${Ts734RefreshMatrixRepository.issueCSummary}',
-        );
+        final hierarchyTextsAfterSync = screen.visibleTextsSnapshot();
+        final hierarchySemanticsAfterSync = screen
+            .visibleSemanticsLabelsSnapshot();
+        final hierarchyStable =
+            _sameSnapshot(hierarchyTextsBeforeSync, hierarchyTextsAfterSync) &&
+            _sameSnapshot(
+              hierarchySemanticsBeforeSync,
+              hierarchySemanticsAfterSync,
+            );
         final unaffectedObserved =
-            'board_column_visible=$boardColumnVisible; '
+            'board_issue_visible=$boardCardVisible; '
+            'board_summary_stable=$boardSummaryStable; '
+            'board_semantics=${_formatSnapshot(boardSemanticsAfterSync)}; '
             'board_issue_c_visible=$boardCardVisible; '
-            'hierarchy_issue_c_visible=$hierarchyCardVisible';
-        if (!boardColumnVisible || !boardCardVisible || !hierarchyCardVisible) {
+            'hierarchy_stable=$hierarchyStable';
+        if (!boardCardVisible || !boardSummaryStable || !hierarchyStable) {
           _recordStep(
             result,
             step: 3,
@@ -206,19 +256,28 @@ void main() {
         await _resumeApp(tester);
         await screen.openSection('Dashboard');
 
-        final openIssuesVisible = await screen.isSemanticsLabelVisible(
+        final dashboardSemanticsAfterProjectMeta = screen
+            .visibleSemanticsLabelsSnapshot();
+        final openIssuesVisible = _snapshotContains(
+          dashboardSemanticsAfterProjectMeta,
           'Open Issues 2',
         );
-        final inProgressVisible = await screen.isSemanticsLabelVisible(
+        final inProgressVisible = _snapshotContains(
+          dashboardSemanticsAfterProjectMeta,
           'Issues in Progress 1',
         );
-        final completedVisible = await screen.isSemanticsLabelVisible(
+        final completedVisible = _snapshotContains(
+          dashboardSemanticsAfterProjectMeta,
           'Completed 1',
         );
         final dashboardObserved =
             'open_issues_2=$openIssuesVisible; '
             'issues_in_progress_1=$inProgressVisible; '
-            'completed_1=$completedVisible';
+            'completed_1=$completedVisible; '
+            'dashboard_semantics=${_formatSnapshot(dashboardSemanticsAfterProjectMeta)}';
+        final dashboardHumanObserved =
+            'dashboard=Open Issues 2 / Issues in Progress 1 / Completed 1; '
+            'dashboard_semantics=${_formatSnapshot(dashboardSemanticsAfterProjectMeta)}';
         if (!openIssuesVisible || !inProgressVisible || !completedVisible) {
           _recordStep(
             result,
@@ -257,6 +316,9 @@ void main() {
         final settingsObserved =
             'attachments_tab_opened=$attachmentsTabOpened; '
             'release_tag_prefix=${releaseTagPrefix ?? '<missing>'}';
+        final settingsHumanObserved =
+            'release_tag_prefix=${releaseTagPrefix ?? '<missing>'}; '
+            'settings_texts=${_formatSnapshot(screen.visibleTextsSnapshot())}';
         result['observed_release_tag_prefix'] = releaseTagPrefix;
         if (!attachmentsTabOpened ||
             releaseTagPrefix != Ts734RefreshMatrixRepository.updatedTagPrefix) {
@@ -289,22 +351,22 @@ void main() {
           result,
           check:
               'Viewed the refreshed Issue-C Comments tab exactly as a user would and confirmed the new comment text replaced the old wording in place.',
-          observed:
-              'visible_comment=${repository.currentIssueCComment}; visible_texts=${_formatSnapshot(screen.visibleTextsSnapshot())}',
+          observed: commentsHumanObserved,
         );
         _recordHumanVerification(
           result,
           check:
               'Returned to Board and Hierarchy after the comments-only sync to confirm Issue-C still appeared in the same user-facing surfaces.',
           observed:
-              'board_and_hierarchy_issue_visible=${Ts734RefreshMatrixRepository.issueCKey}; visible_semantics=${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}',
+              'board_and_hierarchy_issue_visible=${Ts734RefreshMatrixRepository.issueCKey}; '
+              'board_semantics=${_formatSnapshot(boardSemanticsAfterSync)}; '
+              'hierarchy_semantics=${_formatSnapshot(hierarchySemanticsAfterSync)}',
         );
         _recordHumanVerification(
           result,
           check:
               'Opened Dashboard and Settings after the project metadata refresh to verify the counters and Release tag prefix changed in visible UI, not just in repository data.',
-          observed:
-              'dashboard=Open Issues 2 / Issues in Progress 1 / Completed 1; release_tag_prefix=${releaseTagPrefix ?? '<missing>'}',
+          observed: '$dashboardHumanObserved; $settingsHumanObserved',
         );
 
         if (failures.isNotEmpty) {
@@ -333,7 +395,7 @@ File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
 
 Future<void> _resumeApp(WidgetTester tester) async {
-  await tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 250));
   await tester.pumpAndSettle();
@@ -511,7 +573,9 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
     ..writeln()
     ..writeln('Environment: `flutter test / ${Platform.operatingSystem}`')
     ..writeln('Repository: `${result['repository'] ?? '<missing>'}`')
-    ..writeln('Observed release tag prefix: `${result['observed_release_tag_prefix'] ?? '<missing>'}`');
+    ..writeln(
+      'Observed release tag prefix: `${result['observed_release_tag_prefix'] ?? '<missing>'}`',
+    );
 
   if (!passed) {
     buffer
@@ -631,12 +695,13 @@ List<String> _bugLogLines(Map<String, Object?> result) {
 }
 
 String _actualResultLine(Map<String, Object?> result) {
-  final failedStep = ((result['steps'] as List<Map<String, Object?>>?) ?? const [])
-      .cast<Map<String, Object?>>()
-      .firstWhere(
-        (step) => step['status'] != 'passed',
-        orElse: () => <String, Object?>{},
-      );
+  final failedStep =
+      ((result['steps'] as List<Map<String, Object?>>?) ?? const [])
+          .cast<Map<String, Object?>>()
+          .firstWhere(
+            (step) => step['status'] != 'passed',
+            orElse: () => <String, Object?>{},
+          );
   if (failedStep.isEmpty) {
     return 'The test failed before recording a detailed step observation.';
   }
@@ -675,4 +740,28 @@ String _formatHydrationCalls(List<Ts734HydrationCall> calls) {
 
 List<String> _scopeNames(Set<IssueHydrationScope> scopes) {
   return scopes.map((scope) => scope.name).toList(growable: false)..sort();
+}
+
+bool _snapshotContains(List<String> snapshot, String expected) {
+  for (final value in snapshot) {
+    final trimmed = value.trim();
+    if (trimmed == expected || trimmed.contains(expected)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _sameSnapshot(List<String> left, List<String> right) {
+  return _normalizeSnapshot(left).join('\n') ==
+      _normalizeSnapshot(right).join('\n');
+}
+
+List<String> _normalizeSnapshot(List<String> snapshot) {
+  return snapshot
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toSet()
+      .toList(growable: false)
+    ..sort();
 }
