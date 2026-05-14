@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -107,6 +106,9 @@ void main() {
         result['initial_repository_access_label'] =
             initialState.repositoryAccessTopBarLabel;
         result['opened_repositories'] = openedRepositories;
+        final shellEntryPoint = screen.observeShellEntryPoint(
+          workspaceDisplayName: _currentWorkspaceDisplayName,
+        );
 
         if (openedRepositories.isEmpty ||
             openedRepositories.first !=
@@ -120,34 +122,18 @@ void main() {
           );
         }
 
-        final addWorkspaceFinder = _addWorkspaceControl();
-        final workspaceSwitcherFinder = find.byKey(
-          const ValueKey<String>('workspace-switcher-trigger'),
-        );
         result['has_add_workspace_visible_text'] = initialState.visibleTexts
             .contains('Add workspace');
 
-        if (addWorkspaceFinder.evaluate().isEmpty ||
-            workspaceSwitcherFinder.evaluate().isEmpty ||
-            !_containsSemanticLabel(
-              initialState.interactiveSemanticsLabels,
-              'Add workspace',
-            ) ||
-            !_containsSemanticLabel(
-              initialState.interactiveSemanticsLabels,
-              'Workspace switcher:',
-            ) ||
-            !_containsSemanticLabel(
-              initialState.interactiveSemanticsLabels,
-              _currentWorkspaceDisplayName,
-            )) {
+        if (!shellEntryPoint.hasAccessibleShellControls) {
           throw AssertionError(
             'Step 1 failed: launching the application as a returning user did not render the expected active shell with both Add workspace and the workspace switcher available.\n'
             'Observed opened repositories: ${_formatList(openedRepositories)}\n'
             'Observed dashboard visible: ${initialState.isDashboardVisible}\n'
             "Observed Add workspace visible text: ${result['has_add_workspace_visible_text']}\n"
             'Observed visible texts: ${_formatList(initialState.visibleTexts)}\n'
-            'Observed interactive semantics labels: ${_formatList(initialState.interactiveSemanticsLabels)}',
+            'Observed interactive semantics labels: ${_formatList(initialState.interactiveSemanticsLabels)}\n'
+            'Observed shell entry point: ${jsonEncode(shellEntryPoint.toJson())}',
           );
         }
         _recordStep(
@@ -159,42 +145,12 @@ void main() {
               'dashboard_visible=${initialState.isDashboardVisible}; opened_repositories=${_formatList(openedRepositories)}; visible_texts=${_formatList(initialState.visibleTexts)}',
         );
 
-        final addWorkspaceRect = tester.getRect(addWorkspaceFinder.first);
-        final workspaceSwitcherRect = tester.getRect(workspaceSwitcherFinder);
-        final sharedTopBarRow = _sharesTopBarRow(
-          addWorkspaceFinder.first,
-          workspaceSwitcherFinder,
-        );
-        final verticalDelta =
-            (addWorkspaceRect.center.dy - workspaceSwitcherRect.center.dy)
-                .abs();
-        final horizontalGap =
-            workspaceSwitcherRect.left - addWorkspaceRect.right;
-        final addWorkspaceBeforeSwitcher =
-            addWorkspaceRect.center.dx < workspaceSwitcherRect.center.dx;
+        result['shell_layout'] = shellEntryPoint.toJson();
 
-        result['shell_layout'] = <String, Object?>{
-          'shared_top_bar_row': sharedTopBarRow,
-          'vertical_center_delta': verticalDelta,
-          'horizontal_gap': horizontalGap,
-          'add_workspace_before_switcher': addWorkspaceBeforeSwitcher,
-          'add_workspace_rect': _rectAsMap(addWorkspaceRect),
-          'workspace_switcher_rect': _rectAsMap(workspaceSwitcherRect),
-        };
-
-        if (!sharedTopBarRow ||
-            verticalDelta > 4 ||
-            horizontalGap < 0 ||
-            horizontalGap > 24 ||
-            !addWorkspaceBeforeSwitcher) {
+        if (!shellEntryPoint.isPositionedBesideWorkspaceSwitcher) {
           throw AssertionError(
             'Step 2 failed: the persistent Add workspace action was not rendered beside the workspace switcher in the primary shell controls.\n'
-            'Observed shared top-bar row: $sharedTopBarRow\n'
-            'Observed vertical center delta: $verticalDelta\n'
-            'Observed horizontal gap: $horizontalGap\n'
-            'Observed add-workspace-before-switcher: $addWorkspaceBeforeSwitcher\n'
-            'Observed add workspace rect: ${_rectAsMap(addWorkspaceRect)}\n'
-            'Observed workspace switcher rect: ${_rectAsMap(workspaceSwitcherRect)}',
+            'Observed shell layout: ${jsonEncode(shellEntryPoint.toJson())}',
           );
         }
         _recordStep(
@@ -203,7 +159,7 @@ void main() {
           status: 'passed',
           action: _requestSteps[1],
           observed:
-              'shared_top_bar_row=$sharedTopBarRow; vertical_center_delta=$verticalDelta; horizontal_gap=$horizontalGap; add_workspace_before_switcher=$addWorkspaceBeforeSwitcher',
+              'shared_top_bar_row=${shellEntryPoint.sharedTopBarRow}; vertical_center_delta=${shellEntryPoint.verticalCenterDelta}; horizontal_gap=${shellEntryPoint.horizontalGap}; add_workspace_before_switcher=${shellEntryPoint.addWorkspaceBeforeSwitcher}',
         );
 
         await screen.openAddWorkspace();
@@ -262,47 +218,6 @@ void main() {
     timeout: const Timeout(Duration(seconds: 30)),
   );
 }
-
-Finder _addWorkspaceControl() {
-  final button = find.ancestor(
-    of: find.text('Add workspace'),
-    matching: find.bySubtype<ButtonStyleButton>(),
-  );
-  if (button.evaluate().isNotEmpty) {
-    return button.first;
-  }
-  return find.bySemanticsLabel(RegExp('^Add workspace\$')).first;
-}
-
-bool _containsSemanticLabel(List<String> labels, String fragment) {
-  return labels.any((label) => label.contains(fragment));
-}
-
-bool _sharesTopBarRow(Finder left, Finder right) {
-  final leftRows = find
-      .ancestor(of: left, matching: find.byType(Row))
-      .evaluate();
-  final rightRows = find
-      .ancestor(of: right, matching: find.byType(Row))
-      .evaluate();
-  for (final leftRow in leftRows) {
-    for (final rightRow in rightRows) {
-      if (identical(leftRow, rightRow)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-Map<String, double> _rectAsMap(Rect rect) => <String, double>{
-  'left': rect.left,
-  'top': rect.top,
-  'right': rect.right,
-  'bottom': rect.bottom,
-  'width': rect.width,
-  'height': rect.height,
-};
 
 void _recordStep(
   Map<String, Object?> result, {
