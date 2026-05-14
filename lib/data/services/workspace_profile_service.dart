@@ -262,6 +262,7 @@ class SharedPreferencesWorkspaceProfileService
           target: normalizeWorkspaceTarget(profile.targetType, profile.target),
           defaultBranch: normalizeWorkspaceBranch(profile.defaultBranch),
           writeBranch: normalizeWorkspaceBranch(profile.writeBranch),
+          customDisplayName: profile.normalizedCustomDisplayName,
           lastOpenedAt: profile.lastOpenedAt?.toUtc(),
         ),
     ])..sort(compareWorkspaceProfileRecency);
@@ -348,6 +349,7 @@ class SharedPreferencesWorkspaceProfileService
           leftProfile.target != rightProfile.target ||
           leftProfile.defaultBranch != rightProfile.defaultBranch ||
           leftProfile.writeBranch != rightProfile.writeBranch ||
+          leftProfile.customDisplayName != rightProfile.customDisplayName ||
           leftProfile.lastOpenedAt != rightProfile.lastOpenedAt) {
         return false;
       }

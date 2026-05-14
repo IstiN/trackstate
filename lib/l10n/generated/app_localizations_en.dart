@@ -634,7 +634,75 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get workspaceOnboardingFirstRunDescription =>
-      'Choose a local folder or hosted repository to get started.';
+      'Choose a local folder to open an existing workspace or initialize TrackState in a new one.';
+
+  @override
+  String get localWorkspaceOnboardingOpenExisting => 'Open existing folder';
+
+  @override
+  String get localWorkspaceOnboardingInitializeFolder => 'Initialize folder';
+
+  @override
+  String get localWorkspaceOnboardingFolderLabel => 'Selected folder';
+
+  @override
+  String get localWorkspaceOnboardingFolderRequired =>
+      'Choose a folder to continue.';
+
+  @override
+  String get localWorkspaceOnboardingFolderBrowseOpen =>
+      'Choose existing folder';
+
+  @override
+  String get localWorkspaceOnboardingFolderBrowseInitialize =>
+      'Choose folder to initialize';
+
+  @override
+  String get localWorkspaceOnboardingChangeFolder => 'Change folder';
+
+  @override
+  String get localWorkspaceOnboardingDetailsTitle => 'Workspace details';
+
+  @override
+  String get localWorkspaceOnboardingWorkspaceName => 'Workspace name';
+
+  @override
+  String get localWorkspaceOnboardingWorkspaceNameRequired =>
+      'Workspace name is required.';
+
+  @override
+  String get localWorkspaceOnboardingWorkspaceNameHelper =>
+      'Defaults to the selected folder name. You can rename it before saving the workspace profile.';
+
+  @override
+  String get localWorkspaceOnboardingWriteBranchHelper =>
+      'TrackState opens and writes to this local branch. Existing repositories must stay on their current branch during onboarding.';
+
+  @override
+  String get localWorkspaceOnboardingWriteBranchRequired =>
+      'Write Branch is required.';
+
+  @override
+  String get localWorkspaceOnboardingReadyStatus => 'Ready to open';
+
+  @override
+  String get localWorkspaceOnboardingInitializeStatus =>
+      'Initialization required';
+
+  @override
+  String get localWorkspaceOnboardingBlockedStatus => 'Folder not supported';
+
+  @override
+  String get localWorkspaceOnboardingOpenAction => 'Open workspace';
+
+  @override
+  String get localWorkspaceOnboardingInitializeAction =>
+      'Initialize TrackState here';
+
+  @override
+  String localWorkspaceOnboardingCurrentBranchMismatch(String branch) {
+    return 'This repository is currently on $branch. Switch the branch yourself before onboarding, or keep the detected write branch.';
+  }
 
   @override
   String get workspaceOnboardingRepositoryHelper =>
