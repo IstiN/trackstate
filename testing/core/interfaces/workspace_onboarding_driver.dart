@@ -26,6 +26,10 @@ abstract interface class WorkspaceOnboardingDriver {
 
   Future<void> selectHostedRepositorySuggestion(String fullName);
 
+  Future<void> enterHostedRepository(String repository);
+
+  Future<void> enterHostedBranch(String branch);
+
   Future<void> submit();
 
   WorkspaceOnboardingState captureState();

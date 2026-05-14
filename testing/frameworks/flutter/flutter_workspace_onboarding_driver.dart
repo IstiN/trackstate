@@ -83,6 +83,22 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
   }
 
   @override
+  Future<void> enterHostedRepository(String repository) async {
+    await _enterText(
+      const ValueKey('workspace-onboarding-hosted-repository'),
+      repository,
+    );
+  }
+
+  @override
+  Future<void> enterHostedBranch(String branch) async {
+    await _enterText(
+      const ValueKey('workspace-onboarding-hosted-branch'),
+      branch,
+    );
+  }
+
+  @override
   Future<void> submit() async {
     await _tapAndSettle(_submitButtonFinder());
   }
@@ -191,6 +207,18 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       return null;
     }
     return _tester.widget<EditableText>(field.first).controller.text;
+  }
+
+  Future<void> _enterText(Key key, String value) async {
+    final field = find.descendant(
+      of: find.byKey(key),
+      matching: find.byType(EditableText),
+    );
+    if (field.evaluate().isEmpty) {
+      throw StateError('Editable field "$key" was not visible.');
+    }
+    await _tester.enterText(field.first, value);
+    await _tester.pumpAndSettle();
   }
 
   bool _isButtonEnabled(Finder finder) {
