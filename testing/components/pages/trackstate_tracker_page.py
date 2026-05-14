@@ -65,8 +65,11 @@ class TrackStateTrackerPage:
         self.app_url = app_url
         self._live_page = TrackStateLiveAppPage(session, app_url)
 
-    def open(self) -> RuntimeObservation:
+    def open_entrypoint(self) -> None:
         self._live_page.open()
+
+    def open(self) -> RuntimeObservation:
+        self.open_entrypoint()
         try:
             wait_match = self.session.wait_for_any_text(
                 [*self.LOAD_ERROR_TEXT_VARIANTS, "Connect GitHub", self.BOARD_LABEL],
