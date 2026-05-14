@@ -377,13 +377,13 @@ def _assert_workspace_row(
             f"Expected target fragment: {expected_target}\n"
             f"Observed row: {_row_asdict(row)}",
         )
-    lowered_visible_text = row.visible_text.lower()
-    if "undefined" in lowered_visible_text or "null" in lowered_visible_text:
-        raise AssertionError(
-            "Expected result failed: the saved workspace row exposed broken user-"
-            "facing fallback text.\n"
-            f"Observed row: {_row_asdict(row)}",
-        )
+    _assert_no_broken_row_tokens(
+        row,
+        error_prefix=(
+            "Expected result failed: the saved workspace row exposed broken "
+            "user-facing fallback text."
+        ),
+    )
     missing_actions = [
         label
         for label in required_action_labels
@@ -428,6 +428,7 @@ def _assert_corrupted_entry_handling(
     observation: SavedWorkspaceListObservation,
     storage_snapshot: dict[str, str | None],
 ) -> str:
+    _assert_no_broken_rows(observation)
     corrupted_row = _find_row_optional(observation, target=CORRUPTED_TARGET)
     normalized_state = _decode_prefixed_workspace_state(storage_snapshot)
     normalized_profile = _find_profile_by_target(normalized_state, CORRUPTED_TARGET)
@@ -448,26 +449,85 @@ def _assert_corrupted_entry_handling(
             f"entry: {_storage_summary(storage_snapshot)}"
         )
 
-    _assert_workspace_row(
-        corrupted_row,
-        expected_type="Hosted",
-        expected_target=CORRUPTED_TARGET,
-        required_action_labels=("Open", "Delete"),
-    )
+    _assert_safely_rendered_corrupted_row(corrupted_row)
+    corrupted_row_summary = _corrupted_row_summary(corrupted_row)
     if normalized_profile is None:
         return (
             "Viewed the Saved workspaces list after preloading malformed row metadata. "
-            "The corrupted target rendered as a safe Hosted fallback row with visible "
-            "repository text and interactive controls, while the valid rows stayed intact. "
+            "The corrupted target rendered as a safe user-facing row instead of breaking "
+            "the Saved workspaces UI, while the valid rows stayed intact. "
+            f"Rendered row evidence: {corrupted_row_summary}. "
             f"Storage evidence: {_storage_summary(storage_snapshot)}"
         )
     return (
         "Viewed the Saved workspaces list after preloading malformed row metadata. "
-        "The corrupted target rendered as a safe Hosted fallback row instead of "
-        "crashing the UI. Automation also captured the repaired Flutter web "
-        "workspace profile as diagnostic evidence without requiring one exact "
-        f"persisted payload shape: {normalized_profile_summary}. "
-        f"Corrupted row text={corrupted_row.visible_text!r}."
+        "The corrupted target rendered as a safe user-facing row instead of crashing "
+        "the UI. Automation also captured the repaired Flutter web workspace profile "
+        "as diagnostic evidence without requiring one exact persisted payload shape: "
+        f"{normalized_profile_summary}. Rendered row evidence: {corrupted_row_summary}."
+    )
+
+
+def _assert_safely_rendered_corrupted_row(row: SavedWorkspaceRowObservation) -> None:
+    if not row.visible_text.strip():
+        raise AssertionError(
+            "Step 3 failed: the malformed saved-workspace entry rendered as an empty "
+            "visible row instead of a safe user-facing fallback.\n"
+            f"Observed row: {_row_asdict(row)}",
+        )
+    _assert_no_broken_row_tokens(
+        row,
+        error_prefix=(
+            "Step 3 failed: the malformed saved-workspace entry still exposed broken "
+            "user-facing placeholder text."
+        ),
+    )
+
+
+def _assert_no_broken_rows(observation: SavedWorkspaceListObservation) -> None:
+    for row in observation.rows:
+        _assert_no_broken_row_tokens(
+            row,
+            error_prefix=(
+                "Step 3 failed: a rendered saved workspace row exposed broken user-"
+                "facing placeholder text."
+            ),
+        )
+
+
+def _assert_no_broken_row_tokens(
+    row: SavedWorkspaceRowObservation,
+    *,
+    error_prefix: str,
+) -> None:
+    user_facing_values = [
+        row.visible_text,
+        row.detail_text,
+        row.display_name or "",
+        row.semantics_label or "",
+        row.target_type_label or "",
+        *row.action_labels,
+        *row.button_labels,
+    ]
+    if any(_contains_broken_placeholder_token(value) for value in user_facing_values):
+        raise AssertionError(
+            f"{error_prefix}\n"
+            f"Observed row: {_row_asdict(row)}",
+        )
+
+
+def _contains_broken_placeholder_token(value: str) -> bool:
+    lowered_value = value.lower()
+    return "undefined" in lowered_value or "null" in lowered_value
+
+
+def _corrupted_row_summary(row: SavedWorkspaceRowObservation) -> str:
+    labels = row.button_labels or row.action_labels
+    return (
+        f"type={row.target_type_label!r}, "
+        f"display_name={row.display_name!r}, "
+        f"actions={list(labels)!r}, "
+        f"text={row.visible_text!r}"
     )
 
 
@@ -842,12 +902,14 @@ def _tracker_rework_summary(result: dict[str, object], *, passed: bool) -> str:
     summary_lines = [
         "h3. Rework Summary",
         "",
-        "* Added the required {{testing/tests/TS-682/README.md}} ticket README.",
         (
-            "* Relaxed Step 3 so Flutter web storage remains diagnostic evidence: "
-            "the test now accepts either a skipped malformed entry or any safe "
-            "equivalent repaired profile, and only rejects clearly unsafe persisted "
-            "values."
+            "* Relaxed Step 3 so the malformed-row UI path now accepts either a "
+            "skipped entry or any safe rendered fallback/placeholder row, and only "
+            "rejects clearly broken user-facing output."
+        ),
+        (
+            "* Kept Flutter web storage as diagnostic evidence only, so equivalent "
+            "safe repaired payloads remain valid."
         ),
         f"* Re-run result: *{status}* via {jira_inline(RUN_COMMAND)}.",
     ]
@@ -869,13 +931,13 @@ def _write_review_replies(*, passed: bool) -> None:
             {
                 "replies": [
                     {
-                        "inReplyToId": 3239497782,
-                        "threadId": "PRRT_kwDOSU6Gf86B-qyD",
+                        "inReplyToId": 3239529918,
+                        "threadId": "PRRT_kwDOSU6Gf86B-wpu",
                         "reply": (
-                            "Fixed: Step 3 no longer hard-codes one exact repaired "
-                            "storage payload. The test still verifies the UI stays "
-                            "stable, keeps the storage snapshot as diagnostic evidence, "
-                            "and only rejects clearly unsafe persisted values if the "
+                            "Fixed: Step 3 no longer hard-codes one exact malformed-row "
+                            "UI fallback. The test now accepts either a skipped entry or "
+                            "any safe rendered row/placeholder, while still rejecting "
+                            "broken user-facing output such as placeholder tokens if the "
                             f"malformed profile is still present. The rerun {rerun_result}."
                         ),
                     },
@@ -883,9 +945,9 @@ def _write_review_replies(*, passed: bool) -> None:
                         "inReplyToId": None,
                         "threadId": None,
                         "reply": (
-                            "Fixed: added `testing/tests/TS-682/README.md`, relaxed the "
-                            "optional storage-repair assertion to align with the ticket, "
-                            f"and reran TS-682. The rerun {rerun_result}."
+                            "Fixed: relaxed the malformed-row UI assertion to align with "
+                            "TS-682, kept storage checks diagnostic-only, and reran "
+                            f"TS-682. The rerun {rerun_result}."
                         ),
                     },
                 ]
