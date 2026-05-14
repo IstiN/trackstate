@@ -1,5 +1,7 @@
 import '../../core/interfaces/workspace_onboarding_driver.dart';
 import '../../core/interfaces/workspace_onboarding_screen.dart';
+import '../../core/models/workspace_onboarding_choice_observation.dart';
+import '../../core/models/workspace_shell_entry_point_observation.dart';
 import '../../core/models/workspace_onboarding_state.dart';
 
 class WorkspaceOnboardingScreen implements WorkspaceOnboardingScreenHandle {
@@ -26,10 +28,31 @@ class WorkspaceOnboardingScreen implements WorkspaceOnboardingScreenHandle {
       _driver.selectHostedRepositorySuggestion(fullName);
 
   @override
+  Future<void> enterHostedRepository(String repository) =>
+      _driver.enterHostedRepository(repository);
+
+  @override
+  Future<void> enterHostedBranch(String branch) =>
+      _driver.enterHostedBranch(branch);
+
+  @override
   Future<void> submit() => _driver.submit();
 
   @override
   WorkspaceOnboardingState captureState() => _driver.captureState();
+
+  @override
+  WorkspaceOnboardingChoiceObservation observeTargetChoices() =>
+      _driver.observeTargetChoices();
+
+  @override
+  WorkspaceShellEntryPointObservation observeShellEntryPoint({
+    required String workspaceDisplayName,
+  }) {
+    return _driver.observeShellEntryPoint(
+      workspaceDisplayName: workspaceDisplayName,
+    );
+  }
 
   @override
   bool isAccessCalloutVisible({

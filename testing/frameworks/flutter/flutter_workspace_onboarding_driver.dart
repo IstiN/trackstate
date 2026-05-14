@@ -9,6 +9,8 @@ import 'package:trackstate/ui/features/tracker/services/workspace_directory_pick
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/workspace_onboarding_driver.dart';
+import '../../core/models/workspace_onboarding_choice_observation.dart';
+import '../../core/models/workspace_shell_entry_point_observation.dart';
 import '../../core/models/workspace_onboarding_state.dart';
 
 class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
@@ -83,6 +85,22 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
   }
 
   @override
+  Future<void> enterHostedRepository(String repository) async {
+    await _enterText(
+      const ValueKey('workspace-onboarding-hosted-repository'),
+      repository,
+    );
+  }
+
+  @override
+  Future<void> enterHostedBranch(String branch) async {
+    await _enterText(
+      const ValueKey('workspace-onboarding-hosted-branch'),
+      branch,
+    );
+  }
+
+  @override
   Future<void> submit() async {
     await _tapAndSettle(_submitButtonFinder());
   }
@@ -115,6 +133,115 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       repositoryAccessTopBarLabel: _visibleAccessLabel(),
       visibleTexts: _visibleTexts(),
       interactiveSemanticsLabels: _interactiveSemanticsLabels(),
+    );
+  }
+
+  @override
+  WorkspaceOnboardingChoiceObservation observeTargetChoices() {
+    final localFolderFinder = _targetChoiceControl('Local folder');
+    final hostedRepositoryFinder = _targetChoiceControl('Hosted repository');
+    final interactiveLabels = _interactiveSemanticsLabels();
+    final isLocalFolderVisible = localFolderFinder.evaluate().isNotEmpty;
+    final isHostedRepositoryVisible = hostedRepositoryFinder
+        .evaluate()
+        .isNotEmpty;
+
+    double? verticalCenterDelta;
+    double? horizontalGap;
+    double? widthDelta;
+    double? heightDelta;
+    var sharedChoiceRow = false;
+    Map<String, double>? localFolderRect;
+    Map<String, double>? hostedRepositoryRect;
+
+    if (isLocalFolderVisible && isHostedRepositoryVisible) {
+      final localRect = _tester.getRect(localFolderFinder.first);
+      final hostedRect = _tester.getRect(hostedRepositoryFinder.first);
+      sharedChoiceRow = _sharesTopBarRow(
+        localFolderFinder.first,
+        hostedRepositoryFinder.first,
+      );
+      verticalCenterDelta = (localRect.center.dy - hostedRect.center.dy).abs();
+      horizontalGap = hostedRect.left - localRect.right;
+      widthDelta = (localRect.width - hostedRect.width).abs();
+      heightDelta = (localRect.height - hostedRect.height).abs();
+      localFolderRect = _rectAsMap(localRect);
+      hostedRepositoryRect = _rectAsMap(hostedRect);
+    }
+
+    return WorkspaceOnboardingChoiceObservation(
+      isLocalFolderVisible: isLocalFolderVisible,
+      isHostedRepositoryVisible: isHostedRepositoryVisible,
+      localFolderHasSemanticLabel: _containsSemanticLabel(
+        interactiveLabels,
+        'Local folder',
+      ),
+      hostedRepositoryHasSemanticLabel: _containsSemanticLabel(
+        interactiveLabels,
+        'Hosted repository',
+      ),
+      sharedChoiceRow: sharedChoiceRow,
+      verticalCenterDelta: verticalCenterDelta,
+      horizontalGap: horizontalGap,
+      widthDelta: widthDelta,
+      heightDelta: heightDelta,
+      localFolderRect: localFolderRect,
+      hostedRepositoryRect: hostedRepositoryRect,
+    );
+  }
+
+  @override
+  WorkspaceShellEntryPointObservation observeShellEntryPoint({
+    required String workspaceDisplayName,
+  }) {
+    final addWorkspaceFinder = _addWorkspaceControl();
+    final workspaceSwitcherFinder = _workspaceSwitcherTrigger();
+    final interactiveLabels = _interactiveSemanticsLabels();
+    final hasAddWorkspace = addWorkspaceFinder.evaluate().isNotEmpty;
+    final hasWorkspaceSwitcher = workspaceSwitcherFinder.evaluate().isNotEmpty;
+
+    double? verticalCenterDelta;
+    double? horizontalGap;
+    var sharedTopBarRow = false;
+    var addWorkspaceBeforeSwitcher = false;
+    Map<String, double>? addWorkspaceRect;
+    Map<String, double>? workspaceSwitcherRect;
+
+    if (hasAddWorkspace && hasWorkspaceSwitcher) {
+      final addRect = _tester.getRect(addWorkspaceFinder.first);
+      final switcherRect = _tester.getRect(workspaceSwitcherFinder.first);
+      sharedTopBarRow = _sharesTopBarRow(
+        addWorkspaceFinder.first,
+        workspaceSwitcherFinder.first,
+      );
+      verticalCenterDelta = (addRect.center.dy - switcherRect.center.dy).abs();
+      horizontalGap = switcherRect.left - addRect.right;
+      addWorkspaceBeforeSwitcher = addRect.center.dx < switcherRect.center.dx;
+      addWorkspaceRect = _rectAsMap(addRect);
+      workspaceSwitcherRect = _rectAsMap(switcherRect);
+    }
+
+    return WorkspaceShellEntryPointObservation(
+      isAddWorkspaceVisible: hasAddWorkspace,
+      isWorkspaceSwitcherVisible: hasWorkspaceSwitcher,
+      addWorkspaceHasSemanticLabel: _containsSemanticLabel(
+        interactiveLabels,
+        'Add workspace',
+      ),
+      workspaceSwitcherHasSemanticLabel: _containsSemanticLabel(
+        interactiveLabels,
+        'Workspace switcher:',
+      ),
+      currentWorkspaceIncludedInSwitcherLabel: _containsSemanticLabel(
+        interactiveLabels,
+        workspaceDisplayName,
+      ),
+      sharedTopBarRow: sharedTopBarRow,
+      verticalCenterDelta: verticalCenterDelta,
+      horizontalGap: horizontalGap,
+      addWorkspaceBeforeSwitcher: addWorkspaceBeforeSwitcher,
+      addWorkspaceRect: addWorkspaceRect,
+      workspaceSwitcherRect: workspaceSwitcherRect,
     );
   }
 
@@ -166,6 +293,32 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
         description: 'repository-access callout "$title"',
       );
 
+  Finder _addWorkspaceControl() {
+    final button = find.ancestor(
+      of: find.text('Add workspace'),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    if (button.evaluate().isNotEmpty) {
+      return button.first;
+    }
+    return find.bySemanticsLabel(RegExp('^Add workspace\$')).first;
+  }
+
+  Finder _workspaceSwitcherTrigger() {
+    return find.byKey(const ValueKey<String>('workspace-switcher-trigger'));
+  }
+
+  Finder _targetChoiceControl(String label) {
+    final button = find.ancestor(
+      of: find.text(label),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    if (button.evaluate().isNotEmpty) {
+      return button.first;
+    }
+    return find.text(label);
+  }
+
   Finder _submitButtonFinder() {
     final hostedFinder = find.byKey(
       const ValueKey('workspace-onboarding-open'),
@@ -191,6 +344,18 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       return null;
     }
     return _tester.widget<EditableText>(field.first).controller.text;
+  }
+
+  Future<void> _enterText(Key key, String value) async {
+    final field = find.descendant(
+      of: find.byKey(key),
+      matching: find.byType(EditableText),
+    );
+    if (field.evaluate().isEmpty) {
+      throw StateError('Editable field "$key" was not visible.');
+    }
+    await _tester.enterText(field.first, value);
+    await _tester.pumpAndSettle();
   }
 
   bool _isButtonEnabled(Finder finder) {
@@ -306,4 +471,30 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
     }
     return deduped;
   }
+
+  bool _containsSemanticLabel(List<String> labels, String fragment) {
+    return labels.any((label) => label.contains(fragment));
+  }
+
+  bool _sharesTopBarRow(Finder left, Finder right) {
+    final leftRows = find.ancestor(of: left, matching: find.byType(Row));
+    final rightRows = find.ancestor(of: right, matching: find.byType(Row));
+    for (final leftRow in leftRows.evaluate()) {
+      for (final rightRow in rightRows.evaluate()) {
+        if (identical(leftRow, rightRow)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  Map<String, double> _rectAsMap(Rect rect) => <String, double>{
+    'left': rect.left,
+    'top': rect.top,
+    'right': rect.right,
+    'bottom': rect.bottom,
+    'width': rect.width,
+    'height': rect.height,
+  };
 }
