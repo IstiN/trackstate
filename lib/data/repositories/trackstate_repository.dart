@@ -57,6 +57,10 @@ abstract interface class WorkspaceSyncRepository {
   Future<RepositorySyncCheck> checkSync({RepositorySyncState? previousState});
 }
 
+abstract interface class HostedWorkspaceCatalogRepository {
+  Future<List<HostedRepositoryReference>> listAccessibleHostedRepositories();
+}
+
 enum IssueHydrationScope { detail, comments, attachments }
 
 extension TrackStateRepositoryAttachmentSupport on TrackStateRepository {
@@ -91,7 +95,8 @@ class ProviderBackedTrackStateRepository
     implements
         TrackStateRepository,
         ProjectSettingsRepository,
-        WorkspaceSyncRepository {
+        WorkspaceSyncRepository,
+        HostedWorkspaceCatalogRepository {
   static const RepositoryPermission _restrictedPermission =
       RepositoryPermission(
         canRead: false,
@@ -251,6 +256,16 @@ class ProviderBackedTrackStateRepository
       );
       rethrow;
     }
+  }
+
+  @override
+  Future<List<HostedRepositoryReference>>
+  listAccessibleHostedRepositories() async {
+    final provider = _provider;
+    return switch (provider) {
+      RepositoryCatalogReader reader => reader.listAccessibleRepositories(),
+      _ => const <HostedRepositoryReference>[],
+    };
   }
 
   String _resolveUserIdentity(RepositoryUser? user) {

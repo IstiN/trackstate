@@ -324,6 +324,25 @@
   "repositoryAccessReleaseRestrictedMessage": "Issue edits and comments can continue. For new attachments, use the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main so GitHub Actions uploads them to Releases.",
   "repositoryAccessSettingsHint": "Settings is the canonical place to review repository access and reconnect safely.",
   "savedWorkspaces": "Saved workspaces",
+  "addWorkspace": "Add workspace",
+  "localFolder": "Local folder",
+  "hostedRepository": "Hosted repository",
+  "workspaceOnboardingDescription": "Choose how TrackState should open the next workspace.",
+  "workspaceOnboardingFirstRunDescription": "Choose a local folder or hosted repository to get started.",
+  "workspaceOnboardingRepositoryHelper": "Enter the repository as owner/repo.",
+  "workspaceOnboardingLocalFolderHelper": "Enter the local Git folder path.",
+  "workspaceOnboardingBrowseRepositories": "Accessible repositories",
+  "workspaceOnboardingLoadingRepositories": "Loading accessible repositories...",
+  "workspaceOnboardingBrowseUnavailableHint": "Connect GitHub in an existing hosted workspace to browse accessible repositories. You can still enter owner/repo manually here.",
+  "workspaceOnboardingRepositoryManualFallbackHint": "Select a repository from the current GitHub session or enter owner/repo manually.",
+  "workspaceOnboardingRepositoryLoadFailed": "Accessible repositories could not be loaded. Enter owner/repo manually instead. {error}",
+  "@workspaceOnboardingRepositoryLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "workspaceTargetTypeHosted": "Hosted",
   "workspaceTargetTypeLocal": "Local",
   "activeWorkspace": "Active",

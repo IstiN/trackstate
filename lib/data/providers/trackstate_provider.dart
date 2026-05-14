@@ -44,6 +44,10 @@ abstract interface class RepositorySyncChecker {
   Future<RepositorySyncCheck> checkSync({RepositorySyncState? previousState});
 }
 
+abstract interface class RepositoryCatalogReader {
+  Future<List<HostedRepositoryReference>> listAccessibleRepositories();
+}
+
 abstract interface class RepositoryAttachmentStore {
   Future<RepositoryAttachment> readAttachment(
     String path, {
