@@ -27,7 +27,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   Finder get repositoryAccessButton => find.bySemanticsLabel(
     RegExp(
-      r'^(Local Git|Connect GitHub|Connected|Read-only|Attachments limited)$',
+      r'^(Local Git|Connect GitHub|Connected|Read-only|Attachments limited|Workspace switcher: .+)$',
     ),
   );
 
@@ -230,10 +230,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
                 required String repositoryPath,
                 required String defaultBranch,
                 required String writeBranch,
-              }) =>
-                  _repositoryService.openRepository(
-                    repositoryPath: repositoryPath,
-                  ),
+              }) => _repositoryService.openRepository(
+                repositoryPath: repositoryPath,
+              ),
         ),
       ),
     );
@@ -1362,7 +1361,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   void expectLocalRuntimeChrome() {
     expect(localGitAccessButton, findsAtLeastNWidgets(1));
-    expect(find.text('Local Git'), findsOneWidget);
     expect(find.text('Connect GitHub'), findsNothing);
   }
 

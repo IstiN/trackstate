@@ -55,8 +55,10 @@ void main() {
       final createIssueButton = find
           .bySemanticsLabel(RegExp('^Create issue\$'))
           .last;
-      final repositoryAccessButton = find
-          .bySemanticsLabel(RegExp('^Attachments limited\$'))
+      final workspaceSwitcherButton = find
+          .bySemanticsLabel(
+            RegExp('^Workspace switcher: .*Attachments limited\$'),
+          )
           .last;
       final themeToggle = find
           .bySemanticsLabel(RegExp('^(Dark theme|Light theme)\$'))
@@ -68,7 +70,7 @@ void main() {
       expect(syncPill, findsOneWidget);
       expect(searchField, findsOneWidget);
       expect(createIssueButton, findsOneWidget);
-      expect(repositoryAccessButton, findsOneWidget);
+      expect(workspaceSwitcherButton, findsOneWidget);
       expect(themeToggle, findsOneWidget);
       expect(profileIdentity, findsWidgets);
 
@@ -76,7 +78,7 @@ void main() {
         'search field': tester.getRect(searchField).height,
         'sync pill': tester.getRect(syncPill).height,
         'create issue': tester.getRect(createIssueButton).height,
-        'repository access': tester.getRect(repositoryAccessButton).height,
+        'workspace switcher': tester.getRect(workspaceSwitcherButton).height,
         'theme toggle': tester.getRect(themeToggle).height,
         'profile identity': tester.getRect(profileIdentity.last).height,
       };

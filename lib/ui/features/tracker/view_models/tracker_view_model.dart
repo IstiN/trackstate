@@ -56,6 +56,9 @@ enum TrackerMessageKind {
   githubAuthorizationCodeReturned,
   githubConnected,
   storedGitHubTokenInvalid,
+  workspaceSwitchFailed,
+  workspaceRestoreSkipped,
+  workspaceRestoreFailed,
 }
 
 enum IssueDeferredSection { detail, comments, attachments, history }
@@ -209,6 +212,36 @@ class TrackerMessage {
         tone: TrackerMessageTone.error,
         error: '$error',
       );
+
+  factory TrackerMessage.workspaceSwitchFailed({
+    required String workspaceName,
+    required String reason,
+  }) => TrackerMessage._(
+    TrackerMessageKind.workspaceSwitchFailed,
+    tone: TrackerMessageTone.error,
+    repository: workspaceName,
+    error: reason,
+  );
+
+  factory TrackerMessage.workspaceRestoreSkipped({
+    required String workspaceName,
+    required String reason,
+  }) => TrackerMessage._(
+    TrackerMessageKind.workspaceRestoreSkipped,
+    tone: TrackerMessageTone.info,
+    repository: workspaceName,
+    error: reason,
+  );
+
+  factory TrackerMessage.workspaceRestoreFailed({
+    required String workspaceName,
+    required String reason,
+  }) => TrackerMessage._(
+    TrackerMessageKind.workspaceRestoreFailed,
+    tone: TrackerMessageTone.error,
+    repository: workspaceName,
+    error: reason,
+  );
 }
 
 class IssueEditRequest {
@@ -322,6 +355,7 @@ class TrackerViewModel extends ChangeNotifier {
   int get totalSearchResults => _searchPage.total;
   bool get hasMoreSearchResults => _searchPage.hasMore;
   bool get isLoadingMoreSearchResults => _isLoadingMoreSearchResults;
+  String? get workspaceId => _workspaceId;
   WorkspaceSyncStatus get workspaceSyncStatus => _workspaceSyncStatus;
   bool get hasPendingWorkspaceSyncRefresh =>
       _workspaceSyncStatus.hasPendingRefresh;
@@ -677,6 +711,11 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     _message = null;
+    notifyListeners();
+  }
+
+  void showMessage(TrackerMessage message) {
+    _message = message;
     notifyListeners();
   }
 

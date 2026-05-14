@@ -926,8 +926,15 @@ class SettingsScreenRobot {
     return labels.map((entry) => entry.label).toList();
   }
 
-  Finder topBarProviderControl(String label) =>
-      _buttonControlWithText(label, requiresTrackStateIcon: true);
+  Finder topBarProviderControl(String label) {
+    final exact = _buttonControlWithText(label, requiresTrackStateIcon: true);
+    if (exact.evaluate().isNotEmpty) {
+      return exact;
+    }
+    return find.bySemanticsLabel(
+      RegExp('Workspace switcher: .*${RegExp.escape(label)}'),
+    );
+  }
 
   Finder settingsProviderControl(String label) =>
       _buttonControlWithText(label, requiresTrackStateIcon: false);
@@ -1209,7 +1216,7 @@ class SettingsScreenRobot {
         return control;
       }
     }
-    return connectGitHubTopBarControl;
+    return find.bySemanticsLabel(RegExp('Workspace switcher: .*'));
   }
 
   bool _subtreeContainsWidget(Element root, bool Function(Widget) matches) {
