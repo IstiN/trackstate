@@ -100,17 +100,14 @@ void main() {
       }
 
       await repository.emitIssueRemovalSync();
-      await _pumpUntil(
+      final settledPostRefreshStateReached = await _pumpUntil(
         tester,
-        condition: () async =>
-            !_issueDetailVisible(
-              app,
-              Ts732RemovedIssueSyncRepository.removedIssueKey,
-            ) ||
-            await app.isMessageBannerVisibleContaining(
-              _expectedNotificationFragment,
-            ),
-        timeout: const Duration(seconds: 5),
+        condition: () async => await _hasSettledPostRefreshState(
+          app,
+          expectedSearchValue: expectedSearchValue,
+          notificationFragment: _expectedNotificationFragment,
+        ),
+        timeout: const Duration(seconds: 10),
       );
 
       final visibleTexts = app.visibleTextsSnapshot();
@@ -130,6 +127,8 @@ void main() {
         _expectedNotificationFragment,
       );
 
+      result['settled_post_refresh_state_reached'] =
+          settledPostRefreshStateReached;
       result['visible_texts_after_refresh'] = visibleTexts;
       result['visible_semantics_after_refresh'] = visibleSemantics;
       result['visible_search_results_after_refresh'] = visibleResults;
@@ -142,6 +141,7 @@ void main() {
         action:
             'Simulate a background sync where Issue-A no longer exists in issueSummaries/repositoryIndex, then observe the issue detail surface.',
         observed:
+            'settled_post_refresh_state_reached=$settledPostRefreshStateReached; '
             'any_issue_detail_visible=$anyIssueDetailVisible; '
             'visible_semantics=${_formatSnapshot(visibleSemantics)}',
       );
@@ -165,6 +165,7 @@ void main() {
         action:
             'Observe the Search section navigation state and the non-blocking notification area after the refresh applies.',
         observed:
+            'settled_post_refresh_state_reached=$settledPostRefreshStateReached; '
             'jql_value=${jqlValueAfterRefresh ?? '<missing>'}; '
             'removed_issue_search_result_visible=$removedIssueSearchResultVisible; '
             'remaining_issue_search_result_visible=$remainingIssueSearchResultVisible; '
@@ -274,7 +275,7 @@ bool _snapshotContains(List<String> values, String expected) {
   return false;
 }
 
-Future<void> _pumpUntil(
+Future<bool> _pumpUntil(
   WidgetTester tester, {
   required Future<bool> Function() condition,
   required Duration timeout,
@@ -282,10 +283,31 @@ Future<void> _pumpUntil(
   final end = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(end)) {
     if (await condition()) {
-      return;
+      return true;
     }
     await tester.pump(const Duration(milliseconds: 100));
   }
+  return false;
+}
+
+Future<bool> _hasSettledPostRefreshState(
+  TrackStateAppComponent app, {
+  required String expectedSearchValue,
+  required String notificationFragment,
+}) async {
+  final visibleResults = app.visibleIssueSearchResultLabelsSnapshot();
+  final jqlSearchValue = await app.readJqlSearchFieldValue();
+  return !_anyIssueDetailVisible(app) &&
+      await app.isMessageBannerVisibleContaining(notificationFragment) &&
+      jqlSearchValue == expectedSearchValue &&
+      !_snapshotContains(
+        visibleResults,
+        'Open ${Ts732RemovedIssueSyncRepository.removedIssueKey} ${Ts732RemovedIssueSyncRepository.removedIssueSummary}',
+      ) &&
+      _snapshotContains(
+        visibleResults,
+        'Open ${Ts732RemovedIssueSyncRepository.remainingIssueKey} ${Ts732RemovedIssueSyncRepository.remainingIssueSummary}',
+      );
 }
 
 String _formatSnapshot(List<String> values, {int limit = 24}) {
