@@ -5,11 +5,17 @@ import '../models/workspace_onboarding_state.dart';
 abstract interface class WorkspaceOnboardingScreenHandle {
   Future<void> openAddWorkspace();
 
+  Future<void> chooseOpenExistingFolder();
+
   Future<void> chooseExistingFolder();
 
   Future<void> chooseHostedRepository();
 
   Future<void> chooseHostedRepositorySuggestion(String fullName);
+
+  Future<void> enterLocalWorkspaceName(String value);
+
+  Future<void> enterLocalWriteBranch(String value);
 
   Future<void> enterHostedRepository(String repository);
 
