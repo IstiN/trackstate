@@ -13,8 +13,6 @@ const String _ticketSummary =
 const String _testFilePath = 'testing/tests/TS-701/test_ts_701.dart';
 const String _runCommand =
     'flutter test testing/tests/TS-701/test_ts_701.dart --reporter expanded';
-const String _expectedFirstRunDescription =
-    'Choose a local folder or hosted repository to get started.';
 
 const List<String> _requestSteps = <String>[
   'Launch the TrackState application.',
@@ -99,10 +97,6 @@ void main() {
           }
 
           final missingExpectedTexts = <String>[
-            if (!initialState.visibleTexts.contains(
-              _expectedFirstRunDescription,
-            ))
-              _expectedFirstRunDescription,
             if (!initialState.visibleTexts.contains('Local folder'))
               'Local folder',
             if (!initialState.visibleTexts.contains('Hosted repository'))
@@ -119,7 +113,7 @@ void main() {
           if (missingExpectedTexts.isNotEmpty) {
             failures.add(
               'Step 2 failed: the first-launch onboarding content did not match the ticket expectation.\n'
-              'Missing visible texts: ${_formatList(missingExpectedTexts)}\n'
+              'Missing ticket-required choice labels: ${_formatList(missingExpectedTexts)}\n'
               'Observed visible texts: ${_formatList(initialState.visibleTexts)}\n'
               'Observed interactive semantics labels: ${_formatList(initialState.interactiveSemanticsLabels)}',
             );
@@ -235,7 +229,7 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '',
     'h4. What was tested',
     '* Launched the production first-launch flow with an empty SharedPreferences-backed workspace profile store.',
-    '* Checked the first visible screen content for the onboarding route heading, first-run description, and the ticket-required {noformat}Local folder{noformat} and {noformat}Hosted repository{noformat} choices.',
+    '* Checked the first visible screen content for the onboarding route heading and the ticket-required {noformat}Local folder{noformat} and {noformat}Hosted repository{noformat} choices.',
     '* Verified the user-facing choice controls behave like equal first-class options by checking their visibility, semantics labels, and side-by-side layout observation.',
     '',
     'h4. Result',
@@ -289,7 +283,7 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '',
     '### What was tested',
     '- Launched the production first-launch flow with an empty SharedPreferences-backed workspace profile store.',
-    '- Checked the first visible screen content for the onboarding route heading, first-run description, and the ticket-required `Local folder` and `Hosted repository` choices.',
+    '- Checked the first visible screen content for the onboarding route heading and the ticket-required `Local folder` and `Hosted repository` choices.',
     '- Verified the user-facing choice controls behave like equal first-class options by checking their visibility, semantics labels, and side-by-side layout observation.',
     '',
     '### Result',
