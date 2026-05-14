@@ -18,6 +18,10 @@ abstract interface class WorkspaceProfileService {
     bool select = true,
   });
   Future<WorkspaceProfilesState> selectProfile(String workspaceId);
+  Future<WorkspaceProfilesState> saveHostedAccessMode(
+    String workspaceId,
+    HostedWorkspaceAccessMode? accessMode,
+  );
   Future<WorkspaceProfilesState> deleteProfile(String workspaceId);
   Future<WorkspaceProfile?> ensureLegacyContextMigrated(
     WorkspaceProfileInput? input,
@@ -102,10 +106,18 @@ class SharedPreferencesWorkspaceProfileService
     }
 
     final currentProfile = existingProfile.first;
-    final updatedProfile = WorkspaceProfile.create(
-      input,
-      lastOpenedAt: select ? _clock : (currentProfile.lastOpenedAt?.toUtc()),
-    );
+    final updatedProfile =
+        WorkspaceProfile.create(
+          input,
+          lastOpenedAt: select
+              ? _clock
+              : (currentProfile.lastOpenedAt?.toUtc()),
+        ).copyWith(
+          hostedAccessMode:
+              input.targetType == WorkspaceProfileTargetType.hosted
+              ? currentProfile.hostedAccessMode
+              : null,
+        );
     _throwIfDuplicate(
       state.profiles,
       updatedProfile,
@@ -160,6 +172,47 @@ class SharedPreferencesWorkspaceProfileService
         ..sort(compareWorkspaceProfileRecency),
       activeWorkspaceId: workspaceId,
       migrationComplete: true,
+    );
+    await _writeState(preferences, nextState);
+    return nextState;
+  }
+
+  @override
+  Future<WorkspaceProfilesState> saveHostedAccessMode(
+    String workspaceId,
+    HostedWorkspaceAccessMode? accessMode,
+  ) async {
+    await repairBrowserPreferencesStorage();
+    final preferences = await SharedPreferences.getInstance();
+    final state = _normalizeState(_readState(preferences));
+    var foundWorkspace = false;
+    var changed = false;
+    final nextProfiles = resolveWorkspaceDisplayNames([
+      for (final profile in state.profiles)
+        if (profile.id == workspaceId)
+          () {
+            foundWorkspace = true;
+            if (!profile.isHosted || profile.hostedAccessMode == accessMode) {
+              return profile;
+            }
+            changed = true;
+            return profile.copyWith(hostedAccessMode: accessMode);
+          }()
+        else
+          profile,
+    ])..sort(compareWorkspaceProfileRecency);
+    if (!foundWorkspace) {
+      throw WorkspaceProfileException(
+        'Saved workspace $workspaceId was not found.',
+      );
+    }
+    if (!changed) {
+      return state;
+    }
+    final nextState = WorkspaceProfilesState(
+      profiles: nextProfiles,
+      activeWorkspaceId: state.activeWorkspaceId,
+      migrationComplete: state.migrationComplete,
     );
     await _writeState(preferences, nextState);
     return nextState;
@@ -264,6 +317,7 @@ class SharedPreferencesWorkspaceProfileService
           writeBranch: normalizeWorkspaceBranch(profile.writeBranch),
           customDisplayName: profile.normalizedCustomDisplayName,
           lastOpenedAt: profile.lastOpenedAt?.toUtc(),
+          hostedAccessMode: profile.isHosted ? profile.hostedAccessMode : null,
         ),
     ])..sort(compareWorkspaceProfileRecency);
     final previousActiveWorkspace = state.profiles.where(
