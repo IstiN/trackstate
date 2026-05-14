@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import json
+import os
 import platform
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -20,6 +22,9 @@ from testing.components.pages.live_workspace_management_page import (  # noqa: E
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage  # noqa: E402
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
+)
+from testing.components.services.live_saved_workspace_visual_probe import (  # noqa: E402
+    LiveSavedWorkspaceVisualProbe,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
@@ -161,6 +166,10 @@ def main() -> None:
                 )
 
                 observation = workspace_page.open_settings_and_observe_saved_workspaces()
+                observation = _enrich_visual_observation(
+                    workspace_page=workspace_page,
+                    observation=observation,
+                )
                 result["workspace_observation"] = _list_asdict(observation)
                 if not (observation.section_visible and observation.row_count >= 2):
                     failure_observation = (
@@ -606,6 +615,24 @@ def _record_human_verification(
     checks = result.setdefault("human_verification", [])
     assert isinstance(checks, list)
     checks.append({"check": check, "observed": observed})
+
+
+def _enrich_visual_observation(
+    *,
+    workspace_page: LiveWorkspaceManagementPage,
+    observation: SavedWorkspaceListObservation,
+) -> SavedWorkspaceListObservation:
+    fd, temp_path = tempfile.mkstemp(prefix="ts668-visual-", suffix=".png")
+    os.close(fd)
+    screenshot_path = Path(temp_path)
+    try:
+        workspace_page.screenshot(str(screenshot_path))
+        return LiveSavedWorkspaceVisualProbe().observe(
+            screenshot_path=screenshot_path,
+            observation=observation,
+        )
+    finally:
+        screenshot_path.unlink(missing_ok=True)
 
 
 def _capture_visible_screenshot(
