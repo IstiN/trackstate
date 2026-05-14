@@ -33,18 +33,16 @@ void main() {
           condition: () =>
               _workspaceSyncPill.evaluate().isNotEmpty &&
               find
-                  .bySemanticsLabel(
-                    RegExp(
-                      '^${RegExp.escape(Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel)}\$',
-                    ),
+                  .text(
+                    Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel,
+                    findRichText: true,
                   )
                   .evaluate()
                   .isNotEmpty &&
               find
-                  .bySemanticsLabel(
-                    RegExp(
-                      '^${RegExp.escape(Ts716WorkspaceSyncAccessibilityRepository.readOnlyLabel)}\$',
-                    ),
+                  .textContaining(
+                    'This repository session is read-only',
+                    findRichText: true,
                   )
                   .evaluate()
                   .isNotEmpty,
