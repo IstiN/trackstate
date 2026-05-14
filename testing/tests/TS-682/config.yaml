@@ -1,0 +1,10 @@
+test_id: TS-682
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with browser storage preloaded with one valid hosted workspace, one valid local workspace, and one malformed saved-workspace entry.
+  - Verifies the Saved workspaces list remains functional, valid rows stay visible, and the malformed entry is either normalized into a safe fallback row or skipped without breaking the UI.
