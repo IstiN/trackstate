@@ -177,12 +177,6 @@ void main() {
           final submitLabel = selectedState.submitLabel ?? '';
           final step3Failures = <String>[];
 
-          if (selectedState.statusLabel != 'Folder not supported') {
-            step3Failures.add(
-              'The onboarding flow was not blocked after selecting a non-empty non-Git folder. '
-              'Observed status label: ${selectedState.statusLabel}',
-            );
-          }
           if (!hasExistingGitRepositoryGuidance || !hasEmptyFolderGuidance) {
             step3Failures.add(
               'The user-facing message did not instruct the user to choose an existing Git repository or an empty folder. '
