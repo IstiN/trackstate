@@ -26,6 +26,14 @@ class WorkspaceOnboardingScreen implements WorkspaceOnboardingScreenHandle {
       _driver.selectHostedRepositorySuggestion(fullName);
 
   @override
+  Future<void> enterHostedRepository(String repository) =>
+      _driver.enterHostedRepository(repository);
+
+  @override
+  Future<void> enterHostedBranch(String branch) =>
+      _driver.enterHostedBranch(branch);
+
+  @override
   Future<void> submit() => _driver.submit();
 
   @override
