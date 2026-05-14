@@ -57,6 +57,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Saved workspaces'), findsOneWidget);
+    expect(find.text('Hosted'), findsOneWidget);
+    expect(find.text('Local'), findsOneWidget);
     expect(find.text('trackstate/trackstate'), findsWidgets);
     expect(find.text('demo'), findsOneWidget);
     expect(find.text('Active'), findsOneWidget);

@@ -620,6 +620,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get savedWorkspaces => 'Saved workspaces';
 
   @override
+  String get workspaceTargetTypeHosted => 'Hosted';
+
+  @override
+  String get workspaceTargetTypeLocal => 'Local';
+
+  @override
   String get activeWorkspace => 'Active';
 
   @override

@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'browser_preferences_storage_repair.dart';
+
 abstract interface class TrackStateAuthStore {
   Future<String?> readToken({String? repository, String? workspaceId});
   Future<void> saveToken(String token, {String? repository, String? workspaceId});
@@ -19,6 +21,7 @@ class SharedPreferencesTrackStateAuthStore implements TrackStateAuthStore {
 
   @override
   Future<String?> readToken({String? repository, String? workspaceId}) async {
+    await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
     final workspaceKey = _workspaceTokenKey(workspaceId);
     if (workspaceKey != null) {
@@ -37,12 +40,14 @@ class SharedPreferencesTrackStateAuthStore implements TrackStateAuthStore {
     String? repository,
     String? workspaceId,
   }) async {
+    await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(_requiredScopeKey(repository, workspaceId), token);
   }
 
   @override
   Future<void> clearToken({String? repository, String? workspaceId}) async {
+    await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove(_requiredScopeKey(repository, workspaceId));
   }
@@ -52,6 +57,7 @@ class SharedPreferencesTrackStateAuthStore implements TrackStateAuthStore {
     required String repository,
     required String workspaceId,
   }) async {
+    await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
     final legacyKey = _legacyRepositoryTokenKey(repository);
     if (legacyKey == null) {
@@ -74,6 +80,7 @@ class SharedPreferencesTrackStateAuthStore implements TrackStateAuthStore {
     if (fromWorkspaceId == toWorkspaceId) {
       return;
     }
+    await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
     final previousKey = _workspaceTokenKey(fromWorkspaceId);
     final nextKey = _workspaceTokenKey(toWorkspaceId);
