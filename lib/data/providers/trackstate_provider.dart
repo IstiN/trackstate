@@ -40,6 +40,10 @@ abstract interface class RepositoryPermissionChecker {
   Future<RepositoryPermission> getPermission();
 }
 
+abstract interface class RepositoryCatalogReader {
+  Future<List<HostedRepositoryReference>> listAccessibleRepositories();
+}
+
 abstract interface class RepositoryAttachmentStore {
   Future<RepositoryAttachment> readAttachment(
     String path, {
