@@ -9,6 +9,7 @@ import 'package:trackstate/ui/features/tracker/services/workspace_directory_pick
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/workspace_onboarding_driver.dart';
+import '../../core/models/workspace_onboarding_choice_observation.dart';
 import '../../core/models/workspace_shell_entry_point_observation.dart';
 import '../../core/models/workspace_onboarding_state.dart';
 
@@ -136,6 +137,60 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
   }
 
   @override
+  WorkspaceOnboardingChoiceObservation observeTargetChoices() {
+    final localFolderFinder = _targetChoiceControl('Local folder');
+    final hostedRepositoryFinder = _targetChoiceControl('Hosted repository');
+    final interactiveLabels = _interactiveSemanticsLabels();
+    final isLocalFolderVisible = localFolderFinder.evaluate().isNotEmpty;
+    final isHostedRepositoryVisible = hostedRepositoryFinder
+        .evaluate()
+        .isNotEmpty;
+
+    double? verticalCenterDelta;
+    double? horizontalGap;
+    double? widthDelta;
+    double? heightDelta;
+    var sharedChoiceRow = false;
+    Map<String, double>? localFolderRect;
+    Map<String, double>? hostedRepositoryRect;
+
+    if (isLocalFolderVisible && isHostedRepositoryVisible) {
+      final localRect = _tester.getRect(localFolderFinder.first);
+      final hostedRect = _tester.getRect(hostedRepositoryFinder.first);
+      sharedChoiceRow = _sharesTopBarRow(
+        localFolderFinder.first,
+        hostedRepositoryFinder.first,
+      );
+      verticalCenterDelta = (localRect.center.dy - hostedRect.center.dy).abs();
+      horizontalGap = hostedRect.left - localRect.right;
+      widthDelta = (localRect.width - hostedRect.width).abs();
+      heightDelta = (localRect.height - hostedRect.height).abs();
+      localFolderRect = _rectAsMap(localRect);
+      hostedRepositoryRect = _rectAsMap(hostedRect);
+    }
+
+    return WorkspaceOnboardingChoiceObservation(
+      isLocalFolderVisible: isLocalFolderVisible,
+      isHostedRepositoryVisible: isHostedRepositoryVisible,
+      localFolderHasSemanticLabel: _containsSemanticLabel(
+        interactiveLabels,
+        'Local folder',
+      ),
+      hostedRepositoryHasSemanticLabel: _containsSemanticLabel(
+        interactiveLabels,
+        'Hosted repository',
+      ),
+      sharedChoiceRow: sharedChoiceRow,
+      verticalCenterDelta: verticalCenterDelta,
+      horizontalGap: horizontalGap,
+      widthDelta: widthDelta,
+      heightDelta: heightDelta,
+      localFolderRect: localFolderRect,
+      hostedRepositoryRect: hostedRepositoryRect,
+    );
+  }
+
+  @override
   WorkspaceShellEntryPointObservation observeShellEntryPoint({
     required String workspaceDisplayName,
   }) {
@@ -251,6 +306,17 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
 
   Finder _workspaceSwitcherTrigger() {
     return find.byKey(const ValueKey<String>('workspace-switcher-trigger'));
+  }
+
+  Finder _targetChoiceControl(String label) {
+    final button = find.ancestor(
+      of: find.text(label),
+      matching: find.bySubtype<ButtonStyleButton>(),
+    );
+    if (button.evaluate().isNotEmpty) {
+      return button.first;
+    }
+    return find.text(label);
   }
 
   Finder _submitButtonFinder() {
