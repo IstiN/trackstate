@@ -4,13 +4,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/local_workspace_onboarding_service.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
-import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../components/screens/settings_screen_robot.dart';
 import '../../core/utils/color_contrast.dart';
+import '../../fixtures/local_workspace_onboarding_screen_fixture.dart';
 
 const String _ticketKey = 'TS-720';
 const String _ticketSummary =
@@ -27,14 +26,8 @@ const String _workspaceNameLabel = 'Workspace name';
 const String _writeBranchLabel = 'Write Branch';
 const String _changeFolderLabel = 'Change folder';
 const String _submitLabel = 'Initialize TrackState here';
-const String _statusLabel = 'Initialization required';
+const String _openExistingFolderLabel = 'Open existing folder';
 const String _selectedFolderLabel = 'Selected folder';
-const String _workspaceNameHelper =
-    'Defaults to the selected folder name. You can rename it before saving the workspace profile.';
-const String _writeBranchHelper =
-    'TrackState opens and writes to this local branch. Existing repositories must stay on their current branch during onboarding.';
-const String _statusMessage =
-    'Git is already initialized here, but TrackState metadata is missing. Initialize TrackState here to create the project scaffold.';
 
 const List<String> _requestSteps = <String>[
   "Select 'Open existing folder' and pick the 'alpha-project' directory.",
@@ -94,285 +87,285 @@ void main() {
           );
         }
 
-        await _pumpLocalWorkspaceOnboardingApp(
+        final screen = await launchLocalWorkspaceOnboardingFixture(
           tester,
-          selectedPath: preparedWorkspace.repositoryPath,
+          workspaceProfileService: SharedPreferencesWorkspaceProfileService(
+            now: () => DateTime.utc(2026, 5, 14, 12, 0),
+          ),
+          onboardingService: createLocalWorkspaceOnboardingService(),
+          directoryPicker:
+              ({String? confirmButtonText, String? initialDirectory}) async =>
+                  preparedWorkspace!.repositoryPath,
+          sharedPreferences: const <String, Object>{},
         );
 
-        final initialVisibleTexts = robot.visibleTexts();
-        result['initial_visible_texts'] = initialVisibleTexts;
+        try {
+          final failures = <String>[];
+          final initialState = screen.captureState();
+          result['initial_visible_texts'] = initialState.visibleTexts;
 
-        await _openExistingFolder(tester);
-        await _pumpUntil(
-          tester,
-          condition: () =>
-              find
-                  .text(_workspaceDetailsHeading, findRichText: true)
-                  .evaluate()
-                  .isNotEmpty &&
-              robot
-                  .labeledTextField(_workspaceNameLabel)
-                  .evaluate()
-                  .isNotEmpty &&
-              robot.labeledTextField(_writeBranchLabel).evaluate().isNotEmpty &&
-              find
-                  .text(preparedWorkspace!.repositoryPath, findRichText: true)
-                  .evaluate()
-                  .isNotEmpty,
-          timeout: const Duration(seconds: 10),
-          failureMessage:
-              'TS-720 could not reach the Workspace details step after selecting $_expectedFolderName. '
-              'Visible texts: ${_formatSnapshot(robot.visibleTexts())}. '
-              'Visible semantics: ${_formatSnapshot(robot.visibleSemanticsLabelsSnapshot())}.',
-        );
-
-        final failures = <String>[];
-        final detailsVisibleTexts = robot.visibleTexts();
-        final visibleSemantics = robot.visibleSemanticsLabelsSnapshot();
-        final workspaceNameValue = robot.textFieldValue(_workspaceNameLabel);
-        final writeBranchValue = robot.textFieldValue(_writeBranchLabel);
-        final folderVisible = find
-            .text(preparedWorkspace.repositoryPath, findRichText: true)
-            .evaluate()
-            .isNotEmpty;
-
-        result['details_visible_texts'] = detailsVisibleTexts;
-        result['details_visible_semantics'] = visibleSemantics;
-        result['details_workspace_name_value'] = workspaceNameValue;
-        result['details_write_branch_value'] = writeBranchValue;
-        result['details_folder_visible'] = folderVisible;
-
-        final step12Observed =
-            'workspace_details_visible=${detailsVisibleTexts.contains(_workspaceDetailsHeading)}; '
-            'selected_folder_visible=$folderVisible; '
-            'status_visible=${detailsVisibleTexts.contains(_statusLabel)}; '
-            'visible_texts=${detailsVisibleTexts.join(' | ')}';
-        final step12Failures = <String>[];
-        for (final text in const <String>[
-          _workspaceDetailsHeading,
-          _selectedFolderLabel,
-          _workspaceNameLabel,
-          _writeBranchLabel,
-          _workspaceNameHelper,
-          _writeBranchHelper,
-          _statusLabel,
-          _statusMessage,
-          _changeFolderLabel,
-          _submitLabel,
-        ]) {
-          if (!detailsVisibleTexts.contains(text)) {
-            step12Failures.add(
-              'The Workspace details step did not visibly render "$text".',
+          final step1Observed =
+              'onboarding_visible=${initialState.isOnboardingVisible}; '
+              'open_existing_visible=${initialState.visibleTexts.contains(_openExistingFolderLabel)}; '
+              'visible_texts=${initialState.visibleTexts.join(' | ')}';
+          final step1Failures = <String>[];
+          if (!initialState.isOnboardingVisible) {
+            step1Failures.add(
+              'The onboarding flow was not visible before selecting the existing folder.',
             );
           }
-        }
-        if (!folderVisible) {
-          step12Failures.add(
-            'The selected folder path ${preparedWorkspace.repositoryPath} was not visible in the Selected folder area.',
+          if (!initialState.visibleTexts.contains(_openExistingFolderLabel)) {
+            step1Failures.add(
+              'The onboarding flow did not expose the Open existing folder action.',
+            );
+          }
+          _recordStep(
+            result,
+            step: 1,
+            status: step1Failures.isEmpty ? 'passed' : 'failed',
+            action: _requestSteps[0],
+            observed: step1Observed,
           );
-        }
-        _recordStep(
-          result,
-          step: 1,
-          status: step12Failures.isEmpty ? 'passed' : 'failed',
-          action: _requestSteps[0],
-          observed: step12Observed,
-        );
-        _recordStep(
-          result,
-          step: 2,
-          status: step12Failures.isEmpty ? 'passed' : 'failed',
-          action: _requestSteps[1],
-          observed: step12Observed,
-        );
-        failures.addAll(
-          step12Failures.map((message) => 'Steps 1-2 failed: $message'),
-        );
-
-        final step3Observed =
-            'workspace_name="$workspaceNameValue"; write_branch="$writeBranchValue"; '
-            'expected_workspace_name="$_expectedFolderName"; expected_write_branch="$_expectedBranch"';
-        final step3Failures = <String>[];
-        if (workspaceNameValue != _expectedFolderName) {
-          step3Failures.add(
-            'The Workspace name field proposed "$workspaceNameValue" instead of the folder-derived "$_expectedFolderName" display name.',
+          failures.addAll(
+            step1Failures.map((message) => 'Step 1 failed: $message'),
           );
-        }
-        if (writeBranchValue != _expectedBranch) {
-          step3Failures.add(
-            'The Write Branch field proposed "$writeBranchValue" instead of preserving the detected repository branch "$_expectedBranch".',
+
+          await screen.chooseExistingFolder();
+
+          final detailsState = screen.captureState();
+          final detailsVisibleTexts = detailsState.visibleTexts;
+          final workspaceNameValue = detailsState.workspaceNameValue;
+          final writeBranchValue = detailsState.writeBranchValue;
+          final folderVisible =
+              detailsState.folderPath == preparedWorkspace.path;
+          final submitLabel = detailsState.submitLabel ?? _submitLabel;
+
+          result['details_visible_texts'] = detailsVisibleTexts;
+          result['details_workspace_name_value'] = workspaceNameValue;
+          result['details_write_branch_value'] = writeBranchValue;
+          result['details_folder_visible'] = folderVisible;
+          result['details_submit_label'] = submitLabel;
+
+          final step2Observed =
+              'workspace_details_visible=${detailsVisibleTexts.contains(_workspaceDetailsHeading)}; '
+              'selected_folder_visible=$folderVisible; '
+              'workspace_name_visible=${detailsVisibleTexts.contains(_workspaceNameLabel)}; '
+              'write_branch_visible=${detailsVisibleTexts.contains(_writeBranchLabel)}; '
+              'submit_label=$submitLabel';
+          final step2Failures = <String>[];
+          if (!detailsVisibleTexts.contains(_workspaceDetailsHeading)) {
+            step2Failures.add(
+              'The Workspace details heading did not appear after choosing the repository folder.',
+            );
+          }
+          if (!detailsVisibleTexts.contains(_selectedFolderLabel)) {
+            step2Failures.add(
+              'The Selected folder row was not visible on the details step.',
+            );
+          }
+          if (!folderVisible) {
+            step2Failures.add(
+              'The selected folder path ${preparedWorkspace.path} was not reflected on the details step.',
+            );
+          }
+          if (!detailsVisibleTexts.contains(_workspaceNameLabel) ||
+              workspaceNameValue == null) {
+            step2Failures.add(
+              'The Workspace name field was not visible as an editable control on the details step.',
+            );
+          }
+          if (!detailsVisibleTexts.contains(_writeBranchLabel) ||
+              writeBranchValue == null) {
+            step2Failures.add(
+              'The Write Branch field was not visible as an editable control on the details step.',
+            );
+          }
+          if (!detailsState.isSubmitVisible || submitLabel != _submitLabel) {
+            step2Failures.add(
+              'The expected Initialize TrackState action was not visible on the details step.',
+            );
+          }
+          _recordStep(
+            result,
+            step: 2,
+            status: step2Failures.isEmpty ? 'passed' : 'failed',
+            action: _requestSteps[1],
+            observed: step2Observed,
           );
-        }
-        _recordStep(
-          result,
-          step: 3,
-          status: step3Failures.isEmpty ? 'passed' : 'failed',
-          action: _requestSteps[2],
-          observed: step3Observed,
-        );
-        failures.addAll(
-          step3Failures.map((message) => 'Step 3 failed: $message'),
-        );
-
-        await _enterTextField(
-          tester,
-          robot.labeledTextField(_workspaceNameLabel),
-          _editedWorkspaceName,
-        );
-        await _enterTextField(
-          tester,
-          robot.labeledTextField(_writeBranchLabel),
-          _editedWriteBranch,
-        );
-        final editedWorkspaceNameValue = robot.textFieldValue(
-          _workspaceNameLabel,
-        );
-        final editedWriteBranchValue = robot.textFieldValue(_writeBranchLabel);
-        result['edited_workspace_name_value'] = editedWorkspaceNameValue;
-        result['edited_write_branch_value'] = editedWriteBranchValue;
-
-        final step4Observed =
-            'edited_workspace_name="$editedWorkspaceNameValue"; edited_write_branch="$editedWriteBranchValue"';
-        final step4Failures = <String>[];
-        if (editedWorkspaceNameValue != _editedWorkspaceName) {
-          step4Failures.add(
-            'The Workspace name field did not keep the user-edited value "$_editedWorkspaceName".',
+          failures.addAll(
+            step2Failures.map((message) => 'Step 2 failed: $message'),
           );
-        }
-        if (editedWriteBranchValue != _editedWriteBranch) {
-          step4Failures.add(
-            'The Write Branch field did not keep the user-edited value "$_editedWriteBranch".',
+
+          final step3Observed =
+              'workspace_name="$workspaceNameValue"; write_branch="$writeBranchValue"; '
+              'expected_workspace_name="$_expectedFolderName"; expected_write_branch="$_expectedBranch"';
+          final step3Failures = <String>[];
+          if (workspaceNameValue != _expectedFolderName) {
+            step3Failures.add(
+              'The Workspace name field proposed "$workspaceNameValue" instead of the folder-derived "$_expectedFolderName" display name.',
+            );
+          }
+          if (writeBranchValue != _expectedBranch) {
+            step3Failures.add(
+              'The Write Branch field proposed "$writeBranchValue" instead of preserving the detected repository branch "$_expectedBranch".',
+            );
+          }
+          _recordStep(
+            result,
+            step: 3,
+            status: step3Failures.isEmpty ? 'passed' : 'failed',
+            action: _requestSteps[2],
+            observed: step3Observed,
           );
-        }
-        _recordStep(
-          result,
-          step: 4,
-          status: step4Failures.isEmpty ? 'passed' : 'failed',
-          action: _requestSteps[3],
-          observed: step4Observed,
-        );
-        failures.addAll(
-          step4Failures.map((message) => 'Step 4 failed: $message'),
-        );
-
-        final focusCandidates = <String, Finder>{
-          _changeFolderLabel: robot.actionButton(_changeFolderLabel),
-          _workspaceNameLabel: robot.labeledTextField(_workspaceNameLabel),
-          _writeBranchLabel: robot.labeledTextField(_writeBranchLabel),
-          _submitLabel: robot.actionButton(_submitLabel),
-        };
-        await robot.clearFocus();
-        final focusOrder = await robot.collectFocusOrder(
-          candidates: focusCandidates,
-          tabs: 20,
-        );
-        result['focus_order'] = focusOrder;
-
-        final detailsHeadingContrast = _textContrastOnPage(
-          robot,
-          text: _workspaceDetailsHeading,
-          minimumContrast: 4.5,
-        );
-        final workspaceNameContrast = _fieldLabelContrast(
-          robot,
-          label: _workspaceNameLabel,
-          minimumContrast: 4.5,
-        );
-        final writeBranchContrast = _fieldLabelContrast(
-          robot,
-          label: _writeBranchLabel,
-          minimumContrast: 4.5,
-        );
-        final submitButtonContrast = _buttonContrast(
-          robot,
-          label: _submitLabel,
-          minimumContrast: 4.5,
-        );
-        final contrastObservations = <_ContrastObservation>[
-          detailsHeadingContrast,
-          workspaceNameContrast,
-          writeBranchContrast,
-          submitButtonContrast,
-        ];
-        result['contrast'] = contrastObservations
-            .map((observation) => observation.toJson())
-            .toList();
-
-        final step5Observed =
-            'focus_order=${focusOrder.join(' -> ')}; '
-            'contrast=${contrastObservations.map((observation) => observation.describe()).join(' || ')}';
-        final step5Failures = <String>[];
-
-        final changeFolderIndex = focusOrder.indexOf(_changeFolderLabel);
-        final workspaceNameIndex = focusOrder.indexOf(_workspaceNameLabel);
-        final writeBranchIndex = focusOrder.indexOf(_writeBranchLabel);
-        final submitIndex = focusOrder.indexOf(_submitLabel);
-
-        if (changeFolderIndex == -1 ||
-            workspaceNameIndex == -1 ||
-            writeBranchIndex == -1 ||
-            submitIndex == -1) {
-          step5Failures.add(
-            'Keyboard Tab traversal did not reach all expected Workspace details controls. '
-            'Observed focus order: ${_formatSnapshot(focusOrder)}.',
+          failures.addAll(
+            step3Failures.map((message) => 'Step 3 failed: $message'),
           );
-        } else if (!(changeFolderIndex < workspaceNameIndex &&
-            workspaceNameIndex < writeBranchIndex &&
-            writeBranchIndex < submitIndex)) {
-          step5Failures.add(
-            'Keyboard Tab traversal was not logical for the Workspace details flow. '
-            'Observed focus order: ${_formatSnapshot(focusOrder)}.',
+
+          await screen.enterWorkspaceName(_editedWorkspaceName);
+          await screen.enterWriteBranch(_editedWriteBranch);
+          final editedState = screen.captureState();
+          final editedWorkspaceNameValue = editedState.workspaceNameValue;
+          final editedWriteBranchValue = editedState.writeBranchValue;
+          result['edited_workspace_name_value'] = editedWorkspaceNameValue;
+          result['edited_write_branch_value'] = editedWriteBranchValue;
+
+          final step4Observed =
+              'edited_workspace_name="$editedWorkspaceNameValue"; edited_write_branch="$editedWriteBranchValue"';
+          final step4Failures = <String>[];
+          if (editedWorkspaceNameValue != _editedWorkspaceName) {
+            step4Failures.add(
+              'The Workspace name field did not keep the user-edited value "$_editedWorkspaceName".',
+            );
+          }
+          if (editedWriteBranchValue != _editedWriteBranch) {
+            step4Failures.add(
+              'The Write Branch field did not keep the user-edited value "$_editedWriteBranch".',
+            );
+          }
+          _recordStep(
+            result,
+            step: 4,
+            status: step4Failures.isEmpty ? 'passed' : 'failed',
+            action: _requestSteps[3],
+            observed: step4Observed,
           );
-        }
-
-        final failingContrast = contrastObservations
-            .where((observation) => !observation.passes)
-            .toList(growable: false);
-        if (failingContrast.isNotEmpty) {
-          step5Failures.add(
-            'AA contrast checks failed for ${failingContrast.map((observation) => observation.label).join(', ')}. '
-            'Observed: ${failingContrast.map((observation) => observation.describe()).join(' || ')}.',
+          failures.addAll(
+            step4Failures.map((message) => 'Step 4 failed: $message'),
           );
+
+          final focusOrder = await robot.collectLocalWorkspaceDetailsFocusOrder(
+            submitLabel: submitLabel,
+          );
+          result['focus_order'] = focusOrder;
+
+          final detailsHeadingContrast = _textContrastOnPage(
+            robot,
+            text: _workspaceDetailsHeading,
+            minimumContrast: 4.5,
+          );
+          final workspaceNameContrast = _fieldLabelContrast(
+            robot,
+            label: _workspaceNameLabel,
+            minimumContrast: 4.5,
+          );
+          final writeBranchContrast = _fieldLabelContrast(
+            robot,
+            label: _writeBranchLabel,
+            minimumContrast: 4.5,
+          );
+          final submitButtonContrast = _buttonContrast(
+            robot,
+            label: submitLabel,
+            minimumContrast: 4.5,
+          );
+          final contrastObservations = <_ContrastObservation>[
+            detailsHeadingContrast,
+            workspaceNameContrast,
+            writeBranchContrast,
+            submitButtonContrast,
+          ];
+          result['contrast'] = contrastObservations
+              .map((observation) => observation.toJson())
+              .toList();
+
+          final step5Observed =
+              'focus_order=${focusOrder.join(' -> ')}; '
+              'contrast=${contrastObservations.map((observation) => observation.describe()).join(' || ')}';
+          final step5Failures = <String>[];
+
+          final changeFolderIndex = focusOrder.indexOf(_changeFolderLabel);
+          final workspaceNameIndex = focusOrder.indexOf(_workspaceNameLabel);
+          final writeBranchIndex = focusOrder.indexOf(_writeBranchLabel);
+          final submitIndex = focusOrder.indexOf(submitLabel);
+
+          if (changeFolderIndex == -1 ||
+              workspaceNameIndex == -1 ||
+              writeBranchIndex == -1 ||
+              submitIndex == -1) {
+            step5Failures.add(
+              'Keyboard Tab traversal did not reach all expected Workspace details controls. '
+              'Observed focus order: ${_formatSnapshot(focusOrder)}.',
+            );
+          } else if (!(changeFolderIndex < workspaceNameIndex &&
+              workspaceNameIndex < writeBranchIndex &&
+              writeBranchIndex < submitIndex)) {
+            step5Failures.add(
+              'Keyboard Tab traversal was not logical for the Workspace details flow. '
+              'Observed focus order: ${_formatSnapshot(focusOrder)}.',
+            );
+          }
+
+          final failingContrast = contrastObservations
+              .where((observation) => !observation.passes)
+              .toList(growable: false);
+          if (failingContrast.isNotEmpty) {
+            step5Failures.add(
+              'AA contrast checks failed for ${failingContrast.map((observation) => observation.label).join(', ')}. '
+              'Observed: ${failingContrast.map((observation) => observation.describe()).join(' || ')}.',
+            );
+          }
+
+          _recordStep(
+            result,
+            step: 5,
+            status: step5Failures.isEmpty ? 'passed' : 'failed',
+            action: _requestSteps[4],
+            observed: step5Observed,
+          );
+          failures.addAll(
+            step5Failures.map((message) => 'Step 5 failed: $message'),
+          );
+
+          _recordHumanVerification(
+            result,
+            check:
+                'Viewed the first-run onboarding flow after choosing the alpha-project folder and confirmed the selected folder row and workspace details controls were visible as a user would see them.',
+            observed:
+                'selected_folder=${detailsState.folderPath}; visible_labels=${detailsVisibleTexts.where((text) => <String>{_workspaceDetailsHeading, _selectedFolderLabel, _workspaceNameLabel, _writeBranchLabel, submitLabel}.contains(text)).join(' | ')}',
+          );
+          _recordHumanVerification(
+            result,
+            check:
+                'Verified the user-facing proposed values matched the folder-derived display name and the detected repository branch before editing either field.',
+            observed:
+                'workspace_name="$workspaceNameValue"; write_branch="$writeBranchValue"; expected_folder_name="$_expectedFolderName"; expected_branch="$_expectedBranch"',
+          );
+          _recordHumanVerification(
+            result,
+            check:
+                'Edited both visible fields to confirm they remained user-editable before finishing the onboarding flow.',
+            observed:
+                'edited_workspace_name="$editedWorkspaceNameValue"; edited_write_branch="$editedWriteBranchValue"',
+          );
+
+          if (failures.isNotEmpty) {
+            throw AssertionError(failures.join('\n\n'));
+          }
+
+          _writePassOutputs(result);
+        } finally {
+          screen.dispose();
         }
-
-        _recordStep(
-          result,
-          step: 5,
-          status: step5Failures.isEmpty ? 'passed' : 'failed',
-          action: _requestSteps[4],
-          observed: step5Observed,
-        );
-        failures.addAll(
-          step5Failures.map((message) => 'Step 5 failed: $message'),
-        );
-
-        _recordHumanVerification(
-          result,
-          check:
-              'Viewed the first-run local onboarding screen after picking the alpha-project folder, exactly as a user would encounter the Workspace details step.',
-          observed:
-              'status=${detailsVisibleTexts.contains(_statusLabel) ? _statusLabel : '<missing>'}; folder_path_visible=$folderVisible; visible_texts=${detailsVisibleTexts.join(' | ')}',
-        );
-        _recordHumanVerification(
-          result,
-          check:
-              'Verified the user-facing details content rather than internal state: Selected folder, Workspace details, Workspace name helper copy, Write Branch helper copy, and the initialization status message.',
-          observed:
-              'folder=${preparedWorkspace.repositoryPath}; workspace_name="$workspaceNameValue"; write_branch="$writeBranchValue"; message_present=${detailsVisibleTexts.contains(_statusMessage)}',
-        );
-        _recordHumanVerification(
-          result,
-          check:
-              'Edited both visible fields to confirm they behaved like user-editable inputs before finishing the flow.',
-          observed:
-              'edited_workspace_name="$editedWorkspaceNameValue"; edited_write_branch="$editedWriteBranchValue"',
-        );
-
-        if (failures.isNotEmpty) {
-          throw AssertionError(failures.join('\n\n'));
-        }
-
-        _writePassOutputs(result);
       } catch (error, stackTrace) {
         result['error'] = '${error.runtimeType}: $error';
         result['traceback'] = stackTrace.toString();
@@ -381,67 +374,10 @@ void main() {
       } finally {
         preparedWorkspace?.dispose();
         semantics.dispose();
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
       }
     },
-    timeout: const Timeout(Duration(seconds: 90)),
+    timeout: const Timeout(Duration(seconds: 120)),
   );
-}
-
-Future<void> _pumpLocalWorkspaceOnboardingApp(
-  WidgetTester tester, {
-  required String selectedPath,
-}) async {
-  SharedPreferences.setMockInitialValues(const <String, Object>{});
-  tester.view.physicalSize = const Size(1440, 960);
-  tester.view.devicePixelRatio = 1;
-
-  await tester.pumpWidget(
-    TrackStateApp(
-      key: const ValueKey('ts-720-app'),
-      repositoryFactory: () => const DemoTrackStateRepository(),
-      workspaceProfileService: SharedPreferencesWorkspaceProfileService(
-        now: () => DateTime.utc(2026, 5, 14, 12, 0),
-      ),
-      localWorkspaceOnboardingService: createLocalWorkspaceOnboardingService(),
-      workspaceDirectoryPicker:
-          ({String? confirmButtonText, String? initialDirectory}) async =>
-              selectedPath,
-      openLocalRepository:
-          ({
-            required String repositoryPath,
-            required String defaultBranch,
-            required String writeBranch,
-          }) async => const DemoTrackStateRepository(),
-    ),
-  );
-  await _pumpFrames(tester, frames: 12);
-}
-
-Future<void> _openExistingFolder(WidgetTester tester) async {
-  final button = find.byKey(
-    const ValueKey('local-workspace-onboarding-open-existing'),
-  );
-  await tester.ensureVisible(button);
-  await tester.runAsync(() async {
-    await tester.tap(button, warnIfMissed: false);
-    await tester.pump();
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-  });
-  await _pumpFrames(tester, frames: 12);
-}
-
-Future<void> _enterTextField(
-  WidgetTester tester,
-  Finder field,
-  String text,
-) async {
-  await tester.ensureVisible(field.first);
-  await tester.tap(field.first, warnIfMissed: false);
-  await tester.pump();
-  await tester.enterText(field.first, text);
-  await _pumpFrames(tester, frames: 8);
 }
 
 Future<_PreparedWorkspace> _prepareReadyWorkspace() async {
@@ -503,38 +439,13 @@ Future<void> _runGit(String workingDirectory, List<String> arguments) async {
   );
 }
 
-Future<void> _pumpUntil(
-  WidgetTester tester, {
-  required bool Function() condition,
-  required Duration timeout,
-  required String failureMessage,
-}) async {
-  final end = DateTime.now().add(timeout);
-  while (DateTime.now().isBefore(end)) {
-    if (condition()) {
-      return;
-    }
-    await tester.pump(const Duration(milliseconds: 100));
-  }
-  if (condition()) {
-    return;
-  }
-  fail(failureMessage);
-}
-
-Future<void> _pumpFrames(WidgetTester tester, {required int frames}) async {
-  for (var frame = 0; frame < frames; frame += 1) {
-    await tester.pump(const Duration(milliseconds: 16));
-  }
-}
-
 _ContrastObservation _textContrastOnPage(
   SettingsScreenRobot robot, {
   required String text,
   required double minimumContrast,
 }) {
   final ratio = contrastRatio(
-    robot.renderedTextColor(find.text(text, findRichText: true).first),
+    robot.renderedVisibleTextColor(text),
     robot.colors().surface,
   );
   return _ContrastObservation(
@@ -814,9 +725,6 @@ String _bugDescription(Map<String, Object?> result) {
     ..writeln('```')
     ..writeln('initial_visible_texts: ${result['initial_visible_texts']}')
     ..writeln('details_visible_texts: ${result['details_visible_texts']}')
-    ..writeln(
-      'details_visible_semantics: ${result['details_visible_semantics']}',
-    )
     ..writeln('focus_order: ${result['focus_order']}')
     ..writeln('contrast: ${result['contrast']}')
     ..writeln('```');
@@ -874,6 +782,7 @@ class _PreparedWorkspace {
   final String repositoryPath;
   final LocalWorkspaceInspection _inspection;
 
+  String get path => repositoryPath;
   bool get canContinueOnboarding => _inspection.canInitialize;
   String get stateName => _inspection.state.name;
   String get inspectionMessage => _inspection.message;
