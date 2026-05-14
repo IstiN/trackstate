@@ -1,0 +1,13 @@
+test_id: TS-736
+type: ui
+framework: flutter_test
+platform: linux
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Pumps the production JQL Search surface with a hosted workspace fixture that starts with one urgent-labeled match.
+  - Triggers a real workspace sync refresh that removes the urgent label and drives the production empty-state behavior.
+  - Verifies the active JQL query remains visible after the refresh instead of being cleared or rewritten.
+runtime_inputs:
+  query: labels = urgent
+  run_command: flutter test testing/tests/TS-736/test_ts_736.dart --reporter expanded
