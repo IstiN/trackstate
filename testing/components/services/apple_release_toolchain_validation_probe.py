@@ -251,22 +251,8 @@ class AppleReleaseToolchainValidationProbeService:
                 )
 
             original_text = workflow_file.read_text(encoding="utf-8")
-            required_fragment = (
-                f"flutter-version: '{self._config.required_flutter_version}'"
-            )
-            replacement_fragment = (
-                f"flutter-version: '{self._config.incompatible_flutter_version}'"
-            )
-            if original_text.count(required_fragment) != 1:
-                raise AppleReleaseToolchainValidationProbeError(
-                    "TS-707 expected to replace exactly one Flutter version declaration in "
-                    "the disposable workflow branch.\n"
-                    f"Expected fragment: {required_fragment}\n"
-                    f"Observed matches: {original_text.count(required_fragment)}"
-                )
-
             workflow_file.write_text(
-                original_text.replace(required_fragment, replacement_fragment, 1),
+                self._inject_validation_probe_step(original_text),
                 encoding="utf-8",
             )
             self._run_command(["git", "add", self._config.workflow_path], cwd=temp_repository_root)
@@ -275,7 +261,8 @@ class AppleReleaseToolchainValidationProbeService:
                     "git",
                     "commit",
                     "-m",
-                    "TS-707 probe: force incompatible Flutter version on Apple release workflow",
+                    "TS-707 probe: inject incompatible Flutter validation shim\n\n"
+                    "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
                 ],
                 cwd=temp_repository_root,
             )
@@ -337,6 +324,54 @@ class AppleReleaseToolchainValidationProbeService:
         raise AppleReleaseToolchainValidationProbeError(
             "TS-707 did not produce a disposable Apple release workflow observation."
         )
+
+    def _inject_validation_probe_step(self, workflow_text: str) -> str:
+        validation_marker = f"      - name: {self._config.validation_step_name}\n"
+        if workflow_text.count(validation_marker) != 1:
+            raise AppleReleaseToolchainValidationProbeError(
+                "TS-707 expected to inject the incompatible Flutter probe immediately "
+                "before the validation step in the disposable workflow branch.\n"
+                f"Validation marker: {validation_marker.strip()}\n"
+                f"Observed matches: {workflow_text.count(validation_marker)}"
+            )
+
+        injection = (
+            "      - name: Inject incompatible Flutter validation probe\n"
+            "        shell: bash\n"
+            "        run: |\n"
+            "          set -euo pipefail\n"
+            "\n"
+            "          probe_dir=\"$RUNNER_TEMP/ts707-probe/bin\"\n"
+            "          mkdir -p \"$probe_dir\"\n"
+            "\n"
+            "          original_flutter=\"$(command -v flutter)\"\n"
+            "          if [[ -z \"$original_flutter\" ]]; then\n"
+            "            echo \"::error::TS-707 probe could not locate the runner's Flutter "
+            "binary before validation.\"\n"
+            "            exit 1\n"
+            "          fi\n"
+            "\n"
+            "          printf '%s\\n' \"$original_flutter\" > \"$probe_dir/flutter.real\"\n"
+            "          cat > \"$probe_dir/flutter\" <<'EOF'\n"
+            "          #!/usr/bin/env bash\n"
+            "          set -euo pipefail\n"
+            "\n"
+            "          script_dir=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n"
+            "          real_flutter=\"$(cat \"$script_dir/flutter.real\")\"\n"
+            "\n"
+            "          if [[ \"${1:-}\" == \"--version\" ]]; then\n"
+            f"            echo \"Flutter {self._config.incompatible_flutter_version} • "
+            "channel stable • https://github.com/flutter/flutter.git\"\n"
+            "            exit 0\n"
+            "          fi\n"
+            "\n"
+            "          exec \"$real_flutter\" \"$@\"\n"
+            "          EOF\n"
+            "          chmod +x \"$probe_dir/flutter\"\n"
+            "          echo \"$probe_dir\" >> \"$GITHUB_PATH\"\n"
+            "\n"
+        )
+        return workflow_text.replace(validation_marker, injection + validation_marker, 1)
 
     def _wait_for_push_run(
         self,

@@ -24,6 +24,6 @@ runtime_inputs:
   poll_interval_seconds: 10
   log_excerpt_lines: 40
 notes:
-  - Uses the live Apple release workflow from IstiN/trackstate and a disposable semantic tag whose workflow file is modified only for the test run to install Flutter 3.30.0.
+  - Uses the live Apple release workflow from IstiN/trackstate and a disposable semantic tag whose workflow file is modified only for the test run to inject a Flutter 3.30.0 shim immediately before the validation step while leaving Set up Flutter on 3.35.3.
   - Expects the production validation step to reject that mismatched Flutter version with an explicit 3.35.3-required error before the desktop or CLI build steps proceed.
   - Treats the workflow's runner-availability guard as a precondition check; unavailable or offline release runners block the test instead of generating product-bug evidence.

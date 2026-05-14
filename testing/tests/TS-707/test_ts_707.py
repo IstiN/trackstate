@@ -125,7 +125,7 @@ def main() -> None:
 
         _assert_human_verification(observation)
     except Exception as error:
-        if _is_precondition_error(error):
+        if _is_precondition_error(error) or _is_harness_failure(observation):
             result["failure_kind"] = "precondition"
         result.setdefault("error", f"{type(error).__name__}: {error}")
         result.setdefault("traceback", traceback.format_exc())
@@ -176,6 +176,9 @@ def _assert_self_hosted_phase_reached(
 def _assert_validation_failure_contract(
     observation: AppleReleaseToolchainValidationObservation,
 ) -> None:
+    incomplete_validation_message = _incomplete_validation_message(observation)
+    if incomplete_validation_message is not None:
+        raise TS707PreconditionError(incomplete_validation_message)
     if observation.validation_step is None:
         raise AssertionError(
             "Step 3 failed: the build job never exposed the `Verify runner toolchain` "
@@ -316,7 +319,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response(result, passed=False), encoding="utf-8")
-    if _is_precondition_failure(result):
+    if _is_precondition_failure(result) or not _validation_step_executed(result):
         BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     else:
         BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
@@ -332,9 +335,9 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was tested",
         (
             "* Triggered the live {{Apple Release Builds}} workflow using a disposable "
-            "semantic tag whose workflow definition was modified only for the test run "
-            "to install Flutter {{3.30.0}} while the production validator still requires "
-            "{{3.35.3}}."
+            "semantic tag whose disposable workflow branch leaves {{Set up Flutter}} on "
+            "{{3.35.3}} but injects an incompatible Flutter {{3.30.0}} version shim "
+            "immediately before {{Verify runner toolchain}}."
         ),
         (
             "* Checked whether the run reached the self-hosted macOS build job and whether "
@@ -394,9 +397,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         (
             "- Triggered the live `Apple Release Builds` workflow using a disposable "
-            "semantic tag whose workflow definition was modified only for the test run "
-            "to install Flutter `3.30.0` while the production validator still requires "
-            "`3.35.3`."
+            "semantic tag whose disposable workflow branch leaves `Set up Flutter` on "
+            "`3.35.3` but injects an incompatible Flutter `3.30.0` version shim "
+            "immediately before `Verify runner toolchain`."
         ),
         (
             "- Checked whether the run reached the self-hosted macOS build job and whether "
@@ -677,8 +680,8 @@ def _failure_result_line(result: dict[str, object], *, jira: bool) -> str:
     prefix = "* " if jira else "- "
     if _is_precondition_failure(result):
         return (
-            f"{prefix}Could not validate the expected result because a documented "
-            f"infrastructure precondition failed. {_failed_step_summary(result)}"
+            f"{prefix}Could not validate the expected result because a non-product "
+            f"precondition or test-harness condition failed. {_failed_step_summary(result)}"
         )
     return f"{prefix}Did not match the expected result. {_failed_step_summary(result)}"
 
@@ -686,8 +689,9 @@ def _failure_result_line(result: dict[str, object], *, jira: bool) -> str:
 def _failure_outcome_line(result: dict[str, object]) -> str:
     if _is_precondition_failure(result):
         return (
-            "- The Apple release workflow was blocked before the macOS validation path "
-            f"started. {_failed_step_summary(result)}"
+            "- The Apple release workflow did not reach a product-valid TS-707 outcome "
+            f"because a non-product precondition or test-harness condition failed. "
+            f"{_failed_step_summary(result)}"
         )
     return (
         "- The Apple release workflow did not satisfy the requested toolchain "
@@ -701,6 +705,15 @@ def _actual_result_summary(result: dict[str, object]) -> str:
     verify_runner = _as_text((result.get("verify_runner_job") or {}).get("conclusion"))
     build_job = _as_text((result.get("build_job") or {}).get("conclusion"))
     if _is_precondition_failure(result):
+        if _setup_failed_before_validation(result):
+            setup_name = _as_text((result.get("setup_flutter_step") or {}).get("name")) or "Set up Flutter"
+            return (
+                f"The disposable Apple release run at `{run_url}` failed in `{setup_name}` "
+                "before `Verify runner toolchain` executed. Build job conclusion was "
+                f"`{build_job}`, so the automation did not reach the product validation "
+                f"surface and should be treated as a non-product harness failure: "
+                f"{failed_summary}"
+            )
         return (
             f"The disposable Apple release run at `{run_url}` stopped in the runner-"
             f"availability guard before the macOS validation step executed. Verify-runner "
@@ -726,6 +739,15 @@ def _is_precondition_failure(result: dict[str, object]) -> bool:
     return result.get("failure_kind") == "precondition"
 
 
+def _validation_step_executed(result: dict[str, object]) -> bool:
+    validation_step = result.get("validation_step")
+    if not isinstance(validation_step, dict) or not _as_text(validation_step.get("name")):
+        return False
+    conclusion = _as_text(validation_step.get("conclusion"))
+    status = _as_text(validation_step.get("status"))
+    return bool(conclusion) or status == "completed"
+
+
 def _is_precondition_error(error: Exception) -> bool:
     if isinstance(error, TS707PreconditionError):
         return True
@@ -733,6 +755,59 @@ def _is_precondition_error(error: Exception) -> bool:
     return (
         "did not reach a non-cancelled completed state within the timeout" in error_message
         and "Status: queued" in error_message
+    )
+
+
+def _is_harness_failure(
+    observation: AppleReleaseToolchainValidationObservation | None,
+) -> bool:
+    if observation is None:
+        return False
+    return (
+        _incomplete_validation_message(observation) is not None
+        or (
+            observation.validation_step is None
+            and observation.setup_flutter_step is not None
+            and observation.setup_flutter_step.conclusion == "failure"
+        )
+    )
+
+
+def _setup_failed_before_validation(result: dict[str, object]) -> bool:
+    setup_step = result.get("setup_flutter_step")
+    return (
+        isinstance(setup_step, dict)
+        and (_as_text(setup_step.get("conclusion")) == "failure" or _as_text(setup_step.get("status")) == "in_progress")
+        and not _validation_step_executed(result)
+    )
+
+
+def _incomplete_validation_message(
+    observation: AppleReleaseToolchainValidationObservation,
+) -> str | None:
+    if observation.build_job is None or observation.run_conclusion != "failure":
+        return None
+
+    setup_incomplete = observation.setup_flutter_step is not None and (
+        observation.setup_flutter_step.status in {"pending", "in_progress"}
+        or observation.setup_flutter_step.conclusion is None
+    )
+    validation_incomplete = observation.validation_step is not None and (
+        observation.validation_step.status in {"pending", "in_progress"}
+        or observation.validation_step.conclusion is None
+    )
+    if not (setup_incomplete or validation_incomplete):
+        return None
+
+    return (
+        "Step 3 blocked: the build job ended in a non-final tool-state before "
+        "`Verify runner toolchain` actually executed, so TS-707 did not reach the "
+        "product validation surface.\n"
+        f"Build job summary: {_single_job_summary(observation.build_job)}\n"
+        f"Setup Flutter step summary: {_single_step_summary(observation.setup_flutter_step)}\n"
+        f"Validation step summary: {_single_step_summary(observation.validation_step)}\n"
+        f"Run URL: {observation.run_url}\n"
+        f"Log excerpt:\n{observation.run_log_excerpt}"
     )
 
 

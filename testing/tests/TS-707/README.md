@@ -6,8 +6,9 @@ or CLI build work proceeds.
 
 The automation:
 1. clones the repository into a disposable temp directory
-2. changes only the workflow's Flutter version in that disposable copy from
-   `3.35.3` to `3.30.0`
+2. inserts a disposable probe step that prepends a shim reporting Flutter
+   `3.30.0` immediately before `Verify runner toolchain`, while leaving
+   `Set up Flutter` on `3.35.3`
 3. pushes a disposable `v*` tag to trigger the real Apple release workflow
 4. waits for the self-hosted macOS build job to start and expose
    `Verify runner toolchain`
