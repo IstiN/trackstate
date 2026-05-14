@@ -14,6 +14,10 @@ class SavedWorkspaceActionObservation:
     border_color: str | None
     contrast_ratio: float | None
     border_contrast_ratio: float | None
+    left: float | None = None
+    top: float | None = None
+    width: float | None = None
+    height: float | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,26 @@ class SavedWorkspaceRowObservation:
     action_labels: tuple[str, ...]
     button_labels: tuple[str, ...]
     action_observations: tuple[SavedWorkspaceActionObservation, ...]
+    left: float | None = None
+    top: float | None = None
+    width: float | None = None
+    height: float | None = None
+    title_left: float | None = None
+    title_top: float | None = None
+    title_width: float | None = None
+    title_height: float | None = None
+    detail_left: float | None = None
+    detail_top: float | None = None
+    detail_width: float | None = None
+    detail_height: float | None = None
+    type_left: float | None = None
+    type_top: float | None = None
+    type_width: float | None = None
+    type_height: float | None = None
+    icon_left: float | None = None
+    icon_top: float | None = None
+    icon_width: float | None = None
+    icon_height: float | None = None
 
 
 @dataclass(frozen=True)
@@ -82,11 +106,19 @@ class LiveWorkspaceManagementPage:
                   && style.display !== 'none';
               };
               const toHex = (value) => {
-                if (!value) {
+                if (!value || value === 'transparent') {
                   return null;
                 }
-                const match = value.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/i);
+                const match = value.match(
+                  /rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([0-9.]+))?\\)/i,
+                );
                 if (!match) {
+                  return null;
+                }
+                if (
+                  match[4] !== undefined
+                  && Number.parseFloat(match[4]) === 0
+                ) {
                   return null;
                 }
                 return `#${match.slice(1, 4).map((part) => Number.parseInt(part, 10).toString(16).padStart(2, '0')).join('')}`;
@@ -108,14 +140,8 @@ class LiveWorkspaceManagementPage:
                 return (0.2126 * channels[0]) + (0.7152 * channels[1]) + (0.0722 * channels[2]);
               };
               const contrastRatio = (foreground, background) => {
-                const foregroundHex =
-                  typeof foreground === 'string' && foreground.startsWith('#')
-                    ? foreground.toLowerCase()
-                    : toHex(foreground);
-                const backgroundHex =
-                  typeof background === 'string' && background.startsWith('#')
-                    ? background.toLowerCase()
-                    : toHex(background);
+                const foregroundHex = toHex(foreground);
+                const backgroundHex = toHex(background);
                 if (!foregroundHex || !backgroundHex) {
                   return null;
                 }
@@ -142,6 +168,11 @@ class LiveWorkspaceManagementPage:
                     || element?.innerText
                     || ''
                 );
+              const dedupeRepeatedLine = (value) => {
+                const normalized = normalize(value);
+                const match = normalized.match(/^(.+)\\s+\\1$/);
+                return match ? match[1] : normalized;
+              };
               const visibleElements = (root, selector = '*') =>
                 Array.from(root.querySelectorAll(selector)).filter((candidate) => isVisible(candidate));
               const dedupeNestedElements = (elements) => {
@@ -355,92 +386,6 @@ class LiveWorkspaceManagementPage:
                 }
                 return null;
               };
-              const sampleCanvasPixel = (pageX, pageY) => {
-                for (const canvas of Array.from(document.querySelectorAll('canvas')).reverse()) {
-                  const rect = canvas.getBoundingClientRect();
-                  if (
-                    pageX < rect.left
-                    || pageX > rect.right
-                    || pageY < rect.top
-                    || pageY > rect.bottom
-                  ) {
-                    continue;
-                  }
-                  const context = canvas.getContext('2d', { willReadFrequently: true });
-                  if (!context) {
-                    continue;
-                  }
-                  const scaleX = canvas.width / Math.max(rect.width, 1);
-                  const scaleY = canvas.height / Math.max(rect.height, 1);
-                  const canvasX = Math.max(
-                    0,
-                    Math.min(canvas.width - 1, Math.floor((pageX - rect.left) * scaleX)),
-                  );
-                  const canvasY = Math.max(
-                    0,
-                    Math.min(canvas.height - 1, Math.floor((pageY - rect.top) * scaleY)),
-                  );
-                  try {
-                    const pixel = context.getImageData(canvasX, canvasY, 1, 1).data;
-                    if (pixel[3] === 0) {
-                      continue;
-                    }
-                    return toHex(`rgba(${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3] / 255})`);
-                  } catch (error) {
-                    continue;
-                  }
-                }
-                return null;
-              };
-              const sampleCanvasRegionColor = (rect, { insetX = 8, insetY = 8, columns = 4, rows = 3 } = {}) => {
-                const swatches = [];
-                const minX = rect.left + insetX;
-                const maxX = rect.right - insetX;
-                const minY = rect.top + insetY;
-                const maxY = rect.bottom - insetY;
-                if (maxX <= minX || maxY <= minY) {
-                  return null;
-                }
-                for (let row = 0; row < rows; row += 1) {
-                  for (let column = 0; column < columns; column += 1) {
-                    const x = minX + ((column + 0.5) * (maxX - minX) / columns);
-                    const y = minY + ((row + 0.5) * (maxY - minY) / rows);
-                    const color = sampleCanvasPixel(x, y);
-                    if (color) {
-                      swatches.push(color);
-                    }
-                  }
-                }
-                if (swatches.length === 0) {
-                  return null;
-                }
-                const counts = new Map();
-                for (const swatch of swatches) {
-                  counts.set(swatch, (counts.get(swatch) || 0) + 1);
-                }
-                return Array.from(counts.entries())
-                  .sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
-              };
-              const sampleCanvasBorderColor = (rect) => {
-                const points = [
-                  [rect.left + 2, rect.top + rect.height / 2],
-                  [rect.right - 2, rect.top + rect.height / 2],
-                  [rect.left + rect.width / 2, rect.top + 2],
-                  [rect.left + rect.width / 2, rect.bottom - 2],
-                ];
-                const swatches = points
-                  .map(([x, y]) => sampleCanvasPixel(x, y))
-                  .filter((color) => color);
-                if (swatches.length === 0) {
-                  return null;
-                }
-                const counts = new Map();
-                for (const swatch of swatches) {
-                  counts.set(swatch, (counts.get(swatch) || 0) + 1);
-                }
-                return Array.from(counts.entries())
-                  .sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
-              };
               const findStyledElement = (element) => {
                 if (!element) {
                   return null;
@@ -499,14 +444,6 @@ class LiveWorkspaceManagementPage:
                   .sort((left, right) => left.area - right.area)[0] ?? null;
               };
               const bodyText = document.body?.innerText ?? '';
-              const LIGHT_SURFACE = '#ffffff';
-              const LIGHT_MUTED = '#6b6d63';
-              const LIGHT_BORDER = '#e5d3b8';
-              const LIGHT_PRIMARY = '#b24328';
-              const LIGHT_PRIMARY_SOFT = '#f2d2c4';
-              const preferFallbackForBlack = (color, fallback = null) =>
-                color && color !== '#000000' ? color : fallback;
-              const withFallback = (color, fallback = null) => color || fallback;
               if (
                 !bodyText.includes('Project Settings')
                 || !bodyText.includes(settingsAdminHeading)
@@ -516,9 +453,8 @@ class LiveWorkspaceManagementPage:
 
               const openLabels = ['Open', 'Open workspace'];
               const activeLabels = ['Active', 'Active workspace'];
-              const actionableRowLabels = [...openLabels, ...activeLabels];
-              const actionLabels = [...actionableRowLabels, 'Delete'];
-              const headings = visibleElements(document)
+              const actionLabels = [...openLabels, ...activeLabels, 'Delete'];
+              const headings = visibleElements(document, 'flt-semantics,[aria-label]')
                 .map((element) => ({
                   element,
                   label: normalize(element.getAttribute('aria-label') || ''),
@@ -539,11 +475,11 @@ class LiveWorkspaceManagementPage:
                 let current = heading.element;
                 while (current && current !== document.body) {
                   const text = normalize(current.innerText || '');
-                  const label = normalize(current.getAttribute('aria-label') || '');
                   const buttonLabels = actionNodeLabels(current);
                   if (
-                    (text.includes('Saved workspaces') || label.includes('Saved workspaces'))
+                    text.includes('Saved workspaces')
                     && buttonLabels.includes('Delete')
+                    && buttonLabels.some((label) => openLabels.includes(label))
                   ) {
                     section = current;
                     break;
@@ -555,40 +491,49 @@ class LiveWorkspaceManagementPage:
                 }
               }
 
-              if (!section) {
-                return null;
-              }
-
-              const rowCandidates = visibleElements(section)
-                .map((element) => {
-                  const text = normalize(element.innerText || '');
-                  const rect = element.getBoundingClientRect();
-                  const buttonLabels = actionNodeLabels(element);
-                  return {
-                    element,
-                    text,
-                    area: rect.width * rect.height,
-                    buttonLabels,
-                    selected:
-                      hasSelectedSemantics(element)
-                      || activeLabels.some((label) => text.includes(label)),
-                  };
+              const rowSearchRoot = section ?? document.body;
+              const rowCandidates = visibleElements(
+                rowSearchRoot,
+                'flt-semantics[role="button"],[role="button"],button',
+              )
+                .filter((element) => accessibleLabel(element) === 'Delete')
+                .map((deleteButton) => {
+                  let current = deleteButton;
+                  while (current && current !== document.body) {
+                    const text = normalize(current.innerText || '');
+                    const rect = current.getBoundingClientRect();
+                    const buttonLabels = actionNodeLabels(current);
+                    const selected =
+                      hasSelectedSemantics(current)
+                      || activeLabels.some((label) => text.includes(label));
+                    const hasTypeLabel = text.includes('Hosted') || text.includes('Local');
+                    if (
+                      hasTypeLabel
+                      && text.includes('Branch:')
+                      && buttonLabels.includes('Delete')
+                      && (
+                        buttonLabels.some((label) => openLabels.includes(label))
+                        || selected
+                      )
+                    ) {
+                      return {
+                        element: current,
+                        text,
+                        area: rect.width * rect.height,
+                        buttonLabels,
+                        selected,
+                      };
+                    }
+                    current = current.parentElement;
+                  }
+                  return null;
                 })
-                .filter((candidate) =>
-                  candidate.buttonLabels.includes('Delete')
-                  && (
-                    candidate.buttonLabels.some((label) => openLabels.includes(label))
-                    || candidate.selected
-                  )
-                )
+                .filter((candidate) => candidate)
                 .sort((left, right) => left.area - right.area);
 
               const rows = [];
               for (const candidate of rowCandidates) {
-                if (rows.some((accepted) =>
-                  accepted.element.contains(candidate.element)
-                  || candidate.element.contains(accepted.element)
-                )) {
+                if (rows.some((accepted) => accepted.element.contains(candidate.element))) {
                   continue;
                 }
                 rows.push(candidate);
@@ -599,38 +544,24 @@ class LiveWorkspaceManagementPage:
                 const rowRect = rowElement.getBoundingClientRect();
                 const rawLines = (rowElement.innerText || '')
                   .split(/\\n+/)
-                  .map((line) => normalize(line))
+                  .map((line) => dedupeRepeatedLine(line))
                   .filter((line) => line.length > 0 && line !== 'Saved workspaces');
                 const rowActionLabels = rawLines.filter((line) => actionLabels.includes(line));
                 const contentLines = rawLines.filter((line) => !actionLabels.includes(line));
-                const semanticsLabels = visibleElements(rowElement, 'flt-semantics[aria-label],[aria-label]')
-                  .map((element) => normalize(element.getAttribute('aria-label') || ''))
+                const typeLabel = contentLines.find((line) => line === 'Hosted' || line === 'Local') ?? null;
+                const semanticsLabels = [rowElement, ...visibleElements(rowElement, 'flt-semantics[aria-label],[aria-label]')]
+                  .map((element) => dedupeRepeatedLine(element.getAttribute('aria-label') || ''))
                   .filter((label) =>
                     label.length > 0
                     && label !== 'Saved workspaces'
+                    && label !== 'repository'
+                    && label !== 'folder'
                     && !actionLabels.includes(label)
                   );
-                const semanticLines = semanticsLabels
-                  .flatMap((label) => label.split(/\\n+/))
-                  .map((line) => normalize(line))
-                  .filter((line) =>
-                    line.length > 0
-                    && line !== 'Saved workspaces'
-                    && !actionLabels.includes(line)
-                  );
-                const contentCandidates = Array.from(
-                  new Set([
-                    ...contentLines,
-                    ...semanticLines,
-                  ]),
-                );
                 const semanticsLabel = semanticsLabels[0] ?? null;
-                const typeLabel = contentCandidates.find((line) => line === 'Hosted' || line === 'Local') ?? null;
-                const displayName = contentCandidates.find(
-                  (line) => line !== typeLabel && !activeLabels.includes(line),
-                ) ?? semanticsLabel;
-                const detailText = contentCandidates
-                  .filter((line) => line !== typeLabel && line !== displayName && !activeLabels.includes(line))
+                const displayName = contentLines.find((line) => line !== typeLabel) ?? semanticsLabel;
+                const detailText = contentLines
+                  .filter((line) => line !== typeLabel && line !== displayName)
                   .join(' | ');
                 const visibleText = normalize(rowElement.innerText || '');
                 const findTextElement = (text) => {
@@ -640,7 +571,7 @@ class LiveWorkspaceManagementPage:
                   return visibleElements(rowElement)
                     .map((element) => ({
                       element,
-                      text: normalize(element.innerText || ''),
+                      text: dedupeRepeatedLine(element.innerText || ''),
                       area: (() => {
                         const rect = element.getBoundingClientRect();
                         return rect.width * rect.height;
@@ -649,37 +580,26 @@ class LiveWorkspaceManagementPage:
                     .filter((candidate) => candidate.text === text)
                     .sort((left, right) => left.area - right.area)[0]?.element ?? null;
                 };
+                const toRect = (element) => {
+                  if (!element) {
+                    return null;
+                  }
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                  };
+                };
                 const rowStyles = findStyledElement(rowElement);
                 const titleElement = findTextElement(displayName);
                 const detailElement = findTextElement(detailText);
                 const typeElement = findTextElement(typeLabel);
-                const isSelectedRow =
-                  hasSelectedSemantics(rowElement)
-                  || rowActionLabels.some((label) => activeLabels.includes(label));
-                const titleColor = withFallback(
-                  titleElement ? toHex(window.getComputedStyle(titleElement).color) : null,
-                  null,
-                );
-                const detailColor = withFallback(
-                  detailElement ? toHex(window.getComputedStyle(detailElement).color) : null,
-                  isSelectedRow ? '#2d2a26' : LIGHT_MUTED,
-                );
-                const typeColor = withFallback(
-                  typeElement ? toHex(window.getComputedStyle(typeElement).color) : null,
-                  isSelectedRow ? '#2d2a26' : LIGHT_MUTED,
-                );
-                const backgroundColor = preferFallbackForBlack(
-                  rowStyles?.backgroundColor
-                  ?? sampleCanvasRegionColor(rowRect)
-                  ?? resolveBackgroundColor(rowElement, null),
-                  isSelectedRow ? LIGHT_PRIMARY_SOFT : LIGHT_SURFACE,
-                );
-                const resolvedBorderColor = preferFallbackForBlack(
-                  rowStyles?.borderColor
-                  ?? sampleCanvasBorderColor(rowRect)
-                  ?? null,
-                  isSelectedRow ? LIGHT_PRIMARY : LIGHT_BORDER,
-                );
+                const titleColor = titleElement ? toHex(window.getComputedStyle(titleElement).color) : null;
+                const detailColor = detailElement ? toHex(window.getComputedStyle(detailElement).color) : null;
+                const typeColor = typeElement ? toHex(window.getComputedStyle(typeElement).color) : null;
+                const backgroundColor = rowStyles?.backgroundColor ?? resolveBackgroundColor(rowElement, null);
                 const buttonElements = dedupeNestedElements(
                   visibleElements(rowElement, 'flt-semantics[role="button"],[role="button"],button')
                     .sort((left, right) => {
@@ -693,28 +613,26 @@ class LiveWorkspaceManagementPage:
                 const actionObservations = buttonElements
                   .map((element) => {
                     const label = accessibleLabel(element);
-                    const foregroundColor = withFallback(
-                      resolveForegroundColor(element),
-                      isSelectedRow ? '#2d2a26' : LIGHT_PRIMARY,
-                    );
-                    const actionBackgroundColor = preferFallbackForBlack(
-                      resolveBackgroundColor(element, backgroundColor),
-                      backgroundColor,
-                    );
+                    const actionBackgroundColor = resolveBackgroundColor(element, backgroundColor);
                     const borderColor = resolveBorderColor(element);
+                    const rect = element.getBoundingClientRect();
                     return {
                       label,
-                      foregroundColor,
+                      foregroundColor: resolveForegroundColor(element),
                       backgroundColor: actionBackgroundColor,
                       borderColor,
                       contrastRatio: contrastRatio(
-                        foregroundColor,
+                        resolveForegroundColor(element),
                         actionBackgroundColor,
                       ),
                       borderContrastRatio: contrastRatio(
                         borderColor,
                         actionBackgroundColor ?? backgroundColor,
                       ),
+                      left: rect.left,
+                      top: rect.top,
+                      width: rect.width,
+                      height: rect.height,
                     };
                   })
                   .filter((candidate) => candidate.label.length > 0);
@@ -739,45 +657,26 @@ class LiveWorkspaceManagementPage:
                   .map((element) => accessibleLabel(element))
                   .find((label) => label.length > 0) ?? null;
                 const iconClassification = classifyIcon(iconElement);
-                const inferredIconIdentity = iconClassification.identity
-                  || (() => {
-                    const normalizedLabel = normalize(iconAccessibilityLabel || '').toLowerCase();
-                    if (normalizedLabel.includes('repository')) {
-                      return 'repository';
-                    }
-                    if (normalizedLabel.includes('folder')) {
-                      return 'folder';
-                    }
-                    return null;
-                  })();
-                const iconColor = withFallback(
-                  iconElement
-                    ? (
-                      resolveForegroundColor(iconElement)
-                      ?? resolveForegroundColor(iconElement.parentElement)
-                    )
-                    : null,
-                  isSelectedRow ? LIGHT_PRIMARY : LIGHT_MUTED,
-                );
+                const iconColor = iconElement
+                  ? (
+                    resolveForegroundColor(iconElement)
+                    ?? resolveForegroundColor(iconElement.parentElement)
+                  )
+                  : null;
+                const rowRectPayload = toRect(rowElement);
+                const titleRect = toRect(titleElement);
+                const detailRect = toRect(detailElement);
+                const typeRect = toRect(typeElement);
+                const iconRect = toRect(iconElement);
                 return {
                   semanticsLabel,
                   displayName,
-                  targetTypeLabel: typeLabel
-                    || (() => {
-                      const combined = `${semanticsLabel || ''} ${visibleText}`.toLowerCase();
-                      if (combined.includes('hosted')) {
-                        return 'Hosted';
-                      }
-                      if (combined.includes('local')) {
-                        return 'Local';
-                      }
-                      return null;
-                    })(),
+                  targetTypeLabel: typeLabel,
                   detailText,
                   visibleText,
-                  selected: isSelectedRow,
+                  selected: hasSelectedSemantics(rowElement) || rowActionLabels.some((label) => activeLabels.includes(label)),
                   backgroundColor,
-                  borderColor: resolvedBorderColor,
+                  borderColor: rowStyles?.borderColor ?? null,
                   titleColor,
                   detailColor,
                   typeColor,
@@ -785,7 +684,7 @@ class LiveWorkspaceManagementPage:
                   detailContrastRatio: contrastRatio(detailColor, backgroundColor),
                   typeContrastRatio: contrastRatio(typeColor, backgroundColor),
                   imageCount: imageElements.length,
-                  iconIdentity: inferredIconIdentity,
+                  iconIdentity: iconClassification.identity,
                   iconFingerprint: iconClassification.fingerprint,
                   iconAccessibilityLabel,
                   iconColor,
@@ -793,20 +692,40 @@ class LiveWorkspaceManagementPage:
                   actionLabels: rowActionLabels,
                   buttonLabels,
                   actionObservations,
+                  left: rowRectPayload?.left ?? null,
+                  top: rowRectPayload?.top ?? null,
+                  width: rowRectPayload?.width ?? null,
+                  height: rowRectPayload?.height ?? null,
+                  titleLeft: titleRect?.left ?? null,
+                  titleTop: titleRect?.top ?? null,
+                  titleWidth: titleRect?.width ?? null,
+                  titleHeight: titleRect?.height ?? null,
+                  detailLeft: detailRect?.left ?? null,
+                  detailTop: detailRect?.top ?? null,
+                  detailWidth: detailRect?.width ?? null,
+                  detailHeight: detailRect?.height ?? null,
+                  typeLeft: typeRect?.left ?? null,
+                  typeTop: typeRect?.top ?? null,
+                  typeWidth: typeRect?.width ?? null,
+                  typeHeight: typeRect?.height ?? null,
+                  iconLeft: iconRect?.left ?? null,
+                  iconTop: iconRect?.top ?? null,
+                  iconWidth: iconRect?.width ?? null,
+                  iconHeight: iconRect?.height ?? null,
                 };
               });
 
-                return {
-                  bodyText,
-                  sectionText: normalize(
-                    section?.innerText
-                    || rows.map((candidate) => candidate.text).join('\\n')
-                    || '',
-                  ),
-                  sectionVisible: !!section,
-                  rowCount: rowPayload.length,
-                  rows: rowPayload,
-                };
+              const sectionText = section
+                ? normalize(section.innerText || '')
+                : rowPayload.map((row) => row.visibleText).join('\\n');
+
+              return {
+                bodyText,
+                sectionText,
+                sectionVisible: rowPayload.length > 0,
+                rowCount: rowPayload.length,
+                rows: rowPayload,
+              };
             }
             """,
             arg={"settingsAdminHeading": self._settings_admin_heading},
@@ -935,9 +854,129 @@ class LiveWorkspaceManagementPage:
                             if action.get("borderContrastRatio") is not None
                             else None
                         ),
+                        left=(
+                            float(action.get("left"))
+                            if action.get("left") is not None
+                            else None
+                        ),
+                        top=(
+                            float(action.get("top"))
+                            if action.get("top") is not None
+                            else None
+                        ),
+                        width=(
+                            float(action.get("width"))
+                            if action.get("width") is not None
+                            else None
+                        ),
+                        height=(
+                            float(action.get("height"))
+                            if action.get("height") is not None
+                            else None
+                        ),
                     )
                     for action in row.get("actionObservations", [])
                     if isinstance(action, dict)
+                ),
+                left=(
+                    float(row.get("left"))
+                    if row.get("left") is not None
+                    else None
+                ),
+                top=(
+                    float(row.get("top"))
+                    if row.get("top") is not None
+                    else None
+                ),
+                width=(
+                    float(row.get("width"))
+                    if row.get("width") is not None
+                    else None
+                ),
+                height=(
+                    float(row.get("height"))
+                    if row.get("height") is not None
+                    else None
+                ),
+                title_left=(
+                    float(row.get("titleLeft"))
+                    if row.get("titleLeft") is not None
+                    else None
+                ),
+                title_top=(
+                    float(row.get("titleTop"))
+                    if row.get("titleTop") is not None
+                    else None
+                ),
+                title_width=(
+                    float(row.get("titleWidth"))
+                    if row.get("titleWidth") is not None
+                    else None
+                ),
+                title_height=(
+                    float(row.get("titleHeight"))
+                    if row.get("titleHeight") is not None
+                    else None
+                ),
+                detail_left=(
+                    float(row.get("detailLeft"))
+                    if row.get("detailLeft") is not None
+                    else None
+                ),
+                detail_top=(
+                    float(row.get("detailTop"))
+                    if row.get("detailTop") is not None
+                    else None
+                ),
+                detail_width=(
+                    float(row.get("detailWidth"))
+                    if row.get("detailWidth") is not None
+                    else None
+                ),
+                detail_height=(
+                    float(row.get("detailHeight"))
+                    if row.get("detailHeight") is not None
+                    else None
+                ),
+                type_left=(
+                    float(row.get("typeLeft"))
+                    if row.get("typeLeft") is not None
+                    else None
+                ),
+                type_top=(
+                    float(row.get("typeTop"))
+                    if row.get("typeTop") is not None
+                    else None
+                ),
+                type_width=(
+                    float(row.get("typeWidth"))
+                    if row.get("typeWidth") is not None
+                    else None
+                ),
+                type_height=(
+                    float(row.get("typeHeight"))
+                    if row.get("typeHeight") is not None
+                    else None
+                ),
+                icon_left=(
+                    float(row.get("iconLeft"))
+                    if row.get("iconLeft") is not None
+                    else None
+                ),
+                icon_top=(
+                    float(row.get("iconTop"))
+                    if row.get("iconTop") is not None
+                    else None
+                ),
+                icon_width=(
+                    float(row.get("iconWidth"))
+                    if row.get("iconWidth") is not None
+                    else None
+                ),
+                icon_height=(
+                    float(row.get("iconHeight"))
+                    if row.get("iconHeight") is not None
+                    else None
                 ),
             )
             for row in rows_payload
