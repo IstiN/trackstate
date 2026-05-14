@@ -1,6 +1,7 @@
 import '../../../components/services/local_git_workspace_sync_reason_validator.dart';
 import '../../../core/interfaces/local_git_workspace_sync_reason_probe.dart';
 import '../../../core/utils/local_git_repository_fixture.dart';
+import '../../../frameworks/providers/provider_backed_local_git_workspace_sync_runtime_factory.dart';
 
 LocalGitWorkspaceSyncReasonProbe createTs713LocalGitWorkspaceSyncProbe() {
   return LocalGitWorkspaceSyncReasonValidator(
@@ -8,5 +9,7 @@ LocalGitWorkspaceSyncReasonProbe createTs713LocalGitWorkspaceSyncProbe() {
       userName: 'TS-713 Tester',
       userEmail: 'ts713@example.com',
     ),
+    syncRuntimeFactory:
+        const ProviderBackedLocalGitWorkspaceSyncRuntimeFactory(),
   );
 }

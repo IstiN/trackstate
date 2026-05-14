@@ -1,10 +1,9 @@
 import 'dart:io';
 
-import 'package:trackstate/data/repositories/local_trackstate_repository.dart';
-import 'package:trackstate/data/services/workspace_sync_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
 import '../../core/interfaces/local_git_workspace_sync_reason_probe.dart';
+import '../../core/interfaces/local_git_workspace_sync_runtime_factory.dart';
 import '../../core/models/local_git_workspace_sync_reason_observation.dart';
 import '../../core/utils/local_git_repository_fixture.dart';
 
@@ -12,43 +11,38 @@ class LocalGitWorkspaceSyncReasonValidator
     implements LocalGitWorkspaceSyncReasonProbe {
   LocalGitWorkspaceSyncReasonValidator({
     required Future<LocalGitRepositoryFixture> Function() createFixture,
-  }) : _createFixture = createFixture;
+    required LocalGitWorkspaceSyncRuntimeFactory syncRuntimeFactory,
+  }) : _createFixture = createFixture,
+       _syncRuntimeFactory = syncRuntimeFactory;
 
   static const String issuePath = 'DEMO/DEMO-1/main.md';
   static const String headChangeCommitSubject = 'TS-713 local head change';
 
   final Future<LocalGitRepositoryFixture> Function() _createFixture;
+  final LocalGitWorkspaceSyncRuntimeFactory _syncRuntimeFactory;
 
   @override
   Future<LocalGitWorkspaceSyncReasonObservation> runScenario() async {
     final fixture = await _createFixture();
     final issueFile = File('${fixture.directory.path}/$issuePath');
-    final repository = LocalTrackStateRepository(
+    final syncRuntime = await _syncRuntimeFactory.create(
       repositoryPath: fixture.directory.path,
-    );
-    final refreshes = <WorkspaceSyncRefresh>[];
-    final statuses = <WorkspaceSyncStatus>[];
-    final service = WorkspaceSyncService(
-      repository: repository,
-      loadSnapshot: repository.loadSnapshot,
-      onRefresh: refreshes.add,
-      onStatusChanged: statuses.add,
     );
 
     try {
-      final baselineSnapshot = await repository.loadSnapshot();
-      service.updateBaselineSnapshot(baselineSnapshot);
-      await service.checkNow(force: true);
+      final baselineSnapshot = await syncRuntime.loadSnapshot();
+      syncRuntime.updateBaselineSnapshot(baselineSnapshot);
+      await syncRuntime.checkNow(force: true);
 
-      final initialResult = service.status.lastResult;
+      final initialResult = syncRuntime.status.lastResult;
       if (initialResult == null ||
           initialResult.hasChanges ||
-          refreshes.isNotEmpty) {
+          syncRuntime.refreshCount != 0) {
         throw StateError(
           'Precondition failed: the initial background sync check should establish a clean baseline without reporting any domains.\n'
           'Observed signals: ${_signalNames(initialResult?.signals ?? const <WorkspaceSyncSignal>{})}\n'
           'Observed domains: ${_domainNames(initialResult?.changedDomains ?? const <WorkspaceSyncDomain>{})}\n'
-          'Observed refresh count: ${refreshes.length}',
+          'Observed refresh count: ${syncRuntime.refreshCount}',
         );
       }
 
@@ -67,12 +61,12 @@ class LocalGitWorkspaceSyncReasonValidator
         'rev-parse',
         'HEAD',
       ]);
-      final headRefreshCount = refreshes.length;
-      await service.checkNow(force: true);
+      final headRefreshCount = syncRuntime.refreshCount;
+      await syncRuntime.checkNow(force: true);
       final headCheck = _captureCheckObservation(
-        service.status,
+        syncRuntime.status,
         refreshesBefore: headRefreshCount,
-        refreshesAfter: refreshes.length,
+        refreshesAfter: syncRuntime.refreshCount,
       );
 
       final committedIssueContent = await issueFile.readAsString();
@@ -84,12 +78,12 @@ class LocalGitWorkspaceSyncReasonValidator
         '--short',
         '--untracked-files=all',
       ]);
-      final worktreeRefreshCount = refreshes.length;
-      await service.checkNow(force: true);
+      final worktreeRefreshCount = syncRuntime.refreshCount;
+      await syncRuntime.checkNow(force: true);
       final worktreeCheck = _captureCheckObservation(
-        service.status,
+        syncRuntime.status,
         refreshesBefore: worktreeRefreshCount,
-        refreshesAfter: refreshes.length,
+        refreshesAfter: syncRuntime.refreshCount,
       );
 
       return LocalGitWorkspaceSyncReasonObservation(
@@ -103,7 +97,7 @@ class LocalGitWorkspaceSyncReasonValidator
         worktreeCheck: worktreeCheck,
       );
     } finally {
-      service.dispose();
+      syncRuntime.dispose();
       await fixture.dispose();
     }
   }
