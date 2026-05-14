@@ -1,0 +1,18 @@
+test_id: TS-715
+type: web
+framework: python
+platform: playwright
+dependencies:
+  - GH_TOKEN or GITHUB_TOKEN with hosted TrackState access
+  - TRACKSTATE_LIVE_APP_URL (optional override)
+notes:
+  - Opens the deployed hosted TrackState app and reuses the real live hosted workspace.
+  - Simulates a revoked GitHub PAT by forcing workspace-sync GitHub API checks to return HTTP 401 after the session is connected.
+  - Verifies the top-bar sync pill, the visible Workspace sync Settings card, the surfaced authentication error, and the logged retry cadence.
+runtime_inputs:
+  expected_sync_label: Sync unavailable
+  expected_settings_section: Workspace sync
+  expected_retry_interval_seconds: 60
+  intercepted_sync_endpoints:
+    - /repos/{repository}
+    - /repos/{repository}/branches/{branch}
