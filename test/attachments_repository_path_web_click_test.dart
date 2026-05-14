@@ -213,6 +213,19 @@ class _RepositoryPathWebTestProvider implements TrackStateProviderAdapter {
     canCheckCollaborators: false,
   );
 
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => const RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: _revision,
+      sessionRevision: 'web-test',
+      connectionState: ProviderConnectionState.connected,
+      permission: _permission,
+    ),
+  );
+
   static const Map<String, String> _files = {
     'project.json': '''
 {
