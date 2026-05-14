@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/local_workspace_onboarding_service.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
+import 'package:trackstate/ui/features/tracker/services/workspace_directory_picker.dart';
 
 import '../../core/interfaces/workspace_onboarding_driver.dart';
 import '../../core/models/workspace_onboarding_state.dart';
@@ -20,6 +22,8 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
     required WorkspaceProfileService workspaceProfileService,
     HostedRepositoryLoader? openHostedRepository,
     LocalRepositoryLoader? openLocalRepository,
+    LocalWorkspaceOnboardingService? localWorkspaceOnboardingService,
+    WorkspaceDirectoryPicker? workspaceDirectoryPicker,
     Map<String, Object>? sharedPreferences,
   }) async {
     if (sharedPreferences != null) {
@@ -35,9 +39,18 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
         workspaceProfileService: workspaceProfileService,
         openHostedRepository: openHostedRepository,
         openLocalRepository: openLocalRepository,
+        localWorkspaceOnboardingService: localWorkspaceOnboardingService,
+        workspaceDirectoryPicker:
+            workspaceDirectoryPicker ?? pickWorkspaceDirectory,
       ),
     );
-    await _tester.pumpAndSettle();
+    await _tester.pump();
+    await _waitForAnyVisible(<Finder>[
+      find.byKey(const ValueKey('local-workspace-onboarding-open-existing')),
+      find.byKey(const ValueKey('workspace-onboarding-open')),
+      find.text('Dashboard'),
+      find.bySemanticsLabel(RegExp('^Add workspace\$')),
+    ]);
   }
 
   @override
@@ -45,6 +58,20 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
     await _tapAndSettle(
       find.bySemanticsLabel(RegExp('^Add workspace\$')).first,
     );
+  }
+
+  @override
+  Future<void> chooseOpenExistingFolder() async {
+    await _tap(
+      find.byKey(const ValueKey('local-workspace-onboarding-open-existing')),
+    );
+    await _waitForAnyVisible(<Finder>[
+      find.byKey(const ValueKey('local-workspace-onboarding-submit')),
+      find.byKey(const ValueKey('local-workspace-onboarding-name')),
+      find.byKey(const ValueKey('local-workspace-onboarding-change-folder')),
+      find.text('Ready to open'),
+      find.text('Workspace details'),
+    ]);
   }
 
   @override
@@ -68,7 +95,32 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
   }
 
   @override
+  Future<void> enterLocalWorkspaceName(String value) async {
+    await _enterText(const ValueKey('local-workspace-onboarding-name'), value);
+  }
+
+  @override
+  Future<void> enterLocalWriteBranch(String value) async {
+    await _enterText(
+      const ValueKey('local-workspace-onboarding-write-branch'),
+      value,
+    );
+  }
+
+  @override
   Future<void> submit() async {
+    final localSubmit = find.byKey(
+      const ValueKey('local-workspace-onboarding-submit'),
+    );
+    if (localSubmit.evaluate().isNotEmpty) {
+      await _tap(localSubmit.first);
+      await _waitForAnyVisible(<Finder>[
+        find.text('Dashboard'),
+        find.text('Local Git'),
+        find.bySemanticsLabel(RegExp('^Add workspace\$')),
+      ]);
+      return;
+    }
     await _tapAndSettle(
       find.byKey(const ValueKey('workspace-onboarding-open')),
     );
@@ -76,11 +128,22 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
 
   @override
   WorkspaceOnboardingState captureState() {
+    final localOnboardingVisible =
+        find
+            .byKey(const ValueKey('local-workspace-onboarding-open-existing'))
+            .evaluate()
+            .isNotEmpty ||
+        find
+            .byKey(const ValueKey('local-workspace-onboarding-submit'))
+            .evaluate()
+            .isNotEmpty;
     return WorkspaceOnboardingState(
-      isOnboardingVisible: find
-          .byKey(const ValueKey('workspace-onboarding-open'))
-          .evaluate()
-          .isNotEmpty,
+      isOnboardingVisible:
+          localOnboardingVisible ||
+          find
+              .byKey(const ValueKey('workspace-onboarding-open'))
+              .evaluate()
+              .isNotEmpty,
       isDashboardVisible: find.text('Dashboard').evaluate().isNotEmpty,
       hostedRepositoryValue: _editableTextValue(
         const ValueKey('workspace-onboarding-hosted-repository'),
@@ -88,8 +151,16 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       hostedBranchValue: _editableTextValue(
         const ValueKey('workspace-onboarding-hosted-branch'),
       ),
+      localWorkspaceNameValue: _editableTextValue(
+        const ValueKey('local-workspace-onboarding-name'),
+      ),
+      localWriteBranchValue: _editableTextValue(
+        const ValueKey('local-workspace-onboarding-write-branch'),
+      ),
+      localFolderPath: _selectedFolderPath(),
+      primaryActionLabel: _primaryActionLabel(),
       repositoryAccessTopBarLabel: _visibleAccessLabel(),
-      visibleTexts: _uniqueVisibleTexts(find.byType(Text)),
+      visibleTexts: _uniqueVisibleTexts(),
     );
   }
 
@@ -167,16 +238,101 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
     return null;
   }
 
+  String? _selectedFolderPath() {
+    for (final widget in _tester.widgetList<SelectableText>(
+      find.byType(SelectableText),
+    )) {
+      final value =
+          widget.data?.trim() ?? widget.textSpan?.toPlainText().trim();
+      if (value != null && value.isNotEmpty) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  String? _primaryActionLabel() {
+    for (final key in const <ValueKey<String>>[
+      ValueKey<String>('local-workspace-onboarding-submit'),
+      ValueKey<String>('workspace-onboarding-open'),
+    ]) {
+      final label = _buttonLabel(key);
+      if (label != null) {
+        return label;
+      }
+    }
+    return null;
+  }
+
+  String? _buttonLabel(Key key) {
+    final finder = find.byKey(key);
+    if (finder.evaluate().isEmpty) {
+      return null;
+    }
+    final labelFinder = find.descendant(
+      of: finder.first,
+      matching: find.textContaining(''),
+    );
+    for (final widget in _tester.widgetList<Text>(labelFinder)) {
+      final value = widget.data?.trim();
+      if (value != null && value.isNotEmpty) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _enterText(Key key, String value) async {
+    final finder = find.descendant(
+      of: find.byKey(key),
+      matching: find.byType(EditableText),
+    );
+    if (finder.evaluate().isEmpty) {
+      throw StateError('Editable text field "$key" was not visible.');
+    }
+    await _tester.enterText(finder.first, value);
+    await _tester.pumpAndSettle();
+  }
+
+  Future<void> _tap(Finder finder) async {
+    await _tester.ensureVisible(finder);
+    await _tester.tap(finder, warnIfMissed: false);
+    await _tester.pump();
+  }
+
   Future<void> _tapAndSettle(Finder finder) async {
     await _tester.ensureVisible(finder);
     await _tester.tap(finder, warnIfMissed: false);
     await _tester.pumpAndSettle();
   }
 
-  List<String> _uniqueVisibleTexts(Finder finder) {
+  Future<void> _waitForAnyVisible(List<Finder> finders) async {
+    const step = Duration(milliseconds: 100);
+    const timeout = Duration(seconds: 5);
+    var elapsed = Duration.zero;
+    while (elapsed < timeout) {
+      if (finders.any((finder) => finder.evaluate().isNotEmpty)) {
+        return;
+      }
+      await _tester.pump(step);
+      elapsed += step;
+    }
+  }
+
+  List<String> _uniqueVisibleTexts() {
     final texts = <String>[];
-    for (final widget in _tester.widgetList<Text>(finder)) {
+    for (final widget in _tester.widgetList<Text>(find.byType(Text))) {
       final label = widget.data?.trim();
+      if (label == null || label.isEmpty || texts.contains(label)) {
+        continue;
+      }
+      texts.add(label);
+    }
+    for (final widget in _tester.widgetList<SelectableText>(
+      find.byType(SelectableText),
+    )) {
+      final label =
+          widget.data?.trim() ?? widget.textSpan?.toPlainText().trim();
       if (label == null || label.isEmpty || texts.contains(label)) {
         continue;
       }

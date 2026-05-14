@@ -16,11 +16,22 @@ class WorkspaceOnboardingScreen implements WorkspaceOnboardingScreenHandle {
   Future<void> openAddWorkspace() => _driver.openAddWorkspace();
 
   @override
+  Future<void> chooseOpenExistingFolder() => _driver.chooseOpenExistingFolder();
+
+  @override
   Future<void> chooseHostedRepository() => _driver.selectHostedRepository();
 
   @override
   Future<void> chooseHostedRepositorySuggestion(String fullName) =>
       _driver.selectHostedRepositorySuggestion(fullName);
+
+  @override
+  Future<void> enterLocalWorkspaceName(String value) =>
+      _driver.enterLocalWorkspaceName(value);
+
+  @override
+  Future<void> enterLocalWriteBranch(String value) =>
+      _driver.enterLocalWriteBranch(value);
 
   @override
   Future<void> submit() => _driver.submit();
