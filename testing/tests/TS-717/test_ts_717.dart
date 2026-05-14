@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -103,6 +101,9 @@ void main() {
 
         final pickerInvocations = <Map<String, String?>>[];
         final openedRepositories = <String>[];
+        final onboardingService = _RecordingLocalWorkspaceOnboardingService(
+          inspection,
+        );
         final workspaceProfileService =
             SharedPreferencesWorkspaceProfileService(
               now: () => DateTime.utc(2026, 5, 14, 16, 30),
@@ -111,8 +112,7 @@ void main() {
         final screen = await launchWorkspaceOnboardingFixture(
           tester,
           workspaceProfileService: workspaceProfileService,
-          localWorkspaceOnboardingService:
-              _StaticLocalWorkspaceOnboardingService(inspection),
+          localWorkspaceOnboardingService: onboardingService,
           workspaceDirectoryPicker:
               ({String? confirmButtonText, String? initialDirectory}) async {
                 pickerInvocations.add(<String, String?>{
@@ -135,7 +135,8 @@ void main() {
         );
 
         try {
-          final initialVisibleTexts = _normalizedVisibleTexts(tester);
+          final initialState = screen.captureState();
+          final initialVisibleTexts = initialState.visibleTexts;
           result['initial_visible_texts'] = initialVisibleTexts;
           if (!initialVisibleTexts.contains('Add workspace') ||
               !initialVisibleTexts.contains('Open existing folder')) {
@@ -145,24 +146,7 @@ void main() {
             );
           }
 
-          await tester.tap(
-            find.byKey(
-              const ValueKey('local-workspace-onboarding-open-existing'),
-            ),
-            warnIfMissed: false,
-          );
-          await _pumpUntil(
-            tester,
-            condition: () =>
-                pickerInvocations.isNotEmpty &&
-                find
-                    .byKey(const ValueKey('local-workspace-onboarding-submit'))
-                    .evaluate()
-                    .isNotEmpty,
-            timeout: const Duration(seconds: 10),
-            failureMessage:
-                'Step 2 failed: the onboarding flow did not finish inspecting the selected folder after invoking the DirectoryPickerAdapter.',
-          );
+          await screen.chooseExistingFolder();
 
           if (pickerInvocations.length != 1) {
             throw AssertionError(
@@ -180,6 +164,18 @@ void main() {
               'Step 2 failed: the DirectoryPickerAdapter was not called with the expected open-existing confirmation label.\n'
               'Observed confirmButtonText: ${pickerInvocation['confirmButtonText'] ?? '<null>'}\n'
               'Observed initialDirectory: ${pickerInvocation['initialDirectory'] ?? '<null>'}',
+            );
+          }
+          result['inspected_folder_paths'] =
+              onboardingService.inspectedFolderPaths;
+          if (onboardingService.inspectedFolderPaths.isEmpty ||
+              onboardingService.inspectedFolderPaths.any(
+                (path) => path != fixture.repositoryPath,
+              )) {
+            throw AssertionError(
+              'Step 3 failed: the onboarding UI did not inspect the selected local folder path.\n'
+              'Observed inspected folder paths: ${_formatList(onboardingService.inspectedFolderPaths)}\n'
+              'Expected selected folder path: ${fixture.repositoryPath}',
             );
           }
           _recordStep(
@@ -201,27 +197,19 @@ void main() {
                 'confirmButtonText=${pickerInvocation['confirmButtonText']}; selectedFolder=${fixture.repositoryPath}',
           );
 
-          final visibleTexts = _normalizedVisibleTexts(tester);
-          final interactiveLabels = _interactiveSemanticsLabels(tester);
-          final nameValue = _editableTextValue(
-            tester,
-            const ValueKey('local-workspace-onboarding-name'),
-          );
-          final writeBranchValue = _editableTextValue(
-            tester,
-            const ValueKey('local-workspace-onboarding-write-branch'),
-          );
-          final submitFinder = find.byKey(
-            const ValueKey('local-workspace-onboarding-submit'),
-          );
-          final submitButton = tester.widget<FilledButton>(submitFinder);
-          final submitLabel = _filledButtonLabel(tester, submitFinder);
+          final localSelectionState = screen.captureState();
+          final visibleTexts = localSelectionState.visibleTexts;
+          final interactiveLabels =
+              localSelectionState.interactiveSemanticsLabels;
+          final nameValue = localSelectionState.localWorkspaceNameValue;
+          final writeBranchValue = localSelectionState.localWriteBranchValue;
+          final submitLabel = localSelectionState.primaryActionLabel;
           result['visible_texts'] = visibleTexts;
           result['interactive_semantics_labels'] = interactiveLabels;
           result['workspace_name_value'] = nameValue;
           result['write_branch_value'] = writeBranchValue;
           result['submit_label'] = submitLabel;
-          result['submit_enabled'] = submitButton.onPressed != null;
+          result['submit_enabled'] = localSelectionState.isPrimaryActionEnabled;
 
           final requiredTexts = <String>[
             'Ready to open',
@@ -240,7 +228,7 @@ void main() {
               nameValue != fixture.workspaceFolderName ||
               writeBranchValue != Ts717ReadyWorkspaceFixture.defaultBranch ||
               submitLabel != 'Open workspace' ||
-              submitButton.onPressed == null) {
+              !localSelectionState.isPrimaryActionEnabled) {
             throw AssertionError(
               'Step 3 failed: the ready repository selection did not advance to the expected Workspace details state with an enabled Open action.\n'
               'Missing visible texts: ${_formatList(missingTexts)}\n'
@@ -248,7 +236,7 @@ void main() {
               'Observed workspace name: $nameValue\n'
               'Observed write branch: $writeBranchValue\n'
               'Observed submit label: $submitLabel\n'
-              'Observed submit enabled: ${submitButton.onPressed != null}',
+              'Observed submit enabled: ${localSelectionState.isPrimaryActionEnabled}',
             );
           }
           _recordStep(
@@ -258,7 +246,7 @@ void main() {
             action:
                 'Observe the LocalWorkspaceInspectionService output and the visible UI state.',
             observed:
-                'inspection_state=${inspection.state.name}; status=Ready to open; selected_folder=${fixture.repositoryPath}; workspace_name=$nameValue; write_branch=$writeBranchValue; submit_label=$submitLabel; submit_enabled=${submitButton.onPressed != null}',
+                'inspection_state=${inspection.state.name}; inspected_folder=${_formatList(onboardingService.inspectedFolderPaths)}; status=Ready to open; selected_folder=${fixture.repositoryPath}; workspace_name=$nameValue; write_branch=$writeBranchValue; submit_label=$submitLabel; submit_enabled=${localSelectionState.isPrimaryActionEnabled}',
           );
 
           final requiredSemanticFragments = <String>[
@@ -293,16 +281,7 @@ void main() {
                 'interactive_semantics_labels=${_formatList(interactiveLabels)}',
           );
 
-          await tester.tap(submitFinder, warnIfMissed: false);
-          await _pumpUntil(
-            tester,
-            condition: () =>
-                openedRepositories.isNotEmpty ||
-                find.text('Dashboard').evaluate().isNotEmpty,
-            timeout: const Duration(seconds: 10),
-            failureMessage:
-                'Step 3 failed: submitting the ready local workspace did not continue into the workspace shell.',
-          );
+          await screen.submit();
 
           final afterSnapshot = await tester.runAsync(fixture.captureSnapshot);
           if (afterSnapshot == null) {
@@ -314,10 +293,8 @@ void main() {
           result['after_worktree_status'] = afterSnapshot.worktreeStatusLines;
           result['after_files'] = afterSnapshot.files;
           result['opened_repositories'] = openedRepositories;
-          result['dashboard_visible'] = find
-              .text('Dashboard')
-              .evaluate()
-              .isNotEmpty;
+          final postOpenState = screen.captureState();
+          result['dashboard_visible'] = postOpenState.isDashboardVisible;
 
           if (_singleOrNull(openedRepositories) !=
                   '${fixture.repositoryPath}@main@main' ||
@@ -326,21 +303,16 @@ void main() {
                 afterSnapshot.worktreeStatusLines,
                 beforeSnapshot.worktreeStatusLines,
               ) ||
-              !_mapEquals(afterSnapshot.files, beforeSnapshot.files)) {
+              !_mapEquals(afterSnapshot.files, beforeSnapshot.files) ||
+              !postOpenState.isDashboardVisible) {
             throw AssertionError(
               'Step 3 failed: opening the ready repository changed files on disk or called the local repository loader with unexpected arguments.\n'
               'Observed opened repositories: ${_formatList(openedRepositories)}\n'
               'Observed head revision before/after: ${beforeSnapshot.headRevision} -> ${afterSnapshot.headRevision}\n'
               'Observed worktree status before: ${_formatList(beforeSnapshot.worktreeStatusLines)}\n'
               'Observed worktree status after: ${_formatList(afterSnapshot.worktreeStatusLines)}\n'
-              'Observed files changed: ${!_mapEquals(afterSnapshot.files, beforeSnapshot.files)}',
-            );
-          }
-
-          if (find.text('Dashboard').evaluate().isEmpty) {
-            throw AssertionError(
-              'Human-style verification failed: after pressing "Open workspace", the visible app did not continue into the workspace shell.\n'
-              'Observed visible texts: ${_formatList(_normalizedVisibleTexts(tester))}',
+              'Observed files changed: ${!_mapEquals(afterSnapshot.files, beforeSnapshot.files)}\n'
+              'Observed dashboard visible: ${postOpenState.isDashboardVisible}',
             );
           }
 
@@ -407,94 +379,6 @@ void _recordHumanVerification(
   checks.add(<String, Object?>{'check': check, 'observed': observed});
 }
 
-List<String> _normalizedVisibleTexts(WidgetTester tester) {
-  final texts = <String>[];
-  for (final widget in tester.widgetList(find.byType(Text))) {
-    if (widget is! Text) {
-      continue;
-    }
-    final data = widget.data?.trim();
-    if (data == null || data.isEmpty || texts.contains(data)) {
-      continue;
-    }
-    texts.add(data);
-  }
-  for (final widget in tester.widgetList<SelectableText>(
-    find.byType(SelectableText),
-  )) {
-    final data = widget.data?.trim();
-    if (data == null || data.isEmpty || texts.contains(data)) {
-      continue;
-    }
-    texts.add(data);
-  }
-  return texts;
-}
-
-List<String> _interactiveSemanticsLabels(WidgetTester tester) {
-  final scaffoldFinder = find.byType(Scaffold);
-  if (scaffoldFinder.evaluate().isEmpty) {
-    return const <String>[];
-  }
-  final rootNode = tester.getSemantics(scaffoldFinder.first);
-  final labels = <String>[];
-
-  void visit(SemanticsNode node) {
-    final children = node.debugListChildrenInOrder(
-      DebugSemanticsDumpOrder.traversalOrder,
-    );
-    final label = node.label.replaceAll('\n', ' ').trim();
-    final flags = node.getSemanticsData().flagsCollection;
-    if (label.isNotEmpty &&
-        !node.isInvisible &&
-        !node.isMergedIntoParent &&
-        (flags.isButton || flags.isTextField)) {
-      labels.add(label);
-    }
-    for (final child in children) {
-      visit(child);
-    }
-  }
-
-  visit(rootNode);
-  return _dedupeConsecutive(labels);
-}
-
-List<String> _dedupeConsecutive(List<String> labels) {
-  final deduped = <String>[];
-  for (final label in labels) {
-    if (deduped.isEmpty || deduped.last != label) {
-      deduped.add(label);
-    }
-  }
-  return deduped;
-}
-
-String _editableTextValue(WidgetTester tester, Key key) {
-  final field = find.descendant(
-    of: find.byKey(key),
-    matching: find.byType(EditableText),
-  );
-  return tester.widget<EditableText>(field.first).controller.text;
-}
-
-String _filledButtonLabel(WidgetTester tester, Finder finder) {
-  final richTexts = find.descendant(
-    of: finder,
-    matching: find.byType(RichText),
-  );
-  for (final element in richTexts.evaluate()) {
-    final widget = element.widget;
-    if (widget is RichText) {
-      final text = widget.text.toPlainText().trim();
-      if (text.isNotEmpty) {
-        return text;
-      }
-    }
-  }
-  return '';
-}
-
 String _formatList(List<Object?> values) {
   if (values.isEmpty) {
     return '<empty>';
@@ -526,14 +410,16 @@ bool _mapEquals(Map<String, String> left, Map<String, String> right) {
   return true;
 }
 
-class _StaticLocalWorkspaceOnboardingService
+class _RecordingLocalWorkspaceOnboardingService
     implements LocalWorkspaceOnboardingService {
-  const _StaticLocalWorkspaceOnboardingService(this.inspection);
+  _RecordingLocalWorkspaceOnboardingService(this.inspection);
 
   final LocalWorkspaceInspection inspection;
+  final List<String> inspectedFolderPaths = <String>[];
 
   @override
   Future<LocalWorkspaceInspection> inspectFolder(String folderPath) async {
+    inspectedFolderPaths.add(folderPath);
     return inspection;
   }
 
@@ -546,25 +432,5 @@ class _StaticLocalWorkspaceOnboardingService
     throw UnimplementedError(
       'TS-717 only exercises the ready-to-open onboarding path.',
     );
-  }
-}
-
-Future<void> _pumpUntil(
-  WidgetTester tester, {
-  required bool Function() condition,
-  required Duration timeout,
-  required String failureMessage,
-  Duration step = const Duration(milliseconds: 100),
-}) async {
-  final end = DateTime.now().add(timeout);
-  while (DateTime.now().isBefore(end)) {
-    if (condition()) {
-      await tester.pump();
-      return;
-    }
-    await tester.pump(step);
-  }
-  if (!condition()) {
-    fail(failureMessage);
   }
 }

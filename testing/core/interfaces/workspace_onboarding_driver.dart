@@ -20,6 +20,8 @@ abstract interface class WorkspaceOnboardingDriver {
 
   Future<void> openAddWorkspace();
 
+  Future<void> selectExistingFolder();
+
   Future<void> selectHostedRepository();
 
   Future<void> selectHostedRepositorySuggestion(String fullName);
