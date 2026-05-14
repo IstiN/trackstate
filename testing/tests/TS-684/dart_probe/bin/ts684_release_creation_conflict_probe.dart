@@ -1,10 +1,13 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:http/http.dart';
 import 'package:http/testing.dart';
 
+import '../../../../../lib/cli/trackstate_cli.dart';
 import '../../../../../lib/data/providers/github/github_trackstate_provider.dart';
+import '../../../../../lib/data/providers/local/local_git_trackstate_provider.dart';
 import '../../../../../lib/data/providers/trackstate_provider.dart';
 import '../../../../../lib/data/repositories/trackstate_repository.dart';
 import '../../../../../lib/domain/models/trackstate_models.dart';
@@ -22,51 +25,59 @@ const String _releaseTitle = 'Attachments for TS-101';
 
 Future<void> main() async {
   final result = <String, Object?>{'status': 'failed'};
+  Directory? repositoryDirectory;
+  File? attachmentFile;
 
   try {
     final exchanges = <RecordedGitHubExchange>[];
-    final repository = ProviderBackedTrackStateRepository(
-      provider: GitHubTrackStateProvider(
-        repositoryName: _repositoryName,
-        dataRef: _branch,
-        client: MockClient((request) async {
-          final recorded = await RecordedGitHubExchange.fromRequest(request);
-          final response = _responseFor(recorded);
-          exchanges.add(recorded.withResponseStatusCode(response.statusCode));
-          return response;
-        }),
+    repositoryDirectory = await Directory.systemTemp.createTemp(
+      'ts684-cli-repository-',
+    );
+    attachmentFile = File('${repositoryDirectory.path}/$_attachmentName');
+    await attachmentFile.writeAsBytes(
+      Uint8List.fromList(
+        utf8.encode('%PDF-1.4\nTS-684 CLI release creation conflict payload\n'),
       ),
     );
-    await repository.connect(
-      const RepositoryConnection(
-        repository: _repositoryName,
+
+    final repository = _CliProbeRepository(
+      seededSnapshot: TrackerSnapshot(project: _projectConfig, issues: [_seedIssue]),
+      githubRepositoryName: _repositoryName,
+      githubBranch: _branch,
+      githubClient: MockClient((request) async {
+        final recorded = await RecordedGitHubExchange.fromRequest(request);
+        final response = _responseFor(recorded);
+        exchanges.add(recorded.withResponseStatusCode(response.statusCode));
+        return response;
+      }),
+    );
+    final cli = TrackStateCli(
+      environment: TrackStateCliEnvironment(
+        workingDirectory: repositoryDirectory.path,
+        resolvePath: (path) => path,
+        environment: const <String, String>{
+          trackStateCliTokenEnvironmentVariable: 'mock-token',
+        },
+      ),
+      providerFactory: _CliProbeProviderFactory(
         branch: _branch,
-        token: 'mock-token',
+        repositoryName: _repositoryName,
       ),
+      repositoryFactory: _CliProbeRepositoryFactory(repository),
     );
 
-    repository.replaceCachedState(
-      snapshot: TrackerSnapshot(project: _projectConfig, issues: [_seedIssue]),
-      tree: const <RepositoryTreeEntry>[],
-    );
-
-    final uploadBytes = Uint8List.fromList(
-      utf8.encode('%PDF-1.4\nTS-684 synthetic release creation conflict payload\n'),
-    );
-    final uploadOutcome = <String, Object?>{'status': 'unknown'};
-
-    try {
-      await repository.uploadIssueAttachment(
-        issue: _seedIssue,
-        name: _attachmentName,
-        bytes: uploadBytes,
-      );
-      uploadOutcome['status'] = 'success';
-    } catch (error, stackTrace) {
-      uploadOutcome['status'] = 'error';
-      uploadOutcome['message'] = error.toString();
-      uploadOutcome['stackTrace'] = stackTrace.toString();
-    }
+    final requestedCommand = <String>[
+      'attachment',
+      'upload',
+      '--target',
+      'local',
+      '--issue',
+      _issueKey,
+      '--file',
+      attachmentFile.path,
+    ];
+    final cliResult = await cli.run(requestedCommand);
+    final cliPayload = _tryJson(cliResult.stdout);
 
     result.addAll(<String, Object?>{
       'status': 'passed',
@@ -79,7 +90,15 @@ Future<void> main() async {
       'attachmentName': _attachmentName,
       'releaseTag': _releaseTag,
       'releaseTitle': _releaseTitle,
-      'uploadOutcome': uploadOutcome,
+      'requestedCommand': requestedCommand,
+      'requestedCommandText':
+          'trackstate attachment upload --target local --issue $_issueKey --file $_attachmentName',
+      'repositoryPath': repositoryDirectory.path,
+      'attachmentPath': attachmentFile.path,
+      'cliExitCode': cliResult.exitCode,
+      'cliStdout': cliResult.stdout,
+      'cliStderr': '',
+      'cliPayload': cliPayload,
       'requestSequence': exchanges
           .map((exchange) => exchange.describe())
           .toList(growable: false),
@@ -124,14 +143,33 @@ Future<void> main() async {
               .map((attachment) => attachment.name)
               .toList(growable: false) ??
           const <String>[],
-      'uploadBytesLength': uploadBytes.length,
+      'uploadBytesLength': await attachmentFile.length(),
     });
   } catch (error, stackTrace) {
     result['error'] = error.toString();
     result['stackTrace'] = stackTrace.toString();
+  } finally {
+    if (attachmentFile != null && await attachmentFile.exists()) {
+      await attachmentFile.delete();
+    }
+    if (repositoryDirectory != null && await repositoryDirectory.exists()) {
+      await repositoryDirectory.delete(recursive: true);
+    }
   }
 
   print(jsonEncode(result));
+}
+
+Object? _tryJson(String text) {
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) {
+    return null;
+  }
+  try {
+    return jsonDecode(trimmed);
+  } on FormatException {
+    return null;
+  }
 }
 
 String httpResponseForReleaseConflict() => jsonEncode(<String, Object?>{
@@ -281,6 +319,192 @@ class RecordedGitHubExchange {
     'jsonBody': jsonBody,
     'responseStatusCode': responseStatusCode,
   };
+}
+
+class _CliProbeProviderFactory implements TrackStateCliProviderFactory {
+  const _CliProbeProviderFactory({
+    required this.branch,
+    required this.repositoryName,
+  });
+
+  final String branch;
+  final String repositoryName;
+
+  @override
+  LocalGitTrackStateProvider createLocal({
+    required String repositoryPath,
+    required String dataRef,
+  }) => _CliProbeLocalGitProvider(
+    repositoryPath: repositoryPath,
+    branch: branch,
+    repositoryName: repositoryName,
+  );
+
+  @override
+  TrackStateProviderAdapter createHosted({
+    required String provider,
+    required String repository,
+    required String branch,
+    Client? client,
+  }) {
+    throw UnsupportedError('TS-684 does not create hosted providers.');
+  }
+}
+
+class _CliProbeRepositoryFactory implements TrackStateCliRepositoryFactory {
+  const _CliProbeRepositoryFactory(this.repository);
+
+  final _CliProbeRepository repository;
+
+  @override
+  TrackStateRepository createLocal({
+    required String repositoryPath,
+    required String dataRef,
+    Client? client,
+  }) => repository;
+
+  @override
+  TrackStateRepository createHosted({
+    required String provider,
+    required String repository,
+    required String branch,
+    Client? client,
+  }) {
+    throw UnsupportedError('TS-684 does not create hosted repositories.');
+  }
+}
+
+class _CliProbeRepository extends ProviderBackedTrackStateRepository {
+  _CliProbeRepository({
+    required TrackerSnapshot seededSnapshot,
+    required String githubRepositoryName,
+    required String githubBranch,
+    required Client githubClient,
+  }) : _seededSnapshot = seededSnapshot,
+       _githubRepositoryName = githubRepositoryName,
+       _githubBranch = githubBranch,
+       _delegate = ProviderBackedTrackStateRepository(
+         provider: GitHubTrackStateProvider(
+           repositoryName: githubRepositoryName,
+           dataRef: githubBranch,
+           client: githubClient,
+         ),
+       ),
+       super(
+         provider: _CliProbeLocalGitProvider(
+           repositoryPath: '/tmp/ts684-cli-probe',
+           branch: githubBranch,
+           repositoryName: githubRepositoryName,
+         ),
+         usesLocalPersistence: true,
+         supportsGitHubAuth: false,
+       );
+
+  final TrackerSnapshot _seededSnapshot;
+  final String _githubRepositoryName;
+  final String _githubBranch;
+  final ProviderBackedTrackStateRepository _delegate;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    final localUser = await super.connect(connection);
+    await _delegate.connect(
+      RepositoryConnection(
+        repository: _githubRepositoryName,
+        branch: _githubBranch,
+        token: connection.token,
+      ),
+    );
+    return localUser;
+  }
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    replaceCachedState(snapshot: _seededSnapshot, tree: const <RepositoryTreeEntry>[]);
+    _delegate.replaceCachedState(
+      snapshot: _seededSnapshot,
+      tree: const <RepositoryTreeEntry>[],
+    );
+    return _seededSnapshot;
+  }
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async {
+    try {
+      return await _delegate.uploadIssueAttachment(
+        issue: issue,
+        name: name,
+        bytes: bytes,
+      );
+    } finally {
+      replaceCachedState(
+        snapshot: _delegate.cachedSnapshot ?? _seededSnapshot,
+        tree: const <RepositoryTreeEntry>[],
+      );
+    }
+  }
+}
+
+class _CliProbeLocalGitProvider extends LocalGitTrackStateProvider {
+  _CliProbeLocalGitProvider({
+    required super.repositoryPath,
+    required this.branch,
+    required this.repositoryName,
+  }) : super(processRunner: const _UnexpectedGitProcessRunner());
+
+  final String branch;
+  final String repositoryName;
+
+  @override
+  Future<String> resolveWriteBranch() async => branch;
+
+  @override
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async =>
+      const RepositoryUser(
+        login: 'release-tester@example.com',
+        displayName: 'Release Tester',
+        accountId: '684',
+        emailAddress: 'release-tester@example.com',
+        active: true,
+      );
+
+  @override
+  Future<RepositoryPermission> getPermission() async =>
+      const RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        attachmentUploadMode: AttachmentUploadMode.full,
+        supportsReleaseAttachmentWrites: true,
+        canCheckCollaborators: false,
+      );
+
+  @override
+  Future<String?> resolveGitHubRepositoryIdentity() async => repositoryName;
+
+  @override
+  Future<String?> releaseAttachmentIdentityFailureReason() async => null;
+}
+
+class _UnexpectedGitProcessRunner implements GitProcessRunner {
+  const _UnexpectedGitProcessRunner();
+
+  @override
+  Future<GitCommandResult> run(
+    String repositoryPath,
+    List<String> args, {
+    bool binaryOutput = false,
+  }) async {
+    throw UnsupportedError(
+      'TS-684 CLI probe should not invoke local git: $repositoryPath ${args.join(' ')}',
+    );
+  }
 }
 
 const TrackStateIssue _seedIssue = TrackStateIssue(

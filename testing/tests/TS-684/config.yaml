@@ -7,9 +7,9 @@ dependencies:
   - offline dart pub get in testing/tests/TS-684/dart_probe
   - probe-local path dependency for package:http with MockClient support
 notes:
-  - Exercises the production GitHub release-backed attachment upload flow through ProviderBackedTrackStateRepository and GitHubTrackStateProvider.
-  - Mocks the GitHub release-creation endpoint to return HTTP 409 Conflict so the caller-visible error can be verified without changing production code.
-  - Verifies the failure is surfaced as a conflict-style release-creation error, not as a 422 validation failure or a generic repository error.
+  - Exercises the local TrackState CLI attachment upload execution layer for a github-releases project.
+  - Mocks the GitHub release-creation endpoint to return HTTP 409 Conflict so the caller-visible CLI envelope can be verified without changing production code.
+  - Verifies the local CLI surface reports the failure as a conflict-style release-creation error, not as a 422 validation failure or a generic REPOSITORY_OPEN_FAILED wrapper.
 runtime_inputs:
   repository: IstiN/trackstate
   branch: main
