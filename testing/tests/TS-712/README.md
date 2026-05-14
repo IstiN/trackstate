@@ -24,7 +24,7 @@ mkdir -p outputs && flutter test testing/tests/TS-712/test_ts_712.dart --reporte
 
 - Flutter test runtime
 - Production `WorkspaceSyncService`
-- Probe `WorkspaceSyncRepository` with a fixed UTC clock
+- Layered cadence probe abstraction backed by a fixed UTC clock
 
 ## Expected result
 

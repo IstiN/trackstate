@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/local_workspace_onboarding_service.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
+import 'package:trackstate/ui/features/tracker/services/workspace_directory_picker.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/workspace_onboarding_driver.dart';
@@ -20,6 +23,8 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
     required WorkspaceProfileService workspaceProfileService,
     HostedRepositoryLoader? openHostedRepository,
     LocalRepositoryLoader? openLocalRepository,
+    LocalWorkspaceOnboardingService? localWorkspaceOnboardingService,
+    WorkspaceDirectoryPicker? workspaceDirectoryPicker,
     Map<String, Object>? sharedPreferences,
   }) async {
     if (sharedPreferences != null) {
@@ -35,6 +40,9 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
         workspaceProfileService: workspaceProfileService,
         openHostedRepository: openHostedRepository,
         openLocalRepository: openLocalRepository,
+        localWorkspaceOnboardingService: localWorkspaceOnboardingService,
+        workspaceDirectoryPicker:
+            workspaceDirectoryPicker ?? pickWorkspaceDirectory,
       ),
     );
     await _tester.pumpAndSettle();
@@ -44,6 +52,13 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
   Future<void> openAddWorkspace() async {
     await _tapAndSettle(
       find.bySemanticsLabel(RegExp('^Add workspace\$')).first,
+    );
+  }
+
+  @override
+  Future<void> selectExistingFolder() async {
+    await _tapAndSettle(
+      find.byKey(const ValueKey('local-workspace-onboarding-open-existing')),
     );
   }
 
@@ -69,18 +84,19 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
 
   @override
   Future<void> submit() async {
-    await _tapAndSettle(
-      find.byKey(const ValueKey('workspace-onboarding-open')),
-    );
+    await _tapAndSettle(_submitButtonFinder());
   }
 
   @override
   WorkspaceOnboardingState captureState() {
+    final submitFinder = _submitButtonFinder();
     return WorkspaceOnboardingState(
-      isOnboardingVisible: find
-          .byKey(const ValueKey('workspace-onboarding-open'))
-          .evaluate()
-          .isNotEmpty,
+      isOnboardingVisible:
+          submitFinder.evaluate().isNotEmpty ||
+          find
+              .byKey(const ValueKey('local-workspace-onboarding-open-existing'))
+              .evaluate()
+              .isNotEmpty,
       isDashboardVisible: find.text('Dashboard').evaluate().isNotEmpty,
       hostedRepositoryValue: _editableTextValue(
         const ValueKey('workspace-onboarding-hosted-repository'),
@@ -88,8 +104,17 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       hostedBranchValue: _editableTextValue(
         const ValueKey('workspace-onboarding-hosted-branch'),
       ),
+      localWorkspaceNameValue: _editableTextValue(
+        const ValueKey('local-workspace-onboarding-name'),
+      ),
+      localWriteBranchValue: _editableTextValue(
+        const ValueKey('local-workspace-onboarding-write-branch'),
+      ),
+      primaryActionLabel: _buttonLabel(submitFinder),
+      isPrimaryActionEnabled: _isButtonEnabled(submitFinder),
       repositoryAccessTopBarLabel: _visibleAccessLabel(),
-      visibleTexts: _uniqueVisibleTexts(find.byType(Text)),
+      visibleTexts: _visibleTexts(),
+      interactiveSemanticsLabels: _interactiveSemanticsLabels(),
     );
   }
 
@@ -141,6 +166,22 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
         description: 'repository-access callout "$title"',
       );
 
+  Finder _submitButtonFinder() {
+    final hostedFinder = find.byKey(
+      const ValueKey('workspace-onboarding-open'),
+    );
+    if (hostedFinder.evaluate().isNotEmpty) {
+      return hostedFinder.first;
+    }
+    final localFinder = find.byKey(
+      const ValueKey('local-workspace-onboarding-submit'),
+    );
+    if (localFinder.evaluate().isNotEmpty) {
+      return localFinder.first;
+    }
+    return hostedFinder;
+  }
+
   String? _editableTextValue(Key key) {
     final field = find.descendant(
       of: find.byKey(key),
@@ -150,6 +191,34 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       return null;
     }
     return _tester.widget<EditableText>(field.first).controller.text;
+  }
+
+  bool _isButtonEnabled(Finder finder) {
+    if (finder.evaluate().isEmpty) {
+      return false;
+    }
+    final widget = _tester.widget<ButtonStyleButton>(finder);
+    return widget.onPressed != null;
+  }
+
+  String _buttonLabel(Finder finder) {
+    if (finder.evaluate().isEmpty) {
+      return '';
+    }
+    final richTexts = find.descendant(
+      of: finder,
+      matching: find.byType(RichText),
+    );
+    for (final element in richTexts.evaluate()) {
+      final widget = element.widget;
+      if (widget is RichText) {
+        final text = widget.text.toPlainText().trim();
+        if (text.isNotEmpty) {
+          return text;
+        }
+      }
+    }
+    return '';
   }
 
   String? _visibleAccessLabel() {
@@ -165,6 +234,49 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       }
     }
     return null;
+  }
+
+  List<String> _visibleTexts() {
+    final texts = _uniqueVisibleTexts(find.byType(Text));
+    for (final widget in _tester.widgetList<SelectableText>(
+      find.byType(SelectableText),
+    )) {
+      final label = widget.data?.trim();
+      if (label == null || label.isEmpty || texts.contains(label)) {
+        continue;
+      }
+      texts.add(label);
+    }
+    return texts;
+  }
+
+  List<String> _interactiveSemanticsLabels() {
+    final scaffoldFinder = find.byType(Scaffold);
+    if (scaffoldFinder.evaluate().isEmpty) {
+      return const <String>[];
+    }
+    final rootNode = _tester.getSemantics(scaffoldFinder.first);
+    final labels = <String>[];
+
+    void visit(SemanticsNode node) {
+      final children = node.debugListChildrenInOrder(
+        DebugSemanticsDumpOrder.traversalOrder,
+      );
+      final label = node.label.replaceAll('\n', ' ').trim();
+      final flags = node.getSemanticsData().flagsCollection;
+      if (label.isNotEmpty &&
+          !node.isInvisible &&
+          !node.isMergedIntoParent &&
+          (flags.isButton || flags.isTextField)) {
+        labels.add(label);
+      }
+      for (final child in children) {
+        visit(child);
+      }
+    }
+
+    visit(rootNode);
+    return _dedupeConsecutive(labels);
   }
 
   Future<void> _tapAndSettle(Finder finder) async {
@@ -183,5 +295,15 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       texts.add(label);
     }
     return texts;
+  }
+
+  List<String> _dedupeConsecutive(List<String> labels) {
+    final deduped = <String>[];
+    for (final label in labels) {
+      if (deduped.isEmpty || deduped.last != label) {
+        deduped.add(label);
+      }
+    }
+    return deduped;
   }
 }
