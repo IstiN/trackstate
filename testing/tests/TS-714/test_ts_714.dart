@@ -92,15 +92,15 @@ void main() {
       await _pumpUntil(
         tester,
         condition: () async =>
-            await app.isTextVisible(_pendingLabel) &&
+            await app.isTopBarTextVisible(_pendingLabel) &&
             await app.isTextVisible(_pendingMessage),
         timeout: const Duration(seconds: 5),
       );
 
-      if (!(await app.isTextVisible(_pendingLabel))) {
+      if (!(await app.isTopBarTextVisible(_pendingLabel))) {
         failures.add(
           'Step 2 failed: after the external Git change arrived during the unsaved edit session, the top bar did not expose the visible "$_pendingLabel" sync state. '
-          'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
+          'Top bar texts: ${_formatSnapshot(app.topBarVisibleTextsSnapshot())}.',
         );
       }
 
@@ -130,17 +130,17 @@ void main() {
       await _pumpUntil(
         tester,
         condition: () async =>
-            !(await app.isTextVisible(_pendingLabel)) &&
+            !(await app.isTopBarTextVisible(_pendingLabel)) &&
             await app.isTextVisible(
               Ts714BackgroundSyncDeferredRepository.issueKey,
             ),
         timeout: const Duration(seconds: 5),
       );
 
-      if (await app.isTextVisible(_pendingLabel)) {
+      if (await app.isTopBarTextVisible(_pendingLabel)) {
         failures.add(
           'Step 5 failed: the top bar still showed "$_pendingLabel" after saving the issue, so the queued refresh never cleared. '
-          'Visible texts: ${_formatSnapshot(app.visibleTextsSnapshot())}.',
+          'Top bar texts: ${_formatSnapshot(app.topBarVisibleTextsSnapshot())}.',
         );
       }
 
