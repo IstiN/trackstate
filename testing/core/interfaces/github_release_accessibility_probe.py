@@ -51,8 +51,11 @@ class GitHubReleaseAccessibilityObservation:
     quick_start_heading_present: bool
     quick_start_heading_is_logical: bool
     quick_start_focus_labels: list[str]
+    quick_start_expected_focus_order: list[GitHubReleaseFocusObservation]
+    quick_start_focus_order: list[GitHubReleaseFocusObservation]
     assets: list[GitHubReleaseAssetObservation]
     digests: list[GitHubReleaseDigestObservation]
+    asset_expected_focus_order: list[GitHubReleaseFocusObservation]
     asset_focus_order: list[GitHubReleaseFocusObservation]
     downloads: list[GitHubReleaseDownloadObservation]
     release_note_text_color_hex: str

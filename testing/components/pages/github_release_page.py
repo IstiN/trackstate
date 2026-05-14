@@ -23,9 +23,10 @@ class _ReleasePageSnapshot:
     headings: list[GitHubReleaseHeadingObservation]
     quick_start_heading_present: bool
     quick_start_heading_is_logical: bool
-    quick_start_focus_labels: list[str]
+    quick_start_expected_focus_order: list[GitHubReleaseFocusObservation]
     assets: list[GitHubReleaseAssetObservation]
     digests: list[GitHubReleaseDigestObservation]
+    asset_expected_focus_order: list[GitHubReleaseFocusObservation]
     release_note_text_color: RgbColor
     release_note_background_color: RgbColor
 
@@ -85,8 +86,13 @@ class GitHubReleasePage:
         screenshot_path: str | None = None,
     ) -> GitHubReleaseAccessibilityObservation:
         snapshot = self._snapshot_page()
-        focus_order = self._observe_asset_focus_order(
-            stop_count=1 + len(snapshot.assets) + len(snapshot.digests),
+        asset_focus_order = self._observe_focus_order(
+            group="asset",
+            stop_count=len(snapshot.asset_expected_focus_order),
+        )
+        quick_start_focus_order = self._observe_focus_order(
+            group="quick-start",
+            stop_count=len(snapshot.quick_start_expected_focus_order),
         )
         downloads = self._download_assets_via_keyboard(snapshot.assets)
         captured_screenshot_path = self._capture_screenshot(screenshot_path)
@@ -100,10 +106,13 @@ class GitHubReleasePage:
             headings=snapshot.headings,
             quick_start_heading_present=snapshot.quick_start_heading_present,
             quick_start_heading_is_logical=snapshot.quick_start_heading_is_logical,
-            quick_start_focus_labels=snapshot.quick_start_focus_labels,
+            quick_start_focus_labels=[step.label or "" for step in quick_start_focus_order],
+            quick_start_expected_focus_order=snapshot.quick_start_expected_focus_order,
+            quick_start_focus_order=quick_start_focus_order,
             assets=snapshot.assets,
             digests=snapshot.digests,
-            asset_focus_order=focus_order,
+            asset_expected_focus_order=snapshot.asset_expected_focus_order,
+            asset_focus_order=asset_focus_order,
             downloads=downloads,
             release_note_text_color_hex=rgb_to_hex(snapshot.release_note_text_color),
             release_note_background_color_hex=rgb_to_hex(
@@ -121,6 +130,48 @@ class GitHubReleasePage:
             """
             () => {
                 const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                const focusableSelector =
+                    'summary, a[href], button, input, select, textarea, [tabindex], clipboard-copy';
+                const isKeyboardFocusable = (node) => {
+                    if (!(node instanceof HTMLElement)) {
+                        return false;
+                    }
+                    if (node.hasAttribute('disabled') || node.closest('[hidden], [inert]')) {
+                        return false;
+                    }
+                    const tabindex = node.getAttribute('tabindex');
+                    if (tabindex === '-1') {
+                        return false;
+                    }
+                    if (node.tagName === 'A') {
+                        return node.hasAttribute('href');
+                    }
+                    if (node.tagName === 'SUMMARY' || node.tagName === 'CLIPBOARD-COPY') {
+                        return true;
+                    }
+                    return ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(node.tagName)
+                        || node.hasAttribute('tabindex');
+                };
+                const accessibleLabel = (node) =>
+                    normalize(node.getAttribute('aria-label')) || normalize(node.textContent);
+                const toFocusObservation = (node) => ({
+                    tagName: node.tagName,
+                    role: node.getAttribute('role'),
+                    label: accessibleLabel(node),
+                    href: node.getAttribute('href') || null,
+                });
+                const collectFocusableDescendants = (root, excludedNodes = []) => {
+                    const excluded = new Set(excludedNodes);
+                    return Array.from(root.querySelectorAll(focusableSelector)).filter(
+                        (node) => !excluded.has(node) && isKeyboardFocusable(node),
+                    );
+                };
+                const markFocusGroup = (nodes, group) => {
+                    nodes.forEach((node, index) => {
+                        node.setAttribute('data-ts710-focus-group', group);
+                        node.setAttribute('data-ts710-focus-index', String(index));
+                    });
+                };
                 const releaseBody = document.querySelector('[data-test-selector="body-content"]');
                 if (!releaseBody) {
                     return null;
@@ -137,7 +188,7 @@ class GitHubReleasePage:
                     heading.text.toLowerCase().includes('quick start'),
                 );
                 let quickStartHeadingIsLogical = true;
-                let quickStartFocusLabels = [];
+                let quickStartFocusNodes = [];
                 if (quickStartIndex >= 0) {
                     const sectionHeadings = Array.from(
                         releaseBody.querySelectorAll('h1,h2,h3,h4,h5,h6'),
@@ -149,27 +200,6 @@ class GitHubReleasePage:
                         const previousLevel = Number(previousHeading.tagName.slice(1));
                         quickStartHeadingIsLogical = quickStartLevel <= previousLevel + 1;
                     }
-
-                    const isFocusable = (node) => {
-                        if (!(node instanceof HTMLElement)) {
-                            return false;
-                        }
-                        if (node.hasAttribute('disabled')) {
-                            return false;
-                        }
-                        const tabindex = node.getAttribute('tabindex');
-                        if (tabindex === '-1') {
-                            return false;
-                        }
-                        if (node.tagName === 'A') {
-                            return node.hasAttribute('href');
-                        }
-                        return ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(node.tagName)
-                            || node.hasAttribute('tabindex');
-                    };
-
-                    const focusableLabel = (node) =>
-                        normalize(node.getAttribute('aria-label')) || normalize(node.textContent);
 
                     const sectionNodes = [];
                     for (
@@ -186,21 +216,27 @@ class GitHubReleasePage:
                         sectionNodes.push(node);
                     }
 
-                    quickStartFocusLabels = sectionNodes.flatMap((node) =>
-                        Array.from(
-                            node.querySelectorAll(
-                                'a, button, input, select, textarea, [tabindex]',
-                            ),
-                        )
-                            .filter(isFocusable)
-                            .map(focusableLabel)
-                            .filter((label) => label.length > 0),
+                    quickStartFocusNodes = sectionNodes.flatMap((node) =>
+                        collectFocusableDescendants(node),
                     );
                 }
 
                 const assetsSummary = Array.from(document.querySelectorAll('summary')).find(
                     (node) => normalize(node.textContent).includes('Assets'),
                 );
+                const assetContainer = assetsSummary?.closest('details') || null;
+                const assetFocusNodes = assetsSummary
+                    ? [
+                        assetsSummary,
+                        ...(
+                            assetContainer
+                                ? collectFocusableDescendants(assetContainer, [assetsSummary])
+                                : []
+                        ),
+                    ]
+                    : [];
+                markFocusGroup(assetFocusNodes, 'asset');
+                markFocusGroup(quickStartFocusNodes, 'quick-start');
                 const assetLinks = Array.from(
                     document.querySelectorAll(
                         'a[href*="/releases/download/"], a[href*="/archive/refs/tags/"]',
@@ -247,9 +283,10 @@ class GitHubReleasePage:
                     headings,
                     quickStartHeadingPresent: quickStartIndex >= 0,
                     quickStartHeadingIsLogical,
-                    quickStartFocusLabels,
+                    quickStartExpectedFocusOrder: quickStartFocusNodes.map(toFocusObservation),
                     assets: assetLinks,
                     digests: digestControls,
+                    assetExpectedFocusOrder: assetFocusNodes.map(toFocusObservation),
                     releaseNoteTextColor: noteStyle.color,
                     releaseNoteBackgroundColor: effectiveBackground(noteTextNode),
                 };
@@ -293,6 +330,12 @@ class GitHubReleasePage:
             for item in payload.get("digests", [])
             if isinstance(item, dict)
         ]
+        asset_expected_focus_order = self._parse_focus_observations(
+            payload.get("assetExpectedFocusOrder", []),
+        )
+        quick_start_expected_focus_order = self._parse_focus_observations(
+            payload.get("quickStartExpectedFocusOrder", []),
+        )
 
         return _ReleasePageSnapshot(
             release_title=str(payload.get("releaseTitle", "")),
@@ -302,13 +345,10 @@ class GitHubReleasePage:
             quick_start_heading_is_logical=bool(
                 payload.get("quickStartHeadingIsLogical", True),
             ),
-            quick_start_focus_labels=[
-                str(label)
-                for label in payload.get("quickStartFocusLabels", [])
-                if isinstance(label, str)
-            ],
+            quick_start_expected_focus_order=quick_start_expected_focus_order,
             assets=assets,
             digests=digests,
+            asset_expected_focus_order=asset_expected_focus_order,
             release_note_text_color=self._parse_rgb(
                 str(payload.get("releaseNoteTextColor", "rgb(0, 0, 0)")),
             ),
@@ -317,12 +357,17 @@ class GitHubReleasePage:
             ),
         )
 
-    def _observe_asset_focus_order(
+    def _observe_focus_order(
         self,
         *,
+        group: str,
         stop_count: int,
     ) -> list[GitHubReleaseFocusObservation]:
-        self._session.focus(self._asset_summary_selector, has_text="Assets")
+        if stop_count <= 0:
+            return []
+        self._session.focus(
+            f'[data-ts710-focus-group="{group}"][data-ts710-focus-index="0"]',
+        )
         observations: list[GitHubReleaseFocusObservation] = []
         for index in range(max(stop_count, 1)):
             payload = self._session.evaluate(
@@ -343,8 +388,7 @@ class GitHubReleasePage:
                         role: active.getAttribute('role'),
                         label:
                             normalize(active.getAttribute('aria-label'))
-                            || normalize(active.textContent)
-                            || null,
+                            || normalize(active.textContent),
                         href: active.getAttribute('href'),
                     };
                 }
@@ -352,7 +396,8 @@ class GitHubReleasePage:
             )
             if not isinstance(payload, dict):
                 raise AssertionError(
-                    "Could not observe keyboard focus while traversing the Assets section.",
+                    "Could not observe keyboard focus while traversing the live GitHub "
+                    f"release page focus group: {group}.",
                 )
             observations.append(
                 GitHubReleaseFocusObservation(
@@ -367,6 +412,21 @@ class GitHubReleasePage:
             if index < stop_count - 1:
                 self._session.press_key("Tab")
         return observations
+
+    @staticmethod
+    def _parse_focus_observations(items: object) -> list[GitHubReleaseFocusObservation]:
+        if not isinstance(items, list):
+            return []
+        return [
+            GitHubReleaseFocusObservation(
+                tag_name=str(item.get("tagName", "")),
+                role=str(item["role"]) if item.get("role") is not None else None,
+                label=str(item["label"]) if item.get("label") is not None else None,
+                href=str(item["href"]) if item.get("href") is not None else None,
+            )
+            for item in items
+            if isinstance(item, dict)
+        ]
 
     def _download_assets_via_keyboard(
         self,

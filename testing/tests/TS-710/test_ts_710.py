@@ -15,6 +15,7 @@ from testing.core.config.github_release_accessibility_config import (  # noqa: E
 )
 from testing.core.interfaces.github_release_accessibility_probe import (  # noqa: E402
     GitHubReleaseAccessibilityObservation,
+    GitHubReleaseFocusObservation,
 )
 from testing.tests.support.github_release_accessibility_probe_factory import (  # noqa: E402
     create_github_release_accessibility_probe,
@@ -111,30 +112,14 @@ class GitHubReleaseAccessibilityTest(unittest.TestCase):
                 f"Observed digest: {digest}",
             )
 
-        focused_asset_labels = [
-            step.label
-            for step in observation.asset_focus_order
-            if step.href is not None and step.label is not None
-        ]
-        expected_asset_labels = [asset.aria_label or asset.label for asset in observation.assets]
         self.assertEqual(
-            focused_asset_labels,
-            expected_asset_labels,
+            self._focus_order_signature(observation.asset_focus_order),
+            self._focus_order_signature(observation.asset_expected_focus_order),
             "Step 4 failed: keyboard traversal through the Assets section did not keep "
-            "the asset links in logical order.\n"
-            f"Focused asset labels: {focused_asset_labels}\n"
-            f"Expected asset labels: {expected_asset_labels}",
-        )
-        self.assertTrue(
-            observation.asset_focus_order and observation.asset_focus_order[0].label is not None,
-            "Step 4 failed: keyboard traversal never reached the Assets section control.",
-        )
-        self.assertIn(
-            "Assets",
-            observation.asset_focus_order[0].label or "",
-            "Step 4 failed: keyboard traversal did not begin from the Assets section "
-            "toggle before moving into the asset links.\n"
-            f"Observed focus order: {observation.asset_focus_order}",
+            "all interactive elements in logical order.\n"
+            f"Observed focus order: {self._focus_order_signature(observation.asset_focus_order)}\n"
+            f"Expected focus order: "
+            f"{self._focus_order_signature(observation.asset_expected_focus_order)}",
         )
 
         self.assertEqual(
@@ -184,13 +169,37 @@ class GitHubReleaseAccessibilityTest(unittest.TestCase):
                 "jumped to an illogical level within the release notes.\n"
                 f"Observed headings: {observation.headings}",
             )
-            for label in observation.quick_start_focus_labels:
+            self.assertEqual(
+                self._focus_order_signature(observation.quick_start_focus_order),
+                self._focus_order_signature(observation.quick_start_expected_focus_order),
+                "Human-style verification failed: keyboard traversal inside the Quick "
+                "Start section did not follow the actual section order.\n"
+                f"Observed focus order: "
+                f"{self._focus_order_signature(observation.quick_start_focus_order)}\n"
+                f"Expected focus order: "
+                f"{self._focus_order_signature(observation.quick_start_expected_focus_order)}",
+            )
+            for step in observation.quick_start_focus_order:
                 self.assertTrue(
-                    label.strip(),
+                    step.label is not None and step.label.strip(),
                     "Human-style verification failed: a Quick Start control did not "
                     "expose a non-empty accessible label.\n"
-                    f"Observed labels: {observation.quick_start_focus_labels}",
+                    f"Observed focus order: "
+                    f"{self._focus_order_signature(observation.quick_start_focus_order)}",
                 )
+
+    @staticmethod
+    def _focus_order_signature(
+        observations: list[GitHubReleaseFocusObservation],
+    ) -> list[tuple[str, str | None, str]]:
+        return [
+            (
+                observation.label or "",
+                observation.href,
+                observation.tag_name,
+            )
+            for observation in observations
+        ]
 
     def _write_result_if_requested(
         self,
