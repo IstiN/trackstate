@@ -26,6 +26,7 @@ class TrackStateReleaseAssetObservation:
     browser_download_url: str | None
     classification: str
     sha256: str | None = None
+    checksum_manifest_text: str | None = None
     archive_members: tuple[str, ...] = ()
     extracted_binary_relative_path: str | None = None
     file_output: str | None = None

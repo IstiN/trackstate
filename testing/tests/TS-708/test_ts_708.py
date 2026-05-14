@@ -411,9 +411,12 @@ class Ts708ReleaseArtifactScenario:
             )
             return failures
         if not manifest_text:
+            download_error = (
+                f"\nDownload error: {checksum_asset.error}" if checksum_asset.error else ""
+            )
             failures.append(
                 "Step 5 failed: the checksum manifest could not be downloaded or was empty.\n"
-                f"Checksum asset: {checksum_asset.name}"
+                f"Checksum asset: {checksum_asset.name}{download_error}"
             )
             return failures
         parsed_manifest = _parse_checksum_manifest(manifest_text)

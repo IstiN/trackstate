@@ -83,10 +83,7 @@ class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
                     temp_dir=temp_dir,
                 )
                 if asset_observation.classification == "checksum":
-                    checksum_manifest_text = self._read_checksum_manifest(
-                        release_asset_reader=self._release_asset_reader,
-                        asset_id=raw_asset["id"],
-                    )
+                    checksum_manifest_text = asset_observation.checksum_manifest_text
                 asset_observations.append(asset_observation)
 
         return TrackStateReleaseArtifactObservation(
@@ -241,6 +238,7 @@ class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
                 browser_download_url=_optional_string(raw_asset.get("browser_download_url")),
                 classification="checksum",
                 sha256=sha256,
+                checksum_manifest_text=asset_bytes.decode("utf-8", errors="replace"),
             )
 
         return self._observe_archive_asset(
@@ -323,19 +321,6 @@ class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
             file_output=file_output,
             error=error,
         )
-
-    def _read_checksum_manifest(
-        self,
-        *,
-        release_asset_reader: TrackStateReleaseAssetReader,
-        asset_id: int,
-    ) -> str | None:
-        try:
-            payload = release_asset_reader.download_release_asset_bytes(asset_id)
-        except Exception:
-            return None
-        return payload.decode("utf-8", errors="replace")
-
 
 def _optional_string(value: object) -> str | None:
     if value is None:
