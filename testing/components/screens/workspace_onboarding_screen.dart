@@ -1,5 +1,6 @@
 import '../../core/interfaces/workspace_onboarding_driver.dart';
 import '../../core/interfaces/workspace_onboarding_screen.dart';
+import '../../core/models/workspace_shell_entry_point_observation.dart';
 import '../../core/models/workspace_onboarding_state.dart';
 
 class WorkspaceOnboardingScreen implements WorkspaceOnboardingScreenHandle {
@@ -38,6 +39,15 @@ class WorkspaceOnboardingScreen implements WorkspaceOnboardingScreenHandle {
 
   @override
   WorkspaceOnboardingState captureState() => _driver.captureState();
+
+  @override
+  WorkspaceShellEntryPointObservation observeShellEntryPoint({
+    required String workspaceDisplayName,
+  }) {
+    return _driver.observeShellEntryPoint(
+      workspaceDisplayName: workspaceDisplayName,
+    );
+  }
 
   @override
   bool isAccessCalloutVisible({
