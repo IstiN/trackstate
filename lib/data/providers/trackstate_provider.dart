@@ -40,6 +40,10 @@ abstract interface class RepositoryPermissionChecker {
   Future<RepositoryPermission> getPermission();
 }
 
+abstract interface class RepositorySyncChecker {
+  Future<RepositorySyncCheck> checkSync({RepositorySyncState? previousState});
+}
+
 abstract interface class RepositoryAttachmentStore {
   Future<RepositoryAttachment> readAttachment(
     String path, {
@@ -83,6 +87,7 @@ abstract interface class TrackStateProviderAdapter
         RepositorySessionManager,
         RepositoryCommitManager,
         RepositoryPermissionChecker,
+        RepositorySyncChecker,
         RepositoryAttachmentStore {
   ProviderType get providerType;
   String get repositoryLabel;
@@ -184,6 +189,36 @@ class RepositoryTreeEntry {
 
   final String path;
   final String type;
+}
+
+class RepositorySyncState {
+  const RepositorySyncState({
+    required this.providerType,
+    required this.repositoryRevision,
+    required this.sessionRevision,
+    required this.connectionState,
+    this.workingTreeRevision,
+    this.permission,
+  });
+
+  final ProviderType providerType;
+  final String repositoryRevision;
+  final String sessionRevision;
+  final ProviderConnectionState connectionState;
+  final String? workingTreeRevision;
+  final RepositoryPermission? permission;
+}
+
+class RepositorySyncCheck {
+  const RepositorySyncCheck({
+    required this.state,
+    this.signals = const <WorkspaceSyncSignal>{},
+    this.changedPaths = const <String>{},
+  });
+
+  final RepositorySyncState state;
+  final Set<WorkspaceSyncSignal> signals;
+  final Set<String> changedPaths;
 }
 
 class RepositoryTextFile {

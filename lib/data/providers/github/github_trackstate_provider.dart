@@ -371,6 +371,36 @@ class GitHubTrackStateProvider
   }
 
   @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async {
+    final currentState = await _readSyncState();
+    if (previousState == null) {
+      return RepositorySyncCheck(state: currentState);
+    }
+    final signals = <WorkspaceSyncSignal>{};
+    final changedPaths = <String>{};
+    if (previousState.repositoryRevision != currentState.repositoryRevision) {
+      signals.add(WorkspaceSyncSignal.hostedRepository);
+      changedPaths.addAll(
+        await _compareChangedPaths(
+          base: previousState.repositoryRevision,
+          head: currentState.repositoryRevision,
+        ),
+      );
+    }
+    if (previousState.sessionRevision != currentState.sessionRevision ||
+        previousState.connectionState != currentState.connectionState) {
+      signals.add(WorkspaceSyncSignal.hostedSession);
+    }
+    return RepositorySyncCheck(
+      state: currentState,
+      signals: signals,
+      changedPaths: changedPaths,
+    );
+  }
+
+  @override
   Future<RepositoryAttachment> readAttachment(
     String path, {
     required String ref,
@@ -408,6 +438,84 @@ class GitHubTrackStateProvider
       lfsOid: pointerInfo?.oid,
       declaredSizeBytes: pointerInfo?.sizeBytes,
     );
+  }
+
+  Future<RepositorySyncState> _readSyncState() async {
+    final branch = await resolveWriteBranch();
+    final repository = _connection?.repository ?? repositoryName;
+    final headSha = await _branchHeadSha(repository: repository, branch: branch);
+    final permission = await getPermission();
+    final connectionState = _connection == null
+        ? ProviderConnectionState.disconnected
+        : ProviderConnectionState.connected;
+    return RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: headSha,
+      sessionRevision:
+          '${connectionState.name}:${permission.canRead}:${permission.canWrite}:${permission.canCreateBranch}:${permission.canManageAttachments}:${permission.attachmentUploadMode.name}:${permission.supportsReleaseAttachmentWrites}',
+      connectionState: connectionState,
+      permission: permission,
+    );
+  }
+
+  Future<String> _branchHeadSha({
+    required String repository,
+    required String branch,
+  }) async {
+    final json =
+        await _getGitHubJson(
+              '/repos/$repository/branches/$branch',
+              token: _connection?.token,
+            )
+            as Map<String, Object?>;
+    final commit = json['commit'];
+    if (commit is! Map<String, Object?>) {
+      throw const TrackStateProviderException(
+        'GitHub branch response did not contain commit metadata.',
+      );
+    }
+    final sha = commit['sha']?.toString().trim() ?? '';
+    if (sha.isEmpty) {
+      throw const TrackStateProviderException(
+        'GitHub branch response did not contain a commit SHA.',
+      );
+    }
+    return sha;
+  }
+
+  Future<Set<String>> _compareChangedPaths({
+    required String base,
+    required String head,
+  }) async {
+    if (base.trim().isEmpty || head.trim().isEmpty || base.trim() == head.trim()) {
+      return const <String>{};
+    }
+    try {
+      final json =
+          await _getGitHubJson(
+                '/repos/${_connection?.repository ?? repositoryName}/compare/$base...$head',
+                token: _connection?.token,
+              )
+              as Map<String, Object?>;
+      final files = json['files'];
+      if (files is! List<Object?>) {
+        return const <String>{};
+      }
+      final paths = <String>{};
+      for (final entry in files.whereType<Map<String, Object?>>()) {
+        final filename = entry['filename']?.toString().trim() ?? '';
+        if (filename.isNotEmpty) {
+          paths.add(filename);
+        }
+        final previousFilename = entry['previous_filename']?.toString().trim() ?? '';
+        if (previousFilename.isNotEmpty) {
+          paths.add(previousFilename);
+        }
+      }
+      return paths;
+    } on TrackStateProviderException {
+      return const <String>{};
+    }
   }
 
   @override
