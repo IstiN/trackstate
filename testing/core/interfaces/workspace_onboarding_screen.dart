@@ -9,6 +9,10 @@ abstract interface class WorkspaceOnboardingScreenHandle {
 
   Future<void> chooseHostedRepositorySuggestion(String fullName);
 
+  Future<void> enterHostedRepository(String repository);
+
+  Future<void> enterHostedBranch(String branch);
+
   Future<void> submit();
 
   WorkspaceOnboardingState captureState();
