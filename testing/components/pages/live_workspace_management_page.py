@@ -555,17 +555,8 @@ class LiveWorkspaceManagementPage:
                 }
               }
 
-              if (!section) {
-                return {
-                  bodyText,
-                  sectionText: '',
-                  sectionVisible: false,
-                  rowCount: 0,
-                  rows: [],
-                };
-              }
-
-              const rowCandidates = visibleElements(section)
+              const rowSearchRoot = section || document;
+              const rowCandidates = visibleElements(rowSearchRoot)
                 .map((element) => {
                   const text = normalize(element.innerText || '');
                   const rect = element.getBoundingClientRect();
@@ -804,8 +795,12 @@ class LiveWorkspaceManagementPage:
 
               return {
                 bodyText,
-                sectionText: normalize(section.innerText || ''),
-                sectionVisible: true,
+                sectionText: normalize(
+                  section?.innerText
+                  || rows.map((candidate) => candidate.text).join('\\n')
+                  || '',
+                ),
+                sectionVisible: !!section || rowPayload.length > 0,
                 rowCount: rowPayload.length,
                 rows: rowPayload,
               };
