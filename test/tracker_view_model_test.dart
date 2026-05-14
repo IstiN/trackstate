@@ -186,6 +186,72 @@ void main() {
     },
   );
 
+  test(
+    'view model ignores stale restored issue hydration after a newer query request',
+    () async {
+      final baseline = await const DemoTrackStateRepository().loadSnapshot();
+      final selectedIssue = baseline.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+      final hydratedSelectedIssue = selectedIssue.copyWith(
+        description: 'Previously hydrated detail',
+        hasDetailLoaded: true,
+      );
+      final initialSnapshot = TrackerSnapshot(
+        project: baseline.project,
+        issues: [
+          for (final issue in baseline.issues)
+            if (issue.key == hydratedSelectedIssue.key)
+              hydratedSelectedIssue
+            else
+              issue,
+        ],
+        repositoryIndex: baseline.repositoryIndex,
+        loadWarnings: baseline.loadWarnings,
+        readiness: baseline.readiness,
+        startupRecovery: baseline.startupRecovery,
+      );
+      final refreshedSnapshot = TrackerSnapshot(
+        project: baseline.project,
+        issues: [
+          for (final issue in baseline.issues)
+            if (issue.key == hydratedSelectedIssue.key)
+              _summaryOnlyIssue(issue)
+            else
+              issue,
+        ],
+        repositoryIndex: baseline.repositoryIndex,
+        loadWarnings: baseline.loadWarnings,
+        readiness: baseline.readiness,
+        startupRecovery: baseline.startupRecovery,
+      );
+      final repository = _DelayedHydrationReloadRepository(
+        initialSnapshot: initialSnapshot,
+        refreshedSnapshot: refreshedSnapshot,
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      expect(
+        viewModel.selectedIssue?.description,
+        'Previously hydrated detail',
+      );
+
+      repository.delayNextHydration();
+      final reloadFuture = viewModel.load();
+      await repository.waitForPendingHydration();
+
+      await viewModel.updateQuery('project = TRACK AND status = "In Progress"');
+      repository.completePendingHydration();
+      await reloadFuture;
+
+      expect(viewModel.jql, 'project = TRACK AND status = "In Progress"');
+      expect(viewModel.selectedIssue?.key, 'TRACK-12');
+      expect(viewModel.selectedIssue?.description, isEmpty);
+      expect(viewModel.selectedIssue?.hasDetailLoaded, isFalse);
+    },
+  );
+
   test('view model changes sections and toggles theme', () async {
     final viewModel = TrackerViewModel(
       repository: const DemoTrackStateRepository(),
@@ -2579,4 +2645,103 @@ class _WriteBranchAwareMutableProvider
 
   @override
   Future<String> resolveWriteBranch() async => writeBranch;
+}
+
+class _DelayedHydrationReloadRepository
+    extends ProviderBackedTrackStateRepository {
+  _DelayedHydrationReloadRepository({
+    required TrackerSnapshot initialSnapshot,
+    required TrackerSnapshot refreshedSnapshot,
+  }) : _snapshots = <TrackerSnapshot>[initialSnapshot, refreshedSnapshot],
+       _currentSnapshot = initialSnapshot,
+       super(
+         provider: MutableIssueDetailTrackStateProvider(),
+         supportsGitHubAuth: false,
+       );
+
+  final List<TrackerSnapshot> _snapshots;
+  final JqlSearchService _searchService = const JqlSearchService();
+  TrackerSnapshot _currentSnapshot;
+  Completer<void>? _delayedHydrationCompleter;
+  Completer<void>? _pendingHydrationCompleter;
+
+  void delayNextHydration() {
+    _delayedHydrationCompleter = Completer<void>();
+    _pendingHydrationCompleter = Completer<void>();
+  }
+
+  Future<void> waitForPendingHydration() async {
+    final completer = _pendingHydrationCompleter;
+    if (completer == null) {
+      throw StateError('No delayed hydration is pending.');
+    }
+    await completer.future;
+  }
+
+  void completePendingHydration() {
+    _delayedHydrationCompleter?.complete();
+    _delayedHydrationCompleter = null;
+  }
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    if (_snapshots.length > 1) {
+      _currentSnapshot = _snapshots.removeAt(0);
+      return _currentSnapshot;
+    }
+    return _currentSnapshot = _snapshots.single;
+  }
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    return _searchService.search(
+      issues: _currentSnapshot.issues,
+      project: _currentSnapshot.project,
+      jql: jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+  }
+
+  @override
+  Future<TrackStateIssue> hydrateIssue(
+    TrackStateIssue issue, {
+    Set<IssueHydrationScope> scopes = const {IssueHydrationScope.detail},
+    bool force = false,
+  }) async {
+    _pendingHydrationCompleter?.complete();
+    final delayedHydrationCompleter = _delayedHydrationCompleter;
+    if (delayedHydrationCompleter != null) {
+      await delayedHydrationCompleter.future;
+      if (identical(_delayedHydrationCompleter, delayedHydrationCompleter)) {
+        _delayedHydrationCompleter = null;
+      }
+    }
+    final currentIssue = _currentSnapshot.issues.firstWhere(
+      (candidate) => candidate.key == issue.key,
+      orElse: () => issue,
+    );
+    final hydrated = currentIssue.copyWith(
+      description: 'Stale hydrated detail should not be applied',
+      hasDetailLoaded: true,
+    );
+    _currentSnapshot = TrackerSnapshot(
+      project: _currentSnapshot.project,
+      issues: [
+        for (final candidate in _currentSnapshot.issues)
+          if (candidate.key == hydrated.key) hydrated else candidate,
+      ],
+      repositoryIndex: _currentSnapshot.repositoryIndex,
+      loadWarnings: _currentSnapshot.loadWarnings,
+      readiness: _currentSnapshot.readiness,
+      startupRecovery: _currentSnapshot.startupRecovery,
+    );
+    return hydrated;
+  }
 }

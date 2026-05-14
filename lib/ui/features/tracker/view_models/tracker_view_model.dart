@@ -1823,11 +1823,18 @@ class TrackerViewModel extends ChangeNotifier {
     loadingSet.add(issue.key);
     _clearIssueDeferredError(issue.key, _deferredSectionForScope(scope));
     notifyListeners();
+    final searchRequestToken = _searchRequestSerial;
     try {
       final hydrated = await repository.hydrateIssue(
         currentIssue,
         scopes: {scope},
       );
+      if (!_shouldApplyHydratedIssueRefresh(
+        searchRequestToken: searchRequestToken,
+        issueKey: currentIssue.key,
+      )) {
+        return;
+      }
       _applyTargetedIssueRefresh(hydrated);
       _clearIssueDeferredError(issue.key, _deferredSectionForScope(scope));
       _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
@@ -2155,6 +2162,14 @@ class TrackerViewModel extends ChangeNotifier {
     return requestToken == _searchRequestSerial;
   }
 
+  bool _shouldApplyHydratedIssueRefresh({
+    required int searchRequestToken,
+    required String issueKey,
+  }) {
+    return _isSearchRequestCurrent(searchRequestToken) &&
+        _selectedIssue?.key == issueKey;
+  }
+
   bool get _shouldDeferWorkspaceSyncRefresh =>
       _isSaving ||
       _editSessionDepth > 0 ||
@@ -2214,6 +2229,12 @@ class TrackerViewModel extends ChangeNotifier {
         currentIssue,
         scopes: scopes,
       );
+      if (!_shouldApplyHydratedIssueRefresh(
+        searchRequestToken: searchRequestToken,
+        issueKey: currentIssue.key,
+      )) {
+        return;
+      }
       _applyTargetedIssueRefresh(hydrated);
       _refreshSearchResultsFromLoadedSnapshot(
         _snapshot!,
