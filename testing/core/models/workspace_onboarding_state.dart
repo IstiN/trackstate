@@ -6,6 +6,7 @@ class WorkspaceOnboardingState {
     required this.hostedBranchValue,
     required this.localWorkspaceNameValue,
     required this.localWriteBranchValue,
+    required this.localFolderPath,
     required this.primaryActionLabel,
     required this.isPrimaryActionEnabled,
     required this.repositoryAccessTopBarLabel,
@@ -19,7 +20,8 @@ class WorkspaceOnboardingState {
   final String? hostedBranchValue;
   final String? localWorkspaceNameValue;
   final String? localWriteBranchValue;
-  final String primaryActionLabel;
+  final String? localFolderPath;
+  final String? primaryActionLabel;
   final bool isPrimaryActionEnabled;
   final String? repositoryAccessTopBarLabel;
   final List<String> visibleTexts;
