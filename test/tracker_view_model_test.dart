@@ -1018,6 +1018,43 @@ void main() {
   );
 
   test(
+    'view model restores the selected issue and query across workspace-style reloads',
+    () async {
+      final previousViewModel = TrackerViewModel(
+        repository: const DemoTrackStateRepository(),
+      );
+      await previousViewModel.load();
+      await previousViewModel.updateQuery(
+        'project = TRACK AND status = "In Progress" ORDER BY priority DESC',
+      );
+      final selectedIssue = previousViewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-41',
+      );
+      previousViewModel.selectIssue(
+        selectedIssue,
+        returnSection: TrackerSection.hierarchy,
+      );
+
+      final nextViewModel = TrackerViewModel(
+        repository: const DemoTrackStateRepository(),
+      );
+      nextViewModel.restorePresentationStateFrom(previousViewModel);
+
+      await nextViewModel.load();
+
+      expect(
+        nextViewModel.jql,
+        'project = TRACK AND status = "In Progress" ORDER BY priority DESC',
+      );
+      expect(nextViewModel.selectedIssue?.key, 'TRACK-41');
+      expect(nextViewModel.issueDetailReturnSection, TrackerSection.hierarchy);
+
+      previousViewModel.dispose();
+      nextViewModel.dispose();
+    },
+  );
+
+  test(
     'view model uses shared mutations and preserves the origin after create',
     () async {
       final repository = const DemoTrackStateRepository();

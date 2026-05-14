@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -13,55 +14,109 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  test('view model queues background refreshes until the edit session ends', () async {
-    final baseline = await const DemoTrackStateRepository().loadSnapshot();
-    final repository = _SyncAwareRepository(snapshot: baseline);
-    final viewModel = TrackerViewModel(repository: repository);
+  test(
+    'view model queues background refreshes until the edit session ends',
+    () async {
+      final baseline = await const DemoTrackStateRepository().loadSnapshot();
+      final repository = _SyncAwareRepository(snapshot: baseline);
+      final viewModel = TrackerViewModel(repository: repository);
 
-    await viewModel.load();
-    await Future<void>.delayed(Duration.zero);
+      await viewModel.load();
+      await Future<void>.delayed(Duration.zero);
 
-    final selectedIssue = viewModel.selectedIssue!;
-    repository.queueHostedRefresh(
-      nextSnapshot: TrackerSnapshot(
-        project: baseline.project,
-        issues: [
-          for (final issue in baseline.issues)
-            if (issue.key == selectedIssue.key)
-              _copyIssue(
+      final selectedIssue = viewModel.selectedIssue!;
+      repository.queueHostedRefresh(
+        nextSnapshot: TrackerSnapshot(
+          project: baseline.project,
+          issues: [
+            for (final issue in baseline.issues)
+              if (issue.key == selectedIssue.key)
+                _copyIssue(issue, description: 'Remote description update')
+              else
                 issue,
-                description: 'Remote description update',
-              )
-            else
-              issue,
-        ],
-        repositoryIndex: baseline.repositoryIndex,
-        loadWarnings: baseline.loadWarnings,
-        readiness: baseline.readiness,
-        startupRecovery: baseline.startupRecovery,
-      ),
-      changedPaths: {'${_issueRoot(selectedIssue.storagePath)}/main.md'},
-    );
+          ],
+          repositoryIndex: baseline.repositoryIndex,
+          loadWarnings: baseline.loadWarnings,
+          readiness: baseline.readiness,
+          startupRecovery: baseline.startupRecovery,
+        ),
+        changedPaths: {'${_issueRoot(selectedIssue.storagePath)}/main.md'},
+      );
 
-    viewModel.beginEditSession();
-    await viewModel.handleAppResumed();
-    await Future<void>.delayed(Duration.zero);
-    await Future<void>.delayed(Duration.zero);
+      viewModel.beginEditSession();
+      await viewModel.handleAppResumed();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
 
-    expect(viewModel.hasPendingWorkspaceSyncRefresh, isTrue);
-    expect(viewModel.selectedIssue?.description, isNot('Remote description update'));
+      expect(viewModel.hasPendingWorkspaceSyncRefresh, isTrue);
+      expect(
+        viewModel.selectedIssue?.description,
+        isNot('Remote description update'),
+      );
 
-    viewModel.endEditSession();
-    await Future<void>.delayed(Duration.zero);
-    await Future<void>.delayed(Duration.zero);
+      viewModel.endEditSession();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
 
-    expect(viewModel.hasPendingWorkspaceSyncRefresh, isFalse);
-    expect(viewModel.selectedIssue?.description, 'Remote description update');
-  });
+      expect(viewModel.hasPendingWorkspaceSyncRefresh, isFalse);
+      expect(viewModel.selectedIssue?.description, 'Remote description update');
+    },
+  );
+
+  test(
+    'view model defers background refresh while a query update is in flight',
+    () async {
+      final baseline = await const DemoTrackStateRepository().loadSnapshot();
+      final repository = _SyncAwareRepository(snapshot: baseline);
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      repository.delayNextSearchRequest();
+
+      final queryFuture = viewModel.updateQuery(
+        'project = TRACK AND status = "In Progress"',
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      repository.queueHostedRefresh(
+        nextSnapshot: TrackerSnapshot(
+          project: baseline.project,
+          issues: [
+            for (final issue in baseline.issues)
+              if (issue.key == 'TRACK-12')
+                _copyIssue(issue, description: 'Query-safe remote refresh')
+              else
+                issue,
+          ],
+          repositoryIndex: baseline.repositoryIndex,
+          loadWarnings: baseline.loadWarnings,
+          readiness: baseline.readiness,
+          startupRecovery: baseline.startupRecovery,
+        ),
+        changedPaths: {'TRACK-12/main.md'},
+      );
+
+      await viewModel.handleAppResumed();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(viewModel.hasPendingWorkspaceSyncRefresh, isTrue);
+
+      repository.completePendingSearch();
+      await queryFuture;
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(viewModel.hasPendingWorkspaceSyncRefresh, isFalse);
+      expect(viewModel.jql, 'project = TRACK AND status = "In Progress"');
+      expect(viewModel.selectedIssue?.description, 'Query-safe remote refresh');
+    },
+  );
 }
 
-class _SyncAwareRepository implements TrackStateRepository, WorkspaceSyncRepository {
-  _SyncAwareRepository({required TrackerSnapshot snapshot}) : _snapshot = snapshot;
+class _SyncAwareRepository
+    implements TrackStateRepository, WorkspaceSyncRepository {
+  _SyncAwareRepository({required TrackerSnapshot snapshot})
+    : _snapshot = snapshot;
 
   TrackerSnapshot _snapshot;
   RepositorySyncState _state = const RepositorySyncState(
@@ -72,6 +127,7 @@ class _SyncAwareRepository implements TrackStateRepository, WorkspaceSyncReposit
   );
   RepositorySyncCheck? _queuedCheck;
   final JqlSearchService _searchService = const JqlSearchService();
+  Completer<void>? _delayedSearchCompleter;
 
   @override
   bool get usesLocalPersistence => false;
@@ -97,6 +153,15 @@ class _SyncAwareRepository implements TrackStateRepository, WorkspaceSyncReposit
     );
   }
 
+  void delayNextSearchRequest() {
+    _delayedSearchCompleter = Completer<void>();
+  }
+
+  void completePendingSearch() {
+    _delayedSearchCompleter?.complete();
+    _delayedSearchCompleter = null;
+  }
+
   @override
   Future<RepositorySyncCheck> checkSync({
     RepositorySyncState? previousState,
@@ -118,14 +183,23 @@ class _SyncAwareRepository implements TrackStateRepository, WorkspaceSyncReposit
     int startAt = 0,
     int maxResults = 50,
     String? continuationToken,
-  }) async => _searchService.search(
-    issues: _snapshot.issues,
-    project: _snapshot.project,
-    jql: jql,
-    startAt: startAt,
-    maxResults: maxResults,
-    continuationToken: continuationToken,
-  );
+  }) async {
+    final delayedSearchCompleter = _delayedSearchCompleter;
+    if (delayedSearchCompleter != null) {
+      await delayedSearchCompleter.future;
+      if (identical(_delayedSearchCompleter, delayedSearchCompleter)) {
+        _delayedSearchCompleter = null;
+      }
+    }
+    return _searchService.search(
+      issues: _snapshot.issues,
+      project: _snapshot.project,
+      jql: jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+  }
 
   @override
   Future<List<TrackStateIssue>> searchIssues(String jql) async =>
@@ -163,8 +237,10 @@ class _SyncAwareRepository implements TrackStateRepository, WorkspaceSyncReposit
   ) async => throw UnimplementedError();
 
   @override
-  Future<TrackStateIssue> addIssueComment(TrackStateIssue issue, String body) async =>
-      throw UnimplementedError();
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => throw UnimplementedError();
 
   @override
   Future<TrackStateIssue> uploadIssueAttachment({
@@ -178,8 +254,9 @@ class _SyncAwareRepository implements TrackStateRepository, WorkspaceSyncReposit
       Uint8List(0);
 
   @override
-  Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue) async =>
-      const <IssueHistoryEntry>[];
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
 }
 
 TrackStateIssue _copyIssue(TrackStateIssue issue, {String? description}) {
@@ -221,7 +298,6 @@ TrackStateIssue _copyIssue(TrackStateIssue issue, {String? description}) {
   );
 }
 
-String _issueRoot(String storagePath) =>
-    storagePath.endsWith('/main.md')
-        ? storagePath.substring(0, storagePath.length - '/main.md'.length)
-        : storagePath;
+String _issueRoot(String storagePath) => storagePath.endsWith('/main.md')
+    ? storagePath.substring(0, storagePath.length - '/main.md'.length)
+    : storagePath;
