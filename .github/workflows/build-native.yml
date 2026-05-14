@@ -161,7 +161,11 @@ jobs:
 
           app_path="build/macos/Build/Products/Release/trackstate.app"
           if [[ ! -d "$app_path" ]]; then
-            app_path="$(find build/macos/Build/Products/Release -maxdepth 1 -name '*.app' | head -n 1)"
+            app_path=""
+            while IFS= read -r candidate_app_path; do
+              app_path="$candidate_app_path"
+              break
+            done < <(find build/macos/Build/Products/Release -maxdepth 1 -name '*.app')
           fi
 
           if [[ -z "$app_path" || ! -d "$app_path" ]]; then

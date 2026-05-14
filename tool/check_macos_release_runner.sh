@@ -22,6 +22,15 @@ fail() {
   exit 1
 }
 
+read_first_line() {
+  local __result_var="$1"
+  shift
+
+  local first_line=""
+  IFS= read -r first_line < <("$@")
+  printf -v "$__result_var" '%s' "$first_line"
+}
+
 if [[ "$runner_os" != "Darwin" ]]; then
   fail "TrackState Apple release jobs require a macOS runner; found '$runner_os'."
 fi
@@ -36,7 +45,7 @@ for tool in "${required_tools[@]}"; do
   fi
 done
 
-flutter_version_line="$(flutter --version | head -n 1)"
+read_first_line flutter_version_line flutter --version
 if [[ "$flutter_version_line" != "Flutter $required_flutter_version"* ]]; then
   fail "Flutter $required_flutter_version is required; found '$flutter_version_line'."
 fi
@@ -46,7 +55,7 @@ if [[ "$dart_version_line" != "Dart SDK version: $required_dart_version"* ]]; th
   fail "Dart $required_dart_version is required; found '$dart_version_line'."
 fi
 
-xcode_version_line="$(xcodebuild -version | head -n 1)"
+read_first_line xcode_version_line xcodebuild -version
 if [[ ! "$xcode_version_line" =~ ^Xcode[[:space:]]+([0-9]+)(\.[0-9]+)? ]]; then
   fail "Unable to determine the Xcode version from '$xcode_version_line'."
 fi
@@ -56,7 +65,7 @@ if (( xcode_major < minimum_xcode_major )); then
   fail "Xcode $minimum_xcode_major or newer is required; found '$xcode_version_line'."
 fi
 
-bash_version_line="$(bash --version | head -n 1)"
+read_first_line bash_version_line bash --version
 if [[ ! "$bash_version_line" =~ version[[:space:]]+([0-9]+)\.([0-9]+) ]]; then
   fail "Unable to determine the Bash version from '$bash_version_line'."
 fi
