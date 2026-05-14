@@ -345,7 +345,10 @@ class TrackerViewModel extends ChangeNotifier {
   WorkspaceSyncService? _workspaceSyncService;
   WorkspaceSyncStatus _workspaceSyncStatus = const WorkspaceSyncStatus();
   WorkspaceSyncRefresh? _pendingWorkspaceSyncRefresh;
+  int _queryUpdateSerial = 0;
+  int? _activeQueryUpdateToken;
   int _searchRequestSerial = 0;
+  int _issueHydrationContextSerial = 0;
   int _editSessionDepth = 0;
   bool _disposed = false;
 
@@ -595,8 +598,9 @@ class TrackerViewModel extends ChangeNotifier {
 
   Future<void> updateQuery(String query) async {
     final previousQuery = _jql;
+    final queryUpdateToken = _beginQueryUpdate();
     final requestToken = _beginSearchRequest();
-    _isUpdatingQuery = true;
+    _invalidateIssueHydrationContext();
     _jql = query;
     try {
       final searchPage = await _repository.searchIssuePage(
@@ -615,10 +619,8 @@ class TrackerViewModel extends ChangeNotifier {
       _jql = previousQuery;
       _message = TrackerMessage.searchFailed(error);
     } finally {
-      if (_isSearchRequestCurrent(requestToken)) {
-        _isUpdatingQuery = false;
-        unawaited(_applyPendingWorkspaceSyncRefresh());
-      }
+      _finishQueryUpdate(queryUpdateToken);
+      unawaited(_applyPendingWorkspaceSyncRefresh());
     }
     notifyListeners();
   }
@@ -675,6 +677,9 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   void selectIssue(TrackStateIssue issue, {TrackerSection? returnSection}) {
+    if (_selectedIssue?.key != issue.key) {
+      _invalidateIssueHydrationContext();
+    }
     _selectedIssue = issue;
     _section = TrackerSection.search;
     _issueDetailReturnSection =
@@ -1823,14 +1828,14 @@ class TrackerViewModel extends ChangeNotifier {
     loadingSet.add(issue.key);
     _clearIssueDeferredError(issue.key, _deferredSectionForScope(scope));
     notifyListeners();
-    final searchRequestToken = _searchRequestSerial;
+    final hydrationContextToken = _captureIssueHydrationContext();
     try {
       final hydrated = await repository.hydrateIssue(
         currentIssue,
         scopes: {scope},
       );
       if (!_shouldApplyHydratedIssueRefresh(
-        searchRequestToken: searchRequestToken,
+        hydrationContextToken: hydrationContextToken,
         issueKey: currentIssue.key,
       )) {
         return;
@@ -2162,11 +2167,37 @@ class TrackerViewModel extends ChangeNotifier {
     return requestToken == _searchRequestSerial;
   }
 
+  int _beginQueryUpdate() {
+    _queryUpdateSerial += 1;
+    final token = _queryUpdateSerial;
+    _activeQueryUpdateToken = token;
+    _isUpdatingQuery = true;
+    return token;
+  }
+
+  void _finishQueryUpdate(int queryUpdateToken) {
+    if (_activeQueryUpdateToken != queryUpdateToken) {
+      return;
+    }
+    _activeQueryUpdateToken = null;
+    _isUpdatingQuery = false;
+  }
+
+  int _captureIssueHydrationContext() => _issueHydrationContextSerial;
+
+  void _invalidateIssueHydrationContext() {
+    _issueHydrationContextSerial += 1;
+  }
+
+  bool _isIssueHydrationContextCurrent(int hydrationContextToken) {
+    return hydrationContextToken == _issueHydrationContextSerial;
+  }
+
   bool _shouldApplyHydratedIssueRefresh({
-    required int searchRequestToken,
+    required int hydrationContextToken,
     required String issueKey,
   }) {
-    return _isSearchRequestCurrent(searchRequestToken) &&
+    return _isIssueHydrationContextCurrent(hydrationContextToken) &&
         _selectedIssue?.key == issueKey;
   }
 
@@ -2181,6 +2212,7 @@ class TrackerViewModel extends ChangeNotifier {
     required TrackStateIssue? previousSelectedIssue,
     required String? preferredSelectedIssueKey,
   }) async {
+    final previousSelectedIssueKey = _selectedIssue?.key;
     _snapshot = snapshot;
     _startupRecovery = snapshot.startupRecovery;
     if (_jql.contains('project = TRACK') && snapshot.project.key != 'TRACK') {
@@ -2193,6 +2225,9 @@ class TrackerViewModel extends ChangeNotifier {
       preferredSelectedIssueKey,
       snapshot.issues,
     );
+    if (_selectedIssue?.key != previousSelectedIssueKey) {
+      _invalidateIssueHydrationContext();
+    }
     _updateWorkspaceSyncBaseline();
     await _restoreSelectedIssueScopes(previousSelectedIssue);
   }
@@ -2217,7 +2252,7 @@ class TrackerViewModel extends ChangeNotifier {
     if (scopes.isEmpty) {
       return;
     }
-    final searchRequestToken = _searchRequestSerial;
+    final hydrationContextToken = _captureIssueHydrationContext();
     for (final scope in scopes) {
       _clearIssueDeferredError(
         currentIssue.key,
@@ -2230,16 +2265,13 @@ class TrackerViewModel extends ChangeNotifier {
         scopes: scopes,
       );
       if (!_shouldApplyHydratedIssueRefresh(
-        searchRequestToken: searchRequestToken,
+        hydrationContextToken: hydrationContextToken,
         issueKey: currentIssue.key,
       )) {
         return;
       }
       _applyTargetedIssueRefresh(hydrated);
-      _refreshSearchResultsFromLoadedSnapshot(
-        _snapshot!,
-        requestToken: searchRequestToken,
-      );
+      _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
     } on Object catch (error) {
       for (final scope in scopes) {
         _setIssueDeferredError(

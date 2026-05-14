@@ -252,6 +252,38 @@ void main() {
     },
   );
 
+  test(
+    'view model keeps selected issue hydration when pagination starts later',
+    () async {
+      final repository = _DelayedHydrationPaginationRepository(
+        snapshot: _searchPaginationSnapshot(),
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final selectedIssue = viewModel.selectedIssue!;
+
+      repository.delayNextHydration();
+      final hydrationFuture = viewModel.ensureIssueDetailLoaded(selectedIssue);
+      await repository.waitForPendingHydration();
+
+      final loadMoreFuture = viewModel.loadMoreSearchResults();
+      await Future<void>.delayed(Duration.zero);
+
+      repository.completePendingHydration();
+      await hydrationFuture;
+      await loadMoreFuture;
+
+      expect(viewModel.selectedIssue?.key, selectedIssue.key);
+      expect(
+        viewModel.selectedIssue?.description,
+        'Hydrated detail for ${selectedIssue.key}',
+      );
+      expect(viewModel.selectedIssue?.hasDetailLoaded, isTrue);
+      expect(viewModel.searchResults.length, 8);
+    },
+  );
+
   test('view model changes sections and toggles theme', () async {
     final viewModel = TrackerViewModel(
       repository: const DemoTrackStateRepository(),
@@ -2462,6 +2494,9 @@ TrackerSnapshot _searchPaginationSnapshot() {
         links: const [],
         attachments: const [],
         isArchived: false,
+        hasDetailLoaded: false,
+        hasCommentsLoaded: false,
+        hasAttachmentsLoaded: false,
         storagePath: 'TRACK/TRACK-$index/main.md',
         rawMarkdown: '',
       ),
@@ -2741,6 +2776,93 @@ class _DelayedHydrationReloadRepository
       loadWarnings: _currentSnapshot.loadWarnings,
       readiness: _currentSnapshot.readiness,
       startupRecovery: _currentSnapshot.startupRecovery,
+    );
+    return hydrated;
+  }
+}
+
+class _DelayedHydrationPaginationRepository
+    extends ProviderBackedTrackStateRepository {
+  _DelayedHydrationPaginationRepository({required TrackerSnapshot snapshot})
+    : _snapshot = snapshot,
+      super(
+        provider: MutableIssueDetailTrackStateProvider(),
+        supportsGitHubAuth: false,
+      );
+
+  final JqlSearchService _searchService = const JqlSearchService();
+  TrackerSnapshot _snapshot;
+  Completer<void>? _delayedHydrationCompleter;
+  Completer<void>? _pendingHydrationCompleter;
+
+  void delayNextHydration() {
+    _delayedHydrationCompleter = Completer<void>();
+    _pendingHydrationCompleter = Completer<void>();
+  }
+
+  Future<void> waitForPendingHydration() async {
+    final completer = _pendingHydrationCompleter;
+    if (completer == null) {
+      throw StateError('No delayed hydration is pending.');
+    }
+    await completer.future;
+  }
+
+  void completePendingHydration() {
+    _delayedHydrationCompleter?.complete();
+    _delayedHydrationCompleter = null;
+  }
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    return _searchService.search(
+      issues: _snapshot.issues,
+      project: _snapshot.project,
+      jql: jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+  }
+
+  @override
+  Future<TrackStateIssue> hydrateIssue(
+    TrackStateIssue issue, {
+    Set<IssueHydrationScope> scopes = const {IssueHydrationScope.detail},
+    bool force = false,
+  }) async {
+    _pendingHydrationCompleter?.complete();
+    final delayedHydrationCompleter = _delayedHydrationCompleter;
+    if (delayedHydrationCompleter != null) {
+      await delayedHydrationCompleter.future;
+      if (identical(_delayedHydrationCompleter, delayedHydrationCompleter)) {
+        _delayedHydrationCompleter = null;
+      }
+    }
+    final hydrated = issue.copyWith(
+      description: 'Hydrated detail for ${issue.key}',
+      hasDetailLoaded: scopes.contains(IssueHydrationScope.detail),
+      hasCommentsLoaded: scopes.contains(IssueHydrationScope.comments),
+      hasAttachmentsLoaded: scopes.contains(IssueHydrationScope.attachments),
+    );
+    _snapshot = TrackerSnapshot(
+      project: _snapshot.project,
+      issues: [
+        for (final candidate in _snapshot.issues)
+          if (candidate.key == hydrated.key) hydrated else candidate,
+      ],
+      repositoryIndex: _snapshot.repositoryIndex,
+      loadWarnings: _snapshot.loadWarnings,
+      readiness: _snapshot.readiness,
+      startupRecovery: _snapshot.startupRecovery,
     );
     return hydrated;
   }

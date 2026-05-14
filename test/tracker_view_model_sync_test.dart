@@ -111,6 +111,57 @@ void main() {
       expect(viewModel.selectedIssue?.description, 'Query-safe remote refresh');
     },
   );
+
+  test(
+    'view model applies queued refresh after load more supersedes a pending query request',
+    () async {
+      final snapshot = _searchPaginationSnapshot();
+      final repository = _SyncAwareRepository(snapshot: snapshot);
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      repository.delayNextSearchRequest();
+
+      final queryFuture = viewModel.updateQuery('project = TRACK');
+      await Future<void>.delayed(Duration.zero);
+
+      final loadMoreFuture = viewModel.loadMoreSearchResults();
+      await Future<void>.delayed(Duration.zero);
+
+      repository.queueHostedRefresh(
+        nextSnapshot: TrackerSnapshot(
+          project: snapshot.project,
+          issues: [
+            for (final issue in snapshot.issues)
+              if (issue.key == 'TRACK-1')
+                _copyIssue(issue, description: 'Refresh survives stale query')
+              else
+                issue,
+          ],
+          repositoryIndex: snapshot.repositoryIndex,
+          loadWarnings: snapshot.loadWarnings,
+          readiness: snapshot.readiness,
+          startupRecovery: snapshot.startupRecovery,
+        ),
+        changedPaths: {'TRACK/TRACK-1/main.md'},
+      );
+
+      await viewModel.handleAppResumed();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(viewModel.hasPendingWorkspaceSyncRefresh, isTrue);
+
+      repository.completePendingSearch();
+      await queryFuture;
+      await loadMoreFuture;
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(viewModel.hasPendingWorkspaceSyncRefresh, isFalse);
+      expect(viewModel.searchResults.length, 8);
+      expect(viewModel.selectedIssue?.description, 'Refresh survives stale query');
+    },
+  );
 }
 
 class _SyncAwareRepository
@@ -301,3 +352,69 @@ TrackStateIssue _copyIssue(TrackStateIssue issue, {String? description}) {
 String _issueRoot(String storagePath) => storagePath.endsWith('/main.md')
     ? storagePath.substring(0, storagePath.length - '/main.md'.length)
     : storagePath;
+
+TrackerSnapshot _searchPaginationSnapshot() {
+  final issues = [
+    for (var index = 1; index <= 8; index += 1)
+      TrackStateIssue(
+        key: 'TRACK-$index',
+        project: 'TRACK',
+        issueType: IssueType.story,
+        issueTypeId: 'story',
+        status: IssueStatus.inProgress,
+        statusId: 'in-progress',
+        priority: IssuePriority.medium,
+        priorityId: 'medium',
+        summary: 'Paged issue $index',
+        description: 'Search result $index',
+        assignee: 'user-$index',
+        reporter: 'demo-user',
+        labels: const ['paged'],
+        components: const [],
+        fixVersionIds: const [],
+        watchers: const [],
+        customFields: const {},
+        parentKey: null,
+        epicKey: null,
+        parentPath: null,
+        epicPath: null,
+        progress: 0,
+        updatedLabel: 'just now',
+        acceptanceCriteria: const ['Visible in search pagination'],
+        comments: const [],
+        links: const [],
+        attachments: const [],
+        isArchived: false,
+        hasDetailLoaded: false,
+        hasCommentsLoaded: false,
+        hasAttachmentsLoaded: false,
+        storagePath: 'TRACK/TRACK-$index/main.md',
+        rawMarkdown: '',
+      ),
+  ];
+  return TrackerSnapshot(
+    project: const ProjectConfig(
+      key: 'TRACK',
+      name: 'TrackState',
+      repository: 'trackstate/trackstate',
+      branch: 'main',
+      defaultLocale: 'en',
+      issueTypeDefinitions: [TrackStateConfigEntry(id: 'story', name: 'Story')],
+      statusDefinitions: [
+        TrackStateConfigEntry(id: 'in-progress', name: 'In Progress'),
+      ],
+      fieldDefinitions: [
+        TrackStateFieldDefinition(
+          id: 'summary',
+          name: 'Summary',
+          type: 'string',
+          required: true,
+        ),
+      ],
+      priorityDefinitions: [
+        TrackStateConfigEntry(id: 'medium', name: 'Medium'),
+      ],
+    ),
+    issues: issues,
+  );
+}
