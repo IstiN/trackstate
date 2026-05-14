@@ -183,8 +183,10 @@ def main() -> None:
                 }
                 desktop_panel: WorkspaceSwitcherPanelObservation | None = None
                 try:
-                    page.open_switcher()
-                    desktop_panel = page.observe_panel(desktop_trigger)
+                    desktop_panel = _open_and_observe_panel(
+                        page=page,
+                        trigger=desktop_trigger,
+                    )
                     result["desktop_panel_observation"] = asdict(desktop_panel)
                     _assert_desktop_panel(
                         panel=desktop_panel,
@@ -197,8 +199,8 @@ def main() -> None:
                         step=3,
                         status="failed",
                         action=(
-                            "Click the desktop switcher trigger and verify it opens an "
-                            "anchored panel."
+                            "Click the desktop switcher trigger and verify it opens a "
+                            "desktop dialog."
                         ),
                         observed=str(error),
                     )
@@ -208,13 +210,13 @@ def main() -> None:
                         step=3,
                         status="passed",
                         action=(
-                            "Click the desktop switcher trigger and verify it opens an "
-                            "anchored panel."
+                            "Click the desktop switcher trigger and verify it opens a "
+                            "desktop dialog."
                         ),
                         observed=(
                             f"container_kind={desktop_panel.container_kind}; "
                             f"role={desktop_panel.container_role!r}; "
-                            f"anchored={desktop_panel.anchored_to_trigger}; "
+                            f"background_dimmed={desktop_panel.background_dimmed}; "
                             f"bounds=({desktop_panel.left:.1f}, {desktop_panel.top:.1f}, "
                             f"{desktop_panel.width:.1f}, {desktop_panel.height:.1f})"
                         ),
@@ -227,7 +229,7 @@ def main() -> None:
                         result,
                         check=(
                             "Opened the desktop workspace switcher from the live app shell "
-                            "and checked where the surface appeared relative to the trigger."
+                            "and checked it opened as the desktop dialog surface."
                         ),
                         observed=(
                             f"container_kind={desktop_panel.container_kind}; "
@@ -273,6 +275,7 @@ def main() -> None:
                     _assert_compact_trigger(
                         mobile_trigger,
                         desktop_trigger=desktop_trigger,
+                        desktop_trigger_visual=desktop_trigger_visual,
                         trigger_visual=mobile_trigger_visual,
                     )
                 except AssertionError as error:
@@ -301,6 +304,7 @@ def main() -> None:
                             f"size=({mobile_trigger.width:.1f}x{mobile_trigger.height:.1f}); "
                             f"label={mobile_trigger.semantic_label!r}; "
                             f"visual_icon_visible={mobile_trigger_visual.icon_visible}; "
+                            f"text_band_count={mobile_trigger_visual.text_band_count}; "
                             f"top_buttons={list(mobile_trigger.top_button_labels)!r}"
                         ),
                     )
@@ -310,18 +314,21 @@ def main() -> None:
                         "Viewed the compact/mobile app shell and checked the switcher "
                         "looked condensed rather than like the desktop button."
                     ),
-                    observed=(
-                        f"lines={list(mobile_trigger.raw_text_lines)!r}; "
-                        f"size=({mobile_trigger.width:.1f}x{mobile_trigger.height:.1f}); "
-                        f"text={mobile_trigger.visible_text!r}; "
-                        f"visual_icon_visible={mobile_trigger_visual.icon_visible}"
-                    ),
-                )
+                        observed=(
+                            f"lines={list(mobile_trigger.raw_text_lines)!r}; "
+                            f"size=({mobile_trigger.width:.1f}x{mobile_trigger.height:.1f}); "
+                            f"text={mobile_trigger.visible_text!r}; "
+                            f"visual_icon_visible={mobile_trigger_visual.icon_visible}; "
+                            f"text_band_count={mobile_trigger_visual.text_band_count}"
+                        ),
+                    )
 
                 mobile_panel: WorkspaceSwitcherPanelObservation | None = None
                 try:
-                    page.open_switcher()
-                    mobile_panel = page.observe_panel(mobile_trigger)
+                    mobile_panel = _open_and_observe_panel(
+                        page=page,
+                        trigger=mobile_trigger,
+                    )
                     result["compact_panel_observation"] = asdict(mobile_panel)
                     _assert_compact_panel(mobile_panel)
                 except AssertionError as error:
@@ -463,29 +470,28 @@ def _assert_desktop_panel(
     panel: WorkspaceSwitcherPanelObservation,
     trigger: WorkspaceSwitcherTriggerObservation,
 ) -> None:
-    if panel.title_text != "Workspace switcher":
+    if trigger.display_name not in panel.container_text and panel.bright_change_pixels <= 0:
         raise AssertionError(
-            "Step 3 failed: opening the desktop switcher did not show the expected "
-            "workspace-switcher title.\n"
-            f"Observed title: {panel.title_text!r}\n"
-            f"Observed container text: {panel.container_text}",
+            "Step 3 failed: opening the desktop workspace switcher did not produce any "
+            "rendered dialog evidence.\n"
+            f"Observed panel text: {panel.container_text}",
         )
-    if trigger.display_name not in panel.container_text:
-        raise AssertionError(
-            "Step 3 failed: opening the desktop switcher did not show the active "
-            "workspace summary in the opened surface.\n"
-            f"Expected workspace name: {trigger.display_name!r}\n"
-            f"Observed container text: {panel.container_text}",
-        )
-    if panel.container_kind != "anchored-panel":
+    if panel.container_kind != "dialog":
         raise AssertionError(
             "Step 3 failed: clicking the desktop workspace switcher did not open an "
-            "anchored panel.\n"
+            "desktop dialog.\n"
             f"Observed container kind: {panel.container_kind}\n"
             f"Observed bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
             f"width={panel.width:.1f}, height={panel.height:.1f}\n"
             f"Trigger bounds: left={trigger.left:.1f}, top={trigger.top:.1f}, "
             f"width={trigger.width:.1f}, height={trigger.height:.1f}",
+        )
+    if not panel.background_dimmed:
+        raise AssertionError(
+            "Step 3 failed: opening the desktop workspace switcher did not dim the "
+            "background like a modal dialog.\n"
+            f"Observed bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
+            f"width={panel.width:.1f}, height={panel.height:.1f}",
         )
 
 
@@ -493,6 +499,7 @@ def _assert_compact_trigger(
     trigger: WorkspaceSwitcherTriggerObservation,
     *,
     desktop_trigger: WorkspaceSwitcherTriggerObservation,
+    desktop_trigger_visual: WorkspaceSwitcherTriggerVisualObservation,
     trigger_visual: WorkspaceSwitcherTriggerVisualObservation,
 ) -> None:
     if trigger.height < 44:
@@ -528,6 +535,20 @@ def _assert_compact_trigger(
             f"Observed semantic icon_count: {trigger.icon_count}\n"
             f"Observed visual icon: {trigger_visual.icon_visible}",
         )
+    if trigger_visual.text_band_count < 2:
+        raise AssertionError(
+            "Step 5 failed: the compact workspace switcher did not render the expected "
+            "stacked mobile text treatment.\n"
+            f"Observed text bands: {trigger_visual.text_band_count}\n"
+            f"Observed band boxes: {list(trigger_visual.text_band_boxes)!r}",
+        )
+    if trigger_visual.text_band_count <= desktop_trigger_visual.text_band_count:
+        raise AssertionError(
+            "Step 5 failed: the compact workspace switcher did not visibly condense "
+            "the text structure relative to desktop.\n"
+            f"Desktop text bands: {desktop_trigger_visual.text_band_count}\n"
+            f"Compact text bands: {trigger_visual.text_band_count}",
+        )
     if any(label in DESKTOP_SECTIONS for label in trigger.top_button_labels):
         raise AssertionError(
             "Step 5 failed: the compact workspace switcher still shared the desktop "
@@ -537,17 +558,18 @@ def _assert_compact_trigger(
 
 
 def _assert_compact_panel(panel: WorkspaceSwitcherPanelObservation) -> None:
-    if panel.title_text != "Workspace switcher":
-        raise AssertionError(
-            "Step 6 failed: opening the compact workspace switcher did not show the "
-            "expected workspace-switcher title.\n"
-            f"Observed title: {panel.title_text!r}",
-        )
     if panel.container_kind not in {"bottom-sheet", "full-screen-sheet"}:
         raise AssertionError(
             "Step 6 failed: clicking the compact workspace switcher did not open a "
             "bottom sheet or full-screen sheet.\n"
             f"Observed container kind: {panel.container_kind}\n"
+            f"Observed bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
+            f"width={panel.width:.1f}, height={panel.height:.1f}",
+        )
+    if not panel.background_dimmed:
+        raise AssertionError(
+            "Step 6 failed: opening the compact workspace switcher did not dim the "
+            "background like a mobile sheet.\n"
             f"Observed bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
             f"width={panel.width:.1f}, height={panel.height:.1f}",
         )
@@ -642,7 +664,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             "workspace switcher showing the active workspace name, icon, and state."
         ),
         (
-            "* Verified the opened switcher container on desktop and after resizing to "
+            "* Verified the opened switcher surface on desktop and after resizing to "
             "a compact/mobile width."
         ),
         "",
@@ -695,7 +717,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         ),
         (
             "- Opened the switcher on desktop, resized to a compact/mobile width, and "
-            "opened it again to verify the container adapted by layout."
+            "opened it again to verify the desktop dialog and mobile sheet adapted by layout."
         ),
         "",
         "## Result",
@@ -776,7 +798,7 @@ def _bug_description(result: dict[str, object]) -> str:
             "## Steps to reproduce",
             "1. Launch the deployed TrackState application on a desktop browser.",
             "2. Verify the previous standalone repository-access button is replaced by a workspace switcher showing the active workspace name, icon, and state badge.",
-            "3. Click the switcher trigger and verify it opens an anchored panel.",
+            "3. Click the switcher trigger and verify it opens the desktop dialog surface.",
             "4. Resize the browser to a compact/mobile width.",
             "5. Verify the switcher trigger uses a condensed, icon-led presentation.",
             "6. Click the trigger and verify it opens a bottom sheet or full-screen sheet.",
@@ -795,7 +817,7 @@ def _bug_description(result: dict[str, object]) -> str:
             _annotated_step_line(
                 result,
                 3,
-                "Click the desktop switcher trigger and verify it opens an anchored panel.",
+                "Click the desktop switcher trigger and verify it opens the desktop dialog surface.",
             ),
             _annotated_step_line(
                 result,
@@ -817,8 +839,8 @@ def _bug_description(result: dict[str, object]) -> str:
             (
                 "- Expected: the app shell replaces the legacy repository-access button "
                 "with a workspace switcher across tracker sections, the desktop trigger "
-                "opens an anchored panel, and the compact trigger opens a bottom sheet "
-                "or full-screen sheet."
+                "opens the desktop dialog surface, and the compact trigger opens a "
+                "bottom sheet or full-screen sheet."
             ),
             f"- Actual: {result.get('error', '<missing error>')}",
             "",
@@ -890,6 +912,39 @@ def _observe_trigger_visual(
         )
     finally:
         screenshot_path.unlink(missing_ok=True)
+
+
+def _open_and_observe_panel(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    trigger: WorkspaceSwitcherTriggerObservation,
+) -> WorkspaceSwitcherPanelObservation:
+    with tempfile.NamedTemporaryFile(
+        dir=OUTPUTS_DIR,
+        prefix="ts722_panel_before_",
+        suffix=".png",
+        delete=False,
+    ) as before_handle:
+        before_path = Path(before_handle.name)
+    with tempfile.NamedTemporaryFile(
+        dir=OUTPUTS_DIR,
+        prefix="ts722_panel_after_",
+        suffix=".png",
+        delete=False,
+    ) as after_handle:
+        after_path = Path(after_handle.name)
+    try:
+        page.screenshot(str(before_path))
+        page.open_switcher()
+        page.screenshot(str(after_path))
+        return page.observe_panel(
+            trigger,
+            before_screenshot_path=before_path,
+            after_screenshot_path=after_path,
+        )
+    finally:
+        before_path.unlink(missing_ok=True)
+        after_path.unlink(missing_ok=True)
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:

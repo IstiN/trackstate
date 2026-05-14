@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import re
 
 from testing.components.pages.live_project_settings_page import LiveProjectSettingsPage
+from testing.core.utils.color_contrast import color_distance
+from testing.core.utils.png_image import RgbImage
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
 from testing.core.interfaces.web_app_session import WebAppTimeoutError
 
@@ -34,6 +37,7 @@ class WorkspaceSwitcherPanelObservation:
     container_kind: str
     container_role: str | None
     container_text: str
+    bright_change_pixels: int
     left: float
     top: float
     width: float
@@ -41,6 +45,7 @@ class WorkspaceSwitcherPanelObservation:
     anchored_to_trigger: bool
     bottom_aligned: bool
     full_screen_like: bool
+    background_dimmed: bool
 
 
 class LiveWorkspaceSwitcherPage:
@@ -234,172 +239,29 @@ class LiveWorkspaceSwitcherPage:
         self,
         trigger: WorkspaceSwitcherTriggerObservation,
         *,
-        timeout_ms: int = 30_000,
+        before_screenshot_path: Path,
+        after_screenshot_path: Path,
     ) -> WorkspaceSwitcherPanelObservation:
-        try:
-            payload = self._session.wait_for_function(
-                """
-                ({ displayName }) => {
-                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-                  const dedupeRepeatedLine = (value) => {
-                    const normalized = normalize(value);
-                    const match = normalized.match(/^(.+)\\s+\\1$/);
-                    return match ? match[1] : normalized;
-                  };
-                  const isVisible = (element) => {
-                    if (!element) {
-                      return false;
-                    }
-                    const rect = element.getBoundingClientRect();
-                    const style = window.getComputedStyle(element);
-                    return rect.width > 0
-                      && rect.height > 0
-                      && style.visibility !== 'hidden'
-                      && style.display !== 'none';
-                  };
-                  const visibleElements = Array.from(document.querySelectorAll('body *')).filter(isVisible);
-                  const textFor = (element) => dedupeRepeatedLine(element.innerText || '');
-                  const accessibleLabel = (element) =>
-                    dedupeRepeatedLine(element.getAttribute('aria-label') || '');
-                  const sortByArea = (elements) =>
-                    elements.sort((left, right) => {
-                      const leftRect = left.getBoundingClientRect();
-                      const rightRect = right.getBoundingClientRect();
-                      return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
-                    });
-                  const dedupeNestedElements = (elements) => {
-                    const deduped = [];
-                    for (const candidate of elements) {
-                      if (deduped.some((accepted) => accepted.contains(candidate))) {
-                        continue;
-                      }
-                      deduped.push(candidate);
-                    }
-                    return deduped;
-                  };
-                  const titleElement = sortByArea(
-                    visibleElements.filter((element) => {
-                      const text = textFor(element);
-                      return text === 'Workspace switcher';
-                    }),
-                  )[0] ?? null;
-                  const controlLabels = new Set(['Delete', 'Hosted', 'Local', 'Save and switch']);
-                  const surfaceElements = dedupeNestedElements(
-                    sortByArea(
-                      visibleElements.filter((element) => {
-                        const text = textFor(element);
-                        if (!text) {
-                          return false;
-                        }
-                        const rect = element.getBoundingClientRect();
-                        if (
-                          rect.width <= 0
-                          || rect.height <= 0
-                          || (rect.width * rect.height) >= (window.innerWidth * window.innerHeight * 0.9)
-                        ) {
-                          return false;
-                        }
-                        return (
-                          text === 'Workspace switcher'
-                          || text === 'Saved workspaces'
-                          || controlLabels.has(text)
-                          || (displayName && text.includes(displayName))
-                          || text.includes('Branch:')
-                          || text.includes('Needs sign-in')
-                          || text === 'Active'
-                        );
-                      }),
-                    ),
-                  );
-                  if (!titleElement) {
-                    return null;
-                  }
-                  const surfaceTextValues = Array.from(
-                    new Set(
-                      [titleElement, ...surfaceElements]
-                        .map((element) => textFor(element))
-                        .filter((text) => text.length > 0),
-                    ),
-                  );
-                  const hasWorkspaceSummary =
-                    surfaceTextValues.some((text) => displayName && text.includes(displayName))
-                    && surfaceTextValues.some((text) => text.includes('Branch:') || text.includes('Needs sign-in'));
-                  const hasPanelControls = surfaceTextValues.some((text) => text === 'Save and switch')
-                    && surfaceTextValues.some((text) => text === 'Hosted')
-                    && surfaceTextValues.some((text) => text === 'Local');
-                  if (!hasWorkspaceSummary || !hasPanelControls) {
-                    return null;
-                  }
-                  const boundsElements = [titleElement, ...surfaceElements];
-                  const rects = boundsElements.map((element) => element.getBoundingClientRect());
-                  const left = Math.min(...rects.map((rect) => rect.left));
-                  const top = Math.min(...rects.map((rect) => rect.top));
-                  const right = Math.max(...rects.map((rect) => rect.right));
-                  const bottom = Math.max(...rects.map((rect) => rect.bottom));
-                  let current = titleElement;
-                  let containerRole = null;
-                  while (current && current !== document.body) {
-                    const role = normalize(current.getAttribute('role') || '').toLowerCase();
-                    const ariaLabel = normalize(current.getAttribute('aria-label') || '').toLowerCase();
-                    const containerText = textFor(current);
-                    if (
-                      containerText.includes('Workspace switcher')
-                      && (
-                        role === 'dialog'
-                        || ariaLabel === 'dialog'
-                      )
-                    ) {
-                      containerRole = role || ariaLabel;
-                      break;
-                    }
-                    current = current.parentElement;
-                  }
-                  if (!containerRole) {
-                    const floatingDialog = visibleElements.find((element) => {
-                      const role = normalize(element.getAttribute('role') || '').toLowerCase();
-                      const ariaLabel = normalize(element.getAttribute('aria-label') || '').toLowerCase();
-                      const text = textFor(element);
-                      return text.includes('Workspace switcher') && (role === 'dialog' || ariaLabel === 'dialog');
-                    }) ?? null;
-                    if (floatingDialog) {
-                      const role = normalize(floatingDialog.getAttribute('role') || '').toLowerCase();
-                      const ariaLabel = normalize(floatingDialog.getAttribute('aria-label') || '').toLowerCase();
-                      containerRole = role || ariaLabel;
-                    }
-                  }
-                  return {
-                    viewportWidth: window.innerWidth,
-                    viewportHeight: window.innerHeight,
-                    titleText: textFor(titleElement),
-                    containerRole,
-                    containerText: surfaceTextValues.join(' | '),
-                    left,
-                    top,
-                    width: right - left,
-                    height: bottom - top,
-                  };
-                }
-                """,
-                arg={"displayName": trigger.display_name},
-                timeout_ms=timeout_ms,
+        before = RgbImage.open(before_screenshot_path)
+        after = RgbImage.open(after_screenshot_path)
+        if before.width != after.width or before.height != after.height:
+            raise AssertionError(
+                "The workspace switcher screenshots did not use the same viewport.\n"
+                f"Before screenshot: {before.width}x{before.height}\n"
+                f"After screenshot: {after.width}x{after.height}",
             )
-        except WebAppTimeoutError as error:
+        surface_box = _bright_surface_box(before=before, after=after)
+        if surface_box is None:
             raise AssertionError(
                 "Activating the workspace switcher did not render any visible switcher "
                 "surface.\n"
                 f"Observed body text:\n{self.current_body_text()}",
-            ) from error
-        if not isinstance(payload, dict):
-            raise AssertionError(
-                "Activating the workspace switcher did not render any visible switcher panel.\n"
-                f"Observed body text:\n{self.current_body_text()}",
             )
-        left = float(payload["left"])
-        top = float(payload["top"])
-        width = float(payload["width"])
-        height = float(payload["height"])
-        viewport_width = float(payload["viewportWidth"])
-        viewport_height = float(payload["viewportHeight"])
+        left, top, right, bottom, bright_change_pixels = surface_box
+        width = float(right - left)
+        height = float(bottom - top)
+        viewport_width = trigger.viewport_width
+        viewport_height = trigger.viewport_height
         right = left + width
         trigger_right = trigger.left + trigger.width
         trigger_bottom = trigger.top + trigger.height
@@ -416,27 +278,45 @@ class LiveWorkspaceSwitcherPage:
         bottom_aligned = (top + height) >= (viewport_height - 24)
         full_screen_like = (
             top <= 40
-            and left <= 24
-            and width >= viewport_width * 0.85
-            and height >= viewport_height * 0.75
+            and left <= 12
+            and width >= viewport_width * 0.96
+            and height >= viewport_height * 0.8
+        )
+        background_dimmed = _background_dimmed(before=before, after=after)
+        centered_dialog = (
+            abs((left + (width / 2)) - (viewport_width / 2)) <= viewport_width * 0.12
+            and top >= 40
+            and bottom <= (viewport_height - 40)
+            and width >= viewport_width * 0.3
+            and width <= viewport_width * 0.85
+            and height >= viewport_height * 0.25
+            and background_dimmed
         )
         if full_screen_like:
             container_kind = "full-screen-sheet"
-        elif bottom_aligned and top >= viewport_height * 0.25:
+        elif (
+            bottom_aligned
+            and left <= 12
+            and width >= viewport_width * 0.96
+            and height >= viewport_height * 0.3
+        ):
             container_kind = "bottom-sheet"
+        elif centered_dialog:
+            container_kind = "dialog"
         elif anchored_to_trigger:
             container_kind = "anchored-panel"
         else:
-            container_kind = "dialog"
+            container_kind = "surface"
         return WorkspaceSwitcherPanelObservation(
             viewport_width=viewport_width,
             viewport_height=viewport_height,
-            title_text=str(payload["titleText"]),
+            title_text="",
             container_kind=container_kind,
-            container_role=(
-                str(payload["containerRole"]) if payload["containerRole"] is not None else None
+            container_role=None,
+            container_text=(
+                "Rendered workspace switcher surface detected from screenshot diff."
             ),
-            container_text=str(payload["containerText"]),
+            bright_change_pixels=bright_change_pixels,
             left=left,
             top=top,
             width=width,
@@ -444,6 +324,7 @@ class LiveWorkspaceSwitcherPage:
             anchored_to_trigger=anchored_to_trigger,
             bottom_aligned=bottom_aligned,
             full_screen_like=full_screen_like,
+            background_dimmed=background_dimmed,
         )
 
     def close_switcher(self) -> None:
@@ -457,3 +338,49 @@ class LiveWorkspaceSwitcherPage:
 
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
+
+
+def _bright_surface_box(
+    *,
+    before: RgbImage,
+    after: RgbImage,
+) -> tuple[float, float, float, float, int] | None:
+    minimum_brightness = 225.0
+    minimum_pixels = max(1_500, int((after.width * after.height) * 0.004))
+    min_x = after.width
+    min_y = after.height
+    max_x = -1
+    max_y = -1
+    bright_pixels = 0
+    for y in range(after.height):
+        for x in range(after.width):
+            index = (y * after.width) + x
+            after_pixel = after.pixels[index]
+            before_pixel = before.pixels[index]
+            if color_distance(after_pixel, before_pixel) <= 18.0:
+                continue
+            brightness = (after_pixel[0] + after_pixel[1] + after_pixel[2]) / 3
+            if brightness < minimum_brightness:
+                continue
+            bright_pixels += 1
+            if x < min_x:
+                min_x = x
+            if y < min_y:
+                min_y = y
+            if x > max_x:
+                max_x = x
+            if y > max_y:
+                max_y = y
+    if bright_pixels < minimum_pixels or max_x < min_x or max_y < min_y:
+        return None
+    return (float(min_x), float(min_y), float(max_x + 1), float(max_y + 1), bright_pixels)
+
+
+def _background_dimmed(*, before: RgbImage, after: RgbImage) -> bool:
+    darker_pixels = 0
+    for before_pixel, after_pixel in zip(before.pixels, after.pixels):
+        before_brightness = sum(before_pixel) / 3
+        after_brightness = sum(after_pixel) / 3
+        if (before_brightness - after_brightness) >= 12 and color_distance(before_pixel, after_pixel) >= 14:
+            darker_pixels += 1
+    return darker_pixels >= int((after.width * after.height) * 0.08)
