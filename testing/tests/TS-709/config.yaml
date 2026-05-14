@@ -1,0 +1,23 @@
+test_id: TS-709
+type: api
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - GitHub CLI authenticated with repo and workflow scopes
+  - Playwright for human-style GitHub file-page verification
+runtime_inputs:
+  repository: IstiN/trackstate
+  default_branch: main
+  apple_workflow_name: Apple Release Builds
+  apple_workflow_file: build-native.yml
+  apple_workflow_path: .github/workflows/build-native.yml
+  main_ci_workflow_name: Flutter CI
+  main_ci_workflow_file: flutter-ci.yml
+  main_ci_workflow_path: .github/workflows/flutter-ci.yml
+  expected_semver_tag_pattern: v*
+  recent_runs_limit: 30
+  ui_timeout_seconds: 60
+notes:
+  - Validates the live GitHub Actions workflow definitions and recent run history for IstiN/trackstate.
+  - Confirms Apple Release Builds is tag-scoped while the general CI path continues to process pushes on main.
+  - Uses GitHub browser file pages for the required human-style verification without mutating the repository.

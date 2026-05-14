@@ -19,6 +19,8 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     MobileTriggerFocusObservation,
     WorkspaceSwitcherBadgeObservation,
     WorkspaceSwitcherIconObservation,
+    WorkspaceSwitcherInteractiveTextObservation,
+    WorkspaceSwitcherSemanticsObservation,
     WorkspaceSwitcherSurfaceObservation,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
@@ -236,6 +238,10 @@ def main() -> None:
                 surface=surface,
                 screenshot_path=SURFACE_PROBE_SCREENSHOT_PATH,
             )
+            surface = _enrich_interactive_text_contrast(
+                surface=surface,
+                screenshot_path=SURFACE_PROBE_SCREENSHOT_PATH,
+            )
             result["desktop_surface_observation"] = _surface_payload(surface)
 
             sheet_sequence = page.collect_tab_sequence(tab_count=SHEET_TAB_COUNT)
@@ -304,7 +310,9 @@ def main() -> None:
                 observed=(
                     f"heading={surface.heading_text!r}; "
                     f"interactive_labels={[item.label for item in surface.interactive_elements]!r}; "
+                    f"semantics_labels={[node.label for node in surface.semantics_nodes]!r}; "
                     f"badge_labels={[badge.label for badge in surface.badges]!r}; "
+                    f"interactive_text_labels={[text.label for text in surface.interactive_texts]!r}; "
                     f"icon_labels={[icon.label for icon in surface.interactive_icons]!r}"
                 ),
             )
@@ -430,12 +438,32 @@ def _assert_sheet_accessibility(
             f"Observed heading: {surface.heading_text!r}\n"
             f"Observed body text:\n{surface.body_text}",
         )
-    if surface.missing_interactive_labels:
+    if not surface.semantics_nodes:
         raise AssertionError(
-            "Step 3 failed: some visible workspace switcher controls were missing "
-            "descriptive semantics labels.\n"
-            f"Missing labels: {list(surface.missing_interactive_labels)!r}\n"
+            "Step 3 failed: the workspace switcher probe did not expose the visible "
+            "semantics tree for the sheet.\n"
             f"Observed interactive labels: {[item.label for item in surface.interactive_elements]!r}",
+        )
+    non_interactive_semantics = tuple(
+        node
+        for node in surface.semantics_nodes
+        if node.role not in {"button", "textbox", "searchbox"}
+        and node.label != "Workspace switcher"
+    )
+    if not non_interactive_semantics:
+        raise AssertionError(
+            "Step 3 failed: the workspace switcher semantics probe only exposed "
+            "interactive controls, so AC6 coverage for non-interactive sheet content "
+            "is still incomplete.\n"
+            f"Observed semantics labels: {_semantics_summary(surface.semantics_nodes)}"
+        )
+    if surface.missing_interactive_labels or surface.missing_semantics_labels:
+        raise AssertionError(
+            "Step 3 failed: some visible workspace switcher elements were missing "
+            "descriptive semantics labels.\n"
+            f"Missing interactive labels: {list(surface.missing_interactive_labels)!r}\n"
+            f"Missing semantics labels: {list(surface.missing_semantics_labels)!r}\n"
+            f"Observed semantics labels: {_semantics_summary(surface.semantics_nodes)}",
         )
     labels = [step.after_label or "" for step in sequence]
     has_workspace_list_control = any(label in {"Open", "Delete", "Active"} for label in labels)
@@ -453,7 +481,8 @@ def _assert_sheet_accessibility(
         )
     return (
         f"focus_sequence={_focus_sequence_summary(sequence)}; "
-        f"interactive_labels={[item.label for item in surface.interactive_elements]!r}"
+        f"interactive_labels={[item.label for item in surface.interactive_elements]!r}; "
+        f"semantics_labels={_semantics_summary(surface.semantics_nodes)}"
     )
 
 
@@ -485,10 +514,22 @@ def _assert_accessible_contrast(
             "interactive icons for contrast inspection.\n"
             f"Observed icons: {_icon_summary(surface.interactive_icons)}"
         )
+    if not surface.interactive_texts:
+        raise AssertionError(
+            "Step 4 failed: the workspace switcher probe did not expose any visible "
+            "interactive text controls for contrast inspection.\n"
+            f"Observed text controls: {_interactive_text_summary(surface.interactive_texts)}"
+        )
     low_contrast = [
         badge
         for badge in state_badges
         if badge.contrast_ratio is None or badge.contrast_ratio < MIN_TEXT_CONTRAST
+    ]
+    low_text_contrast = [
+        text_control
+        for text_control in surface.interactive_texts
+        if text_control.contrast_ratio is None
+        or text_control.contrast_ratio < MIN_TEXT_CONTRAST
     ]
     low_icon_contrast = [
         icon
@@ -501,6 +542,12 @@ def _assert_accessible_contrast(
             f"{MIN_TEXT_CONTRAST}:1 text contrast requirement.\n"
             f"Observed badges: {_badge_summary(state_badges)}"
         )
+    if low_text_contrast:
+        raise AssertionError(
+            "Step 4 failed: one or more visible text-bearing interactive controls did "
+            f"not meet the {MIN_TEXT_CONTRAST}:1 text contrast requirement.\n"
+            f"Observed text controls: {_interactive_text_summary(surface.interactive_texts)}"
+        )
     if low_icon_contrast:
         raise AssertionError(
             "Step 4 failed: one or more visible interactive icons did not meet the "
@@ -509,6 +556,7 @@ def _assert_accessible_contrast(
         )
     return (
         f"badges={_badge_summary(state_badges)}; "
+        f"text_controls={_interactive_text_summary(surface.interactive_texts)}; "
         f"icons={_icon_summary(surface.interactive_icons)}"
     )
 
@@ -535,6 +583,19 @@ def _enrich_icon_contrast(
         _observe_icon(image=image, icon=icon) for icon in surface.interactive_icons
     )
     return replace(surface, interactive_icons=observed_icons)
+
+
+def _enrich_interactive_text_contrast(
+    *,
+    surface: WorkspaceSwitcherSurfaceObservation,
+    screenshot_path: Path,
+) -> WorkspaceSwitcherSurfaceObservation:
+    image = RgbImage.open(screenshot_path)
+    observed_text_controls = tuple(
+        _observe_interactive_text(image=image, text_control=text_control)
+        for text_control in surface.interactive_texts
+    )
+    return replace(surface, interactive_texts=observed_text_controls)
 
 
 def _observe_badge(
@@ -585,6 +646,35 @@ def _observe_icon(
     foreground = _sample_foreground(crop, background=background)
     return replace(
         icon,
+        foreground_color=(rgb_to_hex(foreground).lower() if foreground is not None else None),
+        background_color=rgb_to_hex(background).lower(),
+        contrast_ratio=(
+            round(contrast_ratio(foreground, background), 2)
+            if foreground is not None
+            else None
+        ),
+    )
+
+
+def _observe_interactive_text(
+    *,
+    image: RgbImage,
+    text_control: WorkspaceSwitcherInteractiveTextObservation,
+) -> WorkspaceSwitcherInteractiveTextObservation:
+    box = _box(
+        image=image,
+        left=text_control.x,
+        top=text_control.y,
+        width=text_control.width,
+        height=text_control.height,
+    )
+    if box is None:
+        return text_control
+    crop = image.crop(box)
+    background = _dominant_color(crop)
+    foreground = _sample_foreground(crop, background=background)
+    return replace(
+        text_control,
         foreground_color=(rgb_to_hex(foreground).lower() if foreground is not None else None),
         background_color=rgb_to_hex(background).lower(),
         contrast_ratio=(
@@ -709,6 +799,39 @@ def _icon_summary(icons: tuple[WorkspaceSwitcherIconObservation, ...]) -> str:
     )
 
 
+def _interactive_text_summary(
+    texts: tuple[WorkspaceSwitcherInteractiveTextObservation, ...],
+) -> str:
+    return str(
+        [
+            {
+                "label": text.label,
+                "visible_text": text.visible_text,
+                "foreground": text.foreground_color,
+                "background": text.background_color,
+                "contrast": text.contrast_ratio,
+            }
+            for text in texts
+        ]
+    )
+
+
+def _semantics_summary(
+    semantics_nodes: tuple[WorkspaceSwitcherSemanticsObservation, ...],
+) -> str:
+    return str(
+        [
+            {
+                "label": node.label,
+                "role": node.role,
+                "tag": node.tag_name,
+                "visible_text": node.visible_text,
+            }
+            for node in semantics_nodes
+        ]
+    )
+
+
 def _mobile_focus_summary(observation: MobileTriggerFocusObservation) -> str:
     return (
         f"focus_sequence={_focus_sequence_summary(observation.focus_sequence)}; "
@@ -729,9 +852,12 @@ def _surface_payload(surface: WorkspaceSwitcherSurfaceObservation) -> dict[str, 
         "dialog_visible": surface.dialog_visible,
         "heading_text": surface.heading_text,
         "interactive_elements": [asdict(item) for item in surface.interactive_elements],
+        "semantics_nodes": [asdict(item) for item in surface.semantics_nodes],
         "missing_interactive_labels": list(surface.missing_interactive_labels),
+        "missing_semantics_labels": list(surface.missing_semantics_labels),
         "badges": [asdict(item) for item in surface.badges],
         "interactive_icons": [asdict(item) for item in surface.interactive_icons],
+        "interactive_texts": [asdict(item) for item in surface.interactive_texts],
     }
 
 
