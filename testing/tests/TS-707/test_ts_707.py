@@ -34,6 +34,11 @@ RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 
+
+class TS707PreconditionError(AssertionError):
+    pass
+
+
 REQUEST_STEPS = [
     "Trigger the Apple release workflow by pushing a `v*` tag.",
     "Wait for the workflow to reach the self-hosted runner execution phase.",
@@ -120,10 +125,14 @@ def main() -> None:
 
         _assert_human_verification(observation)
     except Exception as error:
+        if _is_precondition_error(error):
+            result["failure_kind"] = "precondition"
         result.setdefault("error", f"{type(error).__name__}: {error}")
         result.setdefault("traceback", traceback.format_exc())
         if observation is not None and not result.get("human_verification"):
             _record_human_observations(result, observation)
+        if observation is None:
+            _record_partial_progress_from_error(result, str(error))
         _record_failed_step_from_error(result, str(error))
         _write_failure_outputs(result)
         raise
@@ -135,6 +144,9 @@ def main() -> None:
 def _assert_self_hosted_phase_reached(
     observation: AppleReleaseToolchainValidationObservation,
 ) -> None:
+    runner_precondition_message = _runner_precondition_message(observation)
+    if runner_precondition_message is not None:
+        raise TS707PreconditionError(runner_precondition_message)
     if observation.build_job is None:
         raise AssertionError(
             "Step 2 failed: the Apple release run never exposed the self-hosted build job.\n"
@@ -177,6 +189,7 @@ def _assert_validation_failure_contract(
         raise AssertionError(
             "Step 3 failed: the macOS environment validation step did not fail.\n"
             f"Validation step summary: {_single_step_summary(observation.validation_step)}\n"
+            f"Setup Flutter step summary: {_single_step_summary(observation.setup_flutter_step)}\n"
             f"Run URL: {observation.run_url}\n"
             f"Log excerpt:\n{observation.run_log_excerpt}"
         )
@@ -303,7 +316,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response(result, passed=False), encoding="utf-8")
-    BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    if _is_precondition_failure(result):
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    else:
+        BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -335,7 +351,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         (
             "* Matched the expected result."
             if passed
-            else f"* Did not match the expected result. {_failed_step_summary(result)}"
+            else _failure_result_line(result, jira=True)
         ),
         (
             f"* Environment: repository {{{{{result.get('repository', '')}}}}}, branch "
@@ -397,7 +413,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         (
             "- Matched the expected result."
             if passed
-            else f"- Did not match the expected result. {_failed_step_summary(result)}"
+            else _failure_result_line(result, jira=False)
         ),
         (
             f"- Environment: repository `{result.get('repository', '')}`, branch "
@@ -442,8 +458,7 @@ def _response(result: dict[str, object], *, passed: bool) -> str:
             "- The Apple release workflow reached the macOS validation step and rejected "
             "the incompatible Flutter version before any desktop or CLI build work ran."
             if passed
-            else "- The Apple release workflow did not satisfy the requested toolchain "
-            f"contract. {_failed_step_summary(result)}"
+            else _failure_outcome_line(result)
         ),
         "",
         "## Step results",
@@ -477,7 +492,7 @@ def _bug_description(result: dict[str, object]) -> str:
     traceback_text = _as_text(result.get("traceback")) or _as_text(result.get("error"))
 
     lines = [
-        f"# {TICKET_KEY} - Apple release toolchain validation did not produce the expected Flutter version failure",
+        f"# {TICKET_KEY} - Apple release workflow violated the macOS toolchain validation contract",
         "",
         "## Expected",
         EXPECTED_RESULT,
@@ -506,6 +521,9 @@ def _bug_description(result: dict[str, object]) -> str:
             "`Build macOS CLI` steps do not proceed."
         ),
         f"- **Actual:** {_actual_result_summary(result)}",
+        "",
+        "## Missing or broken production capability",
+        _product_gap_summary(result),
         "",
         "## Exact error message or assertion failure",
         "```text",
@@ -562,6 +580,27 @@ def _record_human_verification(
     verifications = result.setdefault("human_verification", [])
     if isinstance(verifications, list):
         verifications.append({"check": check, "observed": observed})
+
+
+def _record_partial_progress_from_error(result: dict[str, object], error_message: str) -> None:
+    if "did not reach a non-cancelled completed state within the timeout" not in error_message:
+        return
+    run_id = _error_detail(error_message, "Run ID:")
+    run_url = _error_detail(error_message, "URL:")
+    status = _error_detail(error_message, "Status:") or "queued"
+    if not run_url:
+        return
+    _record_step(
+        result,
+        step=1,
+        status="passed",
+        action=REQUEST_STEPS[0],
+        observed=(
+            f"Observed disposable Apple release run `{run_id or '<unknown>'}` at "
+            f"`{run_url}`, but the workflow remained `{status}` until the automation "
+            "timeout expired."
+        ),
+    )
 
 
 def _record_failed_step_from_error(result: dict[str, object], error_message: str) -> None:
@@ -634,11 +673,41 @@ def _failed_step_summary(result: dict[str, object]) -> str:
     return _as_text(result.get("error")) or "The run failed before a step result was recorded."
 
 
+def _failure_result_line(result: dict[str, object], *, jira: bool) -> str:
+    prefix = "* " if jira else "- "
+    if _is_precondition_failure(result):
+        return (
+            f"{prefix}Could not validate the expected result because a documented "
+            f"infrastructure precondition failed. {_failed_step_summary(result)}"
+        )
+    return f"{prefix}Did not match the expected result. {_failed_step_summary(result)}"
+
+
+def _failure_outcome_line(result: dict[str, object]) -> str:
+    if _is_precondition_failure(result):
+        return (
+            "- The Apple release workflow was blocked before the macOS validation path "
+            f"started. {_failed_step_summary(result)}"
+        )
+    return (
+        "- The Apple release workflow did not satisfy the requested toolchain "
+        f"contract. {_failed_step_summary(result)}"
+    )
+
+
 def _actual_result_summary(result: dict[str, object]) -> str:
     failed_summary = _failed_step_summary(result)
     run_url = _as_text(result.get("run_url"))
     verify_runner = _as_text((result.get("verify_runner_job") or {}).get("conclusion"))
     build_job = _as_text((result.get("build_job") or {}).get("conclusion"))
+    if _is_precondition_failure(result):
+        return (
+            f"The disposable Apple release run at `{run_url}` stopped in the runner-"
+            f"availability guard before the macOS validation step executed. Verify-runner "
+            f"job conclusion was `{verify_runner}`, build job conclusion was `{build_job}`, "
+            f"and the run was blocked by an unmet infrastructure precondition: "
+            f"{failed_summary}"
+        )
     return (
         f"The disposable Apple release run at `{run_url}` did not reach the expected "
         f"validation outcome. Verify-runner job conclusion was `{verify_runner}`, build "
@@ -651,6 +720,20 @@ def _step_status_icon(result: dict[str, object], step_number: int) -> str:
         if isinstance(entry, dict) and entry.get("step") == step_number:
             return "✅" if entry.get("status") == "passed" else "❌"
     return "❌"
+
+
+def _is_precondition_failure(result: dict[str, object]) -> bool:
+    return result.get("failure_kind") == "precondition"
+
+
+def _is_precondition_error(error: Exception) -> bool:
+    if isinstance(error, TS707PreconditionError):
+        return True
+    error_message = str(error)
+    return (
+        "did not reach a non-cancelled completed state within the timeout" in error_message
+        and "Status: queued" in error_message
+    )
 
 
 def _step_observation_text(result: dict[str, object], step_number: int) -> str:
@@ -681,6 +764,75 @@ def _step_as_dict(
     step: AppleReleaseToolchainValidationStepObservation | None,
 ) -> dict[str, object] | None:
     return asdict(step) if step is not None else None
+
+
+def _runner_precondition_message(
+    observation: AppleReleaseToolchainValidationObservation,
+) -> str | None:
+    verify_runner_failed = (
+        observation.verify_runner_job is not None
+        and observation.verify_runner_job.conclusion == "failure"
+    )
+    build_job_not_started = observation.build_job is None or not observation.build_job.steps
+    if not (verify_runner_failed and build_job_not_started):
+        return None
+
+    reason = _runner_guard_reason(observation.run_log_excerpt)
+    reason_line = f"Runner-guard reason: {reason}\n" if reason else ""
+    return (
+        "Step 2 blocked: TS-707 requires an online self-hosted macOS release runner, "
+        "but the workflow stopped in `Verify macOS runner availability` before the "
+        "build job reached the macOS validation path.\n"
+        f"{reason_line}"
+        f"Verify-runner job: {_single_job_summary(observation.verify_runner_job)}\n"
+        f"Build job: {_single_job_summary(observation.build_job)}\n"
+        f"Run URL: {observation.run_url}\n"
+        f"Log excerpt:\n{observation.run_log_excerpt}"
+    )
+
+
+def _runner_guard_reason(log_excerpt: str) -> str:
+    for token in (
+        "No runner registered",
+        "none are online",
+        "Bring the TrackState release runner online",
+        "Provision the TrackState maintainer-owned macOS release runner",
+    ):
+        for line in log_excerpt.splitlines():
+            if token in line:
+                return line.strip()
+    return ""
+
+
+def _product_gap_summary(result: dict[str, object]) -> str:
+    failed_summary = _failed_step_summary(result)
+    if "Verify runner toolchain" in failed_summary:
+        return (
+            "The release workflow did not expose or execute the `Verify runner toolchain` "
+            "step as required by the macOS release contract."
+        )
+    if "Flutter `3.35.3` required error" in failed_summary:
+        return (
+            "The `Verify runner toolchain` step executed, but it did not emit the explicit "
+            "Flutter `3.35.3` requirement error required by the release contract."
+        )
+    if "Build macOS desktop app" in failed_summary or "Build macOS CLI" in failed_summary:
+        return (
+            "The release workflow allowed downstream desktop or CLI build steps to proceed "
+            "after the macOS toolchain validation should have stopped the job."
+        )
+    return (
+        "The Apple release workflow did not preserve the macOS toolchain validation "
+        "contract required by TS-707."
+    )
+
+
+def _error_detail(error_message: str, label: str) -> str:
+    prefix = f"{label} "
+    for line in error_message.splitlines():
+        if line.startswith(prefix):
+            return line.removeprefix(prefix).strip()
+    return ""
 
 
 def _required_flutter_line(observation: AppleReleaseToolchainValidationObservation) -> str:

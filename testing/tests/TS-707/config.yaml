@@ -20,10 +20,10 @@ runtime_inputs:
   required_flutter_version: 3.35.3
   incompatible_flutter_version: 3.30.0
   ui_timeout_seconds: 60
-  run_timeout_seconds: 900
+  run_timeout_seconds: 1800
   poll_interval_seconds: 10
   log_excerpt_lines: 40
 notes:
   - Uses the live Apple release workflow from IstiN/trackstate and a disposable semantic tag whose workflow file is modified only for the test run to install Flutter 3.30.0.
   - Expects the production validation step to reject that mismatched Flutter version with an explicit 3.35.3-required error before the desktop or CLI build steps proceed.
-  - Fails if production never reaches the macOS validation step, because that means the user-facing release workflow cannot enforce the toolchain contract.
+  - Treats the workflow's runner-availability guard as a precondition check; unavailable or offline release runners block the test instead of generating product-bug evidence.

@@ -91,10 +91,21 @@ class AppleReleaseToolchainValidationProbeService:
                 f"::error::Flutter {self._config.required_flutter_version} is required;",
             ),
         )
-        excerpt_marker = version_error_line or self._first_matching_line(
+        setup_failure_line = None
+        if setup_flutter_step is not None and setup_flutter_step.conclusion == "failure":
+            setup_failure_line = self._first_matching_line(
+                run_log,
+                (
+                    "Unable to determine Flutter version",
+                    f"{build_job.name}\t{self._config.setup_flutter_step_name}\t##[error]",
+                    f"{build_job.name}\t{self._config.setup_flutter_step_name}\tProcess completed with exit code 1.",
+                ),
+            )
+        excerpt_marker = version_error_line or setup_failure_line or self._first_matching_line(
             run_log,
             (
                 self._config.validation_step_name,
+                self._config.setup_flutter_step_name,
                 "Resource not accessible by integration",
                 "Unhandled error: HttpError",
                 "status: 403",
