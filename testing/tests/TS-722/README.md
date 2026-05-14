@@ -31,8 +31,8 @@ PYTHONPATH=. python3 testing/tests/TS-722/test_ts_722.py
 ```text
 Pass: the workspace switcher replaces the legacy repository-access button in
 Dashboard, Board, JQL Search, and Settings; the desktop trigger keeps the
-active workspace name, icon, and state badge; opening it yields a desktop
-dialog surface; and the compact layout keeps an icon-led trigger plus a bottom
+active workspace name, icon, and state badge; opening it yields an anchored
+desktop panel; and the compact layout keeps an icon-led trigger plus a bottom
 sheet or full-screen sheet.
 
 Fail: any tracker section still exposes the legacy control, the trigger loses

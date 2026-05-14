@@ -200,7 +200,7 @@ def main() -> None:
                         status="failed",
                         action=(
                             "Click the desktop switcher trigger and verify it opens a "
-                            "desktop dialog."
+                            "desktop anchored panel."
                         ),
                         observed=str(error),
                     )
@@ -211,7 +211,7 @@ def main() -> None:
                         status="passed",
                         action=(
                             "Click the desktop switcher trigger and verify it opens a "
-                            "desktop dialog."
+                            "desktop anchored panel."
                         ),
                         observed=(
                             f"container_kind={desktop_panel.container_kind}; "
@@ -229,7 +229,7 @@ def main() -> None:
                         result,
                         check=(
                             "Opened the desktop workspace switcher from the live app shell "
-                            "and checked it opened as the desktop dialog surface."
+                            "and checked it opened as the desktop anchored panel."
                         ),
                         observed=(
                             f"container_kind={desktop_panel.container_kind}; "
@@ -473,23 +473,24 @@ def _assert_desktop_panel(
     if trigger.display_name not in panel.container_text and panel.bright_change_pixels <= 0:
         raise AssertionError(
             "Step 3 failed: opening the desktop workspace switcher did not produce any "
-            "rendered dialog evidence.\n"
+            "rendered anchored-panel evidence.\n"
             f"Observed panel text: {panel.container_text}",
         )
-    if panel.container_kind != "dialog":
+    if panel.container_kind != "anchored-panel" or not panel.anchored_to_trigger:
         raise AssertionError(
             "Step 3 failed: clicking the desktop workspace switcher did not open an "
-            "desktop dialog.\n"
+            "anchored desktop panel.\n"
             f"Observed container kind: {panel.container_kind}\n"
+            f"Anchored to trigger: {panel.anchored_to_trigger}\n"
             f"Observed bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
             f"width={panel.width:.1f}, height={panel.height:.1f}\n"
             f"Trigger bounds: left={trigger.left:.1f}, top={trigger.top:.1f}, "
             f"width={trigger.width:.1f}, height={trigger.height:.1f}",
         )
-    if not panel.background_dimmed:
+    if panel.background_dimmed:
         raise AssertionError(
-            "Step 3 failed: opening the desktop workspace switcher did not dim the "
-            "background like a modal dialog.\n"
+            "Step 3 failed: opening the desktop workspace switcher dimmed the "
+            "background like a modal instead of behaving like an anchored panel.\n"
             f"Observed bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
             f"width={panel.width:.1f}, height={panel.height:.1f}",
         )
@@ -717,7 +718,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         ),
         (
             "- Opened the switcher on desktop, resized to a compact/mobile width, and "
-            "opened it again to verify the desktop dialog and mobile sheet adapted by layout."
+            "opened it again to verify the desktop anchored panel and mobile sheet adapted by layout."
         ),
         "",
         "## Result",
@@ -762,6 +763,11 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
+        (
+            "- Rework: updated TS-722 desktop validation to require the ticketed "
+            "anchored panel instead of accepting a centered modal dialog, and "
+            "aligned the test documentation with that requirement."
+        ),
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -798,7 +804,7 @@ def _bug_description(result: dict[str, object]) -> str:
             "## Steps to reproduce",
             "1. Launch the deployed TrackState application on a desktop browser.",
             "2. Verify the previous standalone repository-access button is replaced by a workspace switcher showing the active workspace name, icon, and state badge.",
-            "3. Click the switcher trigger and verify it opens the desktop dialog surface.",
+            "3. Click the switcher trigger and verify it opens an anchored desktop panel.",
             "4. Resize the browser to a compact/mobile width.",
             "5. Verify the switcher trigger uses a condensed, icon-led presentation.",
             "6. Click the trigger and verify it opens a bottom sheet or full-screen sheet.",
@@ -817,7 +823,7 @@ def _bug_description(result: dict[str, object]) -> str:
             _annotated_step_line(
                 result,
                 3,
-                "Click the desktop switcher trigger and verify it opens the desktop dialog surface.",
+                "Click the desktop switcher trigger and verify it opens an anchored desktop panel.",
             ),
             _annotated_step_line(
                 result,
@@ -839,10 +845,18 @@ def _bug_description(result: dict[str, object]) -> str:
             (
                 "- Expected: the app shell replaces the legacy repository-access button "
                 "with a workspace switcher across tracker sections, the desktop trigger "
-                "opens the desktop dialog surface, and the compact trigger opens a "
+                "opens an anchored desktop panel, and the compact trigger opens a "
                 "bottom sheet or full-screen sheet."
             ),
             f"- Actual: {result.get('error', '<missing error>')}",
+            "",
+            "## Missing/broken production capability",
+            (
+                "- The desktop workspace-switcher trigger does not expose the ticketed "
+                "anchored panel behavior. The live product currently renders a centered "
+                "modal dialog with background dimming instead of a trigger-anchored "
+                "desktop panel."
+            ),
             "",
             "## Environment",
             f"- URL: `{result.get('app_url', '')}`",
@@ -850,6 +864,11 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- Browser: `{result.get('browser', 'Chromium (Playwright)')}`",
             f"- OS: `{result.get('os', '')}`",
             f"- Screenshot: `{result.get('screenshot', str(FAILURE_SCREENSHOT_PATH))}`",
+            "",
+            "## Failing command",
+            "```bash",
+            RUN_COMMAND,
+            "```",
             "",
             "## Desktop section observations",
             "```json",
