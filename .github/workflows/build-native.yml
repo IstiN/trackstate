@@ -1,155 +1,215 @@
-name: Native Builds
+name: Apple Release Builds
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
-      build_macos:
-        description: 'Build macOS app'
-        type: boolean
-        default: true
-      build_ios:
-        description: 'Build iOS (no-codesign)'
-        type: boolean
-        default: false
+      release_ref:
+        description: 'Semantic version tag to rebuild (for example v1.2.3)'
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: write
 
+concurrency:
+  group: apple-release-${{ github.event_name == 'push' && github.ref_name || github.event.inputs.release_ref }}
+  cancel-in-progress: false
+
+env:
+  required_runner_labels: self-hosted,macOS,trackstate-release,ARM64
+  release_ref: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.release_ref }}
+
 jobs:
-  build-macos:
-    if: >-
-      github.event_name != 'workflow_dispatch' ||
-      github.event.inputs.build_macos == 'true'
-    runs-on: [self-hosted, macos]
-    timeout-minutes: 30
-    env:
-      FLUTTER_ROOT: /Users/uladzimir_klyshevich/development/flutter
-
+  verify-runner:
+    name: Verify macOS runner availability
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.release.outputs.tag }}
     steps:
-      - name: Add Flutter to PATH
-        run: echo "$FLUTTER_ROOT/bin" >> "$GITHUB_PATH"
-
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-          fetch-depth: 0
-
-      - name: Verify Flutter
-        run: flutter --version
-
-      - name: Compute version
-        id: version
+      - name: Resolve release tag
+        id: release
+        shell: bash
         run: |
-          LATEST=$(git tag -l 'v*' --sort=-v:refname | head -1)
-          if [ -z "$LATEST" ]; then
-            LATEST="v0.0.0"
+          set -euo pipefail
+
+          release_ref="${{ env.release_ref }}"
+          if [[ ! "$release_ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Apple release workflow requires a semantic version tag such as v1.2.3."
+            exit 1
           fi
-          MAJOR=$(echo "$LATEST" | sed 's/v//' | cut -d. -f1)
-          MINOR=$(echo "$LATEST" | sed 's/v//' | cut -d. -f2)
-          PATCH=$(echo "$LATEST" | sed 's/v//' | cut -d. -f3)
-          NEXT_PATCH=$((PATCH + 1))
-          VERSION="v${MAJOR}.${MINOR}.${NEXT_PATCH}"
-          BUILD_NUMBER=$(($(git rev-list --count HEAD)))
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "build_name=${MAJOR}.${MINOR}.${NEXT_PATCH}" >> "$GITHUB_OUTPUT"
-          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "Next version: $VERSION (build $BUILD_NUMBER)"
+
+          echo "tag=$release_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Check configured macOS runner labels
+        uses: actions/github-script@v7
+        env:
+          REQUIRED_LABELS: ${{ env.required_runner_labels }}
+        with:
+          script: |
+            const requiredLabels = process.env.REQUIRED_LABELS.split(',');
+            const { owner, repo } = context.repo;
+            const response = await github.request(
+              'GET /repos/{owner}/{repo}/actions/runners',
+              {
+                owner,
+                repo,
+                per_page: 100,
+              },
+            );
+
+            const matchingRunners = response.data.runners.filter((runner) =>
+              requiredLabels.every((label) =>
+                runner.labels.some(
+                  (runnerLabel) =>
+                    runnerLabel.name.toLowerCase() === label.toLowerCase(),
+                ),
+              ),
+            );
+
+            if (matchingRunners.length === 0) {
+              core.setFailed(
+                `No runner registered for ${owner}/${repo} matches labels [${requiredLabels.join(', ')}]. ` +
+                'Provision the TrackState maintainer-owned macOS release runner before rerunning this workflow.',
+              );
+              return;
+            }
+
+            const onlineRunners = matchingRunners.filter(
+              (runner) => runner.status === 'online',
+            );
+
+            if (onlineRunners.length === 0) {
+              core.setFailed(
+                `Runner labels [${requiredLabels.join(', ')}] are registered, but none are online. ` +
+                'Bring the TrackState release runner online before rerunning this workflow.',
+              );
+              return;
+            }
+
+            core.notice(
+              `Using TrackState release runner contract: ${onlineRunners.map((runner) => runner.name).join(', ')}`,
+            );
+
+  build-macos-release:
+    name: Build macOS desktop and CLI artifacts
+    needs: verify-runner
+    runs-on: [self-hosted, macOS, trackstate-release, ARM64]
+    timeout-minutes: 45
+    env:
+      release_tag: ${{ needs.verify-runner.outputs.release_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.release_tag }}
+          submodules: true
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.3'
+          channel: stable
+          cache: true
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Import signing certificate
-        env:
-          CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - name: Verify runner toolchain
+        shell: bash
+        run: ./tool/check_macos_release_runner.sh
+
+      - name: Compute release metadata
+        id: metadata
+        shell: bash
         run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          set -euo pipefail
 
-          echo "$CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+          build_name="${release_tag#v}"
+          build_number="$(git rev-list --count HEAD)"
 
-          security create-keychain -p "" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "" "$KEYCHAIN_PATH"
+          echo "build_name=$build_name" >> "$GITHUB_OUTPUT"
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+          echo "desktop_archive=TrackState-macos-arm64-${release_tag}.zip" >> "$GITHUB_OUTPUT"
+          echo "cli_archive=trackstate-cli-macos-arm64-${release_tag}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum_file=trackstate-apple-${release_tag}-sha256.txt" >> "$GITHUB_OUTPUT"
 
-          security import "$CERT_PATH" -P "$CERTIFICATE_PASSWORD" \
-            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: \
-            -k "" "$KEYCHAIN_PATH"
-
-          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain
-
-      - name: Build macOS app
+      - name: Build macOS desktop app
+        shell: bash
         run: |
+          set -euo pipefail
+
           flutter build macos --release \
-            --build-name=${{ steps.version.outputs.build_name }} \
-            --build-number=${{ steps.version.outputs.build_number }}
+            --build-name="${{ steps.metadata.outputs.build_name }}" \
+            --build-number="${{ steps.metadata.outputs.build_number }}"
 
-      - name: Package as DMG
+      - name: Build macOS CLI
+        shell: bash
         run: |
-          APP_PATH="build/macos/Build/Products/Release/trackstate.app"
-          if [ ! -d "$APP_PATH" ]; then
-            APP_PATH=$(find build/macos/Build/Products/Release -name "*.app" -maxdepth 1 | head -1)
-          fi
-          hdiutil create -volname "TrackState" \
-            -srcfolder "$APP_PATH" \
-            -ov -format UDZO "build/TrackState-macOS.dmg"
+          set -euo pipefail
 
-      - name: Upload macOS artifact
+          mkdir -p build/release
+          dart compile exe bin/trackstate.dart -o build/release/trackstate
+
+      - name: Package desktop and CLI artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app_path="build/macos/Build/Products/Release/trackstate.app"
+          if [[ ! -d "$app_path" ]]; then
+            app_path=""
+            while IFS= read -r candidate_app_path; do
+              app_path="$candidate_app_path"
+              break
+            done < <(find build/macos/Build/Products/Release -maxdepth 1 -name '*.app')
+          fi
+
+          if [[ -z "$app_path" || ! -d "$app_path" ]]; then
+            echo "::error::macOS app bundle was not produced by flutter build macos."
+            exit 1
+          fi
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$app_path" \
+            "build/${{ steps.metadata.outputs.desktop_archive }}"
+
+          tar -czf "build/${{ steps.metadata.outputs.cli_archive }}" \
+            -C build/release \
+            trackstate
+
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd build
+          shasum -a 256 \
+            "${{ steps.metadata.outputs.desktop_archive }}" \
+            "${{ steps.metadata.outputs.cli_archive }}" \
+            > "${{ steps.metadata.outputs.checksum_file }}"
+
+      - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: trackstate-macos-${{ github.sha }}
-          path: build/TrackState-macOS.dmg
+          name: trackstate-apple-${{ env.release_tag }}
+          path: |
+            build/${{ steps.metadata.outputs.desktop_archive }}
+            build/${{ steps.metadata.outputs.cli_archive }}
+            build/${{ steps.metadata.outputs.checksum_file }}
+          if-no-files-found: error
 
-      - name: Upload to release
-        if: github.event_name == 'push'
+      - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: TrackState ${{ steps.version.outputs.version }}
+          tag_name: ${{ env.release_tag }}
+          name: TrackState ${{ env.release_tag }}
           generate_release_notes: true
-          files: build/TrackState-macOS.dmg
-
-      - name: Cleanup keychain
-        if: always()
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
-
-  build-ios:
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      github.event.inputs.build_ios == 'true'
-    runs-on: [self-hosted, macos]
-    timeout-minutes: 30
-    env:
-      FLUTTER_ROOT: /Users/uladzimir_klyshevich/development/flutter
-
-    steps:
-      - name: Add Flutter to PATH
-        run: echo "$FLUTTER_ROOT/bin" >> "$GITHUB_PATH"
-
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-
-      - name: Verify Flutter
-        run: flutter --version
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Install CocoaPods dependencies
-        run: cd ios && pod install --repo-update
-
-      - name: Build iOS (unsigned)
-        run: flutter build ios --release --no-codesign
-
-      - name: Upload iOS artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: trackstate-ios-${{ github.sha }}
-          path: build/ios/iphoneos/Runner.app
+          overwrite_files: true
+          files: |
+            build/${{ steps.metadata.outputs.desktop_archive }}
+            build/${{ steps.metadata.outputs.cli_archive }}
+            build/${{ steps.metadata.outputs.checksum_file }}
