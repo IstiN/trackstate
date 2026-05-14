@@ -15,6 +15,9 @@ class FlutterLocalWorkspaceOnboardingDriver
 
   final WidgetTester _tester;
 
+  static const _openExistingFolderKey = ValueKey(
+    'local-workspace-onboarding-open-existing',
+  );
   static const _initializeFolderKey = ValueKey(
     'local-workspace-onboarding-initialize-folder',
   );
@@ -91,8 +94,23 @@ class FlutterLocalWorkspaceOnboardingDriver
   }
 
   @override
+  Future<void> chooseExistingFolder() async {
+    await _tapAndSettle(find.byKey(_openExistingFolderKey));
+  }
+
+  @override
   Future<void> chooseInitializeFolder() async {
     await _tapAndSettle(find.byKey(_initializeFolderKey));
+  }
+
+  @override
+  Future<void> enterWorkspaceName(String value) async {
+    await _enterTextField(_nameKey, value);
+  }
+
+  @override
+  Future<void> enterWriteBranch(String value) async {
+    await _enterTextField(_writeBranchKey, value);
   }
 
   @override
@@ -190,6 +208,25 @@ class FlutterLocalWorkspaceOnboardingDriver
           _statusLabels.any((label) => find.text(label).evaluate().isNotEmpty),
       failureMessage:
           'Timed out waiting for the folder inspection result to appear after tapping the onboarding action.',
+    );
+  }
+
+  Future<void> _enterTextField(Key key, String value) async {
+    final field = find.descendant(
+      of: find.byKey(key),
+      matching: find.byType(EditableText),
+    );
+    if (field.evaluate().isEmpty) {
+      throw TestFailure('Expected editable onboarding field for key "$key".');
+    }
+    await _tester.ensureVisible(field.first);
+    await _tester.tap(field.first, warnIfMissed: false);
+    await _tester.pump();
+    await _tester.enterText(field.first, value);
+    await _pumpUntil(
+      () => _editableTextValue(key) == value,
+      failureMessage:
+          'Timed out waiting for onboarding field "$key" to update to "$value".',
     );
   }
 
