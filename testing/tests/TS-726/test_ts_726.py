@@ -18,6 +18,7 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     LiveWorkspaceSwitcherPage,
     MobileTriggerFocusObservation,
     WorkspaceSwitcherBadgeObservation,
+    WorkspaceSwitcherIconObservation,
     WorkspaceSwitcherSurfaceObservation,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
@@ -69,7 +70,9 @@ LOCAL_TARGET = "/tmp/trackstate-demo"
 DEFAULT_BRANCH = "main"
 DESKTOP_TAB_COUNT = 12
 SHEET_TAB_COUNT = 12
+MOBILE_TAB_COUNT = 24
 MIN_TEXT_CONTRAST = 4.5
+MIN_GRAPHIC_CONTRAST = 3.0
 
 
 def main() -> None:
@@ -229,6 +232,10 @@ def main() -> None:
                 surface=surface,
                 screenshot_path=SURFACE_PROBE_SCREENSHOT_PATH,
             )
+            surface = _enrich_icon_contrast(
+                surface=surface,
+                screenshot_path=SURFACE_PROBE_SCREENSHOT_PATH,
+            )
             result["desktop_surface_observation"] = _surface_payload(surface)
 
             sheet_sequence = page.collect_tab_sequence(tab_count=SHEET_TAB_COUNT)
@@ -260,7 +267,7 @@ def main() -> None:
                 )
 
             try:
-                contrast_summary = _assert_badge_contrast(surface.badges)
+                contrast_summary = _assert_accessible_contrast(surface)
             except AssertionError as error:
                 observed = str(error)
                 _record_step(
@@ -297,7 +304,8 @@ def main() -> None:
                 observed=(
                     f"heading={surface.heading_text!r}; "
                     f"interactive_labels={[item.label for item in surface.interactive_elements]!r}; "
-                    f"badge_labels={[badge.label for badge in surface.badges]!r}"
+                    f"badge_labels={[badge.label for badge in surface.badges]!r}; "
+                    f"icon_labels={[icon.label for icon in surface.interactive_icons]!r}"
                 ),
             )
             _capture_screenshot(
@@ -334,7 +342,9 @@ def main() -> None:
                 )
                 errors.append(error)
             else:
-                mobile_focus = page.observe_mobile_trigger_focus()
+                mobile_focus = page.observe_mobile_trigger_focus(
+                    tab_count=MOBILE_TAB_COUNT,
+                )
                 result["mobile_trigger_focus_observation"] = asdict(mobile_focus)
                 try:
                     mobile_summary = _assert_mobile_focus_ring(mobile_focus)
@@ -447,9 +457,10 @@ def _assert_sheet_accessibility(
     )
 
 
-def _assert_badge_contrast(
-    badges: tuple[WorkspaceSwitcherBadgeObservation, ...],
+def _assert_accessible_contrast(
+    surface: WorkspaceSwitcherSurfaceObservation,
 ) -> str:
+    badges = surface.badges
     state_badges = tuple(
         badge
         for badge in badges
@@ -468,18 +479,38 @@ def _assert_badge_contrast(
             "Step 4 failed: the workspace switcher dialog did not expose any visible "
             "state or type badges to evaluate for contrast."
         )
+    if not surface.interactive_icons:
+        raise AssertionError(
+            "Step 4 failed: the workspace switcher probe did not expose any visible "
+            "interactive icons for contrast inspection.\n"
+            f"Observed icons: {_icon_summary(surface.interactive_icons)}"
+        )
     low_contrast = [
         badge
         for badge in state_badges
         if badge.contrast_ratio is None or badge.contrast_ratio < MIN_TEXT_CONTRAST
     ]
+    low_icon_contrast = [
+        icon
+        for icon in surface.interactive_icons
+        if icon.contrast_ratio is None or icon.contrast_ratio < MIN_GRAPHIC_CONTRAST
+    ]
     if low_contrast:
         raise AssertionError(
             "Step 4 failed: one or more visible workspace badges did not meet the "
             f"{MIN_TEXT_CONTRAST}:1 text contrast requirement.\n"
-            f"Observed badges: {_badge_summary(state_badges)}",
+            f"Observed badges: {_badge_summary(state_badges)}"
         )
-    return _badge_summary(state_badges)
+    if low_icon_contrast:
+        raise AssertionError(
+            "Step 4 failed: one or more visible interactive icons did not meet the "
+            f"{MIN_GRAPHIC_CONTRAST}:1 non-text contrast requirement.\n"
+            f"Observed icons: {_icon_summary(surface.interactive_icons)}"
+        )
+    return (
+        f"badges={_badge_summary(state_badges)}; "
+        f"icons={_icon_summary(surface.interactive_icons)}"
+    )
 
 
 def _enrich_badge_contrast(
@@ -492,6 +523,18 @@ def _enrich_badge_contrast(
         _observe_badge(image=image, badge=badge) for badge in surface.badges
     )
     return replace(surface, badges=observed_badges)
+
+
+def _enrich_icon_contrast(
+    *,
+    surface: WorkspaceSwitcherSurfaceObservation,
+    screenshot_path: Path,
+) -> WorkspaceSwitcherSurfaceObservation:
+    image = RgbImage.open(screenshot_path)
+    observed_icons = tuple(
+        _observe_icon(image=image, icon=icon) for icon in surface.interactive_icons
+    )
+    return replace(surface, interactive_icons=observed_icons)
 
 
 def _observe_badge(
@@ -513,6 +556,35 @@ def _observe_badge(
     foreground = _sample_foreground(crop, background=background)
     return replace(
         badge,
+        foreground_color=(rgb_to_hex(foreground).lower() if foreground is not None else None),
+        background_color=rgb_to_hex(background).lower(),
+        contrast_ratio=(
+            round(contrast_ratio(foreground, background), 2)
+            if foreground is not None
+            else None
+        ),
+    )
+
+
+def _observe_icon(
+    *,
+    image: RgbImage,
+    icon: WorkspaceSwitcherIconObservation,
+) -> WorkspaceSwitcherIconObservation:
+    box = _box(
+        image=image,
+        left=icon.x,
+        top=icon.y,
+        width=icon.width,
+        height=icon.height,
+    )
+    if box is None:
+        return icon
+    crop = image.crop(box)
+    background = _dominant_color(crop)
+    foreground = _sample_foreground(crop, background=background)
+    return replace(
+        icon,
         foreground_color=(rgb_to_hex(foreground).lower() if foreground is not None else None),
         background_color=rgb_to_hex(background).lower(),
         contrast_ratio=(
@@ -584,8 +656,8 @@ def _assert_mobile_focus_ring(
         "Workspace switcher:"
     ):
         raise AssertionError(
-            "Step 5 failed: attempting to focus the condensed mobile workspace "
-            "switcher trigger did not move keyboard focus onto that trigger.\n"
+            "Step 5 failed: keyboard Tab navigation in the condensed mobile layout "
+            "never moved focus onto the workspace switcher trigger.\n"
             f"{_mobile_focus_summary(observation)}",
         )
     ring_visible = (
@@ -623,8 +695,23 @@ def _badge_summary(badges: tuple[WorkspaceSwitcherBadgeObservation, ...]) -> str
     )
 
 
+def _icon_summary(icons: tuple[WorkspaceSwitcherIconObservation, ...]) -> str:
+    return str(
+        [
+            {
+                "label": icon.label,
+                "foreground": icon.foreground_color,
+                "background": icon.background_color,
+                "contrast": icon.contrast_ratio,
+            }
+            for icon in icons
+        ]
+    )
+
+
 def _mobile_focus_summary(observation: MobileTriggerFocusObservation) -> str:
     return (
+        f"focus_sequence={_focus_sequence_summary(observation.focus_sequence)}; "
         f"trigger_text={observation.trigger_text!r}; "
         f"active_after_focus={observation.active_label_after_focus!r}; "
         f"active_role_after_focus={observation.active_role_after_focus!r}; "
@@ -644,6 +731,7 @@ def _surface_payload(surface: WorkspaceSwitcherSurfaceObservation) -> dict[str, 
         "interactive_elements": [asdict(item) for item in surface.interactive_elements],
         "missing_interactive_labels": list(surface.missing_interactive_labels),
         "badges": [asdict(item) for item in surface.badges],
+        "interactive_icons": [asdict(item) for item in surface.interactive_icons],
     }
 
 

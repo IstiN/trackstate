@@ -42,6 +42,18 @@ class WorkspaceSwitcherBadgeObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceSwitcherIconObservation:
+    label: str
+    foreground_color: str | None
+    background_color: str | None
+    contrast_ratio: float | None
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherSurfaceObservation:
     body_text: str
     dialog_visible: bool
@@ -49,6 +61,7 @@ class WorkspaceSwitcherSurfaceObservation:
     interactive_elements: tuple[WorkspaceSwitcherInteractiveObservation, ...]
     missing_interactive_labels: tuple[str, ...]
     badges: tuple[WorkspaceSwitcherBadgeObservation, ...]
+    interactive_icons: tuple[WorkspaceSwitcherIconObservation, ...]
 
 
 @dataclass(frozen=True)
@@ -71,6 +84,7 @@ class MobileTriggerFocusObservation:
     active_role_after_focus: str | None
     active_tag_name_after_focus: str
     active_outer_html_after_focus: str
+    focus_sequence: tuple[FocusNavigationStep, ...]
 
 
 class LiveWorkspaceSwitcherPage:
@@ -219,6 +233,28 @@ class LiveWorkspaceSwitcherPage:
                   || element.textContent
                   || '',
                 );
+              const resolveBackgroundColor = (element, fallback) => {
+                let current = element;
+                while (current && current !== document.body) {
+                  const computedBackground = toHex(window.getComputedStyle(current).backgroundColor);
+                  if (computedBackground) {
+                    return computedBackground;
+                  }
+                  current = current.parentElement;
+                }
+                return fallback;
+              };
+              const resolveForegroundColor = (element) => {
+                let current = element;
+                while (current) {
+                  const computedColor = toHex(window.getComputedStyle(current).color);
+                  if (computedColor) {
+                    return computedColor;
+                  }
+                  current = current.parentElement;
+                }
+                return null;
+              };
               const rectPayload = (element) => {
                 const rect = element.getBoundingClientRect();
                 return {
@@ -268,16 +304,7 @@ class LiveWorkspaceSwitcherPage:
                   return rect.height <= 40 && rect.width <= 180;
                 });
               const badges = badgeElements.map((element) => {
-                let backgroundColor = dialogBackground;
-                let current = element;
-                while (current && current !== dialog) {
-                  const computedBackground = toHex(window.getComputedStyle(current).backgroundColor);
-                  if (computedBackground) {
-                    backgroundColor = computedBackground;
-                    break;
-                  }
-                  current = current.parentElement;
-                }
+                const backgroundColor = resolveBackgroundColor(element, dialogBackground);
                 const style = window.getComputedStyle(element);
                 return {
                   label: normalize(element.innerText || element.textContent),
@@ -286,6 +313,43 @@ class LiveWorkspaceSwitcherPage:
                   contrastRatio: contrastRatio(style.color, backgroundColor),
                   ...rectPayload(element),
                 };
+              });
+              const workspaceTrigger = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              ).find((candidate) =>
+                isVisible(candidate)
+                && labelFor(candidate).startsWith('Workspace switcher:'),
+              );
+              const iconSelector = [
+                'flt-semantics[role="img"]',
+                '[role="img"]',
+                'img',
+                'svg',
+                'canvas',
+              ].join(',');
+              const triggerAndDialogControls = [
+                ...(workspaceTrigger ? [workspaceTrigger] : []),
+                ...Array.from(dialog.querySelectorAll(interactiveSelector)).filter(isVisible),
+              ];
+              const interactiveIcons = triggerAndDialogControls.flatMap((element) => {
+                const icons = Array.from(element.querySelectorAll(iconSelector)).filter(isVisible);
+                const label = labelFor(element);
+                if (!icons.length && !label.startsWith('Workspace switcher:') && label !== 'Delete') {
+                  return [];
+                }
+                const iconElement = icons[0] ?? element;
+                const backgroundColor = resolveBackgroundColor(
+                  iconElement,
+                  resolveBackgroundColor(element, dialogBackground),
+                );
+                const foregroundColor = resolveForegroundColor(iconElement);
+                return [{
+                  label,
+                  foregroundColor,
+                  backgroundColor,
+                  contrastRatio: contrastRatio(foregroundColor, backgroundColor),
+                  ...rectPayload(iconElement),
+                }];
               });
               return {
                 bodyText: document.body?.innerText ?? '',
@@ -296,6 +360,7 @@ class LiveWorkspaceSwitcherPage:
                 interactiveElements,
                 missingInteractiveLabels,
                 badges,
+                interactiveIcons,
               };
             }
             """,
@@ -351,13 +416,87 @@ class LiveWorkspaceSwitcherPage:
                 )
                 for item in payload.get("badges", [])
             ),
+            interactive_icons=tuple(
+                WorkspaceSwitcherIconObservation(
+                    label=str(item.get("label", "")),
+                    foreground_color=(
+                        str(item.get("foregroundColor"))
+                        if item.get("foregroundColor") is not None
+                        else None
+                    ),
+                    background_color=(
+                        str(item.get("backgroundColor"))
+                        if item.get("backgroundColor") is not None
+                        else None
+                    ),
+                    contrast_ratio=(
+                        float(item.get("contrastRatio"))
+                        if item.get("contrastRatio") is not None
+                        else None
+                    ),
+                    x=float(item.get("x", 0.0)),
+                    y=float(item.get("y", 0.0)),
+                    width=float(item.get("width", 0.0)),
+                    height=float(item.get("height", 0.0)),
+                )
+                for item in payload.get("interactiveIcons", [])
+            ),
         )
 
     def observe_mobile_trigger_focus(
         self,
         *,
+        tab_count: int = 24,
         timeout_ms: int = 10_000,
     ) -> MobileTriggerFocusObservation:
+        before = self._mobile_trigger_snapshot(timeout_ms=timeout_ms)
+        steps: list[FocusNavigationStep] = []
+        for step_index in range(1, tab_count + 1):
+            active_before = self._session.active_element()
+            self._session.press_key("Tab", timeout_ms=timeout_ms)
+            active_after = self._session.active_element()
+            steps.append(
+                FocusNavigationStep(
+                    step=step_index,
+                    before_label=active_before.accessible_name,
+                    before_role=active_before.role,
+                    after_label=active_after.accessible_name,
+                    after_role=active_after.role,
+                    after_tag_name=active_after.tag_name,
+                    after_outer_html=active_after.outer_html,
+                )
+            )
+            if self._is_workspace_trigger_label(active_after.accessible_name):
+                break
+        after = self._mobile_trigger_snapshot(timeout_ms=timeout_ms)
+        active = self._session.active_element()
+        return MobileTriggerFocusObservation(
+            trigger_label=str(before.get("triggerLabel", "")),
+            trigger_text=str(before.get("triggerText", "")),
+            trigger_x=float(before.get("triggerX", 0.0)),
+            trigger_y=float(before.get("triggerY", 0.0)),
+            trigger_width=float(before.get("triggerWidth", 0.0)),
+            trigger_height=float(before.get("triggerHeight", 0.0)),
+            before_outline=str(before.get("outline", "")),
+            before_outline_color=str(before.get("outlineColor", "")),
+            before_outline_width=str(before.get("outlineWidth", "")),
+            before_box_shadow=str(before.get("boxShadow", "")),
+            after_outline=str(after.get("outline", "")),
+            after_outline_color=str(after.get("outlineColor", "")),
+            after_outline_width=str(after.get("outlineWidth", "")),
+            after_box_shadow=str(after.get("boxShadow", "")),
+            active_label_after_focus=active.accessible_name,
+            active_role_after_focus=active.role,
+            active_tag_name_after_focus=active.tag_name,
+            active_outer_html_after_focus=active.outer_html,
+            focus_sequence=tuple(steps),
+        )
+
+    def _mobile_trigger_snapshot(
+        self,
+        *,
+        timeout_ms: int,
+    ) -> dict[str, object]:
         payload = self._session.wait_for_function(
             """
             () => {
@@ -399,23 +538,7 @@ class LiveWorkspaceSwitcherPage:
                   boxShadow: style.boxShadow,
                 };
               };
-              const before = describeTrigger();
-              trigger.focus();
-              const active = document.activeElement;
-              const after = describeTrigger();
-              return {
-                before,
-                after,
-                activeLabel: normalize(
-                  active?.getAttribute?.('aria-label')
-                  || active?.innerText
-                  || active?.textContent
-                  || '',
-                ),
-                activeRole: active?.getAttribute?.('role') ?? null,
-                activeTagName: active?.tagName ?? '',
-                activeOuterHtml: active?.outerHTML?.slice(0, 400) ?? '',
-              };
+              return describeTrigger();
             }
             """,
             timeout_ms=timeout_ms,
@@ -425,41 +548,7 @@ class LiveWorkspaceSwitcherPage:
                 "The mobile layout did not expose the condensed workspace switcher trigger.\n"
                 f"Observed body text:\n{self.body_text()}",
             )
-        before = payload.get("before", {})
-        after = payload.get("after", {})
-        if not isinstance(before, dict) or not isinstance(after, dict):
-            raise AssertionError(
-                "The mobile trigger focus diagnostic did not return a valid payload.\n"
-                f"Observed payload: {payload!r}",
-            )
-        return MobileTriggerFocusObservation(
-            trigger_label=str(before.get("triggerLabel", "")),
-            trigger_text=str(before.get("triggerText", "")),
-            trigger_x=float(before.get("triggerX", 0.0)),
-            trigger_y=float(before.get("triggerY", 0.0)),
-            trigger_width=float(before.get("triggerWidth", 0.0)),
-            trigger_height=float(before.get("triggerHeight", 0.0)),
-            before_outline=str(before.get("outline", "")),
-            before_outline_color=str(before.get("outlineColor", "")),
-            before_outline_width=str(before.get("outlineWidth", "")),
-            before_box_shadow=str(before.get("boxShadow", "")),
-            after_outline=str(after.get("outline", "")),
-            after_outline_color=str(after.get("outlineColor", "")),
-            after_outline_width=str(after.get("outlineWidth", "")),
-            after_box_shadow=str(after.get("boxShadow", "")),
-            active_label_after_focus=(
-                str(payload.get("activeLabel"))
-                if payload.get("activeLabel") not in (None, "")
-                else None
-            ),
-            active_role_after_focus=(
-                str(payload.get("activeRole"))
-                if payload.get("activeRole") is not None
-                else None
-            ),
-            active_tag_name_after_focus=str(payload.get("activeTagName", "")),
-            active_outer_html_after_focus=str(payload.get("activeOuterHtml", "")),
-        )
+        return payload
 
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
