@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/local_workspace_onboarding_service.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
+import 'package:trackstate/ui/features/tracker/services/workspace_directory_picker.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/workspace_onboarding_driver.dart';
@@ -20,6 +22,8 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
     required WorkspaceProfileService workspaceProfileService,
     HostedRepositoryLoader? openHostedRepository,
     LocalRepositoryLoader? openLocalRepository,
+    LocalWorkspaceOnboardingService? localWorkspaceOnboardingService,
+    WorkspaceDirectoryPicker? workspaceDirectoryPicker,
     Map<String, Object>? sharedPreferences,
   }) async {
     if (sharedPreferences != null) {
@@ -35,6 +39,9 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
         workspaceProfileService: workspaceProfileService,
         openHostedRepository: openHostedRepository,
         openLocalRepository: openLocalRepository,
+        localWorkspaceOnboardingService: localWorkspaceOnboardingService,
+        workspaceDirectoryPicker:
+            workspaceDirectoryPicker ?? pickWorkspaceDirectory,
       ),
     );
     await _tester.pumpAndSettle();
