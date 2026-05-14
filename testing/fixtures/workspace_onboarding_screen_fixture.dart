@@ -4,6 +4,7 @@ import 'package:trackstate/data/services/local_workspace_onboarding_service.dart
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/ui/features/tracker/services/workspace_directory_picker.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
+import 'package:trackstate/ui/features/tracker/services/workspace_directory_picker.dart';
 
 import '../components/screens/workspace_onboarding_screen.dart';
 import '../core/interfaces/workspace_onboarding_screen.dart';
