@@ -8,6 +8,7 @@ import '../../../../data/repositories/trackstate_repository.dart';
 import '../../../../data/services/issue_mutation_service.dart';
 import '../../../../data/services/jql_search_service.dart';
 import '../../../../data/services/trackstate_auth_store.dart';
+import '../../../../data/services/workspace_sync_service.dart';
 import '../../../../domain/models/issue_mutation_models.dart';
 import '../../../../domain/models/trackstate_models.dart';
 
@@ -307,6 +308,11 @@ class TrackerViewModel extends ChangeNotifier {
   bool _isLoadingMoreSearchResults = false;
   bool _didAutoResumeStartupRecoveryAfterAuthentication = false;
   bool _hasLoadedInitialSearchResults = false;
+  WorkspaceSyncService? _workspaceSyncService;
+  WorkspaceSyncStatus _workspaceSyncStatus = const WorkspaceSyncStatus();
+  WorkspaceSyncRefresh? _pendingWorkspaceSyncRefresh;
+  int _editSessionDepth = 0;
+  bool _disposed = false;
 
   TrackerSnapshot? get snapshot => _snapshot;
   TrackerSection get section => _section;
@@ -316,6 +322,9 @@ class TrackerViewModel extends ChangeNotifier {
   int get totalSearchResults => _searchPage.total;
   bool get hasMoreSearchResults => _searchPage.hasMore;
   bool get isLoadingMoreSearchResults => _isLoadingMoreSearchResults;
+  WorkspaceSyncStatus get workspaceSyncStatus => _workspaceSyncStatus;
+  bool get hasPendingWorkspaceSyncRefresh =>
+      _workspaceSyncStatus.hasPendingRefresh;
   TrackStateIssue? get selectedIssue => _selectedIssue;
   TrackerSection? get issueDetailReturnSection => _issueDetailReturnSection;
   ProjectSettingsTab? get projectSettingsTab => _projectSettingsTab;
@@ -500,6 +509,7 @@ class TrackerViewModel extends ChangeNotifier {
       if (hasStartupRecovery && _snapshot != null) {
         _section = TrackerSection.settings;
       }
+      _configureWorkspaceSync();
     } on Object catch (error) {
       final recovery = _startupRecoveryFrom(error);
       if (recovery == null) {
@@ -533,8 +543,18 @@ class TrackerViewModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _boundProviderSession?.removeListener(_handleProviderSessionChanged);
+    _workspaceSyncService?.dispose();
     super.dispose();
+  }
+
+  Future<void> handleAppResumed() async {
+    await _workspaceSyncService?.handleAppResume();
+  }
+
+  Future<void> retryWorkspaceSync() async {
+    await _workspaceSyncService?.retryNow();
   }
 
   Future<void> updateQuery(String query) async {
@@ -660,6 +680,20 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void beginEditSession() {
+    _editSessionDepth += 1;
+  }
+
+  void endEditSession() {
+    if (_editSessionDepth == 0) {
+      return;
+    }
+    _editSessionDepth -= 1;
+    if (_editSessionDepth == 0) {
+      unawaited(_applyPendingWorkspaceSyncRefresh());
+    }
+  }
+
   TrackStateRepositoryException? _hostedWriteAccessException(String action) {
     if (usesLocalPersistence || !exposesHostedAccessGates) {
       return null;
@@ -724,6 +758,7 @@ class TrackerViewModel extends ChangeNotifier {
       _bindProviderSession();
       _isSaving = false;
       notifyListeners();
+      unawaited(_applyPendingWorkspaceSyncRefresh());
     }
   }
 
@@ -761,6 +796,7 @@ class TrackerViewModel extends ChangeNotifier {
           if (current.key == issue.key) optimisticIssue else current,
       ],
     );
+    _updateWorkspaceSyncBaseline();
     _selectedIssue = _selectedIssue?.key == issue.key
         ? optimisticIssue
         : _selectedIssue;
@@ -789,6 +825,7 @@ class TrackerViewModel extends ChangeNotifier {
         project: snapshot.project,
         issues: previousIssues,
       );
+      _updateWorkspaceSyncBaseline();
       _selectedIssue = previousIssues.firstWhere(
         (current) => current.key == issue.key,
         orElse: () => issue,
@@ -797,6 +834,7 @@ class TrackerViewModel extends ChangeNotifier {
     } finally {
       _isSaving = false;
       notifyListeners();
+      unawaited(_applyPendingWorkspaceSyncRefresh());
     }
   }
 
@@ -861,6 +899,7 @@ class TrackerViewModel extends ChangeNotifier {
                   'The issue could not be created with the current repository session.',
             );
       _snapshot = await _repository.loadSnapshot();
+      _updateWorkspaceSyncBaseline();
       _selectIssueFromSnapshot(created);
       await _refreshSearchResultsAfterMutation();
       _section = TrackerSection.search;
@@ -875,6 +914,7 @@ class TrackerViewModel extends ChangeNotifier {
     } finally {
       _isSaving = false;
       notifyListeners();
+      unawaited(_applyPendingWorkspaceSyncRefresh());
     }
   }
 
@@ -1158,6 +1198,7 @@ class TrackerViewModel extends ChangeNotifier {
     try {
       _snapshot = await (repository as ProjectSettingsRepository)
           .saveProjectSettings(settings);
+      _updateWorkspaceSyncBaseline();
       if (_selectedIssue case final selectedIssue?) {
         _selectedIssue = _snapshot!.issues.firstWhere(
           (issue) => issue.key == selectedIssue.key,
@@ -1172,6 +1213,7 @@ class TrackerViewModel extends ChangeNotifier {
     } finally {
       _isSaving = false;
       notifyListeners();
+      unawaited(_applyPendingWorkspaceSyncRefresh());
     }
   }
 
@@ -1294,6 +1336,7 @@ class TrackerViewModel extends ChangeNotifier {
       repositoryIndex: snapshot.repositoryIndex,
       loadWarnings: snapshot.loadWarnings,
     );
+    _updateWorkspaceSyncBaseline();
     return nextIssues.firstWhere(
       (candidate) => candidate.key == currentIssue.key,
       orElse: () => nextIssue,
@@ -1424,6 +1467,7 @@ class TrackerViewModel extends ChangeNotifier {
     } finally {
       _isSaving = false;
       notifyListeners();
+      unawaited(_applyPendingWorkspaceSyncRefresh());
     }
   }
 
@@ -1578,6 +1622,7 @@ class TrackerViewModel extends ChangeNotifier {
     } finally {
       _isSaving = false;
       notifyListeners();
+      unawaited(_applyPendingWorkspaceSyncRefresh());
     }
   }
 
@@ -1723,6 +1768,7 @@ class TrackerViewModel extends ChangeNotifier {
     final snapshot = await _repository.loadSnapshot();
     final previousSelectedKey = _selectedIssue?.key;
     _snapshot = snapshot;
+    _updateWorkspaceSyncBaseline();
     _startupRecovery = snapshot.startupRecovery;
     if (_jql.contains('project = TRACK') && project?.key != 'TRACK') {
       _jql = _jql.replaceFirst('project = TRACK', 'project = ${project!.key}');
@@ -1825,6 +1871,7 @@ class TrackerViewModel extends ChangeNotifier {
       readiness: snapshot.readiness,
       startupRecovery: snapshot.startupRecovery,
     );
+    _updateWorkspaceSyncBaseline();
   }
 
   void _applyTargetedIssueRefresh(TrackStateIssue issue) {
@@ -1836,6 +1883,7 @@ class TrackerViewModel extends ChangeNotifier {
             (candidate) => candidate.key == issue.key,
           )) {
         _snapshot = cachedSnapshot;
+        _updateWorkspaceSyncBaseline();
         _selectIssueFromSnapshot(issue);
         return;
       }
@@ -1907,6 +1955,110 @@ class TrackerViewModel extends ChangeNotifier {
 
   void _handleProviderSessionChanged() {
     notifyListeners();
+  }
+
+  void _configureWorkspaceSync() {
+    _workspaceSyncService?.dispose();
+    _workspaceSyncService = null;
+    final snapshot = _snapshot;
+    if (snapshot == null || _repository is! WorkspaceSyncRepository) {
+      _workspaceSyncStatus = const WorkspaceSyncStatus();
+      return;
+    }
+    final service = WorkspaceSyncService(
+      repository: _repository as WorkspaceSyncRepository,
+      loadSnapshot: _repository.loadSnapshot,
+      onRefresh: _handleWorkspaceSyncRefresh,
+      onStatusChanged: _handleWorkspaceSyncStatusChanged,
+    );
+    _workspaceSyncService = service;
+    _workspaceSyncStatus = service.status;
+    service.start(initialSnapshot: snapshot);
+  }
+
+  void _handleWorkspaceSyncStatusChanged(WorkspaceSyncStatus status) {
+    if (_disposed) {
+      return;
+    }
+    final hasPendingRefresh = _pendingWorkspaceSyncRefresh != null ||
+        _workspaceSyncStatus.hasPendingRefresh;
+    _workspaceSyncStatus = hasPendingRefresh
+        ? status.copyWith(
+            hasPendingRefresh: true,
+            health: WorkspaceSyncHealth.attentionNeeded,
+          )
+        : status;
+    notifyListeners();
+  }
+
+  Future<void> _handleWorkspaceSyncRefresh(WorkspaceSyncRefresh refresh) async {
+    if (_disposed) {
+      return;
+    }
+    if (_isSaving || _editSessionDepth > 0) {
+      _pendingWorkspaceSyncRefresh = refresh;
+      _workspaceSyncStatus = _workspaceSyncStatus.copyWith(
+        hasPendingRefresh: true,
+        health: WorkspaceSyncHealth.attentionNeeded,
+        lastResult: refresh.result,
+      );
+      notifyListeners();
+      return;
+    }
+    await _applyWorkspaceSyncRefresh(refresh);
+  }
+
+  Future<void> _applyPendingWorkspaceSyncRefresh() async {
+    if (_disposed) {
+      return;
+    }
+    final refresh = _pendingWorkspaceSyncRefresh;
+    if (refresh == null || _isSaving || _editSessionDepth > 0) {
+      return;
+    }
+    _pendingWorkspaceSyncRefresh = null;
+    await _applyWorkspaceSyncRefresh(refresh);
+  }
+
+  Future<void> _applyWorkspaceSyncRefresh(WorkspaceSyncRefresh refresh) async {
+    if (_disposed) {
+      return;
+    }
+    final snapshot = refresh.snapshot;
+    final changedDomains = refresh.result.changedDomains;
+    if (snapshot != null) {
+      final previousSelectedKey = _selectedIssue?.key;
+      _snapshot = snapshot;
+      _startupRecovery = snapshot.startupRecovery;
+      _selectedIssue = _resolveSelectedIssue(previousSelectedKey, snapshot.issues);
+      _updateWorkspaceSyncBaseline();
+      if (changedDomains.contains(WorkspaceSyncDomain.projectMeta) ||
+          changedDomains.contains(WorkspaceSyncDomain.issueSummaries) ||
+          changedDomains.contains(WorkspaceSyncDomain.repositoryIndex)) {
+        await _refreshSearchResultsAfterMutation(preferLoadedSnapshot: true);
+      }
+    }
+    final refreshedIssueKeys = <String>{
+      for (final domain in refresh.result.domains.values) ...domain.issueKeys,
+    };
+    for (final issueKey in refreshedIssueKeys) {
+      _issueHistoryByKey.remove(issueKey);
+    }
+    _workspaceSyncStatus = _workspaceSyncStatus.copyWith(
+      hasPendingRefresh: false,
+      lastResult: refresh.result,
+      latestError: null,
+      health: WorkspaceSyncHealth.synced,
+    );
+    notifyListeners();
+  }
+
+  void _updateWorkspaceSyncBaseline() {
+    final snapshot = _snapshot;
+    if (snapshot == null) {
+      return;
+    }
+    _workspaceSyncService?.updateBaselineSnapshot(snapshot);
   }
 
   String? _callbackToken() {

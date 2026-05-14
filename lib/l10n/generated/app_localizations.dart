@@ -196,6 +196,96 @@ abstract class AppLocalizations {
   /// **'Synced with Git'**
   String get syncStatus;
 
+  /// No description provided for @workspaceSyncSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Workspace sync'**
+  String get workspaceSyncSettings;
+
+  /// No description provided for @workspaceSyncChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'Syncing'**
+  String get workspaceSyncChecking;
+
+  /// No description provided for @workspaceSyncAttentionNeeded.
+  ///
+  /// In en, this message translates to:
+  /// **'Attention needed'**
+  String get workspaceSyncAttentionNeeded;
+
+  /// No description provided for @workspaceSyncUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync unavailable'**
+  String get workspaceSyncUnavailable;
+
+  /// No description provided for @workspaceSyncPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Updates pending'**
+  String get workspaceSyncPending;
+
+  /// No description provided for @workspaceSyncPendingTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Updates pending'**
+  String get workspaceSyncPendingTitle;
+
+  /// No description provided for @workspaceSyncPendingMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Background updates were detected while edits were open. TrackState will apply the latest refresh after you finish the current draft or save.'**
+  String get workspaceSyncPendingMessage;
+
+  /// No description provided for @workspaceSyncCheckingMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'TrackState is checking the active workspace for Git and repository changes.'**
+  String get workspaceSyncCheckingMessage;
+
+  /// No description provided for @workspaceSyncIdleMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Workspace sync is running in the background for the active workspace.'**
+  String get workspaceSyncIdleMessage;
+
+  /// No description provided for @workspaceSyncLastSuccessful.
+  ///
+  /// In en, this message translates to:
+  /// **'Last successful sync check: {timestamp}'**
+  String workspaceSyncLastSuccessful(String timestamp);
+
+  /// No description provided for @workspaceSyncRetryAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Next retry at {timestamp}.'**
+  String workspaceSyncRetryAt(String timestamp);
+
+  /// No description provided for @workspaceSyncErrorMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'The latest sync check failed: {error}'**
+  String workspaceSyncErrorMessage(String error);
+
+  /// No description provided for @workspaceSyncLastCheckedLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Last checked'**
+  String get workspaceSyncLastCheckedLabel;
+
+  /// No description provided for @workspaceSyncLastSuccessfulLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Last successful'**
+  String get workspaceSyncLastSuccessfulLabel;
+
+  /// No description provided for @workspaceSyncLatestError.
+  ///
+  /// In en, this message translates to:
+  /// **'Latest error'**
+  String get workspaceSyncLatestError;
+
   /// No description provided for @searchIssues.
   ///
   /// In en, this message translates to:

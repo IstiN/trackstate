@@ -511,6 +511,21 @@ class _TestHostedProvider
   }
 
   @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'workspace-onboarding-test-revision',
+      sessionRevision: _connection == null ? 'disconnected' : 'connected',
+      connectionState: _connection == null
+          ? ProviderConnectionState.disconnected
+          : ProviderConnectionState.connected,
+      permission: await getPermission(),
+    ),
+  );
+
+  @override
   Future<RepositoryBranch> getBranch(String name) async =>
       RepositoryBranch(name: name, exists: true, isCurrent: name == branch);
 

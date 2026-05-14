@@ -61,6 +61,60 @@ class AppLocalizationsEn extends AppLocalizations {
   String get syncStatus => 'Synced with Git';
 
   @override
+  String get workspaceSyncSettings => 'Workspace sync';
+
+  @override
+  String get workspaceSyncChecking => 'Syncing';
+
+  @override
+  String get workspaceSyncAttentionNeeded => 'Attention needed';
+
+  @override
+  String get workspaceSyncUnavailable => 'Sync unavailable';
+
+  @override
+  String get workspaceSyncPending => 'Updates pending';
+
+  @override
+  String get workspaceSyncPendingTitle => 'Updates pending';
+
+  @override
+  String get workspaceSyncPendingMessage =>
+      'Background updates were detected while edits were open. TrackState will apply the latest refresh after you finish the current draft or save.';
+
+  @override
+  String get workspaceSyncCheckingMessage =>
+      'TrackState is checking the active workspace for Git and repository changes.';
+
+  @override
+  String get workspaceSyncIdleMessage =>
+      'Workspace sync is running in the background for the active workspace.';
+
+  @override
+  String workspaceSyncLastSuccessful(String timestamp) {
+    return 'Last successful sync check: $timestamp';
+  }
+
+  @override
+  String workspaceSyncRetryAt(String timestamp) {
+    return 'Next retry at $timestamp.';
+  }
+
+  @override
+  String workspaceSyncErrorMessage(String error) {
+    return 'The latest sync check failed: $error';
+  }
+
+  @override
+  String get workspaceSyncLastCheckedLabel => 'Last checked';
+
+  @override
+  String get workspaceSyncLastSuccessfulLabel => 'Last successful';
+
+  @override
+  String get workspaceSyncLatestError => 'Latest error';
+
+  @override
   String get searchIssues => 'Search issues';
 
   @override
