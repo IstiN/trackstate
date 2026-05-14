@@ -1,5 +1,12 @@
 enum WorkspaceProfileTargetType { hosted, local }
 
+enum HostedWorkspaceAccessMode {
+  disconnected,
+  readOnly,
+  writable,
+  attachmentRestricted,
+}
+
 class WorkspaceProfileInput {
   const WorkspaceProfileInput({
     required this.targetType,
@@ -28,6 +35,7 @@ class WorkspaceProfile {
     required this.defaultBranch,
     required this.writeBranch,
     this.lastOpenedAt,
+    this.hostedAccessMode,
   });
 
   final String id;
@@ -37,6 +45,7 @@ class WorkspaceProfile {
   final String defaultBranch;
   final String writeBranch;
   final DateTime? lastOpenedAt;
+  final HostedWorkspaceAccessMode? hostedAccessMode;
 
   bool get isHosted => targetType == WorkspaceProfileTargetType.hosted;
   bool get isLocal => targetType == WorkspaceProfileTargetType.local;
@@ -58,6 +67,7 @@ class WorkspaceProfile {
     String? defaultBranch,
     String? writeBranch,
     Object? lastOpenedAt = _workspaceProfileNoop,
+    Object? hostedAccessMode = _workspaceProfileNoop,
   }) {
     return WorkspaceProfile(
       id: id ?? this.id,
@@ -69,6 +79,9 @@ class WorkspaceProfile {
       lastOpenedAt: identical(lastOpenedAt, _workspaceProfileNoop)
           ? this.lastOpenedAt
           : lastOpenedAt as DateTime?,
+      hostedAccessMode: identical(hostedAccessMode, _workspaceProfileNoop)
+          ? this.hostedAccessMode
+          : hostedAccessMode as HostedWorkspaceAccessMode?,
     );
   }
 
@@ -81,6 +94,7 @@ class WorkspaceProfile {
       'defaultBranch': defaultBranch,
       'writeBranch': writeBranch,
       'lastOpenedAt': lastOpenedAt?.toUtc().toIso8601String(),
+      'hostedAccessMode': hostedAccessMode?.name,
     };
   }
 
@@ -89,6 +103,10 @@ class WorkspaceProfile {
     final targetType = WorkspaceProfileTargetType.values.firstWhere(
       (candidate) => candidate.name == targetTypeName,
       orElse: () => WorkspaceProfileTargetType.hosted,
+    );
+    final hostedAccessModeName = json['hostedAccessMode']?.toString().trim();
+    final hostedAccessMode = HostedWorkspaceAccessMode.values.where(
+      (candidate) => candidate.name == hostedAccessModeName,
     );
     final lastOpenedAtValue = json['lastOpenedAt']?.toString().trim();
     return WorkspaceProfile(
@@ -104,6 +122,11 @@ class WorkspaceProfile {
       lastOpenedAt: lastOpenedAtValue == null || lastOpenedAtValue.isEmpty
           ? null
           : DateTime.tryParse(lastOpenedAtValue)?.toUtc(),
+      hostedAccessMode:
+          targetType == WorkspaceProfileTargetType.hosted &&
+              hostedAccessMode.isNotEmpty
+          ? hostedAccessMode.first
+          : null,
     );
   }
 
@@ -127,6 +150,7 @@ class WorkspaceProfile {
       defaultBranch: normalizedDefaultBranch,
       writeBranch: normalizedWriteBranch,
       lastOpenedAt: lastOpenedAt?.toUtc(),
+      hostedAccessMode: null,
     );
   }
 }

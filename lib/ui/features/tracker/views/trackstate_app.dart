@@ -86,6 +86,8 @@ class _TrackStateAppState extends State<TrackStateApp> {
   bool _showsWorkspaceOnboarding = false;
   WorkspaceProfilesState _workspaceState = const WorkspaceProfilesState();
   Set<String> _authenticatedWorkspaceIds = const <String>{};
+  Map<String, HostedWorkspaceAccessMode> _hostedWorkspaceAccessModes =
+      const <String, HostedWorkspaceAccessMode>{};
   Map<String, bool> _localWorkspaceAvailability = const <String, bool>{};
   final Map<String, String> _workspaceValidationFailures = <String, String>{};
   _WorkspaceRestoreFailure? _pendingWorkspaceRestoreFailure;
@@ -112,6 +114,7 @@ class _TrackStateAppState extends State<TrackStateApp> {
     _workspaceProfilesReady = false;
     _showsWorkspaceOnboarding = false;
     _workspaceState = const WorkspaceProfilesState();
+    _hostedWorkspaceAccessModes = const <String, HostedWorkspaceAccessMode>{};
     unawaited(_initializeWorkspaceProfiles());
   }
 
@@ -187,8 +190,19 @@ class _TrackStateAppState extends State<TrackStateApp> {
   Future<void> _refreshWorkspaceSwitcherState([
     WorkspaceProfilesState? state,
   ]) async {
-    final workspaceState = state ?? _workspaceState;
+    var workspaceState = state ?? _workspaceState;
+    final activeWorkspace = workspaceState.activeWorkspace;
+    if (activeWorkspace != null &&
+        activeWorkspace.isHosted &&
+        activeWorkspace.id == viewModel.workspaceId) {
+      final liveAccessMode = _hostedWorkspaceAccessModeForViewModel(viewModel);
+      if (activeWorkspace.hostedAccessMode != liveAccessMode) {
+        workspaceState = await widget.workspaceProfileService
+            .saveHostedAccessMode(activeWorkspace.id, liveAccessMode);
+      }
+    }
     final authenticatedWorkspaceIds = <String>{};
+    final hostedWorkspaceAccessModes = <String, HostedWorkspaceAccessMode>{};
     final localWorkspaceAvailability = <String, bool>{};
     for (final workspace in workspaceState.profiles) {
       if (workspace.isHosted) {
@@ -197,6 +211,9 @@ class _TrackStateAppState extends State<TrackStateApp> {
         );
         if (token != null && token.trim().isNotEmpty) {
           authenticatedWorkspaceIds.add(workspace.id);
+        }
+        if (workspace.hostedAccessMode case final accessMode?) {
+          hostedWorkspaceAccessModes[workspace.id] = accessMode;
         }
         continue;
       }
@@ -207,7 +224,9 @@ class _TrackStateAppState extends State<TrackStateApp> {
       return;
     }
     setState(() {
+      _workspaceState = workspaceState;
       _authenticatedWorkspaceIds = authenticatedWorkspaceIds;
+      _hostedWorkspaceAccessModes = hostedWorkspaceAccessModes;
       _localWorkspaceAvailability = localWorkspaceAvailability;
       _workspaceValidationFailures.removeWhere(
         (workspaceId, _) => !workspaceState.profiles.any(
@@ -359,6 +378,10 @@ class _TrackStateAppState extends State<TrackStateApp> {
       } else {
         _authenticatedWorkspaceIds = <String>{..._authenticatedWorkspaceIds}
           ..remove(workspace.id);
+        _hostedWorkspaceAccessModes = <String, HostedWorkspaceAccessMode>{
+          ..._hostedWorkspaceAccessModes,
+          workspace.id: HostedWorkspaceAccessMode.disconnected,
+        };
       }
     });
     _workspaceValidationFailures[workspace.id] = reason;
@@ -810,14 +833,14 @@ class _TrackStateAppState extends State<TrackStateApp> {
       viewModel: viewModel,
       workspaces: _workspaceState,
       authenticatedWorkspaceIds: _authenticatedWorkspaceIds,
+      hostedWorkspaceAccessModes: _hostedWorkspaceAccessModes,
       localWorkspaceAvailability: _localWorkspaceAvailability,
       onSelectWorkspace: (workspace) {
         Navigator.of(context, rootNavigator: true).pop();
         unawaited(_switchToWorkspace(workspace));
       },
       onDeleteWorkspace: (workspace) {
-        Navigator.of(context, rootNavigator: true).pop();
-        unawaited(_deleteWorkspaceProfile(workspace));
+        unawaited(_confirmAndDeleteWorkspaceFromSwitcher(context, workspace));
       },
       onAddWorkspace: (input) async {
         Navigator.of(context, rootNavigator: true).pop();
@@ -853,6 +876,19 @@ class _TrackStateAppState extends State<TrackStateApp> {
         );
       },
     );
+  }
+
+  Future<void> _confirmAndDeleteWorkspaceFromSwitcher(
+    BuildContext context,
+    WorkspaceProfile workspace,
+  ) async {
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+    final confirmed = await _confirmWorkspaceDeletion(context, workspace);
+    if (!mounted || !confirmed) {
+      return;
+    }
+    rootNavigator.pop();
+    await _deleteWorkspaceProfile(workspace);
   }
 
   void _openWorkspaceOnboarding() {
@@ -2131,6 +2167,32 @@ String _activeWorkspaceStateLabel(
     HostedRepositoryAccessMode.readOnly => l10n.workspaceStateReadOnly,
     HostedRepositoryAccessMode.writable => l10n.workspaceStateConnected,
     HostedRepositoryAccessMode.attachmentRestricted =>
+      l10n.repositoryAccessAttachmentsRestricted,
+  };
+}
+
+HostedWorkspaceAccessMode _hostedWorkspaceAccessModeForViewModel(
+  TrackerViewModel viewModel,
+) {
+  return switch (viewModel.hostedRepositoryAccessMode) {
+    HostedRepositoryAccessMode.disconnected =>
+      HostedWorkspaceAccessMode.disconnected,
+    HostedRepositoryAccessMode.readOnly => HostedWorkspaceAccessMode.readOnly,
+    HostedRepositoryAccessMode.writable => HostedWorkspaceAccessMode.writable,
+    HostedRepositoryAccessMode.attachmentRestricted =>
+      HostedWorkspaceAccessMode.attachmentRestricted,
+  };
+}
+
+String _hostedWorkspaceAccessModeLabel(
+  AppLocalizations l10n,
+  HostedWorkspaceAccessMode accessMode,
+) {
+  return switch (accessMode) {
+    HostedWorkspaceAccessMode.disconnected => l10n.workspaceStateNeedsSignIn,
+    HostedWorkspaceAccessMode.readOnly => l10n.workspaceStateReadOnly,
+    HostedWorkspaceAccessMode.writable => l10n.workspaceStateConnected,
+    HostedWorkspaceAccessMode.attachmentRestricted =>
       l10n.repositoryAccessAttachmentsRestricted,
   };
 }
@@ -3778,32 +3840,40 @@ class _SavedWorkspaceList extends StatelessWidget {
     WorkspaceProfile workspace,
     ValueChanged<WorkspaceProfile> onDeleteWorkspace,
   ) async {
-    final l10n = AppLocalizations.of(context)!;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(l10n.workspaceDeleteConfirmationTitle),
-          content: Text(
-            l10n.workspaceDeleteConfirmationMessage(workspace.displayName),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: Text(l10n.cancel),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: Text(l10n.delete),
-            ),
-          ],
-        );
-      },
-    );
-    if (confirmed == true) {
+    final confirmed = await _confirmWorkspaceDeletion(context, workspace);
+    if (confirmed) {
       onDeleteWorkspace(workspace);
     }
   }
+}
+
+Future<bool> _confirmWorkspaceDeletion(
+  BuildContext context,
+  WorkspaceProfile workspace,
+) async {
+  final l10n = AppLocalizations.of(context)!;
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) {
+      return AlertDialog(
+        title: Text(l10n.workspaceDeleteConfirmationTitle),
+        content: Text(
+          l10n.workspaceDeleteConfirmationMessage(workspace.displayName),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(l10n.delete),
+          ),
+        ],
+      );
+    },
+  );
+  return confirmed == true;
 }
 
 class _WorkspaceSwitcherSheet extends StatefulWidget {
@@ -3811,6 +3881,7 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
     required this.viewModel,
     required this.workspaces,
     required this.authenticatedWorkspaceIds,
+    required this.hostedWorkspaceAccessModes,
     required this.localWorkspaceAvailability,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
@@ -3820,6 +3891,7 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
   final Set<String> authenticatedWorkspaceIds;
+  final Map<String, HostedWorkspaceAccessMode> hostedWorkspaceAccessModes;
   final Map<String, bool> localWorkspaceAvailability;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
@@ -3946,6 +4018,8 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                           activeWorkspaceId: activeWorkspaceId,
                           authenticatedWorkspaceIds:
                               widget.authenticatedWorkspaceIds,
+                          hostedWorkspaceAccessModes:
+                              widget.hostedWorkspaceAccessModes,
                           localWorkspaceAvailability:
                               widget.localWorkspaceAvailability,
                         ),
@@ -4132,7 +4206,8 @@ class _WorkspaceStateBadge extends StatelessWidget {
       backgroundColor = colors.error.withValues(alpha: 0.12);
       textColor = colors.error;
     } else if (lowerLabel.contains('sign') ||
-        lowerLabel.contains('read-only')) {
+        lowerLabel.contains('read-only') ||
+        lowerLabel.contains('attachment')) {
       backgroundColor = colors.warning.withValues(alpha: 0.14);
       textColor = colors.warning;
     } else if (lowerLabel.contains('connected') ||
@@ -4165,6 +4240,7 @@ String _workspaceStateLabel(
   WorkspaceProfile workspace, {
   required String? activeWorkspaceId,
   required Set<String> authenticatedWorkspaceIds,
+  required Map<String, HostedWorkspaceAccessMode> hostedWorkspaceAccessModes,
   required Map<String, bool> localWorkspaceAvailability,
 }) {
   if (workspace.id == activeWorkspaceId) {
@@ -4175,9 +4251,13 @@ String _workspaceStateLabel(
         ? l10n.workspaceStateUnavailable
         : l10n.workspaceStateLocal;
   }
-  return authenticatedWorkspaceIds.contains(workspace.id)
+  if (!authenticatedWorkspaceIds.contains(workspace.id)) {
+    return l10n.workspaceStateNeedsSignIn;
+  }
+  final accessMode = hostedWorkspaceAccessModes[workspace.id];
+  return accessMode == null
       ? l10n.workspaceStateSavedHostedWorkspace
-      : l10n.workspaceStateNeedsSignIn;
+      : _hostedWorkspaceAccessModeLabel(l10n, accessMode);
 }
 
 class _ProjectSettingsAdmin extends StatefulWidget {

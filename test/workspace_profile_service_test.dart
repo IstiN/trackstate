@@ -108,6 +108,37 @@ void main() {
   );
 
   test(
+    'saveHostedAccessMode persists the last verified hosted access mode per workspace',
+    () async {
+      final service = SharedPreferencesWorkspaceProfileService(
+        authStore: _MemoryAuthStore(),
+      );
+
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'trackstate/trackstate',
+          defaultBranch: 'main',
+        ),
+      );
+
+      final nextState = await service.saveHostedAccessMode(
+        'hosted:trackstate/trackstate@main',
+        HostedWorkspaceAccessMode.readOnly,
+      );
+
+      expect(
+        nextState.profiles.single.hostedAccessMode,
+        HostedWorkspaceAccessMode.readOnly,
+      );
+      expect(
+        (await service.loadState()).profiles.single.hostedAccessMode,
+        HostedWorkspaceAccessMode.readOnly,
+      );
+    },
+  );
+
+  test(
     'deleteProfile clears scoped credentials and falls back to the most recently opened workspace',
     () async {
       final authStore = _MemoryAuthStore()

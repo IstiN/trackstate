@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
@@ -75,6 +76,81 @@ void main() {
       );
       expect(service.state.activeWorkspaceId, 'hosted:stable/repo@main');
       expect(find.text('stable/repo'), findsWidgets);
+    },
+  );
+
+  testWidgets(
+    'workspace switcher shows the last verified hosted access state for inactive saved workspaces',
+    (tester) async {
+      final authStore = _MemoryAuthStore()
+        ..workspaceTokens['hosted:beta/repo@main'] = 'beta-token'
+        ..workspaceTokens['hosted:gamma/repo@main'] = 'gamma-token';
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+              hostedAccessMode: HostedWorkspaceAccessMode.writable,
+            ),
+            WorkspaceProfile(
+              id: 'hosted:beta/repo@main',
+              displayName: 'beta/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'beta/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+              hostedAccessMode: HostedWorkspaceAccessMode.readOnly,
+            ),
+            WorkspaceProfile(
+              id: 'hosted:gamma/repo@main',
+              displayName: 'gamma/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'gamma/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+              hostedAccessMode: HostedWorkspaceAccessMode.attachmentRestricted,
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          authStore: authStore,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Read-only'), findsOneWidget);
+      expect(find.text('Attachments limited'), findsOneWidget);
     },
   );
 
@@ -156,6 +232,99 @@ void main() {
       expect(service.state.activeWorkspaceId, 'local:/tmp/demo@main');
     },
   );
+
+  testWidgets('workspace switcher confirms before deleting a saved workspace', (
+    tester,
+  ) async {
+    final service = _MemoryWorkspaceProfileService(
+      WorkspaceProfilesState(
+        profiles: const [
+          WorkspaceProfile(
+            id: 'hosted:alpha/repo@main',
+            displayName: 'alpha/repo',
+            targetType: WorkspaceProfileTargetType.hosted,
+            target: 'alpha/repo',
+            defaultBranch: 'main',
+            writeBranch: 'main',
+          ),
+          WorkspaceProfile(
+            id: 'local:/tmp/demo@main',
+            displayName: 'demo',
+            targetType: WorkspaceProfileTargetType.local,
+            target: '/tmp/demo',
+            defaultBranch: 'main',
+            writeBranch: 'main',
+          ),
+        ],
+        activeWorkspaceId: 'hosted:alpha/repo@main',
+        migrationComplete: true,
+      ),
+    );
+
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await tester.pumpWidget(
+      TrackStateApp(
+        workspaceProfileService: service,
+        openHostedRepository:
+            ({
+              required String repository,
+              required String defaultBranch,
+              required String writeBranch,
+            }) async => DemoTrackStateRepository(
+              snapshot: await _snapshotForRepository(repository),
+            ),
+        openLocalRepository:
+            ({
+              required String repositoryPath,
+              required String defaultBranch,
+              required String writeBranch,
+            }) async => DemoTrackStateRepository(
+              snapshot: await _snapshotForRepository(repositoryPath),
+            ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.bySemanticsLabel(RegExp('Workspace switcher:')).last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey('workspace-delete-local:/tmp/demo@main')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete saved workspace'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Saved workspaces'), findsOneWidget);
+    expect(
+      service.state.profiles.any(
+        (profile) => profile.id == 'local:/tmp/demo@main',
+      ),
+      isTrue,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('workspace-delete-local:/tmp/demo@main')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pumpAndSettle();
+
+    expect(
+      service.state.profiles.any(
+        (profile) => profile.id == 'local:/tmp/demo@main',
+      ),
+      isFalse,
+    );
+  });
 
   testWidgets(
     'workspace switcher can add a hosted workspace and switch to it',
@@ -274,6 +443,25 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
   }
 
   @override
+  Future<WorkspaceProfilesState> saveHostedAccessMode(
+    String workspaceId,
+    HostedWorkspaceAccessMode? accessMode,
+  ) async {
+    state = WorkspaceProfilesState(
+      profiles: [
+        for (final profile in state.profiles)
+          if (profile.id == workspaceId && profile.isHosted)
+            profile.copyWith(hostedAccessMode: accessMode)
+          else
+            profile,
+      ],
+      activeWorkspaceId: state.activeWorkspaceId,
+      migrationComplete: true,
+    );
+    return state;
+  }
+
+  @override
   Future<WorkspaceProfile?> ensureLegacyContextMigrated(
     WorkspaceProfileInput? input,
   ) async => null;
@@ -303,5 +491,49 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
       migrationComplete: true,
     );
     return updated;
+  }
+}
+
+class _MemoryAuthStore implements TrackStateAuthStore {
+  final Map<String, String> workspaceTokens = <String, String>{};
+
+  @override
+  Future<void> clearToken({String? repository, String? workspaceId}) async {
+    if (workspaceId != null) {
+      workspaceTokens.remove(workspaceId);
+    }
+  }
+
+  @override
+  Future<String?> migrateLegacyRepositoryToken({
+    required String repository,
+    required String workspaceId,
+  }) async => null;
+
+  @override
+  Future<void> moveToken({
+    required String fromWorkspaceId,
+    required String toWorkspaceId,
+  }) async {
+    final token = workspaceTokens.remove(fromWorkspaceId);
+    if (token != null) {
+      workspaceTokens[toWorkspaceId] = token;
+    }
+  }
+
+  @override
+  Future<String?> readToken({String? repository, String? workspaceId}) async {
+    return workspaceId == null ? null : workspaceTokens[workspaceId];
+  }
+
+  @override
+  Future<void> saveToken(
+    String token, {
+    String? repository,
+    String? workspaceId,
+  }) async {
+    if (workspaceId != null) {
+      workspaceTokens[workspaceId] = token;
+    }
   }
 }

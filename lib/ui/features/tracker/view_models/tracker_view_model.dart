@@ -349,6 +349,7 @@ class TrackerViewModel extends ChangeNotifier {
   int get totalSearchResults => _searchPage.total;
   bool get hasMoreSearchResults => _searchPage.hasMore;
   bool get isLoadingMoreSearchResults => _isLoadingMoreSearchResults;
+  String? get workspaceId => _workspaceId;
   TrackStateIssue? get selectedIssue => _selectedIssue;
   TrackerSection? get issueDetailReturnSection => _issueDetailReturnSection;
   ProjectSettingsTab? get projectSettingsTab => _projectSettingsTab;
