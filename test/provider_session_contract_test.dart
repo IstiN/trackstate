@@ -345,6 +345,20 @@ class _FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
   Future<RepositoryPermission> getPermission() async => _permission;
 
   @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'mock-revision',
+      sessionRevision:
+          '${_permission.canRead}:${_permission.canWrite}:${_permission.supportsReleaseAttachmentWrites}',
+      connectionState: ProviderConnectionState.connected,
+      permission: _permission,
+    ),
+  );
+
+  @override
   Future<void> ensureCleanWorktree() async {}
 
   @override
@@ -432,6 +446,26 @@ class _FailingTrackStateProviderAdapter implements TrackStateProviderAdapter {
         canManageAttachments: false,
         canCheckCollaborators: false,
       );
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => const RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: 'mock-revision',
+      sessionRevision: 'error',
+      connectionState: ProviderConnectionState.error,
+      permission: RepositoryPermission(
+        canRead: false,
+        canWrite: false,
+        isAdmin: false,
+        canCreateBranch: false,
+        canManageAttachments: false,
+        canCheckCollaborators: false,
+      ),
+    ),
+  );
 
   @override
   Future<void> ensureCleanWorktree() async {}

@@ -263,7 +263,38 @@ class LocalGitTrackStateProvider
       supportsReleaseAttachmentWrites:
           releaseAttachmentCapability.supportsReleaseAttachmentWrites,
       releaseAttachmentWriteFailureReason:
-          releaseAttachmentCapability.failureReason,
+        releaseAttachmentCapability.failureReason,
+    );
+  }
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async {
+    final currentState = await _readSyncState();
+    if (previousState == null) {
+      return RepositorySyncCheck(state: currentState);
+    }
+    final signals = <WorkspaceSyncSignal>{};
+    final changedPaths = <String>{};
+    if (previousState.repositoryRevision != currentState.repositoryRevision) {
+      signals.add(WorkspaceSyncSignal.localHead);
+      changedPaths.addAll(
+        await _changedPathsBetween(
+          previousState.repositoryRevision,
+          currentState.repositoryRevision,
+        ),
+      );
+    }
+    if ((previousState.workingTreeRevision ?? '') !=
+        (currentState.workingTreeRevision ?? '')) {
+      signals.add(WorkspaceSyncSignal.localWorktree);
+      changedPaths.addAll(await _worktreeChangedPaths());
+    }
+    return RepositorySyncCheck(
+      state: currentState,
+      signals: signals,
+      changedPaths: changedPaths,
     );
   }
 
@@ -402,6 +433,75 @@ class LocalGitTrackStateProvider
 
   Future<String> _gitConfigValue(String key) async =>
       (await _tryGit(['config', '--local', key]))?.stdout.trim() ?? '';
+
+  Future<RepositorySyncState> _readSyncState() async {
+    final permission = await getPermission();
+    final branch = await resolveWriteBranch();
+    final revision = await _runGit(['rev-parse', dataRef]);
+    final status = await _runGit([
+      'status',
+      '--porcelain=v1',
+      '--untracked-files=all',
+    ]);
+    return RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: revision.stdout.trim(),
+      sessionRevision:
+          '$branch:${permission.canRead}:${permission.canWrite}:${permission.supportsReleaseAttachmentWrites}',
+      connectionState: ProviderConnectionState.connected,
+      workingTreeRevision: status.stdout.trim(),
+      permission: permission,
+    );
+  }
+
+  Future<Set<String>> _changedPathsBetween(String previous, String current) async {
+    if (previous.trim().isEmpty ||
+        current.trim().isEmpty ||
+        previous.trim() == current.trim()) {
+      return const <String>{};
+    }
+    final result = await _runGit([
+      'diff',
+      '--name-only',
+      '--find-renames',
+      previous,
+      current,
+    ]);
+    return LineSplitter.split(result.stdout)
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toSet();
+  }
+
+  Future<Set<String>> _worktreeChangedPaths() async {
+    final result = await _runGit([
+      'status',
+      '--porcelain=v1',
+      '--untracked-files=all',
+    ]);
+    final paths = <String>{};
+    for (final line in LineSplitter.split(result.stdout)) {
+      final normalized = line.trimRight();
+      if (normalized.length < 4) {
+        continue;
+      }
+      final rawPath = normalized.substring(3).trim();
+      if (rawPath.contains(' -> ')) {
+        final parts = rawPath.split(' -> ');
+        for (final part in parts) {
+          final value = part.trim();
+          if (value.isNotEmpty) {
+            paths.add(value);
+          }
+        }
+        continue;
+      }
+      if (rawPath.isNotEmpty) {
+        paths.add(rawPath);
+      }
+    }
+    return paths;
+  }
 
   Future<_LocalReleaseAttachmentCapability> _releaseAttachmentCapability({
     required String branch,

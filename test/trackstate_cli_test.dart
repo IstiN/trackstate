@@ -2502,6 +2502,19 @@ class _FakeLocalGitTrackStateProvider extends LocalGitTrackStateProvider {
 
   @override
   Future<RepositoryPermission> getPermission() async => permission;
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'cli-provider-revision',
+      sessionRevision: '${permission.canRead}:${permission.canWrite}',
+      connectionState: ProviderConnectionState.connected,
+      permission: permission,
+    ),
+  );
 }
 
 class _FakeHostedTrackStateProvider
@@ -2554,6 +2567,19 @@ class _FakeHostedTrackStateProvider
 
   @override
   Future<RepositoryPermission> getPermission() async => permission;
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'cli-provider-revision',
+      sessionRevision: '${permission.canRead}:${permission.canWrite}',
+      connectionState: ProviderConnectionState.connected,
+      permission: permission,
+    ),
+  );
 
   @override
   Future<RepositoryBranch> getBranch(String name) async =>
