@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/jql_search_service.dart';
+import 'package:trackstate/data/services/local_workspace_onboarding_service.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
@@ -14,7 +15,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  testWidgets('first launch shows workspace onboarding choices', (
+  testWidgets('first launch shows local workspace onboarding actions', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1440, 960);
@@ -24,37 +25,188 @@ void main() {
       tester.view.resetDevicePixelRatio();
     });
 
-    final bootstrapSnapshot = await _snapshotForRepository(
-      repository: 'trackstate/trackstate',
-      branch: 'main',
-    );
-
-    await tester.pumpWidget(
-      TrackStateApp(
-        repositoryFactory: () => _HostedWorkspaceTestRepository(
-          snapshot: bootstrapSnapshot,
-          provider: _TestHostedProvider(
-            repositoryName: 'trackstate/trackstate',
-            branch: 'main',
-          ),
-        ),
-      ),
-    );
+    await tester.pumpWidget(const TrackStateApp());
     await tester.pumpAndSettle();
 
     expect(find.text('Add workspace'), findsOneWidget);
-    expect(find.text('Local folder'), findsOneWidget);
-    expect(find.text('Hosted repository'), findsOneWidget);
-
-    await tester.tap(find.text('Hosted repository'));
-    await tester.pumpAndSettle();
-
-    expect(
-      find.byKey(const ValueKey('workspace-onboarding-hosted-repository')),
-      findsOneWidget,
-    );
-    expect(find.textContaining('owner/repo manually'), findsOneWidget);
+    expect(find.text('Open existing folder'), findsOneWidget);
+    expect(find.text('Initialize folder'), findsOneWidget);
+    expect(find.textContaining('Choose a local folder'), findsOneWidget);
+    expect(find.text('Hosted repository'), findsNothing);
   });
+
+  testWidgets(
+    'first launch local onboarding saves a custom workspace name and opens the workspace',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final service = SharedPreferencesWorkspaceProfileService(
+        now: () => DateTime.utc(2026, 5, 14, 10, 0),
+      );
+      final onboardingService = _FakeLocalWorkspaceOnboardingService(
+        inspection: const LocalWorkspaceInspection(
+          folderPath: '/tmp/local-demo',
+          state: LocalWorkspaceInspectionState.readyToOpen,
+          message: 'Ready to open.',
+          suggestedWorkspaceName: 'local-demo',
+          suggestedWriteBranch: 'main',
+          detectedWriteBranch: 'main',
+          hasGitRepository: true,
+        ),
+      );
+      final openedRepositories = <String>[];
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          localWorkspaceOnboardingService: onboardingService,
+          workspaceDirectoryPicker:
+              ({String? confirmButtonText, String? initialDirectory}) async =>
+                  '/tmp/local-demo',
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                openedRepositories.add(
+                  '$repositoryPath@$defaultBranch@$writeBranch',
+                );
+                return const DemoTrackStateRepository();
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('local-workspace-onboarding-open-existing')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('/tmp/local-demo'), findsOneWidget);
+      expect(
+        _editableTextValue(
+          tester,
+          const ValueKey('local-workspace-onboarding-name'),
+        ),
+        'local-demo',
+      );
+      expect(
+        _editableTextValue(
+          tester,
+          const ValueKey('local-workspace-onboarding-write-branch'),
+        ),
+        'main',
+      );
+
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(const ValueKey('local-workspace-onboarding-name')),
+          matching: find.byType(EditableText),
+        ),
+        'Native Demo',
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('local-workspace-onboarding-submit')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(openedRepositories.single, '/tmp/local-demo@main@main');
+      final state = await service.loadState();
+      expect(state.activeWorkspace?.displayName, 'Native Demo');
+      expect(state.activeWorkspace?.customDisplayName, 'Native Demo');
+    },
+  );
+
+  testWidgets(
+    'first launch local onboarding initializes the selected folder before opening',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final service = SharedPreferencesWorkspaceProfileService(
+        now: () => DateTime.utc(2026, 5, 14, 10, 0),
+      );
+      final onboardingService = _FakeLocalWorkspaceOnboardingService(
+        inspection: const LocalWorkspaceInspection(
+          folderPath: '/tmp/new-workspace',
+          state: LocalWorkspaceInspectionState.readyToInitialize,
+          message: 'Initialize TrackState here.',
+          suggestedWorkspaceName: 'new-workspace',
+          suggestedWriteBranch: 'main',
+          needsGitInitialization: true,
+        ),
+        initializedResult: const LocalWorkspaceSetupResult(
+          folderPath: '/tmp/new-workspace',
+          displayName: 'Fresh Workspace',
+          defaultBranch: 'main',
+          writeBranch: 'main',
+          projectKey: 'FW',
+        ),
+      );
+      final openedRepositories = <String>[];
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          localWorkspaceOnboardingService: onboardingService,
+          workspaceDirectoryPicker:
+              ({String? confirmButtonText, String? initialDirectory}) async =>
+                  '/tmp/new-workspace',
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                openedRepositories.add(
+                  '$repositoryPath@$defaultBranch@$writeBranch',
+                );
+                return const DemoTrackStateRepository();
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(
+          const ValueKey('local-workspace-onboarding-initialize-folder'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Initialize TrackState here'), findsOneWidget);
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(const ValueKey('local-workspace-onboarding-name')),
+          matching: find.byType(EditableText),
+        ),
+        'Fresh Workspace',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('local-workspace-onboarding-submit')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        onboardingService.initializeCalls,
+        contains('Fresh Workspace@main'),
+      );
+      expect(openedRepositories.single, '/tmp/new-workspace@main@main');
+      final state = await service.loadState();
+      expect(state.activeWorkspace?.displayName, 'Fresh Workspace');
+    },
+  );
 
   testWidgets(
     'authenticated hosted onboarding suggests repositories, saves the workspace, and opens disconnected hosted access inline',
@@ -183,6 +335,39 @@ void main() {
       expect(state.activeWorkspace?.defaultBranch, 'release');
     },
   );
+}
+
+class _FakeLocalWorkspaceOnboardingService
+    implements LocalWorkspaceOnboardingService {
+  _FakeLocalWorkspaceOnboardingService({
+    required this.inspection,
+    this.initializedResult,
+  });
+
+  final LocalWorkspaceInspection inspection;
+  final LocalWorkspaceSetupResult? initializedResult;
+  final List<String> initializeCalls = <String>[];
+
+  @override
+  Future<LocalWorkspaceInspection> inspectFolder(String folderPath) async =>
+      inspection;
+
+  @override
+  Future<LocalWorkspaceSetupResult> initializeFolder({
+    required LocalWorkspaceInspection inspection,
+    required String workspaceName,
+    required String writeBranch,
+  }) async {
+    initializeCalls.add('$workspaceName@$writeBranch');
+    return initializedResult ??
+        LocalWorkspaceSetupResult(
+          folderPath: inspection.folderPath,
+          displayName: workspaceName,
+          defaultBranch: writeBranch,
+          writeBranch: writeBranch,
+          projectKey: 'TEST',
+        );
+  }
 }
 
 String _editableTextValue(WidgetTester tester, Key key) {

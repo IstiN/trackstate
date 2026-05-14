@@ -139,6 +139,21 @@ void main() {
       matchesGoldenFile('goldens/settings_admin_desktop.png'),
     );
   });
+
+  testWidgets('local onboarding desktop golden', (tester) async {
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const TrackStateApp());
+    await tester.pumpAndSettle();
+
+    await expectLater(
+      find.byType(TrackStateApp),
+      matchesGoldenFile('goldens/local_onboarding_desktop.png'),
+    );
+  });
 }
 
 class _TolerantGoldenFileComparator extends LocalFileComparator {
