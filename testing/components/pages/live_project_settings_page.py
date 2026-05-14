@@ -130,7 +130,9 @@ class LiveProjectSettingsPage:
         if connected_banner in current_body:
             return current_body
 
-        if self._session.count(self._connect_selector) == 0:
+        connect_via_aria = self._session.count(self._connect_selector) > 0
+        connect_via_text = self._session.count(self._button_selector, has_text="Connect GitHub") > 0
+        if not connect_via_aria and not connect_via_text:
             raise AssertionError(
                 "Step 1 failed: the hosted runtime did not expose the Connect GitHub "
                 "action needed to enter the writable Settings flow.\n"
@@ -139,7 +141,14 @@ class LiveProjectSettingsPage:
 
         for attempt in range(2):
             if self._session.count(self._token_input_selector) == 0:
-                self._session.click(self._connect_selector, timeout_ms=30_000)
+                if connect_via_aria:
+                    self._session.click(self._connect_selector, timeout_ms=30_000)
+                else:
+                    self._session.click(
+                        self._button_selector,
+                        has_text="Connect GitHub",
+                        timeout_ms=30_000,
+                    )
             self._session.wait_for_selector(self._token_input_selector, timeout_ms=30_000)
             self._session.fill(self._token_input_selector, token, timeout_ms=30_000)
             self._session.press(self._token_input_selector, "Tab", timeout_ms=30_000)
