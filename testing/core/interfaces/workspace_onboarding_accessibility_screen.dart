@@ -5,21 +5,11 @@ abstract interface class WorkspaceOnboardingAccessibilityScreenHandle {
 
   List<String> interactiveSemanticsLabels();
 
-  Future<void> showHostedRepositoryForm();
+  Future<List<String>> collectForwardFocusOrder();
 
-  Future<void> showLocalFolderForm();
+  Future<List<String>> collectBackwardFocusOrder();
 
-  Future<List<String>> collectLocalForwardFocusOrder();
-
-  Future<List<String>> collectLocalBackwardFocusOrder();
-
-  Future<List<String>> collectHostedForwardFocusOrder();
-
-  Future<List<String>> collectHostedBackwardFocusOrder();
-
-  List<WorkspaceOnboardingContrastObservation> observeLocalContrastSet();
-
-  List<WorkspaceOnboardingContrastObservation> observeHostedContrastSet();
+  List<WorkspaceOnboardingContrastObservation> observeContrastSet();
 
   bool hasVisiblePlaceholderText();
 

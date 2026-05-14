@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/ui/core/trackstate_icons.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 
 import '../../core/interfaces/workspace_onboarding_accessibility_screen.dart';
@@ -16,49 +17,21 @@ class WorkspaceOnboardingAccessibilityRobot
 
   static const _title = 'Add workspace';
   static const _firstRunDescription =
-      'Choose a local folder or hosted repository to get started.';
-  static const _localFolder = 'Local folder';
-  static const _hostedRepository = 'Hosted repository';
-  static const _repositoryPath = 'Repository Path';
-  static const _repository = 'Repository';
-  static const _branch = 'Branch';
-  static const _open = 'Open';
-  static const _localHelper = 'Enter the local Git folder path.';
-  static const _repositoryHelper = 'Enter the repository as owner/repo.';
-  static const _browseUnavailableHint =
-      'Connect GitHub in an existing hosted workspace to browse accessible '
-      'repositories. You can still enter owner/repo manually here.';
+      'Choose a local folder to open an existing workspace or initialize '
+      'TrackState in a new one.';
+  static const _openExistingFolder = 'Open existing folder';
+  static const _initializeFolder = 'Initialize folder';
 
-  Finder get _localFolderButton =>
-      find.bySemanticsLabel(RegExp('^${RegExp.escape(_localFolder)}\$'));
+  Finder get _openExistingFolderButton =>
+      find.byKey(const ValueKey('local-workspace-onboarding-open-existing'));
 
-  Finder get _hostedRepositoryButton =>
-      find.bySemanticsLabel(RegExp('^${RegExp.escape(_hostedRepository)}\$'));
-
-  Finder get _localPathField =>
-      find.byKey(const ValueKey('workspace-onboarding-local-path'));
-
-  Finder get _localBranchField =>
-      find.byKey(const ValueKey('workspace-onboarding-local-branch'));
-
-  Finder get _hostedRepositoryField =>
-      find.byKey(const ValueKey('workspace-onboarding-hosted-repository'));
-
-  Finder get _hostedBranchField =>
-      find.byKey(const ValueKey('workspace-onboarding-hosted-branch'));
-
-  Finder get _openButton =>
-      find.byKey(const ValueKey('workspace-onboarding-open'));
+  Finder get _initializeFolderButton => find.byKey(
+    const ValueKey('local-workspace-onboarding-initialize-folder'),
+  );
 
   Finder get _titleText => find.text(_title);
 
   Finder get _subtitleText => find.text(_firstRunDescription);
-
-  Finder get _localHelperText => find.text(_localHelper);
-
-  Finder get _repositoryHelperText => find.text(_repositoryHelper);
-
-  Finder get _browseUnavailableHintText => find.text(_browseUnavailableHint);
 
   Finder get _onboardingSurface => find.byType(Scaffold);
 
@@ -111,55 +84,18 @@ class WorkspaceOnboardingAccessibilityRobot
   }
 
   @override
-  Future<void> showHostedRepositoryForm() async {
+  Future<List<String>> collectForwardFocusOrder() async {
+    return _collectForwardFocusOrder(_focusCandidates());
+  }
+
+  @override
+  Future<List<String>> collectBackwardFocusOrder() async {
+    return _collectBackwardFocusOrder(_focusCandidates());
+  }
+
+  @override
+  List<WorkspaceOnboardingContrastObservation> observeContrastSet() {
     _expectOnboardingVisible();
-    await tester.tap(_hostedRepositoryButton.first, warnIfMissed: false);
-    await tester.pumpAndSettle();
-    if (_hostedRepositoryField.evaluate().isEmpty) {
-      throw StateError('The hosted repository onboarding form is not visible.');
-    }
-  }
-
-  @override
-  Future<void> showLocalFolderForm() async {
-    _expectOnboardingVisible();
-    await tester.tap(_localFolderButton.first, warnIfMissed: false);
-    await tester.pumpAndSettle();
-    if (_localPathField.evaluate().isEmpty) {
-      throw StateError('The local folder onboarding form is not visible.');
-    }
-  }
-
-  @override
-  Future<List<String>> collectLocalForwardFocusOrder() async {
-    await showLocalFolderForm();
-    return _collectForwardFocusOrder(_localFocusCandidates());
-  }
-
-  @override
-  Future<List<String>> collectLocalBackwardFocusOrder() async {
-    await showLocalFolderForm();
-    return _collectBackwardFocusOrder(_localFocusCandidates());
-  }
-
-  @override
-  Future<List<String>> collectHostedForwardFocusOrder() async {
-    await showHostedRepositoryForm();
-    return _collectForwardFocusOrder(_hostedFocusCandidates());
-  }
-
-  @override
-  Future<List<String>> collectHostedBackwardFocusOrder() async {
-    await showHostedRepositoryForm();
-    return _collectBackwardFocusOrder(_hostedFocusCandidates());
-  }
-
-  @override
-  List<WorkspaceOnboardingContrastObservation> observeLocalContrastSet() {
-    _expectOnboardingVisible();
-    if (_localPathField.evaluate().isEmpty) {
-      throw StateError('The local onboarding form must be visible.');
-    }
     final colors = this.colors();
     return <WorkspaceOnboardingContrastObservation>[
       _observeTextContrast(
@@ -175,69 +111,32 @@ class WorkspaceOnboardingAccessibilityRobot
         minimumContrast: 4.5,
       ),
       _observeButtonTextContrast(
-        label: 'Local folder segmented choice',
-        buttonFinder: _filledButtonWithin(_localFolderButton.first),
-        text: _localFolder,
+        label: 'Open existing folder action',
+        buttonFinder: _openExistingFolderButton,
+        text: _openExistingFolder,
+        backgroundFallback: colors.primary,
         minimumContrast: 4.5,
       ),
-      _observeTextContrast(
-        label: 'Local path helper',
-        textFinder: _localHelperText,
-        background: colors.surface,
-        minimumContrast: 4.5,
-      ),
-      _observeButtonTextContrast(
-        label: 'Open action',
-        buttonFinder: _openButton,
-        text: _open,
-        minimumContrast: 4.5,
-      ),
-    ];
-  }
-
-  @override
-  List<WorkspaceOnboardingContrastObservation> observeHostedContrastSet() {
-    _expectOnboardingVisible();
-    if (_hostedRepositoryField.evaluate().isEmpty) {
-      throw StateError('The hosted onboarding form must be visible.');
-    }
-    final colors = this.colors();
-    return <WorkspaceOnboardingContrastObservation>[
-      _observeTextContrast(
-        label: 'Heading',
-        textFinder: _titleText,
-        background: colors.page,
+      _observeButtonIconContrast(
+        label: 'Open existing folder icon',
+        buttonFinder: _openExistingFolderButton,
+        iconLabel: 'folder',
+        backgroundFallback: colors.primary,
         minimumContrast: 3.0,
       ),
-      _observeTextContrast(
-        label: 'Subtitle',
-        textFinder: _subtitleText,
-        background: colors.page,
-        minimumContrast: 4.5,
-      ),
       _observeButtonTextContrast(
-        label: 'Hosted repository segmented choice',
-        buttonFinder: _filledButtonWithin(_hostedRepositoryButton.first),
-        text: _hostedRepository,
+        label: 'Initialize folder action',
+        buttonFinder: _initializeFolderButton,
+        text: _initializeFolder,
+        backgroundFallback: colors.surface,
         minimumContrast: 4.5,
       ),
-      _observeTextContrast(
-        label: 'Repository helper',
-        textFinder: _repositoryHelperText,
-        background: colors.surface,
-        minimumContrast: 4.5,
-      ),
-      _observeTextContrast(
-        label: 'Browse unavailable hint',
-        textFinder: _browseUnavailableHintText,
-        background: colors.surface,
-        minimumContrast: 4.5,
-      ),
-      _observeButtonTextContrast(
-        label: 'Open action',
-        buttonFinder: _openButton,
-        text: _open,
-        minimumContrast: 4.5,
+      _observeButtonIconContrast(
+        label: 'Initialize folder icon',
+        buttonFinder: _initializeFolderButton,
+        iconLabel: 'plus',
+        backgroundFallback: colors.surface,
+        minimumContrast: 3.0,
       ),
     ];
   }
@@ -264,39 +163,30 @@ class WorkspaceOnboardingAccessibilityRobot
   @override
   bool hasVisibleIcons() {
     return find
-        .descendant(of: _onboardingSurface.first, matching: find.byType(Icon))
+        .descendant(
+          of: _onboardingSurface.first,
+          matching: find.byType(TrackStateIcon),
+        )
         .evaluate()
         .isNotEmpty;
   }
 
   TrackStateColors colors() {
-    final context = tester.element(find.byType(Scaffold).first);
+    final context = tester.element(_onboardingSurface.first);
     return context.ts;
   }
 
   void _expectOnboardingVisible() {
-    if (_titleText.evaluate().isEmpty || _onboardingSurface.evaluate().isEmpty) {
+    if (_titleText.evaluate().isEmpty ||
+        _onboardingSurface.evaluate().isEmpty) {
       throw StateError('The workspace onboarding screen is not visible.');
     }
   }
 
-  Map<String, Finder> _localFocusCandidates() {
+  Map<String, Finder> _focusCandidates() {
     return <String, Finder>{
-      _localFolder: _localFolderButton,
-      _hostedRepository: _hostedRepositoryButton,
-      _repositoryPath: _localPathField,
-      _branch: _localBranchField,
-      _open: _openButton,
-    };
-  }
-
-  Map<String, Finder> _hostedFocusCandidates() {
-    return <String, Finder>{
-      _localFolder: _localFolderButton,
-      _hostedRepository: _hostedRepositoryButton,
-      _repository: _hostedRepositoryField,
-      _branch: _hostedBranchField,
-      _open: _openButton,
+      _openExistingFolder: _openExistingFolderButton,
+      _initializeFolder: _initializeFolderButton,
     };
   }
 
@@ -400,29 +290,54 @@ class WorkspaceOnboardingAccessibilityRobot
     required String label,
     required Finder buttonFinder,
     required String text,
+    required Color backgroundFallback,
     required double minimumContrast,
   }) {
     final style = _effectiveButtonStyle(buttonFinder.first);
     final foreground =
         style.foregroundColor?.resolve(const <WidgetState>{}) ??
         _renderedTextColorWithin(buttonFinder.first, text);
+    final resolvedBackground = style.backgroundColor?.resolve(
+      const <WidgetState>{},
+    );
     final background =
-        style.backgroundColor?.resolve(const <WidgetState>{}) ??
-        Colors.transparent;
+        resolvedBackground == null || resolvedBackground.alpha == 0
+        ? backgroundFallback
+        : resolvedBackground;
     return WorkspaceOnboardingContrastObservation(
       label: label,
       text: text,
       foregroundHex: _rgbHex(foreground),
-      backgroundHex: background.alpha == 0
-          ? 'transparent'
-          : _rgbHex(background),
+      backgroundHex: _rgbHex(background),
       contrastRatio: contrastRatio(foreground, background),
       minimumContrast: minimumContrast,
     );
   }
 
-  Finder _filledButtonWithin(Finder scope) {
-    return find.descendant(of: scope, matching: find.byType(FilledButton));
+  WorkspaceOnboardingContrastObservation _observeButtonIconContrast({
+    required String label,
+    required Finder buttonFinder,
+    required String iconLabel,
+    required Color backgroundFallback,
+    required double minimumContrast,
+  }) {
+    final style = _effectiveButtonStyle(buttonFinder.first);
+    final resolvedBackground = style.backgroundColor?.resolve(
+      const <WidgetState>{},
+    );
+    final background =
+        resolvedBackground == null || resolvedBackground.alpha == 0
+        ? backgroundFallback
+        : resolvedBackground;
+    final foreground = _renderedIconColorWithin(buttonFinder.first);
+    return WorkspaceOnboardingContrastObservation(
+      label: label,
+      text: iconLabel,
+      foregroundHex: _rgbHex(foreground),
+      backgroundHex: _rgbHex(background),
+      contrastRatio: contrastRatio(foreground, background),
+      minimumContrast: minimumContrast,
+    );
   }
 
   String _finderText(Finder finder) {
@@ -497,6 +412,20 @@ class WorkspaceOnboardingAccessibilityRobot
     }
 
     throw StateError('No rendered text "$text" found within $scope.');
+  }
+
+  Color _renderedIconColorWithin(Finder scope) {
+    final iconFinder = find.descendant(
+      of: scope,
+      matching: find.byType(TrackStateIcon),
+    );
+    for (final element in iconFinder.evaluate()) {
+      final widget = element.widget;
+      if (widget is TrackStateIcon && widget.color != null) {
+        return widget.color!;
+      }
+    }
+    throw StateError('No rendered icon color found within $scope.');
   }
 
   bool _isInteractiveTarget(SemanticsNode node) {
