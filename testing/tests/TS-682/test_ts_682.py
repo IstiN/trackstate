@@ -38,6 +38,7 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts682_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts682_failure.png"
 
@@ -57,7 +58,6 @@ HOSTED_TARGET = "IstiN/trackstate-setup"
 LOCAL_TARGET = "/tmp/trackstate-demo"
 CORRUPTED_TARGET = "IstiN/corrupted-repo"
 DEFAULT_BRANCH = "main"
-EXPECTED_CORRUPTED_ID = f"hosted:{CORRUPTED_TARGET.lower()}@{DEFAULT_BRANCH}"
 WORKSPACE_STORAGE_KEYS = (
     "trackstate.workspaceProfiles.state",
     "flutter.trackstate.workspaceProfiles.state",
@@ -431,30 +431,21 @@ def _assert_corrupted_entry_handling(
     corrupted_row = _find_row_optional(observation, target=CORRUPTED_TARGET)
     normalized_state = _decode_prefixed_workspace_state(storage_snapshot)
     normalized_profile = _find_profile_by_target(normalized_state, CORRUPTED_TARGET)
+    normalized_profile_summary = _storage_profile_summary(normalized_profile)
 
     if normalized_profile is not None:
-        expected_profile_bits = {
-            "id": EXPECTED_CORRUPTED_ID,
-            "targetType": "hosted",
-            "target": CORRUPTED_TARGET.lower(),
-        }
-        for key, expected_value in expected_profile_bits.items():
-            observed_value = normalized_profile.get(key)
-            if observed_value != expected_value:
-                raise AssertionError(
-                    "Step 3 failed: the malformed workspace metadata was not normalized "
-                    "into a safe Hosted fallback profile.\n"
-                    f"Expected {key}: {expected_value}\n"
-                    f"Observed profile: {json.dumps(normalized_profile, indent=2)}\n"
-                    f"Storage snapshot:\n{_storage_summary(storage_snapshot)}",
-                )
+        _assert_safe_storage_profile(
+            profile=normalized_profile,
+            storage_snapshot=storage_snapshot,
+        )
 
     if corrupted_row is None:
         return (
             "Viewed the Saved workspaces list after preloading malformed row metadata. "
             "The valid Hosted and Local rows remained visible and interactive, and the "
             "corrupted target was not rendered as a user-facing row. "
-            f"Storage snapshot: {_storage_summary(storage_snapshot)}"
+            "Storage evidence recorded whether Flutter web skipped or repaired the bad "
+            f"entry: {_storage_summary(storage_snapshot)}"
         )
 
     _assert_workspace_row(
@@ -467,14 +458,15 @@ def _assert_corrupted_entry_handling(
         return (
             "Viewed the Saved workspaces list after preloading malformed row metadata. "
             "The corrupted target rendered as a safe Hosted fallback row with visible "
-            "repository text and interactive controls, while the valid rows stayed intact."
+            "repository text and interactive controls, while the valid rows stayed intact. "
+            f"Storage evidence: {_storage_summary(storage_snapshot)}"
         )
     return (
         "Viewed the Saved workspaces list after preloading malformed row metadata. "
         "The corrupted target rendered as a safe Hosted fallback row instead of "
-        "crashing the UI. Automation also confirmed the repaired Flutter web "
-        "workspace state normalized the malformed row to "
-        f"`{EXPECTED_CORRUPTED_ID}` with `targetType=hosted`. "
+        "crashing the UI. Automation also captured the repaired Flutter web "
+        "workspace profile as diagnostic evidence without requiring one exact "
+        f"persisted payload shape: {normalized_profile_summary}. "
         f"Corrupted row text={corrupted_row.visible_text!r}."
     )
 
@@ -513,6 +505,59 @@ def _find_profile_by_target(
         if isinstance(profile_target, str) and profile_target.lower() == normalized_target:
             return {str(key): value for key, value in profile.items()}
     return None
+
+
+def _assert_safe_storage_profile(
+    *,
+    profile: dict[str, object],
+    storage_snapshot: dict[str, str | None],
+) -> None:
+    profile_target_type = profile.get("targetType")
+    if profile_target_type is not None:
+        if not isinstance(profile_target_type, str):
+            raise AssertionError(
+                "Step 3 failed: the repaired workspace profile kept a non-string "
+                "`targetType`, which is still unsafe persisted data.\n"
+                f"Observed profile: {json.dumps(profile, indent=2)}\n"
+                f"Storage snapshot:\n{_storage_summary(storage_snapshot)}",
+            )
+        if profile_target_type.lower() not in {"hosted", "local"}:
+            raise AssertionError(
+                "Step 3 failed: the repaired workspace profile kept an unknown "
+                "`targetType`, which is still unsafe persisted data.\n"
+                f"Observed profile: {json.dumps(profile, indent=2)}\n"
+                f"Storage snapshot:\n{_storage_summary(storage_snapshot)}",
+            )
+
+    for key in ("id", "target", "displayName", "defaultBranch", "writeBranch"):
+        value = profile.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise AssertionError(
+                "Step 3 failed: the repaired workspace profile kept a non-string "
+                f"`{key}` value, which is still unsafe persisted data.\n"
+                f"Observed profile: {json.dumps(profile, indent=2)}\n"
+                f"Storage snapshot:\n{_storage_summary(storage_snapshot)}",
+            )
+        lowered_value = value.lower()
+        if lowered_value in {"undefined", "null"}:
+            raise AssertionError(
+                "Step 3 failed: the repaired workspace profile still contains a "
+                f"placeholder `{key}` value ({value!r}).\n"
+                f"Observed profile: {json.dumps(profile, indent=2)}\n"
+                f"Storage snapshot:\n{_storage_summary(storage_snapshot)}",
+            )
+
+
+def _storage_profile_summary(profile: dict[str, object] | None) -> str:
+    if profile is None:
+        return "malformed profile not present in Flutter web storage after startup"
+    fields = []
+    for key in ("id", "targetType", "target", "defaultBranch", "writeBranch"):
+        value = profile.get(key, "<missing>")
+        fields.append(f"{key}={value!r}")
+    return ", ".join(fields)
 
 
 def _storage_summary(storage_snapshot: dict[str, str | None]) -> str:
@@ -570,6 +615,7 @@ def _record_human_verification(
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    _write_review_replies(passed=True)
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -585,11 +631,12 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     )
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
-    RESPONSE_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
+    RESPONSE_PATH.write_text(_tracker_rework_summary(result, passed=True), encoding="utf-8")
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
     error = str(result.get("error", "AssertionError: TS-682 failed"))
+    _write_review_replies(passed=False)
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -606,7 +653,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     )
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
-    RESPONSE_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
+    RESPONSE_PATH.write_text(_tracker_rework_summary(result, passed=False), encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
@@ -788,6 +835,65 @@ def _bug_description(result: dict[str, object]) -> str:
             "```",
         ],
     ) + "\n"
+
+
+def _tracker_rework_summary(result: dict[str, object], *, passed: bool) -> str:
+    status = "PASSED" if passed else "FAILED"
+    summary_lines = [
+        "h3. Rework Summary",
+        "",
+        "* Added the required {{testing/tests/TS-682/README.md}} ticket README.",
+        (
+            "* Relaxed Step 3 so Flutter web storage remains diagnostic evidence: "
+            "the test now accepts either a skipped malformed entry or any safe "
+            "equivalent repaired profile, and only rejects clearly unsafe persisted "
+            "values."
+        ),
+        f"* Re-run result: *{status}* via {jira_inline(RUN_COMMAND)}.",
+    ]
+    if passed:
+        summary_lines.append(
+            f"* Observed: {jira_inline(str(result.get('corrupted_entry_handling', '<missing>')))}"
+        )
+    else:
+        summary_lines.append(
+            f"* Failure: {jira_inline(_failed_step_summary(result))}"
+        )
+    return "\n".join(summary_lines) + "\n"
+
+
+def _write_review_replies(*, passed: bool) -> None:
+    rerun_result = "passed" if passed else "now fails only for the current product behavior"
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps(
+            {
+                "replies": [
+                    {
+                        "inReplyToId": 3239497782,
+                        "threadId": "PRRT_kwDOSU6Gf86B-qyD",
+                        "reply": (
+                            "Fixed: Step 3 no longer hard-codes one exact repaired "
+                            "storage payload. The test still verifies the UI stays "
+                            "stable, keeps the storage snapshot as diagnostic evidence, "
+                            "and only rejects clearly unsafe persisted values if the "
+                            f"malformed profile is still present. The rerun {rerun_result}."
+                        ),
+                    },
+                    {
+                        "inReplyToId": None,
+                        "threadId": None,
+                        "reply": (
+                            "Fixed: added `testing/tests/TS-682/README.md`, relaxed the "
+                            "optional storage-repair assertion to align with the ticket, "
+                            f"and reran TS-682. The rerun {rerun_result}."
+                        ),
+                    },
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _annotated_step_line(result: dict[str, object], step_number: int, action: str) -> str:
