@@ -4,6 +4,7 @@ from dataclasses import asdict
 import json
 import platform
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -15,6 +16,10 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     LiveWorkspaceSwitcherPage,
     WorkspaceSwitcherPanelObservation,
     WorkspaceSwitcherTriggerObservation,
+)
+from testing.components.services.live_workspace_switcher_visual_probe import (  # noqa: E402
+    LiveWorkspaceSwitcherVisualProbe,
+    WorkspaceSwitcherTriggerVisualObservation,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
@@ -49,6 +54,7 @@ def main() -> None:
 
     config = load_live_setup_test_config()
     service = LiveSetupRepositoryService(config=config)
+    visual_probe = LiveWorkspaceSwitcherVisualProbe()
     token = service.token
     if not token:
         raise RuntimeError(
@@ -105,7 +111,13 @@ def main() -> None:
                 for section in DESKTOP_SECTIONS:
                     page.navigate_to_section(section)
                     trigger = page.observe_trigger()
+                    trigger_visual = _observe_trigger_visual(
+                        page=page,
+                        visual_probe=visual_probe,
+                        trigger=trigger,
+                    )
                     section_payload = asdict(trigger)
+                    section_payload["visual_observation"] = asdict(trigger_visual)
                     desktop_observations = result.setdefault(
                         "desktop_section_observations",
                         {},
@@ -113,13 +125,18 @@ def main() -> None:
                     assert isinstance(desktop_observations, dict)
                     desktop_observations[section] = section_payload
                     try:
-                        _assert_desktop_trigger(trigger, section=section)
+                        _assert_desktop_trigger(
+                            trigger,
+                            trigger_visual=trigger_visual,
+                            section=section,
+                        )
                     except AssertionError as error:
                         step_failures.append(str(error))
                     desktop_summaries.append(
                         f"{section}: label={trigger.semantic_label!r}, "
-                        f"visible_text={trigger.visible_text!r}, "
                         f"icon_count={trigger.icon_count}, "
+                        f"visual_icon_visible={trigger_visual.icon_visible}, "
+                        f"visible_text={trigger.visible_text!r}, "
                         f"top_buttons={list(trigger.top_button_labels)!r}",
                     )
                 if step_failures:
@@ -155,6 +172,15 @@ def main() -> None:
 
                 page.navigate_to_section("Dashboard")
                 desktop_trigger = page.observe_trigger()
+                desktop_trigger_visual = _observe_trigger_visual(
+                    page=page,
+                    visual_probe=visual_probe,
+                    trigger=desktop_trigger,
+                )
+                result["desktop_trigger_observation"] = {
+                    **asdict(desktop_trigger),
+                    "visual_observation": asdict(desktop_trigger_visual),
+                }
                 desktop_panel: WorkspaceSwitcherPanelObservation | None = None
                 try:
                     page.open_switcher()
@@ -234,9 +260,21 @@ def main() -> None:
                     )
 
                 mobile_trigger = page.observe_trigger()
-                result["compact_trigger_observation"] = asdict(mobile_trigger)
+                mobile_trigger_visual = _observe_trigger_visual(
+                    page=page,
+                    visual_probe=visual_probe,
+                    trigger=mobile_trigger,
+                )
+                result["compact_trigger_observation"] = {
+                    **asdict(mobile_trigger),
+                    "visual_observation": asdict(mobile_trigger_visual),
+                }
                 try:
-                    _assert_compact_trigger(mobile_trigger)
+                    _assert_compact_trigger(
+                        mobile_trigger,
+                        desktop_trigger=desktop_trigger,
+                        trigger_visual=mobile_trigger_visual,
+                    )
                 except AssertionError as error:
                     step_failures.append(str(error))
                     _record_step(
@@ -261,7 +299,9 @@ def main() -> None:
                         observed=(
                             f"lines={list(mobile_trigger.raw_text_lines)!r}; "
                             f"size=({mobile_trigger.width:.1f}x{mobile_trigger.height:.1f}); "
-                            f"label={mobile_trigger.semantic_label!r}"
+                            f"label={mobile_trigger.semantic_label!r}; "
+                            f"visual_icon_visible={mobile_trigger_visual.icon_visible}; "
+                            f"top_buttons={list(mobile_trigger.top_button_labels)!r}"
                         ),
                     )
                 _record_human_verification(
@@ -273,7 +313,8 @@ def main() -> None:
                     observed=(
                         f"lines={list(mobile_trigger.raw_text_lines)!r}; "
                         f"size=({mobile_trigger.width:.1f}x{mobile_trigger.height:.1f}); "
-                        f"text={mobile_trigger.visible_text!r}"
+                        f"text={mobile_trigger.visible_text!r}; "
+                        f"visual_icon_visible={mobile_trigger_visual.icon_visible}"
                     ),
                 )
 
@@ -357,6 +398,7 @@ def main() -> None:
 def _assert_desktop_trigger(
     trigger: WorkspaceSwitcherTriggerObservation,
     *,
+    trigger_visual: WorkspaceSwitcherTriggerVisualObservation,
     section: str,
 ) -> None:
     if not trigger.semantic_label.startswith("Workspace switcher:"):
@@ -382,6 +424,20 @@ def _assert_desktop_trigger(
             f"Step 2 failed: in {section}, the workspace switcher did not expose any "
             "workspace state label.\n"
             f"Observed label: {trigger.semantic_label!r}",
+        )
+    if trigger.state_label not in trigger.visible_text:
+        raise AssertionError(
+            f"Step 2 failed: in {section}, the desktop switcher did not keep the visible "
+            "workspace state badge text in the trigger.\n"
+            f"Expected state text: {trigger.state_label!r}\n"
+            f"Observed text: {trigger.visible_text!r}",
+        )
+    if trigger.icon_count <= 0 and not trigger_visual.icon_visible:
+        raise AssertionError(
+            f"Step 2 failed: in {section}, the desktop switcher did not keep a visible "
+            "leading workspace icon.\n"
+            f"Observed semantic icon_count: {trigger.icon_count}\n"
+            f"Observed visual icon: {trigger_visual.icon_visible}",
         )
     if trigger.height > 40:
         raise AssertionError(
@@ -433,7 +489,12 @@ def _assert_desktop_panel(
         )
 
 
-def _assert_compact_trigger(trigger: WorkspaceSwitcherTriggerObservation) -> None:
+def _assert_compact_trigger(
+    trigger: WorkspaceSwitcherTriggerObservation,
+    *,
+    desktop_trigger: WorkspaceSwitcherTriggerObservation,
+    trigger_visual: WorkspaceSwitcherTriggerVisualObservation,
+) -> None:
     if trigger.height < 44:
         raise AssertionError(
             "Step 5 failed: the compact workspace switcher did not expand to a "
@@ -452,6 +513,26 @@ def _assert_compact_trigger(trigger: WorkspaceSwitcherTriggerObservation) -> Non
             "Step 5 failed: the compact workspace switcher did not move into the "
             "stacked mobile header presentation.\n"
             f"Observed top offset: {trigger.top}",
+        )
+    if trigger.height <= desktop_trigger.height:
+        raise AssertionError(
+            "Step 5 failed: the compact workspace switcher did not visibly change from "
+            "the desktop trigger height.\n"
+            f"Desktop height: {desktop_trigger.height}\n"
+            f"Compact height: {trigger.height}",
+        )
+    if trigger.icon_count <= 0 and not trigger_visual.icon_visible:
+        raise AssertionError(
+            "Step 5 failed: the compact workspace switcher did not keep a visible "
+            "leading icon for the icon-led mobile presentation.\n"
+            f"Observed semantic icon_count: {trigger.icon_count}\n"
+            f"Observed visual icon: {trigger_visual.icon_visible}",
+        )
+    if any(label in DESKTOP_SECTIONS for label in trigger.top_button_labels):
+        raise AssertionError(
+            "Step 5 failed: the compact workspace switcher still shared the desktop "
+            "top-row navigation layout instead of the stacked mobile header.\n"
+            f"Observed top buttons: {list(trigger.top_button_labels)!r}",
         )
 
 
@@ -786,6 +867,29 @@ def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     if jira:
         return [f"{prefix} Screenshot: {{{{{screenshot}}}}}"]
     return [f"{prefix} Screenshot: `{screenshot}`"]
+
+
+def _observe_trigger_visual(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    visual_probe: LiveWorkspaceSwitcherVisualProbe,
+    trigger: WorkspaceSwitcherTriggerObservation,
+) -> WorkspaceSwitcherTriggerVisualObservation:
+    with tempfile.NamedTemporaryFile(
+        dir=OUTPUTS_DIR,
+        prefix="ts722_trigger_",
+        suffix=".png",
+        delete=False,
+    ) as handle:
+        screenshot_path = Path(handle.name)
+    try:
+        page.screenshot(str(screenshot_path))
+        return visual_probe.observe_trigger(
+            screenshot_path=screenshot_path,
+            trigger=trigger,
+        )
+    finally:
+        screenshot_path.unlink(missing_ok=True)
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:

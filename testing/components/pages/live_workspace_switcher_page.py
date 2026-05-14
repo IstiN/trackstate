@@ -239,8 +239,13 @@ class LiveWorkspaceSwitcherPage:
         try:
             payload = self._session.wait_for_function(
                 """
-                () => {
+                ({ displayName }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const dedupeRepeatedLine = (value) => {
+                    const normalized = normalize(value);
+                    const match = normalized.match(/^(.+)\\s+\\1$/);
+                    return match ? match[1] : normalized;
+                  };
                   const isVisible = (element) => {
                     if (!element) {
                       return false;
@@ -253,65 +258,121 @@ class LiveWorkspaceSwitcherPage:
                       && style.display !== 'none';
                   };
                   const visibleElements = Array.from(document.querySelectorAll('body *')).filter(isVisible);
-                  const titleElement = visibleElements.find((element) => {
-                    const text = normalize(element.innerText || '');
-                    return text === 'Workspace switcher' || text === 'Workspace switcher Workspace switcher';
-                  }) ?? null;
-                  const dialog = visibleElements.find((element) => {
-                    const text = normalize(element.innerText || '');
-                    return (
-                      (element.getAttribute('role') || '').toLowerCase() === 'dialog'
-                      && text.includes('Workspace switcher')
-                      && text.includes('Hosted')
-                      && text.includes('Local')
-                      && text.includes('Save and switch')
-                    );
-                  }) ?? null;
-                  const surfaceElements = visibleElements.filter((element) => {
-                    const text = normalize(element.innerText || '');
-                    if (!text) {
-                      return false;
+                  const textFor = (element) => dedupeRepeatedLine(element.innerText || '');
+                  const accessibleLabel = (element) =>
+                    dedupeRepeatedLine(element.getAttribute('aria-label') || '');
+                  const sortByArea = (elements) =>
+                    elements.sort((left, right) => {
+                      const leftRect = left.getBoundingClientRect();
+                      const rightRect = right.getBoundingClientRect();
+                      return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                    });
+                  const dedupeNestedElements = (elements) => {
+                    const deduped = [];
+                    for (const candidate of elements) {
+                      if (deduped.some((accepted) => accepted.contains(candidate))) {
+                        continue;
+                      }
+                      deduped.push(candidate);
                     }
-                    const rect = element.getBoundingClientRect();
-                    if (
-                      rect.width <= 0
-                      || rect.height <= 0
-                      || (rect.width * rect.height) >= (window.innerWidth * window.innerHeight * 0.95)
-                    ) {
-                      return false;
-                    }
-                    return (
-                      text.includes('Workspace switcher')
-                      || text.includes('Saved workspaces')
-                      || text.includes('Save and switch')
-                      || text.includes('Delete')
-                      || text === 'Hosted'
-                      || text === 'Local'
-                    );
-                  });
-                  if (!dialog && surfaceElements.length === 0) {
+                    return deduped;
+                  };
+                  const titleElement = sortByArea(
+                    visibleElements.filter((element) => {
+                      const text = textFor(element);
+                      return text === 'Workspace switcher';
+                    }),
+                  )[0] ?? null;
+                  const controlLabels = new Set(['Delete', 'Hosted', 'Local', 'Save and switch']);
+                  const surfaceElements = dedupeNestedElements(
+                    sortByArea(
+                      visibleElements.filter((element) => {
+                        const text = textFor(element);
+                        if (!text) {
+                          return false;
+                        }
+                        const rect = element.getBoundingClientRect();
+                        if (
+                          rect.width <= 0
+                          || rect.height <= 0
+                          || (rect.width * rect.height) >= (window.innerWidth * window.innerHeight * 0.9)
+                        ) {
+                          return false;
+                        }
+                        return (
+                          text === 'Workspace switcher'
+                          || text === 'Saved workspaces'
+                          || controlLabels.has(text)
+                          || (displayName && text.includes(displayName))
+                          || text.includes('Branch:')
+                          || text.includes('Needs sign-in')
+                          || text === 'Active'
+                        );
+                      }),
+                    ),
+                  );
+                  if (!titleElement) {
                     return null;
                   }
-                  const rects = (dialog ? [dialog] : surfaceElements).map((element) =>
-                    element.getBoundingClientRect(),
+                  const surfaceTextValues = Array.from(
+                    new Set(
+                      [titleElement, ...surfaceElements]
+                        .map((element) => textFor(element))
+                        .filter((text) => text.length > 0),
+                    ),
                   );
+                  const hasWorkspaceSummary =
+                    surfaceTextValues.some((text) => displayName && text.includes(displayName))
+                    && surfaceTextValues.some((text) => text.includes('Branch:') || text.includes('Needs sign-in'));
+                  const hasPanelControls = surfaceTextValues.some((text) => text === 'Save and switch')
+                    && surfaceTextValues.some((text) => text === 'Hosted')
+                    && surfaceTextValues.some((text) => text === 'Local');
+                  if (!hasWorkspaceSummary || !hasPanelControls) {
+                    return null;
+                  }
+                  const boundsElements = [titleElement, ...surfaceElements];
+                  const rects = boundsElements.map((element) => element.getBoundingClientRect());
                   const left = Math.min(...rects.map((rect) => rect.left));
                   const top = Math.min(...rects.map((rect) => rect.top));
                   const right = Math.max(...rects.map((rect) => rect.right));
                   const bottom = Math.max(...rects.map((rect) => rect.bottom));
-                  const textParts = Array.from(
-                    new Set(
-                      (dialog ? [dialog, ...surfaceElements] : surfaceElements)
-                        .map((element) => normalize(element.innerText || ''))
-                        .filter((text) => text.length > 0),
-                    ),
-                  );
+                  let current = titleElement;
+                  let containerRole = null;
+                  while (current && current !== document.body) {
+                    const role = normalize(current.getAttribute('role') || '').toLowerCase();
+                    const ariaLabel = normalize(current.getAttribute('aria-label') || '').toLowerCase();
+                    const containerText = textFor(current);
+                    if (
+                      containerText.includes('Workspace switcher')
+                      && (
+                        role === 'dialog'
+                        || ariaLabel === 'dialog'
+                      )
+                    ) {
+                      containerRole = role || ariaLabel;
+                      break;
+                    }
+                    current = current.parentElement;
+                  }
+                  if (!containerRole) {
+                    const floatingDialog = visibleElements.find((element) => {
+                      const role = normalize(element.getAttribute('role') || '').toLowerCase();
+                      const ariaLabel = normalize(element.getAttribute('aria-label') || '').toLowerCase();
+                      const text = textFor(element);
+                      return text.includes('Workspace switcher') && (role === 'dialog' || ariaLabel === 'dialog');
+                    }) ?? null;
+                    if (floatingDialog) {
+                      const role = normalize(floatingDialog.getAttribute('role') || '').toLowerCase();
+                      const ariaLabel = normalize(floatingDialog.getAttribute('aria-label') || '').toLowerCase();
+                      containerRole = role || ariaLabel;
+                    }
+                  }
                   return {
                     viewportWidth: window.innerWidth,
                     viewportHeight: window.innerHeight,
-                    titleText: titleElement ? 'Workspace switcher' : '',
-                    containerRole: dialog ? dialog.getAttribute('role') : null,
-                    containerText: textParts.join(' | '),
+                    titleText: textFor(titleElement),
+                    containerRole,
+                    containerText: surfaceTextValues.join(' | '),
                     left,
                     top,
                     width: right - left,
@@ -319,6 +380,7 @@ class LiveWorkspaceSwitcherPage:
                   };
                 }
                 """,
+                arg={"displayName": trigger.display_name},
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
