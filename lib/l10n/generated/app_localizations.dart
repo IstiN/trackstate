@@ -1204,6 +1204,18 @@ abstract class AppLocalizations {
   /// **'Saved workspaces'**
   String get savedWorkspaces;
 
+  /// No description provided for @workspaceSwitcher.
+  ///
+  /// In en, this message translates to:
+  /// **'Workspace switcher'**
+  String get workspaceSwitcher;
+
+  /// No description provided for @workspaceSwitcherEmptyState.
+  ///
+  /// In en, this message translates to:
+  /// **'No saved workspaces yet. Add one to switch between repositories faster.'**
+  String get workspaceSwitcherEmptyState;
+
   /// No description provided for @workspaceTargetTypeHosted.
   ///
   /// In en, this message translates to:
@@ -1227,6 +1239,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Open'**
   String get openWorkspace;
+
+  /// No description provided for @addWorkspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Add workspace'**
+  String get addWorkspace;
+
+  /// No description provided for @workspaceSaveAndSwitch.
+  ///
+  /// In en, this message translates to:
+  /// **'Save and switch'**
+  String get workspaceSaveAndSwitch;
+
+  /// No description provided for @workspaceStateLocalGit.
+  ///
+  /// In en, this message translates to:
+  /// **'Local Git'**
+  String get workspaceStateLocalGit;
+
+  /// No description provided for @workspaceStateLocal.
+  ///
+  /// In en, this message translates to:
+  /// **'Local'**
+  String get workspaceStateLocal;
+
+  /// No description provided for @workspaceStateConnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected'**
+  String get workspaceStateConnected;
+
+  /// No description provided for @workspaceStateReadOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Read-only'**
+  String get workspaceStateReadOnly;
+
+  /// No description provided for @workspaceStateNeedsSignIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs sign-in'**
+  String get workspaceStateNeedsSignIn;
+
+  /// No description provided for @workspaceStateSavedHostedWorkspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved hosted workspace'**
+  String get workspaceStateSavedHostedWorkspace;
+
+  /// No description provided for @workspaceStateUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Unavailable'**
+  String get workspaceStateUnavailable;
 
   /// No description provided for @workspaceDeleteConfirmationTitle.
   ///
@@ -1299,6 +1365,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. {error}'**
   String repositoryConfigFallback(String error);
+
+  /// No description provided for @workspaceSwitchFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open {workspaceName}. {reason}'**
+  String workspaceSwitchFailed(String workspaceName, String reason);
+
+  /// No description provided for @workspaceRestoreSkipped.
+  ///
+  /// In en, this message translates to:
+  /// **'Skipped {workspaceName} during restore. {reason}'**
+  String workspaceRestoreSkipped(String workspaceName, String reason);
+
+  /// No description provided for @workspaceRestoreFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'No valid saved workspace could be restored. Last skipped workspace: {workspaceName}. {reason}'**
+  String workspaceRestoreFailed(String workspaceName, String reason);
 
   /// No description provided for @localGitTokensNotNeeded.
   ///

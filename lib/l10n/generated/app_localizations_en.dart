@@ -620,6 +620,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get savedWorkspaces => 'Saved workspaces';
 
   @override
+  String get workspaceSwitcher => 'Workspace switcher';
+
+  @override
+  String get workspaceSwitcherEmptyState =>
+      'No saved workspaces yet. Add one to switch between repositories faster.';
+
+  @override
   String get workspaceTargetTypeHosted => 'Hosted';
 
   @override
@@ -630,6 +637,33 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get openWorkspace => 'Open';
+
+  @override
+  String get addWorkspace => 'Add workspace';
+
+  @override
+  String get workspaceSaveAndSwitch => 'Save and switch';
+
+  @override
+  String get workspaceStateLocalGit => 'Local Git';
+
+  @override
+  String get workspaceStateLocal => 'Local';
+
+  @override
+  String get workspaceStateConnected => 'Connected';
+
+  @override
+  String get workspaceStateReadOnly => 'Read-only';
+
+  @override
+  String get workspaceStateNeedsSignIn => 'Needs sign-in';
+
+  @override
+  String get workspaceStateSavedHostedWorkspace => 'Saved hosted workspace';
+
+  @override
+  String get workspaceStateUnavailable => 'Unavailable';
 
   @override
   String get workspaceDeleteConfirmationTitle => 'Delete saved workspace';
@@ -675,6 +709,21 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String repositoryConfigFallback(String error) {
     return 'A repository configuration file could not be parsed, so TrackState.AI fell back to built-in defaults. $error';
+  }
+
+  @override
+  String workspaceSwitchFailed(String workspaceName, String reason) {
+    return 'Could not open $workspaceName. $reason';
+  }
+
+  @override
+  String workspaceRestoreSkipped(String workspaceName, String reason) {
+    return 'Skipped $workspaceName during restore. $reason';
+  }
+
+  @override
+  String workspaceRestoreFailed(String workspaceName, String reason) {
+    return 'No valid saved workspace could be restored. Last skipped workspace: $workspaceName. $reason';
   }
 
   @override
