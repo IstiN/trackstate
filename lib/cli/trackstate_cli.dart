@@ -5344,6 +5344,7 @@ class TrackStateCli {
   }) => <String, Object?>{
     'id': _jiraEntityId(issue.key),
     'key': issue.key,
+    'links': [for (final link in issue.links) _linkPayload(link)],
     'fields': <String, Object?>{
       'summary': issue.summary,
       'description': issue.description,

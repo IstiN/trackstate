@@ -6,6 +6,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class TrackStateCliSelfLinkGuardConfig:
     test_id: str
+    compiled_source_ref: str
     project_key: str
     project_name: str
     seed_issue_key: str
@@ -36,6 +37,7 @@ class TrackStateCliSelfLinkGuardConfig:
     def from_defaults(cls) -> "TrackStateCliSelfLinkGuardConfig":
         return cls(
             test_id="TS-659",
+            compiled_source_ref="origin/main",
             project_key="TS",
             project_name="TS-659 Self Link Guard Project",
             seed_issue_key="TS-0",

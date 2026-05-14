@@ -10,6 +10,7 @@ import '../trackstate_provider.dart';
 class GitHubTrackStateProvider
     implements
         TrackStateProviderAdapter,
+        RepositoryCatalogReader,
         RepositoryReleaseAttachmentStore,
         RepositoryUserLookup,
         RepositoryFileMutator,
@@ -121,6 +122,36 @@ class GitHubTrackStateProvider
       throw TrackStateProviderException('User was not found for email $email.');
     }
     return lookupUserByLogin(login);
+  }
+
+  @override
+  Future<List<HostedRepositoryReference>> listAccessibleRepositories() async {
+    final connection = _requireConnection();
+    final json =
+        await _getGitHubJson(
+              '/user/repos',
+              queryParameters: {
+                'per_page': '100',
+                'affiliation': 'owner,collaborator,organization_member',
+                'sort': 'updated',
+                'direction': 'desc',
+              },
+              token: connection.token,
+            )
+            as List<Object?>;
+    return json
+        .whereType<Map<String, Object?>>()
+        .map(
+          (entry) => HostedRepositoryReference(
+            fullName: entry['full_name']?.toString().trim() ?? '',
+            defaultBranch: entry['default_branch']?.toString().trim() ?? 'main',
+          ),
+        )
+        .where(
+          (entry) =>
+              entry.fullName.isNotEmpty && entry.defaultBranch.isNotEmpty,
+        )
+        .toList(growable: false);
   }
 
   @override

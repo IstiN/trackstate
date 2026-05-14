@@ -20,6 +20,12 @@ from testing.core.utils.png_image import RgbImage
 
 
 class LiveSavedWorkspaceVisualProbe:
+    _reference_fingerprints: dict[str, str] | None = None
+    _REFERENCE_ICON_FINGERPRINTS = {
+        "repository": "0000000001111111011111110111111101111111011111110111111101111110",
+        "folder": "0000000000011111011111110111001101000010011111100111111000000000",
+    }
+
     def observe(
         self,
         *,
@@ -83,15 +89,21 @@ class LiveSavedWorkspaceVisualProbe:
             ),
             background=background_rgb,
         )
+        icon_box = self._box(
+            image=image,
+            left=row.icon_left,
+            top=row.icon_top,
+            width=row.icon_width,
+            height=row.icon_height,
+        )
         icon = self._foreground_metrics(
             image=image,
-            box=self._box(
-                image=image,
-                left=row.icon_left,
-                top=row.icon_top,
-                width=row.icon_width,
-                height=row.icon_height,
-            ),
+            box=icon_box,
+            background=background_rgb,
+        )
+        icon_identity, icon_fingerprint = self._classify_icon(
+            image=image,
+            box=icon_box,
             background=background_rgb,
         )
         actions = tuple(
@@ -112,6 +124,8 @@ class LiveSavedWorkspaceVisualProbe:
             detail_contrast_ratio=detail[1],
             type_color=target_type[0],
             type_contrast_ratio=target_type[1],
+            icon_identity=icon_identity,
+            icon_fingerprint=icon_fingerprint,
             icon_color=icon[0],
             icon_contrast_ratio=icon[1],
             action_observations=actions,
@@ -277,3 +291,210 @@ class LiveSavedWorkspaceVisualProbe:
         counts = Counter(pixels)
         color, _ = counts.most_common(1)[0]
         return color
+
+    def _classify_icon(
+        self,
+        *,
+        image: RgbImage,
+        box: tuple[int, int, int, int] | None,
+        background: RgbColor,
+    ) -> tuple[str | None, str | None]:
+        if box is None:
+            return (None, None)
+        fingerprint = self._icon_fingerprint(image.crop(box), background=background)
+        if fingerprint is None:
+            return (None, None)
+        distances = sorted(
+            (
+                (identity, self._hamming_distance(fingerprint, reference))
+                for identity, reference in self._reference_icon_fingerprints().items()
+            ),
+            key=lambda item: item[1],
+        )
+        if not distances:
+            return (None, fingerprint)
+        best_identity, best_distance = distances[0]
+        if len(distances) > 1 and distances[1][1] - best_distance < 4:
+            return (None, fingerprint)
+        if best_distance > 24:
+            return (None, fingerprint)
+        return (best_identity, fingerprint)
+
+    def _reference_icon_fingerprints(self) -> dict[str, str]:
+        if self._reference_fingerprints is None:
+            self._reference_fingerprints = dict(self._REFERENCE_ICON_FINGERPRINTS)
+        return self._reference_fingerprints
+
+    def _reference_icon_fingerprint(self, kind: str) -> str:
+        bits: list[str] = []
+        size = 32
+        cells = 8
+        for row_index in range(cells):
+            for column_index in range(cells):
+                start_x = math.floor((column_index * size) / cells)
+                end_x = math.floor(((column_index + 1) * size) / cells)
+                start_y = math.floor((row_index * size) / cells)
+                end_y = math.floor(((row_index + 1) * size) / cells)
+                ink_pixels = 0
+                total_pixels = 0
+                for y in range(start_y, end_y):
+                    for x in range(start_x, end_x):
+                        total_pixels += 1
+                        if self._reference_icon_contains_ink(kind, x + 0.5, y + 0.5):
+                            ink_pixels += 1
+                bits.append("1" if total_pixels > 0 and (ink_pixels / total_pixels) >= 0.08 else "0")
+        return "".join(bits)
+
+    def _icon_fingerprint(self, image: RgbImage, *, background: RgbColor) -> str | None:
+        bits: list[str] = []
+        cells = 8
+        for row_index in range(cells):
+            for column_index in range(cells):
+                start_x = math.floor((column_index * image.width) / cells)
+                end_x = math.floor(((column_index + 1) * image.width) / cells)
+                start_y = math.floor((row_index * image.height) / cells)
+                end_y = math.floor(((row_index + 1) * image.height) / cells)
+                ink_pixels = 0
+                total_pixels = 0
+                for y in range(start_y, end_y):
+                    row_offset = y * image.width
+                    for x in range(start_x, end_x):
+                        total_pixels += 1
+                        if color_distance(image.pixels[row_offset + x], background) > 18:
+                            ink_pixels += 1
+                bits.append("1" if total_pixels > 0 and (ink_pixels / total_pixels) >= 0.08 else "0")
+        fingerprint = "".join(bits)
+        return fingerprint if "1" in fingerprint else None
+
+    @staticmethod
+    def _hamming_distance(left: str, right: str) -> int:
+        return sum(1 for left_bit, right_bit in zip(left, right) if left_bit != right_bit)
+
+    def _reference_icon_contains_ink(self, kind: str, x: float, y: float) -> bool:
+        if kind == "repository":
+            return self._repository_icon_contains_ink(x, y)
+        if kind == "folder":
+            return self._folder_icon_contains_ink(x, y)
+        raise ValueError(f"Unsupported icon reference kind: {kind}")
+
+    def _repository_icon_contains_ink(self, x: float, y: float) -> bool:
+        size = 32
+        stroke_width = size * 0.08
+        half_stroke = stroke_width / 2
+        left = size * 0.18
+        top = size * 0.16
+        right = size * 0.82
+        bottom = size * 0.84
+        radius = size * 0.08
+        if self._is_rounded_rect_stroke(
+            x=x,
+            y=y,
+            left=left,
+            top=top,
+            right=right,
+            bottom=bottom,
+            radius=radius,
+            stroke_width=stroke_width,
+        ):
+            return True
+        if self._distance_to_segment(x, y, left, size * 0.34, right, size * 0.34) <= half_stroke:
+            return True
+        if self._distance_to_segment(x, y, size * 0.32, size * 0.54, size * 0.66, size * 0.54) <= half_stroke:
+            return True
+        if self._distance_to_segment(x, y, size * 0.32, size * 0.68, size * 0.58, size * 0.68) <= half_stroke:
+            return True
+        return math.hypot(x - (size * 0.3), y - (size * 0.25)) <= (size * 0.03)
+
+    def _folder_icon_contains_ink(self, x: float, y: float) -> bool:
+        size = 32
+        stroke_width = size * 0.08
+        half_stroke = stroke_width / 2
+        points = (
+            (size * 0.14, size * 0.32),
+            (size * 0.38, size * 0.32),
+            (size * 0.46, size * 0.22),
+            (size * 0.84, size * 0.22),
+            (size * 0.78, size * 0.78),
+            (size * 0.18, size * 0.78),
+        )
+        for start, end in zip(points, (*points[1:], points[0])):
+            if self._distance_to_segment(x, y, start[0], start[1], end[0], end[1]) <= half_stroke:
+                return True
+        return False
+
+    def _is_rounded_rect_stroke(
+        self,
+        *,
+        x: float,
+        y: float,
+        left: float,
+        top: float,
+        right: float,
+        bottom: float,
+        radius: float,
+        stroke_width: float,
+    ) -> bool:
+        half_stroke = stroke_width / 2
+        outer = self._inside_rounded_rect(
+            x=x,
+            y=y,
+            left=left - half_stroke,
+            top=top - half_stroke,
+            right=right + half_stroke,
+            bottom=bottom + half_stroke,
+            radius=radius + half_stroke,
+        )
+        inner = self._inside_rounded_rect(
+            x=x,
+            y=y,
+            left=left + half_stroke,
+            top=top + half_stroke,
+            right=right - half_stroke,
+            bottom=bottom - half_stroke,
+            radius=max(radius - half_stroke, 0),
+        )
+        return outer and not inner
+
+    @staticmethod
+    def _inside_rounded_rect(
+        *,
+        x: float,
+        y: float,
+        left: float,
+        top: float,
+        right: float,
+        bottom: float,
+        radius: float,
+    ) -> bool:
+        if x < left or x > right or y < top or y > bottom:
+            return False
+        if radius <= 0:
+            return True
+        inner_left = left + radius
+        inner_right = right - radius
+        inner_top = top + radius
+        inner_bottom = bottom - radius
+        if inner_left <= x <= inner_right or inner_top <= y <= inner_bottom:
+            return True
+        corner_x = inner_left if x < inner_left else inner_right
+        corner_y = inner_top if y < inner_top else inner_bottom
+        return ((x - corner_x) ** 2) + ((y - corner_y) ** 2) <= radius**2
+
+    @staticmethod
+    def _distance_to_segment(
+        x: float,
+        y: float,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+    ) -> float:
+        delta_x = x2 - x1
+        delta_y = y2 - y1
+        if delta_x == 0 and delta_y == 0:
+            return math.hypot(x - x1, y - y1)
+        projection = ((x - x1) * delta_x + (y - y1) * delta_y) / ((delta_x**2) + (delta_y**2))
+        clamped = min(1.0, max(0.0, projection))
+        closest_x = x1 + (clamped * delta_x)
+        closest_y = y1 + (clamped * delta_y)
+        return math.hypot(x - closest_x, y - closest_y)

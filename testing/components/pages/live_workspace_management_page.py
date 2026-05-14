@@ -657,13 +657,6 @@ class LiveWorkspaceManagementPage:
                   .map((element) => accessibleLabel(element))
                   .find((label) => label.length > 0) ?? null;
                 const iconClassification = classifyIcon(iconElement);
-                const iconIdentity = iconClassification.identity
-                  ?? (
-                    iconAccessibilityLabel === 'repository'
-                    || iconAccessibilityLabel === 'folder'
-                      ? iconAccessibilityLabel
-                      : null
-                  );
                 const iconColor = iconElement
                   ? (
                     resolveForegroundColor(iconElement)
@@ -691,7 +684,7 @@ class LiveWorkspaceManagementPage:
                   detailContrastRatio: contrastRatio(detailColor, backgroundColor),
                   typeContrastRatio: contrastRatio(typeColor, backgroundColor),
                   imageCount: imageElements.length,
-                  iconIdentity,
+                  iconIdentity: iconClassification.identity,
                   iconFingerprint: iconClassification.fingerprint,
                   iconAccessibilityLabel,
                   iconColor,

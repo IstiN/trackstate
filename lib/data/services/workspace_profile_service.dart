@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/models/workspace_profile_models.dart';
+import 'browser_preferences_storage_repair.dart';
 import 'trackstate_auth_store.dart';
 
 abstract interface class WorkspaceProfileService {
@@ -41,6 +42,7 @@ class SharedPreferencesWorkspaceProfileService
 
   @override
   Future<WorkspaceProfilesState> loadState() async {
+    await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
     final state = _readState(preferences);
     final normalizedState = _normalizeState(state);
@@ -56,6 +58,7 @@ class SharedPreferencesWorkspaceProfileService
     bool select = true,
   }) async {
     _validateInput(input);
+    await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
     final state = _normalizeState(_readState(preferences));
     final nextProfile = WorkspaceProfile.create(
@@ -86,6 +89,7 @@ class SharedPreferencesWorkspaceProfileService
     bool select = true,
   }) async {
     _validateInput(input);
+    await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
     final state = _normalizeState(_readState(preferences));
     final existingProfile = state.profiles.where(
@@ -135,6 +139,7 @@ class SharedPreferencesWorkspaceProfileService
 
   @override
   Future<WorkspaceProfilesState> selectProfile(String workspaceId) async {
+    await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
     final state = _normalizeState(_readState(preferences));
     WorkspaceProfile? selectedProfile;
@@ -162,6 +167,7 @@ class SharedPreferencesWorkspaceProfileService
 
   @override
   Future<WorkspaceProfilesState> deleteProfile(String workspaceId) async {
+    await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
     final state = _normalizeState(_readState(preferences));
     final nextProfiles = resolveWorkspaceDisplayNames(
@@ -185,6 +191,7 @@ class SharedPreferencesWorkspaceProfileService
   Future<WorkspaceProfile?> ensureLegacyContextMigrated(
     WorkspaceProfileInput? input,
   ) async {
+    await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
     final state = _normalizeState(_readState(preferences));
     if (state.migrationComplete) {
