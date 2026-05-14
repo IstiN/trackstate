@@ -44,23 +44,6 @@ class _Ts65TrackStateProvider implements TrackStateProviderAdapter {
     ),
   );
 
-  @override
-  Future<RepositorySyncCheck> checkSync({
-    RepositorySyncState? previousState,
-  }) async => const RepositorySyncCheck(
-    state: RepositorySyncState(
-      providerType: ProviderType.github,
-      repositoryRevision: _revision,
-      sessionRevision: 'ts65',
-      connectionState: ProviderConnectionState.connected,
-      permission: RepositoryPermission(
-        canRead: true,
-        canWrite: false,
-        isAdmin: false,
-      ),
-    ),
-  );
-
   static const Map<String, String> _files = {
     'project.json': '''
 {
