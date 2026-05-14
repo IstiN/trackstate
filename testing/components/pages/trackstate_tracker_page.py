@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from testing.components.pages.trackstate_live_app_page import TrackStateLiveAppPage
@@ -255,6 +256,76 @@ class TrackStateTrackerPage:
     def screenshot(self, path: str) -> None:
         self.session.screenshot(path)
 
+    def observe_interactive_shell(
+        self,
+        required_navigation_labels: Sequence[str],
+        *,
+        timeout_ms: int = 120_000,
+    ) -> dict[str, object]:
+        try:
+            payload = self.session.wait_for_function(
+                """
+                (requiredNavigationLabels) => {
+                  const bodyText = document.body?.innerText ?? '';
+                  const visibleNavigationLabels = requiredNavigationLabels.filter(
+                    (label) => bodyText.includes(label),
+                  );
+                  const fatalBannerVisible = bodyText.includes('TrackState data was not found');
+                  const connectGitHubVisible = bodyText.includes('Connect GitHub');
+                  const shellReady = visibleNavigationLabels.length === requiredNavigationLabels.length;
+                  return shellReady || fatalBannerVisible || connectGitHubVisible
+                    ? {
+                        bodyText,
+                        visibleNavigationLabels,
+                        fatalBannerVisible,
+                        connectGitHubVisible,
+                        shellReady,
+                      }
+                    : null;
+                }
+                """,
+                arg=list(required_navigation_labels),
+                timeout_ms=timeout_ms,
+            )
+        except Exception:
+            return self._interactive_shell_fallback()
+        if not isinstance(payload, dict):
+            return self._interactive_shell_fallback()
+        return {
+            "body_text": str(payload.get("bodyText", "")),
+            "visible_navigation_labels": [
+                str(label) for label in payload.get("visibleNavigationLabels", [])
+            ],
+            "fatal_banner_visible": bool(payload.get("fatalBannerVisible")),
+            "connect_github_visible": bool(payload.get("connectGitHubVisible")),
+            "shell_ready": bool(payload.get("shellReady")),
+        }
+
+    def snapshot_local_storage(
+        self,
+        keys: Sequence[str],
+    ) -> dict[str, str | None]:
+        payload = self.session.evaluate(
+            """
+            (keys) => {
+              const snapshot = {};
+              for (const key of keys) {
+                snapshot[key] = window.localStorage.getItem(key);
+              }
+              return snapshot;
+            }
+            """,
+            arg=list(keys),
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Expected a workspace storage snapshot map, got: {payload!r}",
+            )
+        return {
+            str(key): (None if value is None else str(value))
+            for key, value in payload.items()
+        }
+
     @staticmethod
     def extract_issue_key(summary: str, body_text: str) -> str | None:
         pattern = re.compile(
@@ -289,3 +360,13 @@ class TrackStateTrackerPage:
             f'textarea[aria-label="{label}"]',
             f'[role="textbox"][aria-label="{label}"]',
         )
+
+    def _interactive_shell_fallback(self) -> dict[str, object]:
+        body_text = self.body_text()
+        return {
+            "body_text": body_text,
+            "visible_navigation_labels": [],
+            "fatal_banner_visible": "TrackState data was not found" in body_text,
+            "connect_github_visible": "Connect GitHub" in body_text,
+            "shell_ready": False,
+        }

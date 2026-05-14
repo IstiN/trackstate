@@ -516,8 +516,9 @@ class LiveWorkspaceManagementPage:
 
               const openLabels = ['Open', 'Open workspace'];
               const activeLabels = ['Active', 'Active workspace'];
-              const actionLabels = [...openLabels, ...activeLabels, 'Delete'];
-              const headings = visibleElements(document, 'flt-semantics,[aria-label]')
+              const actionableRowLabels = [...openLabels, ...activeLabels];
+              const actionLabels = [...actionableRowLabels, 'Delete'];
+              const headings = visibleElements(document)
                 .map((element) => ({
                   element,
                   label: normalize(element.getAttribute('aria-label') || ''),
@@ -534,17 +535,16 @@ class LiveWorkspaceManagementPage:
                 .sort((left, right) => left.area - right.area);
 
               let section = null;
-                for (const heading of headings) {
-                  let current = heading.element;
-                  while (current && current !== document.body) {
-                    const text = normalize(current.innerText || '');
-                    const label = normalize(current.getAttribute('aria-label') || '');
-                    const buttonLabels = actionNodeLabels(current);
-                    if (
-                      (text.includes('Saved workspaces') || label.includes('Saved workspaces'))
-                      && buttonLabels.includes('Delete')
-                      && buttonLabels.some((label) => openLabels.includes(label))
-                    ) {
+              for (const heading of headings) {
+                let current = heading.element;
+                while (current && current !== document.body) {
+                  const text = normalize(current.innerText || '');
+                  const label = normalize(current.getAttribute('aria-label') || '');
+                  const buttonLabels = actionNodeLabels(current);
+                  if (
+                    (text.includes('Saved workspaces') || label.includes('Saved workspaces'))
+                    && buttonLabels.includes('Delete')
+                  ) {
                     section = current;
                     break;
                   }
@@ -556,13 +556,7 @@ class LiveWorkspaceManagementPage:
               }
 
               if (!section) {
-                return {
-                  bodyText,
-                  sectionText: '',
-                  sectionVisible: false,
-                  rowCount: 0,
-                  rows: [],
-                };
+                return null;
               }
 
               const rowCandidates = visibleElements(section)
@@ -600,9 +594,9 @@ class LiveWorkspaceManagementPage:
                 rows.push(candidate);
               }
 
-                const rowPayload = rows.map((rowCandidate) => {
-                  const rowElement = rowCandidate.element;
-                  const rowRect = rowElement.getBoundingClientRect();
+              const rowPayload = rows.map((rowCandidate) => {
+                const rowElement = rowCandidate.element;
+                const rowRect = rowElement.getBoundingClientRect();
                 const rawLines = (rowElement.innerText || '')
                   .split(/\\n+/)
                   .map((line) => normalize(line))
@@ -802,13 +796,17 @@ class LiveWorkspaceManagementPage:
                 };
               });
 
-              return {
-                bodyText,
-                sectionText: normalize(section.innerText || ''),
-                sectionVisible: true,
-                rowCount: rowPayload.length,
-                rows: rowPayload,
-              };
+                return {
+                  bodyText,
+                  sectionText: normalize(
+                    section?.innerText
+                    || rows.map((candidate) => candidate.text).join('\\n')
+                    || '',
+                  ),
+                  sectionVisible: !!section,
+                  rowCount: rowPayload.length,
+                  rows: rowPayload,
+                };
             }
             """,
             arg={"settingsAdminHeading": self._settings_admin_heading},
