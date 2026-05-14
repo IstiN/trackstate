@@ -1,0 +1,11 @@
+test_id: TS-718
+type: api
+framework: flutter_test
+platform: linux
+dependencies:
+  - Flutter SDK available on PATH
+  - git CLI available on PATH
+notes:
+  - Exercises the production local workspace onboarding bootstrap flow against a new empty local directory.
+  - Verifies the initialized folder contains only the minimal scaffold, repository-path attachment storage, and a first Git commit.
+  - Verifies no extra demo or hosted-only files are created by asserting the exact non-git file tree.
