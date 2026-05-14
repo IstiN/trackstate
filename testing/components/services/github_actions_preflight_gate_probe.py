@@ -4,7 +4,6 @@ from copy import deepcopy
 from dataclasses import asdict
 import json
 from datetime import datetime, timezone
-import re
 import time
 from typing import Any
 from urllib.parse import quote
@@ -86,26 +85,8 @@ class GitHubActionsPreflightGateProbeService:
         partial_result["workflow"] = asdict(workflow_observation)
         head_sha = self._load_branch_sha(default_branch)
         partial_result["head_sha"] = head_sha
-        matching_runners = self._load_matching_runners(partial_result=partial_result)
-        partial_result["matching_runners"] = [
-            asdict(runner) for runner in matching_runners
-        ]
-        online_matching_runners = [
-            runner
-            for runner in matching_runners
-            if (runner.status or "").lower() == "online"
-        ]
-        if online_matching_runners:
-            raise GitHubActionsPreflightGateProbeError(
-                "Precondition failed: TS-706 requires all repository runners matching "
-                f"{self._config.expected_runner_labels} to be offline before creating the "
-                "disposable release tag. Matching online runners: "
-                + ", ".join(
-                    f"{runner.name} (status={runner.status}, busy={runner.busy})"
-                    for runner in online_matching_runners
-                ),
-                partial_result=partial_result,
-            )
+        matching_runners: list[GitHubActionsSelfHostedRunnerObservation] = []
+        partial_result["matching_runners"] = []
         baseline_run_ids = {
             run.id for run in self._list_workflow_runs(event="push", per_page=50)
         }
@@ -171,43 +152,6 @@ class GitHubActionsPreflightGateProbeService:
             log_text=log_text,
             expected_failure_markers=list(self._config.expected_failure_markers),
         )
-
-    def _load_matching_runners(
-        self,
-        *,
-        partial_result: dict[str, Any],
-    ) -> list[GitHubActionsSelfHostedRunnerObservation]:
-        try:
-            payload = self._load_json_object(
-                endpoint=(
-                    f"/repos/{self._config.repository}/actions/runners?per_page=100"
-                )
-            )
-        except GitHubActionsPreflightGateProbeError as error:
-            partial_result["runner_inventory_error"] = str(error)
-            raise GitHubActionsPreflightGateProbeError(
-                "Precondition failed: TS-706 could not verify whether the "
-                f"{self._config.expected_runner_labels} runners were offline before "
-                "creating the disposable release tag because the repository runners API "
-                "was not accessible.\n"
-                f"Inventory error: {error}",
-                partial_result=partial_result,
-            ) from error
-
-        runners = payload.get("runners")
-        if not isinstance(runners, list):
-            raise GitHubActionsPreflightGateProbeError(
-                "Precondition failed: TS-706 could not verify the repository runner "
-                "inventory because the GitHub API response did not include a runners list.",
-                partial_result=partial_result,
-            )
-        matching_runners = [
-            self._to_runner_observation(entry)
-            for entry in runners
-            if isinstance(entry, dict)
-            and self._runner_has_required_labels(entry)
-        ]
-        return matching_runners
 
     def _parse_workflow_observation(
         self,
@@ -385,7 +329,8 @@ class GitHubActionsPreflightGateProbeService:
         if downstream_job.status not in {"queued", "in_progress", "waiting"}:
             return
         raise GitHubActionsPreflightGateProbeError(
-            "TS-706 could not reproduce the no-runner failure condition because the "
+            "Precondition failed: TS-706 could not reproduce the no-runner failure "
+            "condition through the live Apple Release Builds workflow because the "
             f"preflight job `{preflight_job.name}` succeeded and the downstream macOS "
             f"job `{downstream_job.name}` entered `{downstream_job.status}`. This "
             "repository currently appears to have a matching online macOS release runner. "
@@ -523,26 +468,6 @@ class GitHubActionsPreflightGateProbeService:
             display_title=self._read_string(payload, "display_title"),
         )
 
-    def _to_runner_observation(
-        self,
-        payload: dict[str, Any],
-    ) -> GitHubActionsSelfHostedRunnerObservation:
-        runner_id = payload.get("id")
-        if not isinstance(runner_id, int):
-            raise GitHubActionsPreflightGateProbeError(
-                f"GitHub Actions runner payload did not include an integer id: {payload}"
-            )
-        busy = payload.get("busy")
-        if not isinstance(busy, bool):
-            busy = None
-        return GitHubActionsSelfHostedRunnerObservation(
-            id=runner_id,
-            name=self._read_string(payload, "name") or "",
-            status=self._read_string(payload, "status"),
-            busy=busy,
-            labels=self._read_runner_labels(payload),
-        )
-
     def _load_json_object(self, *, endpoint: str) -> dict[str, Any]:
         try:
             response_text = self._github_api_client.request_text(endpoint=endpoint)
@@ -561,24 +486,6 @@ class GitHubActionsPreflightGateProbeService:
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
         return []
-
-    def _read_runner_labels(self, payload: dict[str, Any]) -> list[str]:
-        labels = payload.get("labels")
-        if not isinstance(labels, list):
-            return []
-        names: list[str] = []
-        for entry in labels:
-            if not isinstance(entry, dict):
-                continue
-            name = self._read_string(entry, "name")
-            if name is not None:
-                names.append(name)
-        return names
-
-    def _runner_has_required_labels(self, payload: dict[str, Any]) -> bool:
-        runner_labels = set(self._read_runner_labels(payload))
-        required_labels = set(self._config.expected_runner_labels)
-        return required_labels.issubset(runner_labels)
 
     def _split_csv(self, value: str) -> list[str]:
         return [item.strip() for item in value.split(",") if item.strip()]

@@ -9,6 +9,12 @@ the resulting workflow run to complete, verifies the preflight and downstream
 job outcomes through the GitHub API/logs, and opens the run/job pages in
 Chromium for human-style verification.
 
+TS-706 does not rely on the repository self-hosted runners inventory API.
+Instead, it treats the live workflow itself as the supported precondition
+signal: the expected path is a failing preflight job with the configured
+runner-availability message, while a successful preflight plus queued macOS job
+means the runner-offline precondition was not met.
+
 ## Dependencies
 
 - GitHub CLI authenticated with repository and workflow access for

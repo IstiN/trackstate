@@ -105,9 +105,10 @@ def main() -> None:
             observed=(
                 "Confirmed the live Apple release workflow still uses an Ubuntu "
                 f"preflight job with runner contract {observation.workflow.required_runner_labels} "
-                "before the macOS release job, and the repository runner inventory "
-                f"showed no online matches for {config.expected_runner_labels}. "
-                f"Matching runners observed: {_format_matching_runners(observation.matching_runners)}."
+                "before the macOS release job. TS-706 verified the offline/mismatch "
+                "precondition through the resulting live workflow behavior instead of "
+                "the repository runners inventory API, which is not required for the "
+                "supported test path."
             ),
         )
 
@@ -332,30 +333,6 @@ def _merge_probe_error_context(result: dict[str, object], error: Exception) -> N
     if not isinstance(partial_result, dict):
         return
     result.update(partial_result)
-
-
-def _format_matching_runners(matching_runners: object) -> str:
-    if not isinstance(matching_runners, list) or not matching_runners:
-        return "none"
-    descriptions: list[str] = []
-    for entry in matching_runners:
-        if hasattr(entry, "name") and hasattr(entry, "status"):
-            name = str(getattr(entry, "name"))
-            status = str(getattr(entry, "status", "unknown"))
-            busy = getattr(entry, "busy", None)
-            labels = getattr(entry, "labels", [])
-        elif isinstance(entry, dict):
-            name = str(entry.get("name", ""))
-            status = str(entry.get("status", "unknown"))
-            busy = entry.get("busy")
-            labels = entry.get("labels", [])
-        else:
-            descriptions.append(str(entry))
-            continue
-        descriptions.append(
-            f"{name} (status={status}, busy={busy}, labels={labels})"
-        )
-    return "; ".join(descriptions)
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -726,16 +703,25 @@ def _review_reply_text(
         )
     if root_comment_id == 3243481706:
         return (
-            "Fixed: TS-706 now performs an explicit repository runner-inventory check "
-            "before creating the disposable tag and stops with a precondition failure if "
-            "the required macOS release runners are online or the runners API is not "
-            f"accessible. {rerun_summary}"
+            "Fixed: TS-706 no longer depends on the repository runners inventory API. "
+            "It now verifies the runner-offline precondition through the accessible live "
+            "workflow signal instead: if the preflight job succeeds and the downstream "
+            "macOS job queues, the test records that as a precondition-not-met failure "
+            f"with preserved run/job context. {rerun_summary}"
         )
     if root_comment_id == 3243481854:
         return (
             "Fixed: the test now seeds config-backed metadata before `probe.validate()` "
             "and merges `GitHubActionsPreflightGateProbeError.partial_result` into the "
             f"failure output so repository, branch, tag, workflow, and run/job context are preserved. {rerun_summary}"
+        )
+    if root_comment_id == 3243539818:
+        return (
+            "Fixed: removed the unsupported `GET /repos/{repo}/actions/runners` "
+            "dependency and switched TS-706 back to an accessible, product-visible "
+            "precondition signal from the live workflow run itself. The test now only "
+            "fails for precondition reasons when the run proves a matching macOS runner "
+            f"is available. {rerun_summary}"
         )
     return (
         "Fixed: added `testing/tests/TS-706/README.md`, removed hardcoded workflow "

@@ -50,6 +50,15 @@ class _UnusedWorkflowRunLogReader:
         raise AssertionError(f"Log reader should not be used for run {run_id}")
 
 
+class _FakeWorkflowRunLogReader:
+    def __init__(self, log_text: str) -> None:
+        self._log_text = log_text
+
+    def read_run_log(self, run_id: int) -> str:
+        del run_id
+        return self._log_text
+
+
 class GitHubActionsPreflightGateProbeRegressionTest(unittest.TestCase):
     def setUp(self) -> None:
         self.config = GitHubActionsPreflightGateConfig(
@@ -89,7 +98,18 @@ jobs:
       - ARM64
 """.strip()
 
-    def test_validate_stops_before_tag_creation_when_matching_runner_is_online(self) -> None:
+    def test_validate_uses_live_workflow_signal_without_runner_inventory_api(self) -> None:
+        completed_run = GitHubActionsWorkflowRunObservation(
+            id=91,
+            event="push",
+            head_branch="main",
+            head_sha="head-sha",
+            status="completed",
+            conclusion="failure",
+            html_url="https://github.com/IstiN/trackstate/actions/runs/91",
+            created_at="2026-05-14T18:37:30Z",
+            display_title="TS-706",
+        )
         github_api_client = _FakeGitHubApiClient(
             {
                 ("GET", "/repos/IstiN/trackstate"): [
@@ -112,67 +132,53 @@ jobs:
                 ("GET", "/repos/IstiN/trackstate/branches/main"): [
                     {"commit": {"sha": "head-sha"}}
                 ],
-                ("GET", "/repos/IstiN/trackstate/actions/runners?per_page=100"): [
+                (
+                    "GET",
+                    "/repos/IstiN/trackstate/actions/workflows/build-native.yml/runs?event=push&per_page=50",
+                ): [{"workflow_runs": []}],
+                ("POST", "/repos/IstiN/trackstate/git/refs"): [""],
+                ("GET", "/repos/IstiN/trackstate/actions/runs/91/jobs?per_page=20"): [
                     {
-                        "runners": [
+                        "jobs": [
                             {
-                                "id": 7,
-                                "name": "macos-release-1",
-                                "status": "online",
-                                "busy": False,
-                                "labels": [
-                                    {"name": "self-hosted"},
-                                    {"name": "macOS"},
-                                    {"name": "trackstate-release"},
-                                    {"name": "ARM64"},
-                                ],
-                            }
+                                "id": 101,
+                                "name": "Verify macOS runner availability",
+                                "status": "completed",
+                                "conclusion": "failure",
+                                "html_url": "https://github.com/IstiN/trackstate/actions/runs/91/job/101",
+                            },
+                            {
+                                "id": 202,
+                                "name": "Build macOS desktop and CLI artifacts",
+                                "status": "completed",
+                                "conclusion": "skipped",
+                                "html_url": "https://github.com/IstiN/trackstate/actions/runs/91/job/202",
+                            },
                         ]
                     }
                 ],
+                ("DELETE", "/repos/IstiN/trackstate/git/refs/tags/v98.test"): [""],
             }
         )
         probe = GitHubActionsPreflightGateProbeService(
             self.config,
             github_api_client=github_api_client,
-            workflow_run_log_reader=_UnusedWorkflowRunLogReader(),
+            workflow_run_log_reader=_FakeWorkflowRunLogReader(
+                "No runner registered for IstiN/trackstate"
+            ),
         )
+        probe._build_tag_name = lambda: "v98.test"  # type: ignore[method-assign]
+        probe._wait_for_new_push_run = lambda **_: completed_run  # type: ignore[method-assign]
+        probe._wait_for_completed_run = lambda _run_id: completed_run  # type: ignore[method-assign]
 
-        with self.assertRaisesRegex(
-            GitHubActionsPreflightGateProbeError,
-            "Precondition failed: TS-706 requires all repository runners matching",
-        ) as raised:
-            probe.validate()
+        observation = probe.validate()
 
+        self.assertEqual(observation.matching_runners, [])
         self.assertNotIn(
-            ("POST", "/repos/IstiN/trackstate/git/refs"),
+            ("GET", "/repos/IstiN/trackstate/actions/runners?per_page=100"),
             github_api_client.calls,
         )
-        self.assertEqual(
-            raised.exception.partial_result.get("repository"),
-            "IstiN/trackstate",
-        )
-        self.assertEqual(
-            raised.exception.partial_result.get("head_sha"),
-            "head-sha",
-        )
-        self.assertEqual(
-            raised.exception.partial_result.get("matching_runners"),
-            [
-                {
-                    "id": 7,
-                    "name": "macos-release-1",
-                    "status": "online",
-                    "busy": False,
-                    "labels": [
-                        "self-hosted",
-                        "macOS",
-                        "trackstate-release",
-                        "ARM64",
-                    ],
-                }
-            ],
-        )
+        self.assertIn(("POST", "/repos/IstiN/trackstate/git/refs"), github_api_client.calls)
 
     def test_validate_preserves_partial_context_when_run_exposes_online_runner(self) -> None:
         github_api_client = _FakeGitHubApiClient(
@@ -196,9 +202,6 @@ jobs:
                 ): [self.workflow_yaml],
                 ("GET", "/repos/IstiN/trackstate/branches/main"): [
                     {"commit": {"sha": "head-sha"}}
-                ],
-                ("GET", "/repos/IstiN/trackstate/actions/runners?per_page=100"): [
-                    {"runners": []}
                 ],
                 (
                     "GET",
@@ -262,10 +265,14 @@ jobs:
 
         with self.assertRaisesRegex(
             GitHubActionsPreflightGateProbeError,
-            "matching online macOS release runner",
+            "Precondition failed: TS-706 could not reproduce the no-runner failure condition",
         ) as raised:
             probe.validate()
 
+        self.assertNotIn(
+            ("GET", "/repos/IstiN/trackstate/actions/runners?per_page=100"),
+            github_api_client.calls,
+        )
         self.assertEqual(
             raised.exception.partial_result.get("tag_name"),
             "v98.test",
