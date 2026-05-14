@@ -22,11 +22,17 @@ abstract interface class WorkspaceOnboardingDriver {
 
   Future<void> openAddWorkspace();
 
+  Future<void> chooseOpenExistingFolder();
+
   Future<void> selectExistingFolder();
 
   Future<void> selectHostedRepository();
 
   Future<void> selectHostedRepositorySuggestion(String fullName);
+
+  Future<void> enterLocalWorkspaceName(String value);
+
+  Future<void> enterLocalWriteBranch(String value);
 
   Future<void> enterHostedRepository(String repository);
 
