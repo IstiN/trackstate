@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/jql_search_service.dart';
@@ -16,6 +18,7 @@ class Ts733SyncRefreshRepository extends DemoTrackStateRepository
   static const String openStatusId = 'open';
   static const String closedStatusId = 'closed';
   static const String query = 'status = Open';
+  static const Duration automaticSyncWait = Duration(seconds: 61);
 
   static const JqlSearchService _searchService = JqlSearchService();
   static const RepositoryUser _connectedUser = RepositoryUser(
