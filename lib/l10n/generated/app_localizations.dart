@@ -1321,8 +1321,122 @@ abstract class AppLocalizations {
   /// No description provided for @workspaceOnboardingFirstRunDescription.
   ///
   /// In en, this message translates to:
-  /// **'Choose a local folder or hosted repository to get started.'**
+  /// **'Choose a local folder to open an existing workspace or initialize TrackState in a new one.'**
   String get workspaceOnboardingFirstRunDescription;
+
+  /// No description provided for @localWorkspaceOnboardingOpenExisting.
+  ///
+  /// In en, this message translates to:
+  /// **'Open existing folder'**
+  String get localWorkspaceOnboardingOpenExisting;
+
+  /// No description provided for @localWorkspaceOnboardingInitializeFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Initialize folder'**
+  String get localWorkspaceOnboardingInitializeFolder;
+
+  /// No description provided for @localWorkspaceOnboardingFolderLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Selected folder'**
+  String get localWorkspaceOnboardingFolderLabel;
+
+  /// No description provided for @localWorkspaceOnboardingFolderRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a folder to continue.'**
+  String get localWorkspaceOnboardingFolderRequired;
+
+  /// No description provided for @localWorkspaceOnboardingFolderBrowseOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose existing folder'**
+  String get localWorkspaceOnboardingFolderBrowseOpen;
+
+  /// No description provided for @localWorkspaceOnboardingFolderBrowseInitialize.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose folder to initialize'**
+  String get localWorkspaceOnboardingFolderBrowseInitialize;
+
+  /// No description provided for @localWorkspaceOnboardingChangeFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Change folder'**
+  String get localWorkspaceOnboardingChangeFolder;
+
+  /// No description provided for @localWorkspaceOnboardingDetailsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Workspace details'**
+  String get localWorkspaceOnboardingDetailsTitle;
+
+  /// No description provided for @localWorkspaceOnboardingWorkspaceName.
+  ///
+  /// In en, this message translates to:
+  /// **'Workspace name'**
+  String get localWorkspaceOnboardingWorkspaceName;
+
+  /// No description provided for @localWorkspaceOnboardingWorkspaceNameRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Workspace name is required.'**
+  String get localWorkspaceOnboardingWorkspaceNameRequired;
+
+  /// No description provided for @localWorkspaceOnboardingWorkspaceNameHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Defaults to the selected folder name. You can rename it before saving the workspace profile.'**
+  String get localWorkspaceOnboardingWorkspaceNameHelper;
+
+  /// No description provided for @localWorkspaceOnboardingWriteBranchHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'TrackState opens and writes to this local branch. Existing repositories must stay on their current branch during onboarding.'**
+  String get localWorkspaceOnboardingWriteBranchHelper;
+
+  /// No description provided for @localWorkspaceOnboardingWriteBranchRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Write Branch is required.'**
+  String get localWorkspaceOnboardingWriteBranchRequired;
+
+  /// No description provided for @localWorkspaceOnboardingReadyStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Ready to open'**
+  String get localWorkspaceOnboardingReadyStatus;
+
+  /// No description provided for @localWorkspaceOnboardingInitializeStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Initialization required'**
+  String get localWorkspaceOnboardingInitializeStatus;
+
+  /// No description provided for @localWorkspaceOnboardingBlockedStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Folder not supported'**
+  String get localWorkspaceOnboardingBlockedStatus;
+
+  /// No description provided for @localWorkspaceOnboardingOpenAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Open workspace'**
+  String get localWorkspaceOnboardingOpenAction;
+
+  /// No description provided for @localWorkspaceOnboardingInitializeAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Initialize TrackState here'**
+  String get localWorkspaceOnboardingInitializeAction;
+
+  /// No description provided for @localWorkspaceOnboardingCurrentBranchMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'This repository is currently on {branch}. Switch the branch yourself before onboarding, or keep the detected write branch.'**
+  String localWorkspaceOnboardingCurrentBranchMismatch(String branch);
 
   /// No description provided for @workspaceOnboardingRepositoryHelper.
   ///
