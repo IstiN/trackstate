@@ -1,0 +1,21 @@
+test_id: TS-684
+type: api
+framework: python
+platform: dart-probe
+dependencies:
+  - shared Python Dart runtime bootstrap in testing/frameworks/python/dart_probe_runtime.py
+  - offline dart pub get in testing/tests/TS-684/dart_probe
+  - probe-local path dependency for package:http with MockClient support
+notes:
+  - Exercises the production GitHub release-backed attachment upload flow through ProviderBackedTrackStateRepository and GitHubTrackStateProvider.
+  - Mocks the GitHub release-creation endpoint to return HTTP 409 Conflict so the caller-visible error can be verified without changing production code.
+  - Verifies the failure is surfaced as a conflict-style release-creation error, not as a 422 validation failure or a generic repository error.
+runtime_inputs:
+  repository: IstiN/trackstate
+  branch: main
+  issue_key: TS-101
+  issue_path: TS/TS-101
+  manifest_path: TS/TS-101/attachments.json
+  attachment_name: test.pdf
+  expected_release_tag: ts684-TS-101
+  expected_release_title: Attachments for TS-101
