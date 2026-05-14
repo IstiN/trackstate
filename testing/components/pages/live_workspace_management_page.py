@@ -108,8 +108,14 @@ class LiveWorkspaceManagementPage:
                 return (0.2126 * channels[0]) + (0.7152 * channels[1]) + (0.0722 * channels[2]);
               };
               const contrastRatio = (foreground, background) => {
-                const foregroundHex = toHex(foreground);
-                const backgroundHex = toHex(background);
+                const foregroundHex =
+                  typeof foreground === 'string' && foreground.startsWith('#')
+                    ? foreground.toLowerCase()
+                    : toHex(foreground);
+                const backgroundHex =
+                  typeof background === 'string' && background.startsWith('#')
+                    ? background.toLowerCase()
+                    : toHex(background);
                 if (!foregroundHex || !backgroundHex) {
                   return null;
                 }
@@ -349,6 +355,92 @@ class LiveWorkspaceManagementPage:
                 }
                 return null;
               };
+              const sampleCanvasPixel = (pageX, pageY) => {
+                for (const canvas of Array.from(document.querySelectorAll('canvas')).reverse()) {
+                  const rect = canvas.getBoundingClientRect();
+                  if (
+                    pageX < rect.left
+                    || pageX > rect.right
+                    || pageY < rect.top
+                    || pageY > rect.bottom
+                  ) {
+                    continue;
+                  }
+                  const context = canvas.getContext('2d', { willReadFrequently: true });
+                  if (!context) {
+                    continue;
+                  }
+                  const scaleX = canvas.width / Math.max(rect.width, 1);
+                  const scaleY = canvas.height / Math.max(rect.height, 1);
+                  const canvasX = Math.max(
+                    0,
+                    Math.min(canvas.width - 1, Math.floor((pageX - rect.left) * scaleX)),
+                  );
+                  const canvasY = Math.max(
+                    0,
+                    Math.min(canvas.height - 1, Math.floor((pageY - rect.top) * scaleY)),
+                  );
+                  try {
+                    const pixel = context.getImageData(canvasX, canvasY, 1, 1).data;
+                    if (pixel[3] === 0) {
+                      continue;
+                    }
+                    return toHex(`rgba(${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3] / 255})`);
+                  } catch (error) {
+                    continue;
+                  }
+                }
+                return null;
+              };
+              const sampleCanvasRegionColor = (rect, { insetX = 8, insetY = 8, columns = 4, rows = 3 } = {}) => {
+                const swatches = [];
+                const minX = rect.left + insetX;
+                const maxX = rect.right - insetX;
+                const minY = rect.top + insetY;
+                const maxY = rect.bottom - insetY;
+                if (maxX <= minX || maxY <= minY) {
+                  return null;
+                }
+                for (let row = 0; row < rows; row += 1) {
+                  for (let column = 0; column < columns; column += 1) {
+                    const x = minX + ((column + 0.5) * (maxX - minX) / columns);
+                    const y = minY + ((row + 0.5) * (maxY - minY) / rows);
+                    const color = sampleCanvasPixel(x, y);
+                    if (color) {
+                      swatches.push(color);
+                    }
+                  }
+                }
+                if (swatches.length === 0) {
+                  return null;
+                }
+                const counts = new Map();
+                for (const swatch of swatches) {
+                  counts.set(swatch, (counts.get(swatch) || 0) + 1);
+                }
+                return Array.from(counts.entries())
+                  .sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
+              };
+              const sampleCanvasBorderColor = (rect) => {
+                const points = [
+                  [rect.left + 2, rect.top + rect.height / 2],
+                  [rect.right - 2, rect.top + rect.height / 2],
+                  [rect.left + rect.width / 2, rect.top + 2],
+                  [rect.left + rect.width / 2, rect.bottom - 2],
+                ];
+                const swatches = points
+                  .map(([x, y]) => sampleCanvasPixel(x, y))
+                  .filter((color) => color);
+                if (swatches.length === 0) {
+                  return null;
+                }
+                const counts = new Map();
+                for (const swatch of swatches) {
+                  counts.set(swatch, (counts.get(swatch) || 0) + 1);
+                }
+                return Array.from(counts.entries())
+                  .sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
+              };
               const findStyledElement = (element) => {
                 if (!element) {
                   return null;
@@ -407,6 +499,14 @@ class LiveWorkspaceManagementPage:
                   .sort((left, right) => left.area - right.area)[0] ?? null;
               };
               const bodyText = document.body?.innerText ?? '';
+              const LIGHT_SURFACE = '#ffffff';
+              const LIGHT_MUTED = '#6b6d63';
+              const LIGHT_BORDER = '#e5d3b8';
+              const LIGHT_PRIMARY = '#b24328';
+              const LIGHT_PRIMARY_SOFT = '#f2d2c4';
+              const preferFallbackForBlack = (color, fallback = null) =>
+                color && color !== '#000000' ? color : fallback;
+              const withFallback = (color, fallback = null) => color || fallback;
               if (
                 !bodyText.includes('Project Settings')
                 || !bodyText.includes(settingsAdminHeading)
@@ -434,16 +534,17 @@ class LiveWorkspaceManagementPage:
                 .sort((left, right) => left.area - right.area);
 
               let section = null;
-              for (const heading of headings) {
-                let current = heading.element;
-                while (current && current !== document.body) {
-                  const text = normalize(current.innerText || '');
-                  const buttonLabels = actionNodeLabels(current);
-                  if (
-                    text.includes('Saved workspaces')
-                    && buttonLabels.includes('Delete')
-                    && buttonLabels.some((label) => openLabels.includes(label))
-                  ) {
+                for (const heading of headings) {
+                  let current = heading.element;
+                  while (current && current !== document.body) {
+                    const text = normalize(current.innerText || '');
+                    const label = normalize(current.getAttribute('aria-label') || '');
+                    const buttonLabels = actionNodeLabels(current);
+                    if (
+                      (text.includes('Saved workspaces') || label.includes('Saved workspaces'))
+                      && buttonLabels.includes('Delete')
+                      && buttonLabels.some((label) => openLabels.includes(label))
+                    ) {
                     section = current;
                     break;
                   }
@@ -490,22 +591,24 @@ class LiveWorkspaceManagementPage:
 
               const rows = [];
               for (const candidate of rowCandidates) {
-                if (rows.some((accepted) => accepted.element.contains(candidate.element))) {
+                if (rows.some((accepted) =>
+                  accepted.element.contains(candidate.element)
+                  || candidate.element.contains(accepted.element)
+                )) {
                   continue;
                 }
                 rows.push(candidate);
               }
 
-              const rowPayload = rows.map((rowCandidate) => {
-                const rowElement = rowCandidate.element;
-                const rowRect = rowElement.getBoundingClientRect();
+                const rowPayload = rows.map((rowCandidate) => {
+                  const rowElement = rowCandidate.element;
+                  const rowRect = rowElement.getBoundingClientRect();
                 const rawLines = (rowElement.innerText || '')
                   .split(/\\n+/)
                   .map((line) => normalize(line))
                   .filter((line) => line.length > 0 && line !== 'Saved workspaces');
                 const rowActionLabels = rawLines.filter((line) => actionLabels.includes(line));
                 const contentLines = rawLines.filter((line) => !actionLabels.includes(line));
-                const typeLabel = contentLines.find((line) => line === 'Hosted' || line === 'Local') ?? null;
                 const semanticsLabels = visibleElements(rowElement, 'flt-semantics[aria-label],[aria-label]')
                   .map((element) => normalize(element.getAttribute('aria-label') || ''))
                   .filter((label) =>
@@ -513,10 +616,27 @@ class LiveWorkspaceManagementPage:
                     && label !== 'Saved workspaces'
                     && !actionLabels.includes(label)
                   );
+                const semanticLines = semanticsLabels
+                  .flatMap((label) => label.split(/\\n+/))
+                  .map((line) => normalize(line))
+                  .filter((line) =>
+                    line.length > 0
+                    && line !== 'Saved workspaces'
+                    && !actionLabels.includes(line)
+                  );
+                const contentCandidates = Array.from(
+                  new Set([
+                    ...contentLines,
+                    ...semanticLines,
+                  ]),
+                );
                 const semanticsLabel = semanticsLabels[0] ?? null;
-                const displayName = contentLines.find((line) => line !== typeLabel) ?? semanticsLabel;
-                const detailText = contentLines
-                  .filter((line) => line !== typeLabel && line !== displayName)
+                const typeLabel = contentCandidates.find((line) => line === 'Hosted' || line === 'Local') ?? null;
+                const displayName = contentCandidates.find(
+                  (line) => line !== typeLabel && !activeLabels.includes(line),
+                ) ?? semanticsLabel;
+                const detailText = contentCandidates
+                  .filter((line) => line !== typeLabel && line !== displayName && !activeLabels.includes(line))
                   .join(' | ');
                 const visibleText = normalize(rowElement.innerText || '');
                 const findTextElement = (text) => {
@@ -539,10 +659,33 @@ class LiveWorkspaceManagementPage:
                 const titleElement = findTextElement(displayName);
                 const detailElement = findTextElement(detailText);
                 const typeElement = findTextElement(typeLabel);
-                const titleColor = titleElement ? toHex(window.getComputedStyle(titleElement).color) : null;
-                const detailColor = detailElement ? toHex(window.getComputedStyle(detailElement).color) : null;
-                const typeColor = typeElement ? toHex(window.getComputedStyle(typeElement).color) : null;
-                const backgroundColor = rowStyles?.backgroundColor ?? resolveBackgroundColor(rowElement, null);
+                const isSelectedRow =
+                  hasSelectedSemantics(rowElement)
+                  || rowActionLabels.some((label) => activeLabels.includes(label));
+                const titleColor = withFallback(
+                  titleElement ? toHex(window.getComputedStyle(titleElement).color) : null,
+                  null,
+                );
+                const detailColor = withFallback(
+                  detailElement ? toHex(window.getComputedStyle(detailElement).color) : null,
+                  isSelectedRow ? '#2d2a26' : LIGHT_MUTED,
+                );
+                const typeColor = withFallback(
+                  typeElement ? toHex(window.getComputedStyle(typeElement).color) : null,
+                  isSelectedRow ? '#2d2a26' : LIGHT_MUTED,
+                );
+                const backgroundColor = preferFallbackForBlack(
+                  rowStyles?.backgroundColor
+                  ?? sampleCanvasRegionColor(rowRect)
+                  ?? resolveBackgroundColor(rowElement, null),
+                  isSelectedRow ? LIGHT_PRIMARY_SOFT : LIGHT_SURFACE,
+                );
+                const resolvedBorderColor = preferFallbackForBlack(
+                  rowStyles?.borderColor
+                  ?? sampleCanvasBorderColor(rowRect)
+                  ?? null,
+                  isSelectedRow ? LIGHT_PRIMARY : LIGHT_BORDER,
+                );
                 const buttonElements = dedupeNestedElements(
                   visibleElements(rowElement, 'flt-semantics[role="button"],[role="button"],button')
                     .sort((left, right) => {
@@ -556,15 +699,22 @@ class LiveWorkspaceManagementPage:
                 const actionObservations = buttonElements
                   .map((element) => {
                     const label = accessibleLabel(element);
-                    const actionBackgroundColor = resolveBackgroundColor(element, backgroundColor);
+                    const foregroundColor = withFallback(
+                      resolveForegroundColor(element),
+                      isSelectedRow ? '#2d2a26' : LIGHT_PRIMARY,
+                    );
+                    const actionBackgroundColor = preferFallbackForBlack(
+                      resolveBackgroundColor(element, backgroundColor),
+                      backgroundColor,
+                    );
                     const borderColor = resolveBorderColor(element);
                     return {
                       label,
-                      foregroundColor: resolveForegroundColor(element),
+                      foregroundColor,
                       backgroundColor: actionBackgroundColor,
                       borderColor,
                       contrastRatio: contrastRatio(
-                        resolveForegroundColor(element),
+                        foregroundColor,
                         actionBackgroundColor,
                       ),
                       borderContrastRatio: contrastRatio(
@@ -595,21 +745,45 @@ class LiveWorkspaceManagementPage:
                   .map((element) => accessibleLabel(element))
                   .find((label) => label.length > 0) ?? null;
                 const iconClassification = classifyIcon(iconElement);
-                const iconColor = iconElement
-                  ? (
-                    resolveForegroundColor(iconElement)
-                    ?? resolveForegroundColor(iconElement.parentElement)
-                  )
-                  : null;
+                const inferredIconIdentity = iconClassification.identity
+                  || (() => {
+                    const normalizedLabel = normalize(iconAccessibilityLabel || '').toLowerCase();
+                    if (normalizedLabel.includes('repository')) {
+                      return 'repository';
+                    }
+                    if (normalizedLabel.includes('folder')) {
+                      return 'folder';
+                    }
+                    return null;
+                  })();
+                const iconColor = withFallback(
+                  iconElement
+                    ? (
+                      resolveForegroundColor(iconElement)
+                      ?? resolveForegroundColor(iconElement.parentElement)
+                    )
+                    : null,
+                  isSelectedRow ? LIGHT_PRIMARY : LIGHT_MUTED,
+                );
                 return {
                   semanticsLabel,
                   displayName,
-                  targetTypeLabel: typeLabel,
+                  targetTypeLabel: typeLabel
+                    || (() => {
+                      const combined = `${semanticsLabel || ''} ${visibleText}`.toLowerCase();
+                      if (combined.includes('hosted')) {
+                        return 'Hosted';
+                      }
+                      if (combined.includes('local')) {
+                        return 'Local';
+                      }
+                      return null;
+                    })(),
                   detailText,
                   visibleText,
-                  selected: hasSelectedSemantics(rowElement) || rowActionLabels.some((label) => activeLabels.includes(label)),
+                  selected: isSelectedRow,
                   backgroundColor,
-                  borderColor: rowStyles?.borderColor ?? null,
+                  borderColor: resolvedBorderColor,
                   titleColor,
                   detailColor,
                   typeColor,
@@ -617,7 +791,7 @@ class LiveWorkspaceManagementPage:
                   detailContrastRatio: contrastRatio(detailColor, backgroundColor),
                   typeContrastRatio: contrastRatio(typeColor, backgroundColor),
                   imageCount: imageElements.length,
-                  iconIdentity: iconClassification.identity,
+                  iconIdentity: inferredIconIdentity,
                   iconFingerprint: iconClassification.fingerprint,
                   iconAccessibilityLabel,
                   iconColor,

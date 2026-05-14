@@ -2462,19 +2462,32 @@ class _SettingsState extends State<_Settings> {
           subtitle: project.repository,
         ),
         if (widget.workspaces.hasProfiles) ...[
-          _SurfaceCard(
-            semanticLabel: l10n.savedWorkspaces,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _SectionTitle(l10n.savedWorkspaces),
-                const SizedBox(height: 8),
-                _SavedWorkspaceList(
-                  workspaces: widget.workspaces,
-                  onSelectWorkspace: widget.onSelectWorkspace,
-                  onDeleteWorkspace: widget.onDeleteWorkspace,
-                ),
-              ],
+          Semantics(
+            container: true,
+            focusable: true,
+            readOnly: true,
+            label: l10n.savedWorkspaces,
+            explicitChildNodes: true,
+            child: _SurfaceCard(
+              semanticLabel: l10n.savedWorkspaces,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Semantics(
+                    header: true,
+                    focusable: true,
+                    readOnly: true,
+                    label: l10n.savedWorkspaces,
+                    child: _SectionTitle(l10n.savedWorkspaces),
+                  ),
+                  const SizedBox(height: 8),
+                  _SavedWorkspaceList(
+                    workspaces: widget.workspaces,
+                    onSelectWorkspace: widget.onSelectWorkspace,
+                    onDeleteWorkspace: widget.onDeleteWorkspace,
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -2534,80 +2547,118 @@ class _SavedWorkspaceList extends StatelessWidget {
     return Column(
       children: [
         for (final workspace in workspaces.profiles) ...[
-          Semantics(
-            container: true,
-            selected: workspace.id == activeWorkspaceId,
-            label: workspace.displayName,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: workspace.id == activeWorkspaceId
-                    ? colors.surfaceAlt
-                    : colors.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: workspace.id == activeWorkspaceId
-                      ? colors.primary
-                      : colors.border,
-                ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    TrackStateIcon(
-                      workspace.isHosted
-                          ? TrackStateIconGlyph.repository
-                          : TrackStateIconGlyph.folder,
-                      color: workspace.id == activeWorkspaceId
-                          ? colors.primary
-                          : colors.muted,
-                      semanticLabel: workspace.displayName,
+          Builder(
+            builder: (context) {
+              final isActive = workspace.id == activeWorkspaceId;
+              final workspaceTypeLabel = workspace.isHosted
+                  ? l10n.workspaceTargetTypeHosted
+                  : l10n.workspaceTargetTypeLocal;
+              final detailText =
+                  workspace.defaultBranch == workspace.writeBranch
+                  ? '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch}'
+                  : '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch} • ${l10n.writeBranch}: ${workspace.writeBranch}';
+              return Semantics(
+                container: true,
+                focusable: true,
+                readOnly: true,
+                selected: isActive,
+                explicitChildNodes: true,
+                label:
+                    '$workspaceTypeLabel\n${workspace.displayName}\n$detailText',
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: isActive ? colors.primarySoft : colors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isActive ? colors.primary : colors.border,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            workspace.displayName,
-                            style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        TrackStateIcon(
+                          workspace.isHosted
+                              ? TrackStateIconGlyph.repository
+                              : TrackStateIconGlyph.folder,
+                          color: isActive ? colors.primary : colors.muted,
+                          semanticLabel: workspace.isHosted
+                              ? 'repository'
+                              : 'folder',
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Semantics(
+                                label: workspaceTypeLabel,
+                                child: Text(
+                                  workspaceTypeLabel,
+                                  style: Theme.of(context).textTheme.labelMedium
+                                      ?.copyWith(
+                                        color: isActive
+                                            ? colors.text
+                                            : colors.muted,
+                                      ),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Semantics(
+                                label: workspace.displayName,
+                                child: Text(
+                                  workspace.displayName,
+                                  style: Theme.of(context).textTheme.titleSmall,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Semantics(
+                                label: detailText,
+                                child: Text(
+                                  detailText,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: isActive
+                                            ? colors.text
+                                            : colors.muted,
+                                      ),
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 4),
+                        ),
+                        const SizedBox(width: 12),
+                        if (isActive)
                           Text(
-                            workspace.defaultBranch == workspace.writeBranch
-                                ? '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch}'
-                                : '${workspace.target} • ${l10n.branch}: ${workspace.defaultBranch} • ${l10n.writeBranch}: ${workspace.writeBranch}',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: colors.muted),
+                            l10n.activeWorkspace,
+                            style: Theme.of(context).textTheme.labelMedium
+                                ?.copyWith(color: colors.text),
+                          )
+                        else
+                          OutlinedButton(
+                            onPressed: () => onSelectWorkspace(workspace),
+                            child: Text(l10n.openWorkspace),
                           ),
-                        ],
-                      ),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          style: isActive
+                              ? TextButton.styleFrom(
+                                  foregroundColor: colors.text,
+                                )
+                              : null,
+                          onPressed: () => _showWorkspaceDeleteDialog(
+                            context,
+                            workspace,
+                            onDeleteWorkspace,
+                          ),
+                          child: Text(l10n.delete),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    if (workspace.id == activeWorkspaceId)
-                      Text(
-                        l10n.activeWorkspace,
-                        style: Theme.of(context).textTheme.labelMedium
-                            ?.copyWith(color: colors.primary),
-                      )
-                    else
-                      OutlinedButton(
-                        onPressed: () => onSelectWorkspace(workspace),
-                        child: Text(l10n.openWorkspace),
-                      ),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () => _showWorkspaceDeleteDialog(
-                        context,
-                        workspace,
-                        onDeleteWorkspace,
-                      ),
-                      child: Text(l10n.delete),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
           if (workspace != workspaces.profiles.last) const SizedBox(height: 8),
         ],

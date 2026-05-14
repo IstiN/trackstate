@@ -1204,6 +1204,18 @@ abstract class AppLocalizations {
   /// **'Saved workspaces'**
   String get savedWorkspaces;
 
+  /// No description provided for @workspaceTargetTypeHosted.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted'**
+  String get workspaceTargetTypeHosted;
+
+  /// No description provided for @workspaceTargetTypeLocal.
+  ///
+  /// In en, this message translates to:
+  /// **'Local'**
+  String get workspaceTargetTypeLocal;
+
   /// No description provided for @activeWorkspace.
   ///
   /// In en, this message translates to:
