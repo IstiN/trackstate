@@ -444,6 +444,10 @@ class TrackerViewModel extends ChangeNotifier {
   bool get isGitHubAppAuthAvailable =>
       supportsGitHubAuth &&
       (_githubAppClientId.isNotEmpty || _githubAuthProxyUrl.isNotEmpty);
+  bool get canBrowseHostedRepositories =>
+      supportsGitHubAuth &&
+      isConnected &&
+      _repository is HostedWorkspaceCatalogRepository;
 
   List<TrackStateIssue> get issues => _snapshot?.issues ?? const [];
   List<TrackStateIssue> get epics => _snapshot?.epics ?? const [];
@@ -721,6 +725,19 @@ class TrackerViewModel extends ChangeNotifier {
       _isSaving = false;
       notifyListeners();
     }
+  }
+
+  Future<List<HostedRepositoryReference>>
+  loadAccessibleHostedRepositories() async {
+    final repository = _repository;
+    if (!canBrowseHostedRepositories) {
+      return const <HostedRepositoryReference>[];
+    }
+    return switch (repository) {
+      HostedWorkspaceCatalogRepository catalog =>
+        catalog.listAccessibleHostedRepositories(),
+      _ => const <HostedRepositoryReference>[],
+    };
   }
 
   Future<void> moveIssue(TrackStateIssue issue, IssueStatus status) async {
