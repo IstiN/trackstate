@@ -167,20 +167,20 @@ class WorkspaceSyncService {
     required RepositorySyncCheck syncCheck,
   }) async {
     final baselineSnapshot = _baselineSnapshot;
-    final snapshotNeeded =
-        syncCheck.signals.contains(WorkspaceSyncSignal.localHead) ||
-        syncCheck.signals.contains(WorkspaceSyncSignal.localWorktree) ||
-        syncCheck.signals.contains(WorkspaceSyncSignal.hostedRepository);
+    final pathChanges = _domainsFromChangedPaths(
+      syncCheck.changedPaths,
+    ).toList(growable: false);
+    final snapshotNeeded = _requiresSnapshotReload(
+      syncCheck: syncCheck,
+      pathChanges: pathChanges,
+    );
     TrackerSnapshot? nextSnapshot;
     if (snapshotNeeded) {
       nextSnapshot = await _loadSnapshot();
       _baselineSnapshot = nextSnapshot;
     }
     final domains = <WorkspaceSyncDomain, WorkspaceSyncDomainChange>{};
-    _mergeDomainChanges(
-      domains,
-      _domainsFromChangedPaths(syncCheck.changedPaths),
-    );
+    _mergeDomainChanges(domains, pathChanges);
     if (baselineSnapshot != null && nextSnapshot != null) {
       _mergeDomainChanges(
         domains,
@@ -207,10 +207,42 @@ class WorkspaceSyncService {
     if (result.hasChanges) {
       await _onRefresh(WorkspaceSyncRefresh(result: result, snapshot: nextSnapshot));
     }
-    return result;
-  }
+  return result;
+}
 
-  DateTime _computeNextRetryAt() {
+bool _requiresSnapshotReload({
+  required RepositorySyncCheck syncCheck,
+  required List<WorkspaceSyncDomainChange> pathChanges,
+}) {
+  if (syncCheck.signals.contains(WorkspaceSyncSignal.localHead) ||
+      syncCheck.signals.contains(WorkspaceSyncSignal.localWorktree)) {
+    return true;
+  }
+  if (!syncCheck.signals.contains(WorkspaceSyncSignal.hostedRepository)) {
+    return false;
+  }
+  if (syncCheck.changedPaths.isEmpty || pathChanges.isEmpty) {
+    return true;
+  }
+  for (final change in pathChanges) {
+    if (change.isGlobal) {
+      return true;
+    }
+    switch (change.domain) {
+      case WorkspaceSyncDomain.projectMeta:
+      case WorkspaceSyncDomain.issueSummaries:
+      case WorkspaceSyncDomain.issueDetails:
+      case WorkspaceSyncDomain.repositoryIndex:
+        return true;
+      case WorkspaceSyncDomain.comments:
+      case WorkspaceSyncDomain.attachments:
+        break;
+    }
+  }
+  return false;
+}
+
+DateTime _computeNextRetryAt() {
     final now = _now();
     if (_repository.usesLocalPersistence || _hostedBackoffSteps.isEmpty) {
       return now.add(_cadence);
@@ -574,7 +606,7 @@ bool _isRepositoryIndexPath(String path) {
 }
 
 Set<String> _issueKeysFromPath(String path) {
-  return RegExp(r'([A-Z][A-Z0-9]+-\d+)')
+  return RegExp(r'([A-Z][A-Z0-9]+-\d+[A-Z0-9]*)')
       .allMatches(path)
       .map((match) => match.group(1)!)
       .toSet();

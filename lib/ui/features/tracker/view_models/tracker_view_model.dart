@@ -2127,6 +2127,8 @@ class TrackerViewModel extends ChangeNotifier {
           changedDomains.contains(WorkspaceSyncDomain.repositoryIndex)) {
         await _refreshSearchResultsAfterMutation(preferLoadedSnapshot: true);
       }
+    } else {
+      await _hydrateSelectedIssueForWorkspaceSync(refresh.result);
     }
     final refreshedIssueKeys = <String>{
       for (final domain in refresh.result.domains.values) ...domain.issueKeys,
@@ -2141,6 +2143,69 @@ class TrackerViewModel extends ChangeNotifier {
       health: WorkspaceSyncHealth.synced,
     );
     notifyListeners();
+  }
+
+  Future<void> _hydrateSelectedIssueForWorkspaceSync(
+    WorkspaceSyncResult result,
+  ) async {
+    final currentIssue = _selectedIssue;
+    final repository = _repository;
+    if (currentIssue == null || repository is! ProviderBackedTrackStateRepository) {
+      return;
+    }
+    final scopes = <IssueHydrationScope>{};
+    if (_syncChangeAppliesToIssue(
+          result.domains[WorkspaceSyncDomain.comments],
+          currentIssue.key,
+        )) {
+      scopes.add(IssueHydrationScope.comments);
+    }
+    if (_syncChangeAppliesToIssue(
+          result.domains[WorkspaceSyncDomain.attachments],
+          currentIssue.key,
+        )) {
+      scopes.add(IssueHydrationScope.attachments);
+    }
+    if (scopes.isEmpty) {
+      return;
+    }
+    final hydrationContextToken = _captureIssueHydrationContext();
+    for (final scope in scopes) {
+      _clearIssueDeferredError(currentIssue.key, _deferredSectionForScope(scope));
+    }
+    try {
+      final hydrated = await repository.hydrateIssue(
+        currentIssue,
+        scopes: scopes,
+        force: true,
+      );
+      if (!_shouldApplyHydratedIssueRefresh(
+        hydrationContextToken: hydrationContextToken,
+        issueKey: currentIssue.key,
+      )) {
+        return;
+      }
+      _applyTargetedIssueRefresh(hydrated);
+      _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+    } on Object catch (error) {
+      for (final scope in scopes) {
+        _setIssueDeferredError(
+          currentIssue.key,
+          _deferredSectionForScope(scope),
+          '$error',
+        );
+      }
+    }
+  }
+
+  bool _syncChangeAppliesToIssue(
+    WorkspaceSyncDomainChange? change,
+    String issueKey,
+  ) {
+    if (change == null) {
+      return false;
+    }
+    return change.isGlobal || change.issueKeys.contains(issueKey);
   }
 
   void _updateWorkspaceSyncBaseline() {
