@@ -138,15 +138,15 @@ def main() -> None:
                 result["normalized_workspace_state"] = _decode_workspace_state(
                     storage_snapshot,
                 )
-                result["request_observation"] = {
-                    "requested_urls": list(request_observation.requested_urls),
-                }
+                result["request_observation"] = _request_observation_payload(
+                    request_observation,
+                )
 
-                if not invalid_branch_observed and not invalid_branch_urls and not request_observation.requested_urls:
+                if not invalid_branch_observed and not invalid_branch_urls:
                     raise AssertionError(
-                        "Precondition failed: startup did not issue any observable GitHub "
-                        "requests after the invalid saved-workspace state was preloaded, so "
-                        "the restore flow could not be verified.\n"
+                        "Precondition failed: startup never requested the configured invalid "
+                        f"hosted branch `{INVALID_HOSTED_BRANCH}`, so the saved hosted "
+                        "workspace validation path was not proven.\n"
                         f"Observed GitHub requests: {request_observation.requested_urls}\n"
                         f"Observed storage snapshot: {json.dumps(storage_snapshot, indent=2)}\n"
                         f"Observed body text:\n{tracker_page.body_text()}",
@@ -181,6 +181,9 @@ def main() -> None:
                     )
                     result["shell_observation"] = _shell_payload(shell_observation)
                     _assert_settings_recovery_shell(shell_observation)
+                    result["request_observation"] = _request_observation_payload(
+                        request_observation,
+                    )
                     _record_step(
                         result,
                         step=2,
@@ -216,6 +219,9 @@ def main() -> None:
                     current_body = page.current_body_text()
                     result["shell_observation"] = _shell_payload(shell_observation)
                     result["final_body_text"] = current_body
+                    result["request_observation"] = _request_observation_payload(
+                        request_observation,
+                    )
                     result["visible_recovery_text"] = [
                         text for text in RECOVERY_TEXT if text in current_body
                     ]
@@ -271,9 +277,8 @@ def main() -> None:
     except Exception as error:
         result.setdefault("error", _format_error(error))
         result.setdefault("traceback", traceback.format_exc())
-        result.setdefault(
-            "request_observation",
-            {"requested_urls": list(request_observation.requested_urls)},
+        result["request_observation"] = _request_observation_payload(
+            request_observation,
         )
         _write_failure_outputs(result)
         raise
@@ -406,6 +411,12 @@ def _shell_payload(
     observation: StartupRecoveryShellObservation,
 ) -> dict[str, object]:
     return asdict(observation)
+
+
+def _request_observation_payload(
+    observation: Ts727RestoreRequestObservation,
+) -> dict[str, object]:
+    return {"requested_urls": list(observation.requested_urls)}
 
 
 def _record_step(
