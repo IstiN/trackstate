@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -14,6 +15,8 @@ const String _ticketSummary =
 const String _testFilePath = 'testing/tests/TS-736/test_ts_736.dart';
 const String _runCommand =
     'flutter test testing/tests/TS-736/test_ts_736.dart --reporter expanded';
+const int _reviewCommentId = 3243626085;
+const String _reviewThreadId = 'PRRT_kwDOSU6Gf86CKUE6';
 
 const List<String> _requestSteps = <String>[
   "Simulate a background sync where the 'urgent' label is removed from the issue, causing the query to return no results.",
@@ -47,6 +50,14 @@ void main() {
 
       try {
         await screen.pump(repository);
+        await _pumpUntil(
+          tester,
+          condition: () async => await _isSteadyHostedSyncVisible(screen),
+          timeout: const Duration(seconds: 8),
+        );
+        result['repository_revision_before_refresh'] =
+            repository.currentRevision;
+        result['sync_check_count_before_refresh'] = repository.syncCheckCount;
         await screen.openSection('JQL Search');
         await screen.searchIssues(Ts736SearchQueryFallbackRepository.query);
         await screen.expectIssueSearchResultVisible(
@@ -71,6 +82,7 @@ void main() {
         }
 
         await repository.emitUrgentLabelRemovalSync();
+        await _resumeApp(tester);
         await _pumpUntil(
           tester,
           condition: () async =>
@@ -89,6 +101,9 @@ void main() {
         final rowsAfterRefresh = screen
             .visibleIssueSearchResultLabelsSnapshot();
         final textsAfterRefresh = screen.visibleTextsSnapshot();
+        result['repository_revision_after_refresh'] =
+            repository.currentRevision;
+        result['sync_check_count_after_refresh'] = repository.syncCheckCount;
         result['query_after_refresh'] = queryAfterRefresh;
         result['no_results_visible'] = noResultsVisible;
         result['urgent_row_visible_after_refresh'] = urgentRowVisible;
@@ -235,7 +250,15 @@ File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
+File get _reviewRepliesFile => File('${_outputsDir.path}/review_replies.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
+
+Future<void> _resumeApp(WidgetTester tester) async {
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 250));
+  await tester.pumpAndSettle();
+}
 
 void _recordStep(
   Map<String, Object?> result, {
@@ -279,6 +302,7 @@ void _writePassOutputs(Map<String, Object?> result) {
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: true));
 }
 
 void _writeFailureOutputs(Map<String, Object?> result) {
@@ -290,6 +314,7 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
 }
 
@@ -303,12 +328,13 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '',
     'h4. What was tested',
     '* Opened the production {noformat}JQL Search{noformat} surface and ran the active urgent-label query {noformat}${result['query']}{noformat}.',
-    '* Triggered a real hosted workspace sync refresh that removed the urgent label from the only matching issue.',
+    '* Waited for the hosted workspace to finish its initial sync and reach the steady {noformat}Synced with Git{noformat} / {noformat}Hosted · Connected{noformat} state with the urgent issue still visible.',
+    '* Triggered a later hosted workspace sync refresh that removed the urgent label from the only matching issue through the production app-resume refresh path.',
     '* Checked that the query text stayed visible and the search list switched to the existing empty-state behavior.',
     '',
     'h4. Result',
     passed
-        ? '* Matched the expected result: the active query stayed visible after the sync refresh, the previous issue row disappeared, and the search list showed the standard empty-state copy.'
+        ? '* Matched the expected result: after the initial hosted sync had already settled, the later refresh still preserved the active query, removed the previous issue row, and showed the standard empty-state copy.'
         : '* Did not match the expected result. See the failed step details and exact error below.',
     '* Environment: {noformat}flutter widget test / ${Platform.operatingSystem}{noformat}',
     '* Run command: {noformat}$_runCommand{noformat}',
@@ -345,12 +371,13 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '',
     '### What was tested',
     '- Opened the production `JQL Search` surface and ran the active urgent-label query `${result['query']}`.',
-    '- Triggered a real hosted workspace sync refresh that removed the urgent label from the only matching issue.',
+    '- Waited for the hosted workspace to finish its initial sync and reach the steady `Synced with Git` / `Hosted · Connected` state with the urgent issue still visible.',
+    '- Triggered a later hosted workspace sync refresh that removed the urgent label from the only matching issue through the production app-resume refresh path.',
     '- Checked that the query text stayed visible and the search list switched to the existing empty-state behavior.',
     '',
     '### Result',
     passed
-        ? '- Matched the expected result: the active query stayed visible after the sync refresh, the previous issue row disappeared, and the search list showed the standard empty-state copy.'
+        ? '- Matched the expected result: after the initial hosted sync had already settled, the later refresh still preserved the active query, removed the previous issue row, and showed the standard empty-state copy.'
         : '- Did not match the expected result. See the failed step details and exact error below.',
     '- Environment: `flutter widget test` / `${Platform.operatingSystem}`',
     '- Run command: `$_runCommand`',
@@ -382,11 +409,16 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
   final lines = <String>[
     '# $_ticketKey',
     '',
+    passed
+        ? 'Fixed the review findings by letting the initial hosted sync settle before mutating the repository, then driving the follow-up refresh through the production app-resume sync path. Added the required `testing/tests/TS-736/README.md`.'
+        : 'Reworked the fixture so the initial hosted sync settles before mutating the repository, then drove the follow-up refresh through the production app-resume sync path. Added the required `testing/tests/TS-736/README.md`, but the test still fails against the product behavior.',
+    '',
     '- Status: $statusLabel',
-    '- Test case: $_ticketSummary',
-    '- Run command: `$_runCommand`',
-    '- Environment: `flutter widget test` on `${Platform.operatingSystem}`',
     '- Query: `${result['query']}`',
+    '- Repository revision before refresh: `${result['repository_revision_before_refresh'] ?? '<missing>'}`',
+    '- Repository revision after refresh: `${result['repository_revision_after_refresh'] ?? '<missing>'}`',
+    '- Sync checks before refresh: `${result['sync_check_count_before_refresh'] ?? '<missing>'}`',
+    '- Sync checks after refresh: `${result['sync_check_count_after_refresh'] ?? '<missing>'}`',
     '- Final query value: `${result['query_after_refresh'] ?? result['query_at_failure'] ?? '<missing>'}`',
     '- Final visible rows: `${_formatSnapshot(_stringList(result['final_visible_rows'] ?? result['visible_rows_at_failure']))}`',
     '',
@@ -443,7 +475,7 @@ String _bugDescription(Map<String, Object?> result) {
     'After the background sync removes the urgent label and the query returns no matches, the active JQL query should remain visible in the input field and the search results area should show the standard empty-state behavior.',
     '',
     '## Actual result',
-    'After the background sync refresh, the query field showed `$observedQuery` and the search surface exposed rows `$observedRows` with visible texts `$observedTexts`.',
+    'After the background sync refresh, the query field showed `$observedQuery`, the search surface exposed rows `$observedRows` with visible texts `$observedTexts`, and the repository revision moved from `${result['repository_revision_before_refresh'] ?? '<missing>'}` to `${result['repository_revision_after_refresh'] ?? '<missing>'}`.',
     '',
     '## Exact error message / stack trace',
     '```',
@@ -461,6 +493,8 @@ String _bugDescription(Map<String, Object?> result) {
     '- OS: `${Platform.operatingSystem}`',
     '- Runtime: `flutter widget test`',
     '- Repository path: `${Directory.current.path}`',
+    '- Repository revision before refresh: `${result['repository_revision_before_refresh'] ?? '<missing>'}`',
+    '- Repository revision after refresh: `${result['repository_revision_after_refresh'] ?? '<missing>'}`',
     '- Test file: `$_testFilePath`',
     '',
     '## Relevant logs',
@@ -468,6 +502,8 @@ String _bugDescription(Map<String, Object?> result) {
     'Initial query: ${result['initial_query'] ?? '<missing>'}',
     'Initial visible rows: ${_formatSnapshot(_stringList(result['initial_visible_rows']))}',
     'Initial visible texts: ${_formatSnapshot(_stringList(result['initial_visible_texts']))}',
+    'Sync checks before refresh: ${result['sync_check_count_before_refresh'] ?? '<missing>'}',
+    'Sync checks after refresh: ${result['sync_check_count_after_refresh'] ?? '<missing>'}',
     'Observed query after refresh/failure: $observedQuery',
     'Observed no-results visible: ${result['no_results_visible'] ?? '<missing>'}',
     'Observed urgent row visible after refresh: ${result['urgent_row_visible_after_refresh'] ?? '<missing>'}',
@@ -528,6 +564,17 @@ String _stepOutcome(Map<String, Object?> result, int stepNumber) {
   return '❌ No observation was recorded for this step.';
 }
 
+String _reviewReplies(Map<String, Object?> result, {required bool passed}) {
+  final reply = passed
+      ? 'Fixed: TS-736 now lets the initial hosted sync complete into the steady `Synced with Git` / `Hosted · Connected` state before the urgent label is removed, then triggers the follow-up refresh through the production app-resume sync path. I also added the required `testing/tests/TS-736/README.md`. The rerun passes.'
+      : 'Fixed: TS-736 now lets the initial hosted sync complete into the steady `Synced with Git` / `Hosted · Connected` state before the urgent label is removed, then triggers the follow-up refresh through the production app-resume sync path. I also added the required `testing/tests/TS-736/README.md`. The rerun still exposes a product-visible failure: ${result['error'] ?? 'see attached failure output'}.';
+  return '${jsonEncode(<String, Object>{
+    'replies': <Map<String, Object>>[
+      <String, Object>{'inReplyToId': _reviewCommentId, 'threadId': _reviewThreadId, 'reply': reply},
+    ],
+  })}\n';
+}
+
 List<String> _stringList(Object? value) {
   return (value as List? ?? const <Object?>[])
       .map((entry) => '$entry'.trim())
@@ -551,4 +598,12 @@ String _formatSnapshot(List<String> values, {int limit = 20}) {
     return '<none>';
   }
   return snapshot.join(' | ');
+}
+
+Future<bool> _isSteadyHostedSyncVisible(TrackStateAppComponent screen) async {
+  final synced = await screen.isTextVisible('Synced with Git');
+  final connected = await screen.isTextVisible('Hosted · Connected');
+  final syncing = await screen.isTextVisible('Syncing');
+  final needsSignIn = await screen.isTextVisible('Hosted · Needs sign-in');
+  return synced && connected && !syncing && !needsSignIn;
 }

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -24,6 +23,10 @@ class Ts736SearchQueryFallbackRepository
 
   Future<void> emitUrgentLabelRemovalSync() =>
       _provider.emitUrgentLabelRemovalSync();
+
+  int get syncCheckCount => _provider.syncCheckCount;
+
+  String get currentRevision => _provider.currentRevision;
 }
 
 class _Ts736MutableProvider implements TrackStateProviderAdapter {
@@ -36,7 +39,6 @@ class _Ts736MutableProvider implements TrackStateProviderAdapter {
     canCheckCollaborators: false,
   );
 
-  final Completer<void> _firstSyncGate = Completer<void>();
   final Map<String, String> _files = <String, String>{
     'project.json': '''
 {
@@ -118,9 +120,9 @@ class _Ts736MutableProvider implements TrackStateProviderAdapter {
     ),
   };
 
-  bool _awaitedFirstSync = false;
   bool _hasPendingExternalSync = false;
   int _revision = 1;
+  int _syncCheckCount = 0;
 
   Future<void> emitUrgentLabelRemovalSync() async {
     _files['.trackstate/index/issues.json'] = _issueIndexJson(
@@ -138,19 +140,13 @@ class _Ts736MutableProvider implements TrackStateProviderAdapter {
     );
     _revision += 1;
     _hasPendingExternalSync = true;
-    if (!_firstSyncGate.isCompleted) {
-      _firstSyncGate.complete();
-    }
   }
 
   @override
   Future<RepositorySyncCheck> checkSync({
     RepositorySyncState? previousState,
   }) async {
-    if (!_awaitedFirstSync) {
-      _awaitedFirstSync = true;
-      await _firstSyncGate.future;
-    }
+    _syncCheckCount += 1;
 
     final hasPendingExternalSync = _hasPendingExternalSync;
     _hasPendingExternalSync = false;
@@ -265,6 +261,10 @@ class _Ts736MutableProvider implements TrackStateProviderAdapter {
   }
 
   String get _currentRevision => 'ts736-revision-$_revision';
+
+  int get syncCheckCount => _syncCheckCount;
+
+  String get currentRevision => _currentRevision;
 }
 
 String _issueIndexJson({
