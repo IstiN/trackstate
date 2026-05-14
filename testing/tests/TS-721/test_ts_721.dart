@@ -8,8 +8,8 @@ import 'package:trackstate/data/services/local_workspace_onboarding_service.dart
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 
+import '../../components/services/local_git_repository_service.dart';
 import '../../fixtures/workspace_onboarding_screen_fixture.dart';
-import '../../frameworks/flutter/trackstate_test_runtime.dart';
 import 'support/ts721_cached_local_workspace_onboarding_service.dart';
 import 'support/ts721_local_workspace_fixture.dart';
 import 'support/ts721_recording_workspace_profile_service.dart';
@@ -65,18 +65,18 @@ void main() {
           Ts721CachedLocalWorkspaceOnboardingService(
             inspection: localWorkspaceInspection,
           );
-      final localRepository = await createLocalGitTestRepository(
-        tester: tester,
-        repositoryPath: fixture.repositoryPath,
-      );
       final workspaceProfileService = Ts721RecordingWorkspaceProfileService(
         SharedPreferencesWorkspaceProfileService(
           now: () => DateTime.utc(2026, 5, 14, 12, 0),
         ),
       );
+      final localRepositoryService = LocalGitRepositoryService(tester);
       final openedRepositories = <String>[];
 
       try {
+        final localRepository = await localRepositoryService.openRepository(
+          repositoryPath: fixture.repositoryPath,
+        );
         final screen = await launchWorkspaceOnboardingFixture(
           tester,
           repositoryFactory: () => const DemoTrackStateRepository(),

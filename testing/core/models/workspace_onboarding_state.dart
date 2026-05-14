@@ -8,8 +8,10 @@ class WorkspaceOnboardingState {
     required this.localWriteBranchValue,
     required this.localFolderPath,
     required this.primaryActionLabel,
+    required this.isPrimaryActionEnabled,
     required this.repositoryAccessTopBarLabel,
     required this.visibleTexts,
+    required this.interactiveSemanticsLabels,
   });
 
   final bool isOnboardingVisible;
@@ -20,6 +22,8 @@ class WorkspaceOnboardingState {
   final String? localWriteBranchValue;
   final String? localFolderPath;
   final String? primaryActionLabel;
+  final bool isPrimaryActionEnabled;
   final String? repositoryAccessTopBarLabel;
   final List<String> visibleTexts;
+  final List<String> interactiveSemanticsLabels;
 }
