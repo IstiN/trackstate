@@ -124,17 +124,33 @@ void main() {
         }
 
         final baselineHydrationCount = repository.hydrateCalls.length;
+        final baselineLoadSnapshotCount = repository.loadSnapshotCalls;
         await repository.emitCommentsOnlyRefresh();
         await _resumeApp(tester);
 
         final commentRefreshHydrations = repository.hydrateCalls
             .skip(baselineHydrationCount)
             .toList(growable: false);
-        final commentOnlyScopes = commentRefreshHydrations
+        final commentRefreshLoadSnapshotDelta =
+            repository.loadSnapshotCalls - baselineLoadSnapshotCount;
+        final issueCHydrations = commentRefreshHydrations
             .where(
               (call) => call.issueKey == Ts734RefreshMatrixRepository.issueCKey,
             )
-            .map((call) => _scopeNames(call.scopes).join(','))
+            .toList(growable: false);
+        final issueCExactCommentsHydrations = issueCHydrations
+            .where(
+              (call) =>
+                  call.scopes.length == 1 &&
+                  call.scopes.contains(IssueHydrationScope.comments),
+            )
+            .toList(growable: false);
+        final issueCUnexpectedScopeHydrations = issueCHydrations
+            .where(
+              (call) =>
+                  call.scopes.length != 1 ||
+                  !call.scopes.contains(IssueHydrationScope.comments),
+            )
             .toList(growable: false);
         final updatedCommentVisible = await screen.isTextVisible(
           Ts734RefreshMatrixRepository.updatedComment,
@@ -147,16 +163,26 @@ void main() {
               (call) => call.issueKey != Ts734RefreshMatrixRepository.issueCKey,
             )
             .toList(growable: false);
-        final commentsScopeTriggered = commentRefreshHydrations.any(
-          (call) =>
-              call.issueKey == Ts734RefreshMatrixRepository.issueCKey &&
-              call.scopes.contains(IssueHydrationScope.comments),
-        );
+        final commentsScopeTriggered = issueCExactCommentsHydrations.isNotEmpty;
+        final scopedCommentsRefreshOnly =
+            commentRefreshHydrations.isNotEmpty &&
+            issueCExactCommentsHydrations.length ==
+                commentRefreshHydrations.length &&
+            issueCUnexpectedScopeHydrations.isEmpty &&
+            unexpectedIssueHydrations.isEmpty;
+        final issueCHydrationScopes = issueCHydrations
+            .map((call) => _scopeNames(call.scopes).join(','))
+            .toList(growable: false);
+        final commentsDidNotReloadSnapshot =
+            commentRefreshLoadSnapshotDelta == 0;
         final commentsObserved =
             'updated_comment_visible=$updatedCommentVisible; '
             'stale_comment_visible=$staleCommentVisible; '
             'comments_scope_triggered=$commentsScopeTriggered; '
-            'issue_c_hydrations=${commentOnlyScopes.join(' | ')}; '
+            'comments_only_exact_for_issue_c=$scopedCommentsRefreshOnly; '
+            'load_snapshot_delta=$commentRefreshLoadSnapshotDelta; '
+            'issue_c_hydrations=${issueCHydrationScopes.join(' | ')}; '
+            'unexpected_issue_c_hydrations=${_formatHydrationCalls(issueCUnexpectedScopeHydrations)}; '
             'all_hydrations=${_formatHydrationCalls(commentRefreshHydrations)}';
         final commentsHumanObserved =
             'visible_comment=${repository.currentIssueCComment}; '
@@ -164,9 +190,9 @@ void main() {
             'visible_semantics=${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}';
         if (!updatedCommentVisible ||
             staleCommentVisible ||
-            commentRefreshHydrations.isEmpty ||
             !commentsScopeTriggered ||
-            unexpectedIssueHydrations.isNotEmpty) {
+            !scopedCommentsRefreshOnly ||
+            !commentsDidNotReloadSnapshot) {
           _recordStep(
             result,
             step: 2,
@@ -176,7 +202,7 @@ void main() {
             observed: commentsObserved,
           );
           failures.add(
-            'Step 2 failed: the comments-only sync did not stay scoped to the Issue-C comments surface.\n'
+            'Step 2 failed: the comments-only sync did not stay scoped to the Issue-C comments surface without a hosted snapshot reload.\n'
             'Observed: $commentsObserved\n'
             'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}\n'
             'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}',
@@ -473,7 +499,7 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '',
     'h4. Result',
     passed
-        ? '* Matched the expected result: comment-only invalidation refreshed only the Issue-C comments surface, while the project metadata refresh updated the Dashboard counters and Settings display.'
+        ? '* Matched the expected result: comment-only invalidation refreshed only the Issue-C comments surface without a hosted snapshot reload, while the project metadata refresh updated the Dashboard counters and Settings display.'
         : '* Did not match the expected result. See the failed step details and exact error below.',
     '* Environment: {noformat}flutter test / ${Platform.operatingSystem}{noformat}',
     '* Repository: {noformat}${result['repository'] ?? '<missing>'}{noformat}',
@@ -526,7 +552,7 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '',
     '## Result',
     passed
-        ? '- Matched the expected result: the comments-only invalidation stayed scoped to Issue-C comments, and the project metadata refresh updated the Dashboard and Settings surfaces.'
+        ? '- Matched the expected result: the comments-only invalidation stayed scoped to Issue-C comments without a hosted snapshot reload, and the project metadata refresh updated the Dashboard and Settings surfaces.'
         : '- Did not match the expected result. See the failed step details and exact error below.',
     '',
     '## Step results',
@@ -567,7 +593,7 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
     ..writeln()
     ..writeln(
       passed
-          ? 'Passed: comments-only sync stayed scoped to Issue-C comments, and the project metadata refresh updated Dashboard counters plus the Settings release tag prefix.'
+          ? 'Passed: comments-only sync stayed scoped to Issue-C comments without a hosted snapshot reload, and the project metadata refresh updated Dashboard counters plus the Settings release tag prefix.'
           : 'Failed: the refresh matrix behavior did not stay scoped to the expected surfaces.',
     )
     ..writeln()
@@ -596,7 +622,7 @@ String _bugDescription(Map<String, Object?> result) {
     '# Bug Report - $_ticketKey',
     '',
     '## Summary',
-    'The workspace sync refresh matrix does not keep comment-only updates scoped to Issue-C comments and/or does not refresh Dashboard and Settings correctly after the project metadata sync.',
+    _bugSummary(result),
     '',
     '## Steps to Reproduce',
     ..._bugStepLines(result),
@@ -604,6 +630,9 @@ String _bugDescription(Map<String, Object?> result) {
     '## Actual vs Expected',
     '- **Expected:** a comments-only sync refresh updates only the Issue-C comments surface while Board and Hierarchy stay stable; a subsequent project metadata refresh updates the Dashboard counters and the Settings Attachments release tag prefix.',
     '- **Actual:** ${_actualResultLine(result)}',
+    '',
+    '## Missing/Broken Production Capability',
+    _missingCapabilityLine(result),
     '',
     '## Exact Error Message or Assertion Failure',
     '```text',
@@ -695,17 +724,43 @@ List<String> _bugLogLines(Map<String, Object?> result) {
 }
 
 String _actualResultLine(Map<String, Object?> result) {
-  final failedStep =
-      ((result['steps'] as List<Map<String, Object?>>?) ?? const [])
-          .cast<Map<String, Object?>>()
-          .firstWhere(
-            (step) => step['status'] != 'passed',
-            orElse: () => <String, Object?>{},
-          );
+  final failedStep = _firstFailedStep(result) ?? <String, Object?>{};
   if (failedStep.isEmpty) {
     return 'The test failed before recording a detailed step observation.';
   }
   return 'Step ${failedStep['step']} failed with the observation `${failedStep['observed']}`.';
+}
+
+String _bugSummary(Map<String, Object?> result) {
+  final failedStep = _firstFailedStep(result);
+  if (failedStep?['step'] == 2) {
+    return 'A comments-only hosted workspace sync still reloads the snapshot and/or restores non-comments scopes for the selected issue instead of staying limited to Issue-C comments.';
+  }
+  if (failedStep?['step'] == 4 || failedStep?['step'] == 5) {
+    return 'A project metadata workspace sync does not refresh the Dashboard counters and Settings attachments display consistently.';
+  }
+  return 'The workspace sync refresh matrix does not keep updates scoped to the expected surfaces.';
+}
+
+String _missingCapabilityLine(Map<String, Object?> result) {
+  final failedStep = _firstFailedStep(result);
+  if (failedStep?['step'] == 2) {
+    return '- The production-visible workspace sync path for comment-only hosted changes does not preserve the current snapshot and selected-issue hydration state narrowly enough; it still allows a snapshot reload and/or non-comments issue rehydration during a comments-only refresh.';
+  }
+  if (failedStep?['step'] == 4 || failedStep?['step'] == 5) {
+    return '- The production-visible workspace sync path for `projectMeta` changes does not propagate the refreshed project metadata through the Dashboard and Settings surfaces reliably.';
+  }
+  return '- The production-visible workspace sync refresh path does not maintain the surface-level invalidation boundaries required by the ticket.';
+}
+
+Map<String, Object?>? _firstFailedStep(Map<String, Object?> result) {
+  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
+  for (final step in steps) {
+    if (step['status'] != 'passed') {
+      return step;
+    }
+  }
+  return null;
 }
 
 String _formatSnapshot(List<String> values, {int limit = 24}) {
