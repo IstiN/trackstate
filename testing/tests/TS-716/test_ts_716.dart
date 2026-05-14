@@ -69,13 +69,10 @@ void main() {
           final semanticsLabel = tester
               .getSemantics(_workspaceSyncPill.first)
               .label;
-          final normalizedSemantics = semanticsLabel.toLowerCase();
-          if (semanticsLabel.trim() ==
-                  Ts716WorkspaceSyncAccessibilityRepository.topBarStatusLabel ||
-              !normalizedSemantics.contains('sync')) {
+          if (!_hasDescriptiveSyncErrorSemantics(semanticsLabel)) {
             failures.add(
               'Step 2 failed: the top-bar sync pill semantics label was "$semanticsLabel", '
-              'which only repeats the visible state instead of describing the sync error context '
+              'which did not include both sync context and descriptive error-state wording '
               '(for example "Sync error, attention needed").',
             );
           }
@@ -301,6 +298,31 @@ int _compareVisualOrder(Rect left, Rect right) {
     return vertical;
   }
   return left.left.compareTo(right.left);
+}
+
+bool _hasDescriptiveSyncErrorSemantics(String label) {
+  final normalizedLabel = label
+      .toLowerCase()
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (normalizedLabel.isEmpty) {
+    return false;
+  }
+
+  const syncTerms = <String>['sync', 'workspace sync', 'repository sync'];
+  const errorTerms = <String>[
+    'error',
+    'failed',
+    'failure',
+    'attention needed',
+    'attention',
+    'warning',
+    'problem',
+  ];
+
+  final hasSyncContext = syncTerms.any(normalizedLabel.contains);
+  final hasErrorContext = errorTerms.any(normalizedLabel.contains);
+  return hasSyncContext && hasErrorContext;
 }
 
 Future<void> _pumpUntil(
