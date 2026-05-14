@@ -162,6 +162,48 @@ void main() {
       expect(viewModel.selectedIssue?.description, 'Refresh survives stale query');
     },
   );
+
+  test(
+    'view model scopes comment-only hosted refreshes to the selected issue comments',
+    () async {
+      final baseline = await const DemoTrackStateRepository().loadSnapshot();
+      final repository = _ScopedCommentsRefreshRepository(snapshot: baseline);
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      final issue = viewModel.issues.firstWhere((candidate) => candidate.key == 'TRACK-12');
+      viewModel.selectIssue(issue);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      repository.resetTracking();
+
+      repository.queueCommentsRefresh(
+        issueKey: issue.key,
+        updatedCommentBody: 'Scoped sync comment update',
+      );
+
+      await viewModel.handleAppResumed();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(repository.loadSnapshotCalls, 0);
+      expect(
+        repository.hydrateRequests,
+        equals(<Set<IssueHydrationScope>>[
+          {IssueHydrationScope.comments},
+        ]),
+      );
+      expect(
+        viewModel.selectedIssue?.comments.last.body,
+        'Scoped sync comment update',
+      );
+
+      viewModel.dispose();
+    },
+  );
 }
 
 class _SyncAwareRepository
@@ -308,6 +350,228 @@ class _SyncAwareRepository
   Future<List<IssueHistoryEntry>> loadIssueHistory(
     TrackStateIssue issue,
   ) async => const <IssueHistoryEntry>[];
+}
+
+class _ScopedCommentsRefreshRepository extends ProviderBackedTrackStateRepository {
+  _ScopedCommentsRefreshRepository({required TrackerSnapshot snapshot})
+    : _snapshot = snapshot,
+      super(provider: _SyncTestProvider(), supportsGitHubAuth: false);
+
+  TrackerSnapshot _snapshot;
+  final JqlSearchService _searchService = const JqlSearchService();
+  RepositorySyncState _state = const RepositorySyncState(
+    providerType: ProviderType.github,
+    repositoryRevision: 'rev-1',
+    sessionRevision: 'connected:true:true',
+    connectionState: ProviderConnectionState.connected,
+  );
+  RepositorySyncCheck? _queuedCheck;
+  final Map<String, String> _pendingCommentBodies = <String, String>{};
+  int loadSnapshotCalls = 0;
+  final List<Set<IssueHydrationScope>> hydrateRequests =
+      <Set<IssueHydrationScope>>[];
+
+  void resetTracking() {
+    loadSnapshotCalls = 0;
+    hydrateRequests.clear();
+  }
+
+  void queueCommentsRefresh({
+    required String issueKey,
+    required String updatedCommentBody,
+  }) {
+    final issue = _snapshot.issues.firstWhere((candidate) => candidate.key == issueKey);
+    _pendingCommentBodies[issueKey] = updatedCommentBody;
+    _state = const RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: 'rev-2',
+      sessionRevision: 'connected:true:true',
+      connectionState: ProviderConnectionState.connected,
+    );
+    _queuedCheck = RepositorySyncCheck(
+      state: _state,
+      signals: const {WorkspaceSyncSignal.hostedRepository},
+      changedPaths: {'${_issueRoot(issue.storagePath)}/comments/0002.md'},
+    );
+  }
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async {
+    if (previousState == null) {
+      return RepositorySyncCheck(state: _state);
+    }
+    final queuedCheck = _queuedCheck;
+    _queuedCheck = null;
+    return queuedCheck ?? RepositorySyncCheck(state: _state);
+  }
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    loadSnapshotCalls += 1;
+    return _snapshot;
+  }
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    return _searchService.search(
+      issues: _snapshot.issues,
+      project: _snapshot.project,
+      jql: jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+  }
+
+  @override
+  Future<TrackStateIssue> hydrateIssue(
+    TrackStateIssue issue, {
+    Set<IssueHydrationScope> scopes = const {IssueHydrationScope.detail},
+    bool force = false,
+  }) async {
+    hydrateRequests.add(Set<IssueHydrationScope>.from(scopes));
+    final currentIssue = _snapshot.issues.firstWhere(
+      (candidate) => candidate.key == issue.key,
+      orElse: () => issue,
+    );
+    final pendingCommentBody = _pendingCommentBodies.remove(issue.key);
+    final hydratedComments = pendingCommentBody == null
+        ? currentIssue.comments
+        : <IssueComment>[
+            ...currentIssue.comments,
+            IssueComment(
+              id: '0002',
+              author: 'sync-user',
+              body: pendingCommentBody,
+              updatedLabel: 'now',
+              createdAt: '2026-05-14T10:00:00Z',
+              updatedAt: '2026-05-14T10:00:00Z',
+              storagePath: '${_issueRoot(currentIssue.storagePath)}/comments/0002.md',
+            ),
+          ];
+    final hydrated = currentIssue.copyWith(
+      comments: hydratedComments,
+      hasDetailLoaded:
+          currentIssue.hasDetailLoaded || scopes.contains(IssueHydrationScope.detail),
+      hasCommentsLoaded:
+          currentIssue.hasCommentsLoaded ||
+          scopes.contains(IssueHydrationScope.comments),
+      hasAttachmentsLoaded:
+          currentIssue.hasAttachmentsLoaded ||
+          scopes.contains(IssueHydrationScope.attachments),
+    );
+    _snapshot = TrackerSnapshot(
+      project: _snapshot.project,
+      issues: [
+        for (final candidate in _snapshot.issues)
+          if (candidate.key == hydrated.key) hydrated else candidate,
+      ],
+      repositoryIndex: _snapshot.repositoryIndex,
+      loadWarnings: _snapshot.loadWarnings,
+      readiness: _snapshot.readiness,
+      startupRecovery: _snapshot.startupRecovery,
+    );
+    replaceCachedState(snapshot: _snapshot);
+    return hydrated;
+  }
+}
+
+class _SyncTestProvider implements TrackStateProviderAdapter {
+  static const RepositoryPermission _permission = RepositoryPermission(
+    canRead: true,
+    canWrite: true,
+    isAdmin: false,
+    canCreateBranch: true,
+    canManageAttachments: true,
+    attachmentUploadMode: AttachmentUploadMode.full,
+    supportsReleaseAttachmentWrites: true,
+    canCheckCollaborators: false,
+  );
+
+  @override
+  String get dataRef => 'main';
+
+  @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
+  String get repositoryLabel => 'trackstate/trackstate';
+
+  @override
+  Future<RepositoryCommitResult> createCommit(
+    RepositoryCommitRequest request,
+  ) async => RepositoryCommitResult(
+    branch: request.branch,
+    message: request.message,
+    revision: 'sync-test',
+  );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async =>
+      const RepositoryUser(login: 'sync-user', displayName: 'Sync User');
+
+  @override
+  Future<RepositoryBranch> getBranch(String name) async =>
+      RepositoryBranch(name: name, exists: true, isCurrent: true);
+
+  @override
+  Future<RepositoryPermission> getPermission() async => _permission;
+
+  @override
+  Future<bool> isLfsTracked(String path) async => false;
+
+  @override
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async =>
+      const <RepositoryTreeEntry>[];
+
+  @override
+  Future<RepositoryAttachment> readAttachment(
+    String path, {
+    required String ref,
+  }) async => throw const TrackStateProviderException('Not used in sync test.');
+
+  @override
+  Future<RepositoryTextFile> readTextFile(String path, {required String ref}) async =>
+      throw const TrackStateProviderException('Not used in sync test.');
+
+  @override
+  Future<String> resolveWriteBranch() async => dataRef;
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: const RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: 'sync-test',
+      sessionRevision: 'connected:true:true',
+      connectionState: ProviderConnectionState.connected,
+      permission: _permission,
+    ),
+  );
+
+  @override
+  Future<RepositoryWriteResult> writeTextFile(RepositoryWriteRequest request) async =>
+      RepositoryWriteResult(
+        path: request.path,
+        branch: request.branch,
+        revision: 'sync-test',
+      );
+
+  @override
+  Future<RepositoryAttachmentWriteResult> writeAttachment(
+    RepositoryAttachmentWriteRequest request,
+  ) async => throw const TrackStateProviderException('Not used in sync test.');
 }
 
 TrackStateIssue _copyIssue(TrackStateIssue issue, {String? description}) {
