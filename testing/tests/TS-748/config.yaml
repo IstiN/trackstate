@@ -3,7 +3,7 @@ type: ui
 framework: flutter_test
 platform: linux
 dependencies:
-  - TS-744
+  - TS-742
 notes:
   - Reuses the production widget sync-refresh path covered by TS-742 to verify the selected JQL Search row exposes the expected selection styling tokens before and after refresh.
   - Verifies the selected row keeps the production-visible selected semantics flag, highlight background, selection border, emphasized key color, and emphasized summary weight across refresh.
