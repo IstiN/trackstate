@@ -1,0 +1,9 @@
+test_id: TS-741
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Uses a mutable hosted ProviderBackedTrackStateRepository fixture to drive the real TrackState app through the production workspace sync listener.
+  - Verifies an unknown hosted sync domain is filtered without dispatching issue refreshes or triggering a global snapshot reload.
+  - Confirms the visible Comments tab stays unchanged for the user after the malformed sync scope is processed.
