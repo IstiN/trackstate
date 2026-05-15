@@ -453,6 +453,8 @@ class _TrackStateAppState extends State<TrackStateApp>
 
   Future<void> _initializeWorkspaceProfiles() async {
     final loadedState = await widget.workspaceProfileService.loadState();
+    final startsWithoutSavedWorkspaces =
+        widget.repository == null && kIsWeb && !loadedState.hasProfiles;
     if (!mounted) {
       return;
     }
@@ -512,6 +514,9 @@ class _TrackStateAppState extends State<TrackStateApp>
       _showsWorkspaceOnboarding = _shouldShowWorkspaceOnboarding(migratedState);
       _workspaceProfilesReady = true;
     });
+    if (startsWithoutSavedWorkspaces) {
+      viewModel.openProjectSettings();
+    }
   }
 
   bool _shouldShowWorkspaceOnboarding(WorkspaceProfilesState state) {
