@@ -473,6 +473,11 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (loadedState.hasProfiles) {
       final restored = await _restoreWorkspaceFromSavedState(loadedState);
       if (!restored) {
+        if (mounted) {
+          setState(() {
+            _workspaceProfilesReady = true;
+          });
+        }
         await viewModel.load();
         if (_pendingWorkspaceRestoreFailure case final failure?) {
           viewModel.showMessage(
@@ -482,6 +487,7 @@ class _TrackStateAppState extends State<TrackStateApp>
             ),
           );
         }
+        viewModel.openProjectSettings();
       }
       return;
     }
