@@ -252,6 +252,25 @@ void main() {
           action: _requestSteps[2],
           observed: stepThreeObserved,
         );
+        _recordHumanVerification(
+          result,
+          check:
+              'Viewed the visible JQL Search list after the refresh and confirmed whether the same issue row still showed a production-visible selected/highlight state while its detail panel stayed open.',
+          observed:
+              'matched_expected=$selectionPreserved; query=${queryAfterRefresh ?? '<missing>'}; '
+              'rows=${_formatSnapshot(rowsAfterRefresh)}; issue_a_selected=$issueASelected; '
+              'issue_b_selected=$issueBSelected; issue_a_detail_visible=$issueADetailVisible; '
+              'issue_b_detail_visible=$issueBDetailVisible',
+        );
+        _recordHumanVerification(
+          result,
+          check:
+              'Reviewed the selected issue detail exactly where a user would read it and confirmed whether the refreshed description text was visible in the detail panel.',
+          observed:
+              'matched_expected=$updatedDescriptionVisible; '
+              'updated_description_visible=$updatedDescriptionVisible; '
+              'visible_texts=${_formatSnapshot(visibleTextsAfterRefresh)}',
+        );
         if (!selectionPreserved) {
           throw AssertionError(
             'Step 3 failed: after the refresh updated a non-query field for '
@@ -265,23 +284,6 @@ void main() {
             'Visible semantics: ${_formatSnapshot(visibleSemanticsAfterRefresh)}',
           );
         }
-
-        _recordHumanVerification(
-          result,
-          check:
-              'Viewed the visible JQL Search list after the refresh and confirmed the same issue row still showed the production-visible selected/highlight state while its detail panel stayed open.',
-          observed:
-              'query=${queryAfterRefresh ?? '<missing>'}; rows=${_formatSnapshot(rowsAfterRefresh)}; '
-              'issue_a_selected=$issueASelected; issue_b_selected=$issueBSelected; '
-              'issue_a_detail_visible=$issueADetailVisible; issue_b_detail_visible=$issueBDetailVisible',
-        );
-        _recordHumanVerification(
-          result,
-          check:
-              'Reviewed the selected issue detail exactly where a user would read it and confirmed the refreshed description text was visible in the detail panel.',
-          observed:
-              'updated_description_visible=$updatedDescriptionVisible; visible_texts=${_formatSnapshot(visibleTextsAfterRefresh)}',
-        );
 
         _writePassOutputs(result);
       } catch (error, stackTrace) {
