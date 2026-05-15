@@ -1,0 +1,11 @@
+test_id: TS-758
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with one saved hosted workspace profile preloaded in browser storage.
+  - Forces the saved workspace bootstrap branch to fail on first load, then makes the same saved workspace valid before clicking Retry.
+  - Verifies Retry re-validates that saved workspace and loads the live tracker shell instead of keeping the recovery screen visible.

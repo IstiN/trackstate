@@ -114,5 +114,8 @@ class LiveStartupRecoveryPage:
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
 
+    def tap_retry(self) -> None:
+        self._session.click(self._button_selector, has_text="Retry", timeout_ms=30_000)
+
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
