@@ -156,19 +156,19 @@ jobs:
           ref: ${{ env.release_checkout_ref }}
           submodules: true
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.35.3'
-          channel: stable
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
       - name: Verify runner toolchain
         shell: bash
         run: ./tool/check_macos_release_runner.sh
+
+      - name: Use runner Flutter SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter --version
+          dart --version
+
+      - name: Install dependencies
+        run: flutter pub get
 
       - name: Compute release metadata
         id: metadata
