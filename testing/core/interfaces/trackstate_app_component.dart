@@ -65,7 +65,6 @@ abstract interface class TrackStateAppComponent {
     String summary, {
     required bool expectedSelected,
   });
-
   List<String> issueSearchResultTextsSnapshot(String key, String summary);
 
   Future<void> dragIssueToStatusColumn({
