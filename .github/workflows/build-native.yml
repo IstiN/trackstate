@@ -269,14 +269,50 @@ jobs:
           if-no-files-found: error
 
       - name: Publish release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.release_tag }}
-          name: TrackState ${{ env.release_tag }}
-          target_commitish: ${{ env.release_checkout_ref }}
-          generate_release_notes: true
-          overwrite_files: true
-          files: |
-            build/${{ steps.metadata.outputs.desktop_archive }}
-            build/${{ steps.metadata.outputs.cli_archive }}
-            build/${{ steps.metadata.outputs.checksum_file }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          heartbeat() {
+            while true; do
+              sleep 60
+              echo "::notice::GitHub release asset publishing is still running..."
+            done
+          }
+
+          heartbeat &
+          heartbeat_pid="$!"
+          cleanup_heartbeat() {
+            kill "$heartbeat_pid" 2>/dev/null || true
+            wait "$heartbeat_pid" 2>/dev/null || true
+          }
+          trap cleanup_heartbeat EXIT
+
+          release_notes="$(mktemp)"
+          if gh release view "$release_tag" >/dev/null 2>&1; then
+            echo "Updating existing release $release_tag"
+          else
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="$release_tag" \
+              -f target_commitish="$release_checkout_ref" \
+              --jq '.body' > "$release_notes"
+
+            gh release create "$release_tag" \
+              --title "TrackState $release_tag" \
+              --notes-file "$release_notes" \
+              --target "$release_checkout_ref"
+          fi
+
+          gh release upload "$release_tag" \
+            "build/${{ steps.metadata.outputs.desktop_archive }}" \
+            "build/${{ steps.metadata.outputs.cli_archive }}" \
+            "build/${{ steps.metadata.outputs.checksum_file }}" \
+            --clobber
+
+          cleanup_heartbeat
+          trap - EXIT
