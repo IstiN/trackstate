@@ -87,6 +87,13 @@ class PostRetryObservation:
     body_text: str
 
 
+@dataclass(frozen=True)
+class RestoredWorkspaceObservation:
+    post_retry: PostRetryObservation
+    storage_snapshot: dict[str, str | None]
+    workspace_state: dict[str, object] | None
+
+
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     SUCCESS_SCREENSHOT_PATH.unlink(missing_ok=True)
@@ -267,19 +274,30 @@ def main() -> None:
                 )
 
                 page.tap_retry()
-                board_ready, post_retry = poll_until(
-                    probe=lambda: _probe_post_retry_shell(tracker_page),
-                    is_satisfied=lambda observation: isinstance(observation, PostRetryObservation),
+                restoration_ready, restored_observation = poll_until(
+                    probe=lambda: _probe_restored_workspace(
+                        tracker_page=tracker_page,
+                        repository=repository_service.repository,
+                        branch=invalid_branch,
+                    ),
+                    is_satisfied=lambda observation: isinstance(
+                        observation,
+                        RestoredWorkspaceObservation,
+                    ),
                     timeout_seconds=120,
                     interval_seconds=2,
                 )
                 post_repair_urls = tuple(request_observation.post_repair_validation_urls)
-                if not board_ready or not isinstance(post_retry, PostRetryObservation):
+                if (
+                    not restoration_ready
+                    or not isinstance(restored_observation, RestoredWorkspaceObservation)
+                ):
                     raise AssertionError(
                         "Step 4 failed: Retry re-requested the saved workspace, but the "
-                        "deployed app never reached the interactive tracker shell.\n"
+                        "deployed app never completed the full restored state.\n"
                         "Observed post-repair requests: "
                         f"{request_observation.post_repair_validation_urls!r}\n"
+                        f"Last restoration observation: {restored_observation!r}\n"
                         f"Observed body text:\n{tracker_page.body_text()}",
                     )
                 if not post_repair_urls:
@@ -287,18 +305,11 @@ def main() -> None:
                         "Step 4 failed: the app reached a new state after Retry, but no "
                         "revalidation request for the saved workspace was captured.\n"
                         f"Observed requests: {request_observation.requested_urls!r}\n"
-                        f"Observed body text:\n{post_retry.body_text}",
+                        f"Observed body text:\n{restored_observation.post_retry.body_text}",
                     )
-                post_retry_storage_snapshot = tracker_page.snapshot_local_storage(
-                    WORKSPACE_STORAGE_KEYS
-                )
-                post_retry_workspace_state = _decode_workspace_state(post_retry_storage_snapshot)
-                _assert_saved_workspace_restored(
-                    post_retry=post_retry,
-                    workspace_state=post_retry_workspace_state,
-                    repository=repository_service.repository,
-                    branch=invalid_branch,
-                )
+                post_retry = restored_observation.post_retry
+                post_retry_storage_snapshot = restored_observation.storage_snapshot
+                post_retry_workspace_state = restored_observation.workspace_state
 
                 result["post_retry_observation"] = _post_retry_payload(post_retry)
                 result["post_retry_storage_snapshot"] = post_retry_storage_snapshot
@@ -464,6 +475,35 @@ def _probe_post_retry_shell(
         )
     except Exception as error:
         return str(error)
+
+
+def _probe_restored_workspace(
+    *,
+    tracker_page: TrackStateTrackerPage,
+    repository: str,
+    branch: str,
+) -> RestoredWorkspaceObservation | str:
+    post_retry = _probe_post_retry_shell(tracker_page)
+    if not isinstance(post_retry, PostRetryObservation):
+        return post_retry
+
+    storage_snapshot = tracker_page.snapshot_local_storage(WORKSPACE_STORAGE_KEYS)
+    workspace_state = _decode_workspace_state(storage_snapshot)
+    try:
+        _assert_saved_workspace_restored(
+            post_retry=post_retry,
+            workspace_state=workspace_state,
+            repository=repository,
+            branch=branch,
+        )
+    except AssertionError as error:
+        return str(error)
+
+    return RestoredWorkspaceObservation(
+        post_retry=post_retry,
+        storage_snapshot=storage_snapshot,
+        workspace_state=workspace_state,
+    )
 
 
 def _wait_for_branch_to_exist(
