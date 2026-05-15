@@ -89,7 +89,45 @@ void main() {
     expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
     expect(
       '${result.stdout}',
-      contains('Runner readiness verified for Flutter 3.35.3'),
+      contains('Runner readiness verified for Flutter 3.35.3 (minimum 3.35.3)'),
+    );
+  });
+
+  test('runner readiness script accepts newer Flutter and Dart versions', () async {
+    await writeExecutable(
+      'flutter',
+      '#!/usr/bin/env bash\n'
+      'echo "Flutter 3.38.9 • channel stable • fake"\n',
+    );
+    await writeExecutable(
+      'dart',
+      '#!/usr/bin/env bash\n'
+      'echo "Dart SDK version: 3.10.0 (stable) (Fake)" >&2\n',
+    );
+
+    final result = await runReadinessCheck();
+
+    expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+    expect(
+      '${result.stdout}',
+      contains('Runner readiness verified for Flutter 3.38.9 (minimum 3.35.3)'),
+    );
+    expect('${result.stdout}', contains('Dart 3.10.0 (minimum 3.9.2)'));
+  });
+
+  test('runner readiness script fails when Flutter is below the minimum', () async {
+    await writeExecutable(
+      'flutter',
+      '#!/usr/bin/env bash\n'
+      'echo "Flutter 3.34.9 • channel stable • fake"\n',
+    );
+
+    final result = await runReadinessCheck();
+
+    expect(result.exitCode, isNonZero);
+    expect(
+      '${result.stdout}${result.stderr}',
+      contains('Flutter 3.35.3 or newer is required'),
     );
   });
 
@@ -125,7 +163,7 @@ void main() {
     expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
     expect(
       '${result.stdout}',
-      contains('Runner readiness verified for Flutter 3.35.3'),
+      contains('Runner readiness verified for Flutter 3.35.3 (minimum 3.35.3)'),
     );
   });
 }
