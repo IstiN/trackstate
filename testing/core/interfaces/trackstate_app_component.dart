@@ -39,6 +39,10 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openIssue(String key, String summary);
 
+  Future<void> enterJqlSearchQuery(String query);
+
+  Future<void> submitJqlSearch();
+
   Future<void> searchIssues(String query);
 
   Future<String?> readJqlSearchFieldValue();

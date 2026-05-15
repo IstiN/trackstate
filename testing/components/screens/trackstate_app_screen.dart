@@ -478,11 +478,24 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> searchIssues(String query) async {
+    await enterJqlSearchQuery(query);
+    await submitJqlSearch();
+  }
+
+  @override
+  Future<void> enterJqlSearchQuery(String query) async {
     await _waitForVisible(_jqlSearchPanel);
     await _waitForVisible(_jqlSearchField);
     await tester.tap(_jqlSearchField.first);
     await tester.pump();
     await tester.enterText(_jqlSearchField.first, query);
+    await tester.pump();
+  }
+
+  @override
+  Future<void> submitJqlSearch() async {
+    await _waitForVisible(_jqlSearchPanel);
+    await _waitForVisible(_jqlSearchField);
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
   }
