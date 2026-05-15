@@ -55,9 +55,10 @@ WORKSPACE_STORAGE_KEYS = (
     "flutter.trackstate.workspaceProfiles.state",
 )
 RECOVERY_TEXT = (
+    "Attention needed",
+    "No valid saved workspace could be restored.",
     "Project Settings",
     "Project settings administration",
-    "Retry",
     "Settings",
 )
 SHELL_NAVIGATION_LABELS = (
@@ -178,6 +179,11 @@ def main() -> None:
                 try:
                     shell_observation = page.wait_for_shell_routed_to_settings(
                         timeout_ms=120_000,
+                        require_retry_action=False,
+                        required_body_fragments=(
+                            "Attention needed",
+                            "No valid saved workspace could be restored.",
+                        ),
                     )
                     result["shell_observation"] = _shell_payload(shell_observation)
                     _assert_settings_recovery_shell(shell_observation)
@@ -199,13 +205,14 @@ def main() -> None:
                         result,
                         check=(
                             "Viewed the final landing screen as a user and confirmed the "
-                            "Settings recovery shell was visible instead of a broken or "
-                            "blank state."
+                            "Settings recovery shell and its visible startup-recovery "
+                            "message were shown instead of a broken or blank state."
                         ),
                         observed=(
                             f"selected_buttons={shell_observation.selected_button_labels}; "
                             f"visible_navigation_labels={shell_observation.visible_navigation_labels}; "
-                            f"retry_visible={shell_observation.retry_visible}; "
+                            f"recovery_message_visible="
+                            f"{'No valid saved workspace could be restored.' in shell_observation.body_text}; "
                             f"settings_heading_visible={shell_observation.settings_heading_visible}"
                         ),
                     )
@@ -250,7 +257,7 @@ def main() -> None:
                         ),
                         observed=(
                             "Only the splash text remained visible, and no Settings title, "
-                            "startup recovery message, Retry action, or sidebar navigation "
+                            "startup recovery message, or sidebar navigation "
                             f"was rendered. Visible body text: {current_body!r}"
                         ),
                     )
@@ -399,10 +406,16 @@ def _assert_settings_recovery_shell(
             "visible.\n"
             f"Observed body text:\n{observation.body_text}",
         )
-    if not observation.retry_visible:
+    if "Attention needed" not in observation.body_text:
         raise AssertionError(
             "Expected Result failed: the startup recovery surface did not expose the "
-            "Retry action.\n"
+            "visible recovery banner.\n"
+            f"Observed body text:\n{observation.body_text}",
+        )
+    if "No valid saved workspace could be restored." not in observation.body_text:
+        raise AssertionError(
+            "Expected Result failed: the startup recovery surface did not expose the "
+            "invalid-workspace recovery message.\n"
             f"Observed body text:\n{observation.body_text}",
         )
 
@@ -581,12 +594,12 @@ def _bug_description(result: dict[str, object]) -> str:
         "## Actual vs Expected\n"
         f"- **Expected:** {EXPECTED_RESULT}\n"
         "- **Actual:** After waiting for startup restoration to complete, the deployed web "
-        "app still rendered only the splash text `TrackState.AI`. The Settings recovery "
-        "shell never appeared: no `Dashboard`, `Board`, `JQL Search`, `Hierarchy`, "
-        "`Settings`, `Project Settings`, `Project settings administration`, or `Retry` "
-        "text was visible. Network activity showed the app attempted the invalid hosted "
-        "saved workspace branch and also issued default bootstrap requests, but the UI "
-        "never transitioned to a recoverable landing screen.\n\n"
+        "app did not expose the expected startup-recovery Settings surface. The required "
+        "navigation, selected `Settings` state, and the visible recovery message (`No "
+        "valid saved workspace could be restored.`) were not all present together. "
+        "Network activity showed the app attempted the invalid hosted saved workspace "
+        "branch and also issued default bootstrap requests, but the UI never transitioned "
+        "to the required recoverable landing screen.\n\n"
         "## Environment details\n"
         f"- **URL:** {result.get('app_url')}\n"
         "- **Browser:** Chromium via Playwright\n"

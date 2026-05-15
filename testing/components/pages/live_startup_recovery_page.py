@@ -43,10 +43,12 @@ class LiveStartupRecoveryPage:
         self,
         *,
         timeout_ms: int = 120_000,
+        require_retry_action: bool = True,
+        required_body_fragments: tuple[str, ...] = (),
     ) -> StartupRecoveryShellObservation:
         self._session.wait_for_function(
             """
-            ({ requiredNavigationLabels, settingsHeading, topbarTitle }) => {
+            ({ requiredNavigationLabels, settingsHeading, topbarTitle, requireRetryAction, requiredBodyFragments }) => {
               const bodyText = document.body?.innerText ?? '';
               const selectedLabels = Array.from(
                 document.querySelectorAll('flt-semantics[role="button"][aria-current="true"]'),
@@ -54,7 +56,8 @@ class LiveStartupRecoveryPage:
               return requiredNavigationLabels.every((label) => bodyText.includes(label))
                 && bodyText.includes(settingsHeading)
                 && bodyText.includes(topbarTitle)
-                && bodyText.includes('Retry')
+                && (!requireRetryAction || bodyText.includes('Retry'))
+                && requiredBodyFragments.every((fragment) => bodyText.includes(fragment))
                 && selectedLabels.includes('Settings');
             }
             """,
@@ -62,6 +65,8 @@ class LiveStartupRecoveryPage:
                 "requiredNavigationLabels": list(self._required_navigation_labels),
                 "settingsHeading": self._settings_heading,
                 "topbarTitle": self._topbar_title,
+                "requireRetryAction": require_retry_action,
+                "requiredBodyFragments": list(required_body_fragments),
             },
             timeout_ms=timeout_ms,
         )
