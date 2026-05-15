@@ -1,0 +1,9 @@
+test_id: TS-756
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Uses a mutable hosted ProviderBackedTrackStateRepository fixture to drive the real TrackState app through the production workspace sync listener.
+  - Verifies a mixed sync event containing one valid comments path and one unknown metadata path only hydrates the allow-listed comments domain.
+  - Confirms the visible Comments tab updates for the valid path while load_snapshot_delta stays unchanged at 0.
