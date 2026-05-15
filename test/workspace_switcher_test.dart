@@ -1,8 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -79,6 +82,76 @@ void main() {
       );
       expect(service.state.activeWorkspaceId, 'hosted:stable/repo@main');
       expect(find.text('stable/repo'), findsWidgets);
+    },
+  );
+
+  testWidgets(
+    'startup restore routes to settings recovery when every saved workspace is invalid',
+    (tester) async {
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'local:/tmp/missing@main',
+              displayName: 'broken-local',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/missing',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:broken/repo@definitely-missing-branch',
+              displayName: 'broken/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'broken/repo',
+              defaultBranch: 'definitely-missing-branch',
+              writeBranch: 'definitely-missing-branch',
+            ),
+          ],
+          activeWorkspaceId: 'local:/tmp/missing@main',
+          migrationComplete: true,
+        ),
+      );
+      final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: () => _QueuedLoadTrackStateRepository(
+            loadResults: [_withStartupRecovery(snapshot)],
+          ),
+          workspaceProfileService: service,
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => throw StateError('Missing repository $repositoryPath'),
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => _QueuedLoadTrackStateRepository(
+                loadResults: [
+                  StateError(
+                    'Hosted workspace broken/repo@definitely-missing-branch could not be opened.',
+                  ),
+                ],
+              ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Project Settings'), findsOneWidget);
+      expect(find.text('GitHub startup limit reached'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
     },
   );
 
@@ -669,4 +742,126 @@ class _MemoryAuthStore implements TrackStateAuthStore {
       workspaceTokens[workspaceId] = token;
     }
   }
+}
+
+TrackerSnapshot _withStartupRecovery(TrackerSnapshot snapshot) {
+  return TrackerSnapshot(
+    project: snapshot.project,
+    issues: snapshot.issues,
+    repositoryIndex: snapshot.repositoryIndex,
+    loadWarnings: snapshot.loadWarnings,
+    readiness: snapshot.readiness,
+    startupRecovery: const TrackerStartupRecovery(
+      kind: TrackerStartupRecoveryKind.githubRateLimit,
+      failedPath:
+          '/repos/trackstate/trackstate/contents/.trackstate/index/tombstones.json',
+    ),
+  );
+}
+
+class _QueuedLoadTrackStateRepository implements TrackStateRepository {
+  _QueuedLoadTrackStateRepository({required List<Object> loadResults})
+    : _loadResults = List<Object>.from(loadResults);
+
+  final List<Object> _loadResults;
+  final JqlSearchService _searchService = const JqlSearchService();
+  TrackerSnapshot? _currentSnapshot;
+  int _loadCount = 0;
+
+  @override
+  bool get supportsGitHubAuth => true;
+
+  @override
+  bool get usesLocalPersistence => false;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async =>
+      const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    final index = _loadCount < _loadResults.length
+        ? _loadCount
+        : _loadResults.length - 1;
+    _loadCount += 1;
+    final result = _loadResults[index];
+    if (result is TrackerSnapshot) {
+      _currentSnapshot = result;
+      return result;
+    }
+    throw result;
+  }
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    final snapshot =
+        _currentSnapshot ??
+        await const DemoTrackStateRepository().loadSnapshot();
+    return _searchService.search(
+      issues: snapshot.issues,
+      project: snapshot.project,
+      jql: jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+  }
+
+  @override
+  Future<List<TrackStateIssue>> searchIssues(String jql) async =>
+      (await searchIssuePage(jql, maxResults: 500)).issues;
+
+  @override
+  Future<TrackStateIssue> archiveIssue(TrackStateIssue issue) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<DeletedIssueTombstone> deleteIssue(TrackStateIssue issue) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> createIssue({
+    required String summary,
+    String description = '',
+    Map<String, String> customFields = const {},
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<TrackStateIssue> updateIssueDescription(
+    TrackStateIssue issue,
+    String description,
+  ) async => issue;
+
+  @override
+  Future<TrackStateIssue> updateIssueStatus(
+    TrackStateIssue issue,
+    IssueStatus status,
+  ) async => issue;
+
+  @override
+  Future<TrackStateIssue> addIssueComment(
+    TrackStateIssue issue,
+    String body,
+  ) async => issue;
+
+  @override
+  Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
+      Uint8List(0);
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async => const <IssueHistoryEntry>[];
+
+  @override
+  Future<TrackStateIssue> uploadIssueAttachment({
+    required TrackStateIssue issue,
+    required String name,
+    required Uint8List bytes,
+  }) async => issue;
 }
