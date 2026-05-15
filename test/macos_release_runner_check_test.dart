@@ -75,6 +75,11 @@ void main() {
       '#!/usr/bin/env bash\n'
       'echo "shasum"\n',
     );
+    await writeExecutable(
+      'gh',
+      '#!/usr/bin/env bash\n'
+      'echo "gh version 2.0.0"\n',
+    );
   });
 
   tearDown(() async {

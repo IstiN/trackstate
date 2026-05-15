@@ -15,6 +15,7 @@ required_tools=(
   tar
   shasum
   bash
+  gh
 )
 
 fail() {
