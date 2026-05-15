@@ -40,7 +40,9 @@ void main() {
     await writeExecutable(
       'flutter',
       '#!/usr/bin/env bash\n'
-      'echo "Flutter 3.35.3 • channel stable • fake"\n',
+      'echo "Flutter update freshness banner"\n'
+      'echo "Flutter 3.35.3 • channel stable • fake"\n'
+      'echo "Tools • Dart 3.9.2"\n',
     );
     await writeExecutable(
       'dart',
@@ -105,6 +107,25 @@ void main() {
     expect(
       '${result.stdout}${result.stderr}',
       contains('Xcode 16 or newer is required'),
+    );
+  });
+
+  test('runner readiness script reads full Flutter output without pipe breakage', () async {
+    await writeExecutable(
+      'flutter',
+      '#!/usr/bin/env bash\n'
+      'echo "┌ Flutter notice ┐"\n'
+      'echo "│ Additional output before the version │"\n'
+      'echo "Flutter 3.35.3 • channel stable • fake"\n'
+      'echo "Additional output after the version"\n',
+    );
+
+    final result = await runReadinessCheck();
+
+    expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+    expect(
+      '${result.stdout}',
+      contains('Runner readiness verified for Flutter 3.35.3'),
     );
   });
 }
