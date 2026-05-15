@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -53,6 +53,24 @@ typedef LocalRepositoryConfigurationApplier =
       required String defaultBranch,
       required String writeBranch,
     });
+
+@visibleForTesting
+bool shouldOpenProjectSettingsForStartupWithoutSavedWorkspaces({
+  required bool isWeb,
+  required bool hasRepository,
+  required bool hasProfiles,
+}) {
+  return isWeb && !hasRepository && !hasProfiles;
+}
+
+@visibleForTesting
+bool shouldShowWorkspaceOnboardingForStartup({
+  required bool isWeb,
+  required bool hasRepository,
+  required bool hasProfiles,
+}) {
+  return !isWeb && !hasRepository && !hasProfiles;
+}
 
 class TrackStateApp extends StatefulWidget {
   const TrackStateApp({
@@ -454,7 +472,11 @@ class _TrackStateAppState extends State<TrackStateApp>
   Future<void> _initializeWorkspaceProfiles() async {
     final loadedState = await widget.workspaceProfileService.loadState();
     final startsWithoutSavedWorkspaces =
-        widget.repository == null && kIsWeb && !loadedState.hasProfiles;
+        shouldOpenProjectSettingsForStartupWithoutSavedWorkspaces(
+          isWeb: kIsWeb,
+          hasRepository: widget.repository != null,
+          hasProfiles: loadedState.hasProfiles,
+        );
     if (!mounted) {
       return;
     }
@@ -520,7 +542,11 @@ class _TrackStateAppState extends State<TrackStateApp>
   }
 
   bool _shouldShowWorkspaceOnboarding(WorkspaceProfilesState state) {
-    return !kIsWeb && widget.repository == null && !state.hasProfiles;
+    return shouldShowWorkspaceOnboardingForStartup(
+      isWeb: kIsWeb,
+      hasRepository: widget.repository != null,
+      hasProfiles: state.hasProfiles,
+    );
   }
 
   Future<void> _switchToLocalRepository({
