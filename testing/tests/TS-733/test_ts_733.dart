@@ -202,6 +202,23 @@ void main() {
             issueAVisible &&
             issueAStatusVisible &&
             !issueBVisible;
+        _recordHumanVerification(
+          result,
+          check:
+              'Reviewed the visible JQL Search screen after the background refresh the way a user would: the query field, the rendered issue rows, and whether any issue detail pane stayed open.',
+          observed:
+              'query=${queryAfterSync ?? '<missing>'}; rows=${_formatSnapshot(rowsAfterSync)}; '
+              'issue_a_detail_visible=$issueADetailVisible; issue_b_detail_visible=$issueBDetailVisible; '
+              'empty_state_visible=$emptyStateVisible',
+        );
+        _recordHumanVerification(
+          result,
+          check:
+              'Confirmed the remaining visible search result still showed the user-facing Open status text in the correct result row.',
+          observed:
+              'issue_a_visible=$issueAVisible; issue_a_status_open=$issueAStatusVisible; '
+              'row_texts=${_formatSnapshot(screen.issueSearchResultTextsSnapshot(Ts733SyncRefreshRepository.issueAKey, Ts733SyncRefreshRepository.issueASummary))}',
+        );
         if (!selectionCleared) {
           _recordStep(
             result,
@@ -225,24 +242,6 @@ void main() {
           status: 'passed',
           action: _requestSteps[2],
           observed: stepThreeObserved,
-        );
-
-        _recordHumanVerification(
-          result,
-          check:
-              'Reviewed the visible JQL Search screen after the background refresh the way a user would: the query field, the rendered issue rows, and whether any issue detail pane stayed open.',
-          observed:
-              'query=${queryAfterSync ?? '<missing>'}; rows=${_formatSnapshot(rowsAfterSync)}; '
-              'issue_a_detail_visible=$issueADetailVisible; issue_b_detail_visible=$issueBDetailVisible; '
-              'empty_state_visible=$emptyStateVisible',
-        );
-        _recordHumanVerification(
-          result,
-          check:
-              'Confirmed the remaining visible search result still showed the user-facing Open status text in the correct result row.',
-          observed:
-              'issue_a_visible=$issueAVisible; issue_a_status_open=$issueAStatusVisible; '
-              'row_texts=${_formatSnapshot(screen.issueSearchResultTextsSnapshot(Ts733SyncRefreshRepository.issueAKey, Ts733SyncRefreshRepository.issueASummary))}',
         );
 
         _writePassOutputs(result);
