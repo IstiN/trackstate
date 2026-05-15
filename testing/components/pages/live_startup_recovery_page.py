@@ -44,11 +44,18 @@ class LiveStartupRecoveryPage:
         self,
         *,
         timeout_ms: int = 120_000,
-        require_retry: bool = True,
+        require_retry_action: bool = True,
+        required_body_fragments: tuple[str, ...] = (),
     ) -> StartupRecoveryShellObservation:
         self._session.wait_for_function(
             r"""
-            ({ requiredNavigationLabels, settingsHeading, topbarTitle, requireRetry }) => {
+            ({
+              requiredNavigationLabels,
+              settingsHeading,
+              topbarTitle,
+              requireRetryAction,
+              requiredBodyFragments,
+            }) => {
               const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
               const isVisible = (element) => {
                 if (!element) {
@@ -76,7 +83,8 @@ class LiveStartupRecoveryPage:
               return requiredNavigationLabels.every((label) => bodyText.includes(label))
                 && bodyText.includes(settingsHeading)
                 && bodyText.includes(topbarTitle)
-                && (!requireRetry || visibleButtonLabels.includes('Retry'))
+                && (!requireRetryAction || visibleButtonLabels.includes('Retry'))
+                && requiredBodyFragments.every((fragment) => bodyText.includes(fragment))
                 && selectedLabels.includes('Settings');
             }
             """,
@@ -84,7 +92,8 @@ class LiveStartupRecoveryPage:
                 "requiredNavigationLabels": list(self._required_navigation_labels),
                 "settingsHeading": self._settings_heading,
                 "topbarTitle": self._topbar_title,
-                "requireRetry": require_retry,
+                "requireRetryAction": require_retry_action,
+                "requiredBodyFragments": list(required_body_fragments),
             },
             timeout_ms=timeout_ms,
         )
