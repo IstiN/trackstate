@@ -249,6 +249,14 @@ def main() -> None:
 
                 post_retry_shell = page.wait_for_shell_routed_to_settings(timeout_ms=120_000)
                 _assert_settings_recovery_shell(post_retry_shell, require_retry=True)
+                if "Retry" not in post_retry_shell.visible_button_labels:
+                    raise AssertionError(
+                        "Expected Result failed: the post-retry recovery shell did not keep "
+                        "a visible Retry control available.\n"
+                        f"Observed visible button labels: "
+                        f"{post_retry_shell.visible_button_labels}\n"
+                        f"Observed body text:\n{post_retry_shell.body_text}",
+                    )
                 result["post_retry_shell_observation"] = _shell_payload(post_retry_shell)
                 _record_step(
                     result,
@@ -424,7 +432,8 @@ def _assert_settings_recovery_shell(
     if require_retry and not observation.retry_visible:
         raise AssertionError(
             "Expected Result failed: the startup recovery surface did not expose the "
-            "Retry action.\n"
+            "Retry action as a visible control.\n"
+            f"Observed visible button labels: {observation.visible_button_labels}\n"
             f"Observed body text:\n{observation.body_text}",
         )
 
