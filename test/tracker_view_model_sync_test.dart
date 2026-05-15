@@ -9,10 +9,49 @@ import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.dart';
 
+import '../testing/tests/TS-733/support/ts733_sync_refresh_repository.dart';
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
+
+  test(
+    'view model clears the selected issue when a sync refresh removes it from active search results',
+    () async {
+      final repository = Ts733SyncRefreshRepository();
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      await viewModel.updateQuery(Ts733SyncRefreshRepository.query);
+      viewModel.selectIssue(
+        viewModel.searchResults.firstWhere(
+          (issue) => issue.key == Ts733SyncRefreshRepository.issueBKey,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(viewModel.jql, Ts733SyncRefreshRepository.query);
+      expect(
+        viewModel.selectedIssue?.key,
+        Ts733SyncRefreshRepository.issueBKey,
+      );
+
+      repository.scheduleIssueBClosure();
+      await viewModel.handleAppResumed();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(viewModel.jql, Ts733SyncRefreshRepository.query);
+      expect(
+        viewModel.searchResults.map((issue) => issue.key).toList(),
+        <String>[Ts733SyncRefreshRepository.issueAKey],
+      );
+      expect(viewModel.selectedIssue, isNull);
+
+      viewModel.dispose();
+    },
+  );
 
   test(
     'view model queues background refreshes until the edit session ends',
@@ -159,7 +198,10 @@ void main() {
 
       expect(viewModel.hasPendingWorkspaceSyncRefresh, isFalse);
       expect(viewModel.searchResults.length, 8);
-      expect(viewModel.selectedIssue?.description, 'Refresh survives stale query');
+      expect(
+        viewModel.selectedIssue?.description,
+        'Refresh survives stale query',
+      );
     },
   );
 
@@ -174,7 +216,9 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       await Future<void>.delayed(Duration.zero);
 
-      final issue = viewModel.issues.firstWhere((candidate) => candidate.key == 'TRACK-12');
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
       viewModel.selectIssue(issue);
       await Future<void>.delayed(Duration.zero);
       await Future<void>.delayed(Duration.zero);
@@ -352,7 +396,8 @@ class _SyncAwareRepository
   ) async => const <IssueHistoryEntry>[];
 }
 
-class _ScopedCommentsRefreshRepository extends ProviderBackedTrackStateRepository {
+class _ScopedCommentsRefreshRepository
+    extends ProviderBackedTrackStateRepository {
   _ScopedCommentsRefreshRepository({required TrackerSnapshot snapshot})
     : _snapshot = snapshot,
       super(provider: _SyncTestProvider(), supportsGitHubAuth: false);
@@ -380,7 +425,9 @@ class _ScopedCommentsRefreshRepository extends ProviderBackedTrackStateRepositor
     required String issueKey,
     required String updatedCommentBody,
   }) {
-    final issue = _snapshot.issues.firstWhere((candidate) => candidate.key == issueKey);
+    final issue = _snapshot.issues.firstWhere(
+      (candidate) => candidate.key == issueKey,
+    );
     _pendingCommentBodies[issueKey] = updatedCommentBody;
     _state = const RepositorySyncState(
       providerType: ProviderType.github,
@@ -453,13 +500,15 @@ class _ScopedCommentsRefreshRepository extends ProviderBackedTrackStateRepositor
               updatedLabel: 'now',
               createdAt: '2026-05-14T10:00:00Z',
               updatedAt: '2026-05-14T10:00:00Z',
-              storagePath: '${_issueRoot(currentIssue.storagePath)}/comments/0002.md',
+              storagePath:
+                  '${_issueRoot(currentIssue.storagePath)}/comments/0002.md',
             ),
           ];
     final hydrated = currentIssue.copyWith(
       comments: hydratedComments,
       hasDetailLoaded:
-          currentIssue.hasDetailLoaded || scopes.contains(IssueHydrationScope.detail),
+          currentIssue.hasDetailLoaded ||
+          scopes.contains(IssueHydrationScope.detail),
       hasCommentsLoaded:
           currentIssue.hasCommentsLoaded ||
           scopes.contains(IssueHydrationScope.comments),
@@ -541,8 +590,10 @@ class _SyncTestProvider implements TrackStateProviderAdapter {
   }) async => throw const TrackStateProviderException('Not used in sync test.');
 
   @override
-  Future<RepositoryTextFile> readTextFile(String path, {required String ref}) async =>
-      throw const TrackStateProviderException('Not used in sync test.');
+  Future<RepositoryTextFile> readTextFile(
+    String path, {
+    required String ref,
+  }) async => throw const TrackStateProviderException('Not used in sync test.');
 
   @override
   Future<String> resolveWriteBranch() async => dataRef;
@@ -561,12 +612,13 @@ class _SyncTestProvider implements TrackStateProviderAdapter {
   );
 
   @override
-  Future<RepositoryWriteResult> writeTextFile(RepositoryWriteRequest request) async =>
-      RepositoryWriteResult(
-        path: request.path,
-        branch: request.branch,
-        revision: 'sync-test',
-      );
+  Future<RepositoryWriteResult> writeTextFile(
+    RepositoryWriteRequest request,
+  ) async => RepositoryWriteResult(
+    path: request.path,
+    branch: request.branch,
+    revision: 'sync-test',
+  );
 
   @override
   Future<RepositoryAttachmentWriteResult> writeAttachment(

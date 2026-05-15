@@ -3793,19 +3793,25 @@ class _SearchAndDetail extends StatelessWidget {
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 980;
             final list = _IssueList(viewModel: viewModel);
-            final detail = _IssueDetail(
-              issue: viewModel.selectedIssue!,
-              viewModel: viewModel,
-              onCreateChildIssue: () => onOpenCreateIssue(
-                _CreateIssuePrefill.forChild(
-                  originSection:
-                      viewModel.issueDetailReturnSection ??
-                      TrackerSection.search,
-                  issue: viewModel.selectedIssue!,
-                ),
-              ),
-              attachmentPicker: attachmentPicker,
-            );
+            final selectedIssue = viewModel.selectedIssue;
+            final detail = selectedIssue == null
+                ? null
+                : _IssueDetail(
+                    issue: selectedIssue,
+                    viewModel: viewModel,
+                    onCreateChildIssue: () => onOpenCreateIssue(
+                      _CreateIssuePrefill.forChild(
+                        originSection:
+                            viewModel.issueDetailReturnSection ??
+                            TrackerSection.search,
+                        issue: selectedIssue,
+                      ),
+                    ),
+                    attachmentPicker: attachmentPicker,
+                  );
+            if (detail == null) {
+              return list;
+            }
             return compact
                 ? Column(children: [list, const SizedBox(height: 16), detail])
                 : Row(
