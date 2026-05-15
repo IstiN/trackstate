@@ -473,6 +473,11 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (loadedState.hasProfiles) {
       final restored = await _restoreWorkspaceFromSavedState(loadedState);
       if (!restored) {
+        if (mounted) {
+          setState(() {
+            _workspaceProfilesReady = true;
+          });
+        }
         await viewModel.load();
         if (_pendingWorkspaceRestoreFailure case final failure?) {
           viewModel.showMessage(
@@ -482,6 +487,7 @@ class _TrackStateAppState extends State<TrackStateApp>
             ),
           );
         }
+        viewModel.openProjectSettings();
       }
       return;
     }
@@ -3223,6 +3229,8 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
     ),
     TrackerMessageKind.storedGitHubTokenInvalid =>
       l10n.storedGitHubTokenInvalid(message.error!),
+    TrackerMessageKind.selectedIssueUnavailable =>
+      l10n.selectedIssueUnavailable(message.issueKey!),
     TrackerMessageKind.workspaceSwitchFailed => l10n.workspaceSwitchFailed(
       message.repository!,
       message.error!,
@@ -3793,19 +3801,25 @@ class _SearchAndDetail extends StatelessWidget {
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 980;
             final list = _IssueList(viewModel: viewModel);
-            final detail = _IssueDetail(
-              issue: viewModel.selectedIssue!,
-              viewModel: viewModel,
-              onCreateChildIssue: () => onOpenCreateIssue(
-                _CreateIssuePrefill.forChild(
-                  originSection:
-                      viewModel.issueDetailReturnSection ??
-                      TrackerSection.search,
-                  issue: viewModel.selectedIssue!,
-                ),
-              ),
-              attachmentPicker: attachmentPicker,
-            );
+            final selectedIssue = viewModel.selectedIssue;
+            final detail = selectedIssue == null
+                ? null
+                : _IssueDetail(
+                    issue: selectedIssue,
+                    viewModel: viewModel,
+                    onCreateChildIssue: () => onOpenCreateIssue(
+                      _CreateIssuePrefill.forChild(
+                        originSection:
+                            viewModel.issueDetailReturnSection ??
+                            TrackerSection.search,
+                        issue: selectedIssue,
+                      ),
+                    ),
+                    attachmentPicker: attachmentPicker,
+                  );
+            if (detail == null) {
+              return list;
+            }
             return compact
                 ? Column(children: [list, const SizedBox(height: 16), detail])
                 : Row(
@@ -7926,6 +7940,8 @@ class _IssueList extends StatelessWidget {
                 order: NumericFocusOrder(index + 2.0),
                 child: _IssueListRow(
                   issue: visibleResults[index],
+                  selected:
+                      visibleResults[index].key == viewModel.selectedIssue?.key,
                   project: viewModel.project,
                   onSelect: viewModel.selectIssue,
                   trailingAction: showSearchBootstrapLoading
@@ -8234,12 +8250,14 @@ class _IssueListRow extends StatelessWidget {
   const _IssueListRow({
     required this.issue,
     required this.onSelect,
+    this.selected = false,
     this.project,
     this.trailingAction,
   });
 
   final TrackStateIssue issue;
   final ValueChanged<TrackStateIssue> onSelect;
+  final bool selected;
   final ProjectConfig? project;
   final Widget? trailingAction;
 
@@ -8249,73 +8267,94 @@ class _IssueListRow extends StatelessWidget {
     return Semantics(
       container: true,
       button: true,
+      selected: selected,
       label: 'Open ${issue.key} ${issue.summary}',
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 4),
         decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: colors.border)),
         ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Stack(
-                children: [
-                  ExcludeSemantics(
-                    child: Row(
-                      children: [
-                        _IssueTypeGlyph(issue.issueType),
-                        const SizedBox(width: 10),
-                        SizedBox(
-                          width: 86,
-                          child: Text(
-                            issue.key,
-                            style: TextStyle(
-                              fontFamily: 'JetBrains Mono',
-                              color: colors.muted,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? colors.primarySoft : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: selected ? Border.all(color: colors.primary) : null,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Stack(
+                  children: [
+                    ExcludeSemantics(
+                      child: Row(
+                        children: [
+                          _IssueTypeGlyph(issue.issueType),
+                          const SizedBox(width: 10),
+                          SizedBox(
+                            width: 86,
+                            child: Text(
+                              issue.key,
+                              style: TextStyle(
+                                fontFamily: 'JetBrains Mono',
+                                color: selected ? colors.primary : colors.muted,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(issue.summary)),
-                        _StatusBadge(
-                          status: issue.status,
-                          label: _resolvedIssueStatusLabel(
-                            context,
-                            project,
-                            issue,
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              issue.summary,
+                              style: TextStyle(
+                                fontWeight: selected
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                              ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        _Avatar(name: issue.assignee),
-                      ],
-                    ),
-                  ),
-                  Positioned.fill(
-                    child: TextButton(
-                      onPressed: () => onSelect(issue),
-                      style: TextButton.styleFrom(
-                        foregroundColor: colors.text,
-                        backgroundColor: Colors.transparent,
-                        overlayColor: Colors.transparent,
-                        shadowColor: Colors.transparent,
-                        surfaceTintColor: Colors.transparent,
-                        padding: EdgeInsets.zero,
-                        alignment: Alignment.centerLeft,
-                        shape: const RoundedRectangleBorder(),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          _StatusBadge(
+                            status: issue.status,
+                            label: _resolvedIssueStatusLabel(
+                              context,
+                              project,
+                              issue,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          _Avatar(name: issue.assignee),
+                        ],
                       ),
-                      child: const SizedBox.expand(),
                     ),
-                  ),
-                ],
+                    Positioned.fill(
+                      child: TextButton(
+                        onPressed: () => onSelect(issue),
+                        style: TextButton.styleFrom(
+                          foregroundColor: colors.text,
+                          backgroundColor: Colors.transparent,
+                          overlayColor: Colors.transparent,
+                          shadowColor: Colors.transparent,
+                          surfaceTintColor: Colors.transparent,
+                          padding: EdgeInsets.zero,
+                          alignment: Alignment.centerLeft,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            if (trailingAction != null) ...[
-              const SizedBox(width: 8),
-              trailingAction!,
+              if (trailingAction != null) ...[
+                const SizedBox(width: 8),
+                trailingAction!,
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

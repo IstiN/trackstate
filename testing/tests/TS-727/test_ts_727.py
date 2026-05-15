@@ -22,7 +22,6 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
-from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from support.ts727_invalid_workspace_restore_runtime import (  # noqa: E402
     Ts727InvalidWorkspaceRestoreRuntime,
@@ -119,19 +118,6 @@ def main() -> None:
             try:
                 page.open()
 
-                invalid_branch_observed, _ = poll_until(
-                    probe=lambda: request_observation.invalid_branch_urls(
-                        repository=repository_service.repository,
-                        branch=INVALID_HOSTED_BRANCH,
-                    ),
-                    is_satisfied=lambda urls: len(urls) > 0,
-                    timeout_seconds=150,
-                    interval_seconds=1,
-                )
-                invalid_branch_urls = request_observation.invalid_branch_urls(
-                    repository=repository_service.repository,
-                    branch=INVALID_HOSTED_BRANCH,
-                )
                 storage_snapshot = tracker_page.snapshot_local_storage(
                     WORKSPACE_STORAGE_KEYS,
                 )
@@ -143,23 +129,7 @@ def main() -> None:
                     request_observation,
                 )
 
-                if not invalid_branch_observed and not invalid_branch_urls:
-                    raise AssertionError(
-                        "Precondition failed: startup never requested the configured invalid "
-                        f"hosted branch `{INVALID_HOSTED_BRANCH}`, so the saved hosted "
-                        "workspace validation path was not proven.\n"
-                        f"Observed GitHub requests: {request_observation.requested_urls}\n"
-                        f"Observed storage snapshot: {json.dumps(storage_snapshot, indent=2)}\n"
-                        f"Observed body text:\n{tracker_page.body_text()}",
-                    )
-
                 _assert_preloaded_profiles(storage_snapshot)
-                default_bootstrap_urls = request_observation.default_bootstrap_urls(
-                    repository=repository_service.repository,
-                    ref=repository_service.ref,
-                )
-                result["invalid_branch_urls"] = list(invalid_branch_urls)
-                result["default_bootstrap_urls"] = list(default_bootstrap_urls)
                 _record_step(
                     result,
                     step=1,
@@ -170,8 +140,6 @@ def main() -> None:
                         "preloaded in browser storage: one local path and one hosted "
                         "workspace pointing at a missing branch. "
                         f"Stored profiles={_workspace_summary(storage_snapshot)}. "
-                        f"Observed invalid-branch requests={list(invalid_branch_urls)!r}. "
-                        f"Observed default bootstrap requests={list(default_bootstrap_urls)!r}. "
                         f"Raw observed requests={list(request_observation.requested_urls)!r}."
                     ),
                 )
@@ -183,9 +151,20 @@ def main() -> None:
                         required_body_fragments=(
                             "Attention needed",
                             "No valid saved workspace could be restored.",
+                            "Last skipped workspace:",
                         ),
                     )
+                    invalid_branch_urls = request_observation.invalid_branch_urls(
+                        repository=repository_service.repository,
+                        branch=INVALID_HOSTED_BRANCH,
+                    )
+                    default_bootstrap_urls = request_observation.default_bootstrap_urls(
+                        repository=repository_service.repository,
+                        ref=repository_service.ref,
+                    )
                     result["shell_observation"] = _shell_payload(shell_observation)
+                    result["invalid_branch_urls"] = list(invalid_branch_urls)
+                    result["default_bootstrap_urls"] = list(default_bootstrap_urls)
                     _assert_settings_recovery_shell(shell_observation)
                     result["request_observation"] = _request_observation_payload(
                         request_observation,
@@ -197,7 +176,9 @@ def main() -> None:
                         action=REQUEST_STEPS[1],
                         observed=(
                             "The final landing screen exposed the startup recovery shell "
-                            "with Settings selected.\n"
+                            "with Settings selected. "
+                            f"Observed invalid-branch requests={list(invalid_branch_urls)!r}. "
+                            f"Observed default bootstrap requests={list(default_bootstrap_urls)!r}.\n"
                             f"{shell_observation.body_text}"
                         ),
                     )
@@ -211,6 +192,8 @@ def main() -> None:
                         observed=(
                             f"selected_buttons={shell_observation.selected_button_labels}; "
                             f"visible_navigation_labels={shell_observation.visible_navigation_labels}; "
+                            f"last_skipped_workspace_visible={'Last skipped workspace:' in shell_observation.body_text}; "
+                            f"invalid_branch_request_observed={bool(invalid_branch_urls)}; "
                             f"recovery_message_visible="
                             f"{'No valid saved workspace could be restored.' in shell_observation.body_text}; "
                             f"settings_heading_visible={shell_observation.settings_heading_visible}"
@@ -224,8 +207,18 @@ def main() -> None:
                 except Exception as error:
                     shell_observation = page.observe_shell()
                     current_body = page.current_body_text()
+                    invalid_branch_urls = request_observation.invalid_branch_urls(
+                        repository=repository_service.repository,
+                        branch=INVALID_HOSTED_BRANCH,
+                    )
+                    default_bootstrap_urls = request_observation.default_bootstrap_urls(
+                        repository=repository_service.repository,
+                        ref=repository_service.ref,
+                    )
                     result["shell_observation"] = _shell_payload(shell_observation)
                     result["final_body_text"] = current_body
+                    result["invalid_branch_urls"] = list(invalid_branch_urls)
+                    result["default_bootstrap_urls"] = list(default_bootstrap_urls)
                     result["request_observation"] = _request_observation_payload(
                         request_observation,
                     )

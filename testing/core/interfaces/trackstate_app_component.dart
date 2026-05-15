@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 
+import '../models/issue_search_result_selection_observation.dart';
+
 abstract interface class TrackStateAppComponent {
   Finder get goldenTarget;
 
@@ -37,6 +39,10 @@ abstract interface class TrackStateAppComponent {
 
   Future<void> openIssue(String key, String summary);
 
+  Future<void> enterJqlSearchQuery(String query);
+
+  Future<void> submitJqlSearch();
+
   Future<void> searchIssues(String query);
 
   Future<String?> readJqlSearchFieldValue();
@@ -55,6 +61,14 @@ abstract interface class TrackStateAppComponent {
     String text,
   );
 
+  Future<bool> isIssueSearchResultSelected(String key, String summary);
+
+  Future<IssueSearchResultSelectionObservation>
+  readIssueSearchResultSelectionObservation(
+    String key,
+    String summary, {
+    required bool expectedSelected,
+  });
   List<String> issueSearchResultTextsSnapshot(String key, String summary);
 
   Future<void> dragIssueToStatusColumn({
@@ -65,6 +79,8 @@ abstract interface class TrackStateAppComponent {
   });
 
   Future<void> expectIssueDetailVisible(String key);
+
+  Future<bool> isIssueDetailVisible(String key);
 
   Future<void> expectIssueDetailText(String key, String text);
 
