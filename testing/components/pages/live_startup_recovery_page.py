@@ -8,6 +8,9 @@ from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPa
 @dataclass(frozen=True)
 class StartupRecoveryShellObservation:
     body_text: str
+    location_href: str
+    location_hash: str
+    location_pathname: str
     selected_button_labels: tuple[str, ...]
     visible_navigation_labels: tuple[str, ...]
     visible_button_labels: tuple[str, ...]
@@ -39,6 +42,9 @@ class LiveStartupRecoveryPage:
 
     def open(self) -> None:
         self._tracker_page.open_entrypoint()
+
+    def open_route(self, route: str) -> str:
+        return self._tracker_page.open_route(route)
 
     def wait_for_shell_routed_to_settings(
         self,
@@ -128,10 +134,13 @@ class LiveStartupRecoveryPage:
                 .map((candidate) => normalize(candidate.innerText))
                 .filter((label) => label.length > 0);
               return {
-                bodyText,
-                selectedButtonLabels,
-                visibleNavigationLabels: requiredNavigationLabels.filter(
-                  (label) => bodyText.includes(label),
+                 bodyText,
+                 locationHref: window.location.href,
+                 locationHash: window.location.hash,
+                 locationPathname: window.location.pathname,
+                 selectedButtonLabels,
+                 visibleNavigationLabels: requiredNavigationLabels.filter(
+                   (label) => bodyText.includes(label),
                 ),
                 visibleButtonLabels,
                 retryVisible: visibleButtonLabels.includes('Retry'),
@@ -152,6 +161,9 @@ class LiveStartupRecoveryPage:
             )
         return StartupRecoveryShellObservation(
             body_text=str(payload["bodyText"]),
+            location_href=str(payload["locationHref"]),
+            location_hash=str(payload["locationHash"]),
+            location_pathname=str(payload["locationPathname"]),
             selected_button_labels=tuple(str(item) for item in payload["selectedButtonLabels"]),
             visible_navigation_labels=tuple(
                 str(item) for item in payload["visibleNavigationLabels"]
