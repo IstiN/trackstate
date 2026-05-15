@@ -6,7 +6,8 @@ user to **Project Settings**.
 The automation:
 1. opens the deployed TrackState web app in Chromium with an empty browser
    storage state
-2. verifies the workspace-profile storage keys are absent before startup runs
+2. verifies the app starts with no saved workspaces configured, accepting either
+   absent storage keys or an empty normalized workspace-state payload
 3. waits for startup initialization to resolve past the splash screen
 4. checks whether the final landing screen is **Project Settings** rather than
    the tracker dashboard

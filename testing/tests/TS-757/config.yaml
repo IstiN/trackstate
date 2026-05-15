@@ -5,5 +5,6 @@ platform: chromium
 dependencies:
   - Playwright for Python with Chromium installed
 notes:
-  - Opens the deployed TrackState web app in a fresh Playwright browser context with no saved workspace storage keys.
+  - Opens the deployed TrackState web app in a fresh Playwright browser context with no saved workspaces configured.
+  - Accepts either absent workspace-profile storage keys or an empty normalized workspace-state payload as the semantic empty-workspace precondition.
   - Verifies startup initialization dismisses the splash screen and routes the user to Project Settings instead of the tracker dashboard.

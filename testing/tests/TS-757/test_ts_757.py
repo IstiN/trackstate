@@ -93,8 +93,11 @@ def main() -> None:
                     action=REQUEST_STEPS[0],
                     observed=(
                         "Opened the deployed app in a fresh Chromium browser context. "
-                        "The saved-workspace storage keys were absent before startup: "
-                        f"{json.dumps(storage_snapshot, indent=2)}"
+                        "Confirmed the browser started with no saved workspaces "
+                        "configured, allowing either absent storage keys or an empty "
+                        "normalized workspace-state payload after startup repair. "
+                        f"Observed storage snapshot={json.dumps(storage_snapshot, indent=2)}; "
+                        f"normalized_workspace_state={json.dumps(result['normalized_workspace_state'], indent=2)}"
                     ),
                 )
 
@@ -212,14 +215,27 @@ def _decode_workspace_state(
 
 
 def _assert_empty_workspace_store(storage_snapshot: dict[str, str | None]) -> None:
-    unexpected_keys = {
-        key: value for key, value in storage_snapshot.items() if value is not None
-    }
-    if unexpected_keys:
+    decoded_state = _decode_workspace_state(storage_snapshot)
+    if decoded_state is None:
+        return
+    profiles = decoded_state.get("profiles", [])
+    if not isinstance(profiles, list):
+        raise AssertionError(
+            "Precondition failed: startup serialized workspace state, but it was not "
+            "a semantically empty saved-workspace configuration.\n"
+            f"Observed storage snapshot: {json.dumps(storage_snapshot, indent=2)}\n"
+            f"Observed normalized workspace state: {json.dumps(decoded_state, indent=2)}",
+        )
+    active_workspace_id = decoded_state.get("activeWorkspaceId")
+    has_active_workspace = (
+        isinstance(active_workspace_id, str) and active_workspace_id.strip() != ""
+    )
+    if profiles or has_active_workspace:
         raise AssertionError(
             "Precondition failed: the test did not start from an empty saved-workspace "
-            "state.\n"
-            f"Observed storage snapshot: {json.dumps(storage_snapshot, indent=2)}",
+            "configuration.\n"
+            f"Observed storage snapshot: {json.dumps(storage_snapshot, indent=2)}\n"
+            f"Observed normalized workspace state: {json.dumps(decoded_state, indent=2)}",
         )
 
 
@@ -440,12 +456,12 @@ def _bug_description(result: dict[str, object]) -> str:
         "```\n\n"
         "## Actual vs Expected\n"
         f"- **Expected:** {EXPECTED_RESULT}\n"
-        "- **Actual:** With both workspace-profile storage keys absent, startup "
-        "resolved into the tracker dashboard instead of Project Settings. The user "
-        "saw dashboard content such as `Open Issues`, `Create issue`, and "
-        "`Workspace switcher: istin/trackstate-setup, Hosted, Needs sign-in`, while "
-        "the expected `Project Settings` title and `Project settings administration` "
-        "heading never appeared.\n\n"
+        "- **Actual:** With no saved workspaces configured in a fresh browser "
+        "context, startup resolved into the tracker dashboard instead of Project "
+        "Settings. The user saw dashboard content such as `Open Issues`, `Create "
+        "issue`, and `Workspace switcher: istin/trackstate-setup, Hosted, Needs "
+        "sign-in`, while the expected `Project Settings` title and `Project "
+        "settings administration` heading never appeared.\n\n"
         "## Environment details\n"
         f"- **URL:** {result.get('app_url')}\n"
         "- **Browser:** Chromium via Playwright\n"
