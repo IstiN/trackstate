@@ -6,6 +6,7 @@ import platform
 import sys
 import traceback
 from pathlib import Path
+from uuid import uuid4
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -22,6 +23,9 @@ from testing.components.pages.trackstate_tracker_page import (  # noqa: E402
     TrackStateTrackerPage,
     WorkspaceSwitcherTriggerObservation,
 )
+from testing.components.services.live_setup_repository_git_ref_service import (  # noqa: E402
+    LiveSetupRepositoryGitRefService,
+)
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
 )
@@ -37,11 +41,14 @@ TICKET_KEY = "TS-758"
 TEST_CASE_TITLE = "Startup recovery - retry validation after fixing invalid workspace"
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-758/test_ts_758.py"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
+DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts758_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts758_failure.png"
 
@@ -68,7 +75,9 @@ SHELL_NAVIGATION_LABELS = (
     "Settings",
 )
 BOARD_HINT = TrackStateTrackerPage.BOARD_HINT
-INVALID_BRANCH = "ts758-temporarily-missing-branch"
+STARTUP_RECOVERY_MESSAGE = "No valid saved workspace could be restored."
+LAST_SKIPPED_MESSAGE = "Last skipped workspace:"
+TEMP_BRANCH_PREFIX = "ts758-retry-recovery-"
 
 
 @dataclass(frozen=True)
@@ -85,13 +94,18 @@ def main() -> None:
 
     config = load_live_setup_test_config()
     repository_service = LiveSetupRepositoryService(config=config)
+    git_ref_service = LiveSetupRepositoryGitRefService(
+        config=config,
+        token=repository_service.token,
+    )
     token = repository_service.token
-    workspace_state = _workspace_state(repository_service.repository)
+    invalid_branch = _temporary_branch_name()
+    workspace_state = _workspace_state(repository_service.repository, invalid_branch)
     request_observation = Ts758RetryWorkspaceObservation(
         repository=repository_service.repository,
-        invalid_ref=INVALID_BRANCH,
-        repaired_ref=repository_service.ref,
+        invalid_ref=invalid_branch,
     )
+    branch_created = False
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
         "test_case_title": TEST_CASE_TITLE,
@@ -102,8 +116,8 @@ def main() -> None:
         "os": platform.platform(),
         "run_command": RUN_COMMAND,
         "expected_result": EXPECTED_RESULT,
-        "invalid_branch": INVALID_BRANCH,
-        "repaired_ref": repository_service.ref,
+        "invalid_branch": invalid_branch,
+        "repair_source_ref": repository_service.ref,
         "preloaded_workspace_state": workspace_state,
         "steps": [],
         "human_verification": [],
@@ -119,8 +133,7 @@ def main() -> None:
             repository=repository_service.repository,
             token=token,
             workspace_state=workspace_state,
-            invalid_ref=INVALID_BRANCH,
-            repaired_ref=repository_service.ref,
+            invalid_ref=invalid_branch,
             observation=request_observation,
         )
         with create_live_tracker_app(
@@ -148,7 +161,7 @@ def main() -> None:
                 try:
                     shell_observation = page.wait_for_shell_routed_to_settings(timeout_ms=120_000)
                 except Exception as error:
-                    blocked_urls = tuple(request_observation.blocked_urls)
+                    initial_validation_urls = tuple(request_observation.initial_validation_urls)
                     shell_observation = page.observe_shell()
                     result["initial_shell_observation"] = _shell_payload(shell_observation)
                     body_text = tracker_page.body_text()
@@ -160,7 +173,7 @@ def main() -> None:
                             f"selected_buttons={shell_observation.selected_button_labels}; "
                             f"visible_navigation_labels={shell_observation.visible_navigation_labels}; "
                             f"connect_github_visible={shell_observation.connect_github_visible}; "
-                            f"blocked_bootstrap_requests={list(blocked_urls)!r}; "
+                            f"initial_validation_requests={list(initial_validation_urls)!r}; "
                             f"visible body text={body_text!r}"
                         )
                         failure_message = (
@@ -168,7 +181,7 @@ def main() -> None:
                             "workspace restore failure, but it did not expose the required "
                             "Retry action.\n"
                             f"Observed shell state: {_shell_payload(shell_observation)}\n"
-                            f"Observed blocked bootstrap requests: {list(blocked_urls)!r}\n"
+                            f"Observed initial validation requests: {list(initial_validation_urls)!r}\n"
                             f"Observed all requests: {request_observation.requested_urls!r}\n"
                             f"Observed body text:\n{body_text}"
                         )
@@ -176,14 +189,14 @@ def main() -> None:
                         observed = (
                             "The deployed app never reached the visible Startup Recovery "
                             "screen after the saved workspace validation flow. "
-                            f"Observed blocked bootstrap requests={list(blocked_urls)!r}; "
+                            f"observed initial validation requests={list(initial_validation_urls)!r}; "
                             f"observed all requests={request_observation.requested_urls!r}; "
                             f"visible body text={body_text!r}"
                         )
                         failure_message = (
                             "Step 2 failed: the app stayed on a broken startup state instead of "
                             "routing to the Startup Recovery screen.\n"
-                            f"Observed blocked bootstrap requests: {list(blocked_urls)!r}\n"
+                            f"Observed initial validation requests: {list(initial_validation_urls)!r}\n"
                             f"Observed all requests: {request_observation.requested_urls!r}\n"
                             f"Observed body text:\n{body_text}"
                         )
@@ -210,7 +223,7 @@ def main() -> None:
                     raise AssertionError(failure_message) from error
                 result["initial_shell_observation"] = _shell_payload(shell_observation)
                 _assert_settings_recovery_shell(shell_observation)
-                blocked_urls = tuple(request_observation.blocked_urls)
+                initial_validation_urls = tuple(request_observation.initial_validation_urls)
                 _record_step(
                     result,
                     step=2,
@@ -220,20 +233,36 @@ def main() -> None:
                         "The visible recovery UI routed to Project Settings with the "
                         f"Retry action available. selected_buttons={shell_observation.selected_button_labels}; "
                         f"visible_navigation_labels={shell_observation.visible_navigation_labels}; "
-                        f"blocked_bootstrap_requests={list(blocked_urls)!r}"
+                        f"initial_validation_requests={list(initial_validation_urls)!r}"
                     ),
                 )
 
+                repair_source_sha = git_ref_service.fetch_branch_head_sha(repository_service.ref)
+                repair_ref = git_ref_service.create_branch_ref(
+                    branch=invalid_branch,
+                    sha=repair_source_sha,
+                )
+                branch_created = True
+                _wait_for_branch_to_exist(
+                    git_ref_service=git_ref_service,
+                    branch=invalid_branch,
+                    expected_sha=repair_source_sha,
+                )
                 runtime.enable_repair()
+                result["repair_branch_ref"] = {
+                    "ref": repair_ref.ref,
+                    "sha": repair_ref.sha,
+                }
                 _record_step(
                     result,
                     step=3,
                     status="passed",
                     action=REQUEST_STEPS[2],
                     observed=(
-                        "Enabled the saved workspace to become valid by replaying requests "
-                        f"for `{INVALID_BRANCH}` against the live deployed ref "
-                        f"`{repository_service.ref}` on the next validation attempt."
+                        "Created the exact saved hosted branch in GitHub so the same saved "
+                        "workspace became valid before Retry. "
+                        f"branch={invalid_branch!r}; source_ref={repository_service.ref!r}; "
+                        f"source_sha={repair_source_sha!r}; created_ref={repair_ref.ref!r}"
                     ),
                 )
 
@@ -244,23 +273,36 @@ def main() -> None:
                     timeout_seconds=120,
                     interval_seconds=2,
                 )
-                replayed_urls = tuple(request_observation.replayed_urls)
+                post_repair_urls = tuple(request_observation.post_repair_validation_urls)
                 if not board_ready or not isinstance(post_retry, PostRetryObservation):
                     raise AssertionError(
                         "Step 4 failed: Retry re-requested the saved workspace, but the "
                         "deployed app never reached the interactive tracker shell.\n"
-                        f"Observed replayed requests: {request_observation.replayed_urls!r}\n"
+                        "Observed post-repair requests: "
+                        f"{request_observation.post_repair_validation_urls!r}\n"
                         f"Observed body text:\n{tracker_page.body_text()}",
                     )
-                if not replayed_urls:
+                if not post_repair_urls:
                     raise AssertionError(
                         "Step 4 failed: the app reached a new state after Retry, but no "
                         "revalidation request for the saved workspace was captured.\n"
                         f"Observed requests: {request_observation.requested_urls!r}\n"
                         f"Observed body text:\n{post_retry.body_text}",
                     )
+                post_retry_storage_snapshot = tracker_page.snapshot_local_storage(
+                    WORKSPACE_STORAGE_KEYS
+                )
+                post_retry_workspace_state = _decode_workspace_state(post_retry_storage_snapshot)
+                _assert_saved_workspace_restored(
+                    post_retry=post_retry,
+                    workspace_state=post_retry_workspace_state,
+                    repository=repository_service.repository,
+                    branch=invalid_branch,
+                )
 
                 result["post_retry_observation"] = _post_retry_payload(post_retry)
+                result["post_retry_storage_snapshot"] = post_retry_storage_snapshot
+                result["post_retry_workspace_state"] = post_retry_workspace_state
                 result["request_observation"] = _request_observation_payload(request_observation)
                 _record_step(
                     result,
@@ -268,10 +310,12 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[3],
                     observed=(
-                        "Retry triggered a new validation attempt for the saved workspace "
-                        "and the app opened the live tracker shell. "
-                        f"Replayed requests={list(replayed_urls)!r}; "
+                        "Retry revalidated the same saved workspace after the exact saved "
+                        "branch became available, cleared startup recovery, and opened the "
+                        "live tracker shell. "
+                        f"post_repair_requests={list(post_repair_urls)!r}; "
                         f"workspace_switcher={post_retry.switcher.aria_label!r}; "
+                        f"post_retry_workspace_state={post_retry_workspace_state!r}; "
                         f"board_excerpt={_snippet(post_retry.board_text)}"
                     ),
                 )
@@ -296,6 +340,7 @@ def main() -> None:
                     ),
                     observed=(
                         f"workspace_switcher={post_retry.switcher.aria_label!r}; "
+                        f"post_retry_workspace_state={post_retry_workspace_state!r}; "
                         f"visible_board_text={_snippet(post_retry.board_text)}"
                     ),
                 )
@@ -314,6 +359,20 @@ def main() -> None:
                 result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
                 result["final_body_text"] = tracker_page.body_text()
                 raise
+            finally:
+                if branch_created:
+                    try:
+                        git_ref_service.delete_branch_ref(invalid_branch)
+                        result["cleanup"] = {
+                            "deleted_branch": invalid_branch,
+                            "status": "passed",
+                        }
+                    except Exception as cleanup_error:  # pragma: no cover - best effort cleanup
+                        result["cleanup"] = {
+                            "deleted_branch": invalid_branch,
+                            "status": "failed",
+                            "error": _format_error(cleanup_error),
+                        }
     except Exception as error:
         result.setdefault("error", _format_error(error))
         result.setdefault("traceback", traceback.format_exc())
@@ -322,8 +381,12 @@ def main() -> None:
         raise
 
 
-def _workspace_state(repository: str) -> dict[str, object]:
-    hosted_id = f"hosted:{repository.lower()}@{INVALID_BRANCH}"
+def _temporary_branch_name() -> str:
+    return f"{TEMP_BRANCH_PREFIX}{uuid4().hex[:10]}"
+
+
+def _workspace_state(repository: str, branch: str) -> dict[str, object]:
+    hosted_id = f"hosted:{repository.lower()}@{branch}"
     return {
         "activeWorkspaceId": hosted_id,
         "migrationComplete": True,
@@ -333,8 +396,8 @@ def _workspace_state(repository: str) -> dict[str, object]:
                 "displayName": "Recovered hosted workspace",
                 "targetType": "hosted",
                 "target": repository,
-                "defaultBranch": INVALID_BRANCH,
-                "writeBranch": INVALID_BRANCH,
+                "defaultBranch": branch,
+                "writeBranch": branch,
                 "lastOpenedAt": "2026-05-15T12:00:00.000Z",
             },
         ],
@@ -403,15 +466,114 @@ def _probe_post_retry_shell(
         return str(error)
 
 
+def _wait_for_branch_to_exist(
+    *,
+    git_ref_service: LiveSetupRepositoryGitRefService,
+    branch: str,
+    expected_sha: str,
+) -> None:
+    ready, resolved_sha = poll_until(
+        probe=lambda: _branch_head_sha(git_ref_service, branch),
+        is_satisfied=lambda value: value == expected_sha,
+        timeout_seconds=30,
+        interval_seconds=2,
+    )
+    if not ready:
+        raise AssertionError(
+            "Step 3 failed: GitHub did not expose the repaired saved branch before Retry.\n"
+            f"Expected branch: {branch}\n"
+            f"Expected SHA: {expected_sha}\n"
+            f"Observed SHA: {resolved_sha!r}",
+        )
+
+
+def _branch_head_sha(
+    git_ref_service: LiveSetupRepositoryGitRefService,
+    branch: str,
+) -> str | None:
+    ref = git_ref_service.fetch_branch_ref(branch)
+    return ref.sha if ref is not None and ref.sha else None
+
+
+def _assert_saved_workspace_restored(
+    *,
+    post_retry: PostRetryObservation,
+    workspace_state: dict[str, object] | None,
+    repository: str,
+    branch: str,
+) -> None:
+    expected_workspace_id = f"hosted:{repository.lower()}@{branch}"
+    switcher_text = " ".join(
+        part for part in (post_retry.switcher.aria_label, post_retry.switcher.visible_text) if part
+    )
+    if repository.lower() not in switcher_text.lower():
+        raise AssertionError(
+            "Step 4 failed: the post-Retry workspace switcher did not point at the saved "
+            "hosted repository.\n"
+            f"Expected repository: {repository.lower()}\n"
+            f"Observed switcher: {post_retry.switcher.aria_label!r}",
+        )
+    if workspace_state is None:
+        raise AssertionError(
+            "Step 4 failed: the test could not decode workspace storage after Retry.\n"
+            f"Observed switcher: {post_retry.switcher.aria_label!r}\n"
+            f"Observed body text:\n{post_retry.body_text}",
+        )
+    active_workspace_id = workspace_state.get("activeWorkspaceId")
+    if active_workspace_id != expected_workspace_id:
+        raise AssertionError(
+            "Step 4 failed: Retry did not restore the repaired saved workspace as the "
+            "active workspace.\n"
+            f"Expected activeWorkspaceId: {expected_workspace_id!r}\n"
+            f"Observed workspace state: {workspace_state!r}",
+        )
+    profiles = workspace_state.get("profiles")
+    if not isinstance(profiles, list):
+        raise AssertionError(
+            "Step 4 failed: workspace storage did not contain a profiles list after Retry.\n"
+            f"Observed workspace state: {workspace_state!r}",
+        )
+    matching_profile = next(
+        (
+            profile
+            for profile in profiles
+            if isinstance(profile, dict) and profile.get("id") == expected_workspace_id
+        ),
+        None,
+    )
+    if matching_profile is None:
+        raise AssertionError(
+            "Step 4 failed: the repaired saved workspace profile was missing after Retry.\n"
+            f"Expected workspace id: {expected_workspace_id!r}\n"
+            f"Observed workspace state: {workspace_state!r}",
+        )
+    if (
+        matching_profile.get("defaultBranch") != branch
+        or matching_profile.get("writeBranch") != branch
+    ):
+        raise AssertionError(
+            "Step 4 failed: Retry restored a different hosted branch than the saved "
+            "workspace under test.\n"
+            f"Expected branch: {branch!r}\n"
+            f"Observed profile: {matching_profile!r}",
+        )
+    if STARTUP_RECOVERY_MESSAGE in post_retry.body_text or LAST_SKIPPED_MESSAGE in post_retry.body_text:
+        raise AssertionError(
+            "Step 4 failed: the app opened the tracker shell but left the startup recovery "
+            "message visible for the repaired workspace.\n"
+            f"Observed body text:\n{post_retry.body_text}",
+        )
+
+
 def _request_observation_payload(
     observation: Ts758RetryWorkspaceObservation,
 ) -> dict[str, object]:
     return {
         "requested_urls": list(observation.requested_urls),
-        "blocked_urls": list(observation.blocked_urls),
-        "replayed_urls": list(observation.replayed_urls),
-        "blocked_request_count": observation.blocked_request_count,
-        "replayed_request_count": observation.replayed_request_count,
+        "initial_validation_urls": list(observation.initial_validation_urls),
+        "post_repair_validation_urls": list(observation.post_repair_validation_urls),
+        "initial_validation_request_count": observation.initial_validation_request_count,
+        "post_repair_validation_request_count": observation.post_repair_validation_request_count,
     }
 
 
@@ -480,6 +642,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
+    _write_review_replies(result, passed=True)
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -502,6 +665,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    _write_review_replies(result, passed=False)
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -570,6 +734,46 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(result=result, passed=passed),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [thread for thread in threads if isinstance(thread, dict)]
+
+
+def _review_reply_text(result: dict[str, object], *, passed: bool) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else f"Re-ran `{RUN_COMMAND}`: failed with `{result.get('error', 'unknown error')}`."
+    )
+    return (
+        "Fixed the review concerns in the test harness: TS-758 now repairs the exact "
+        "saved hosted workspace by creating the saved GitHub branch instead of rewriting "
+        "invalid-branch requests, and the post-Retry assertions now require the same "
+        "saved workspace to stay active in browser storage while the startup recovery "
+        f"message is gone. {rerun_summary}"
+    )
+
+
 def _bug_description(result: dict[str, object]) -> str:
     steps = result.get("steps", [])
     step_map = {
@@ -609,7 +813,8 @@ def _bug_description(result: dict[str, object]) -> str:
         f"- **OS:** {result.get('os')}\n"
         f"- **Repository:** {result.get('repository')} @ {result.get('repository_ref')}\n"
         f"- **Invalid branch before repair:** {result.get('invalid_branch')}\n"
-        f"- **Repaired live ref:** {result.get('repaired_ref')}\n\n"
+        f"- **Repair source ref:** {result.get('repair_source_ref')}\n"
+        f"- **Repair branch ref:** {result.get('repair_branch_ref')}\n\n"
         "## Screenshots and logs\n"
         f"- **Screenshot:** `{result.get('screenshot')}`\n"
         f"- **Visible body text at failure:** {result.get('final_body_text')!r}\n"

@@ -6,15 +6,15 @@ interface instead of leaving the user stranded on the recovery screen.
 
 The automation:
 1. preloads one saved hosted workspace that initially fails validation because
-   its branch bootstrap requests return a live 404 through Playwright route
-   interception
+   its branch does not exist in the live GitHub repository
 2. launches the deployed TrackState app and waits for the Settings / startup
    recovery shell to appear
-3. changes the same saved workspace to a valid state by letting the intercepted
-   branch requests resolve against the live repository ref
+3. changes the same saved workspace to a valid state by creating that exact
+   saved branch in the live GitHub repository from the configured source ref
 4. clicks **Retry**
 5. verifies the app re-validates that saved workspace, opens the interactive
-   tracker shell, and lets the user reach the Board view
+   tracker shell, keeps that saved workspace active in browser storage, and
+   dismisses startup recovery
 
 ## Install dependencies
 
@@ -41,7 +41,8 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-758/test_ts_758.py
 ```text
 Pass: startup lands on the Settings / startup recovery screen while the saved
 workspace is invalid, Retry re-runs validation after the workspace becomes
-valid, and the app opens the live tracker shell.
+valid, restores that same saved workspace as active, and opens the live
+tracker shell.
 
 Fail: startup never reaches recovery, Retry never re-validates the saved
 workspace, or the app stays on recovery / a broken state instead of loading the
