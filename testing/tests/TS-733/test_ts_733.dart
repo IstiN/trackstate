@@ -202,6 +202,23 @@ void main() {
             issueAVisible &&
             issueAStatusVisible &&
             !issueBVisible;
+        _recordHumanVerification(
+          result,
+          check:
+              'Reviewed the visible JQL Search screen after the background refresh the way a user would: the query field, the rendered issue rows, and whether any issue detail pane stayed open.',
+          observed:
+              'query=${queryAfterSync ?? '<missing>'}; rows=${_formatSnapshot(rowsAfterSync)}; '
+              'issue_a_detail_visible=$issueADetailVisible; issue_b_detail_visible=$issueBDetailVisible; '
+              'empty_state_visible=$emptyStateVisible',
+        );
+        _recordHumanVerification(
+          result,
+          check:
+              'Confirmed the remaining visible search result still showed the user-facing Open status text in the correct result row.',
+          observed:
+              'issue_a_visible=$issueAVisible; issue_a_status_open=$issueAStatusVisible; '
+              'row_texts=${_formatSnapshot(screen.issueSearchResultTextsSnapshot(Ts733SyncRefreshRepository.issueAKey, Ts733SyncRefreshRepository.issueASummary))}',
+        );
         if (!selectionCleared) {
           _recordStep(
             result,
@@ -226,25 +243,6 @@ void main() {
           action: _requestSteps[2],
           observed: stepThreeObserved,
         );
-
-        _recordHumanVerification(
-          result,
-          check:
-              'Reviewed the visible JQL Search screen after the background refresh the way a user would: the query field, the rendered issue rows, and whether any issue detail pane stayed open.',
-          observed:
-              'query=${queryAfterSync ?? '<missing>'}; rows=${_formatSnapshot(rowsAfterSync)}; '
-              'issue_a_detail_visible=$issueADetailVisible; issue_b_detail_visible=$issueBDetailVisible; '
-              'empty_state_visible=$emptyStateVisible',
-        );
-        _recordHumanVerification(
-          result,
-          check:
-              'Confirmed the remaining visible search result still showed the user-facing Open status text in the correct result row.',
-          observed:
-              'issue_a_visible=$issueAVisible; issue_a_status_open=$issueAStatusVisible; '
-              'row_texts=${_formatSnapshot(screen.issueSearchResultTextsSnapshot(Ts733SyncRefreshRepository.issueAKey, Ts733SyncRefreshRepository.issueASummary))}',
-        );
-
         _writePassOutputs(result);
       } catch (error, stackTrace) {
         result['error'] = '${error.runtimeType}: $error';
@@ -338,14 +336,14 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
   final lines = <String>[
     'h3. Test Automation Result',
     '',
-     '*Status:* $statusLabel',
-     '*Test Case:* $_ticketKey - $_ticketSummary',
-     '',
-     'h4. What was tested',
-     '* Launched the production TrackStateApp and opened {noformat}JQL Search{noformat}.',
-     '* Submitted the visible query {noformat}${Ts733SyncRefreshRepository.query}{noformat} and selected {noformat}${Ts733SyncRefreshRepository.issueBKey}{noformat}.',
-     '* Simulated a background workspace sync update that changed {noformat}${Ts733SyncRefreshRepository.issueBKey}{noformat} from Open to Closed, then triggered the production app-resume workspace sync refresh path.',
-     '* Verified the visible query field, the rendered search-result rows, and whether any issue detail remained selected after the refresh.',
+    '*Status:* $statusLabel',
+    '*Test Case:* $_ticketKey - $_ticketSummary',
+    '',
+    'h4. What was tested',
+    '* Launched the production TrackStateApp and opened {noformat}JQL Search{noformat}.',
+    '* Submitted the visible query {noformat}${Ts733SyncRefreshRepository.query}{noformat} and selected {noformat}${Ts733SyncRefreshRepository.issueBKey}{noformat}.',
+    '* Simulated a background workspace sync update that changed {noformat}${Ts733SyncRefreshRepository.issueBKey}{noformat} from Open to Closed, then triggered the production app-resume workspace sync refresh path.',
+    '* Verified the visible query field, the rendered search-result rows, and whether any issue detail remained selected after the refresh.',
     '',
     'h4. Result',
     passed
@@ -395,11 +393,11 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '**Status:** $statusLabel  ',
     '**Test Case:** $_ticketKey - $_ticketSummary',
     '',
-     '### What was tested',
-     '- Launched the production TrackStateApp and opened `JQL Search`.',
-     '- Submitted the visible query `${Ts733SyncRefreshRepository.query}` and selected `${Ts733SyncRefreshRepository.issueBKey}`.',
-     '- Simulated a background workspace sync update that changed `${Ts733SyncRefreshRepository.issueBKey}` from Open to Closed, then triggered the production app-resume workspace sync refresh path.',
-     '- Verified the visible query field, the rendered search-result rows, and whether any issue detail remained selected after the refresh.',
+    '### What was tested',
+    '- Launched the production TrackStateApp and opened `JQL Search`.',
+    '- Submitted the visible query `${Ts733SyncRefreshRepository.query}` and selected `${Ts733SyncRefreshRepository.issueBKey}`.',
+    '- Simulated a background workspace sync update that changed `${Ts733SyncRefreshRepository.issueBKey}` from Open to Closed, then triggered the production app-resume workspace sync refresh path.',
+    '- Verified the visible query field, the rendered search-result rows, and whether any issue detail remained selected after the refresh.',
     '',
     '### Result',
     passed
@@ -445,12 +443,20 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
   final buffer = StringBuffer()
     ..writeln('# $_ticketKey')
     ..writeln()
-    ..writeln(passed ? 'Fixed the review blocker by driving refresh through the production app-resume sync path.' : 'Fixed the review blocker by driving refresh through the production app-resume sync path, but the ticket still fails against the product behavior.')
+    ..writeln(
+      passed
+          ? 'Fixed the review blocker by driving refresh through the production app-resume sync path.'
+          : 'Fixed the review blocker by driving refresh through the production app-resume sync path, but the ticket still fails against the product behavior.',
+    )
     ..writeln()
     ..writeln('New test result: ${passed ? 'PASSED' : 'FAILED'}.')
     ..writeln()
-    ..writeln('- Query: `${result['query'] ?? Ts733SyncRefreshRepository.query}`')
-    ..writeln('- Repository revision after refresh: `${result['repository_revision_after_sync'] ?? '<missing>'}`')
+    ..writeln(
+      '- Query: `${result['query'] ?? Ts733SyncRefreshRepository.query}`',
+    )
+    ..writeln(
+      '- Repository revision after refresh: `${result['repository_revision_after_sync'] ?? '<missing>'}`',
+    )
     ..writeln('- Key observation: `${_headlineObservation(result)}`');
 
   if (!passed) {
@@ -466,24 +472,24 @@ String _bugDescription(Map<String, Object?> result) {
   final lines = <String>[
     '# $_ticketKey - $_ticketSummary',
     '',
-     '## Steps to reproduce',
-     '1. ${_requestSteps[0]}',
-     '   - ${_stepOutcome(result, 1)}',
+    '## Steps to reproduce',
+    '1. ${_requestSteps[0]}',
+    '   - ${_stepOutcome(result, 1)}',
     '2. ${_requestSteps[1]}',
     '   - ${_stepOutcome(result, 2)}',
     '3. ${_requestSteps[2]}',
     '   - ${_stepOutcome(result, 3)}',
-     '',
-     '## Expected result',
-     'The visible JQL query `status = Open` should stay populated after the production app-resume workspace sync refresh. Issue-B should disappear from the results because it is now Closed, Issue-A should remain visible as the refreshed Open result, and no issue should stay selected.',
-     '',
-     '## Actual result',
-     'After the background sync refresh, the visible query was `${result['query_after_sync'] ?? '<missing>'}`, the visible rows were `${_formatSnapshot((result['rows_after_sync'] as List?)?.cast<String>() ?? const <String>[])}`, Issue-A detail visible was `${result['issue_a_detail_visible_after_sync'] ?? '<missing>'}`, and Issue-B detail visible was `${result['issue_b_detail_visible_after_sync'] ?? '<missing>'}`.',
-     '',
-     '## Missing or broken production capability',
-     'After the test triggers the same app-resume workspace sync surface used by the production app, the search surface still does not satisfy TS-733 unless the refreshed JQL results remove Issue-B and clear any visible issue selection. The failing command/output below captures the product-visible gap if the rerun still fails.',
-     '',
-     '## Exact error message / stack trace',
+    '',
+    '## Expected result',
+    'The visible JQL query `status = Open` should stay populated after the production app-resume workspace sync refresh. Issue-B should disappear from the results because it is now Closed, Issue-A should remain visible as the refreshed Open result, and no issue should stay selected.',
+    '',
+    '## Actual result',
+    'After the background sync refresh, the visible query was `${result['query_after_sync'] ?? '<missing>'}`, the visible rows were `${_formatSnapshot((result['rows_after_sync'] as List?)?.cast<String>() ?? const <String>[])}`, Issue-A detail visible was `${result['issue_a_detail_visible_after_sync'] ?? '<missing>'}`, and Issue-B detail visible was `${result['issue_b_detail_visible_after_sync'] ?? '<missing>'}`.',
+    '',
+    '## Missing or broken production capability',
+    'After the test triggers the same app-resume workspace sync surface used by the production app, the search surface still does not satisfy TS-733 unless the refreshed JQL results remove Issue-B and clear any visible issue selection. The failing command/output below captures the product-visible gap if the rerun still fails.',
+    '',
+    '## Exact error message / stack trace',
     '```text',
     '${result['error'] ?? '<missing>'}',
     '',
@@ -525,17 +531,12 @@ String _bugDescription(Map<String, Object?> result) {
 }
 
 String _reviewReplies(Map<String, Object?> result, {required bool passed}) {
-  final reply =
-      passed
-          ? 'Fixed: TS-733 now triggers the production workspace sync refresh through `AppLifecycleState.resumed`, matching the existing TS-734 coverage instead of only advancing test time after mutating the fixture. The rerun now exercises the real sync path and passes.'
-          : 'Fixed: TS-733 now triggers the production workspace sync refresh through `AppLifecycleState.resumed`, matching the existing TS-734 coverage instead of only advancing test time after mutating the fixture. The rerun now exercises the real sync path; the remaining failure is product-visible: ${result['error'] ?? 'see attached failure output'}.';
+  final reply = passed
+      ? 'Fixed: TS-733 now triggers the production workspace sync refresh through `AppLifecycleState.resumed`, matching the existing TS-734 coverage instead of only advancing test time after mutating the fixture. The rerun now exercises the real sync path and passes.'
+      : 'Fixed: TS-733 now triggers the production workspace sync refresh through `AppLifecycleState.resumed`, matching the existing TS-734 coverage instead of only advancing test time after mutating the fixture. The rerun now exercises the real sync path; the remaining failure is product-visible: ${result['error'] ?? 'see attached failure output'}.';
   return '${jsonEncode(<String, Object>{
     'replies': <Map<String, Object>>[
-      <String, Object>{
-        'inReplyToId': _reviewCommentId,
-        'threadId': _reviewThreadId,
-        'reply': reply,
-      },
+      <String, Object>{'inReplyToId': _reviewCommentId, 'threadId': _reviewThreadId, 'reply': reply},
     ],
   })}\n';
 }
