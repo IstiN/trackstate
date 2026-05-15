@@ -10,6 +10,7 @@ class StartupRecoveryShellObservation:
     body_text: str
     selected_button_labels: tuple[str, ...]
     visible_navigation_labels: tuple[str, ...]
+    visible_button_labels: tuple[str, ...]
     retry_visible: bool
     connect_github_visible: bool
     topbar_title_visible: bool
@@ -43,18 +44,39 @@ class LiveStartupRecoveryPage:
         self,
         *,
         timeout_ms: int = 120_000,
+        require_retry: bool = True,
     ) -> StartupRecoveryShellObservation:
         self._session.wait_for_function(
-            """
-            ({ requiredNavigationLabels, settingsHeading, topbarTitle }) => {
+            r"""
+            ({ requiredNavigationLabels, settingsHeading, topbarTitle, requireRetry }) => {
+              const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
               const bodyText = document.body?.innerText ?? '';
               const selectedLabels = Array.from(
                 document.querySelectorAll('flt-semantics[role="button"][aria-current="true"]'),
-              ).map((candidate) => (candidate.innerText ?? '').trim());
+              )
+                .map((candidate) => normalize(candidate.innerText))
+                .filter((label) => label.length > 0);
+              const visibleButtonLabels = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .filter(isVisible)
+                .map((candidate) => normalize(candidate.innerText))
+                .filter((label) => label.length > 0);
               return requiredNavigationLabels.every((label) => bodyText.includes(label))
                 && bodyText.includes(settingsHeading)
                 && bodyText.includes(topbarTitle)
-                && bodyText.includes('Retry')
+                && (!requireRetry || visibleButtonLabels.includes('Retry'))
                 && selectedLabels.includes('Settings');
             }
             """,
@@ -62,6 +84,7 @@ class LiveStartupRecoveryPage:
                 "requiredNavigationLabels": list(self._required_navigation_labels),
                 "settingsHeading": self._settings_heading,
                 "topbarTitle": self._topbar_title,
+                "requireRetry": require_retry,
             },
             timeout_ms=timeout_ms,
         )
@@ -69,13 +92,31 @@ class LiveStartupRecoveryPage:
 
     def observe_shell(self) -> StartupRecoveryShellObservation:
         payload = self._session.evaluate(
-            """
+            r"""
             (requiredNavigationLabels) => {
+              const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
               const bodyText = document.body?.innerText ?? '';
               const selectedButtonLabels = Array.from(
                 document.querySelectorAll('flt-semantics[role="button"][aria-current="true"]'),
               )
-                .map((candidate) => (candidate.innerText ?? '').trim())
+                .map((candidate) => normalize(candidate.innerText))
+                .filter((label) => label.length > 0);
+              const visibleButtonLabels = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .filter(isVisible)
+                .map((candidate) => normalize(candidate.innerText))
                 .filter((label) => label.length > 0);
               return {
                 bodyText,
@@ -83,7 +124,8 @@ class LiveStartupRecoveryPage:
                 visibleNavigationLabels: requiredNavigationLabels.filter(
                   (label) => bodyText.includes(label),
                 ),
-                retryVisible: bodyText.includes('Retry'),
+                visibleButtonLabels,
+                retryVisible: visibleButtonLabels.includes('Retry'),
                 connectGitHubVisible: bodyText.includes('Connect GitHub'),
                 topbarTitleVisible: bodyText.includes('Project Settings'),
                 settingsHeadingVisible: bodyText.includes(
@@ -105,10 +147,18 @@ class LiveStartupRecoveryPage:
             visible_navigation_labels=tuple(
                 str(item) for item in payload["visibleNavigationLabels"]
             ),
+            visible_button_labels=tuple(str(item) for item in payload["visibleButtonLabels"]),
             retry_visible=bool(payload["retryVisible"]),
             connect_github_visible=bool(payload["connectGitHubVisible"]),
             topbar_title_visible=bool(payload["topbarTitleVisible"]),
             settings_heading_visible=bool(payload["settingsHeadingVisible"]),
+        )
+
+    def click_retry(self, *, timeout_ms: int = 30_000) -> None:
+        self._session.click(
+            self._button_selector,
+            has_text="Retry",
+            timeout_ms=timeout_ms,
         )
 
     def current_body_text(self) -> str:
