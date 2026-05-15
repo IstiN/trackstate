@@ -165,6 +165,13 @@ def main() -> None:
                     result["shell_observation"] = _shell_payload(shell_observation)
                     result["invalid_branch_urls"] = list(invalid_branch_urls)
                     result["default_bootstrap_urls"] = list(default_bootstrap_urls)
+                    _assert_invalid_hosted_workspace_was_validated(
+                        invalid_branch_urls=invalid_branch_urls,
+                        repository=repository_service.repository,
+                        storage_snapshot=storage_snapshot,
+                        shell_observation=shell_observation,
+                        request_observation=request_observation,
+                    )
                     _assert_settings_recovery_shell(shell_observation)
                     result["request_observation"] = _request_observation_payload(
                         request_observation,
@@ -411,6 +418,28 @@ def _assert_settings_recovery_shell(
             "invalid-workspace recovery message.\n"
             f"Observed body text:\n{observation.body_text}",
         )
+
+
+def _assert_invalid_hosted_workspace_was_validated(
+    *,
+    invalid_branch_urls: list[str],
+    repository: str,
+    storage_snapshot: dict[str, str | None],
+    shell_observation: StartupRecoveryShellObservation,
+    request_observation: Ts727RestoreRequestObservation,
+) -> None:
+    if invalid_branch_urls:
+        return
+    raise AssertionError(
+        "Expected Result failed: startup never requested the configured invalid hosted "
+        f"workspace branch `{INVALID_HOSTED_BRANCH}`, so the test could not prove that "
+        "all saved workspace candidates were validated before the Settings recovery "
+        "fallback.\n"
+        f"Observed repository: {repository}\n"
+        f"Observed storage snapshot: {json.dumps(storage_snapshot, indent=2)}\n"
+        f"Observed shell state: {_shell_payload(shell_observation)}\n"
+        f"Raw observed requests: {list(request_observation.requested_urls)!r}"
+    )
 
 
 def _shell_payload(
