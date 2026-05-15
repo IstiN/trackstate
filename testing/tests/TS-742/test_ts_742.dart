@@ -75,16 +75,29 @@ void main() {
         final initialIssueBDetailVisible = await screen.isIssueDetailVisible(
           Ts742MatchingIssueSyncRepository.issueBKey,
         );
-        final initialIssueBSelected = await screen.isIssueSearchResultSelected(
-          Ts742MatchingIssueSyncRepository.issueBKey,
-          Ts742MatchingIssueSyncRepository.issueBSummary,
-        );
+        final initialSelectedObservation = await screen
+            .readIssueSearchResultSelectionObservation(
+              Ts742MatchingIssueSyncRepository.issueBKey,
+              Ts742MatchingIssueSyncRepository.issueBSummary,
+              expectedSelected: true,
+            );
+        final initialUnselectedObservation = await screen
+            .readIssueSearchResultSelectionObservation(
+              Ts742MatchingIssueSyncRepository.issueAKey,
+              Ts742MatchingIssueSyncRepository.issueASummary,
+              expectedSelected: false,
+            );
         final initialVisibleTexts = screen.visibleTextsSnapshot();
 
         result['initial_query'] = initialQuery ?? '<missing>';
         result['initial_rows'] = initialRows;
         result['initial_issue_b_detail_visible'] = initialIssueBDetailVisible;
-        result['initial_issue_b_selected_in_results'] = initialIssueBSelected;
+        result['initial_issue_b_selected_in_results'] =
+            initialSelectedObservation.usesExpectedTokens;
+        result['initial_selected_observation'] = initialSelectedObservation
+            .describe();
+        result['initial_unselected_observation'] = initialUnselectedObservation
+            .describe();
         result['initial_visible_texts'] = initialVisibleTexts;
         result['repository_revision_before_refresh'] =
             repository.repositoryRevision;
@@ -129,14 +142,18 @@ void main() {
           Ts742MatchingIssueSyncRepository.issueBSummary,
           'Open',
         );
-        final issueASelected = await screen.isIssueSearchResultSelected(
-          Ts742MatchingIssueSyncRepository.issueAKey,
-          Ts742MatchingIssueSyncRepository.issueASummary,
-        );
-        final issueBSelected = await screen.isIssueSearchResultSelected(
-          Ts742MatchingIssueSyncRepository.issueBKey,
-          Ts742MatchingIssueSyncRepository.issueBSummary,
-        );
+        final selectedObservationAfterRefresh = await screen
+            .readIssueSearchResultSelectionObservation(
+              Ts742MatchingIssueSyncRepository.issueBKey,
+              Ts742MatchingIssueSyncRepository.issueBSummary,
+              expectedSelected: true,
+            );
+        final unselectedObservationAfterRefresh = await screen
+            .readIssueSearchResultSelectionObservation(
+              Ts742MatchingIssueSyncRepository.issueAKey,
+              Ts742MatchingIssueSyncRepository.issueASummary,
+              expectedSelected: false,
+            );
         final issueADetailVisible = await screen.isIssueDetailVisible(
           Ts742MatchingIssueSyncRepository.issueAKey,
         );
@@ -163,8 +180,14 @@ void main() {
         result['issue_a_visible_after_refresh'] = issueAVisible;
         result['issue_b_visible_after_refresh'] = issueBVisible;
         result['issue_b_status_open_after_refresh'] = issueBStatusVisible;
-        result['issue_a_selected_after_refresh'] = issueASelected;
-        result['issue_b_selected_after_refresh'] = issueBSelected;
+        result['issue_a_selected_after_refresh'] =
+            unselectedObservationAfterRefresh.semanticsSelected;
+        result['issue_b_selected_after_refresh'] =
+            selectedObservationAfterRefresh.usesExpectedTokens;
+        result['selected_observation_after_refresh'] =
+            selectedObservationAfterRefresh.describe();
+        result['unselected_observation_after_refresh'] =
+            unselectedObservationAfterRefresh.describe();
         result['issue_a_detail_visible_after_refresh'] = issueADetailVisible;
         result['issue_b_detail_visible_after_refresh'] = issueBDetailVisible;
         result['updated_description_visible_after_refresh'] =
@@ -223,12 +246,13 @@ void main() {
         }
 
         final stepThreeObserved =
-            'initial_issue_b_selected=$initialIssueBSelected; '
+            'initial_selected=${initialSelectedObservation.describe()}; '
+            'initial_unselected=${initialUnselectedObservation.describe()}; '
             'issue_a_visible=$issueAVisible; '
             'issue_b_visible=$issueBVisible; '
             'issue_b_status_open=$issueBStatusVisible; '
-            'issue_a_selected=$issueASelected; '
-            'issue_b_selected=$issueBSelected; '
+            'selected_after=${selectedObservationAfterRefresh.describe()}; '
+            'unselected_after=${unselectedObservationAfterRefresh.describe()}; '
             'issue_a_detail_visible=$issueADetailVisible; '
             'issue_b_detail_visible=$issueBDetailVisible; '
             'updated_description_visible=$updatedDescriptionVisible; '
@@ -236,12 +260,19 @@ void main() {
             'visible_rows=${_formatSnapshot(rowsAfterRefresh)}; '
             'visible_texts=${_formatSnapshot(visibleTextsAfterRefresh)}';
         final selectionPreserved =
-            initialIssueBSelected &&
+            initialSelectedObservation.usesExpectedTokens &&
+            initialUnselectedObservation.usesExpectedTokens &&
             issueAVisible &&
             issueBVisible &&
             issueBStatusVisible &&
-            !issueASelected &&
-            issueBSelected &&
+            selectedObservationAfterRefresh.usesExpectedTokens &&
+            unselectedObservationAfterRefresh.usesExpectedTokens &&
+            selectedObservationAfterRefresh.matchesRenderedTokens(
+              initialSelectedObservation,
+            ) &&
+            unselectedObservationAfterRefresh.matchesRenderedTokens(
+              initialUnselectedObservation,
+            ) &&
             !issueADetailVisible &&
             issueBDetailVisible &&
             updatedDescriptionVisible;
@@ -252,6 +283,27 @@ void main() {
           action: _requestSteps[2],
           observed: stepThreeObserved,
         );
+        _recordHumanVerification(
+          result,
+          check:
+              'Viewed the visible JQL Search list after the refresh and confirmed whether the same issue row still showed the production-visible selected/highlight styling while its detail panel stayed open.',
+          observed:
+              'matched_expected=$selectionPreserved; query=${queryAfterRefresh ?? '<missing>'}; '
+              'rows=${_formatSnapshot(rowsAfterRefresh)}; selected_before=${initialSelectedObservation.describe()}; '
+              'selected_after=${selectedObservationAfterRefresh.describe()}; '
+              'unselected_before=${initialUnselectedObservation.describe()}; '
+              'unselected_after=${unselectedObservationAfterRefresh.describe()}; '
+              'issue_a_detail_visible=$issueADetailVisible; issue_b_detail_visible=$issueBDetailVisible',
+        );
+        _recordHumanVerification(
+          result,
+          check:
+              'Reviewed the selected issue detail exactly where a user would read it and confirmed whether the refreshed description text was visible in the detail panel.',
+          observed:
+              'matched_expected=$updatedDescriptionVisible; '
+              'updated_description_visible=$updatedDescriptionVisible; '
+              'visible_texts=${_formatSnapshot(visibleTextsAfterRefresh)}',
+        );
         if (!selectionPreserved) {
           throw AssertionError(
             'Step 3 failed: after the refresh updated a non-query field for '
@@ -259,29 +311,12 @@ void main() {
             'state was not preserved as expected.\n'
             'Expected: both Open rows remain visible, '
             '${Ts742MatchingIssueSyncRepository.issueBKey} keeps a visible '
-            'selected/highlight state in the JQL Search results list, '
+            'selected/highlight style in the JQL Search results list, '
             'and the detail panel shows the updated description.\n'
             'Observed: $stepThreeObserved\n'
             'Visible semantics: ${_formatSnapshot(visibleSemanticsAfterRefresh)}',
           );
         }
-
-        _recordHumanVerification(
-          result,
-          check:
-              'Viewed the visible JQL Search list after the refresh and confirmed the same issue row still showed the production-visible selected/highlight state while its detail panel stayed open.',
-          observed:
-              'query=${queryAfterRefresh ?? '<missing>'}; rows=${_formatSnapshot(rowsAfterRefresh)}; '
-              'issue_a_selected=$issueASelected; issue_b_selected=$issueBSelected; '
-              'issue_a_detail_visible=$issueADetailVisible; issue_b_detail_visible=$issueBDetailVisible',
-        );
-        _recordHumanVerification(
-          result,
-          check:
-              'Reviewed the selected issue detail exactly where a user would read it and confirmed the refreshed description text was visible in the detail panel.',
-          observed:
-              'updated_description_visible=$updatedDescriptionVisible; visible_texts=${_formatSnapshot(visibleTextsAfterRefresh)}',
-        );
 
         _writePassOutputs(result);
       } catch (error, stackTrace) {
@@ -337,6 +372,7 @@ File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
+File get _reviewRepliesFile => File('${_outputsDir.path}/review_replies.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
 
 Future<void> _resumeApp(WidgetTester tester) async {
@@ -388,6 +424,7 @@ void _writePassOutputs(Map<String, Object?> result) {
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: true));
 }
 
 void _writeFailureOutputs(Map<String, Object?> result) {
@@ -399,6 +436,7 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
 }
 
@@ -513,8 +551,8 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
     '# $_ticketKey',
     '',
     passed
-        ? 'Added a widget regression for the matching-issue sync-refresh path and confirmed the selected JQL result stays open while its detail panel updates.'
-        : 'Added a widget regression for the matching-issue sync-refresh path, but the product behavior still fails the ticket expectations.',
+        ? 'Resolved the merge conflict by keeping the selection-style observation coverage and reran the matching-issue sync-refresh regression successfully.'
+        : 'Resolved the merge conflict by keeping the selection-style observation coverage, but the product behavior still fails the ticket expectations on rerun.',
     '',
     '- Status: ${passed ? 'PASSED' : 'FAILED'}',
     '- Query: `${result['query'] ?? Ts742MatchingIssueSyncRepository.query}`',
@@ -540,6 +578,17 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
   }
 
   return '${lines.join('\n')}\n';
+}
+
+String _reviewReplies(Map<String, Object?> result, {required bool passed}) {
+  final reply = passed
+      ? 'Fixed: resolved the merge conflicts by keeping the main-branch selection-style observation APIs in `testing/`, updated TS-742 to assert the production-visible selected/highlight styling before and after refresh, and reran the test successfully.'
+      : 'Fixed: resolved the merge conflicts by keeping the main-branch selection-style observation APIs in `testing/`, updated TS-742 to assert the production-visible selected/highlight styling before and after refresh, and reran the test. The remaining failure is product-visible: ${result['error'] ?? 'see attached failure output'}.';
+  return '${jsonEncode(<String, Object>{
+    'replies': <Map<String, Object?>>[
+      <String, Object?>{'inReplyToId': null, 'threadId': null, 'reply': reply},
+    ],
+  })}\n';
 }
 
 String _bugDescription(Map<String, Object?> result) {
@@ -577,13 +626,13 @@ String _bugDescription(Map<String, Object?> result) {
     '   - ${_stepOutcome(result, 3)}',
     '',
     '## Expected result',
-    'The issue should remain selected in the JQL Search results list with a visible selected/highlight state, the detail panel should stay open for the same issue, the updated description should become visible, and the active query should remain unchanged.',
+    'The issue should remain selected in the JQL Search results list with the visible selected/highlight styling preserved, the detail panel should stay open for the same issue, the updated description should become visible, and the active query should remain unchanged.',
     '',
     '## Actual result',
     'After the refresh, the query field showed `$observedQuery`, the visible rows were `$observedRows`, the visible texts were `$observedTexts`, and the visible semantics were `$observedSemantics`.',
     '',
     '## Missing or broken production capability',
-    'The production JQL Search results list does not expose an observable selected/highlight state for the currently opened issue row. Because the active result row never reports a selected semantics flag or other production-visible selected state, the test cannot verify that the required selection highlight is preserved across the app-resume sync refresh.',
+    'The production JQL Search results list does not preserve the expected production-visible selected/highlight styling for the currently opened issue row across the app-resume sync refresh. The row-level styling signals recorded below capture whether the background, border, emphasized issue key color, and emphasized summary weight stayed attached to the same issue after refresh.',
     '',
     '## Exact error message / stack trace',
     '```text',
@@ -593,8 +642,8 @@ String _bugDescription(Map<String, Object?> result) {
     '```',
     '',
     '## Actual vs Expected',
-    '- **Expected:** query remains `${result['query'] ?? Ts742MatchingIssueSyncRepository.query}`, both Open result rows remain visible, `${Ts742MatchingIssueSyncRepository.issueBKey}` keeps a visible selected/highlight state, and the detail panel shows `${Ts742MatchingIssueSyncRepository.updatedIssueBDescription}`.',
-    '- **Actual:** query was `$observedQuery`, issue A visible=`${result['issue_a_visible_after_refresh'] ?? '<missing>'}`, issue B visible=`${result['issue_b_visible_after_refresh'] ?? '<missing>'}`, issue A selected=`${result['issue_a_selected_after_refresh'] ?? '<missing>'}`, issue B selected=`${result['issue_b_selected_after_refresh'] ?? '<missing>'}`, issue A detail visible=`${result['issue_a_detail_visible_after_refresh'] ?? '<missing>'}`, issue B detail visible=`${result['issue_b_detail_visible_after_refresh'] ?? '<missing>'}`, updated description visible=`${result['updated_description_visible_after_refresh'] ?? '<missing>'}`.',
+    '- **Expected:** query remains `${result['query'] ?? Ts742MatchingIssueSyncRepository.query}`, both Open result rows remain visible, `${Ts742MatchingIssueSyncRepository.issueBKey}` keeps the expected visible selected/highlight styling, and the detail panel shows `${Ts742MatchingIssueSyncRepository.updatedIssueBDescription}`.',
+    '- **Actual:** query was `$observedQuery`, issue A visible=`${result['issue_a_visible_after_refresh'] ?? '<missing>'}`, issue B visible=`${result['issue_b_visible_after_refresh'] ?? '<missing>'}`, issue B selected styling matched expected=`${result['issue_b_selected_after_refresh'] ?? '<missing>'}`, issue A detail visible=`${result['issue_a_detail_visible_after_refresh'] ?? '<missing>'}`, issue B detail visible=`${result['issue_b_detail_visible_after_refresh'] ?? '<missing>'}`, updated description visible=`${result['updated_description_visible_after_refresh'] ?? '<missing>'}`.',
     '',
     '## Environment',
     '- URL: local Flutter test execution',
@@ -609,11 +658,15 @@ String _bugDescription(Map<String, Object?> result) {
     'Initial query: ${result['initial_query'] ?? '<missing>'}',
     'Initial rows: ${_formatSnapshot(_stringList(result['initial_rows']))}',
     'Initial Issue-B detail visible: ${result['initial_issue_b_detail_visible'] ?? '<missing>'}',
-    'Initial Issue-B selected in results: ${result['initial_issue_b_selected_in_results'] ?? '<missing>'}',
+    'Initial Issue-B selection styling matched expected: ${result['initial_issue_b_selected_in_results'] ?? '<missing>'}',
+    'Initial selected observation: ${result['initial_selected_observation'] ?? '<missing>'}',
+    'Initial unselected observation: ${result['initial_unselected_observation'] ?? '<missing>'}',
     'Repository revision before refresh: ${result['repository_revision_before_refresh'] ?? '<missing>'}',
     'Repository revision after refresh: ${result['repository_revision_after_refresh'] ?? '<missing>'}',
     'Sync check count: ${result['sync_check_count'] ?? '<missing>'}',
-    'Issue-B selected after refresh/failure: ${result['issue_b_selected_after_refresh'] ?? '<missing>'}',
+    'Issue-B selected styling matched after refresh/failure: ${result['issue_b_selected_after_refresh'] ?? '<missing>'}',
+    'Selected observation after refresh/failure: ${result['selected_observation_after_refresh'] ?? '<missing>'}',
+    'Unselected observation after refresh/failure: ${result['unselected_observation_after_refresh'] ?? '<missing>'}',
     'Issue-B row texts after refresh/failure: ${_formatSnapshot(_stringList(result['issue_b_row_texts_after_refresh']))}',
     'Observed query after refresh/failure: $observedQuery',
     'Observed rows after refresh/failure: $observedRows',
