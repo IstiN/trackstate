@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 
+import '../models/issue_search_result_selection_observation.dart';
+
 abstract interface class TrackStateAppComponent {
   Finder get goldenTarget;
 
@@ -57,6 +59,12 @@ abstract interface class TrackStateAppComponent {
 
   Future<bool> isIssueSearchResultSelected(String key, String summary);
 
+  Future<IssueSearchResultSelectionObservation>
+  readIssueSearchResultSelectionObservation(
+    String key,
+    String summary, {
+    required bool expectedSelected,
+  });
   List<String> issueSearchResultTextsSnapshot(String key, String summary);
 
   Future<void> dragIssueToStatusColumn({

@@ -7,18 +7,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
-import 'support/ts742_matching_issue_sync_repository.dart';
+import '../TS-742/support/ts742_matching_issue_sync_repository.dart';
 
-const String _ticketKey = 'TS-742';
+const String _ticketKey = 'TS-748';
 const String _ticketSummary =
-    'Sync refresh with matching issue — selection and detail panel preserved';
-const String _testFilePath = 'testing/tests/TS-742/test_ts_742.dart';
+    'JQL Search selection — selection CSS styles applied and maintained';
+const String _testFilePath = 'testing/tests/TS-748/test_ts_748.dart';
 const String _runCommand =
-    'flutter test testing/tests/TS-742/test_ts_742.dart --reporter expanded';
+    'flutter test testing/tests/TS-748/test_ts_748.dart --reporter expanded';
 const List<String> _requestSteps = <String>[
-  "Simulate a background sync update that modifies a non-queried field (for example the description) of the selected issue while its status remains 'Open'.",
-  'Trigger the workspace sync refresh (for example via app resume).',
-  'Observe the issue selection in the list and the state of the detail panel.',
+  'Inspect the UI properties (CSS classes or style attributes) of the selected issue row to confirm the highlight is active.',
+  'Trigger a workspace sync refresh.',
+  'Re-inspect the UI properties of the same selected issue row after the refresh completes.',
 ];
 
 void main() {
@@ -29,7 +29,7 @@ void main() {
   });
 
   testWidgets(
-    'TS-742 preserves the selected issue and updates its detail panel when the issue still matches the active query',
+    'TS-748 preserves the selected JQL Search row styling before and after a matching sync refresh',
     (tester) async {
       final result = <String, Object?>{
         'ticket': _ticketKey,
@@ -71,9 +71,11 @@ void main() {
         );
 
         final initialQuery = await screen.readJqlSearchFieldValue();
-        final initialRows = screen.visibleIssueSearchResultLabelsSnapshot();
         final initialIssueBDetailVisible = await screen.isIssueDetailVisible(
           Ts742MatchingIssueSyncRepository.issueBKey,
+        );
+        final initialIssueADetailVisible = await screen.isIssueDetailVisible(
+          Ts742MatchingIssueSyncRepository.issueAKey,
         );
         final initialSelectedObservation = await screen
             .readIssueSearchResultSelectionObservation(
@@ -87,30 +89,59 @@ void main() {
               Ts742MatchingIssueSyncRepository.issueASummary,
               expectedSelected: false,
             );
+        final initialRows = screen.visibleIssueSearchResultLabelsSnapshot();
         final initialVisibleTexts = screen.visibleTextsSnapshot();
 
         result['initial_query'] = initialQuery ?? '<missing>';
-        result['initial_rows'] = initialRows;
         result['initial_issue_b_detail_visible'] = initialIssueBDetailVisible;
-        result['initial_issue_b_selected_in_results'] =
-            initialSelectedObservation.usesExpectedTokens;
+        result['initial_issue_a_detail_visible'] = initialIssueADetailVisible;
         result['initial_selected_observation'] = initialSelectedObservation
             .describe();
         result['initial_unselected_observation'] = initialUnselectedObservation
             .describe();
+        result['initial_rows'] = initialRows;
         result['initial_visible_texts'] = initialVisibleTexts;
         result['repository_revision_before_refresh'] =
             repository.repositoryRevision;
 
         if (initialQuery != Ts742MatchingIssueSyncRepository.query ||
-            !initialIssueBDetailVisible) {
+            !initialIssueBDetailVisible ||
+            initialIssueADetailVisible) {
           throw AssertionError(
-            'Precondition failed: TS-742 expected the visible query to be '
-            '"${Ts742MatchingIssueSyncRepository.query}" and '
-            '${Ts742MatchingIssueSyncRepository.issueBKey} to be selected '
-            'before the background refresh.\n'
+            'Precondition failed: TS-748 expected the visible query to be '
+            '"${Ts742MatchingIssueSyncRepository.query}", only '
+            '${Ts742MatchingIssueSyncRepository.issueBKey} to have an open '
+            'detail panel, and the JQL Search results to remain visible before '
+            'the refresh.\n'
             'Observed query: ${initialQuery ?? '<missing>'}\n'
+            'Issue-A detail visible: $initialIssueADetailVisible\n'
             'Issue-B detail visible: $initialIssueBDetailVisible\n'
+            'Visible rows: ${_formatSnapshot(initialRows)}\n'
+            'Visible texts: ${_formatSnapshot(initialVisibleTexts)}',
+          );
+        }
+
+        final stepOneObserved =
+            'selected=${initialSelectedObservation.describe()}; '
+            'unselected=${initialUnselectedObservation.describe()}; '
+            'detail_visible=$initialIssueBDetailVisible';
+        final stepOnePassed =
+            initialSelectedObservation.usesExpectedTokens &&
+            initialUnselectedObservation.usesExpectedTokens &&
+            initialIssueBDetailVisible &&
+            !initialIssueADetailVisible;
+        _recordStep(
+          result,
+          step: 1,
+          status: stepOnePassed ? 'passed' : 'failed',
+          action: _requestSteps[0],
+          observed: stepOneObserved,
+        );
+        if (!stepOnePassed) {
+          throw AssertionError(
+            'Step 1 failed: the selected JQL Search row did not expose the '
+            'expected production-visible selection styling before the refresh.\n'
+            'Observed: $stepOneObserved\n'
             'Visible rows: ${_formatSnapshot(initialRows)}\n'
             'Visible texts: ${_formatSnapshot(initialVisibleTexts)}',
           );
@@ -124,24 +155,18 @@ void main() {
           timeout: const Duration(seconds: 10),
         );
 
+        final queryAfterRefresh = await screen.readJqlSearchFieldValue();
+        final issueBDetailVisible = await screen.isIssueDetailVisible(
+          Ts742MatchingIssueSyncRepository.issueBKey,
+        );
+        final issueADetailVisible = await screen.isIssueDetailVisible(
+          Ts742MatchingIssueSyncRepository.issueAKey,
+        );
+        final updatedDescriptionVisible = await screen.isTextVisible(
+          Ts742MatchingIssueSyncRepository.updatedIssueBDescription,
+        );
         final rowsAfterRefresh = screen
             .visibleIssueSearchResultLabelsSnapshot();
-        final queryAfterRefresh = await screen.readJqlSearchFieldValue();
-        final issueAVisible = rowsAfterRefresh.any(
-          (label) => label.contains(
-            'Open ${Ts742MatchingIssueSyncRepository.issueAKey} ${Ts742MatchingIssueSyncRepository.issueASummary}',
-          ),
-        );
-        final issueBVisible = rowsAfterRefresh.any(
-          (label) => label.contains(
-            'Open ${Ts742MatchingIssueSyncRepository.issueBKey} ${Ts742MatchingIssueSyncRepository.issueBSummary}',
-          ),
-        );
-        final issueBStatusVisible = await screen.isIssueSearchResultTextVisible(
-          Ts742MatchingIssueSyncRepository.issueBKey,
-          Ts742MatchingIssueSyncRepository.issueBSummary,
-          'Open',
-        );
         final selectedObservationAfterRefresh = await screen
             .readIssueSearchResultSelectionObservation(
               Ts742MatchingIssueSyncRepository.issueBKey,
@@ -154,20 +179,6 @@ void main() {
               Ts742MatchingIssueSyncRepository.issueASummary,
               expectedSelected: false,
             );
-        final issueADetailVisible = await screen.isIssueDetailVisible(
-          Ts742MatchingIssueSyncRepository.issueAKey,
-        );
-        final issueBDetailVisible = await screen.isIssueDetailVisible(
-          Ts742MatchingIssueSyncRepository.issueBKey,
-        );
-        final updatedDescriptionVisible = await screen.isTextVisible(
-          Ts742MatchingIssueSyncRepository.updatedIssueBDescription,
-        );
-        final issueBRowTextsAfterRefresh = screen
-            .issueSearchResultTextsSnapshot(
-              Ts742MatchingIssueSyncRepository.issueBKey,
-              Ts742MatchingIssueSyncRepository.issueBSummary,
-            );
         final visibleTextsAfterRefresh = screen.visibleTextsSnapshot();
         final visibleSemanticsAfterRefresh = screen
             .visibleSemanticsLabelsSnapshot();
@@ -176,58 +187,31 @@ void main() {
         result['repository_revision_after_refresh'] =
             repository.repositoryRevision;
         result['query_after_refresh'] = queryAfterRefresh ?? '<missing>';
-        result['rows_after_refresh'] = rowsAfterRefresh;
-        result['issue_a_visible_after_refresh'] = issueAVisible;
-        result['issue_b_visible_after_refresh'] = issueBVisible;
-        result['issue_b_status_open_after_refresh'] = issueBStatusVisible;
-        result['issue_a_selected_after_refresh'] =
-            unselectedObservationAfterRefresh.semanticsSelected;
-        result['issue_b_selected_after_refresh'] =
-            selectedObservationAfterRefresh.usesExpectedTokens;
+        result['issue_b_detail_visible_after_refresh'] = issueBDetailVisible;
+        result['issue_a_detail_visible_after_refresh'] = issueADetailVisible;
+        result['updated_description_visible_after_refresh'] =
+            updatedDescriptionVisible;
         result['selected_observation_after_refresh'] =
             selectedObservationAfterRefresh.describe();
         result['unselected_observation_after_refresh'] =
             unselectedObservationAfterRefresh.describe();
-        result['issue_a_detail_visible_after_refresh'] = issueADetailVisible;
-        result['issue_b_detail_visible_after_refresh'] = issueBDetailVisible;
-        result['updated_description_visible_after_refresh'] =
-            updatedDescriptionVisible;
-        result['issue_b_row_texts_after_refresh'] = issueBRowTextsAfterRefresh;
+        result['rows_after_refresh'] = rowsAfterRefresh;
         result['visible_texts_after_refresh'] = visibleTextsAfterRefresh;
         result['visible_semantics_after_refresh'] =
             visibleSemanticsAfterRefresh;
 
-        final stepOneObserved =
+        final stepTwoObserved =
             'sync_check_count=${repository.syncCheckCount}; '
             'repository_revision_before=${result['repository_revision_before_refresh']}; '
             'repository_revision_after=${repository.repositoryRevision}; '
+            'query_after_refresh=${queryAfterRefresh ?? '<missing>'}; '
             'updated_description_visible=$updatedDescriptionVisible';
-        final stepOnePassed =
+        final stepTwoPassed =
             repository.syncCheckCount >= 2 &&
             repository.repositoryRevision !=
                 result['repository_revision_before_refresh'] &&
+            queryAfterRefresh == Ts742MatchingIssueSyncRepository.query &&
             updatedDescriptionVisible;
-        _recordStep(
-          result,
-          step: 1,
-          status: stepOnePassed ? 'passed' : 'failed',
-          action: _requestSteps[0],
-          observed: stepOneObserved,
-        );
-        if (!stepOnePassed) {
-          throw AssertionError(
-            'Step 1 failed: the production background sync did not apply the '
-            'selected issue description update before the refresh assertions ran.\n'
-            'Observed: $stepOneObserved\n'
-            'Visible texts: ${_formatSnapshot(visibleTextsAfterRefresh)}',
-          );
-        }
-
-        final stepTwoObserved =
-            'query_after_refresh=${queryAfterRefresh ?? '<missing>'}; '
-            'repository_revision_after=${repository.repositoryRevision}';
-        final stepTwoPassed =
-            queryAfterRefresh == Ts742MatchingIssueSyncRepository.query;
         _recordStep(
           result,
           step: 2,
@@ -237,34 +221,24 @@ void main() {
         );
         if (!stepTwoPassed) {
           throw AssertionError(
-            'Step 2 failed: the visible JQL query field did not preserve the '
-            'submitted query after the refresh.\n'
-            'Expected query: ${Ts742MatchingIssueSyncRepository.query}\n'
-            'Observed query: ${queryAfterRefresh ?? '<missing>'}\n'
-            'Visible rows: ${_formatSnapshot(rowsAfterRefresh)}',
+            'Step 2 failed: the production app-resume workspace sync refresh '
+            'did not complete in the expected state before the post-refresh '
+            'style assertions ran.\n'
+            'Observed: $stepTwoObserved\n'
+            'Visible rows: ${_formatSnapshot(rowsAfterRefresh)}\n'
+            'Visible texts: ${_formatSnapshot(visibleTextsAfterRefresh)}',
           );
         }
 
         final stepThreeObserved =
-            'initial_selected=${initialSelectedObservation.describe()}; '
-            'initial_unselected=${initialUnselectedObservation.describe()}; '
-            'issue_a_visible=$issueAVisible; '
-            'issue_b_visible=$issueBVisible; '
-            'issue_b_status_open=$issueBStatusVisible; '
             'selected_after=${selectedObservationAfterRefresh.describe()}; '
+            'selected_before=${initialSelectedObservation.describe()}; '
             'unselected_after=${unselectedObservationAfterRefresh.describe()}; '
-            'issue_a_detail_visible=$issueADetailVisible; '
+            'unselected_before=${initialUnselectedObservation.describe()}; '
             'issue_b_detail_visible=$issueBDetailVisible; '
-            'updated_description_visible=$updatedDescriptionVisible; '
-            'issue_b_row_texts=${_formatSnapshot(issueBRowTextsAfterRefresh)}; '
-            'visible_rows=${_formatSnapshot(rowsAfterRefresh)}; '
-            'visible_texts=${_formatSnapshot(visibleTextsAfterRefresh)}';
-        final selectionPreserved =
-            initialSelectedObservation.usesExpectedTokens &&
-            initialUnselectedObservation.usesExpectedTokens &&
-            issueAVisible &&
-            issueBVisible &&
-            issueBStatusVisible &&
+            'issue_a_detail_visible=$issueADetailVisible; '
+            'updated_description_visible=$updatedDescriptionVisible';
+        final stepThreePassed =
             selectedObservationAfterRefresh.usesExpectedTokens &&
             unselectedObservationAfterRefresh.usesExpectedTokens &&
             selectedObservationAfterRefresh.matchesRenderedTokens(
@@ -273,50 +247,43 @@ void main() {
             unselectedObservationAfterRefresh.matchesRenderedTokens(
               initialUnselectedObservation,
             ) &&
-            !issueADetailVisible &&
             issueBDetailVisible &&
+            !issueADetailVisible &&
             updatedDescriptionVisible;
         _recordStep(
           result,
           step: 3,
-          status: selectionPreserved ? 'passed' : 'failed',
+          status: stepThreePassed ? 'passed' : 'failed',
           action: _requestSteps[2],
           observed: stepThreeObserved,
         );
-        _recordHumanVerification(
-          result,
-          check:
-              'Viewed the visible JQL Search list after the refresh and confirmed whether the same issue row still showed the production-visible selected/highlight styling while its detail panel stayed open.',
-          observed:
-              'matched_expected=$selectionPreserved; query=${queryAfterRefresh ?? '<missing>'}; '
-              'rows=${_formatSnapshot(rowsAfterRefresh)}; selected_before=${initialSelectedObservation.describe()}; '
-              'selected_after=${selectedObservationAfterRefresh.describe()}; '
-              'unselected_before=${initialUnselectedObservation.describe()}; '
-              'unselected_after=${unselectedObservationAfterRefresh.describe()}; '
-              'issue_a_detail_visible=$issueADetailVisible; issue_b_detail_visible=$issueBDetailVisible',
-        );
-        _recordHumanVerification(
-          result,
-          check:
-              'Reviewed the selected issue detail exactly where a user would read it and confirmed whether the refreshed description text was visible in the detail panel.',
-          observed:
-              'matched_expected=$updatedDescriptionVisible; '
-              'updated_description_visible=$updatedDescriptionVisible; '
-              'visible_texts=${_formatSnapshot(visibleTextsAfterRefresh)}',
-        );
-        if (!selectionPreserved) {
+        if (!stepThreePassed) {
           throw AssertionError(
-            'Step 3 failed: after the refresh updated a non-query field for '
-            '${Ts742MatchingIssueSyncRepository.issueBKey}, the visible selection '
-            'state was not preserved as expected.\n'
-            'Expected: both Open rows remain visible, '
-            '${Ts742MatchingIssueSyncRepository.issueBKey} keeps a visible '
-            'selected/highlight style in the JQL Search results list, '
-            'and the detail panel shows the updated description.\n'
+            'Step 3 failed: after the matching sync refresh completed, the '
+            'selected JQL Search row did not keep the same production-visible '
+            'selection styling indicators.\n'
+            'Expected selected row styling to stay consistent before and after '
+            'refresh while the detail panel remained open for '
+            '${Ts742MatchingIssueSyncRepository.issueBKey}.\n'
             'Observed: $stepThreeObserved\n'
             'Visible semantics: ${_formatSnapshot(visibleSemanticsAfterRefresh)}',
           );
         }
+
+        _recordHumanVerification(
+          result,
+          check:
+              'Reviewed the same visible JQL Search row a user would rely on and confirmed the selected issue stayed visually highlighted with the selection background, border, emphasized issue key color, and emphasized summary weight.',
+          observed:
+              'before=${initialSelectedObservation.describe()}; after=${selectedObservationAfterRefresh.describe()}',
+        );
+        _recordHumanVerification(
+          result,
+          check:
+              'Confirmed the sibling unselected row remained visibly unselected so the highlight stayed isolated to the active issue while the refreshed description stayed open in the detail panel.',
+          observed:
+              'before=${initialUnselectedObservation.describe()}; after=${unselectedObservationAfterRefresh.describe()}; issue_b_detail_visible=$issueBDetailVisible; updated_description_visible=$updatedDescriptionVisible',
+        );
 
         _writePassOutputs(result);
       } catch (error, stackTrace) {
@@ -372,7 +339,6 @@ File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
-File get _reviewRepliesFile => File('${_outputsDir.path}/review_replies.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
 
 Future<void> _resumeApp(WidgetTester tester) async {
@@ -424,7 +390,6 @@ void _writePassOutputs(Map<String, Object?> result) {
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
-  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: true));
 }
 
 void _writeFailureOutputs(Map<String, Object?> result) {
@@ -436,7 +401,6 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
-  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
 }
 
@@ -450,13 +414,13 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '',
     'h4. What was tested',
     '* Opened the production {noformat}JQL Search{noformat} surface and ran the active query {noformat}${result['query']}{noformat}.',
-    '* Selected {noformat}${Ts742MatchingIssueSyncRepository.issueBKey}{noformat} and verified its detail panel showed the original description before the sync.',
-    '* Triggered a production app-resume workspace sync refresh after updating only the selected issue description while its status stayed Open.',
-    '* Checked that the query stayed visible, both Open result rows remained visible, and the selected issue detail panel stayed open with the refreshed description text.',
+    '* Selected {noformat}${Ts742MatchingIssueSyncRepository.issueBKey}{noformat} and inspected the production-visible selection styling on the search result row before the refresh.',
+    '* Triggered the production app-resume workspace sync refresh after updating only the selected issue description while its status stayed Open.',
+    '* Re-inspected the same selected row after refresh and checked that the selected semantics flag, selection background, selection border, issue key emphasis, and summary emphasis stayed applied while the updated description remained visible.',
     '',
     'h4. Result',
     passed
-        ? '* Matched the expected result: the active query stayed populated, the selected issue remained selected, and the detail panel showed the updated issue details after the refresh.'
+        ? '* Matched the expected result: the selected row consistently exposed the expected selection styling indicators before and after the refresh, while an unselected sibling row remained unselected.'
         : '* Did not match the expected result. See the failed step details and exact error below.',
     '* Environment: {noformat}flutter test / ${Platform.operatingSystem}{noformat}',
     '* Repository revision after refresh: {noformat}${result['repository_revision_after_refresh'] ?? '<missing>'}{noformat}',
@@ -503,13 +467,13 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '',
     '### What was tested',
     '- Opened the production `JQL Search` surface and ran the active query `${result['query']}`.',
-    '- Selected `${Ts742MatchingIssueSyncRepository.issueBKey}` and verified its detail panel showed the original description before the sync.',
-    '- Triggered a production app-resume workspace sync refresh after updating only the selected issue description while its status stayed Open.',
-    '- Checked that the query stayed visible, both Open result rows remained visible, and the selected issue detail panel stayed open with the refreshed description text.',
+    '- Selected `${Ts742MatchingIssueSyncRepository.issueBKey}` and inspected the production-visible selection styling on the search result row before the refresh.',
+    '- Triggered the production app-resume workspace sync refresh after updating only the selected issue description while its status stayed Open.',
+    '- Re-inspected the same selected row after refresh and checked that the selected semantics flag, selection background, selection border, issue key emphasis, and summary emphasis stayed applied while the updated description remained visible.',
     '',
     '### Result',
     passed
-        ? '- Matched the expected result: the active query stayed populated, the selected issue remained selected, and the detail panel showed the updated issue details after the refresh.'
+        ? '- Matched the expected result: the selected row consistently exposed the expected selection styling indicators before and after the refresh, while an unselected sibling row remained unselected.'
         : '- Did not match the expected result. See the failed step details and exact error below.',
     '- Environment: `flutter test / ${Platform.operatingSystem}`',
     '- Repository revision after refresh: `${result['repository_revision_after_refresh'] ?? '<missing>'}`',
@@ -551,18 +515,17 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
     '# $_ticketKey',
     '',
     passed
-        ? 'Resolved the merge conflict by keeping the selection-style observation coverage and reran the matching-issue sync-refresh regression successfully.'
-        : 'Resolved the merge conflict by keeping the selection-style observation coverage, but the product behavior still fails the ticket expectations on rerun.',
+        ? 'Added a widget regression for JQL Search selection styling and confirmed the selected row keeps the expected visual selection indicators across a matching sync refresh.'
+        : 'Added a widget regression for JQL Search selection styling, but the product behavior still fails the ticket expectations.',
     '',
     '- Status: ${passed ? 'PASSED' : 'FAILED'}',
     '- Query: `${result['query'] ?? Ts742MatchingIssueSyncRepository.query}`',
     '- Repository revision before refresh: `${result['repository_revision_before_refresh'] ?? '<missing>'}`',
     '- Repository revision after refresh: `${result['repository_revision_after_refresh'] ?? '<missing>'}`',
-    '- Initial selected-row state visible: `${result['initial_issue_b_selected_in_results'] ?? '<missing>'}`',
-    '- Final selected-row state visible: `${result['issue_b_selected_after_refresh'] ?? '<missing>'}`',
-    '- Final query value: `${result['query_after_refresh'] ?? result['query_at_failure'] ?? '<missing>'}`',
-    '- Final visible rows: `${_formatSnapshot(_stringList(result['rows_after_refresh'] ?? result['visible_rows_at_failure']))}`',
-    '- Updated description visible: `${result['updated_description_visible_after_refresh'] ?? '<missing>'}`',
+    '- Initial selected-row observation: `${result['initial_selected_observation'] ?? '<missing>'}`',
+    '- Final selected-row observation: `${result['selected_observation_after_refresh'] ?? '<missing>'}`',
+    '- Initial unselected-row observation: `${result['initial_unselected_observation'] ?? '<missing>'}`',
+    '- Final unselected-row observation: `${result['unselected_observation_after_refresh'] ?? '<missing>'}`',
   ];
 
   if (!passed) {
@@ -578,17 +541,6 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
   }
 
   return '${lines.join('\n')}\n';
-}
-
-String _reviewReplies(Map<String, Object?> result, {required bool passed}) {
-  final reply = passed
-      ? 'Fixed: resolved the merge conflicts by keeping the main-branch selection-style observation APIs in `testing/`, updated TS-742 to assert the production-visible selected/highlight styling before and after refresh, and reran the test successfully.'
-      : 'Fixed: resolved the merge conflicts by keeping the main-branch selection-style observation APIs in `testing/`, updated TS-742 to assert the production-visible selected/highlight styling before and after refresh, and reran the test. The remaining failure is product-visible: ${result['error'] ?? 'see attached failure output'}.';
-  return '${jsonEncode(<String, Object>{
-    'replies': <Map<String, Object?>>[
-      <String, Object?>{'inReplyToId': null, 'threadId': null, 'reply': reply},
-    ],
-  })}\n';
 }
 
 String _bugDescription(Map<String, Object?> result) {
@@ -626,13 +578,10 @@ String _bugDescription(Map<String, Object?> result) {
     '   - ${_stepOutcome(result, 3)}',
     '',
     '## Expected result',
-    'The issue should remain selected in the JQL Search results list with the visible selected/highlight styling preserved, the detail panel should stay open for the same issue, the updated description should become visible, and the active query should remain unchanged.',
+    'The selected issue row should expose the expected production-visible selection styling indicators before and after the refresh, including the selected semantics state, selection highlight background, selection border, emphasized issue key color, and emphasized summary text, while the detail panel stays open with the refreshed description.',
     '',
     '## Actual result',
-    'After the refresh, the query field showed `$observedQuery`, the visible rows were `$observedRows`, the visible texts were `$observedTexts`, and the visible semantics were `$observedSemantics`.',
-    '',
-    '## Missing or broken production capability',
-    'The production JQL Search results list does not preserve the expected production-visible selected/highlight styling for the currently opened issue row across the app-resume sync refresh. The row-level styling signals recorded below capture whether the background, border, emphasized issue key color, and emphasized summary weight stayed attached to the same issue after refresh.',
+    'After the run, the query field showed `$observedQuery`, the visible rows were `$observedRows`, the visible texts were `$observedTexts`, and the visible semantics were `$observedSemantics`.',
     '',
     '## Exact error message / stack trace',
     '```text',
@@ -642,8 +591,8 @@ String _bugDescription(Map<String, Object?> result) {
     '```',
     '',
     '## Actual vs Expected',
-    '- **Expected:** query remains `${result['query'] ?? Ts742MatchingIssueSyncRepository.query}`, both Open result rows remain visible, `${Ts742MatchingIssueSyncRepository.issueBKey}` keeps the expected visible selected/highlight styling, and the detail panel shows `${Ts742MatchingIssueSyncRepository.updatedIssueBDescription}`.',
-    '- **Actual:** query was `$observedQuery`, issue A visible=`${result['issue_a_visible_after_refresh'] ?? '<missing>'}`, issue B visible=`${result['issue_b_visible_after_refresh'] ?? '<missing>'}`, issue B selected styling matched expected=`${result['issue_b_selected_after_refresh'] ?? '<missing>'}`, issue A detail visible=`${result['issue_a_detail_visible_after_refresh'] ?? '<missing>'}`, issue B detail visible=`${result['issue_b_detail_visible_after_refresh'] ?? '<missing>'}`, updated description visible=`${result['updated_description_visible_after_refresh'] ?? '<missing>'}`.',
+    '- **Expected:** `${Ts742MatchingIssueSyncRepository.issueBKey}` stays visibly selected with the same selection styling before and after refresh, `${Ts742MatchingIssueSyncRepository.issueAKey}` stays visibly unselected, the query remains `${result['query'] ?? Ts742MatchingIssueSyncRepository.query}`, and the detail panel shows `${Ts742MatchingIssueSyncRepository.updatedIssueBDescription}`.',
+    '- **Actual:** initial selected observation=`${result['initial_selected_observation'] ?? '<missing>'}`, final selected observation=`${result['selected_observation_after_refresh'] ?? '<missing>'}`, initial unselected observation=`${result['initial_unselected_observation'] ?? '<missing>'}`, final unselected observation=`${result['unselected_observation_after_refresh'] ?? '<missing>'}`, issue B detail visible after refresh=`${result['issue_b_detail_visible_after_refresh'] ?? '<missing>'}`, issue A detail visible after refresh=`${result['issue_a_detail_visible_after_refresh'] ?? '<missing>'}`, updated description visible=`${result['updated_description_visible_after_refresh'] ?? '<missing>'}`.',
     '',
     '## Environment',
     '- URL: local Flutter test execution',
@@ -655,20 +604,15 @@ String _bugDescription(Map<String, Object?> result) {
     '',
     '## Relevant logs',
     '```text',
-    'Initial query: ${result['initial_query'] ?? '<missing>'}',
-    'Initial rows: ${_formatSnapshot(_stringList(result['initial_rows']))}',
-    'Initial Issue-B detail visible: ${result['initial_issue_b_detail_visible'] ?? '<missing>'}',
-    'Initial Issue-B selection styling matched expected: ${result['initial_issue_b_selected_in_results'] ?? '<missing>'}',
     'Initial selected observation: ${result['initial_selected_observation'] ?? '<missing>'}',
     'Initial unselected observation: ${result['initial_unselected_observation'] ?? '<missing>'}',
+    'Final selected observation: ${result['selected_observation_after_refresh'] ?? '<missing>'}',
+    'Final unselected observation: ${result['unselected_observation_after_refresh'] ?? '<missing>'}',
+    'Initial query: ${result['initial_query'] ?? '<missing>'}',
+    'Observed query after refresh/failure: $observedQuery',
     'Repository revision before refresh: ${result['repository_revision_before_refresh'] ?? '<missing>'}',
     'Repository revision after refresh: ${result['repository_revision_after_refresh'] ?? '<missing>'}',
     'Sync check count: ${result['sync_check_count'] ?? '<missing>'}',
-    'Issue-B selected styling matched after refresh/failure: ${result['issue_b_selected_after_refresh'] ?? '<missing>'}',
-    'Selected observation after refresh/failure: ${result['selected_observation_after_refresh'] ?? '<missing>'}',
-    'Unselected observation after refresh/failure: ${result['unselected_observation_after_refresh'] ?? '<missing>'}',
-    'Issue-B row texts after refresh/failure: ${_formatSnapshot(_stringList(result['issue_b_row_texts_after_refresh']))}',
-    'Observed query after refresh/failure: $observedQuery',
     'Observed rows after refresh/failure: $observedRows',
     'Observed texts after refresh/failure: $observedTexts',
     'Observed semantics after refresh/failure: $observedSemantics',
