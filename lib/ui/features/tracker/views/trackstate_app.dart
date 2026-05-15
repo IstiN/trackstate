@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -53,6 +53,24 @@ typedef LocalRepositoryConfigurationApplier =
       required String defaultBranch,
       required String writeBranch,
     });
+
+@visibleForTesting
+bool shouldOpenProjectSettingsForStartupWithoutSavedWorkspaces({
+  required bool isWeb,
+  required bool hasRepository,
+  required bool hasProfiles,
+}) {
+  return isWeb && !hasRepository && !hasProfiles;
+}
+
+@visibleForTesting
+bool shouldShowWorkspaceOnboardingForStartup({
+  required bool isWeb,
+  required bool hasRepository,
+  required bool hasProfiles,
+}) {
+  return !isWeb && !hasRepository && !hasProfiles;
+}
 
 class TrackStateApp extends StatefulWidget {
   const TrackStateApp({
@@ -453,6 +471,12 @@ class _TrackStateAppState extends State<TrackStateApp>
 
   Future<void> _initializeWorkspaceProfiles() async {
     final loadedState = await widget.workspaceProfileService.loadState();
+    final startsWithoutSavedWorkspaces =
+        shouldOpenProjectSettingsForStartupWithoutSavedWorkspaces(
+          isWeb: kIsWeb,
+          hasRepository: widget.repository != null,
+          hasProfiles: loadedState.hasProfiles,
+        );
     if (!mounted) {
       return;
     }
@@ -512,10 +536,17 @@ class _TrackStateAppState extends State<TrackStateApp>
       _showsWorkspaceOnboarding = _shouldShowWorkspaceOnboarding(migratedState);
       _workspaceProfilesReady = true;
     });
+    if (startsWithoutSavedWorkspaces) {
+      viewModel.openProjectSettings();
+    }
   }
 
   bool _shouldShowWorkspaceOnboarding(WorkspaceProfilesState state) {
-    return !kIsWeb && widget.repository == null && !state.hasProfiles;
+    return shouldShowWorkspaceOnboardingForStartup(
+      isWeb: kIsWeb,
+      hasRepository: widget.repository != null,
+      hasProfiles: state.hasProfiles,
+    );
   }
 
   Future<void> _switchToLocalRepository({
@@ -723,6 +754,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       _createIssuePrefill = null;
       _showsWorkspaceOnboarding = false;
       _workspaceProfilesReady = true;
+      _pendingWorkspaceRestoreFailure = null;
       if (workspaceState != null) {
         _workspaceState = workspaceState;
       } else if (prepared.workspace != null) {
@@ -777,6 +809,38 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
     await _switchToWorkspace(workspace);
+  }
+
+  Future<void> _retryWorkspaceRestore() async {
+    if (widget.repository != null) {
+      return;
+    }
+    final nextState = await widget.workspaceProfileService.loadState();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _workspaceState = nextState;
+      _workspaceProfilesReady = true;
+    });
+    await _refreshWorkspaceSwitcherState(nextState);
+    final restored = await _restoreWorkspaceFromSavedState(nextState);
+    if (restored) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    if (_pendingWorkspaceRestoreFailure case final failure?) {
+      viewModel.showMessage(
+        TrackerMessage.workspaceRestoreFailed(
+          workspaceName: failure.workspaceName,
+          reason: failure.reason,
+        ),
+      );
+    }
+    viewModel.openProjectSettings();
+    setState(() {});
   }
 
   Future<void> _deleteWorkspaceProfile(WorkspaceProfile workspace) async {
@@ -1044,6 +1108,8 @@ class _TrackStateAppState extends State<TrackStateApp>
                   onApplyLocalGitConfiguration: _switchToLocalRepository,
                   onSelectWorkspace: _selectWorkspaceProfile,
                   onDeleteWorkspace: _deleteWorkspaceProfile,
+                  workspaceRestoreFailure: _pendingWorkspaceRestoreFailure,
+                  onRetryWorkspaceRestore: _retryWorkspaceRestore,
                   attachmentPicker: widget.attachmentPicker,
                 ),
         );
@@ -1066,6 +1132,8 @@ class _TrackerHome extends StatelessWidget {
     required this.onApplyLocalGitConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.workspaceRestoreFailure,
+    required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
   });
 
@@ -1082,6 +1150,8 @@ class _TrackerHome extends StatelessWidget {
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
 
   @override
@@ -1168,6 +1238,8 @@ class _TrackerHome extends StatelessWidget {
                               onApplyLocalGitConfiguration,
                           onSelectWorkspace: onSelectWorkspace,
                           onDeleteWorkspace: onDeleteWorkspace,
+                          workspaceRestoreFailure: workspaceRestoreFailure,
+                          onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                           attachmentPicker: attachmentPicker,
                         )
                       : _DesktopShell(
@@ -1185,6 +1257,8 @@ class _TrackerHome extends StatelessWidget {
                               onApplyLocalGitConfiguration,
                           onSelectWorkspace: onSelectWorkspace,
                           onDeleteWorkspace: onDeleteWorkspace,
+                          workspaceRestoreFailure: workspaceRestoreFailure,
+                          onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                           attachmentPicker: attachmentPicker,
                         ),
                 ),
@@ -2087,6 +2161,8 @@ class _DesktopShell extends StatelessWidget {
     required this.onApplyLocalGitConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.workspaceRestoreFailure,
+    required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
   });
 
@@ -2103,6 +2179,8 @@ class _DesktopShell extends StatelessWidget {
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
 
   @override
@@ -2124,6 +2202,8 @@ class _DesktopShell extends StatelessWidget {
             workspaces: workspaces,
             onSelectWorkspace: onSelectWorkspace,
             onDeleteWorkspace: onDeleteWorkspace,
+            workspaceRestoreFailure: workspaceRestoreFailure,
+            onRetryWorkspaceRestore: onRetryWorkspaceRestore,
             attachmentPicker: attachmentPicker,
           ),
         ),
@@ -2146,6 +2226,8 @@ class _MobileShell extends StatelessWidget {
     required this.onApplyLocalGitConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.workspaceRestoreFailure,
+    required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
   });
 
@@ -2162,6 +2244,8 @@ class _MobileShell extends StatelessWidget {
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
 
   @override
@@ -2180,6 +2264,8 @@ class _MobileShell extends StatelessWidget {
       workspaces: workspaces,
       onSelectWorkspace: onSelectWorkspace,
       onDeleteWorkspace: onDeleteWorkspace,
+      workspaceRestoreFailure: workspaceRestoreFailure,
+      onRetryWorkspaceRestore: onRetryWorkspaceRestore,
       attachmentPicker: attachmentPicker,
     );
   }
@@ -2199,6 +2285,8 @@ class _TrackerMainPane extends StatelessWidget {
     required this.workspaces,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.workspaceRestoreFailure,
+    required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
     this.compact = false,
   });
@@ -2217,6 +2305,8 @@ class _TrackerMainPane extends StatelessWidget {
   final WorkspaceProfilesState workspaces;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
 
   @override
@@ -2244,6 +2334,8 @@ class _TrackerMainPane extends StatelessWidget {
                 workspaces: workspaces,
                 onSelectWorkspace: onSelectWorkspace,
                 onDeleteWorkspace: onDeleteWorkspace,
+                workspaceRestoreFailure: workspaceRestoreFailure,
+                onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                 attachmentPicker: attachmentPicker,
               ),
             ),
@@ -3530,6 +3622,8 @@ class _SectionBody extends StatelessWidget {
     required this.workspaces,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.workspaceRestoreFailure,
+    required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
     this.compact = false,
   });
@@ -3540,11 +3634,16 @@ class _SectionBody extends StatelessWidget {
   final WorkspaceProfilesState workspaces;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    final showsWorkspaceRestoreRecovery =
+        workspaceRestoreFailure != null &&
+        viewModel.section == TrackerSection.settings;
     final body = switch (viewModel.section) {
       TrackerSection.dashboard => _Dashboard(viewModel: viewModel),
       TrackerSection.board => _Board(viewModel: viewModel),
@@ -3563,6 +3662,8 @@ class _SectionBody extends StatelessWidget {
         workspaces: workspaces,
         onSelectWorkspace: onSelectWorkspace,
         onDeleteWorkspace: onDeleteWorkspace,
+        workspaceRestoreFailure: workspaceRestoreFailure,
+        onRetryWorkspaceRestore: onRetryWorkspaceRestore,
       ),
     };
     return SingleChildScrollView(
@@ -3573,7 +3674,10 @@ class _SectionBody extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (viewModel.message != null) ...[
+              if (viewModel.message != null &&
+                  !(showsWorkspaceRestoreRecovery &&
+                      viewModel.message?.kind ==
+                          TrackerMessageKind.workspaceRestoreFailed)) ...[
                 _MessageBanner(
                   message: viewModel.message!,
                   onDismiss: viewModel.dismissMessage,
@@ -4110,6 +4214,8 @@ class _Settings extends StatefulWidget {
     required this.workspaces,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.workspaceRestoreFailure,
+    required this.onRetryWorkspaceRestore,
   });
 
   final TrackerViewModel viewModel;
@@ -4117,6 +4223,8 @@ class _Settings extends StatefulWidget {
   final WorkspaceProfilesState workspaces;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final VoidCallback onRetryWorkspaceRestore;
 
   @override
   State<_Settings> createState() => _SettingsState();
@@ -4243,6 +4351,7 @@ class _SettingsState extends State<_Settings> {
     final l10n = AppLocalizations.of(context)!;
     final project = widget.viewModel.project!;
     final hostedLabel = _repositoryAccessLabel(l10n, widget.viewModel);
+    final workspaceRestoreFailure = widget.workspaceRestoreFailure;
     final selectorChildren = <Widget>[
       if (widget.viewModel.supportsGitHubAuth) ...[
         _SettingsProviderButton(
@@ -4314,7 +4423,19 @@ class _SettingsState extends State<_Settings> {
           ),
           const SizedBox(height: 16),
         ],
-        if (widget.viewModel.startupRecovery case final recovery?) ...[
+        if (workspaceRestoreFailure != null) ...[
+          _AccessCallout(
+            semanticLabel: l10n.startupRecovery,
+            title: l10n.startupRecovery,
+            message: l10n.workspaceRestoreFailed(
+              workspaceRestoreFailure.workspaceName,
+              workspaceRestoreFailure.reason,
+            ),
+            primaryActionLabel: l10n.retry,
+            onPrimaryAction: widget.onRetryWorkspaceRestore,
+          ),
+          const SizedBox(height: 16),
+        ] else if (widget.viewModel.startupRecovery case final recovery?) ...[
           _AccessCallout(
             semanticLabel: l10n.startupRecovery,
             title: _startupRecoveryTitle(l10n, recovery),

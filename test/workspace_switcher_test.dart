@@ -132,7 +132,8 @@ void main() {
                 required String repositoryPath,
                 required String defaultBranch,
                 required String writeBranch,
-              }) async => throw StateError('Missing repository $repositoryPath'),
+              }) async =>
+                  throw StateError('Missing repository $repositoryPath'),
           openHostedRepository:
               ({
                 required String repository,
@@ -150,7 +151,97 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Project Settings'), findsOneWidget);
-      expect(find.text('GitHub startup limit reached'), findsOneWidget);
+      expect(
+        find.textContaining('No valid saved workspace could be restored.'),
+        findsOneWidget,
+      );
+      expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'saved workspace recovery keeps Retry visible and revalidates invalid workspaces',
+    (tester) async {
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'local:/tmp/missing@main',
+              displayName: 'broken-local',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/missing',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:broken/repo@definitely-missing-branch',
+              displayName: 'broken/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'broken/repo',
+              defaultBranch: 'definitely-missing-branch',
+              writeBranch: 'definitely-missing-branch',
+            ),
+          ],
+          activeWorkspaceId: 'local:/tmp/missing@main',
+          migrationComplete: true,
+        ),
+      );
+      var hostedValidationAttempts = 0;
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: DemoTrackStateRepository.new,
+          workspaceProfileService: service,
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async =>
+                  throw StateError('Missing repository $repositoryPath'),
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                hostedValidationAttempts += 1;
+                return _QueuedLoadTrackStateRepository(
+                  loadResults: [
+                    StateError(
+                      'Hosted workspace $repository@$defaultBranch could not be opened.',
+                    ),
+                  ],
+                );
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Project Settings'), findsOneWidget);
+      expect(
+        find.textContaining('No valid saved workspace could be restored.'),
+        findsOneWidget,
+      );
+      expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
+      expect(hostedValidationAttempts, 1);
+
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Retry'));
+      await tester.pumpAndSettle();
+
+      expect(hostedValidationAttempts, 2);
+      expect(find.text('Project Settings'), findsOneWidget);
+      expect(
+        find.textContaining('No valid saved workspace could be restored.'),
+        findsOneWidget,
+      );
       expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
     },
   );
