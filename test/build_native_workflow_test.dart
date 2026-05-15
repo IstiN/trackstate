@@ -65,6 +65,9 @@ void main() {
     expect(workflow, contains('shasum -a 256'));
     expect(workflow, contains(r'gh release create "$release_tag"'));
     expect(workflow, contains(r'gh release upload "$release_tag"'));
+    expect(workflow, contains(r'gh release edit "$release_tag"'));
+    expect(workflow, contains('--draft=false'));
+    expect(workflow, contains('--prerelease=false'));
     expect(workflow, contains('--clobber'));
     expect(
       workflow,

@@ -314,5 +314,11 @@ jobs:
             "build/${{ steps.metadata.outputs.checksum_file }}" \
             --clobber
 
+          gh release edit "$release_tag" \
+            --title "TrackState $release_tag" \
+            --target "$release_checkout_ref" \
+            --draft=false \
+            --prerelease=false
+
           cleanup_heartbeat
           trap - EXIT
