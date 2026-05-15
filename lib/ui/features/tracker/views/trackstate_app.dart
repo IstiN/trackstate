@@ -3223,6 +3223,8 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
     ),
     TrackerMessageKind.storedGitHubTokenInvalid =>
       l10n.storedGitHubTokenInvalid(message.error!),
+    TrackerMessageKind.selectedIssueUnavailable =>
+      l10n.selectedIssueUnavailable(message.issueKey!),
     TrackerMessageKind.workspaceSwitchFailed => l10n.workspaceSwitchFailed(
       message.repository!,
       message.error!,

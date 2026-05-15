@@ -1654,6 +1654,12 @@ abstract class AppLocalizations {
   /// **'No valid saved workspace could be restored. Last skipped workspace: {workspaceName}. {reason}'**
   String workspaceRestoreFailed(String workspaceName, String reason);
 
+  /// No description provided for @selectedIssueUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'{issueKey} is no longer available in this workspace.'**
+  String selectedIssueUnavailable(String issueKey);
+
   /// No description provided for @localGitTokensNotNeeded.
   ///
   /// In en, this message translates to:
