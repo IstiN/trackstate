@@ -4,7 +4,6 @@ from dataclasses import asdict
 import json
 import platform
 import sys
-import time
 import traceback
 from pathlib import Path
 
@@ -62,7 +61,6 @@ SHELL_NAVIGATION_LABELS = (
     "Hierarchy",
     "Settings",
 )
-RECOVERY_MESSAGE_FRAGMENT = "No valid saved workspace could be restored."
 INVALID_LOCAL_TARGET = "/tmp/trackstate-ts759-missing-workspace"
 INVALID_HOSTED_BRANCH = "definitely-missing-branch"
 
@@ -114,14 +112,6 @@ def main() -> None:
             try:
                 page.open()
 
-                initial_retry_observed, initial_invalid_branch_urls = poll_until(
-                    probe=lambda: request_observation.invalid_branch_urls(
-                        branch=INVALID_HOSTED_BRANCH,
-                    ),
-                    is_satisfied=lambda urls: len(urls) > 0,
-                    timeout_seconds=150,
-                    interval_seconds=1,
-                )
                 storage_snapshot = tracker_page.snapshot_local_storage(
                     WORKSPACE_STORAGE_KEYS,
                 )
@@ -130,28 +120,37 @@ def main() -> None:
                     storage_snapshot,
                 )
 
-                if not initial_retry_observed and not initial_invalid_branch_urls:
-                    raise AssertionError(
-                        "Precondition failed: startup never requested the configured invalid "
-                        f"hosted branch `{INVALID_HOSTED_BRANCH}`, so the saved workspace "
-                        "validation path was not proven.\n"
-                        f"Observed GitHub requests: {request_observation.requested_urls}\n"
-                        f"Observed storage snapshot: {json.dumps(storage_snapshot, indent=2)}\n"
-                        f"Observed body text:\n{tracker_page.body_text()}",
-                    )
-
                 _assert_preloaded_profiles(storage_snapshot)
                 initial_shell = page.wait_for_shell_routed_to_settings(
                     timeout_ms=120_000,
-                    require_retry=False,
+                    require_retry_action=False,
                 )
-                _assert_settings_recovery_shell(initial_shell, require_retry=False)
-                if RECOVERY_MESSAGE_FRAGMENT not in initial_shell.body_text:
+                initial_request_observed, initial_invalid_branch_urls = poll_until(
+                    probe=lambda: request_observation.invalid_branch_urls(
+                        branch=INVALID_HOSTED_BRANCH,
+                    ),
+                    is_satisfied=lambda urls: len(urls) > 0,
+                    timeout_seconds=10,
+                    interval_seconds=1,
+                )
+                if not initial_request_observed:
                     raise AssertionError(
-                        "Step 1 failed: the app did not show the startup recovery message "
-                        "after loading invalid saved workspaces.\n"
-                        f"Observed body text: {initial_shell.body_text!r}",
+                        "Precondition failed: startup never proved validation of the configured "
+                        f"invalid hosted branch `{INVALID_HOSTED_BRANCH}` before the recovery "
+                        "shell assertions ran.\n"
+                        f"Observed GitHub requests: {request_observation.requested_urls}\n"
+                        f"Observed storage snapshot: {json.dumps(storage_snapshot, indent=2)}\n"
+                        f"Observed shell state: {_shell_payload(initial_shell)}",
                     )
+                _assert_settings_recovery_shell(initial_shell, require_retry=False)
+                _assert_invalid_workspace_details_visible(
+                    initial_shell,
+                    failure_prefix=(
+                        "Step 1 failed: the startup recovery screen did not keep the "
+                        "invalid workspace details visible after loading invalid saved "
+                        "workspaces."
+                    ),
+                )
                 result["initial_shell_observation"] = _shell_payload(initial_shell)
                 result["request_observation"] = _request_observation_payload(
                     request_observation,
@@ -180,7 +179,9 @@ def main() -> None:
                     ),
                     observed=(
                         f"Settings remained selected, Retry visible={initial_shell.retry_visible}, "
-                        f"and the shell still showed navigation labels "
+                        "the invalid local workspace and missing hosted branch remained "
+                        "visible in Project Settings, and "
+                        f"the shell still showed navigation labels "
                         f"{initial_shell.visible_navigation_labels}."
                     ),
                 )
@@ -269,14 +270,13 @@ def main() -> None:
 
                 post_retry_shell = page.wait_for_shell_routed_to_settings(timeout_ms=120_000)
                 _assert_settings_recovery_shell(post_retry_shell, require_retry=True)
-                if "Retry" not in post_retry_shell.visible_button_labels:
-                    raise AssertionError(
-                        "Expected Result failed: the post-retry recovery shell did not keep "
-                        "a visible Retry control available.\n"
-                        f"Observed visible button labels: "
-                        f"{post_retry_shell.visible_button_labels}\n"
-                        f"Observed body text:\n{post_retry_shell.body_text}",
-                    )
+                _assert_invalid_workspace_details_visible(
+                    post_retry_shell,
+                    failure_prefix=(
+                        "Expected Result failed: the post-retry screen no longer kept the "
+                        "invalid workspace details visible on the startup recovery surface."
+                    ),
+                )
                 result["post_retry_shell_observation"] = _shell_payload(post_retry_shell)
                 _record_step(
                     result,
@@ -301,8 +301,9 @@ def main() -> None:
                     ),
                     observed=(
                         "The visible page stayed on Project Settings / startup recovery, "
-                        "Retry remained available, and the app did not navigate to a normal "
-                        "workspace view."
+                        "Retry remained available, the invalid local workspace and missing "
+                        "hosted branch remained visible, and the app did not navigate to a "
+                        "normal workspace view."
                     ),
                 )
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
@@ -435,24 +436,32 @@ def _wait_for_invalid_branch_request_count_to_stabilize(
     if stable_observations_required <= 0:
         raise ValueError("stable_observations_required must be greater than zero.")
 
-    deadline = time.monotonic() + timeout_seconds
     last_snapshot = observation.invalid_branch_urls(branch=branch)
+    if stable_observations_required == 1:
+        return True, last_snapshot
+
+    last_count = len(last_snapshot)
     stable_observations = 1
 
-    while stable_observations < stable_observations_required:
-        remaining_seconds = deadline - time.monotonic()
-        if remaining_seconds <= 0:
-            return False, last_snapshot
-
-        time.sleep(min(interval_seconds, remaining_seconds))
+    def probe() -> tuple[tuple[str, ...], int]:
+        nonlocal last_snapshot, last_count, stable_observations
         current_snapshot = observation.invalid_branch_urls(branch=branch)
-        if len(current_snapshot) == len(last_snapshot):
+        current_count = len(current_snapshot)
+        if current_count == last_count:
             stable_observations += 1
         else:
-            stable_observations = 1
             last_snapshot = current_snapshot
+            last_count = current_count
+            stable_observations = 1
+        return current_snapshot, stable_observations
 
-    return True, last_snapshot
+    stabilized, final_observation = poll_until(
+        probe=probe,
+        is_satisfied=lambda item: item[1] >= stable_observations_required,
+        timeout_seconds=timeout_seconds,
+        interval_seconds=interval_seconds,
+    )
+    return stabilized, final_observation[0]
 
 
 def _assert_settings_recovery_shell(
@@ -492,6 +501,27 @@ def _assert_settings_recovery_shell(
             f"Observed visible button labels: {observation.visible_button_labels}\n"
             f"Observed body text:\n{observation.body_text}",
         )
+
+
+def _assert_invalid_workspace_details_visible(
+    observation: StartupRecoveryShellObservation,
+    *,
+    failure_prefix: str,
+) -> None:
+    required_fragments = (
+        Path(INVALID_LOCAL_TARGET).name,
+        INVALID_HOSTED_BRANCH,
+    )
+    missing_fragments = [
+        fragment for fragment in required_fragments if fragment not in observation.body_text
+    ]
+    if not missing_fragments:
+        return
+    raise AssertionError(
+        f"{failure_prefix}\n"
+        f"Missing visible fragments: {missing_fragments}\n"
+        f"Observed body text:\n{observation.body_text}",
+    )
 
 
 def _shell_payload(
@@ -654,8 +684,11 @@ def _bug_description(result: dict[str, object]) -> str:
     }
     step_1_result = "PASSED ✅" if step_map.get(1, {}).get("status") == "passed" else "FAILED ❌"
     step_2_result = "PASSED ✅" if step_map.get(2, {}).get("status") == "passed" else "FAILED ❌"
+    failure_summary = _failure_summary(result)
+    actual_behavior = _failure_actual_behavior(result)
+    missing_capability = _failure_missing_capability(result)
     return (
-        f"# {TICKET_KEY} - Retry does not keep startup recovery visible with invalid workspaces\n\n"
+        f"# {TICKET_KEY} - {failure_summary}\n\n"
         "## Steps to reproduce\n"
         f"1. {REQUEST_STEPS[0]}  \n"
         f"   - Actual: {step_map.get(1, {}).get('observed', '<missing>')}\n"
@@ -669,11 +702,14 @@ def _bug_description(result: dict[str, object]) -> str:
         "```\n\n"
         "## Actual vs Expected\n"
         f"- **Expected:** {EXPECTED_RESULT}\n"
-        "- **Actual:** The deployed app reached a recovery/error state for the invalid saved "
-        "workspaces, but it did not satisfy the expected retry behavior. In the observed run, "
-        "the recovery message was visible inside Project Settings while the user-visible "
-        "`Retry` action was missing, making the requested retry step impossible. See the step "
-        "observations and assertion output above for the exact failure boundary.\n\n"
+        f"- **Actual:** {actual_behavior}\n\n"
+        "## Missing or broken production capability\n"
+        f"- {missing_capability}\n\n"
+        "## Failing command/output\n"
+        f"- **Command:** `{result.get('run_command', RUN_COMMAND)}`\n"
+        "```text\n"
+        f"{result.get('error', '<missing>')}\n"
+        "```\n\n"
         "## Environment details\n"
         f"- **URL:** {result.get('app_url')}\n"
         "- **Browser:** Chromium via Playwright\n"
@@ -691,6 +727,79 @@ def _bug_description(result: dict[str, object]) -> str:
         f"- **Invalid branch requests after retry:** {result.get('post_retry_invalid_branch_request_count')}\n"
         f"- **Raw observed requests:** {result.get('request_observation')}\n"
         f"- **Visible body text at failure:** {result.get('final_body_text')!r}\n"
+    )
+
+
+def _first_failed_step(result: dict[str, object]) -> dict[str, object] | None:
+    steps = result.get("steps", [])
+    if not isinstance(steps, list):
+        return None
+    for step in steps:
+        if isinstance(step, dict) and step.get("status") != "passed":
+            return step
+    return None
+
+
+def _failure_text(result: dict[str, object]) -> str:
+    failed_step = _first_failed_step(result)
+    observed = failed_step.get("observed") if isinstance(failed_step, dict) else None
+    return "\n".join(
+        part
+        for part in (
+            str(observed) if observed else "",
+            str(result.get("error", "")),
+        )
+        if part
+    )
+
+
+def _failure_summary(result: dict[str, object]) -> str:
+    failure_text = _failure_text(result).lower()
+    if "no visible retry action" in failure_text or "visible retry control" in failure_text:
+        return "Startup recovery does not expose Retry while saved workspaces remain invalid"
+    if "did not trigger another observable invalid-workspace validation attempt" in failure_text:
+        return "Retry does not revalidate invalid saved workspaces from startup recovery"
+    if "did not keep" in failure_text and "startup recovery" in failure_text:
+        return "Retry leaves the startup recovery surface for invalid saved workspaces"
+    if "startup recovery message" in failure_text or "startup recovery screen" in failure_text:
+        return "Startup recovery screen does not fully appear for invalid saved workspaces"
+    return "Startup recovery retry flow does not match the invalid-workspace requirements"
+
+
+def _failure_actual_behavior(result: dict[str, object]) -> str:
+    failed_step = _first_failed_step(result)
+    if isinstance(failed_step, dict):
+        observed = failed_step.get("observed")
+        if observed:
+            return str(observed)
+    return str(result.get("error", "<missing>"))
+
+
+def _failure_missing_capability(result: dict[str, object]) -> str:
+    summary = _failure_summary(result)
+    if "does not expose Retry" in summary:
+        return (
+            "The startup recovery UI should keep a visible, actionable Retry control "
+            "available while the saved workspace collection remains invalid."
+        )
+    if "does not revalidate" in summary:
+        return (
+            "Clicking Retry should trigger a fresh validation attempt for the persisted "
+            "invalid saved workspaces."
+        )
+    if "leaves the startup recovery surface" in summary:
+        return (
+            "After a failed Retry, the app should remain on the startup recovery surface "
+            "with the invalid workspace context still visible."
+        )
+    if "does not fully appear" in summary:
+        return (
+            "When all saved workspaces are invalid, the app should render the startup "
+            "recovery surface inside Settings so the user can recover."
+        )
+    return (
+        "The startup recovery retry workflow should revalidate the invalid workspace "
+        "collection and keep the recovery UI available to the user."
     )
 
 
