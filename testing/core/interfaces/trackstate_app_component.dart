@@ -55,6 +55,8 @@ abstract interface class TrackStateAppComponent {
     String text,
   );
 
+  Future<bool> isIssueSearchResultSelected(String key, String summary);
+
   List<String> issueSearchResultTextsSnapshot(String key, String summary);
 
   Future<void> dragIssueToStatusColumn({

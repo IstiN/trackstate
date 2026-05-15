@@ -566,6 +566,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     return best ?? rowCandidates.first;
   }
 
+  bool _finderHasSelectedSemantics(Finder finder) {
+    final matches = finder.evaluate().toList();
+    for (var index = 0; index < matches.length; index++) {
+      if (tester
+          .getSemantics(finder.at(index))
+          .hasFlag(SemanticsFlag.isSelected)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @override
   Future<bool> isIssueSearchResultTextVisible(
     String key,
@@ -581,6 +593,28 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         .descendant(of: row, matching: find.text(text, findRichText: true))
         .evaluate()
         .isNotEmpty;
+  }
+
+  @override
+  Future<bool> isIssueSearchResultSelected(String key, String summary) async {
+    await tester.pump();
+    final issue = _issue(key, summary);
+    if (issue.evaluate().isEmpty) {
+      return false;
+    }
+    final row = _issueSearchResultRow(key, summary);
+    if (row.evaluate().isEmpty) {
+      return false;
+    }
+
+    return _finderHasSelectedSemantics(issue) ||
+        _finderHasSelectedSemantics(row) ||
+        _finderHasSelectedSemantics(
+          find.ancestor(of: issue, matching: find.byType(Semantics)),
+        ) ||
+        _finderHasSelectedSemantics(
+          find.descendant(of: row, matching: find.byType(Semantics)),
+        );
   }
 
   @override

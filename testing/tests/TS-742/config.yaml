@@ -7,3 +7,4 @@ notes:
   - Launches the production TrackStateApp with a mutable in-memory repository that implements WorkspaceSyncRepository.
   - Seeds two Open issues, selects TRACK-742-B in JQL Search, mutates only that issue's description, then drives the production app-resume workspace sync refresh path.
   - Verifies the active JQL query stays populated, the selected issue remains selected, and the detail panel shows the refreshed description.
+  - Fails at the production boundary if the JQL Search result row does not expose an observable selected/highlight state for the active issue.
