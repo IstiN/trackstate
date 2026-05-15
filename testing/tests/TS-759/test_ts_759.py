@@ -4,6 +4,7 @@ from dataclasses import asdict
 import json
 import platform
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -218,12 +219,29 @@ def main() -> None:
                         f"Observed requests: {list(request_observation.requested_urls)!r}",
                     )
 
+                requests_stabilized, stabilized_invalid_branch_urls = (
+                    _wait_for_invalid_branch_request_count_to_stabilize(
+                        request_observation,
+                        branch=INVALID_HOSTED_BRANCH,
+                    )
+                )
+                pre_retry_invalid_branch_urls = request_observation.invalid_branch_urls(
+                    branch=INVALID_HOSTED_BRANCH,
+                )
+                result["pre_retry_invalid_branch_requests_stabilized"] = requests_stabilized
+                result["pre_retry_invalid_branch_request_count"] = len(
+                    pre_retry_invalid_branch_urls,
+                )
+                result["stabilized_invalid_branch_request_count"] = len(
+                    stabilized_invalid_branch_urls,
+                )
+
                 page.click_retry(timeout_ms=30_000)
                 retry_revalidated, retried_invalid_branch_urls = poll_until(
                     probe=lambda: request_observation.invalid_branch_urls(
                         branch=INVALID_HOSTED_BRANCH,
                     ),
-                    is_satisfied=lambda urls: len(urls) > len(initial_invalid_branch_urls),
+                    is_satisfied=lambda urls: len(urls) > len(pre_retry_invalid_branch_urls),
                     timeout_seconds=150,
                     interval_seconds=1,
                 )
@@ -241,7 +259,9 @@ def main() -> None:
                     raise AssertionError(
                         "Step 2 failed: clicking Retry did not trigger another observable "
                         "invalid-workspace validation attempt.\n"
-                        f"Initial invalid-branch requests: {list(initial_invalid_branch_urls)!r}\n"
+                        f"Baseline invalid-branch requests before Retry: "
+                        f"{list(pre_retry_invalid_branch_urls)!r}\n"
+                        f"Pre-click request count stabilized: {requests_stabilized}\n"
                         f"Observed requests after Retry: {list(retried_invalid_branch_urls)!r}\n"
                         f"Raw observed requests: {list(request_observation.requested_urls)!r}\n"
                         f"Observed body text: {current_body!r}",
@@ -267,8 +287,9 @@ def main() -> None:
                         "Retry triggered another validation request for the still-invalid "
                         "hosted workspace and the app remained on the Settings startup "
                         "recovery shell with Retry still visible. "
-                        f"Initial invalid-branch request count={len(initial_invalid_branch_urls)}; "
+                        f"Pre-click invalid-branch request count={len(pre_retry_invalid_branch_urls)}; "
                         f"post-retry count={len(retried_invalid_branch_urls)}. "
+                        f"Pre-click request count stabilized={requests_stabilized}. "
                         f"Observed post-retry shell state={_shell_payload(post_retry_shell)}."
                     ),
                 )
@@ -397,6 +418,41 @@ def _workspace_summary(storage_snapshot: dict[str, str | None]) -> str:
             ),
         )
     return ", ".join(summaries)
+
+
+def _wait_for_invalid_branch_request_count_to_stabilize(
+    observation: Ts759RetryRequestObservation,
+    *,
+    branch: str,
+    timeout_seconds: float = 10.0,
+    interval_seconds: float = 1.0,
+    stable_observations_required: int = 3,
+) -> tuple[bool, tuple[str, ...]]:
+    if timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be greater than zero.")
+    if interval_seconds <= 0:
+        raise ValueError("interval_seconds must be greater than zero.")
+    if stable_observations_required <= 0:
+        raise ValueError("stable_observations_required must be greater than zero.")
+
+    deadline = time.monotonic() + timeout_seconds
+    last_snapshot = observation.invalid_branch_urls(branch=branch)
+    stable_observations = 1
+
+    while stable_observations < stable_observations_required:
+        remaining_seconds = deadline - time.monotonic()
+        if remaining_seconds <= 0:
+            return False, last_snapshot
+
+        time.sleep(min(interval_seconds, remaining_seconds))
+        current_snapshot = observation.invalid_branch_urls(branch=branch)
+        if len(current_snapshot) == len(last_snapshot):
+            stable_observations += 1
+        else:
+            stable_observations = 1
+            last_snapshot = current_snapshot
+
+    return True, last_snapshot
 
 
 def _assert_settings_recovery_shell(
@@ -629,7 +685,9 @@ def _bug_description(result: dict[str, object]) -> str:
         f"- **Screenshot:** `{result.get('screenshot')}`\n"
         f"- **Initial shell observation:** {result.get('initial_shell_observation')}\n"
         f"- **Post-retry shell observation:** {result.get('post_retry_shell_observation')}\n"
-        f"- **Invalid branch requests before retry:** {result.get('initial_invalid_branch_request_count')}\n"
+        f"- **Initial invalid branch requests observed during startup:** {result.get('initial_invalid_branch_request_count')}\n"
+        f"- **Invalid branch requests immediately before retry:** {result.get('pre_retry_invalid_branch_request_count')}\n"
+        f"- **Pre-retry request count stabilized:** {result.get('pre_retry_invalid_branch_requests_stabilized')}\n"
         f"- **Invalid branch requests after retry:** {result.get('post_retry_invalid_branch_request_count')}\n"
         f"- **Raw observed requests:** {result.get('request_observation')}\n"
         f"- **Visible body text at failure:** {result.get('final_body_text')!r}\n"
