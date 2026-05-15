@@ -51,6 +51,11 @@ void main() {
             .readAsStringSync();
 
     expect(workflow, contains('flutter build macos --release'));
+    expect(
+      workflow,
+      contains('::notice::flutter build macos is still running...'),
+    );
+    expect(workflow, contains('cleanup_heartbeat'));
     expect(workflow, contains('dart compile exe bin/trackstate.dart'));
     expect(
       workflow,
