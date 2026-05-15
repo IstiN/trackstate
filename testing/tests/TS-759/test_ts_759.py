@@ -62,7 +62,6 @@ SHELL_NAVIGATION_LABELS = (
     "Hierarchy",
     "Settings",
 )
-RECOVERY_MESSAGE_FRAGMENT = "No valid saved workspace could be restored."
 INVALID_LOCAL_TARGET = "/tmp/trackstate-ts759-missing-workspace"
 INVALID_HOSTED_BRANCH = "definitely-missing-branch"
 
@@ -146,12 +145,14 @@ def main() -> None:
                     require_retry=False,
                 )
                 _assert_settings_recovery_shell(initial_shell, require_retry=False)
-                if RECOVERY_MESSAGE_FRAGMENT not in initial_shell.body_text:
-                    raise AssertionError(
-                        "Step 1 failed: the app did not show the startup recovery message "
-                        "after loading invalid saved workspaces.\n"
-                        f"Observed body text: {initial_shell.body_text!r}",
-                    )
+                _assert_invalid_workspace_details_visible(
+                    initial_shell,
+                    failure_prefix=(
+                        "Step 1 failed: the startup recovery screen did not keep the "
+                        "invalid workspace details visible after loading invalid saved "
+                        "workspaces."
+                    ),
+                )
                 result["initial_shell_observation"] = _shell_payload(initial_shell)
                 result["request_observation"] = _request_observation_payload(
                     request_observation,
@@ -180,7 +181,9 @@ def main() -> None:
                     ),
                     observed=(
                         f"Settings remained selected, Retry visible={initial_shell.retry_visible}, "
-                        f"and the shell still showed navigation labels "
+                        "the invalid local workspace and missing hosted branch remained "
+                        "visible in Project Settings, and "
+                        f"the shell still showed navigation labels "
                         f"{initial_shell.visible_navigation_labels}."
                     ),
                 )
@@ -269,14 +272,13 @@ def main() -> None:
 
                 post_retry_shell = page.wait_for_shell_routed_to_settings(timeout_ms=120_000)
                 _assert_settings_recovery_shell(post_retry_shell, require_retry=True)
-                if "Retry" not in post_retry_shell.visible_button_labels:
-                    raise AssertionError(
-                        "Expected Result failed: the post-retry recovery shell did not keep "
-                        "a visible Retry control available.\n"
-                        f"Observed visible button labels: "
-                        f"{post_retry_shell.visible_button_labels}\n"
-                        f"Observed body text:\n{post_retry_shell.body_text}",
-                    )
+                _assert_invalid_workspace_details_visible(
+                    post_retry_shell,
+                    failure_prefix=(
+                        "Expected Result failed: the post-retry screen no longer kept the "
+                        "invalid workspace details visible on the startup recovery surface."
+                    ),
+                )
                 result["post_retry_shell_observation"] = _shell_payload(post_retry_shell)
                 _record_step(
                     result,
@@ -301,8 +303,9 @@ def main() -> None:
                     ),
                     observed=(
                         "The visible page stayed on Project Settings / startup recovery, "
-                        "Retry remained available, and the app did not navigate to a normal "
-                        "workspace view."
+                        "Retry remained available, the invalid local workspace and missing "
+                        "hosted branch remained visible, and the app did not navigate to a "
+                        "normal workspace view."
                     ),
                 )
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
@@ -492,6 +495,27 @@ def _assert_settings_recovery_shell(
             f"Observed visible button labels: {observation.visible_button_labels}\n"
             f"Observed body text:\n{observation.body_text}",
         )
+
+
+def _assert_invalid_workspace_details_visible(
+    observation: StartupRecoveryShellObservation,
+    *,
+    failure_prefix: str,
+) -> None:
+    required_fragments = (
+        Path(INVALID_LOCAL_TARGET).name,
+        INVALID_HOSTED_BRANCH,
+    )
+    missing_fragments = [
+        fragment for fragment in required_fragments if fragment not in observation.body_text
+    ]
+    if not missing_fragments:
+        return
+    raise AssertionError(
+        f"{failure_prefix}\n"
+        f"Missing visible fragments: {missing_fragments}\n"
+        f"Observed body text:\n{observation.body_text}",
+    )
 
 
 def _shell_payload(
