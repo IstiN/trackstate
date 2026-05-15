@@ -43,10 +43,11 @@ class LiveStartupRecoveryPage:
         self,
         *,
         timeout_ms: int = 120_000,
+        require_retry: bool = True,
     ) -> StartupRecoveryShellObservation:
         self._session.wait_for_function(
             """
-            ({ requiredNavigationLabels, settingsHeading, topbarTitle }) => {
+            ({ requiredNavigationLabels, settingsHeading, topbarTitle, requireRetry }) => {
               const bodyText = document.body?.innerText ?? '';
               const selectedLabels = Array.from(
                 document.querySelectorAll('flt-semantics[role="button"][aria-current="true"]'),
@@ -54,7 +55,7 @@ class LiveStartupRecoveryPage:
               return requiredNavigationLabels.every((label) => bodyText.includes(label))
                 && bodyText.includes(settingsHeading)
                 && bodyText.includes(topbarTitle)
-                && bodyText.includes('Retry')
+                && (!requireRetry || bodyText.includes('Retry'))
                 && selectedLabels.includes('Settings');
             }
             """,
@@ -62,6 +63,7 @@ class LiveStartupRecoveryPage:
                 "requiredNavigationLabels": list(self._required_navigation_labels),
                 "settingsHeading": self._settings_heading,
                 "topbarTitle": self._topbar_title,
+                "requireRetry": require_retry,
             },
             timeout_ms=timeout_ms,
         )
@@ -109,6 +111,13 @@ class LiveStartupRecoveryPage:
             connect_github_visible=bool(payload["connectGitHubVisible"]),
             topbar_title_visible=bool(payload["topbarTitleVisible"]),
             settings_heading_visible=bool(payload["settingsHeadingVisible"]),
+        )
+
+    def click_retry(self, *, timeout_ms: int = 30_000) -> None:
+        self._session.click(
+            self._button_selector,
+            has_text="Retry",
+            timeout_ms=timeout_ms,
         )
 
     def current_body_text(self) -> str:
