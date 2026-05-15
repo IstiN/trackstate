@@ -190,9 +190,27 @@ jobs:
         run: |
           set -euo pipefail
 
+          heartbeat() {
+            while true; do
+              sleep 60
+              echo "::notice::flutter build macos is still running..."
+            done
+          }
+
+          heartbeat &
+          heartbeat_pid="$!"
+          cleanup_heartbeat() {
+            kill "$heartbeat_pid" 2>/dev/null || true
+            wait "$heartbeat_pid" 2>/dev/null || true
+          }
+          trap cleanup_heartbeat EXIT
+
           flutter build macos --release \
             --build-name="${{ steps.metadata.outputs.build_name }}" \
             --build-number="${{ steps.metadata.outputs.build_number }}"
+
+          cleanup_heartbeat
+          trap - EXIT
 
       - name: Build macOS CLI
         shell: bash
