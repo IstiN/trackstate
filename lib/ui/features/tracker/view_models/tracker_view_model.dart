@@ -56,6 +56,7 @@ enum TrackerMessageKind {
   githubAuthorizationCodeReturned,
   githubConnected,
   storedGitHubTokenInvalid,
+  selectedIssueUnavailable,
   workspaceSwitchFailed,
   workspaceRestoreSkipped,
   workspaceRestoreFailed,
@@ -211,6 +212,13 @@ class TrackerMessage {
         TrackerMessageKind.storedGitHubTokenInvalid,
         tone: TrackerMessageTone.error,
         error: '$error',
+      );
+
+  factory TrackerMessage.selectedIssueUnavailable({required String issueKey}) =>
+      TrackerMessage._(
+        TrackerMessageKind.selectedIssueUnavailable,
+        tone: TrackerMessageTone.info,
+        issueKey: issueKey,
       );
 
   factory TrackerMessage.workspaceSwitchFailed({
@@ -1475,7 +1483,9 @@ class TrackerViewModel extends ChangeNotifier {
         previousSelectedIssueKey != null &&
         !selectionStillVisible) {
       _selectedIssue = null;
-    } else if (_selectedIssue == null && _searchResults.isNotEmpty) {
+    } else if (retainSelectionWhenMissing &&
+        _selectedIssue == null &&
+        _searchResults.isNotEmpty) {
       _selectedIssue = _searchResults.first;
     }
     if (_selectedIssue?.key != previousSelectedIssueKey) {
@@ -1901,6 +1911,7 @@ class TrackerViewModel extends ChangeNotifier {
   TrackStateIssue? _resolveSelectedIssue(
     String? previousSelectedKey,
     List<TrackStateIssue> issues,
+    bool fallbackWhenMissing,
   ) {
     if (issues.isEmpty) {
       return null;
@@ -1911,6 +1922,11 @@ class TrackerViewModel extends ChangeNotifier {
           return issue;
         }
       }
+      if (!fallbackWhenMissing) {
+        return null;
+      }
+    } else if (!fallbackWhenMissing) {
+      return null;
     }
     for (final issue in issues) {
       if (!issue.isEpic) {
@@ -2140,11 +2156,21 @@ class TrackerViewModel extends ChangeNotifier {
     }
     final snapshot = refresh.snapshot;
     final changedDomains = refresh.result.changedDomains;
+    final shouldClearMissingSelection =
+        changedDomains.contains(WorkspaceSyncDomain.issueSummaries) ||
+        changedDomains.contains(WorkspaceSyncDomain.repositoryIndex);
+    final previousSelectedIssueKey = _selectedIssue?.key;
+    final selectedIssueRemovedFromWorkspace =
+        shouldClearMissingSelection &&
+        previousSelectedIssueKey != null &&
+        snapshot != null &&
+        !snapshot.issues.any((issue) => issue.key == previousSelectedIssueKey);
     if (snapshot != null) {
       await _applyReloadedSnapshot(
         snapshot,
         previousSelectedIssue: _selectedIssue,
         preferredSelectedIssueKey: _selectedIssue?.key,
+        fallbackWhenMissing: !shouldClearMissingSelection,
       );
       if (changedDomains.contains(WorkspaceSyncDomain.projectMeta) ||
           changedDomains.contains(WorkspaceSyncDomain.issueSummaries) ||
@@ -2153,6 +2179,11 @@ class TrackerViewModel extends ChangeNotifier {
           preferLoadedSnapshot: true,
           retainSelectionWhenMissing: false,
         );
+        if (selectedIssueRemovedFromWorkspace) {
+          _message = TrackerMessage.selectedIssueUnavailable(
+            issueKey: previousSelectedIssueKey,
+          );
+        }
       }
     } else {
       await _hydrateSelectedIssueForWorkspaceSync(refresh.result);
@@ -2307,6 +2338,7 @@ class TrackerViewModel extends ChangeNotifier {
     TrackerSnapshot snapshot, {
     required TrackStateIssue? previousSelectedIssue,
     required String? preferredSelectedIssueKey,
+    bool fallbackWhenMissing = true,
   }) async {
     final previousSelectedIssueKey = _selectedIssue?.key;
     _snapshot = snapshot;
@@ -2320,6 +2352,7 @@ class TrackerViewModel extends ChangeNotifier {
     _selectedIssue = _resolveSelectedIssue(
       preferredSelectedIssueKey,
       snapshot.issues,
+      fallbackWhenMissing,
     );
     if (_selectedIssue?.key != previousSelectedIssueKey) {
       _invalidateIssueHydrationContext();

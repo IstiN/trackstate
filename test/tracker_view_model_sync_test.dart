@@ -9,12 +9,54 @@ import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.dart';
 
+import '../testing/tests/TS-732/support/ts732_removed_issue_sync_repository.dart';
 import '../testing/tests/TS-733/support/ts733_sync_refresh_repository.dart';
 
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
+
+  test(
+    'view model clears the selected issue and publishes an info message when a sync refresh removes it from the workspace',
+    () async {
+      final repository = Ts732RemovedIssueSyncRepository();
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      viewModel.selectIssue(
+        viewModel.searchResults.firstWhere(
+          (issue) =>
+              issue.key == Ts732RemovedIssueSyncRepository.removedIssueKey,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        viewModel.selectedIssue?.key,
+        Ts732RemovedIssueSyncRepository.removedIssueKey,
+      );
+
+      await repository.emitIssueRemovalSync();
+      await viewModel.handleAppResumed();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        viewModel.searchResults.map((issue) => issue.key).toList(),
+        <String>[Ts732RemovedIssueSyncRepository.remainingIssueKey],
+      );
+      expect(viewModel.selectedIssue, isNull);
+      expect(viewModel.message, isNotNull);
+      expect(viewModel.message?.tone, TrackerMessageTone.info);
+      expect(
+        viewModel.message?.issueKey,
+        Ts732RemovedIssueSyncRepository.removedIssueKey,
+      );
+
+      viewModel.dispose();
+    },
+  );
 
   test(
     'view model clears the selected issue when a sync refresh removes it from active search results',
