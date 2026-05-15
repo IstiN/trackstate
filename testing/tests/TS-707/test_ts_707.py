@@ -520,7 +520,7 @@ def _bug_description(result: dict[str, object]) -> str:
         "## Actual vs Expected",
         (
             f"- **Expected:** The build job reaches `Verify runner toolchain`, logs "
-            f"`Flutter 3.35.3 is required`, and the later `Build macOS desktop app` / "
+            f"`Flutter 3.35.3 or newer is required`, and the later `Build macOS desktop app` / "
             "`Build macOS CLI` steps do not proceed."
         ),
         f"- **Actual:** {_actual_result_summary(result)}",
