@@ -19,7 +19,7 @@ const List<String> _requestSteps = <String>[
   'Hydrate JQL Search and keep TRACK-777-B visible on the real issue detail surface.',
   'Run a hosted control sync without any explicit load_snapshot_delta marker and observe the public sync payload plus visible state.',
   "Run a hosted sync that explicitly requests load_snapshot_delta=0 through the same sync contract and observe the public payload plus visible state.",
-  'Compare the public RepositorySyncCheck payloads from the control and explicit-false syncs to prove whether the app can distinguish them.',
+  'Compare the public RepositorySyncCheck payloads, including the hosted snapshot reload directive, from the control and explicit-false syncs to prove whether the app can distinguish them.',
 ];
 
 void main() {
@@ -428,7 +428,7 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '**Test Case:** $_ticketKey - $_ticketSummary',
     '',
     '## Rework summary',
-    '- Reworked `testing/tests/TS-777/` so the test compares the unflagged hosted sync path and the explicit `load_snapshot_delta=0` attempt through the public `RepositorySyncCheck(state, signals, changedPaths)` contract.',
+    '- Reworked `testing/tests/TS-777/` so the test compares the unflagged hosted sync path and the explicit `load_snapshot_delta=0` attempt through the public `RepositorySyncCheck(state, signals, changedPaths, hostedSnapshotReloadDirective)` contract.',
     '- Removed the pass condition that depended on fixture-private bookkeeping for `requested_load_snapshot_delta`.',
     '- Kept the assertions focused on app-visible behavior: exposed sync payloads, `loadSnapshot` deltas, and the visible Issue-B detail state.',
     '',
@@ -482,7 +482,7 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
   final lines = <String>[
     'h3. Rework Summary',
     '',
-    '* Updated {{TS-777}} to compare the unflagged hosted sync path and the explicit {{load_snapshot_delta=0}} attempt only through the public {{RepositorySyncCheck(state, signals, changedPaths)}} contract.',
+    '* Updated {{TS-777}} to compare the unflagged hosted sync path and the explicit {{load_snapshot_delta=0}} attempt only through the public {{RepositorySyncCheck(state, signals, changedPaths, hostedSnapshotReloadDirective)}} contract.',
     '* Removed the previous pass condition that relied on fixture-private {{requested_load_snapshot_delta}} bookkeeping.',
     '* Latest result: ${passed ? '✅ PASSED' : '❌ FAILED'}',
     passed
@@ -505,7 +505,7 @@ String _bugDescription(Map<String, Object?> result) {
     '2. Search `status = Open`, select `TRACK-777-B`, and keep the issue detail visible.',
     '3. Trigger a hosted control sync without any explicit `load_snapshot_delta` marker.',
     '4. Trigger a second hosted sync that explicitly requests `load_snapshot_delta=0` through the same public sync boundary.',
-    '5. Compare the exposed `RepositorySyncCheck(state, signals, changedPaths)` payloads and the resulting `loadSnapshot` deltas.',
+    '5. Compare the exposed `RepositorySyncCheck(state, signals, changedPaths, hostedSnapshotReloadDirective)` payloads and the resulting `loadSnapshot` deltas.',
     '',
     '## Expected Result',
     '- The explicit `load_snapshot_delta=0` path is distinguishable from the unflagged hosted sync through the public sync contract, and it still bypasses the global snapshot reload.',

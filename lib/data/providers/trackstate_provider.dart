@@ -218,11 +218,13 @@ class RepositorySyncCheck {
     required this.state,
     this.signals = const <WorkspaceSyncSignal>{},
     this.changedPaths = const <String>{},
+    this.hostedSnapshotReloadDirective,
   });
 
   final RepositorySyncState state;
   final Set<WorkspaceSyncSignal> signals;
   final Set<String> changedPaths;
+  final HostedSnapshotReloadDirective? hostedSnapshotReloadDirective;
 }
 
 class RepositoryTextFile {

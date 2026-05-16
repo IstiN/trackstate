@@ -34,6 +34,8 @@ enum WorkspaceSyncSignal {
   hostedSession,
 }
 
+enum HostedSnapshotReloadDirective { enabled, disabled }
+
 enum WorkspaceSyncTrigger { automatic, appResume, workspaceSwitch, manual }
 
 enum WorkspaceSyncHealth { synced, checking, attentionNeeded, unavailable }

@@ -216,6 +216,14 @@ class WorkspaceSyncService {
         syncCheck.signals.contains(WorkspaceSyncSignal.localWorktree)) {
       return true;
     }
+    if (syncCheck.hostedSnapshotReloadDirective ==
+        HostedSnapshotReloadDirective.disabled) {
+      return false;
+    }
+    if (syncCheck.hostedSnapshotReloadDirective ==
+        HostedSnapshotReloadDirective.enabled) {
+      return true;
+    }
     if (syncCheck.signals.contains(WorkspaceSyncSignal.hostedSnapshotReload)) {
       return true;
     }
