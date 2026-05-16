@@ -4,10 +4,13 @@ Validates the real production serialization path for `RepositorySyncCheck`
 when the hosted compare flow returns an explicit `load_snapshot_delta=0`
 directive.
 
-The test uses the production `GitHubTrackStateProvider` compare-sync path via a
-reusable framework adapter under `testing/frameworks/`, then attempts to
-serialize the returned `RepositorySyncCheck` through Dart's shipped JSON
-encoding path (`jsonEncode`) instead of a test-owned mapper.
+The ticket test now consumes a reusable component service under
+`testing/components/services/`, which hides the concrete GitHub framework
+adapter and keeps the required `tests -> components -> frameworks -> core`
+layering intact. That service drives the production `GitHubTrackStateProvider`
+compare-sync path, then attempts to serialize the returned
+`RepositorySyncCheck` through Dart's shipped JSON encoding path (`jsonEncode`)
+instead of a test-owned mapper.
 
 ## Install dependencies
 

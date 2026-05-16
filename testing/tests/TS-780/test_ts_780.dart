@@ -5,8 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
-import '../../core/interfaces/repository_sync_check_driver.dart';
-import '../../frameworks/api/github/github_repository_sync_check_framework.dart';
+import '../../components/services/repository_sync_check_service.dart';
 
 const String _ticketKey = 'TS-780';
 const String _ticketSummary =
@@ -37,13 +36,13 @@ void main() {
         'human_verification': <Map<String, Object?>>[],
       };
 
-      final RepositorySyncCheckDriver driver =
-          await GitHubRepositorySyncCheckFramework.create();
+      final RepositorySyncCheckService syncCheckService =
+          await RepositorySyncCheckService.create();
 
       try {
         final failures = <String>[];
 
-        final controlCheck = await driver.readHostedSyncCheck();
+        final controlCheck = await syncCheckService.readHostedSyncCheck();
         final controlContractObservation = _describeSyncCheck(controlCheck);
         result['control_contract'] = controlContractObservation;
         final controlStepPassed =
@@ -65,7 +64,7 @@ void main() {
           );
         }
 
-        final explicitCheck = await driver.readHostedSyncCheck(
+        final explicitCheck = await syncCheckService.readHostedSyncCheck(
           loadSnapshotDelta: 0,
         );
         final explicitContractObservation = _describeSyncCheck(explicitCheck);
@@ -281,8 +280,8 @@ void _writeFailureOutputs(Map<String, Object?> result) {
 String _responseSummary(Map<String, Object?> result, {required bool passed}) {
   final lines = <String>[
     passed
-        ? 'Removed the test-only payload mapper, moved GitHub provider wiring into `testing/frameworks/api/github/github_repository_sync_check_framework.dart`, and added `testing/tests/TS-780/README.md`.'
-        : 'Removed the test-only payload mapper, moved GitHub provider wiring into `testing/frameworks/api/github/github_repository_sync_check_framework.dart`, and added `testing/tests/TS-780/README.md`.',
+        ? 'Routed the ticket through `testing/components/services/repository_sync_check_service.dart`, kept GitHub provider wiring behind the reusable framework adapter, and retained the real production serialization assertion.'
+        : 'Routed the ticket through `testing/components/services/repository_sync_check_service.dart`, kept GitHub provider wiring behind the reusable framework adapter, and retained the real production serialization assertion.',
     '',
     passed
         ? 'New result: the shipped `RepositorySyncCheck` JSON path preserved `load_snapshot_delta=0` for the explicit-false hosted sync and omitted it for the control payload.'
@@ -299,9 +298,9 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
   final lines = <String>[
     '## TS-780 rework',
     '',
-    '- Replaced the deleted testing-only payload mapper with the shipped JSON serialization attempt (`jsonEncode`) on the real `RepositorySyncCheck` returned by `GitHubTrackStateProvider`.',
-    '- Moved `MockClient`/`GitHubTrackStateProvider` wiring out of `testing/tests/TS-780/` into `testing/frameworks/api/github/github_repository_sync_check_framework.dart` behind `RepositorySyncCheckDriver`.',
-    '- Added `testing/tests/TS-780/README.md` and updated the ticket config notes.',
+    '- Kept the assertion on the shipped JSON serialization attempt (`jsonEncode`) for the real `RepositorySyncCheck` returned by the production GitHub compare-sync path.',
+    '- Added `testing/components/services/repository_sync_check_service.dart` so the ticket consumes a reusable component that depends on `RepositorySyncCheckDriver` instead of constructing a framework adapter directly.',
+    '- Left `MockClient`/`GitHubTrackStateProvider` wiring inside `testing/frameworks/api/github/github_repository_sync_check_framework.dart` and updated the ticket docs/config to reflect the layered flow.',
     '',
     '## Result',
     '',

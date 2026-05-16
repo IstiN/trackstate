@@ -5,6 +5,7 @@ platform: linux
 dependencies: []
 notes:
   - Uses the production GitHubTrackStateProvider compare-commit sync path with mocked GitHub responses.
+  - Uses a reusable RepositorySyncCheck component service so the ticket depends on components, not frameworks directly.
   - Routes provider wiring through a reusable GitHub framework adapter under testing/frameworks.
   - Uses the production JSON serialization attempt for RepositorySyncCheck instead of a test-owned payload mapper.
   - Compares the explicit-false payload with the no-flag hosted sync payload to prove omission and zero remain distinguishable for integrated clients.
