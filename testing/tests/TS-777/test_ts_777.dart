@@ -16,10 +16,10 @@ const String _testFilePath = 'testing/tests/TS-777/test_ts_777.dart';
 const String _runCommand =
     'flutter test testing/tests/TS-777/test_ts_777.dart --reporter expanded';
 const List<String> _requestSteps = <String>[
-  "Prepare a RepositorySyncCheck payload with the signal 'load_snapshot_delta' explicitly set to 0 (false).",
-  'Run the background sync through the sync contract.',
-  "Monitor the sync orchestration layer for 'loadSnapshot' calls.",
-  "Inspect the 'load_snapshot_delta' counter.",
+  'Hydrate JQL Search and keep TRACK-777-B visible on the real issue detail surface.',
+  'Run a hosted control sync without any explicit load_snapshot_delta marker and observe the public sync payload plus visible state.',
+  "Run a hosted sync that explicitly requests load_snapshot_delta=0 through the same sync contract and observe the public payload plus visible state.",
+  'Compare the public RepositorySyncCheck payloads from the control and explicit-false syncs to prove whether the app can distinguish them.',
 ];
 
 void main() {
@@ -30,7 +30,7 @@ void main() {
   });
 
   testWidgets(
-    'TS-777 processes explicit load_snapshot_delta=0 without a global reload',
+    'TS-777 compares explicit load_snapshot_delta=0 against the unflagged hosted sync boundary',
     (tester) async {
       final result = <String, Object?>{
         'ticket': _ticketKey,
@@ -41,9 +41,6 @@ void main() {
         'query': Ts777ExplicitFalseLoadSnapshotDeltaRepository.query,
         'contract_shape': Ts777ExplicitFalseLoadSnapshotDeltaRepository
             .contractShapeDescription,
-        'requested_load_snapshot_delta':
-            Ts777ExplicitFalseLoadSnapshotDeltaRepository
-                .explicitLoadSnapshotDeltaValue,
         'steps': <Map<String, Object?>>[],
         'human_verification': <Map<String, Object?>>[],
       };
@@ -96,167 +93,214 @@ void main() {
             'selection=${initialSelection.describe()}; '
             'issue_detail_visible=$initialIssueDetailVisible; '
             'visible_rows=${_formatSnapshot(screen.visibleIssueSearchResultLabelsSnapshot())}';
+        final stepOnePassed =
+            initialQuery ==
+                Ts777ExplicitFalseLoadSnapshotDeltaRepository.query &&
+            initialSelection.usesExpectedTokens &&
+            initialIssueDetailVisible;
         _recordStep(
           result,
           step: 1,
-          status:
-              initialQuery ==
-                      Ts777ExplicitFalseLoadSnapshotDeltaRepository.query &&
-                  initialSelection.usesExpectedTokens &&
-                  initialIssueDetailVisible
-              ? 'passed'
-              : 'failed',
+          status: stepOnePassed ? 'passed' : 'failed',
           action: _requestSteps[0],
           observed: stepOneObserved,
         );
-        if (initialQuery !=
-                Ts777ExplicitFalseLoadSnapshotDeltaRepository.query ||
-            !initialSelection.usesExpectedTokens ||
-            !initialIssueDetailVisible) {
+        if (!stepOnePassed) {
           failures.add(
-            'Step 1 failed: the app did not reach the hydrated JQL Search issue-detail state before the explicit false sync was queued.\n'
+            'Step 1 failed: the app did not reach the hydrated JQL Search issue-detail state before the hosted sync comparison started.\n'
             'Observed: $stepOneObserved\n'
             'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}\n'
             'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}',
           );
         }
 
-        final baselineSyncChecks = repository.syncCheckCount;
-        final baselineLoadSnapshotCalls = repository.loadSnapshotCalls;
-        repository.scheduleExplicitFalseLoadSnapshotDeltaBypass();
-        final syncObserved = await _resumeAndWaitForSync(
+        final controlBaselineSyncChecks = repository.syncCheckCount;
+        final controlBaselineLoadSnapshots = repository.loadSnapshotCalls;
+        repository.scheduleHostedSyncWithoutExplicitFlag();
+        final controlSyncObserved = await _resumeAndWaitForSync(
           tester,
           repository: repository,
-          baselineSyncChecks: baselineSyncChecks,
+          baselineSyncChecks: controlBaselineSyncChecks,
         );
-
-        final payload = repository.describeLastPayload();
-        final exposedPayload = repository.describeLastExposedPayload();
-        final stepTwoObserved =
-            'sync_observed=$syncObserved; '
-            'requested_load_snapshot_delta=${repository.lastRequestedLoadSnapshotDelta ?? '<absent>'}; '
-            'payload=$payload; '
-            'contract_shape=${result['contract_shape']}';
+        final controlLoadSnapshotDelta =
+            repository.loadSnapshotCalls - controlBaselineLoadSnapshots;
+        final controlRequestedPayload = repository
+            .describeLastRequestedPayload();
+        final controlExposedPayload = repository.describeLastExposedPayload();
+        final controlPayload = repository.describeLastPayload();
+        final controlQueryAfter = await screen.readJqlSearchFieldValue();
+        final controlInitialDescriptionStillVisible = await screen
+            .isTextVisible(
+              Ts777ExplicitFalseLoadSnapshotDeltaRepository
+                  .initialIssueBDescription,
+            );
+        final controlDescriptionVisible = await screen.isTextVisible(
+          Ts777ExplicitFalseLoadSnapshotDeltaRepository
+              .controlWithoutFlagDescription,
+        );
+        final controlIssueDetailVisible = await screen.isIssueDetailVisible(
+          Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBKey,
+        );
+        final controlStepObserved =
+            'control_sync_observed=$controlSyncObserved; '
+            'control_requested_payload=$controlRequestedPayload; '
+            'control_exposed_payload=$controlExposedPayload; '
+            'control_load_snapshot_delta=$controlLoadSnapshotDelta; '
+            'control_query_after_sync=${controlQueryAfter ?? '<missing>'}; '
+            'control_initial_description_still_visible=$controlInitialDescriptionStillVisible; '
+            'control_description_visible=$controlDescriptionVisible; '
+            'control_issue_detail_visible=$controlIssueDetailVisible';
+        final controlStepPassed =
+            controlSyncObserved &&
+            controlLoadSnapshotDelta == 0 &&
+            controlQueryAfter ==
+                Ts777ExplicitFalseLoadSnapshotDeltaRepository.query &&
+            controlInitialDescriptionStillVisible &&
+            !controlDescriptionVisible &&
+            controlIssueDetailVisible;
+        result['control_requested_payload'] = controlRequestedPayload;
+        result['control_exposed_payload'] = controlExposedPayload;
+        result['control_payload'] = controlPayload;
+        result['control_load_snapshot_delta'] = controlLoadSnapshotDelta;
+        result['control_query_after_sync'] = controlQueryAfter ?? '<missing>';
         _recordStep(
           result,
           step: 2,
-          status:
-              syncObserved &&
-                  repository.lastRequestedLoadSnapshotDelta ==
-                      Ts777ExplicitFalseLoadSnapshotDeltaRepository
-                          .explicitLoadSnapshotDeltaValue
-              ? 'passed'
-              : 'failed',
+          status: controlStepPassed ? 'passed' : 'failed',
           action: _requestSteps[1],
-          observed: stepTwoObserved,
+          observed: controlStepObserved,
         );
-        if (!syncObserved ||
-            repository.lastRequestedLoadSnapshotDelta !=
-                Ts777ExplicitFalseLoadSnapshotDeltaRepository
-                    .explicitLoadSnapshotDeltaValue) {
+        if (!controlStepPassed) {
           failures.add(
-            'Step 2 failed: the background sync did not process the explicit false request through the production sync contract.\n'
-            'Observed: $stepTwoObserved',
-          );
-        }
-
-        final loadSnapshotDelta =
-            repository.loadSnapshotCalls - baselineLoadSnapshotCalls;
-        result['load_snapshot_delta'] = loadSnapshotDelta;
-        result['payload'] = payload;
-        result['exposed_payload'] = exposedPayload;
-        final stepThreeObserved =
-            'baseline_load_snapshot_count=$baselineLoadSnapshotCalls; '
-            'final_load_snapshot_count=${repository.loadSnapshotCalls}; '
-            'load_snapshot_delta=$loadSnapshotDelta; '
-            'exposed_payload=$exposedPayload';
-        _recordStep(
-          result,
-          step: 3,
-          status: loadSnapshotDelta == 0 ? 'passed' : 'failed',
-          action: _requestSteps[2],
-          observed: stepThreeObserved,
-        );
-        if (loadSnapshotDelta != 0) {
-          failures.add(
-            "Step 3 failed: the explicit false sync still called loadSnapshot instead of bypassing the global reload path.\n"
-            'Observed: $stepThreeObserved',
-          );
-        }
-
-        final queryAfterSync = await screen.readJqlSearchFieldValue();
-        final initialDescriptionStillVisible = await screen.isTextVisible(
-          Ts777ExplicitFalseLoadSnapshotDeltaRepository
-              .initialIssueBDescription,
-        );
-        final explicitFalseDescriptionVisible = await screen.isTextVisible(
-          Ts777ExplicitFalseLoadSnapshotDeltaRepository
-              .explicitFalseAttemptDescription,
-        );
-        final issueDetailStillVisible = await screen.isIssueDetailVisible(
-          Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBKey,
-        );
-        result['query_after_sync'] = queryAfterSync ?? '<missing>';
-        result['initial_description_still_visible'] =
-            initialDescriptionStillVisible;
-        result['explicit_false_description_visible'] =
-            explicitFalseDescriptionVisible;
-        result['issue_detail_still_visible'] = issueDetailStillVisible;
-        result['visible_rows_after_sync'] = screen
-            .visibleIssueSearchResultLabelsSnapshot();
-        result['visible_texts_after_sync'] = screen.visibleTextsSnapshot();
-        result['visible_semantics_after_sync'] = screen
-            .visibleSemanticsLabelsSnapshot();
-        final stepFourObserved =
-            'query_after_sync=${queryAfterSync ?? '<missing>'}; '
-            'initial_description_still_visible=$initialDescriptionStillVisible; '
-            'explicit_false_description_visible=$explicitFalseDescriptionVisible; '
-            'issue_detail_still_visible=$issueDetailStillVisible';
-        _recordStep(
-          result,
-          step: 4,
-          status:
-              queryAfterSync ==
-                      Ts777ExplicitFalseLoadSnapshotDeltaRepository.query &&
-                  initialDescriptionStillVisible &&
-                  !explicitFalseDescriptionVisible &&
-                  issueDetailStillVisible
-              ? 'passed'
-              : 'failed',
-          action: _requestSteps[3],
-          observed: stepFourObserved,
-        );
-        if (queryAfterSync !=
-                Ts777ExplicitFalseLoadSnapshotDeltaRepository.query ||
-            !initialDescriptionStillVisible ||
-            explicitFalseDescriptionVisible ||
-            !issueDetailStillVisible) {
-          failures.add(
-            "Step 4 failed: the explicit false sync did not preserve the visible JQL Search issue detail/user state while keeping load_snapshot_delta unchanged.\n"
-            'Observed: $stepFourObserved\n'
+            'Step 2 failed: the unflagged hosted control sync did not stay on the expected no-reload path.\n'
+            'Observed: $controlStepObserved\n'
             'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}\n'
             'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}',
           );
         }
 
+        final explicitBaselineSyncChecks = repository.syncCheckCount;
+        final explicitBaselineLoadSnapshots = repository.loadSnapshotCalls;
+        repository.scheduleExplicitFalseLoadSnapshotDeltaAttempt();
+        final explicitSyncObserved = await _resumeAndWaitForSync(
+          tester,
+          repository: repository,
+          baselineSyncChecks: explicitBaselineSyncChecks,
+        );
+        final explicitLoadSnapshotDelta =
+            repository.loadSnapshotCalls - explicitBaselineLoadSnapshots;
+        final explicitRequestedPayload = repository
+            .describeLastRequestedPayload();
+        final explicitExposedPayload = repository.describeLastExposedPayload();
+        final explicitPayload = repository.describeLastPayload();
+        final explicitQueryAfter = await screen.readJqlSearchFieldValue();
+        final explicitInitialDescriptionStillVisible = await screen
+            .isTextVisible(
+              Ts777ExplicitFalseLoadSnapshotDeltaRepository
+                  .initialIssueBDescription,
+            );
+        final explicitFalseDescriptionVisible = await screen.isTextVisible(
+          Ts777ExplicitFalseLoadSnapshotDeltaRepository
+              .explicitFalseAttemptDescription,
+        );
+        final explicitIssueDetailVisible = await screen.isIssueDetailVisible(
+          Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBKey,
+        );
+        final explicitStepObserved =
+            'explicit_sync_observed=$explicitSyncObserved; '
+            'explicit_requested_payload=$explicitRequestedPayload; '
+            'explicit_exposed_payload=$explicitExposedPayload; '
+            'explicit_load_snapshot_delta=$explicitLoadSnapshotDelta; '
+            'explicit_query_after_sync=${explicitQueryAfter ?? '<missing>'}; '
+            'initial_description_still_visible=$explicitInitialDescriptionStillVisible; '
+            'explicit_false_description_visible=$explicitFalseDescriptionVisible; '
+            'explicit_issue_detail_visible=$explicitIssueDetailVisible';
+        final explicitStepPassed =
+            explicitSyncObserved &&
+            explicitLoadSnapshotDelta == 0 &&
+            explicitQueryAfter ==
+                Ts777ExplicitFalseLoadSnapshotDeltaRepository.query &&
+            explicitInitialDescriptionStillVisible &&
+            !explicitFalseDescriptionVisible &&
+            explicitIssueDetailVisible;
+        result['explicit_requested_payload'] = explicitRequestedPayload;
+        result['explicit_exposed_payload'] = explicitExposedPayload;
+        result['explicit_payload'] = explicitPayload;
+        result['load_snapshot_delta'] = explicitLoadSnapshotDelta;
+        result['exposed_payload'] = explicitExposedPayload;
+        result['payload'] = explicitPayload;
+        result['query_after_sync'] = explicitQueryAfter ?? '<missing>';
+        result['initial_description_still_visible'] =
+            explicitInitialDescriptionStillVisible;
+        result['explicit_false_description_visible'] =
+            explicitFalseDescriptionVisible;
+        result['issue_detail_still_visible'] = explicitIssueDetailVisible;
+        _recordStep(
+          result,
+          step: 3,
+          status: explicitStepPassed ? 'passed' : 'failed',
+          action: _requestSteps[2],
+          observed: explicitStepObserved,
+        );
+        if (!explicitStepPassed) {
+          failures.add(
+            'Step 3 failed: the explicit load_snapshot_delta=0 hosted sync did not stay on the expected no-reload path.\n'
+            'Observed: $explicitStepObserved\n'
+            'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}\n'
+            'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}',
+          );
+        }
+
+        final payloadsDistinguishable =
+            controlExposedPayload != explicitExposedPayload;
+        final comparisonStepObserved =
+            'contract_shape=${result['contract_shape']}; '
+            'control_requested_payload=$controlRequestedPayload; '
+            'control_exposed_payload=$controlExposedPayload; '
+            'control_load_snapshot_delta=$controlLoadSnapshotDelta; '
+            'explicit_requested_payload=$explicitRequestedPayload; '
+            'explicit_exposed_payload=$explicitExposedPayload; '
+            'explicit_load_snapshot_delta=$explicitLoadSnapshotDelta; '
+            'payloads_distinguishable=$payloadsDistinguishable';
+        final comparisonStepPassed =
+            controlStepPassed && explicitStepPassed && payloadsDistinguishable;
+        result['payloads_distinguishable'] = payloadsDistinguishable;
+        _recordStep(
+          result,
+          step: 4,
+          status: comparisonStepPassed ? 'passed' : 'failed',
+          action: _requestSteps[3],
+          observed: comparisonStepObserved,
+        );
+        if (!comparisonStepPassed) {
+          failures.add(
+            'Step 4 failed: the public sync contract still does not distinguish an explicit load_snapshot_delta=0 request from the no-flag hosted sync.\n'
+            'Observed: $comparisonStepObserved',
+          );
+        }
+
+        result['visible_rows_after_sync'] = screen
+            .visibleIssueSearchResultLabelsSnapshot();
+        result['visible_texts_after_sync'] = screen.visibleTextsSnapshot();
+        result['visible_semantics_after_sync'] = screen
+            .visibleSemanticsLabelsSnapshot();
         _recordHumanVerification(
           result,
           check:
-              'Kept the real Issue-B detail visible after the hosted sync and checked the description exactly where a user would read it.',
+              'Kept the real Issue-B detail visible after both hosted syncs and checked that the original description stayed on screen.',
           observed:
-              'initial_description_still_visible=$initialDescriptionStillVisible; '
-              'explicit_false_description_visible=$explicitFalseDescriptionVisible; '
+              'control_initial_description_still_visible=$controlInitialDescriptionStillVisible; '
+              'explicit_initial_description_still_visible=$explicitInitialDescriptionStillVisible; '
               'visible_texts=${_formatSnapshot(screen.visibleTextsSnapshot())}',
         );
         _recordHumanVerification(
           result,
           check:
-              'Confirmed the JQL Search query and selected issue remained stable after the explicit false sync completed.',
+              'Compared the public RepositorySyncCheck payloads for the unflagged control and explicit false attempts.',
           observed:
-              'query_after_sync=${queryAfterSync ?? '<missing>'}; '
-              'issue_detail_still_visible=$issueDetailStillVisible; '
-              'visible_rows=${_formatSnapshot(screen.visibleIssueSearchResultLabelsSnapshot())}; '
-              'visible_semantics=${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}',
+              'control_exposed_payload=$controlExposedPayload; '
+              'explicit_exposed_payload=$explicitExposedPayload; '
+              'payloads_distinguishable=$payloadsDistinguishable',
         );
 
         if (failures.isNotEmpty) {
@@ -316,7 +360,6 @@ Future<bool> _pumpUntil(
 }
 
 Directory get _outputsDir => Directory('${Directory.current.path}/outputs');
-File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
@@ -361,7 +404,6 @@ void _writePassOutputs(Map<String, Object?> result) {
   _resultFile.writeAsStringSync(
     '${jsonEncode(const <String, Object>{'status': 'passed', 'passed': 1, 'failed': 0, 'skipped': 0, 'summary': '1 passed, 0 failed'})}\n',
   );
-  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
 }
@@ -372,63 +414,9 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _resultFile.writeAsStringSync(
     '${jsonEncode(<String, Object>{'status': 'failed', 'passed': 0, 'failed': 1, 'skipped': 0, 'summary': '0 passed, 1 failed', 'error': error})}\n',
   );
-  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
-}
-
-String _jiraComment(Map<String, Object?> result, {required bool passed}) {
-  final statusLabel = passed ? '✅ PASSED' : '❌ FAILED';
-  final lines = <String>[
-    'h3. Test Automation Result',
-    '',
-    '*Status:* $statusLabel',
-    '*Test Case:* $_ticketKey - $_ticketSummary',
-    '',
-    'h4. What was tested',
-    '* Launched the production TrackState widget app with a hosted sync repository fixture dedicated to the explicit {{load_snapshot_delta=0}} path.',
-    '* Opened {{JQL Search}}, searched {{status = Open}}, and kept {{TRACK-777-B}} visible on the real issue detail surface.',
-    '* Queued a hosted background sync request that explicitly asked for {{load_snapshot_delta=0}} and verified the exposed production payload omitted the global reload signal.',
-    '* Monitored {{loadSnapshot}} / {{load_snapshot_delta}} and checked the visible Issue-B description after the sync completed.',
-    '',
-    'h4. Result',
-    passed
-        ? '* Matched the expected result: the explicit false sync was processed, {{load_snapshot_delta}} stayed at 0, and the visible Issue-B detail remained unchanged.'
-        : '* Did not match the expected result. See the failed step details and exact error below.',
-    '* Environment: {noformat}flutter test / ${Platform.operatingSystem}{noformat}',
-    '* Repository: {noformat}${result['repository'] ?? '<missing>'}{noformat}',
-    '',
-    'h4. Step results',
-    ..._jiraStepLines(result),
-    '',
-    'h4. Human-style verification',
-    ..._jiraHumanVerificationLines(result),
-    '',
-    'h4. Test file',
-    '{code}',
-    _testFilePath,
-    '{code}',
-    '',
-    'h4. Run command',
-    '{code:bash}',
-    _runCommand,
-    '{code}',
-  ];
-
-  if (!passed) {
-    lines.addAll(<String>[
-      '',
-      'h4. Exact error',
-      '{noformat}',
-      '${result['error'] ?? '<missing>'}',
-      '',
-      '${result['traceback'] ?? '<missing>'}',
-      '{noformat}',
-    ]);
-  }
-
-  return '${lines.join('\n')}\n';
 }
 
 String _prBody(Map<String, Object?> result, {required bool passed}) {
@@ -439,27 +427,30 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '**Status:** $statusLabel',
     '**Test Case:** $_ticketKey - $_ticketSummary',
     '',
-    '## What was automated',
-    '- Launched the production TrackState widget app with a hosted sync repository fixture for the explicit `load_snapshot_delta=0` case.',
-    '- Opened `JQL Search`, searched `status = Open`, and kept `TRACK-777-B` selected on the visible issue detail surface.',
-    '- Queued a hosted background sync request that explicitly asked for `load_snapshot_delta=0` and captured the exposed `RepositorySyncCheck` payload.',
-    '- Verified `loadSnapshot` / `load_snapshot_delta` stayed unchanged and the visible Issue-B description remained the original text.',
+    '## Rework summary',
+    '- Reworked `testing/tests/TS-777/` so the test compares the unflagged hosted sync path and the explicit `load_snapshot_delta=0` attempt through the public `RepositorySyncCheck(state, signals, changedPaths)` contract.',
+    '- Removed the pass condition that depended on fixture-private bookkeeping for `requested_load_snapshot_delta`.',
+    '- Kept the assertions focused on app-visible behavior: exposed sync payloads, `loadSnapshot` deltas, and the visible Issue-B detail state.',
     '',
-    '## Result',
+    '## Latest result',
     passed
-        ? '- Matched the expected result: the explicit false sync bypassed the global snapshot reload and kept the visible Issue-B detail unchanged.'
-        : '- Did not match the expected result. See the failed step details and exact error below.',
+        ? '- The public sync contract distinguished the explicit-false request from the unflagged control while still bypassing the global reload.'
+        : '- The public sync contract still exposed the same payload for the unflagged control and explicit `load_snapshot_delta=0` attempt, so the app cannot distinguish explicit false from omission.',
+    '',
+    '## Key observations',
+    '- Control requested payload: `${result['control_requested_payload'] ?? '<missing>'}`',
+    '- Control exposed payload: `${result['control_exposed_payload'] ?? '<missing>'}`',
+    '- Control `load_snapshot_delta`: `${result['control_load_snapshot_delta'] ?? '<missing>'}`',
+    '- Explicit-false requested payload: `${result['explicit_requested_payload'] ?? '<missing>'}`',
+    '- Explicit-false exposed payload: `${result['explicit_exposed_payload'] ?? '<missing>'}`',
+    '- Explicit-false `load_snapshot_delta`: `${result['load_snapshot_delta'] ?? '<missing>'}`',
+    '- Payloads distinguishable: `${result['payloads_distinguishable'] ?? '<missing>'}`',
     '',
     '## Step results',
     ..._markdownStepLines(result),
     '',
     '## Human-style verification',
     ..._markdownHumanVerificationLines(result),
-    '',
-    '## Observed payload',
-    '- Requested payload: `${result['payload'] ?? '<missing>'}`',
-    '- Exposed payload: `${result['exposed_payload'] ?? '<missing>'}`',
-    '- Observed `load_snapshot_delta`: `${result['load_snapshot_delta'] ?? '<missing>'}`',
     '',
     '## Test file',
     '```text',
@@ -488,34 +479,18 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
 }
 
 String _responseSummary(Map<String, Object?> result, {required bool passed}) {
-  final buffer = StringBuffer()
-    ..writeln('# $_ticketKey')
-    ..writeln()
-    ..writeln(
-      passed
-          ? 'Passed: the explicit `load_snapshot_delta=0` hosted sync bypassed the global snapshot reload, and the visible Issue-B detail stayed unchanged.'
-          : 'Failed: the explicit `load_snapshot_delta=0` hosted sync did not preserve the expected no-reload behavior.',
-    )
-    ..writeln()
-    ..writeln('Environment: `flutter test / ${Platform.operatingSystem}`')
-    ..writeln('Repository: `${result['repository'] ?? '<missing>'}`')
-    ..writeln('Observed payload: `${result['payload'] ?? '<missing>'}`')
-    ..writeln(
-      'Observed load_snapshot_delta: `${result['load_snapshot_delta'] ?? '<missing>'}`',
-    );
-
-  if (!passed) {
-    buffer
-      ..writeln()
-      ..writeln('Error:')
-      ..writeln('```text')
-      ..writeln('${result['error'] ?? '<missing>'}')
-      ..writeln()
-      ..writeln('${result['traceback'] ?? '<missing>'}')
-      ..writeln('```');
-  }
-
-  return buffer.toString();
+  final lines = <String>[
+    'h3. Rework Summary',
+    '',
+    '* Updated {{TS-777}} to compare the unflagged hosted sync path and the explicit {{load_snapshot_delta=0}} attempt only through the public {{RepositorySyncCheck(state, signals, changedPaths)}} contract.',
+    '* Removed the previous pass condition that relied on fixture-private {{requested_load_snapshot_delta}} bookkeeping.',
+    '* Latest result: ${passed ? '✅ PASSED' : '❌ FAILED'}',
+    passed
+        ? '* The explicit false request was publicly distinguishable from the no-flag hosted sync while still bypassing the global reload.'
+        : '* Both hosted syncs still exposed {noformat}${result['control_exposed_payload'] ?? '<missing>'}{noformat} vs {noformat}${result['explicit_exposed_payload'] ?? '<missing>'}{noformat}, so the app cannot distinguish explicit false from omission.',
+    '* Run command: {noformat}$_runCommand{noformat}',
+  ];
+  return '${lines.join('\n')}\n';
 }
 
 String _bugDescription(Map<String, Object?> result) {
@@ -523,17 +498,26 @@ String _bugDescription(Map<String, Object?> result) {
     '# Bug Report - $_ticketKey',
     '',
     '## Summary',
-    'An explicit `load_snapshot_delta=0` hosted sync request still triggers production-visible reload behavior instead of bypassing the global snapshot reload path.',
+    'The production sync contract still cannot distinguish an explicit `load_snapshot_delta=0` hosted sync request from an unflagged hosted sync.',
     '',
     '## Steps to Reproduce',
-    ..._bugStepLines(result),
+    '1. Launch the TrackState widget app with the hosted sync fixture and open `JQL Search`.',
+    '2. Search `status = Open`, select `TRACK-777-B`, and keep the issue detail visible.',
+    '3. Trigger a hosted control sync without any explicit `load_snapshot_delta` marker.',
+    '4. Trigger a second hosted sync that explicitly requests `load_snapshot_delta=0` through the same public sync boundary.',
+    '5. Compare the exposed `RepositorySyncCheck(state, signals, changedPaths)` payloads and the resulting `loadSnapshot` deltas.',
     '',
-    '## Actual vs Expected',
-    '- **Expected:** after JQL Search is hydrated and `TRACK-777-B` is visible, an explicit `load_snapshot_delta=0` hosted sync is processed without calling `loadSnapshot`, `load_snapshot_delta` remains `0`, and the visible Issue-B detail keeps the original text.',
-    '- **Actual:** ${_actualResultLine(result)}',
+    '## Expected Result',
+    '- The explicit `load_snapshot_delta=0` path is distinguishable from the unflagged hosted sync through the public sync contract, and it still bypasses the global snapshot reload.',
+    '',
+    '## Actual Result',
+    '- The unflagged control and explicit-false attempt both exposed the same public payload: `${result['control_exposed_payload'] ?? '<missing>'}` vs `${result['explicit_exposed_payload'] ?? '<missing>'}`.',
+    '- Both syncs kept `load_snapshot_delta` at `${result['control_load_snapshot_delta'] ?? '<missing>'}` / `${result['load_snapshot_delta'] ?? '<missing>'}`, so the UI stayed stable but the app never received a production-visible explicit-false marker.',
     '',
     '## Missing/Broken Production Capability',
-    '- The production sync pipeline does not fully honor the explicit false `load_snapshot_delta=0` request. It still allows reload behavior and/or visible detail replacement that should be bypassed.',
+    '- `RepositorySyncCheck` only exposes `${result['contract_shape'] ?? '<missing>'}` at this boundary.',
+    '- The product exposes `WorkspaceSyncSignal.hostedSnapshotReload` for explicit `load_snapshot_delta=1`, but there is no corresponding production-visible field or signal for explicit `load_snapshot_delta=0`.',
+    '- Because the public payload is identical to the no-flag path, a test in `testing/` cannot prove that the app distinguishes explicit false from omission.',
     '',
     '## Exact Error Message or Assertion Failure',
     '```text',
@@ -551,9 +535,13 @@ String _bugDescription(Map<String, Object?> result) {
     '',
     '## Relevant Logs',
     '```text',
-    'Requested payload: ${result['payload'] ?? '<missing>'}',
-    'Exposed payload: ${result['exposed_payload'] ?? '<missing>'}',
-    'load_snapshot_delta: ${result['load_snapshot_delta'] ?? '<missing>'}',
+    'Control requested payload: ${result['control_requested_payload'] ?? '<missing>'}',
+    'Control exposed payload: ${result['control_exposed_payload'] ?? '<missing>'}',
+    'Control load_snapshot_delta: ${result['control_load_snapshot_delta'] ?? '<missing>'}',
+    'Explicit requested payload: ${result['explicit_requested_payload'] ?? '<missing>'}',
+    'Explicit exposed payload: ${result['explicit_exposed_payload'] ?? '<missing>'}',
+    'Explicit load_snapshot_delta: ${result['load_snapshot_delta'] ?? '<missing>'}',
+    'Payloads distinguishable: ${result['payloads_distinguishable'] ?? '<missing>'}',
     'Query at failure: ${result['query_at_failure'] ?? result['query_after_sync'] ?? '<missing>'}',
     'Visible rows at failure: ${_formatSnapshot(_stringList(result['visible_rows_at_failure'] ?? result['visible_rows_after_sync']))}',
     'Visible texts at failure: ${_formatSnapshot(_stringList(result['visible_texts_at_failure'] ?? result['visible_texts_after_sync']))}',
@@ -565,33 +553,12 @@ String _bugDescription(Map<String, Object?> result) {
   return '${lines.join('\n')}\n';
 }
 
-List<String> _jiraStepLines(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  return [
-    for (final step in steps)
-      '* Step ${step['step']}: ${step['status'] == 'passed' ? '✅' : '❌'} ${step['action']}\n'
-          '  Observed: {noformat}${step['observed']}{noformat}',
-  ];
-}
-
 List<String> _markdownStepLines(Map<String, Object?> result) {
   final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
   return [
     for (final step in steps)
       '- Step ${step['step']}: ${step['status'] == 'passed' ? '✅' : '❌'} ${step['action']}\n'
           '  - Observed: `${step['observed']}`',
-  ];
-}
-
-List<String> _jiraHumanVerificationLines(Map<String, Object?> result) {
-  final checks =
-      (result['human_verification'] as List<Map<String, Object?>>?) ?? const [];
-  if (checks.isEmpty) {
-    return const ['* No additional human-style checks were recorded.'];
-  }
-  return [
-    for (final check in checks)
-      '* ${check['check']}\n  Observed: {noformat}${check['observed']}{noformat}',
   ];
 }
 
@@ -607,18 +574,6 @@ List<String> _markdownHumanVerificationLines(Map<String, Object?> result) {
   ];
 }
 
-List<String> _bugStepLines(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  if (steps.isEmpty) {
-    return const ['1. No step-level details were recorded.'];
-  }
-  return [
-    for (final step in steps)
-      '${step['step']}. ${step['action']} ${step['status'] == 'passed' ? '✅' : '❌'}\n'
-          '   - Observed: ${step['observed']}',
-  ];
-}
-
 List<String> _bugLogLines(Map<String, Object?> result) {
   final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
   if (steps.isEmpty) {
@@ -628,14 +583,6 @@ List<String> _bugLogLines(Map<String, Object?> result) {
     for (final step in steps)
       'Step ${step['step']} [${step['status']}]: ${step['action']} :: ${step['observed']}',
   ];
-}
-
-String _actualResultLine(Map<String, Object?> result) {
-  return 'The observed payload `${result['exposed_payload'] ?? '<missing>'}` '
-      'produced `load_snapshot_delta=${result['load_snapshot_delta'] ?? '<missing>'}`, '
-      'while `initial_description_still_visible=${result['initial_description_still_visible'] ?? '<missing>'}` '
-      'and `explicit_false_description_visible=${result['explicit_false_description_visible'] ?? '<missing>'}` '
-      'described the user-visible Issue-B detail state.';
 }
 
 List<String> _stringList(Object? value) {

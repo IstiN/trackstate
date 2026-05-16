@@ -22,9 +22,11 @@ class Ts777ExplicitFalseLoadSnapshotDeltaRepository
   static const String closedStatusId = 'closed';
   static const String query = 'status = Open';
   static const String initialIssueBDescription =
-      'Initial detail text before the explicit false hosted sync runs.';
+      'Initial detail text before any hosted sync comparison runs.';
+  static const String controlWithoutFlagDescription =
+      'Issue-B changed after a hosted sync without any explicit load_snapshot_delta marker.';
   static const String explicitFalseAttemptDescription =
-      'Issue-B changed after the test requested load_snapshot_delta=0, but the visible detail should remain unchanged because the global reload must be bypassed.';
+      'Issue-B changed after the test requested load_snapshot_delta=0, but the visible detail should remain unchanged because the explicit false request must bypass the global reload.';
   static const String contractShapeDescription =
       'RepositorySyncCheck(state, signals, changedPaths)';
 
@@ -55,7 +57,16 @@ class Ts777ExplicitFalseLoadSnapshotDeltaRepository
 
   Set<String> get lastReturnedChangedPaths => _lastReturnedChangedPaths;
 
-  void scheduleExplicitFalseLoadSnapshotDeltaBypass() {
+  void scheduleHostedSyncWithoutExplicitFlag() {
+    _currentSnapshot = _snapshotWithUpdatedIssueB(
+      snapshot: _currentSnapshot,
+      description: controlWithoutFlagDescription,
+      updatedLabel: 'control refresh',
+    );
+    _pendingSync = const _PendingTs777Sync();
+  }
+
+  void scheduleExplicitFalseLoadSnapshotDeltaAttempt() {
     _currentSnapshot = _snapshotWithUpdatedIssueB(
       snapshot: _currentSnapshot,
       description: explicitFalseAttemptDescription,
@@ -66,15 +77,18 @@ class Ts777ExplicitFalseLoadSnapshotDeltaRepository
     );
   }
 
-  String describeLastPayload() {
+  String describeLastRequestedPayload() {
     final requested = _lastRequestedLoadSnapshotDelta;
-    return 'requested_load_snapshot_delta=${requested == null ? '<absent>' : requested}; '
-        '${describeLastExposedPayload()}';
+    return 'requested_load_snapshot_delta=${requested == null ? '<absent>' : requested}';
   }
 
   String describeLastExposedPayload() {
     return 'signals=${_formatSignals(lastReturnedSignals)}; '
         'changed_paths=${_formatPaths(lastReturnedChangedPaths)}';
+  }
+
+  String describeLastPayload() {
+    return '${describeLastRequestedPayload()}; ${describeLastExposedPayload()}';
   }
 
   @override
@@ -147,9 +161,9 @@ class Ts777ExplicitFalseLoadSnapshotDeltaRepository
 }
 
 class _PendingTs777Sync {
-  const _PendingTs777Sync({required this.requestedLoadSnapshotDelta});
+  const _PendingTs777Sync({this.requestedLoadSnapshotDelta});
 
-  final int requestedLoadSnapshotDelta;
+  final int? requestedLoadSnapshotDelta;
 }
 
 final TrackerSnapshot _initialSnapshot = TrackerSnapshot(
@@ -233,7 +247,7 @@ final TrackerSnapshot _initialSnapshot = TrackerSnapshot(
       summary: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueASummary,
       storagePath: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueAPath,
       description:
-          'Issue-A stays Open so the active JQL Search query remains visibly populated before and after the explicit false sync check.',
+          'Issue-A stays Open so the active JQL Search query remains visibly populated before and after the hosted sync comparison.',
       updatedLabel: '1 minute ago',
     ),
     _issue(
@@ -340,6 +354,7 @@ TrackStateIssue _issue({
     updatedLabel: updatedLabel,
     acceptanceCriteria: const <String>[
       'Interpret load_snapshot_delta=0 as an explicit false request.',
+      'Expose an app-visible distinction between the explicit false request and the unflagged hosted sync path.',
       'Bypass the global snapshot reload when the explicit false request is processed.',
     ],
     comments: const <IssueComment>[],
