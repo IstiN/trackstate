@@ -1,0 +1,9 @@
+test_id: TS-777
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Launches the production TrackStateApp with a mutable in-memory repository that implements WorkspaceSyncRepository.
+  - Seeds two Open issues in JQL Search, selects TRACK-777-B, then queues a hosted sync request that explicitly asks for load_snapshot_delta=0.
+  - Verifies the production sync listener processes the event without calling loadSnapshot and leaves the visible issue detail unchanged for the user.
