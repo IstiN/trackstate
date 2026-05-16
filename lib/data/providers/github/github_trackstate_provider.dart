@@ -20,6 +20,11 @@ class GitHubTrackStateProvider
     caseSensitive: false,
     multiLine: true,
   );
+  static final RegExp _hostedSnapshotReloadBypassPattern = RegExp(
+    r'(^|[^\w])load_snapshot_delta\s*=\s*0([^\w]|$)',
+    caseSensitive: false,
+    multiLine: true,
+  );
   static const _releaseAssetDeletionVisibilityMaxAttempts = 8;
   static const _releaseAssetDeletionVisibilityDelay = Duration(
     milliseconds: 250,
@@ -416,6 +421,7 @@ class GitHubTrackStateProvider
     }
     final signals = <WorkspaceSyncSignal>{};
     final changedPaths = <String>{};
+    HostedSnapshotReloadDirective? hostedSnapshotReloadDirective;
     if (previousState.repositoryRevision != currentState.repositoryRevision) {
       signals.add(WorkspaceSyncSignal.hostedRepository);
       final delta = await _readHostedRepositoryDelta(
@@ -423,7 +429,9 @@ class GitHubTrackStateProvider
         head: currentState.repositoryRevision,
       );
       changedPaths.addAll(delta.changedPaths);
-      if (delta.requestsSnapshotReload) {
+      hostedSnapshotReloadDirective = delta.hostedSnapshotReloadDirective;
+      if (hostedSnapshotReloadDirective ==
+          HostedSnapshotReloadDirective.enabled) {
         signals.add(WorkspaceSyncSignal.hostedSnapshotReload);
       }
     }
@@ -435,6 +443,7 @@ class GitHubTrackStateProvider
       state: currentState,
       signals: signals,
       changedPaths: changedPaths,
+      hostedSnapshotReloadDirective: hostedSnapshotReloadDirective,
     );
   }
 
@@ -542,7 +551,7 @@ class GitHubTrackStateProvider
               as Map<String, Object?>;
       return _HostedRepositoryDelta(
         changedPaths: _extractChangedPaths(json['files']),
-        requestsSnapshotReload: _containsHostedSnapshotReloadRequest(
+        hostedSnapshotReloadDirective: _readHostedSnapshotReloadDirective(
           json['commits'],
         ),
       );
@@ -570,22 +579,31 @@ class GitHubTrackStateProvider
     return paths;
   }
 
-  bool _containsHostedSnapshotReloadRequest(Object? commits) {
+  HostedSnapshotReloadDirective? _readHostedSnapshotReloadDirective(
+    Object? commits,
+  ) {
     if (commits is! List<Object?>) {
-      return false;
+      return null;
     }
+    HostedSnapshotReloadDirective? directive;
     for (final entry in commits.whereType<Map<String, Object?>>()) {
       final commit = entry['commit'];
       if (commit is! Map<String, Object?>) {
         continue;
       }
       final message = commit['message']?.toString().trim() ?? '';
-      if (message.isNotEmpty &&
-          _hostedSnapshotReloadRequestPattern.hasMatch(message)) {
-        return true;
+      if (message.isEmpty) {
+        continue;
+      }
+      if (_hostedSnapshotReloadBypassPattern.hasMatch(message)) {
+        directive = HostedSnapshotReloadDirective.disabled;
+        continue;
+      }
+      if (_hostedSnapshotReloadRequestPattern.hasMatch(message)) {
+        directive = HostedSnapshotReloadDirective.enabled;
       }
     }
-    return false;
+    return directive;
   }
 
   @override
@@ -1493,11 +1511,11 @@ class GitHubTrackStateProvider
 class _HostedRepositoryDelta {
   const _HostedRepositoryDelta({
     this.changedPaths = const <String>{},
-    this.requestsSnapshotReload = false,
+    this.hostedSnapshotReloadDirective,
   });
 
   final Set<String> changedPaths;
-  final bool requestsSnapshotReload;
+  final HostedSnapshotReloadDirective? hostedSnapshotReloadDirective;
 }
 
 RepositoryPermission _permissionFromRepoJson(Map<String, Object?> json) {

@@ -28,7 +28,7 @@ class Ts777ExplicitFalseLoadSnapshotDeltaRepository
   static const String explicitFalseAttemptDescription =
       'Issue-B changed after the test requested load_snapshot_delta=0, but the visible detail should remain unchanged because the explicit false request must bypass the global reload.';
   static const String contractShapeDescription =
-      'RepositorySyncCheck(state, signals, changedPaths)';
+      'RepositorySyncCheck(state, signals, changedPaths, hostedSnapshotReloadDirective)';
 
   static const JqlSearchService _searchService = JqlSearchService();
   static const RepositoryUser _connectedUser = RepositoryUser(
@@ -44,6 +44,7 @@ class Ts777ExplicitFalseLoadSnapshotDeltaRepository
   int? _lastRequestedLoadSnapshotDelta;
   Set<WorkspaceSyncSignal> _lastReturnedSignals = const <WorkspaceSyncSignal>{};
   Set<String> _lastReturnedChangedPaths = const <String>{};
+  HostedSnapshotReloadDirective? _lastHostedSnapshotReloadDirective;
 
   int get loadSnapshotCalls => _loadSnapshotCalls;
 
@@ -57,6 +58,8 @@ class Ts777ExplicitFalseLoadSnapshotDeltaRepository
 
   Set<String> get lastReturnedChangedPaths => _lastReturnedChangedPaths;
 
+  HostedSnapshotReloadDirective? get lastHostedSnapshotReloadDirective =>
+      _lastHostedSnapshotReloadDirective;
   void scheduleHostedSyncWithoutExplicitFlag() {
     _currentSnapshot = _snapshotWithUpdatedIssueB(
       snapshot: _currentSnapshot,
@@ -84,7 +87,8 @@ class Ts777ExplicitFalseLoadSnapshotDeltaRepository
 
   String describeLastExposedPayload() {
     return 'signals=${_formatSignals(lastReturnedSignals)}; '
-        'changed_paths=${_formatPaths(lastReturnedChangedPaths)}';
+        'changed_paths=${_formatPaths(lastReturnedChangedPaths)}; '
+        'hosted_snapshot_reload=${_formatHostedSnapshotReloadDirective(lastHostedSnapshotReloadDirective)}';
   }
 
   String describeLastPayload() {
@@ -130,6 +134,7 @@ class Ts777ExplicitFalseLoadSnapshotDeltaRepository
       _lastRequestedLoadSnapshotDelta = null;
       _lastReturnedSignals = const <WorkspaceSyncSignal>{};
       _lastReturnedChangedPaths = const <String>{};
+      _lastHostedSnapshotReloadDirective = null;
       return RepositorySyncCheck(
         state: RepositorySyncState(
           providerType: ProviderType.github,
@@ -147,6 +152,10 @@ class Ts777ExplicitFalseLoadSnapshotDeltaRepository
       WorkspaceSyncSignal.hostedRepository,
     };
     _lastReturnedChangedPaths = const <String>{};
+    _lastHostedSnapshotReloadDirective =
+        pendingSync.requestedLoadSnapshotDelta == explicitLoadSnapshotDeltaValue
+        ? HostedSnapshotReloadDirective.disabled
+        : null;
     return RepositorySyncCheck(
       state: RepositorySyncState(
         providerType: ProviderType.github,
@@ -156,6 +165,7 @@ class Ts777ExplicitFalseLoadSnapshotDeltaRepository
       ),
       signals: _lastReturnedSignals,
       changedPaths: _lastReturnedChangedPaths,
+      hostedSnapshotReloadDirective: _lastHostedSnapshotReloadDirective,
     );
   }
 }
@@ -378,4 +388,14 @@ String _formatPaths(Set<String> paths) {
     return '<empty>';
   }
   return paths.join('|');
+}
+
+String _formatHostedSnapshotReloadDirective(
+  HostedSnapshotReloadDirective? directive,
+) {
+  return switch (directive) {
+    HostedSnapshotReloadDirective.enabled => 'enabled',
+    HostedSnapshotReloadDirective.disabled => 'disabled',
+    null => '<absent>',
+  };
 }

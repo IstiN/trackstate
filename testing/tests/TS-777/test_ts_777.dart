@@ -14,12 +14,12 @@ const String _ticketSummary =
     'Sync event with explicit load_snapshot_delta=0 bypasses the global snapshot reload';
 const String _testFilePath = 'testing/tests/TS-777/test_ts_777.dart';
 const String _runCommand =
-    'flutter test testing/tests/TS-777/test_ts_777.dart --reporter expanded';
+    'mkdir -p outputs && flutter test testing/tests/TS-777/test_ts_777.dart --reporter expanded';
 const List<String> _requestSteps = <String>[
   'Hydrate JQL Search and keep TRACK-777-B visible on the real issue detail surface.',
   'Run a hosted control sync without any explicit load_snapshot_delta marker and observe the public sync payload plus visible state.',
   "Run a hosted sync that explicitly requests load_snapshot_delta=0 through the same sync contract and observe the public payload plus visible state.",
-  'Compare the public RepositorySyncCheck payloads from the control and explicit-false syncs to prove whether the app can distinguish them.',
+  'Compare the public RepositorySyncCheck payloads, including the hosted snapshot reload directive, from the control and explicit-false syncs to prove whether the app can distinguish them.',
 ];
 
 void main() {
@@ -360,10 +360,10 @@ Future<bool> _pumpUntil(
 }
 
 Directory get _outputsDir => Directory('${Directory.current.path}/outputs');
-File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
+File get _reviewRepliesFile => File('${_outputsDir.path}/review_replies.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
 
 void _recordStep(
@@ -405,9 +405,9 @@ void _writePassOutputs(Map<String, Object?> result) {
   _resultFile.writeAsStringSync(
     '${jsonEncode(const <String, Object>{'status': 'passed', 'passed': 1, 'failed': 0, 'skipped': 0, 'summary': '1 passed, 0 failed'})}\n',
   );
-  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: true));
 }
 
 void _writeFailureOutputs(Map<String, Object?> result) {
@@ -416,62 +416,10 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _resultFile.writeAsStringSync(
     '${jsonEncode(<String, Object>{'status': 'failed', 'passed': 0, 'failed': 1, 'skipped': 0, 'summary': '0 passed, 1 failed', 'error': error})}\n',
   );
-  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
-}
-
-String _jiraComment(Map<String, Object?> result, {required bool passed}) {
-  final statusLabel = passed ? '✅ PASSED' : '❌ FAILED';
-  final lines = <String>[
-    'h3. Test Automation Result',
-    '',
-    '*Status:* $statusLabel',
-    '*Test Case:* $_ticketKey - $_ticketSummary',
-    '',
-    'h4. What was tested',
-    "* Opened {{JQL Search}}, searched {code}${Ts777ExplicitFalseLoadSnapshotDeltaRepository.query}{code}, and kept {{${Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBKey}}} visible on the production issue detail surface.",
-    '* Triggered both an unflagged hosted sync and an explicit {code}load_snapshot_delta=0{code} hosted sync attempt through the public sync contract.',
-    '* Verified the exposed sync payloads, the {code}loadSnapshot{code} / {code}load_snapshot_delta{code} counters, and the visible Issue-B description after each sync.',
-    '',
-    'h4. Result',
-    passed
-        ? '* Matched the expected result: the explicit false sync remained distinguishable from the no-flag path without triggering a global snapshot reload, and the visible Issue-B detail stayed unchanged.'
-        : '* Did not match the expected result. The current public sync contract in this checkout still collapses the explicit false request into the same exposed payload as the unflagged hosted sync.',
-    '* Environment: {noformat}flutter test / ${Platform.operatingSystem}{noformat}',
-    '* Repository: {noformat}${result['repository'] ?? '<missing>'}{noformat}',
-    '',
-    'h4. Step results',
-    ..._jiraStepLines(result),
-    '',
-    'h4. Human-style verification',
-    ..._jiraHumanVerificationLines(result),
-    '',
-    'h4. Test file',
-    '{code}',
-    _testFilePath,
-    '{code}',
-    '',
-    'h4. Run command',
-    '{code:bash}',
-    _runCommand,
-    '{code}',
-  ];
-
-  if (!passed) {
-    lines.addAll(<String>[
-      '',
-      'h4. Exact error',
-      '{noformat}',
-      '${result['error'] ?? '<missing>'}',
-      '',
-      '${result['traceback'] ?? '<missing>'}',
-      '{noformat}',
-    ]);
-  }
-
-  return '${lines.join('\n')}\n';
 }
 
 String _prBody(Map<String, Object?> result, {required bool passed}) {
@@ -482,15 +430,15 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '**Status:** $statusLabel',
     '**Test Case:** $_ticketKey - $_ticketSummary',
     '',
-    '## What was automated',
-    '- Opened `JQL Search`, searched `status = Open`, and kept `TRACK-777-B` visible on the production issue detail surface.',
-    '- Triggered both an unflagged hosted sync and an explicit `load_snapshot_delta=0` hosted sync attempt through the public sync contract.',
-    '- Verified the exposed sync payloads, the `loadSnapshot` / `load_snapshot_delta` counters, and the visible Issue-B description after each sync.',
+    '## Rework summary',
+    '- Reworked `testing/tests/TS-777/` so the test compares the unflagged hosted sync path and the explicit `load_snapshot_delta=0` attempt through the public `RepositorySyncCheck(state, signals, changedPaths, hostedSnapshotReloadDirective)` contract.',
+    '- Removed the pass condition that depended on fixture-private bookkeeping for `requested_load_snapshot_delta`.',
+    '- Kept the assertions focused on app-visible behavior: exposed sync payloads, `loadSnapshot` deltas, and the visible Issue-B detail state.',
     '',
-    '## Result',
+    '## Latest result',
     passed
-        ? '- Matched the expected result: the explicit false sync remained distinguishable from the no-flag path without triggering a global snapshot reload, and the visible Issue-B detail stayed unchanged.'
-        : '- Did not match the expected result. The current public sync contract in this checkout still collapses the explicit false request into the same exposed payload as the unflagged hosted sync.',
+        ? '- The public sync contract distinguished the explicit-false request from the unflagged control while still bypassing the global reload.'
+        : '- The public sync contract still exposed the same payload for the unflagged control and explicit `load_snapshot_delta=0` attempt, so the app cannot distinguish explicit false from omission.',
     '',
     '## Key observations',
     '- Control requested payload: `${result['control_requested_payload'] ?? '<missing>'}`',
@@ -534,60 +482,45 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
 }
 
 String _responseSummary(Map<String, Object?> result, {required bool passed}) {
-  final buffer = StringBuffer()
-    ..writeln('# $_ticketKey')
-    ..writeln()
-    ..writeln(
-      passed
-          ? 'Passed: the explicit `load_snapshot_delta=0` hosted sync stayed publicly distinguishable from the no-flag path, bypassed global reload, and left the visible Issue-B detail unchanged.'
-          : 'Failed: the explicit `load_snapshot_delta=0` hosted sync still exposes the same public payload as the no-flag hosted sync in the current checkout.',
-    )
-    ..writeln()
-    ..writeln('Environment: `flutter test / ${Platform.operatingSystem}`')
-    ..writeln('Repository: `${result['repository'] ?? '<missing>'}`')
-    ..writeln(
-      'Control exposed payload: `${result['control_exposed_payload'] ?? '<missing>'}`',
-    )
-    ..writeln(
-      'Explicit-false exposed payload: `${result['explicit_exposed_payload'] ?? '<missing>'}`',
-    )
-    ..writeln(
-      'Observed load_snapshot_delta: `${result['load_snapshot_delta'] ?? '<missing>'}`',
-    );
-
-  if (!passed) {
-    buffer
-      ..writeln()
-      ..writeln('Error:')
-      ..writeln('```text')
-      ..writeln('${result['error'] ?? '<missing>'}')
-      ..writeln()
-      ..writeln('${result['traceback'] ?? '<missing>'}')
-      ..writeln('```');
-  }
-
-  return buffer.toString();
+  final lines = <String>[
+    'h3. Rework Summary',
+    '',
+    '* Updated {{TS-777}} to compare the unflagged hosted sync path and the explicit {{load_snapshot_delta=0}} attempt only through the public {{RepositorySyncCheck(state, signals, changedPaths, hostedSnapshotReloadDirective)}} contract.',
+    '* Removed the previous pass condition that relied on fixture-private {{requested_load_snapshot_delta}} bookkeeping.',
+    '* Latest result: ${passed ? '✅ PASSED' : '❌ FAILED'}',
+    passed
+        ? '* The explicit false request was publicly distinguishable from the no-flag hosted sync while still bypassing the global reload.'
+        : '* Both hosted syncs still exposed {noformat}${result['control_exposed_payload'] ?? '<missing>'}{noformat} vs {noformat}${result['explicit_exposed_payload'] ?? '<missing>'}{noformat}, so the app cannot distinguish explicit false from omission.',
+    '* Run command: {noformat}$_runCommand{noformat}',
+  ];
+  return '${lines.join('\n')}\n';
 }
 
 String _bugDescription(Map<String, Object?> result) {
-  final actualResult = _actualResultLine(result);
   final lines = <String>[
     '# Bug Report - $_ticketKey',
     '',
     '## Summary',
-    'The current checkout still cannot distinguish an explicit `load_snapshot_delta=0` hosted sync request from an unflagged hosted sync through the public sync contract.',
+    'The production sync contract still cannot distinguish an explicit `load_snapshot_delta=0` hosted sync request from an unflagged hosted sync.',
     '',
     '## Steps to Reproduce',
-    ..._bugStepLines(result),
+    '1. Launch the TrackState widget app with the hosted sync fixture and open `JQL Search`.',
+    '2. Search `status = Open`, select `TRACK-777-B`, and keep the issue detail visible.',
+    '3. Trigger a hosted control sync without any explicit `load_snapshot_delta` marker.',
+    '4. Trigger a second hosted sync that explicitly requests `load_snapshot_delta=0` through the same public sync boundary.',
+    '5. Compare the exposed `RepositorySyncCheck(state, signals, changedPaths, hostedSnapshotReloadDirective)` payloads and the resulting `loadSnapshot` deltas.',
     '',
-    '## Actual vs Expected',
-    '- **Expected:** the explicit `load_snapshot_delta=0` path stays publicly distinguishable from the unflagged hosted sync through the production-visible sync contract, does not call `loadSnapshot`, keeps `load_snapshot_delta` unchanged, and leaves the visible Issue-B detail on the original description.',
-    '- **Actual:** $actualResult',
+    '## Expected Result',
+    '- The explicit `load_snapshot_delta=0` path is distinguishable from the unflagged hosted sync through the public sync contract, and it still bypasses the global snapshot reload.',
+    '',
+    '## Actual Result',
+    '- The unflagged control and explicit-false attempt both exposed the same public payload: `${result['control_exposed_payload'] ?? '<missing>'}` vs `${result['explicit_exposed_payload'] ?? '<missing>'}`.',
+    '- Both syncs kept `load_snapshot_delta` at `${result['control_load_snapshot_delta'] ?? '<missing>'}` / `${result['load_snapshot_delta'] ?? '<missing>'}`, so the UI stayed stable but the app never received a production-visible explicit-false marker.',
     '',
     '## Missing/Broken Production Capability',
-    '- `RepositorySyncCheck` still exposes `${result['contract_shape'] ?? '<missing>'}` in this checkout, and both sync variants surface the same public payload to the app.',
-    '- The app-visible sync result shows `${result['control_exposed_payload'] ?? '<missing>'}` for the unflagged control and `${result['explicit_exposed_payload'] ?? '<missing>'}` for the explicit false attempt.',
-    '- Because the public payload is identical, the app cannot distinguish explicit false from omission at the boundary this test exercises.',
+    '- `RepositorySyncCheck` only exposes `${result['contract_shape'] ?? '<missing>'}` at this boundary.',
+    '- The product exposes `WorkspaceSyncSignal.hostedSnapshotReload` for explicit `load_snapshot_delta=1`, but there is no corresponding production-visible field or signal for explicit `load_snapshot_delta=0`.',
+    '- Because the public payload is identical to the no-flag path, a test in `testing/` cannot prove that the app distinguishes explicit false from omission.',
     '',
     '## Exact Error Message or Assertion Failure',
     '```text',
@@ -625,33 +558,12 @@ String _bugDescription(Map<String, Object?> result) {
   return '${lines.join('\n')}\n';
 }
 
-List<String> _jiraStepLines(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  return [
-    for (final step in steps)
-      '* Step ${step['step']}: ${step['status'] == 'passed' ? '✅' : '❌'} ${step['action']}\n'
-          '  Observed: {noformat}${step['observed']}{noformat}',
-  ];
-}
-
 List<String> _markdownStepLines(Map<String, Object?> result) {
   final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
   return [
     for (final step in steps)
       '- Step ${step['step']}: ${step['status'] == 'passed' ? '✅' : '❌'} ${step['action']}\n'
           '  - Observed: `${step['observed']}`',
-  ];
-}
-
-List<String> _jiraHumanVerificationLines(Map<String, Object?> result) {
-  final checks =
-      (result['human_verification'] as List<Map<String, Object?>>?) ?? const [];
-  if (checks.isEmpty) {
-    return const ['* No additional human-style checks were recorded.'];
-  }
-  return [
-    for (final check in checks)
-      '* ${check['check']}\n  Observed: {noformat}${check['observed']}{noformat}',
   ];
 }
 
@@ -667,6 +579,17 @@ List<String> _markdownHumanVerificationLines(Map<String, Object?> result) {
   ];
 }
 
+String _reviewReplies(Map<String, Object?> result, {required bool passed}) {
+  final reply = passed
+      ? 'Fixed: resolved the TS-777 merge conflicts against the current `RepositorySyncCheck(state, signals, changedPaths, hostedSnapshotReloadDirective)` contract, kept the assertions on production-visible behavior only, and reran the test successfully.'
+      : 'Fixed: resolved the TS-777 merge conflicts against the current `RepositorySyncCheck(state, signals, changedPaths, hostedSnapshotReloadDirective)` contract, kept the assertions on production-visible behavior only, and reran the test. The remaining failure is product-visible: ${result['error'] ?? 'see attached failure output'}.';
+  return '${jsonEncode(<String, Object>{
+    'replies': <Map<String, Object?>>[
+      <String, Object?>{'inReplyToId': null, 'threadId': null, 'reply': reply},
+    ],
+  })}\n';
+}
+
 List<String> _bugLogLines(Map<String, Object?> result) {
   final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
   if (steps.isEmpty) {
@@ -676,24 +599,6 @@ List<String> _bugLogLines(Map<String, Object?> result) {
     for (final step in steps)
       'Step ${step['step']} [${step['status']}]: ${step['action']} :: ${step['observed']}',
   ];
-}
-
-List<String> _bugStepLines(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  if (steps.isEmpty) {
-    return const <String>[
-      '1. ❌ No step logs were recorded before the failure.',
-    ];
-  }
-  return [
-    for (final step in steps)
-      '${step['step']}. ${step['status'] == 'passed' ? '✅' : '❌'} ${step['action']}\n'
-          '   - Observed: ${step['observed']}',
-  ];
-}
-
-String _actualResultLine(Map<String, Object?> result) {
-  return 'the unflagged control exposed `${result['control_exposed_payload'] ?? '<missing>'}` and the explicit false attempt exposed `${result['explicit_exposed_payload'] ?? '<missing>'}`; `load_snapshot_delta` stayed `${result['control_load_snapshot_delta'] ?? '<missing>'}` / `${result['load_snapshot_delta'] ?? '<missing>'}`, so the visible Issue-B detail stayed stable but the app still received no production-visible distinction between explicit false and omission.';
 }
 
 List<String> _stringList(Object? value) {

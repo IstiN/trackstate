@@ -6,4 +6,4 @@ dependencies: []
 notes:
   - Launches the production TrackStateApp with a mutable in-memory repository that implements WorkspaceSyncRepository.
   - Seeds two Open issues in JQL Search, selects TRACK-773-B, then runs both an unflagged hosted sync control and a flagged hosted sync attempt.
-  - Fails on the real product gap when the current production RepositorySyncCheck contract cannot distinguish the explicit request from the existing hosted fallback and/or the unflagged control still triggers a full snapshot reload.
+  - Passes only when the unflagged hosted sync leaves the global snapshot reload counter unchanged and the explicit attempt exposes a distinct hosted reload signal that triggers exactly one full snapshot reload.

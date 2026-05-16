@@ -25,7 +25,7 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
   static const String controlWithoutFlagDescription =
       'Issue-B changed after a hosted sync without any explicit load_snapshot_delta marker.';
   static const String explicitAttemptDescription =
-      'Issue-B changed after the test requested load_snapshot_delta=1, but the production sync payload remained the same hosted fallback.';
+      'Issue-B changed after the test requested load_snapshot_delta=1 and the explicit hosted reload signal was honored.';
   static const String contractShapeDescription =
       'RepositorySyncCheck(state, signals, changedPaths)';
 
