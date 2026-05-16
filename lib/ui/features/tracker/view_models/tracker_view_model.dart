@@ -2156,6 +2156,9 @@ class TrackerViewModel extends ChangeNotifier {
     }
     final snapshot = refresh.snapshot;
     final changedDomains = refresh.result.changedDomains;
+    final shouldRefreshProjectMetadata =
+        snapshot == null &&
+        changedDomains.contains(WorkspaceSyncDomain.projectMeta);
     final shouldClearMissingSelection =
         changedDomains.contains(WorkspaceSyncDomain.issueSummaries) ||
         changedDomains.contains(WorkspaceSyncDomain.repositoryIndex);
@@ -2186,6 +2189,10 @@ class TrackerViewModel extends ChangeNotifier {
         }
       }
     } else {
+      if (shouldRefreshProjectMetadata) {
+        await _refreshProjectMetadataForWorkspaceSync();
+        await _refreshSearchResultsAfterMutation(preferLoadedSnapshot: true);
+      }
       await _hydrateSelectedIssueForWorkspaceSync(refresh.result);
     }
     final refreshedIssueKeys = <String>{
@@ -2258,6 +2265,28 @@ class TrackerViewModel extends ChangeNotifier {
         );
       }
     }
+  }
+
+  Future<void> _refreshProjectMetadataForWorkspaceSync() async {
+    final snapshot = _snapshot;
+    final repository = _repository;
+    if (snapshot == null) {
+      return;
+    }
+    if (repository is! ProjectMetadataRepository) {
+      return;
+    }
+    final refresh = await (repository as ProjectMetadataRepository)
+        .loadProjectMetadata();
+    _snapshot = TrackerSnapshot(
+      project: refresh.project,
+      issues: snapshot.issues,
+      repositoryIndex: snapshot.repositoryIndex,
+      loadWarnings: refresh.loadWarnings,
+      readiness: snapshot.readiness,
+      startupRecovery: snapshot.startupRecovery,
+    );
+    _updateWorkspaceSyncBaseline();
   }
 
   bool _syncChangeAppliesToIssue(

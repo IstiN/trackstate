@@ -324,6 +324,59 @@ void main() {
   );
 
   test(
+    'workspace sync service does not reload the hosted snapshot for project metadata-only changes',
+    () async {
+      final baseline = await const DemoTrackStateRepository().loadSnapshot();
+      final repository = _FakeWorkspaceSyncRepository(
+        states: [
+          RepositorySyncCheck(
+            state: const RepositorySyncState(
+              providerType: ProviderType.github,
+              repositoryRevision: 'rev-1',
+              sessionRevision: 'connected:true:true',
+              connectionState: ProviderConnectionState.connected,
+            ),
+          ),
+          RepositorySyncCheck(
+            state: const RepositorySyncState(
+              providerType: ProviderType.github,
+              repositoryRevision: 'rev-2',
+              sessionRevision: 'connected:true:true',
+              connectionState: ProviderConnectionState.connected,
+            ),
+            signals: const {WorkspaceSyncSignal.hostedRepository},
+            changedPaths: const {'project.json'},
+          ),
+        ],
+      );
+      final refreshes = <WorkspaceSyncRefresh>[];
+      var loadSnapshotCalls = 0;
+      final service = WorkspaceSyncService(
+        repository: repository,
+        loadSnapshot: () async {
+          loadSnapshotCalls += 1;
+          return baseline;
+        },
+        onRefresh: refreshes.add,
+        onStatusChanged: (_) {},
+      );
+
+      service.updateBaselineSnapshot(baseline);
+      await service.checkNow(force: true);
+      service.updateBaselineSnapshot(baseline);
+      await service.checkNow(force: true);
+
+      expect(loadSnapshotCalls, 0);
+      expect(refreshes, hasLength(1));
+      expect(refreshes.single.snapshot, isNull);
+      expect(
+        refreshes.single.result.changedDomains,
+        equals(<WorkspaceSyncDomain>{WorkspaceSyncDomain.projectMeta}),
+      );
+    },
+  );
+
+  test(
     'workspace sync service ignores unknown hosted sync-domain paths',
     () async {
       final baseline = await const DemoTrackStateRepository().loadSnapshot();

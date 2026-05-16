@@ -237,17 +237,18 @@ class WorkspaceSyncService {
       return false;
     }
     for (final change in pathChanges) {
-      if (change.isGlobal) {
-        return true;
-      }
       switch (change.domain) {
         case WorkspaceSyncDomain.projectMeta:
+          break;
         case WorkspaceSyncDomain.issueSummaries:
         case WorkspaceSyncDomain.issueDetails:
         case WorkspaceSyncDomain.repositoryIndex:
           return true;
         case WorkspaceSyncDomain.comments:
         case WorkspaceSyncDomain.attachments:
+          if (change.isGlobal) {
+            return true;
+          }
           break;
       }
     }
