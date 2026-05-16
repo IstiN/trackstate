@@ -1,0 +1,8 @@
+test_id: TS-774
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Reuses the mutable hosted ProviderBackedTrackStateRepository fixture from TS-734.
+  - Verifies a project metadata sync refreshes Dashboard counters and Settings Attachments data without incrementing the hosted snapshot reload counter.
