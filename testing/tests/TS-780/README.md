@@ -5,12 +5,13 @@ when the hosted compare flow returns an explicit `load_snapshot_delta=0`
 directive.
 
 The ticket test now consumes a reusable component service under
-`testing/components/services/`, which hides the concrete GitHub framework
-adapter and keeps the required `tests -> components -> frameworks -> core`
-layering intact. That service drives the production `GitHubTrackStateProvider`
-compare-sync path, then attempts to serialize the returned
-`RepositorySyncCheck` through Dart's shipped JSON encoding path (`jsonEncode`)
-instead of a test-owned mapper.
+`testing/components/services/`, while ticket-local bootstrap code in
+`testing/tests/TS-780/support/ts780_repository_sync_check_service_factory.dart`
+assembles the concrete GitHub framework adapter and injects it into that
+component. This keeps the component layer framework-agnostic while still
+driving the production `GitHubTrackStateProvider` compare-sync path, then
+attempting to serialize the returned `RepositorySyncCheck` through Dart's
+shipped JSON encoding path (`jsonEncode`) instead of a test-owned mapper.
 
 ## Install dependencies
 

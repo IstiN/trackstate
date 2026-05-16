@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
-import '../../components/services/repository_sync_check_service.dart';
+import 'support/ts780_repository_sync_check_service_factory.dart';
 
 const String _ticketKey = 'TS-780';
 const String _ticketSummary =
@@ -36,8 +36,7 @@ void main() {
         'human_verification': <Map<String, Object?>>[],
       };
 
-      final RepositorySyncCheckService syncCheckService =
-          await RepositorySyncCheckService.create();
+      final syncCheckService = await createTs780RepositorySyncCheckService();
 
       try {
         final failures = <String>[];
@@ -280,8 +279,8 @@ void _writeFailureOutputs(Map<String, Object?> result) {
 String _responseSummary(Map<String, Object?> result, {required bool passed}) {
   final lines = <String>[
     passed
-        ? 'Routed the ticket through `testing/components/services/repository_sync_check_service.dart`, kept GitHub provider wiring behind the reusable framework adapter, and retained the real production serialization assertion.'
-        : 'Routed the ticket through `testing/components/services/repository_sync_check_service.dart`, kept GitHub provider wiring behind the reusable framework adapter, and retained the real production serialization assertion.',
+        ? 'Moved framework assembly out of `testing/components/` into `testing/tests/TS-780/support/ts780_repository_sync_check_service_factory.dart`, kept the reusable component injected with `RepositorySyncCheckDriver`, and retained the real production serialization assertion.'
+        : 'Moved framework assembly out of `testing/components/` into `testing/tests/TS-780/support/ts780_repository_sync_check_service_factory.dart`, kept the reusable component injected with `RepositorySyncCheckDriver`, and retained the real production serialization assertion.',
     '',
     passed
         ? 'New result: the shipped `RepositorySyncCheck` JSON path preserved `load_snapshot_delta=0` for the explicit-false hosted sync and omitted it for the control payload.'
@@ -299,7 +298,8 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '## TS-780 rework',
     '',
     '- Kept the assertion on the shipped JSON serialization attempt (`jsonEncode`) for the real `RepositorySyncCheck` returned by the production GitHub compare-sync path.',
-    '- Added `testing/components/services/repository_sync_check_service.dart` so the ticket consumes a reusable component that depends on `RepositorySyncCheckDriver` instead of constructing a framework adapter directly.',
+    '- Kept `testing/components/services/repository_sync_check_service.dart` framework-agnostic so it depends only on the injected `RepositorySyncCheckDriver` abstraction.',
+    '- Moved framework assembly into `testing/tests/TS-780/support/ts780_repository_sync_check_service_factory.dart`, which creates the GitHub framework adapter and injects it into the reusable component.',
     '- Left `MockClient`/`GitHubTrackStateProvider` wiring inside `testing/frameworks/api/github/github_repository_sync_check_framework.dart` and updated the ticket docs/config to reflect the layered flow.',
     '',
     '## Result',
