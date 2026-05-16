@@ -16,9 +16,9 @@ const String _testFilePath = 'testing/tests/TS-773/test_ts_773.dart';
 const String _runCommand =
     'flutter test testing/tests/TS-773/test_ts_773.dart --reporter expanded';
 const List<String> _requestSteps = <String>[
-  "Simulate a background sync event that includes an explicit field 'load_snapshot_delta=1'.",
-  "Monitor the sync orchestration layer for a call to the 'loadSnapshot' method.",
-  "Inspect the value of the 'load_snapshot_delta' counter after processing.",
+  'Trigger the same hosted sync without an explicit load_snapshot_delta flag and verify it does not default to a global snapshot reload.',
+  'Attempt to request load_snapshot_delta=1 through the current production sync contract.',
+  'Compare the observed payloads, loadSnapshot deltas, and visible issue detail state after both syncs.',
 ];
 
 void main() {
@@ -29,7 +29,7 @@ void main() {
   });
 
   testWidgets(
-    'TS-773 explicit load_snapshot_delta background sync performs a full snapshot reload',
+    'TS-773 exposes the missing explicit load_snapshot_delta boundary and the default hosted reload regression',
     (tester) async {
       final result = <String, Object?>{
         'ticket': _ticketKey,
@@ -39,6 +39,8 @@ void main() {
         'query': Ts773ExplicitLoadSnapshotDeltaRepository.query,
         'steps': <Map<String, Object?>>[],
         'human_verification': <Map<String, Object?>>[],
+        'contract_shape':
+            Ts773ExplicitLoadSnapshotDeltaRepository.contractShapeDescription,
       };
 
       final semantics = tester.ensureSemantics();
@@ -74,7 +76,7 @@ void main() {
 
         final initialQuery = await screen.readJqlSearchFieldValue();
         final initialRows = screen.visibleIssueSearchResultLabelsSnapshot();
-        final initialSelectedObservation = await screen
+        final initialSelection = await screen
             .readIssueSearchResultSelectionObservation(
               Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey,
               Ts773ExplicitLoadSnapshotDeltaRepository.issueBSummary,
@@ -83,219 +85,212 @@ void main() {
         final initialIssueBDetailVisible = await screen.isIssueDetailVisible(
           Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey,
         );
-        final initialVisibleTexts = screen.visibleTextsSnapshot();
-        final initialVisibleSemantics = screen.visibleSemanticsLabelsSnapshot();
 
         result['initial_query'] = initialQuery ?? '<missing>';
         result['initial_rows'] = initialRows;
-        result['initial_selected_observation'] = initialSelectedObservation
-            .describe();
+        result['initial_selection'] = initialSelection.describe();
         result['initial_issue_b_detail_visible'] = initialIssueBDetailVisible;
-        result['initial_visible_texts'] = initialVisibleTexts;
-        result['initial_visible_semantics'] = initialVisibleSemantics;
 
         if (initialQuery != Ts773ExplicitLoadSnapshotDeltaRepository.query ||
-            !initialSelectedObservation.usesExpectedTokens ||
+            !initialSelection.usesExpectedTokens ||
             !initialIssueBDetailVisible) {
           throw AssertionError(
-            'Precondition failed: TS-773 expected the visible query to be '
-            '"${Ts773ExplicitLoadSnapshotDeltaRepository.query}", '
-            '${Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey} to expose a '
-            'selected/highlight state, and its detail panel to be visible before '
-            'the background sync ran.\n'
+            'Precondition failed: TS-773 expected the JQL Search query to remain visible, '
+            '${Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey} to stay selected, '
+            'and its detail panel to be visible before any hosted sync check.\n'
             'Observed query: ${initialQuery ?? '<missing>'}\n'
-            'Selected observation: ${initialSelectedObservation.describe()}\n'
-            'Issue-B detail visible: $initialIssueBDetailVisible\n'
-            'Visible rows: ${_formatSnapshot(initialRows)}\n'
-            'Visible texts: ${_formatSnapshot(initialVisibleTexts)}\n'
-            'Visible semantics: ${_formatSnapshot(initialVisibleSemantics)}',
+            'Observed selection: ${initialSelection.describe()}\n'
+            'Issue-B detail visible: $initialIssueBDetailVisible',
           );
         }
 
-        final baselineSyncCheckCount = repository.syncCheckCount;
-        final baselineLoadSnapshotCount = repository.loadSnapshotCalls;
-        final baselineRepositoryRevision = repository.repositoryRevision;
-
-        repository.scheduleExplicitLoadSnapshotDeltaRefresh();
-        await _resumeApp(tester);
-        await _pumpUntil(
+        final controlBaselineSyncChecks = repository.syncCheckCount;
+        final controlBaselineLoadSnapshots = repository.loadSnapshotCalls;
+        repository.scheduleHostedSyncWithoutExplicitFlag();
+        final controlSyncObserved = await _resumeAndWaitForSync(
           tester,
-          condition: () async =>
-              await _hasUpdatedSelectedIssueState(screen, repository),
-          timeout: const Duration(seconds: 10),
+          repository: repository,
+          baselineSyncChecks: controlBaselineSyncChecks,
         );
 
-        final syncCheckDelta =
-            repository.syncCheckCount - baselineSyncCheckCount;
-        final loadSnapshotDelta =
-            repository.loadSnapshotCalls - baselineLoadSnapshotCount;
-        final queryAfterRefresh = await screen.readJqlSearchFieldValue();
-        final rowsAfterRefresh = screen
-            .visibleIssueSearchResultLabelsSnapshot();
-        final selectedObservationAfterRefresh = await screen
-            .readIssueSearchResultSelectionObservation(
-              Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey,
-              Ts773ExplicitLoadSnapshotDeltaRepository.issueBSummary,
-              expectedSelected: true,
-            );
-        final issueADetailVisible = await screen.isIssueDetailVisible(
-          Ts773ExplicitLoadSnapshotDeltaRepository.issueAKey,
+        final controlLoadSnapshotDelta =
+            repository.loadSnapshotCalls - controlBaselineLoadSnapshots;
+        final controlPayload = repository.describeLastPayload();
+        final controlExposedPayload = repository.describeLastExposedPayload();
+        final controlQueryAfter = await screen.readJqlSearchFieldValue();
+        final controlDescriptionVisible = await screen.isTextVisible(
+          Ts773ExplicitLoadSnapshotDeltaRepository
+              .controlWithoutFlagDescription,
         );
-        final issueBDetailVisible = await screen.isIssueDetailVisible(
+        final controlInitialDescriptionStillVisible = await screen
+            .isTextVisible(
+              Ts773ExplicitLoadSnapshotDeltaRepository.initialIssueBDescription,
+            );
+        final controlIssueBRowTexts = screen.issueSearchResultTextsSnapshot(
           Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey,
+          Ts773ExplicitLoadSnapshotDeltaRepository.issueBSummary,
         );
-        final updatedDescriptionVisible = await screen.isTextVisible(
-          Ts773ExplicitLoadSnapshotDeltaRepository.updatedIssueBDescription,
-        );
-        final initialDescriptionStillVisible = await screen.isTextVisible(
-          Ts773ExplicitLoadSnapshotDeltaRepository.initialIssueBDescription,
-        );
-        final issueBRowTextsAfterRefresh = screen
-            .issueSearchResultTextsSnapshot(
-              Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey,
-              Ts773ExplicitLoadSnapshotDeltaRepository.issueBSummary,
-            );
-        final visibleTextsAfterRefresh = screen.visibleTextsSnapshot();
-        final visibleSemanticsAfterRefresh = screen
-            .visibleSemanticsLabelsSnapshot();
 
-        result['scheduled_load_snapshot_delta_flag'] =
-            repository.scheduledLoadSnapshotDeltaFlag;
-        result['processed_load_snapshot_delta_flag'] =
-            repository.processedLoadSnapshotDeltaFlag;
-        result['sync_check_delta'] = syncCheckDelta;
-        result['baseline_load_snapshot_count'] = baselineLoadSnapshotCount;
-        result['final_load_snapshot_count'] = repository.loadSnapshotCalls;
-        result['load_snapshot_delta'] = loadSnapshotDelta;
-        result['repository_revision_before_refresh'] =
-            baselineRepositoryRevision;
-        result['repository_revision_after_refresh'] =
-            repository.repositoryRevision;
-        result['query_after_refresh'] = queryAfterRefresh ?? '<missing>';
-        result['rows_after_refresh'] = rowsAfterRefresh;
-        result['selected_observation_after_refresh'] =
-            selectedObservationAfterRefresh.describe();
-        result['issue_a_detail_visible_after_refresh'] = issueADetailVisible;
-        result['issue_b_detail_visible_after_refresh'] = issueBDetailVisible;
-        result['updated_description_visible_after_refresh'] =
-            updatedDescriptionVisible;
-        result['initial_description_still_visible_after_refresh'] =
-            initialDescriptionStillVisible;
-        result['issue_b_row_texts_after_refresh'] = issueBRowTextsAfterRefresh;
-        result['visible_texts_after_refresh'] = visibleTextsAfterRefresh;
-        result['visible_semantics_after_refresh'] =
-            visibleSemanticsAfterRefresh;
+        result['control_sync_observed'] = controlSyncObserved;
+        result['control_load_snapshot_delta'] = controlLoadSnapshotDelta;
+        result['control_payload'] = controlPayload;
+        result['control_exposed_payload'] = controlExposedPayload;
+        result['control_query_after_sync'] = controlQueryAfter ?? '<missing>';
+        result['control_description_visible'] = controlDescriptionVisible;
+        result['control_initial_description_still_visible'] =
+            controlInitialDescriptionStillVisible;
+        result['control_issue_b_row_texts'] = controlIssueBRowTexts;
 
-        final stepOneObserved =
-            'scheduled_load_snapshot_delta_flag=${repository.scheduledLoadSnapshotDeltaFlag}; '
-            'processed_load_snapshot_delta_flag=${repository.processedLoadSnapshotDeltaFlag}; '
-            'sync_check_delta=$syncCheckDelta; '
-            'repository_revision_before=$baselineRepositoryRevision; '
-            'repository_revision_after=${repository.repositoryRevision}';
-        final stepOnePassed =
-            repository.scheduledLoadSnapshotDeltaFlag ==
-                Ts773ExplicitLoadSnapshotDeltaRepository
-                    .explicitLoadSnapshotDeltaFlag &&
-            repository.processedLoadSnapshotDeltaFlag ==
-                Ts773ExplicitLoadSnapshotDeltaRepository
-                    .explicitLoadSnapshotDeltaFlag &&
-            syncCheckDelta >= 1 &&
-            repository.repositoryRevision != baselineRepositoryRevision;
+        final controlStepObserved =
+            'control_sync_observed=$controlSyncObserved; '
+            'control_load_snapshot_delta=$controlLoadSnapshotDelta; '
+            'control_payload=$controlPayload; '
+            'control_exposed_payload=$controlExposedPayload; '
+            'control_query_after_sync=${controlQueryAfter ?? '<missing>'}; '
+            'control_description_visible=$controlDescriptionVisible; '
+            'control_initial_description_still_visible='
+            '$controlInitialDescriptionStillVisible';
+        final controlStepPassed =
+            controlSyncObserved &&
+            controlLoadSnapshotDelta == 0 &&
+            !controlDescriptionVisible &&
+            controlQueryAfter == Ts773ExplicitLoadSnapshotDeltaRepository.query;
         _recordStep(
           result,
           step: 1,
-          status: stepOnePassed ? 'passed' : 'failed',
+          status: controlStepPassed ? 'passed' : 'failed',
           action: _requestSteps[0],
-          observed: stepOneObserved,
+          observed: controlStepObserved,
         );
-        if (!stepOnePassed) {
-          throw AssertionError(
-            'Step 1 failed: the queued explicit load_snapshot_delta=1 sync event '
-            'was not observed by the production app-resume sync path.\n'
-            'Observed: $stepOneObserved',
-          );
-        }
 
-        final stepTwoObserved =
-            'baseline_load_snapshot_count=$baselineLoadSnapshotCount; '
-            'final_load_snapshot_count=${repository.loadSnapshotCalls}; '
-            'load_snapshot_delta=$loadSnapshotDelta; '
-            'updated_description_visible=$updatedDescriptionVisible; '
-            'initial_description_still_visible=$initialDescriptionStillVisible';
-        final stepTwoPassed =
-            loadSnapshotDelta == 1 &&
-            updatedDescriptionVisible &&
-            !initialDescriptionStillVisible;
+        final explicitBaselineSyncChecks = repository.syncCheckCount;
+        final explicitBaselineLoadSnapshots = repository.loadSnapshotCalls;
+        repository.scheduleExplicitLoadSnapshotDeltaRefreshAttempt();
+        final explicitSyncObserved = await _resumeAndWaitForSync(
+          tester,
+          repository: repository,
+          baselineSyncChecks: explicitBaselineSyncChecks,
+        );
+
+        final explicitLoadSnapshotDelta =
+            repository.loadSnapshotCalls - explicitBaselineLoadSnapshots;
+        final explicitPayload = repository.describeLastPayload();
+        final explicitExposedPayload = repository.describeLastExposedPayload();
+        final explicitQueryAfter = await screen.readJqlSearchFieldValue();
+        final explicitDescriptionVisible = await screen.isTextVisible(
+          Ts773ExplicitLoadSnapshotDeltaRepository.explicitAttemptDescription,
+        );
+        final payloadsDistinguishable =
+            controlExposedPayload != explicitExposedPayload;
+        final issueBDetailVisibleAfterExplicit = await screen
+            .isIssueDetailVisible(
+              Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey,
+            );
+        final visibleTextsAfterExplicit = screen.visibleTextsSnapshot();
+        final visibleRowsAfterExplicit = screen
+            .visibleIssueSearchResultLabelsSnapshot();
+        final visibleSemanticsAfterExplicit = screen
+            .visibleSemanticsLabelsSnapshot();
+
+        result['explicit_sync_observed'] = explicitSyncObserved;
+        result['explicit_load_snapshot_delta'] = explicitLoadSnapshotDelta;
+        result['load_snapshot_delta'] = explicitLoadSnapshotDelta;
+        result['explicit_payload'] = explicitPayload;
+        result['explicit_exposed_payload'] = explicitExposedPayload;
+        result['payloads_distinguishable'] = payloadsDistinguishable;
+        result['explicit_query_after_sync'] = explicitQueryAfter ?? '<missing>';
+        result['explicit_description_visible'] = explicitDescriptionVisible;
+        result['issue_b_detail_visible_after_explicit'] =
+            issueBDetailVisibleAfterExplicit;
+        result['visible_rows_after_explicit'] = visibleRowsAfterExplicit;
+        result['visible_texts_after_explicit'] = visibleTextsAfterExplicit;
+        result['visible_semantics_after_explicit'] =
+            visibleSemanticsAfterExplicit;
+        result['repository_revision_after_refresh'] =
+            repository.repositoryRevision;
+
+        final explicitStepObserved =
+            'explicit_sync_observed=$explicitSyncObserved; '
+            'requested_explicit_flag=${repository.lastRequestedExplicitFlag == true ? 1 : 0}; '
+            'explicit_load_snapshot_delta=$explicitLoadSnapshotDelta; '
+            'explicit_payload=$explicitPayload; '
+            'explicit_exposed_payload=$explicitExposedPayload; '
+            'payloads_distinguishable=$payloadsDistinguishable; '
+            'explicit_query_after_sync=${explicitQueryAfter ?? '<missing>'}; '
+            'explicit_description_visible=$explicitDescriptionVisible';
+        final explicitStepPassed =
+            explicitSyncObserved &&
+            payloadsDistinguishable &&
+            explicitLoadSnapshotDelta == 1 &&
+            explicitDescriptionVisible &&
+            explicitQueryAfter ==
+                Ts773ExplicitLoadSnapshotDeltaRepository.query;
         _recordStep(
           result,
           step: 2,
-          status: stepTwoPassed ? 'passed' : 'failed',
+          status: explicitStepPassed ? 'passed' : 'failed',
           action: _requestSteps[1],
-          observed: stepTwoObserved,
+          observed: explicitStepObserved,
         );
-        if (!stepTwoPassed) {
-          throw AssertionError(
-            'Step 2 failed: the sync orchestration layer did not call '
-            'loadSnapshot exactly once for the explicit global refresh or the '
-            'reloaded snapshot did not update the visible issue detail.\n'
-            'Observed: $stepTwoObserved\n'
-            'Visible texts: ${_formatSnapshot(visibleTextsAfterRefresh)}',
-          );
-        }
 
-        final stepThreeObserved =
-            'load_snapshot_delta=$loadSnapshotDelta; '
-            'selected_after=${selectedObservationAfterRefresh.describe()}; '
-            'query_after_refresh=${queryAfterRefresh ?? '<missing>'}; '
-            'issue_a_detail_visible=$issueADetailVisible; '
-            'issue_b_detail_visible=$issueBDetailVisible; '
-            'issue_b_row_texts=${_formatSnapshot(issueBRowTextsAfterRefresh)}';
-        final stepThreePassed =
-            loadSnapshotDelta == 1 &&
-            queryAfterRefresh ==
-                Ts773ExplicitLoadSnapshotDeltaRepository.query &&
-            selectedObservationAfterRefresh.usesExpectedTokens &&
-            !issueADetailVisible &&
-            issueBDetailVisible;
+        final comparisonStepObserved =
+            'contract_shape=${result['contract_shape']}; '
+            'control_exposed_payload=$controlExposedPayload; '
+            'explicit_exposed_payload=$explicitExposedPayload; '
+            'control_load_snapshot_delta=$controlLoadSnapshotDelta; '
+            'explicit_load_snapshot_delta=$explicitLoadSnapshotDelta; '
+            'issue_b_detail_visible_after_explicit='
+            '$issueBDetailVisibleAfterExplicit; '
+            'issue_b_row_texts=${_formatSnapshot(controlIssueBRowTexts)}';
+        final comparisonStepPassed =
+            controlStepPassed &&
+            explicitStepPassed &&
+            issueBDetailVisibleAfterExplicit;
         _recordStep(
           result,
           step: 3,
-          status: stepThreePassed ? 'passed' : 'failed',
+          status: comparisonStepPassed ? 'passed' : 'failed',
           action: _requestSteps[2],
-          observed: stepThreeObserved,
+          observed: comparisonStepObserved,
         );
-        if (!stepThreePassed) {
-          throw AssertionError(
-            'Step 3 failed: the observed load_snapshot_delta counter or the '
-            'visible post-refresh state did not match the expected global reload '
-            'result.\n'
-            'Observed: $stepThreeObserved\n'
-            'Visible rows: ${_formatSnapshot(rowsAfterRefresh)}\n'
-            'Visible semantics: ${_formatSnapshot(visibleSemanticsAfterRefresh)}',
-          );
-        }
 
         _recordHumanVerification(
           result,
           check:
-              'Viewed the selected issue detail exactly where a user would read it and confirmed the refreshed description text replaced the original wording after the explicit global reload.',
+              'Watched the visible Issue-B detail after the control sync and confirmed the fallback refresh text appeared even though no explicit load_snapshot_delta marker was available to the app.',
           observed:
-              'updated_description_visible=$updatedDescriptionVisible; '
-              'initial_description_still_visible=$initialDescriptionStillVisible; '
-              'visible_texts=${_formatSnapshot(visibleTextsAfterRefresh)}',
+              'control_description_visible=$controlDescriptionVisible; '
+              'control_initial_description_still_visible='
+              '$controlInitialDescriptionStillVisible; '
+              'control_issue_b_row_texts=${_formatSnapshot(controlIssueBRowTexts)}',
         );
         _recordHumanVerification(
           result,
           check:
-              'Looked back at JQL Search after the reload and confirmed the same query stayed visible, the same issue row still showed the selected/highlight state, and the detail panel stayed on Issue-B.',
+              'Compared the payloads that reached the production sync service for the control sync and the flagged attempt.',
           observed:
-              'query_after_refresh=${queryAfterRefresh ?? '<missing>'}; '
-              'rows_after_refresh=${_formatSnapshot(rowsAfterRefresh)}; '
-              'selected_before=${initialSelectedObservation.describe()}; '
-              'selected_after=${selectedObservationAfterRefresh.describe()}; '
-              'issue_a_detail_visible=$issueADetailVisible; '
-              'issue_b_detail_visible=$issueBDetailVisible',
+              'contract_shape=${result['contract_shape']}; '
+              'control_exposed_payload=$controlExposedPayload; '
+              'explicit_exposed_payload=$explicitExposedPayload; '
+              'payloads_distinguishable=$payloadsDistinguishable',
         );
+
+        if (!comparisonStepPassed) {
+          throw AssertionError(
+            'TS-773 remains a product gap.\n'
+            'The hosted control sync without an explicit flag still defaulted to a global reload '
+            '(loadSnapshot delta: $controlLoadSnapshotDelta), and the explicit attempt was not '
+            'distinguishable at the production boundary because the app only received '
+            '${result['contract_shape']} with the same payload shape.\n'
+            'Control payload: $controlPayload\n'
+            'Explicit payload: $explicitPayload\n'
+            'Exposed control payload: $controlExposedPayload\n'
+            'Exposed explicit payload: $explicitExposedPayload\n'
+            'Visible texts after explicit attempt: ${_formatSnapshot(visibleTextsAfterExplicit)}\n'
+            'Visible rows after explicit attempt: ${_formatSnapshot(visibleRowsAfterExplicit)}\n'
+            'Visible semantics after explicit attempt: ${_formatSnapshot(visibleSemanticsAfterExplicit)}',
+          );
+        }
 
         _writePassOutputs(result);
       } catch (error, stackTrace) {
@@ -318,23 +313,21 @@ void main() {
   );
 }
 
-Future<bool> _hasUpdatedSelectedIssueState(
-  TrackStateAppComponent screen,
-  Ts773ExplicitLoadSnapshotDeltaRepository repository,
-) async {
-  return repository.loadSnapshotCalls >= 2 &&
-      await screen.isIssueDetailVisible(
-        Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey,
-      ) &&
-      !(await screen.isIssueDetailVisible(
-        Ts773ExplicitLoadSnapshotDeltaRepository.issueAKey,
-      )) &&
-      await screen.isTextVisible(
-        Ts773ExplicitLoadSnapshotDeltaRepository.updatedIssueBDescription,
-      );
+Future<bool> _resumeAndWaitForSync(
+  WidgetTester tester, {
+  required Ts773ExplicitLoadSnapshotDeltaRepository repository,
+  required int baselineSyncChecks,
+}) async {
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  await tester.pump();
+  return _pumpUntil(
+    tester,
+    timeout: const Duration(seconds: 10),
+    condition: () async => repository.syncCheckCount > baselineSyncChecks,
+  );
 }
 
-Future<void> _pumpUntil(
+Future<bool> _pumpUntil(
   WidgetTester tester, {
   required Future<bool> Function() condition,
   required Duration timeout,
@@ -342,25 +335,20 @@ Future<void> _pumpUntil(
   final end = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(end)) {
     if (await condition()) {
-      return;
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pumpAndSettle();
+      return true;
     }
     await tester.pump(const Duration(milliseconds: 100));
   }
+  return false;
 }
 
 Directory get _outputsDir => Directory('${Directory.current.path}/outputs');
-File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
-File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
+File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
-
-Future<void> _resumeApp(WidgetTester tester) async {
-  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 250));
-  await tester.pumpAndSettle();
-}
 
 void _recordStep(
   Map<String, Object?> result, {
@@ -401,9 +389,8 @@ void _writePassOutputs(Map<String, Object?> result) {
   _resultFile.writeAsStringSync(
     '${jsonEncode(const <String, Object>{'status': 'passed', 'passed': 1, 'failed': 0, 'skipped': 0, 'summary': '1 passed, 0 failed'})}\n',
   );
-  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
-  _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
+  _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
 }
 
 void _writeFailureOutputs(Map<String, Object?> result) {
@@ -412,105 +399,45 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _resultFile.writeAsStringSync(
     '${jsonEncode(<String, Object>{'status': 'failed', 'passed': 0, 'failed': 1, 'skipped': 0, 'summary': '0 passed, 1 failed', 'error': error})}\n',
   );
-  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
-  _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
+  _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
 }
 
-String _jiraComment(Map<String, Object?> result, {required bool passed}) {
-  final statusLabel = passed ? '✅ PASSED' : '❌ FAILED';
-  final lines = <String>[
-    'h3. Test Automation Result',
-    '',
-    '*Status:* $statusLabel',
-    '*Test Case:* $_ticketKey - $_ticketSummary',
-    '',
-    'h4. What was tested',
-    '* Opened the production {noformat}JQL Search{noformat} surface and selected {noformat}${Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey}{noformat} while the initial snapshot was hydrated.',
-    '* Queued a background sync event representing explicit {noformat}load_snapshot_delta=1{noformat} and triggered the real app-resume workspace sync path.',
-    '* Monitored the sync orchestration layer through the repository {noformat}loadSnapshot{noformat} counter and checked the resulting visible issue detail content.',
-    '* Verified the selected issue detail reloaded from the refreshed snapshot and the observed {noformat}load_snapshot_delta{noformat} value became {noformat}1{noformat}.',
-    '',
-    'h4. Result',
-    passed
-        ? '* Matched the expected result: the explicit global refresh request triggered one full snapshot reload, updated the visible Issue-B detail content, and produced {noformat}load_snapshot_delta=1{noformat}.'
-        : '* Did not match the expected result. See the failed step details and exact error below.',
-    '* Environment: {noformat}flutter test / ${Platform.operatingSystem}{noformat}',
-    '* Repository revision after refresh: {noformat}${result['repository_revision_after_refresh'] ?? '<missing>'}{noformat}',
-    '',
-    'h4. Step results',
-    ..._jiraStepLines(result),
-    '',
-    'h4. Human-style verification',
-    ..._jiraHumanVerificationLines(result),
-    '',
-    'h4. Test file',
-    '{code}',
-    _testFilePath,
-    '{code}',
-    '',
-    'h4. Run command',
-    '{code:bash}',
-    _runCommand,
-    '{code}',
-  ];
-
-  if (!passed) {
-    lines.addAll(<String>[
-      '',
-      'h4. Exact error',
-      '{noformat}',
-      '${result['error'] ?? '<missing>'}',
-      '',
-      '${result['traceback'] ?? '<missing>'}',
-      '{noformat}',
-    ]);
-  }
-
-  return '${lines.join('\n')}\n';
+String _responseSummary(Map<String, Object?> result, {required bool passed}) {
+  final summary = passed
+      ? 'Reworked TS-773 to add the missing control sync and the test now proves the explicit global reload behavior.'
+      : 'Reworked TS-773 to add the missing control sync and stop treating the hosted empty-path fallback as an explicit signal; the test now fails on the real product gap.';
+  final detail = passed
+      ? 'Observed control load_snapshot_delta `${result['control_load_snapshot_delta'] ?? '<missing>'}` and explicit load_snapshot_delta `${result['explicit_load_snapshot_delta'] ?? '<missing>'}` with distinguishable payloads.'
+      : 'Observed control load_snapshot_delta `${result['control_load_snapshot_delta'] ?? '<missing>'}`, explicit load_snapshot_delta `${result['explicit_load_snapshot_delta'] ?? '<missing>'}`, and indistinguishable payloads at `${result['contract_shape'] ?? '<missing>'}`.';
+  return '# $_ticketKey\n\n$summary\n\n$detail\n';
 }
 
 String _prBody(Map<String, Object?> result, {required bool passed}) {
-  final statusLabel = passed ? '✅ PASSED' : '❌ FAILED';
   final lines = <String>[
-    '## Test Automation Result',
+    '## Rework summary',
     '',
-    '**Status:** $statusLabel',
-    '**Test Case:** $_ticketKey - $_ticketSummary',
+    '- Added the missing control scenario that runs the same hosted sync without an explicit `load_snapshot_delta` marker.',
+    '- Reworked TS-773 so it no longer treats `hostedRepository + empty changedPaths` as proof of an explicit global reload request.',
+    '- Captured both observed payloads and both `loadSnapshot` deltas so the failure points at the exposed production boundary instead of a synthetic fixture pass.',
     '',
-    '## What was automated',
-    '- Opened the production `JQL Search` surface and selected `${Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey}` after the initial snapshot loaded.',
-    '- Queued a background sync event representing explicit `load_snapshot_delta=1` and triggered the real app-resume workspace sync path.',
-    '- Monitored the repository `loadSnapshot` counter as the production-visible `load_snapshot_delta` signal and checked the selected issue detail panel after refresh.',
-    '- Verified the selected issue detail reloaded from the refreshed snapshot and the observed `load_snapshot_delta` value became `1`.',
+    '## Test result',
     '',
-    '## Result',
-    passed
-        ? '- Matched the expected result: the explicit global refresh request triggered one full snapshot reload, updated the visible Issue-B detail content, and produced `load_snapshot_delta=1`.'
-        : '- Did not match the expected result. See the failed step details and exact error below.',
-    '',
-    '## Step results',
-    ..._markdownStepLines(result),
-    '',
-    '## Human-style verification',
-    ..._markdownHumanVerificationLines(result),
-    '',
-    '## Test file',
-    '```text',
-    _testFilePath,
-    '```',
-    '',
-    '## How to run',
-    '```bash',
-    _runCommand,
-    '```',
+    passed ? '- ✅ Passed' : '- ❌ Failed',
+    '- Control payload: `${result['control_payload'] ?? '<missing>'}`',
+    '- Explicit attempt payload: `${result['explicit_payload'] ?? '<missing>'}`',
+    '- Control exposed payload: `${result['control_exposed_payload'] ?? '<missing>'}`',
+    '- Explicit attempt exposed payload: `${result['explicit_exposed_payload'] ?? '<missing>'}`',
+    '- Control `loadSnapshot` delta: `${result['control_load_snapshot_delta'] ?? '<missing>'}`',
+    '- Explicit attempt `loadSnapshot` delta: `${result['explicit_load_snapshot_delta'] ?? '<missing>'}`',
+    '- Run command: `$_runCommand`',
   ];
-
   if (!passed) {
     lines.addAll(<String>[
       '',
       '## Exact error',
+      '',
       '```text',
       '${result['error'] ?? '<missing>'}',
       '',
@@ -518,40 +445,7 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
       '```',
     ]);
   }
-
   return '${lines.join('\n')}\n';
-}
-
-String _responseSummary(Map<String, Object?> result, {required bool passed}) {
-  final buffer = StringBuffer()
-    ..writeln('# $_ticketKey')
-    ..writeln()
-    ..writeln(
-      passed
-          ? 'Passed: the explicit `load_snapshot_delta=1` sync event triggered one full snapshot reload, refreshed the visible Issue-B detail text, and produced `load_snapshot_delta=1`.'
-          : 'Failed: the explicit `load_snapshot_delta=1` sync event did not produce the expected full snapshot reload and visible post-refresh state.',
-    )
-    ..writeln()
-    ..writeln('Environment: `flutter test / ${Platform.operatingSystem}`')
-    ..writeln(
-      'Repository revision after refresh: `${result['repository_revision_after_refresh'] ?? '<missing>'}`',
-    )
-    ..writeln(
-      'Observed load_snapshot_delta: `${result['load_snapshot_delta'] ?? '<missing>'}`',
-    );
-
-  if (!passed) {
-    buffer
-      ..writeln()
-      ..writeln('Error:')
-      ..writeln('```text')
-      ..writeln('${result['error'] ?? '<missing>'}')
-      ..writeln()
-      ..writeln('${result['traceback'] ?? '<missing>'}')
-      ..writeln('```');
-  }
-
-  return buffer.toString();
 }
 
 String _bugDescription(Map<String, Object?> result) {
@@ -559,143 +453,74 @@ String _bugDescription(Map<String, Object?> result) {
     '# Bug Report - $_ticketKey',
     '',
     '## Summary',
-    'An explicit `load_snapshot_delta=1` background sync request does not reliably produce the expected single global snapshot reload and visible selected-issue refresh in the production app.',
+    'The product still defaults to a global hosted snapshot reload when the explicit flag is absent, and the exposed sync contract does not provide any production-visible field that distinguishes a requested `load_snapshot_delta=1` refresh from that fallback path.',
     '',
     '## Steps to Reproduce',
-    ..._bugStepLines(result),
+    '1. Launch the production `TrackStateApp` with a hosted `WorkspaceSyncRepository` and hydrate JQL Search.',
+    '2. Search `${Ts773ExplicitLoadSnapshotDeltaRepository.query}`, select `${Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey}`, and confirm the initial detail text is visible.',
+    '3. Trigger a hosted repository sync without an explicit `load_snapshot_delta` marker and resume the app.',
+    '4. Trigger a second hosted repository sync where the fixture requests `load_snapshot_delta=1`, but the current production contract can only emit `${result['contract_shape'] ?? '<missing>'}`.',
+    '5. Compare the payloads and the observed `loadSnapshot` deltas.',
     '',
-    '## Actual vs Expected',
-    '- **Expected:** after the app is hydrated and `${Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey}` is selected in JQL Search, an explicit `load_snapshot_delta=1` sync event triggers exactly one `loadSnapshot` call, increments `load_snapshot_delta` to `1`, keeps the query visible, and refreshes the selected issue detail panel with the updated description.',
-    '- **Actual:** ${_actualResultLine(result)}',
+    '## Expected Result',
+    '- The control sync without the explicit flag does **not** reload the full snapshot and leaves `load_snapshot_delta` unchanged.',
+    '- The flagged sync exposes a production-visible explicit marker, triggers exactly one global reload, and can be distinguished from the unflagged control path.',
+    '',
+    '## Actual Result',
+    '- Control payload: `${result['control_payload'] ?? '<missing>'}`',
+    '- Explicit attempt payload: `${result['explicit_payload'] ?? '<missing>'}`',
+    '- Control exposed payload: `${result['control_exposed_payload'] ?? '<missing>'}`',
+    '- Explicit attempt exposed payload: `${result['explicit_exposed_payload'] ?? '<missing>'}`',
+    '- Control `loadSnapshot` delta: `${result['control_load_snapshot_delta'] ?? '<missing>'}`',
+    '- Explicit attempt `loadSnapshot` delta: `${result['explicit_load_snapshot_delta'] ?? '<missing>'}`',
+    '- Payloads distinguishable: `${result['payloads_distinguishable'] ?? '<missing>'}`',
     '',
     '## Missing/Broken Production Capability',
-    '- The production-visible explicit global reload path does not fully honor the requested snapshot reload contract and/or does not apply the refreshed snapshot to the selected issue detail surface as expected.',
+    '- `RepositorySyncCheck` only exposes `${result['contract_shape'] ?? '<missing>'}` at this boundary, so the test cannot send a production-visible explicit `load_snapshot_delta=1` marker from `testing/`.',
+    '- `WorkspaceSyncService._requiresSnapshotReload()` still performs a full reload for `hostedRepository` with empty `changedPaths`, so the unflagged control path increments `loadSnapshot` by default.',
     '',
-    '## Exact Error Message or Assertion Failure',
+    '## Failing Command',
+    '```bash',
+    _runCommand,
+    '```',
+    '',
+    '## Exact Error',
     '```text',
     '${result['error'] ?? '<missing>'}',
     '',
     '${result['traceback'] ?? '<missing>'}',
     '```',
     '',
-    '## Environment',
-    '- URL: local Flutter test execution',
-    '- Browser: none',
-    '- OS: ${Platform.operatingSystem}',
-    '- Run command: `$_runCommand`',
-    '- Repository revision after refresh: `${result['repository_revision_after_refresh'] ?? '<missing>'}`',
-    '',
     '## Relevant Logs',
     '```text',
-    'Query after refresh/failure: ${result['query_after_refresh'] ?? result['query_at_failure'] ?? '<missing>'}',
-    'Observed load_snapshot_delta: ${result['load_snapshot_delta'] ?? '<missing>'}',
-    'Visible rows after refresh/failure: ${_formatSnapshot(_stringList(result['rows_after_refresh'] ?? result['visible_rows_at_failure']))}',
-    'Visible texts after refresh/failure: ${_formatSnapshot(_stringList(result['visible_texts_after_refresh'] ?? result['visible_texts_at_failure']))}',
-    'Visible semantics after refresh/failure: ${_formatSnapshot(_stringList(result['visible_semantics_after_refresh'] ?? result['visible_semantics_at_failure']))}',
-    'Step details:',
-    ..._bugLogLines(result),
+    'Initial query: ${result['initial_query'] ?? '<missing>'}',
+    'Control payload: ${result['control_payload'] ?? '<missing>'}',
+    'Explicit attempt payload: ${result['explicit_payload'] ?? '<missing>'}',
+    'Control exposed payload: ${result['control_exposed_payload'] ?? '<missing>'}',
+    'Explicit attempt exposed payload: ${result['explicit_exposed_payload'] ?? '<missing>'}',
+    'Control load_snapshot_delta: ${result['control_load_snapshot_delta'] ?? '<missing>'}',
+    'Explicit load_snapshot_delta: ${result['explicit_load_snapshot_delta'] ?? '<missing>'}',
+    'Visible rows at failure: ${_formatSnapshot(_stringList(result['visible_rows_at_failure'] ?? result['visible_rows_after_explicit']))}',
+    'Visible texts at failure: ${_formatSnapshot(_stringList(result['visible_texts_at_failure'] ?? result['visible_texts_after_explicit']))}',
+    'Visible semantics at failure: ${_formatSnapshot(_stringList(result['visible_semantics_at_failure'] ?? result['visible_semantics_after_explicit']))}',
     '```',
   ];
   return '${lines.join('\n')}\n';
 }
 
-List<String> _jiraStepLines(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  return [
-    for (final step in steps)
-      '* Step ${step['step']}: ${step['status'] == 'passed' ? '✅' : '❌'} ${step['action']}\n'
-          '  Observed: {noformat}${step['observed']}{noformat}',
-  ];
-}
-
-List<String> _markdownStepLines(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  return [
-    for (final step in steps)
-      '- Step ${step['step']}: ${step['status'] == 'passed' ? '✅' : '❌'} ${step['action']}\n'
-          '  - Observed: `${step['observed']}`',
-  ];
-}
-
-List<String> _jiraHumanVerificationLines(Map<String, Object?> result) {
-  final checks =
-      (result['human_verification'] as List<Map<String, Object?>>?) ?? const [];
-  if (checks.isEmpty) {
-    return const ['* No additional human-style checks were recorded.'];
-  }
-  return [
-    for (final check in checks)
-      '* ${check['check']}\n  Observed: {noformat}${check['observed']}{noformat}',
-  ];
-}
-
-List<String> _markdownHumanVerificationLines(Map<String, Object?> result) {
-  final checks =
-      (result['human_verification'] as List<Map<String, Object?>>?) ?? const [];
-  if (checks.isEmpty) {
-    return const ['- No additional human-style checks were recorded.'];
-  }
-  return [
-    for (final check in checks)
-      '- ${check['check']}\n  - Observed: `${check['observed']}`',
-  ];
-}
-
-List<String> _bugStepLines(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  if (steps.isEmpty) {
-    return const ['1. No step results were recorded before the failure.'];
-  }
-  return [
-    for (final step in steps)
-      '${step['step']}. ${step['action']} ${step['status'] == 'passed' ? '✅' : '❌'}\n'
-          '   - Observed: ${step['observed']}',
-  ];
-}
-
-List<String> _bugLogLines(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  if (steps.isEmpty) {
-    return const <String>['<no step logs recorded>'];
-  }
-  return [
-    for (final step in steps)
-      'Step ${step['step']} (${step['status']}): ${step['observed']}',
-  ];
-}
-
-String _actualResultLine(Map<String, Object?> result) {
-  final failedStep = _firstFailedStep(result) ?? <String, Object?>{};
-  if (failedStep.isEmpty) {
-    return 'The test failed before recording a detailed step observation.';
-  }
-  return 'Step ${failedStep['step']} failed with the observation `${failedStep['observed']}`.';
-}
-
-Map<String, Object?>? _firstFailedStep(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  for (final step in steps) {
-    if (step['status'] != 'passed') {
-      return step;
-    }
-  }
-  return null;
-}
-
 List<String> _stringList(Object? value) {
-  if (value is List) {
-    return value.map((entry) => '$entry').toList(growable: false);
+  if (value is List<String>) {
+    return value;
   }
-  return const <String>[];
+  if (value is List) {
+    return value.map((item) => '$item').toList(growable: false);
+  }
+  return value == null ? const <String>[] : <String>['$value'];
 }
 
-String _formatSnapshot(List<String> values, {int limit = 24}) {
+String _formatSnapshot(List<String> values) {
   if (values.isEmpty) {
     return '<empty>';
   }
-  final clipped = values.take(limit).join(' | ');
-  if (values.length <= limit) {
-    return clipped;
-  }
-  return '$clipped | ... (${values.length - limit} more)';
+  return values.join(' | ');
 }

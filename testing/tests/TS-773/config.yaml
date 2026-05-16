@@ -5,5 +5,5 @@ platform: linux
 dependencies: []
 notes:
   - Launches the production TrackStateApp with a mutable in-memory repository that implements WorkspaceSyncRepository.
-  - Seeds two Open issues in JQL Search, selects TRACK-773-B, then queues a background sync event representing an explicit load_snapshot_delta=1 global refresh request.
-  - Verifies the production app-resume sync path calls loadSnapshot exactly once for the queued refresh, updates the selected issue detail from the reloaded snapshot, and reports load_snapshot_delta=1.
+  - Seeds two Open issues in JQL Search, selects TRACK-773-B, then runs both an unflagged hosted sync control and a flagged hosted sync attempt.
+  - Fails on the real product gap when the current production RepositorySyncCheck contract cannot distinguish the explicit request from the existing hosted fallback and/or the unflagged control still triggers a full snapshot reload.

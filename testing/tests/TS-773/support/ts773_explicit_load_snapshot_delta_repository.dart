@@ -14,16 +14,20 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
   static const String issueASummary =
       'Issue-A stays visible while the global reload runs';
   static const String issueBSummary =
-      'Issue-B updates through the explicit global reload';
+      'Issue-B reload behavior is compared across hosted sync payloads';
   static const String issueAPath = 'TRACK-773-A/main.md';
   static const String issueBPath = 'TRACK-773-B/main.md';
   static const String openStatusId = 'open';
   static const String closedStatusId = 'closed';
   static const String query = 'status = Open';
   static const String initialIssueBDescription =
-      'Initial detail text before the explicit load_snapshot_delta sync runs.';
-  static const String updatedIssueBDescription =
-      'Updated detail text after the explicit load_snapshot_delta sync forces a full snapshot reload.';
+      'Initial detail text before any hosted background sync runs.';
+  static const String controlWithoutFlagDescription =
+      'Issue-B changed after a hosted sync without any explicit load_snapshot_delta marker.';
+  static const String explicitAttemptDescription =
+      'Issue-B changed after the test requested load_snapshot_delta=1, but the production sync payload remained the same hosted fallback.';
+  static const String contractShapeDescription =
+      'RepositorySyncCheck(state, signals, changedPaths)';
 
   static const JqlSearchService _searchService = JqlSearchService();
   static const RepositoryUser _connectedUser = RepositoryUser(
@@ -32,12 +36,13 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
   );
 
   TrackerSnapshot _currentSnapshot = _initialSnapshot;
-  bool _pendingExplicitGlobalReload = false;
+  _PendingTs773Sync? _pendingSync;
   int _revisionSerial = 1;
   int _syncCheckCount = 0;
   int _loadSnapshotCalls = 0;
-  int? _scheduledLoadSnapshotDeltaFlag;
-  int? _processedLoadSnapshotDeltaFlag;
+  bool? _lastRequestedExplicitFlag;
+  Set<WorkspaceSyncSignal> _lastReturnedSignals = const <WorkspaceSyncSignal>{};
+  Set<String> _lastReturnedChangedPaths = const <String>{};
 
   int get loadSnapshotCalls => _loadSnapshotCalls;
 
@@ -45,14 +50,38 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
 
   String get repositoryRevision => 'ts773-revision-$_revisionSerial';
 
-  int? get scheduledLoadSnapshotDeltaFlag => _scheduledLoadSnapshotDeltaFlag;
+  bool? get lastRequestedExplicitFlag => _lastRequestedExplicitFlag;
 
-  int? get processedLoadSnapshotDeltaFlag => _processedLoadSnapshotDeltaFlag;
+  Set<WorkspaceSyncSignal> get lastReturnedSignals => _lastReturnedSignals;
 
-  void scheduleExplicitLoadSnapshotDeltaRefresh() {
-    _currentSnapshot = _snapshotWithUpdatedIssueB(_currentSnapshot);
-    _pendingExplicitGlobalReload = true;
-    _scheduledLoadSnapshotDeltaFlag = explicitLoadSnapshotDeltaFlag;
+  Set<String> get lastReturnedChangedPaths => _lastReturnedChangedPaths;
+
+  void scheduleHostedSyncWithoutExplicitFlag() {
+    _currentSnapshot = _snapshotWithUpdatedIssueB(
+      snapshot: _currentSnapshot,
+      description: controlWithoutFlagDescription,
+      updatedLabel: 'control refresh',
+    );
+    _pendingSync = const _PendingTs773Sync(requestedExplicitFlag: false);
+  }
+
+  void scheduleExplicitLoadSnapshotDeltaRefreshAttempt() {
+    _currentSnapshot = _snapshotWithUpdatedIssueB(
+      snapshot: _currentSnapshot,
+      description: explicitAttemptDescription,
+      updatedLabel: 'explicit attempt',
+    );
+    _pendingSync = const _PendingTs773Sync(requestedExplicitFlag: true);
+  }
+
+  String describeLastPayload() {
+    return 'requested_explicit_flag=${lastRequestedExplicitFlag == true ? 1 : 0}; '
+        '${describeLastExposedPayload()}';
+  }
+
+  String describeLastExposedPayload() {
+    return 'signals=${_formatSignals(lastReturnedSignals)}; '
+        'changed_paths=${_formatPaths(lastReturnedChangedPaths)}';
   }
 
   @override
@@ -89,10 +118,11 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
     RepositorySyncState? previousState,
   }) async {
     _syncCheckCount += 1;
-    if (_pendingExplicitGlobalReload) {
-      _pendingExplicitGlobalReload = false;
-      _revisionSerial += 1;
-      _processedLoadSnapshotDeltaFlag = _scheduledLoadSnapshotDeltaFlag;
+    final pendingSync = _pendingSync;
+    if (pendingSync == null) {
+      _lastRequestedExplicitFlag = null;
+      _lastReturnedSignals = const <WorkspaceSyncSignal>{};
+      _lastReturnedChangedPaths = const <String>{};
       return RepositorySyncCheck(
         state: RepositorySyncState(
           providerType: ProviderType.github,
@@ -100,12 +130,16 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
           sessionRevision: 'ts773-session',
           connectionState: ProviderConnectionState.connected,
         ),
-        signals: const <WorkspaceSyncSignal>{
-          WorkspaceSyncSignal.hostedRepository,
-        },
-        changedPaths: const <String>{},
       );
     }
+
+    _pendingSync = null;
+    _revisionSerial += 1;
+    _lastRequestedExplicitFlag = pendingSync.requestedExplicitFlag;
+    _lastReturnedSignals = const <WorkspaceSyncSignal>{
+      WorkspaceSyncSignal.hostedRepository,
+    };
+    _lastReturnedChangedPaths = const <String>{};
     return RepositorySyncCheck(
       state: RepositorySyncState(
         providerType: ProviderType.github,
@@ -113,8 +147,16 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
         sessionRevision: 'ts773-session',
         connectionState: ProviderConnectionState.connected,
       ),
+      signals: _lastReturnedSignals,
+      changedPaths: _lastReturnedChangedPaths,
     );
   }
+}
+
+class _PendingTs773Sync {
+  const _PendingTs773Sync({required this.requestedExplicitFlag});
+
+  final bool requestedExplicitFlag;
 }
 
 final TrackerSnapshot _initialSnapshot = TrackerSnapshot(
@@ -198,7 +240,7 @@ final TrackerSnapshot _initialSnapshot = TrackerSnapshot(
       summary: Ts773ExplicitLoadSnapshotDeltaRepository.issueASummary,
       storagePath: Ts773ExplicitLoadSnapshotDeltaRepository.issueAPath,
       description:
-          'Issue-A stays Open so the active query remains visibly populated before and after the global reload.',
+          'Issue-A stays Open so the active query remains visibly populated before and after the sync checks.',
       updatedLabel: '1 minute ago',
     ),
     _issue(
@@ -240,17 +282,17 @@ final TrackerSnapshot _initialSnapshot = TrackerSnapshot(
   ),
 );
 
-TrackerSnapshot _snapshotWithUpdatedIssueB(TrackerSnapshot snapshot) {
+TrackerSnapshot _snapshotWithUpdatedIssueB({
+  required TrackerSnapshot snapshot,
+  required String description,
+  required String updatedLabel,
+}) {
   return TrackerSnapshot(
     project: snapshot.project,
     issues: <TrackStateIssue>[
       for (final issue in snapshot.issues)
         if (issue.key == Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey)
-          issue.copyWith(
-            description: Ts773ExplicitLoadSnapshotDeltaRepository
-                .updatedIssueBDescription,
-            updatedLabel: 'moments ago',
-          )
+          issue.copyWith(description: description, updatedLabel: updatedLabel)
         else
           issue,
     ],
@@ -258,7 +300,7 @@ TrackerSnapshot _snapshotWithUpdatedIssueB(TrackerSnapshot snapshot) {
       entries: <RepositoryIssueIndexEntry>[
         for (final entry in snapshot.repositoryIndex.entries)
           if (entry.key == Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey)
-            entry.copyWith(updatedLabel: 'moments ago')
+            entry.copyWith(updatedLabel: updatedLabel)
           else
             entry,
       ],
@@ -302,8 +344,8 @@ TrackStateIssue _issue({
     progress: 0,
     updatedLabel: updatedLabel,
     acceptanceCriteria: const <String>[
-      'Allow an explicit global snapshot reload request during background sync.',
-      'Refresh the selected issue detail from the reloaded snapshot.',
+      'Do not default to a global reload when the explicit flag is absent.',
+      'Expose an explicit global reload request through the production sync contract.',
     ],
     comments: const <IssueComment>[],
     links: const <IssueLink>[],
@@ -312,4 +354,18 @@ TrackStateIssue _issue({
     storagePath: storagePath,
     rawMarkdown: '# $summary',
   );
+}
+
+String _formatSignals(Set<WorkspaceSyncSignal> signals) {
+  if (signals.isEmpty) {
+    return '<empty>';
+  }
+  return signals.map((signal) => signal.name).join('|');
+}
+
+String _formatPaths(Set<String> paths) {
+  if (paths.isEmpty) {
+    return '<empty>';
+  }
+  return paths.join('|');
 }
