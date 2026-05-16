@@ -1,0 +1,9 @@
+test_id: TS-746
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Launches the production TrackStateApp with a mutable in-memory repository that implements WorkspaceSyncRepository.
+  - Seeds three Open issues for a JQL Search query sorted by priority descending, selects the top issue, then refreshes after demoting that issue so the list reorders.
+  - Verifies the selected issue moves to its new list position while keeping a visible selected/highlight state and an open detail panel with refreshed data.

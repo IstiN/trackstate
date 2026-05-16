@@ -29,6 +29,19 @@ class CreateIssueObservation:
     created_issue_key: str | None
 
 
+@dataclass(frozen=True)
+class WorkspaceRestoreMessageObservation:
+    message_text: str
+    body_text: str
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherTriggerObservation:
+    aria_label: str
+    visible_text: str
+    body_text: str
+
+
 class TrackStateTrackerPage:
     LOAD_ERROR_TEXT = TrackStateLiveAppPage.LOAD_ERROR_TEXT
     LOAD_ERROR_TEXT_VARIANTS = TrackStateLiveAppPage.LOAD_ERROR_TEXT_VARIANTS
@@ -53,7 +66,31 @@ class TrackStateTrackerPage:
         self._live_page = TrackStateLiveAppPage(session, app_url)
 
     def open_entrypoint(self) -> None:
-        self._live_page.open()
+        self.open_url(self.app_url)
+
+    def open_route(self, route: str) -> str:
+        route_url = self.build_route_url(route)
+        self.open_url(route_url)
+        return route_url
+
+    def open_url(self, url: str) -> None:
+        self.session.goto(
+            url,
+            wait_until="domcontentloaded",
+            timeout_ms=120_000,
+        )
+        self.session.activate_accessibility()
+
+    def build_route_url(self, route: str) -> str:
+        base_url = self.app_url.split("#", 1)[0]
+        if not base_url.endswith("/"):
+            base_url = f"{base_url}/"
+        if route.startswith("#"):
+            normalized_route = route
+        else:
+            normalized_route = route if route.startswith("/") else f"/{route}"
+            normalized_route = f"#{normalized_route}"
+        return f"{base_url}{normalized_route}"
 
     def open(self) -> RuntimeObservation:
         self.open_entrypoint()
@@ -258,6 +295,123 @@ class TrackStateTrackerPage:
 
     def screenshot(self, path: str) -> None:
         self.session.screenshot(path)
+
+    def observe_workspace_restore_message(
+        self,
+        *,
+        workspace_name: str,
+        timeout_ms: int = 120_000,
+    ) -> WorkspaceRestoreMessageObservation:
+        payload = self.session.wait_for_function(
+            """
+            (workspaceName) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const bodyText = document.body?.innerText ?? '';
+              const normalizedBody = normalize(bodyText);
+              const anchor = `Skipped ${workspaceName} during restore.`;
+              const startIndex = normalizedBody.indexOf(anchor);
+              if (startIndex === -1) {
+                return null;
+              }
+              const tail = normalizedBody.slice(startIndex);
+              const stopTokens = [
+                ' Close ',
+                ' Dashboard ',
+                ' Board ',
+                ' JQL Search ',
+                ' Hierarchy ',
+                ' Settings ',
+              ];
+              let stopIndex = tail.length;
+              for (const token of stopTokens) {
+                const candidateIndex = tail.indexOf(token);
+                if (candidateIndex > 0 && candidateIndex < stopIndex) {
+                  stopIndex = candidateIndex;
+                }
+              }
+              return {
+                messageText: tail.slice(0, stopIndex).trim(),
+                bodyText,
+              };
+            }
+            """,
+            arg=workspace_name,
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Expected a workspace restore message observation payload, "
+                f"got: {payload!r}",
+            )
+        return WorkspaceRestoreMessageObservation(
+            message_text=str(payload.get("messageText", "")),
+            body_text=str(payload.get("bodyText", "")),
+        )
+
+    def observe_workspace_switcher_trigger(
+        self,
+        *,
+        timeout_ms: int = 120_000,
+    ) -> WorkspaceSwitcherTriggerObservation:
+        payload = self.session.wait_for_function(
+            """
+            () => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const candidates = Array.from(document.querySelectorAll('[aria-label]')).filter(
+                (element) => {
+                  const label = element.getAttribute('aria-label') || '';
+                  return label.startsWith('Workspace switcher:') && isVisible(element);
+                },
+              );
+              if (candidates.length > 0) {
+                const trigger = candidates[0];
+                return {
+                  ariaLabel: trigger.getAttribute('aria-label') || '',
+                  visibleText: normalize(trigger.innerText || trigger.textContent || ''),
+                  bodyText: document.body?.innerText ?? '',
+                };
+              }
+              const bodyText = document.body?.innerText ?? '';
+              const lines = bodyText
+                .split(/\\n+/)
+                .map((line) => normalize(line))
+                .filter((line) => line.length > 0);
+              const switcherLine = lines.find((line) =>
+                line.startsWith('Workspace switcher:'),
+              );
+              if (!switcherLine) {
+                return null;
+              }
+              return {
+                ariaLabel: switcherLine,
+                visibleText: switcherLine.replace(/^Workspace switcher:\\s*/, ''),
+                bodyText,
+              };
+            }
+            """,
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Expected a workspace switcher observation payload, "
+                f"got: {payload!r}",
+            )
+        return WorkspaceSwitcherTriggerObservation(
+            aria_label=str(payload.get("ariaLabel", "")),
+            visible_text=str(payload.get("visibleText", "")),
+            body_text=str(payload.get("bodyText", "")),
+        )
 
     def observe_interactive_shell(
         self,

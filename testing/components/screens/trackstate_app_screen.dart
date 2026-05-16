@@ -3,10 +3,12 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/ui/core/trackstate_theme.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/local_git_repository_port.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
+import '../../core/models/issue_search_result_selection_observation.dart';
 import '../../frameworks/flutter/trackstate_test_runtime.dart';
 
 class TrackStateAppScreen implements TrackStateAppComponent {
@@ -47,7 +49,10 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         .evaluate()
         .toList();
     if (candidates.isEmpty) {
-      return find.byWidgetPredicate((_) => false, description: 'missing top bar');
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing top bar',
+      );
     }
 
     Element bestCandidate = candidates.first;
@@ -473,11 +478,24 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> searchIssues(String query) async {
+    await enterJqlSearchQuery(query);
+    await submitJqlSearch();
+  }
+
+  @override
+  Future<void> enterJqlSearchQuery(String query) async {
     await _waitForVisible(_jqlSearchPanel);
     await _waitForVisible(_jqlSearchField);
     await tester.tap(_jqlSearchField.first);
     await tester.pump();
     await tester.enterText(_jqlSearchField.first, query);
+    await tester.pump();
+  }
+
+  @override
+  Future<void> submitJqlSearch() async {
+    await _waitForVisible(_jqlSearchPanel);
+    await _waitForVisible(_jqlSearchField);
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
   }
@@ -563,6 +581,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     return best ?? rowCandidates.first;
   }
 
+  bool _finderHasSelectedSemantics(Finder finder) {
+    final matches = finder.evaluate().toList();
+    for (var index = 0; index < matches.length; index++) {
+      if (tester
+          .getSemantics(finder.at(index))
+          .hasFlag(SemanticsFlag.isSelected)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @override
   Future<bool> isIssueSearchResultTextVisible(
     String key,
@@ -578,6 +608,158 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         .descendant(of: row, matching: find.text(text, findRichText: true))
         .evaluate()
         .isNotEmpty;
+  }
+
+  @override
+  Future<bool> isIssueSearchResultSelected(String key, String summary) async {
+    await tester.pump();
+    final issue = _issue(key, summary);
+    if (issue.evaluate().isEmpty) {
+      return false;
+    }
+    final row = _issueSearchResultRow(key, summary);
+    if (row.evaluate().isEmpty) {
+      return false;
+    }
+
+    return _finderHasSelectedSemantics(issue) ||
+        _finderHasSelectedSemantics(row) ||
+        _finderHasSelectedSemantics(
+          find.ancestor(of: issue, matching: find.byType(Semantics)),
+        ) ||
+        _finderHasSelectedSemantics(
+          find.descendant(of: row, matching: find.byType(Semantics)),
+        );
+  }
+
+  @override
+  Future<IssueSearchResultSelectionObservation>
+  readIssueSearchResultSelectionObservation(
+    String key,
+    String summary, {
+    required bool expectedSelected,
+  }) async {
+    await tester.pump();
+    final row = _issueSearchResultRow(key, summary);
+    if (row.evaluate().isEmpty) {
+      fail(
+        'Expected the JQL Search result row for $key to be visible before '
+        'reading its selection styling. Visible rows: '
+        '${_formatSnapshot(visibleIssueSearchResultLabelsSnapshot())}.',
+      );
+    }
+
+    final BuildContext context = tester.element(row.first);
+    final colors = context.ts;
+    final issue = _issue(key, summary);
+    final container = _issueSearchResultSelectionContainer(key, summary);
+    final decoration =
+        tester.widget<AnimatedContainer>(container).decoration
+            as BoxDecoration?;
+    final border = decoration?.border;
+    final keyTextStyle = _requiredIssueRowTextStyle(row, key);
+    final summaryTextStyle = _requiredIssueRowTextStyle(row, summary);
+
+    final renderedBackground = decoration?.color ?? Colors.transparent;
+    final renderedBorder = switch (border) {
+      Border() => border.top.color,
+      _ => null,
+    };
+    final expectedBackground = expectedSelected
+        ? colors.primarySoft
+        : Colors.transparent;
+    final expectedBorder = expectedSelected ? colors.primary : null;
+    final expectedKeyColor = expectedSelected ? colors.primary : colors.muted;
+    final expectedSummaryWeight = expectedSelected
+        ? FontWeight.w600
+        : FontWeight.w400;
+
+    return IssueSearchResultSelectionObservation(
+      issueKey: key,
+      expectedSelected: expectedSelected,
+      semanticsSelected:
+          _finderHasSelectedSemantics(issue) ||
+          _finderHasSelectedSemantics(row) ||
+          _finderHasSelectedSemantics(
+            find.ancestor(of: issue, matching: find.byType(Semantics)),
+          ) ||
+          _finderHasSelectedSemantics(
+            find.descendant(of: row, matching: find.byType(Semantics)),
+          ),
+      backgroundHex: _rgbHex(renderedBackground),
+      expectedBackgroundHex: _rgbHex(expectedBackground),
+      borderHex: renderedBorder == null ? 'none' : _rgbHex(renderedBorder),
+      expectedBorderHex: expectedBorder == null
+          ? 'none'
+          : _rgbHex(expectedBorder),
+      keyColorHex: _rgbHex(keyTextStyle.color ?? colors.text),
+      expectedKeyColorHex: _rgbHex(expectedKeyColor),
+      summaryFontWeight: _fontWeightLabel(summaryTextStyle.fontWeight),
+      expectedSummaryFontWeight: _fontWeightLabel(expectedSummaryWeight),
+    );
+  }
+
+  Finder _issueSearchResultSelectionContainer(String key, String summary) {
+    final row = _issueSearchResultRow(key, summary);
+    final candidates = find
+        .ancestor(of: row, matching: find.byType(AnimatedContainer))
+        .evaluate()
+        .toList();
+    if (candidates.isEmpty) {
+      fail(
+        'Expected the JQL Search result row for $key to be wrapped by an '
+        'AnimatedContainer that renders the selection styling.',
+      );
+    }
+
+    Element? best;
+    var smallestArea = double.infinity;
+    for (final candidate in candidates) {
+      final finder = find.byElementPredicate(
+        (element) => element == candidate,
+        description: 'selection container for $key',
+      );
+      final rect = tester.getRect(finder);
+      final area = rect.width * rect.height;
+      if (area < smallestArea) {
+        smallestArea = area;
+        best = candidate;
+      }
+    }
+
+    return find.byElementPredicate(
+      (element) => element == best,
+      description: 'selection container for $key',
+    );
+  }
+
+  TextStyle _requiredIssueRowTextStyle(Finder row, String text) {
+    final finder = find.descendant(
+      of: row,
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is Text) {
+          return widget.data == text;
+        }
+        if (widget is RichText) {
+          return widget.text.toPlainText() == text;
+        }
+        return false;
+      }, description: 'issue row text "$text"'),
+    );
+    if (finder.evaluate().isEmpty) {
+      fail(
+        'Expected the JQL Search result row to include visible text "$text" '
+        'before reading its selection styling.',
+      );
+    }
+    final widget = tester.widget(finder.first);
+    if (widget is Text) {
+      return widget.style ?? const TextStyle();
+    }
+    if (widget is RichText) {
+      return widget.text.style as TextStyle? ?? const TextStyle();
+    }
+    fail('Expected a Text or RichText widget for "$text".');
   }
 
   @override
@@ -604,6 +786,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final detail = _issueDetail(key);
     await _waitForVisible(detail);
     expect(detail, findsOneWidget);
+  }
+
+  @override
+  Future<bool> isIssueDetailVisible(String key) async {
+    await tester.pump();
+    return _issueDetail(key).evaluate().isNotEmpty;
   }
 
   @override
@@ -1318,6 +1506,26 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       return '<none>';
     }
     return snapshot.join(' | ');
+  }
+
+  String _rgbHex(Color color) {
+    final value = color.toARGB32();
+    return '#${value.toRadixString(16).padLeft(8, '0').toUpperCase()}';
+  }
+
+  String _fontWeightLabel(FontWeight? weight) {
+    return switch (weight) {
+      FontWeight.w100 => 'w100',
+      FontWeight.w200 => 'w200',
+      FontWeight.w300 => 'w300',
+      FontWeight.w400 || null => 'w400',
+      FontWeight.w500 => 'w500',
+      FontWeight.w600 => 'w600',
+      FontWeight.w700 => 'w700',
+      FontWeight.w800 => 'w800',
+      FontWeight.w900 => 'w900',
+      _ => '$weight',
+    };
   }
 
   bool _snapshotContains(List<String> values, String expected) {

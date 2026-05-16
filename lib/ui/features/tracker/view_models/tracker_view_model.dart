@@ -56,6 +56,7 @@ enum TrackerMessageKind {
   githubAuthorizationCodeReturned,
   githubConnected,
   storedGitHubTokenInvalid,
+  selectedIssueUnavailable,
   workspaceSwitchFailed,
   workspaceRestoreSkipped,
   workspaceRestoreFailed,
@@ -211,6 +212,13 @@ class TrackerMessage {
         TrackerMessageKind.storedGitHubTokenInvalid,
         tone: TrackerMessageTone.error,
         error: '$error',
+      );
+
+  factory TrackerMessage.selectedIssueUnavailable({required String issueKey}) =>
+      TrackerMessage._(
+        TrackerMessageKind.selectedIssueUnavailable,
+        tone: TrackerMessageTone.info,
+        issueKey: issueKey,
       );
 
   factory TrackerMessage.workspaceSwitchFailed({
@@ -1459,24 +1467,42 @@ class TrackerViewModel extends ChangeNotifier {
             'This repository implementation does not expose shared mutations.';
   }
 
-  void _applySearchPage(TrackStateIssueSearchPage page, {bool append = false}) {
+  void _applySearchPage(
+    TrackStateIssueSearchPage page, {
+    bool append = false,
+    bool retainSelectionWhenMissing = true,
+  }) {
+    final previousSelectedIssueKey = _selectedIssue?.key;
     _searchPage = page;
     _searchResults = append ? [..._searchResults, ...page.issues] : page.issues;
     _hasLoadedInitialSearchResults = true;
-    if (_searchResults.isEmpty) {
-      return;
+    final selectionStillVisible =
+        previousSelectedIssueKey != null &&
+        _searchResults.any((issue) => issue.key == previousSelectedIssueKey);
+    if (!retainSelectionWhenMissing &&
+        previousSelectedIssueKey != null &&
+        !selectionStillVisible) {
+      _selectedIssue = null;
+    } else if (retainSelectionWhenMissing &&
+        _selectedIssue == null &&
+        _searchResults.isNotEmpty) {
+      _selectedIssue = _searchResults.first;
     }
-    _selectedIssue ??= _searchResults.first;
+    if (_selectedIssue?.key != previousSelectedIssueKey) {
+      _invalidateIssueHydrationContext();
+    }
   }
 
   Future<void> _refreshSearchResultsAfterMutation({
     bool preferLoadedSnapshot = false,
+    bool retainSelectionWhenMissing = true,
   }) async {
     final requestToken = _beginSearchRequest();
     if (preferLoadedSnapshot && _snapshot != null) {
       _refreshSearchResultsFromLoadedSnapshot(
         _snapshot!,
         requestToken: requestToken,
+        retainSelectionWhenMissing: retainSelectionWhenMissing,
       );
       return;
     }
@@ -1490,12 +1516,16 @@ class TrackerViewModel extends ChangeNotifier {
       if (!_isSearchRequestCurrent(requestToken)) {
         return;
       }
-      _applySearchPage(searchPage);
+      _applySearchPage(
+        searchPage,
+        retainSelectionWhenMissing: retainSelectionWhenMissing,
+      );
     } on Object catch (_) {
       if (preferLoadedSnapshot && _snapshot != null) {
         _refreshSearchResultsFromLoadedSnapshot(
           _snapshot!,
           requestToken: requestToken,
+          retainSelectionWhenMissing: retainSelectionWhenMissing,
         );
       }
       // Keep the existing search results when a background refresh fails.
@@ -1505,6 +1535,7 @@ class TrackerViewModel extends ChangeNotifier {
   void _refreshSearchResultsFromLoadedSnapshot(
     TrackerSnapshot snapshot, {
     int? requestToken,
+    bool retainSelectionWhenMissing = true,
   }) {
     if (requestToken != null && !_isSearchRequestCurrent(requestToken)) {
       return;
@@ -1517,7 +1548,10 @@ class TrackerViewModel extends ChangeNotifier {
           ? _searchPageSize
           : _searchResults.length,
     );
-    _applySearchPage(searchPage);
+    _applySearchPage(
+      searchPage,
+      retainSelectionWhenMissing: retainSelectionWhenMissing,
+    );
   }
 
   Future<bool> postIssueComment(TrackStateIssue issue, String body) async {
@@ -1877,6 +1911,7 @@ class TrackerViewModel extends ChangeNotifier {
   TrackStateIssue? _resolveSelectedIssue(
     String? previousSelectedKey,
     List<TrackStateIssue> issues,
+    bool fallbackWhenMissing,
   ) {
     if (issues.isEmpty) {
       return null;
@@ -1887,6 +1922,11 @@ class TrackerViewModel extends ChangeNotifier {
           return issue;
         }
       }
+      if (!fallbackWhenMissing) {
+        return null;
+      }
+    } else if (!fallbackWhenMissing) {
+      return null;
     }
     for (final issue in issues) {
       if (!issue.isEpic) {
@@ -2116,17 +2156,37 @@ class TrackerViewModel extends ChangeNotifier {
     }
     final snapshot = refresh.snapshot;
     final changedDomains = refresh.result.changedDomains;
+    final shouldClearMissingSelection =
+        changedDomains.contains(WorkspaceSyncDomain.issueSummaries) ||
+        changedDomains.contains(WorkspaceSyncDomain.repositoryIndex);
+    final previousSelectedIssueKey = _selectedIssue?.key;
+    final selectedIssueRemovedFromWorkspace =
+        shouldClearMissingSelection &&
+        previousSelectedIssueKey != null &&
+        snapshot != null &&
+        !snapshot.issues.any((issue) => issue.key == previousSelectedIssueKey);
     if (snapshot != null) {
       await _applyReloadedSnapshot(
         snapshot,
         previousSelectedIssue: _selectedIssue,
         preferredSelectedIssueKey: _selectedIssue?.key,
+        fallbackWhenMissing: !shouldClearMissingSelection,
       );
       if (changedDomains.contains(WorkspaceSyncDomain.projectMeta) ||
           changedDomains.contains(WorkspaceSyncDomain.issueSummaries) ||
           changedDomains.contains(WorkspaceSyncDomain.repositoryIndex)) {
-        await _refreshSearchResultsAfterMutation(preferLoadedSnapshot: true);
+        await _refreshSearchResultsAfterMutation(
+          preferLoadedSnapshot: true,
+          retainSelectionWhenMissing: false,
+        );
+        if (selectedIssueRemovedFromWorkspace) {
+          _message = TrackerMessage.selectedIssueUnavailable(
+            issueKey: previousSelectedIssueKey,
+          );
+        }
       }
+    } else {
+      await _hydrateSelectedIssueForWorkspaceSync(refresh.result);
     }
     final refreshedIssueKeys = <String>{
       for (final domain in refresh.result.domains.values) ...domain.issueKeys,
@@ -2141,6 +2201,73 @@ class TrackerViewModel extends ChangeNotifier {
       health: WorkspaceSyncHealth.synced,
     );
     notifyListeners();
+  }
+
+  Future<void> _hydrateSelectedIssueForWorkspaceSync(
+    WorkspaceSyncResult result,
+  ) async {
+    final currentIssue = _selectedIssue;
+    final repository = _repository;
+    if (currentIssue == null ||
+        repository is! ProviderBackedTrackStateRepository) {
+      return;
+    }
+    final scopes = <IssueHydrationScope>{};
+    if (_syncChangeAppliesToIssue(
+      result.domains[WorkspaceSyncDomain.comments],
+      currentIssue.key,
+    )) {
+      scopes.add(IssueHydrationScope.comments);
+    }
+    if (_syncChangeAppliesToIssue(
+      result.domains[WorkspaceSyncDomain.attachments],
+      currentIssue.key,
+    )) {
+      scopes.add(IssueHydrationScope.attachments);
+    }
+    if (scopes.isEmpty) {
+      return;
+    }
+    final hydrationContextToken = _captureIssueHydrationContext();
+    for (final scope in scopes) {
+      _clearIssueDeferredError(
+        currentIssue.key,
+        _deferredSectionForScope(scope),
+      );
+    }
+    try {
+      final hydrated = await repository.hydrateIssue(
+        currentIssue,
+        scopes: scopes,
+        force: true,
+      );
+      if (!_shouldApplyHydratedIssueRefresh(
+        hydrationContextToken: hydrationContextToken,
+        issueKey: currentIssue.key,
+      )) {
+        return;
+      }
+      _applyTargetedIssueRefresh(hydrated);
+      _refreshSearchResultsFromLoadedSnapshot(_snapshot!);
+    } on Object catch (error) {
+      for (final scope in scopes) {
+        _setIssueDeferredError(
+          currentIssue.key,
+          _deferredSectionForScope(scope),
+          '$error',
+        );
+      }
+    }
+  }
+
+  bool _syncChangeAppliesToIssue(
+    WorkspaceSyncDomainChange? change,
+    String issueKey,
+  ) {
+    if (change == null) {
+      return false;
+    }
+    return change.isGlobal || change.issueKeys.contains(issueKey);
   }
 
   void _updateWorkspaceSyncBaseline() {
@@ -2211,6 +2338,7 @@ class TrackerViewModel extends ChangeNotifier {
     TrackerSnapshot snapshot, {
     required TrackStateIssue? previousSelectedIssue,
     required String? preferredSelectedIssueKey,
+    bool fallbackWhenMissing = true,
   }) async {
     final previousSelectedIssueKey = _selectedIssue?.key;
     _snapshot = snapshot;
@@ -2224,6 +2352,7 @@ class TrackerViewModel extends ChangeNotifier {
     _selectedIssue = _resolveSelectedIssue(
       preferredSelectedIssueKey,
       snapshot.issues,
+      fallbackWhenMissing,
     );
     if (_selectedIssue?.key != previousSelectedIssueKey) {
       _invalidateIssueHydrationContext();

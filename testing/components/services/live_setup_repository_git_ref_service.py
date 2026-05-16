@@ -38,6 +38,20 @@ class LiveSetupRepositoryGitRefService:
             )
         return ref.sha
 
+    def fetch_branch_ref(self, branch: str) -> LiveHostedGitRef | None:
+        return self._fetch_git_ref(f"heads/{branch}")
+
+    def create_branch_ref(self, *, branch: str, sha: str) -> LiveHostedGitRef:
+        payload = self._write_json(
+            f"/repos/{self.repository}/git/refs",
+            payload={"ref": f"refs/heads/{branch}", "sha": sha},
+            method="POST",
+        )
+        return self._parse_git_ref(payload, context=f"branch {branch}")
+
+    def delete_branch_ref(self, branch: str) -> None:
+        self._delete_git_ref(f"heads/{branch}", context=f"branch {branch}")
+
     def fetch_tag_ref(self, tag_name: str) -> LiveHostedGitRef | None:
         return self._fetch_git_ref(f"tags/{tag_name}")
 
@@ -54,9 +68,12 @@ class LiveSetupRepositoryGitRefService:
         return self._parse_git_ref(payload, context=f"tag {tag_name}")
 
     def delete_tag_ref(self, tag_name: str) -> None:
+        self._delete_git_ref(f"tags/{tag_name}", context=f"tag {tag_name}")
+
+    def _delete_git_ref(self, suffix: str, *, context: str) -> None:
         request = urllib.request.Request(
-            f"https://api.github.com/repos/{self.repository}/git/refs/tags/"
-            f"{quote(tag_name, safe='')}",
+            f"https://api.github.com/repos/{self.repository}/git/refs/"
+            f"{quote(suffix, safe='/')}",
             method="DELETE",
             headers=self._headers(),
         )
@@ -64,15 +81,15 @@ class LiveSetupRepositoryGitRefService:
             with urllib.request.urlopen(request, timeout=60) as response:
                 if response.status != 204:
                     raise RuntimeError(
-                        "GitHub delete for git tag "
-                        f"{tag_name} returned unexpected status {response.status}.",
+                        "GitHub delete for git ref "
+                        f"{context} returned unexpected status {response.status}.",
                     )
         except urllib.error.HTTPError as error:
             if error.code == 404:
                 return
             details = error.read().decode("utf-8", errors="replace")
             raise RuntimeError(
-                f"GitHub API DELETE /repos/{self.repository}/git/refs/tags/{tag_name} "
+                f"GitHub API DELETE /repos/{self.repository}/git/refs/{suffix} "
                 f"failed with HTTP {error.code}.\nResponse body:\n{details}",
             ) from error
 

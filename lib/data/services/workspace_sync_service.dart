@@ -12,10 +12,7 @@ typedef WorkspaceSyncRefreshHandler =
 typedef WorkspaceSyncStatusListener = void Function(WorkspaceSyncStatus status);
 
 class WorkspaceSyncRefresh {
-  const WorkspaceSyncRefresh({
-    required this.result,
-    required this.snapshot,
-  });
+  const WorkspaceSyncRefresh({required this.result, required this.snapshot});
 
   final WorkspaceSyncResult result;
   final TrackerSnapshot? snapshot;
@@ -70,7 +67,9 @@ class WorkspaceSyncService {
   void start({required TrackerSnapshot initialSnapshot}) {
     _baselineSnapshot = initialSnapshot;
     _scheduleNext(_cadence);
-    unawaited(checkNow(trigger: WorkspaceSyncTrigger.workspaceSwitch, force: true));
+    unawaited(
+      checkNow(trigger: WorkspaceSyncTrigger.workspaceSwitch, force: true),
+    );
   }
 
   void updateBaselineSnapshot(TrackerSnapshot snapshot) {
@@ -120,10 +119,7 @@ class WorkspaceSyncService {
         previousState: _previousSyncState,
       );
       _previousSyncState = syncCheck.state;
-      final result = await _buildResult(
-        trigger: trigger,
-        syncCheck: syncCheck,
-      );
+      final result = await _buildResult(trigger: trigger, syncCheck: syncCheck);
       _lastCompletedAt = _now();
       _hostedBackoffIndex = 0;
       _publishStatus(
@@ -167,20 +163,20 @@ class WorkspaceSyncService {
     required RepositorySyncCheck syncCheck,
   }) async {
     final baselineSnapshot = _baselineSnapshot;
-    final snapshotNeeded =
-        syncCheck.signals.contains(WorkspaceSyncSignal.localHead) ||
-        syncCheck.signals.contains(WorkspaceSyncSignal.localWorktree) ||
-        syncCheck.signals.contains(WorkspaceSyncSignal.hostedRepository);
+    final pathChanges = _domainsFromChangedPaths(
+      syncCheck.changedPaths,
+    ).toList(growable: false);
+    final snapshotNeeded = _requiresSnapshotReload(
+      syncCheck: syncCheck,
+      pathChanges: pathChanges,
+    );
     TrackerSnapshot? nextSnapshot;
     if (snapshotNeeded) {
       nextSnapshot = await _loadSnapshot();
       _baselineSnapshot = nextSnapshot;
     }
     final domains = <WorkspaceSyncDomain, WorkspaceSyncDomainChange>{};
-    _mergeDomainChanges(
-      domains,
-      _domainsFromChangedPaths(syncCheck.changedPaths),
-    );
+    _mergeDomainChanges(domains, pathChanges);
     if (baselineSnapshot != null && nextSnapshot != null) {
       _mergeDomainChanges(
         domains,
@@ -205,9 +201,49 @@ class WorkspaceSyncService {
       domains: domains,
     );
     if (result.hasChanges) {
-      await _onRefresh(WorkspaceSyncRefresh(result: result, snapshot: nextSnapshot));
+      await _onRefresh(
+        WorkspaceSyncRefresh(result: result, snapshot: nextSnapshot),
+      );
     }
     return result;
+  }
+
+  bool _requiresSnapshotReload({
+    required RepositorySyncCheck syncCheck,
+    required List<WorkspaceSyncDomainChange> pathChanges,
+  }) {
+    if (syncCheck.signals.contains(WorkspaceSyncSignal.localHead) ||
+        syncCheck.signals.contains(WorkspaceSyncSignal.localWorktree)) {
+      return true;
+    }
+    if (syncCheck.signals.contains(WorkspaceSyncSignal.hostedSnapshotReload)) {
+      return true;
+    }
+    if (!syncCheck.signals.contains(WorkspaceSyncSignal.hostedRepository)) {
+      return false;
+    }
+    if (syncCheck.changedPaths.isEmpty) {
+      return false;
+    }
+    if (pathChanges.isEmpty) {
+      return false;
+    }
+    for (final change in pathChanges) {
+      if (change.isGlobal) {
+        return true;
+      }
+      switch (change.domain) {
+        case WorkspaceSyncDomain.projectMeta:
+        case WorkspaceSyncDomain.issueSummaries:
+        case WorkspaceSyncDomain.issueDetails:
+        case WorkspaceSyncDomain.repositoryIndex:
+          return true;
+        case WorkspaceSyncDomain.comments:
+        case WorkspaceSyncDomain.attachments:
+          break;
+      }
+    }
+    return false;
   }
 
   DateTime _computeNextRetryAt() {
@@ -267,7 +303,9 @@ void _mergeDomainChange(
   target[change.domain] = previous == null ? change : previous.merge(change);
 }
 
-Iterable<WorkspaceSyncDomainChange> _domainsFromChangedPaths(Set<String> paths) {
+Iterable<WorkspaceSyncDomainChange> _domainsFromChangedPaths(
+  Set<String> paths,
+) {
   final changes = <WorkspaceSyncDomainChange>[];
   for (final path in paths) {
     final issueKeys = _issueKeysFromPath(path);
@@ -363,9 +401,7 @@ Iterable<WorkspaceSyncDomainChange> _domainsFromSnapshotDiff({
     );
   }
 
-  final previousByKey = {
-    for (final issue in previous.issues) issue.key: issue,
-  };
+  final previousByKey = {for (final issue in previous.issues) issue.key: issue};
   final nextByKey = {for (final issue in next.issues) issue.key: issue};
   final allKeys = {...previousByKey.keys, ...nextByKey.keys};
   final summaryKeys = <String>{};
@@ -391,7 +427,8 @@ Iterable<WorkspaceSyncDomainChange> _domainsFromSnapshotDiff({
     if (_issueCommentsSignature(before) != _issueCommentsSignature(after)) {
       commentKeys.add(key);
     }
-    if (_issueAttachmentsSignature(before) != _issueAttachmentsSignature(after)) {
+    if (_issueAttachmentsSignature(before) !=
+        _issueAttachmentsSignature(after)) {
       attachmentKeys.add(key);
     }
     if (_issueIndexSignature(before) != _issueIndexSignature(after)) {
@@ -452,11 +489,15 @@ String _projectSignature(ProjectConfig project) {
     project.branch,
     project.defaultLocale,
     project.supportedLocales.join(','),
-    for (final entry in project.issueTypeDefinitions) _configEntrySignature(entry),
+    for (final entry in project.issueTypeDefinitions)
+      _configEntrySignature(entry),
     for (final entry in project.statusDefinitions) _configEntrySignature(entry),
-    for (final entry in project.priorityDefinitions) _configEntrySignature(entry),
-    for (final entry in project.versionDefinitions) _configEntrySignature(entry),
-    for (final entry in project.componentDefinitions) _configEntrySignature(entry),
+    for (final entry in project.priorityDefinitions)
+      _configEntrySignature(entry),
+    for (final entry in project.versionDefinitions)
+      _configEntrySignature(entry),
+    for (final entry in project.componentDefinitions)
+      _configEntrySignature(entry),
     for (final entry in project.resolutionDefinitions)
       _configEntrySignature(entry),
     for (final field in project.fieldDefinitions) _fieldSignature(field),
@@ -525,9 +566,7 @@ String _issueDetailSignature(TrackStateIssue issue) {
     issue.resolutionId ?? '',
     '${issue.progress}',
     issue.links
-        .map(
-          (link) => '${link.type}:${link.targetKey}:${link.direction}',
-        )
+        .map((link) => '${link.type}:${link.targetKey}:${link.direction}')
         .join(','),
     issue.customFields.entries
         .map((entry) => '${entry.key}:${entry.value}')
@@ -574,8 +613,7 @@ bool _isRepositoryIndexPath(String path) {
 }
 
 Set<String> _issueKeysFromPath(String path) {
-  return RegExp(r'([A-Z][A-Z0-9]+-\d+)')
-      .allMatches(path)
-      .map((match) => match.group(1)!)
-      .toSet();
+  return RegExp(
+    r'([A-Z][A-Z0-9]+-\d+[A-Z0-9]*)',
+  ).allMatches(path).map((match) => match.group(1)!).toSet();
 }
