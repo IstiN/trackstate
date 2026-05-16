@@ -136,9 +136,12 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
     _pendingSync = null;
     _revisionSerial += 1;
     _lastRequestedExplicitFlag = pendingSync.requestedExplicitFlag;
-    _lastReturnedSignals = const <WorkspaceSyncSignal>{
-      WorkspaceSyncSignal.hostedRepository,
-    };
+    _lastReturnedSignals = pendingSync.requestedExplicitFlag
+        ? const <WorkspaceSyncSignal>{
+            WorkspaceSyncSignal.hostedRepository,
+            WorkspaceSyncSignal.hostedSnapshotReload,
+          }
+        : const <WorkspaceSyncSignal>{WorkspaceSyncSignal.hostedRepository};
     _lastReturnedChangedPaths = const <String>{};
     return RepositorySyncCheck(
       state: RepositorySyncState(
