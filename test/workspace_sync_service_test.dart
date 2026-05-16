@@ -6,6 +6,148 @@ import 'package:trackstate/domain/models/trackstate_models.dart';
 
 void main() {
   test(
+    'workspace sync service does not reload the hosted snapshot for empty-path hosted syncs without an explicit reload signal',
+    () async {
+      final baseline = await const DemoTrackStateRepository().loadSnapshot();
+      final nextSnapshot = TrackerSnapshot(
+        project: baseline.project,
+        issues: [
+          for (final issue in baseline.issues)
+            if (issue.key == 'TRACK-12')
+              _copyIssue(
+                issue,
+                description:
+                    'Hosted sync changed the issue, but no explicit reload was requested.',
+              )
+            else
+              issue,
+        ],
+        repositoryIndex: baseline.repositoryIndex,
+        loadWarnings: baseline.loadWarnings,
+        readiness: baseline.readiness,
+        startupRecovery: baseline.startupRecovery,
+      );
+      final repository = _FakeWorkspaceSyncRepository(
+        states: [
+          RepositorySyncCheck(
+            state: const RepositorySyncState(
+              providerType: ProviderType.github,
+              repositoryRevision: 'rev-1',
+              sessionRevision: 'connected:true:true',
+              connectionState: ProviderConnectionState.connected,
+            ),
+          ),
+          RepositorySyncCheck(
+            state: const RepositorySyncState(
+              providerType: ProviderType.github,
+              repositoryRevision: 'rev-2',
+              sessionRevision: 'connected:true:true',
+              connectionState: ProviderConnectionState.connected,
+            ),
+            signals: const {WorkspaceSyncSignal.hostedRepository},
+          ),
+        ],
+      );
+      final refreshes = <WorkspaceSyncRefresh>[];
+      var loadSnapshotCalls = 0;
+      final service = WorkspaceSyncService(
+        repository: repository,
+        loadSnapshot: () async {
+          loadSnapshotCalls += 1;
+          return nextSnapshot;
+        },
+        onRefresh: refreshes.add,
+        onStatusChanged: (_) {},
+      );
+
+      service.updateBaselineSnapshot(baseline);
+      await service.checkNow(force: true);
+      service.updateBaselineSnapshot(baseline);
+      await service.checkNow(force: true);
+
+      expect(loadSnapshotCalls, 0);
+      expect(refreshes, isEmpty);
+    },
+  );
+
+  test(
+    'workspace sync service reloads the hosted snapshot when an explicit hosted reload signal is present',
+    () async {
+      final baseline = await const DemoTrackStateRepository().loadSnapshot();
+      final nextSnapshot = TrackerSnapshot(
+        project: baseline.project,
+        issues: [
+          for (final issue in baseline.issues)
+            if (issue.key == 'TRACK-12')
+              _copyIssue(
+                issue,
+                description:
+                    'Hosted sync changed the issue after an explicit reload request.',
+              )
+            else
+              issue,
+        ],
+        repositoryIndex: baseline.repositoryIndex,
+        loadWarnings: baseline.loadWarnings,
+        readiness: baseline.readiness,
+        startupRecovery: baseline.startupRecovery,
+      );
+      final repository = _FakeWorkspaceSyncRepository(
+        states: [
+          RepositorySyncCheck(
+            state: const RepositorySyncState(
+              providerType: ProviderType.github,
+              repositoryRevision: 'rev-1',
+              sessionRevision: 'connected:true:true',
+              connectionState: ProviderConnectionState.connected,
+            ),
+          ),
+          RepositorySyncCheck(
+            state: const RepositorySyncState(
+              providerType: ProviderType.github,
+              repositoryRevision: 'rev-2',
+              sessionRevision: 'connected:true:true',
+              connectionState: ProviderConnectionState.connected,
+            ),
+            signals: const {
+              WorkspaceSyncSignal.hostedRepository,
+              WorkspaceSyncSignal.hostedSnapshotReload,
+            },
+          ),
+        ],
+      );
+      final refreshes = <WorkspaceSyncRefresh>[];
+      var loadSnapshotCalls = 0;
+      final service = WorkspaceSyncService(
+        repository: repository,
+        loadSnapshot: () async {
+          loadSnapshotCalls += 1;
+          return nextSnapshot;
+        },
+        onRefresh: refreshes.add,
+        onStatusChanged: (_) {},
+      );
+
+      service.updateBaselineSnapshot(baseline);
+      await service.checkNow(force: true);
+      service.updateBaselineSnapshot(baseline);
+      await service.checkNow(force: true);
+
+      expect(loadSnapshotCalls, 1);
+      expect(refreshes, hasLength(1));
+      expect(refreshes.single.snapshot, same(nextSnapshot));
+      expect(
+        refreshes.single.result.signals,
+        contains(WorkspaceSyncSignal.hostedSnapshotReload),
+      );
+      expect(
+        refreshes.single.result.changedDomains,
+        contains(WorkspaceSyncDomain.issueDetails),
+      );
+    },
+  );
+
+  test(
     'workspace sync service publishes structured domains for detected changes',
     () async {
       final baseline = await const DemoTrackStateRepository().loadSnapshot();
