@@ -29,13 +29,15 @@ void main() {
   });
 
   testWidgets(
-    'TS-773 exposes the missing explicit load_snapshot_delta boundary and the default hosted reload regression',
+    'TS-773 reloads the hosted snapshot only for the explicit load_snapshot_delta request',
     (tester) async {
       final result = <String, Object?>{
         'ticket': _ticketKey,
         'ticket_summary': _ticketSummary,
-        'environment': 'flutter test',
+        'environment': 'flutter test / ${Platform.operatingSystem}',
         'os': Platform.operatingSystem,
+        'repository': 'trackstate/trackstate',
+        'url': 'local Flutter test execution',
         'query': Ts773ExplicitLoadSnapshotDeltaRepository.query,
         'steps': <Map<String, Object?>>[],
         'human_verification': <Map<String, Object?>>[],
@@ -257,7 +259,7 @@ void main() {
         _recordHumanVerification(
           result,
           check:
-              'Watched the visible Issue-B detail after the control sync and confirmed the fallback refresh text appeared even though no explicit load_snapshot_delta marker was available to the app.',
+              'Watched the visible Issue-B detail after the control sync and confirmed the original description stayed visible because no explicit load_snapshot_delta marker was present.',
           observed:
               'control_description_visible=$controlDescriptionVisible; '
               'control_initial_description_still_visible='
@@ -267,12 +269,15 @@ void main() {
         _recordHumanVerification(
           result,
           check:
-              'Compared the payloads that reached the production sync service for the control sync and the flagged attempt.',
+              'Compared the payloads that reached the production sync service for the control sync and the flagged attempt, then confirmed the explicit sync refreshed the same visible Issue-B detail panel.',
           observed:
               'contract_shape=${result['contract_shape']}; '
               'control_exposed_payload=$controlExposedPayload; '
               'explicit_exposed_payload=$explicitExposedPayload; '
-              'payloads_distinguishable=$payloadsDistinguishable',
+              'payloads_distinguishable=$payloadsDistinguishable; '
+              'explicit_description_visible=$explicitDescriptionVisible; '
+              'issue_b_detail_visible_after_explicit='
+              '$issueBDetailVisibleAfterExplicit',
         );
 
         if (!comparisonStepPassed) {
@@ -346,6 +351,7 @@ Future<bool> _pumpUntil(
 
 Directory get _outputsDir => Directory('${Directory.current.path}/outputs');
 File get _responseFile => File('${_outputsDir.path}/response.md');
+File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
@@ -389,6 +395,7 @@ void _writePassOutputs(Map<String, Object?> result) {
   _resultFile.writeAsStringSync(
     '${jsonEncode(const <String, Object>{'status': 'passed', 'passed': 1, 'failed': 0, 'skipped': 0, 'summary': '1 passed, 0 failed'})}\n',
   );
+  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
 }
@@ -399,39 +406,116 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _resultFile.writeAsStringSync(
     '${jsonEncode(<String, Object>{'status': 'failed', 'passed': 0, 'failed': 1, 'skipped': 0, 'summary': '0 passed, 1 failed', 'error': error})}\n',
   );
+  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
 }
 
+String _jiraComment(Map<String, Object?> result, {required bool passed}) {
+  final statusLabel = passed ? '✅ PASSED' : '❌ FAILED';
+  final lines = <String>[
+    'h3. Test Automation Result',
+    '',
+    '*Status:* $statusLabel',
+    '*Test Case:* $_ticketKey - $_ticketSummary',
+    '',
+    'h4. What was tested',
+    "* Opened the production {noformat}JQL Search{noformat} surface, ran {noformat}${Ts773ExplicitLoadSnapshotDeltaRepository.query}{noformat}, and selected {noformat}${Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey}{noformat}.",
+    "* Triggered one hosted sync without an explicit {noformat}load_snapshot_delta=1{noformat} request and one hosted sync with the explicit request.",
+    "* Verified the production-visible payloads, {noformat}loadSnapshot{noformat} deltas, and the visible Issue-B detail text after each sync.",
+    '',
+    'h4. Result',
+    passed
+        ? "* Matched the expected result: the unflagged hosted sync did not reload the snapshot, the explicit request exposed a distinct hosted reload signal, and the visible Issue-B detail refreshed only after the explicit sync."
+        : '* Did not match the expected result. See the failed step details and exact error below.',
+    '* Environment: {noformat}${result['environment'] ?? '<missing>'}{noformat}',
+    '* Repository: {noformat}${result['repository'] ?? '<missing>'}{noformat}',
+    '',
+    'h4. Step results',
+    ..._jiraStepLines(result),
+    '',
+    'h4. Human-style verification',
+    ..._jiraHumanVerificationLines(result),
+    '',
+    'h4. Test file',
+    '{code}',
+    _testFilePath,
+    '{code}',
+    '',
+    'h4. Run command',
+    '{code:bash}',
+    _runCommand,
+    '{code}',
+  ];
+
+  if (!passed) {
+    lines.addAll(<String>[
+      '',
+      'h4. Exact error',
+      '{noformat}',
+      '${result['error'] ?? '<missing>'}',
+      '',
+      '${result['traceback'] ?? '<missing>'}',
+      '{noformat}',
+    ]);
+  }
+
+  return '${lines.join('\n')}\n';
+}
+
 String _responseSummary(Map<String, Object?> result, {required bool passed}) {
   final summary = passed
-      ? 'Reworked TS-773 to add the missing control sync and the test now proves the explicit global reload behavior.'
-      : 'Reworked TS-773 to add the missing control sync and stop treating the hosted empty-path fallback as an explicit signal; the test now fails on the real product gap.';
+      ? 'Passed: the unflagged hosted sync left the global snapshot reload counter unchanged, and the explicit request triggered exactly one global snapshot reload through a distinct hosted sync signal.'
+      : 'Failed: the hosted sync flow did not preserve the explicit-only snapshot reload contract.';
   final detail = passed
-      ? 'Observed control load_snapshot_delta `${result['control_load_snapshot_delta'] ?? '<missing>'}` and explicit load_snapshot_delta `${result['explicit_load_snapshot_delta'] ?? '<missing>'}` with distinguishable payloads.'
-      : 'Observed control load_snapshot_delta `${result['control_load_snapshot_delta'] ?? '<missing>'}`, explicit load_snapshot_delta `${result['explicit_load_snapshot_delta'] ?? '<missing>'}`, and indistinguishable payloads at `${result['contract_shape'] ?? '<missing>'}`.';
+      ? 'Observed control load_snapshot_delta `${result['control_load_snapshot_delta'] ?? '<missing>'}`, explicit load_snapshot_delta `${result['explicit_load_snapshot_delta'] ?? '<missing>'}`, and distinct payloads at `${result['contract_shape'] ?? '<missing>'}`.'
+      : 'Observed control load_snapshot_delta `${result['control_load_snapshot_delta'] ?? '<missing>'}`, explicit load_snapshot_delta `${result['explicit_load_snapshot_delta'] ?? '<missing>'}`, and payload mismatch details captured at `${result['contract_shape'] ?? '<missing>'}`.';
   return '# $_ticketKey\n\n$summary\n\n$detail\n';
 }
 
 String _prBody(Map<String, Object?> result, {required bool passed}) {
+  final statusLabel = passed ? '✅ PASSED' : '❌ FAILED';
   final lines = <String>[
-    '## Rework summary',
+    '## Test Automation Result',
     '',
-    '- Added the missing control scenario that runs the same hosted sync without an explicit `load_snapshot_delta` marker.',
-    '- Reworked TS-773 so it no longer treats `hostedRepository + empty changedPaths` as proof of an explicit global reload request.',
-    '- Captured both observed payloads and both `loadSnapshot` deltas so the failure points at the exposed production boundary instead of a synthetic fixture pass.',
+    '**Status:** $statusLabel',
+    '**Test Case:** $_ticketKey - $_ticketSummary',
     '',
-    '## Test result',
+    '## What was automated',
     '',
-    passed ? '- ✅ Passed' : '- ❌ Failed',
+    '- Opened the production `JQL Search` surface, ran `status = Open`, and selected `TRACK-773-B`.',
+    '- Triggered one hosted sync without an explicit `load_snapshot_delta=1` request and one hosted sync with the explicit request.',
+    '- Verified the production-visible payloads, `loadSnapshot` deltas, and the visible Issue-B detail text after each sync.',
+    '',
+    '## Result',
+    passed
+        ? '- Matched the expected result: the unflagged hosted sync did not reload the snapshot, the explicit request exposed a distinct hosted reload signal, and the visible Issue-B detail refreshed only after the explicit sync.'
+        : '- Did not match the expected result. See the failed step details and exact error below.',
+    '',
+    '## Step results',
+    ..._markdownStepLines(result),
+    '',
+    '## Human-style verification',
+    ..._markdownHumanVerificationLines(result),
+    '',
+    '## Observed payloads',
     '- Control payload: `${result['control_payload'] ?? '<missing>'}`',
     '- Explicit attempt payload: `${result['explicit_payload'] ?? '<missing>'}`',
     '- Control exposed payload: `${result['control_exposed_payload'] ?? '<missing>'}`',
     '- Explicit attempt exposed payload: `${result['explicit_exposed_payload'] ?? '<missing>'}`',
     '- Control `loadSnapshot` delta: `${result['control_load_snapshot_delta'] ?? '<missing>'}`',
     '- Explicit attempt `loadSnapshot` delta: `${result['explicit_load_snapshot_delta'] ?? '<missing>'}`',
-    '- Run command: `$_runCommand`',
+    '',
+    '## Test file',
+    '```text',
+    _testFilePath,
+    '```',
+    '',
+    '## How to run',
+    '```bash',
+    _runCommand,
+    '```',
   ];
   if (!passed) {
     lines.addAll(<String>[
@@ -449,24 +533,36 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
 }
 
 String _bugDescription(Map<String, Object?> result) {
+  final failedStep = _firstFailedStep(result);
   final lines = <String>[
     '# Bug Report - $_ticketKey',
     '',
     '## Summary',
-    'The product still defaults to a global hosted snapshot reload when the explicit flag is absent, and the exposed sync contract does not provide any production-visible field that distinguishes a requested `load_snapshot_delta=1` refresh from that fallback path.',
+    'The hosted sync flow did not meet the TS-773 contract: only the explicit `load_snapshot_delta=1` request should trigger a global snapshot reload.',
     '',
     '## Steps to Reproduce',
-    '1. Launch the production `TrackStateApp` with a hosted `WorkspaceSyncRepository` and hydrate JQL Search.',
-    '2. Search `${Ts773ExplicitLoadSnapshotDeltaRepository.query}`, select `${Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey}`, and confirm the initial detail text is visible.',
-    '3. Trigger a hosted repository sync without an explicit `load_snapshot_delta` marker and resume the app.',
-    '4. Trigger a second hosted repository sync where the fixture requests `load_snapshot_delta=1`, but the current production contract can only emit `${result['contract_shape'] ?? '<missing>'}`.',
-    '5. Compare the payloads and the observed `loadSnapshot` deltas.',
+    ..._bugStepLines(result),
     '',
-    '## Expected Result',
-    '- The control sync without the explicit flag does **not** reload the full snapshot and leaves `load_snapshot_delta` unchanged.',
-    '- The flagged sync exposes a production-visible explicit marker, triggers exactly one global reload, and can be distinguished from the unflagged control path.',
+    '## Actual vs Expected',
+    '- **Expected:** the control sync without the explicit flag does **not** reload the full snapshot, the explicit sync exposes a distinct production-visible reload marker, and only the explicit sync increments `load_snapshot_delta`.',
+    '- **Actual:** ${_actualResultLine(result)}',
     '',
-    '## Actual Result',
+    '## Exact Error Message or Assertion Failure',
+    '```text',
+    '${result['error'] ?? '<missing>'}',
+    '',
+    '${result['traceback'] ?? '<missing>'}',
+    '```',
+    '',
+    '## Environment',
+    '- URL: ${result['url'] ?? '<missing>'}',
+    '- Browser: none',
+    '- OS: ${result['os'] ?? '<missing>'}',
+    '- Run command: `$_runCommand`',
+    '- Repository: `${result['repository'] ?? '<missing>'}`',
+    '- Sync contract shape: `${result['contract_shape'] ?? '<missing>'}`',
+    '',
+    '## Actual Result Details',
     '- Control payload: `${result['control_payload'] ?? '<missing>'}`',
     '- Explicit attempt payload: `${result['explicit_payload'] ?? '<missing>'}`',
     '- Control exposed payload: `${result['control_exposed_payload'] ?? '<missing>'}`',
@@ -474,22 +570,8 @@ String _bugDescription(Map<String, Object?> result) {
     '- Control `loadSnapshot` delta: `${result['control_load_snapshot_delta'] ?? '<missing>'}`',
     '- Explicit attempt `loadSnapshot` delta: `${result['explicit_load_snapshot_delta'] ?? '<missing>'}`',
     '- Payloads distinguishable: `${result['payloads_distinguishable'] ?? '<missing>'}`',
-    '',
-    '## Missing/Broken Production Capability',
-    '- `RepositorySyncCheck` only exposes `${result['contract_shape'] ?? '<missing>'}` at this boundary, so the test cannot send a production-visible explicit `load_snapshot_delta=1` marker from `testing/`.',
-    '- `WorkspaceSyncService._requiresSnapshotReload()` still performs a full reload for `hostedRepository` with empty `changedPaths`, so the unflagged control path increments `loadSnapshot` by default.',
-    '',
-    '## Failing Command',
-    '```bash',
-    _runCommand,
-    '```',
-    '',
-    '## Exact Error',
-    '```text',
-    '${result['error'] ?? '<missing>'}',
-    '',
-    '${result['traceback'] ?? '<missing>'}',
-    '```',
+    '- Failed step: `${failedStep?['step'] ?? '<missing>'}`',
+    '- Failed observation: `${failedStep?['observed'] ?? '<missing>'}`',
     '',
     '## Relevant Logs',
     '```text',
@@ -500,12 +582,85 @@ String _bugDescription(Map<String, Object?> result) {
     'Explicit attempt exposed payload: ${result['explicit_exposed_payload'] ?? '<missing>'}',
     'Control load_snapshot_delta: ${result['control_load_snapshot_delta'] ?? '<missing>'}',
     'Explicit load_snapshot_delta: ${result['explicit_load_snapshot_delta'] ?? '<missing>'}',
+    'Issue-B detail visible after explicit sync: ${result['issue_b_detail_visible_after_explicit'] ?? '<missing>'}',
     'Visible rows at failure: ${_formatSnapshot(_stringList(result['visible_rows_at_failure'] ?? result['visible_rows_after_explicit']))}',
     'Visible texts at failure: ${_formatSnapshot(_stringList(result['visible_texts_at_failure'] ?? result['visible_texts_after_explicit']))}',
     'Visible semantics at failure: ${_formatSnapshot(_stringList(result['visible_semantics_at_failure'] ?? result['visible_semantics_after_explicit']))}',
     '```',
   ];
   return '${lines.join('\n')}\n';
+}
+
+List<String> _jiraStepLines(Map<String, Object?> result) {
+  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
+  return [
+    for (final step in steps)
+      '* Step ${step['step']}: ${step['status'] == 'passed' ? '✅' : '❌'} ${step['action']}\n'
+          '  Observed: {noformat}${step['observed']}{noformat}',
+  ];
+}
+
+List<String> _markdownStepLines(Map<String, Object?> result) {
+  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
+  return [
+    for (final step in steps)
+      '- Step ${step['step']}: ${step['status'] == 'passed' ? '✅' : '❌'} ${step['action']}\n'
+          '  - Observed: `${step['observed']}`',
+  ];
+}
+
+List<String> _jiraHumanVerificationLines(Map<String, Object?> result) {
+  final checks =
+      (result['human_verification'] as List<Map<String, Object?>>?) ?? const [];
+  if (checks.isEmpty) {
+    return const ['* No additional human-style checks were recorded.'];
+  }
+  return [
+    for (final check in checks)
+      '* ${check['check']}\n  Observed: {noformat}${check['observed']}{noformat}',
+  ];
+}
+
+List<String> _markdownHumanVerificationLines(Map<String, Object?> result) {
+  final checks =
+      (result['human_verification'] as List<Map<String, Object?>>?) ?? const [];
+  if (checks.isEmpty) {
+    return const ['- No additional human-style checks were recorded.'];
+  }
+  return [
+    for (final check in checks)
+      '- ${check['check']}\n  - Observed: `${check['observed']}`',
+  ];
+}
+
+List<String> _bugStepLines(Map<String, Object?> result) {
+  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
+  if (steps.isEmpty) {
+    return const ['1. No step results were recorded before the failure.'];
+  }
+  return [
+    for (final step in steps)
+      '${step['step']}. ${step['action']} ${step['status'] == 'passed' ? '✅' : '❌'}\n'
+          '   - Observed: ${step['observed']}',
+  ];
+}
+
+String _actualResultLine(Map<String, Object?> result) {
+  final failedStep = _firstFailedStep(result) ?? <String, Object?>{};
+  if (failedStep.isEmpty) {
+    return 'The test failed before recording a detailed step observation.';
+  }
+  return 'Step ${failedStep['step']} failed with the observation `${failedStep['observed']}`.';
+}
+
+Map<String, Object?>? _firstFailedStep(Map<String, Object?> result) {
+  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
+  for (final step in steps) {
+    if (step['status'] != 'passed') {
+      return step;
+    }
+  }
+  return null;
 }
 
 List<String> _stringList(Object? value) {
