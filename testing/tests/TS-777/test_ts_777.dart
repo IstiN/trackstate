@@ -14,7 +14,7 @@ const String _ticketSummary =
     'Sync event with explicit load_snapshot_delta=0 bypasses the global snapshot reload';
 const String _testFilePath = 'testing/tests/TS-777/test_ts_777.dart';
 const String _runCommand =
-    'flutter test testing/tests/TS-777/test_ts_777.dart --reporter expanded';
+    'mkdir -p outputs && flutter test testing/tests/TS-777/test_ts_777.dart --reporter expanded';
 const List<String> _requestSteps = <String>[
   'Hydrate JQL Search and keep TRACK-777-B visible on the real issue detail surface.',
   'Run a hosted control sync without any explicit load_snapshot_delta marker and observe the public sync payload plus visible state.',
@@ -363,6 +363,7 @@ Directory get _outputsDir => Directory('${Directory.current.path}/outputs');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
+File get _reviewRepliesFile => File('${_outputsDir.path}/review_replies.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
 
 void _recordStep(
@@ -406,6 +407,7 @@ void _writePassOutputs(Map<String, Object?> result) {
   );
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: true));
 }
 
 void _writeFailureOutputs(Map<String, Object?> result) {
@@ -416,6 +418,7 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   );
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
 }
 
@@ -532,6 +535,8 @@ String _bugDescription(Map<String, Object?> result) {
     '- OS: ${Platform.operatingSystem}',
     '- Run command: `$_runCommand`',
     '- Repository: `${result['repository'] ?? '<missing>'}`',
+    '- Query: `${result['query'] ?? '<missing>'}`',
+    '- Visible issue: `${Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBKey}` / `${Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBSummary}`',
     '',
     '## Relevant Logs',
     '```text',
@@ -572,6 +577,17 @@ List<String> _markdownHumanVerificationLines(Map<String, Object?> result) {
     for (final check in checks)
       '- ${check['check']}\n  - Observed: `${check['observed']}`',
   ];
+}
+
+String _reviewReplies(Map<String, Object?> result, {required bool passed}) {
+  final reply = passed
+      ? 'Fixed: resolved the TS-777 merge conflicts against the current `RepositorySyncCheck(state, signals, changedPaths, hostedSnapshotReloadDirective)` contract, kept the assertions on production-visible behavior only, and reran the test successfully.'
+      : 'Fixed: resolved the TS-777 merge conflicts against the current `RepositorySyncCheck(state, signals, changedPaths, hostedSnapshotReloadDirective)` contract, kept the assertions on production-visible behavior only, and reran the test. The remaining failure is product-visible: ${result['error'] ?? 'see attached failure output'}.';
+  return '${jsonEncode(<String, Object>{
+    'replies': <Map<String, Object?>>[
+      <String, Object?>{'inReplyToId': null, 'threadId': null, 'reply': reply},
+    ],
+  })}\n';
 }
 
 List<String> _bugLogLines(Map<String, Object?> result) {
