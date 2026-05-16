@@ -30,6 +30,7 @@ enum WorkspaceSyncSignal {
   localHead,
   localWorktree,
   hostedRepository,
+  hostedSnapshotReload,
   hostedSession,
 }
 

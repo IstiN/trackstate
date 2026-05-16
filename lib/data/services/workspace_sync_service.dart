@@ -216,11 +216,14 @@ class WorkspaceSyncService {
         syncCheck.signals.contains(WorkspaceSyncSignal.localWorktree)) {
       return true;
     }
+    if (syncCheck.signals.contains(WorkspaceSyncSignal.hostedSnapshotReload)) {
+      return true;
+    }
     if (!syncCheck.signals.contains(WorkspaceSyncSignal.hostedRepository)) {
       return false;
     }
     if (syncCheck.changedPaths.isEmpty) {
-      return true;
+      return false;
     }
     if (pathChanges.isEmpty) {
       return false;

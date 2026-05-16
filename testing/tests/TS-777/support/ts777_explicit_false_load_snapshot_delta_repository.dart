@@ -3,44 +3,45 @@ import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
-class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
+class Ts777ExplicitFalseLoadSnapshotDeltaRepository
+    extends DemoTrackStateRepository
     implements WorkspaceSyncRepository {
-  Ts773ExplicitLoadSnapshotDeltaRepository()
+  Ts777ExplicitFalseLoadSnapshotDeltaRepository()
     : super(snapshot: _initialSnapshot);
 
-  static const int explicitLoadSnapshotDeltaFlag = 1;
-  static const String issueAKey = 'TRACK-773-A';
-  static const String issueBKey = 'TRACK-773-B';
+  static const int explicitLoadSnapshotDeltaValue = 0;
+  static const String issueAKey = 'TRACK-777-A';
+  static const String issueBKey = 'TRACK-777-B';
   static const String issueASummary =
-      'Issue-A stays visible while the global reload runs';
+      'Issue-A keeps the search result list populated during sync checks';
   static const String issueBSummary =
-      'Issue-B reload behavior is compared across hosted sync payloads';
-  static const String issueAPath = 'TRACK-773-A/main.md';
-  static const String issueBPath = 'TRACK-773-B/main.md';
+      'Issue-B should not globally reload when load_snapshot_delta=0';
+  static const String issueAPath = 'TRACK-777-A/main.md';
+  static const String issueBPath = 'TRACK-777-B/main.md';
   static const String openStatusId = 'open';
   static const String closedStatusId = 'closed';
   static const String query = 'status = Open';
   static const String initialIssueBDescription =
-      'Initial detail text before any hosted background sync runs.';
+      'Initial detail text before any hosted sync comparison runs.';
   static const String controlWithoutFlagDescription =
       'Issue-B changed after a hosted sync without any explicit load_snapshot_delta marker.';
-  static const String explicitAttemptDescription =
-      'Issue-B changed after the test requested load_snapshot_delta=1 and the explicit hosted reload signal was honored.';
+  static const String explicitFalseAttemptDescription =
+      'Issue-B changed after the test requested load_snapshot_delta=0, but the visible detail should remain unchanged because the explicit false request must bypass the global reload.';
   static const String contractShapeDescription =
       'RepositorySyncCheck(state, signals, changedPaths)';
 
   static const JqlSearchService _searchService = JqlSearchService();
   static const RepositoryUser _connectedUser = RepositoryUser(
-    login: 'ts773-user',
-    displayName: 'TS-773 User',
+    login: 'ts777-user',
+    displayName: 'TS-777 User',
   );
 
   TrackerSnapshot _currentSnapshot = _initialSnapshot;
-  _PendingTs773Sync? _pendingSync;
+  _PendingTs777Sync? _pendingSync;
   int _revisionSerial = 1;
   int _syncCheckCount = 0;
   int _loadSnapshotCalls = 0;
-  bool? _lastRequestedExplicitFlag;
+  int? _lastRequestedLoadSnapshotDelta;
   Set<WorkspaceSyncSignal> _lastReturnedSignals = const <WorkspaceSyncSignal>{};
   Set<String> _lastReturnedChangedPaths = const <String>{};
 
@@ -48,9 +49,9 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
 
   int get syncCheckCount => _syncCheckCount;
 
-  String get repositoryRevision => 'ts773-revision-$_revisionSerial';
+  String get repositoryRevision => 'ts777-revision-$_revisionSerial';
 
-  bool? get lastRequestedExplicitFlag => _lastRequestedExplicitFlag;
+  int? get lastRequestedLoadSnapshotDelta => _lastRequestedLoadSnapshotDelta;
 
   Set<WorkspaceSyncSignal> get lastReturnedSignals => _lastReturnedSignals;
 
@@ -62,26 +63,32 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
       description: controlWithoutFlagDescription,
       updatedLabel: 'control refresh',
     );
-    _pendingSync = const _PendingTs773Sync(requestedExplicitFlag: false);
+    _pendingSync = const _PendingTs777Sync();
   }
 
-  void scheduleExplicitLoadSnapshotDeltaRefreshAttempt() {
+  void scheduleExplicitFalseLoadSnapshotDeltaAttempt() {
     _currentSnapshot = _snapshotWithUpdatedIssueB(
       snapshot: _currentSnapshot,
-      description: explicitAttemptDescription,
-      updatedLabel: 'explicit attempt',
+      description: explicitFalseAttemptDescription,
+      updatedLabel: 'explicit false request',
     );
-    _pendingSync = const _PendingTs773Sync(requestedExplicitFlag: true);
+    _pendingSync = const _PendingTs777Sync(
+      requestedLoadSnapshotDelta: explicitLoadSnapshotDeltaValue,
+    );
   }
 
-  String describeLastPayload() {
-    return 'requested_explicit_flag=${lastRequestedExplicitFlag == true ? 1 : 0}; '
-        '${describeLastExposedPayload()}';
+  String describeLastRequestedPayload() {
+    final requested = _lastRequestedLoadSnapshotDelta;
+    return 'requested_load_snapshot_delta=${requested == null ? '<absent>' : requested}';
   }
 
   String describeLastExposedPayload() {
     return 'signals=${_formatSignals(lastReturnedSignals)}; '
         'changed_paths=${_formatPaths(lastReturnedChangedPaths)}';
+  }
+
+  String describeLastPayload() {
+    return '${describeLastRequestedPayload()}; ${describeLastExposedPayload()}';
   }
 
   @override
@@ -120,14 +127,14 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
     _syncCheckCount += 1;
     final pendingSync = _pendingSync;
     if (pendingSync == null) {
-      _lastRequestedExplicitFlag = null;
+      _lastRequestedLoadSnapshotDelta = null;
       _lastReturnedSignals = const <WorkspaceSyncSignal>{};
       _lastReturnedChangedPaths = const <String>{};
       return RepositorySyncCheck(
         state: RepositorySyncState(
           providerType: ProviderType.github,
           repositoryRevision: repositoryRevision,
-          sessionRevision: 'ts773-session',
+          sessionRevision: 'ts777-session',
           connectionState: ProviderConnectionState.connected,
         ),
       );
@@ -135,19 +142,16 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
 
     _pendingSync = null;
     _revisionSerial += 1;
-    _lastRequestedExplicitFlag = pendingSync.requestedExplicitFlag;
-    _lastReturnedSignals = pendingSync.requestedExplicitFlag
-        ? const <WorkspaceSyncSignal>{
-            WorkspaceSyncSignal.hostedRepository,
-            WorkspaceSyncSignal.hostedSnapshotReload,
-          }
-        : const <WorkspaceSyncSignal>{WorkspaceSyncSignal.hostedRepository};
+    _lastRequestedLoadSnapshotDelta = pendingSync.requestedLoadSnapshotDelta;
+    _lastReturnedSignals = const <WorkspaceSyncSignal>{
+      WorkspaceSyncSignal.hostedRepository,
+    };
     _lastReturnedChangedPaths = const <String>{};
     return RepositorySyncCheck(
       state: RepositorySyncState(
         providerType: ProviderType.github,
         repositoryRevision: repositoryRevision,
-        sessionRevision: 'ts773-session',
+        sessionRevision: 'ts777-session',
         connectionState: ProviderConnectionState.connected,
       ),
       signals: _lastReturnedSignals,
@@ -156,10 +160,10 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
   }
 }
 
-class _PendingTs773Sync {
-  const _PendingTs773Sync({required this.requestedExplicitFlag});
+class _PendingTs777Sync {
+  const _PendingTs777Sync({this.requestedLoadSnapshotDelta});
 
-  final bool requestedExplicitFlag;
+  final int? requestedLoadSnapshotDelta;
 }
 
 final TrackerSnapshot _initialSnapshot = TrackerSnapshot(
@@ -180,13 +184,13 @@ final TrackerSnapshot _initialSnapshot = TrackerSnapshot(
     ],
     statusDefinitions: <TrackStateConfigEntry>[
       TrackStateConfigEntry(
-        id: Ts773ExplicitLoadSnapshotDeltaRepository.openStatusId,
+        id: Ts777ExplicitFalseLoadSnapshotDeltaRepository.openStatusId,
         name: 'Open',
         localizedLabels: <String, String>{'en': 'Open'},
         category: 'new',
       ),
       TrackStateConfigEntry(
-        id: Ts773ExplicitLoadSnapshotDeltaRepository.closedStatusId,
+        id: Ts777ExplicitFalseLoadSnapshotDeltaRepository.closedStatusId,
         name: 'Closed',
         localizedLabels: <String, String>{'en': 'Closed'},
         category: 'done',
@@ -239,43 +243,43 @@ final TrackerSnapshot _initialSnapshot = TrackerSnapshot(
   ),
   issues: <TrackStateIssue>[
     _issue(
-      key: Ts773ExplicitLoadSnapshotDeltaRepository.issueAKey,
-      summary: Ts773ExplicitLoadSnapshotDeltaRepository.issueASummary,
-      storagePath: Ts773ExplicitLoadSnapshotDeltaRepository.issueAPath,
+      key: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueAKey,
+      summary: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueASummary,
+      storagePath: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueAPath,
       description:
-          'Issue-A stays Open so the active query remains visibly populated before and after the sync checks.',
+          'Issue-A stays Open so the active JQL Search query remains visibly populated before and after the hosted sync comparison.',
       updatedLabel: '1 minute ago',
     ),
     _issue(
-      key: Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey,
-      summary: Ts773ExplicitLoadSnapshotDeltaRepository.issueBSummary,
-      storagePath: Ts773ExplicitLoadSnapshotDeltaRepository.issueBPath,
-      description:
-          Ts773ExplicitLoadSnapshotDeltaRepository.initialIssueBDescription,
+      key: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBKey,
+      summary: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBSummary,
+      storagePath: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBPath,
+      description: Ts777ExplicitFalseLoadSnapshotDeltaRepository
+          .initialIssueBDescription,
       updatedLabel: 'just now',
     ),
   ],
   repositoryIndex: RepositoryIndex(
     entries: <RepositoryIssueIndexEntry>[
       RepositoryIssueIndexEntry(
-        key: Ts773ExplicitLoadSnapshotDeltaRepository.issueAKey,
-        path: Ts773ExplicitLoadSnapshotDeltaRepository.issueAPath,
+        key: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueAKey,
+        path: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueAPath,
         childKeys: <String>[],
-        summary: Ts773ExplicitLoadSnapshotDeltaRepository.issueASummary,
+        summary: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueASummary,
         issueTypeId: 'story',
-        statusId: Ts773ExplicitLoadSnapshotDeltaRepository.openStatusId,
+        statusId: Ts777ExplicitFalseLoadSnapshotDeltaRepository.openStatusId,
         priorityId: 'medium',
         assignee: 'qa-user',
         labels: <String>['search'],
         updatedLabel: '1 minute ago',
       ),
       RepositoryIssueIndexEntry(
-        key: Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey,
-        path: Ts773ExplicitLoadSnapshotDeltaRepository.issueBPath,
+        key: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBKey,
+        path: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBPath,
         childKeys: <String>[],
-        summary: Ts773ExplicitLoadSnapshotDeltaRepository.issueBSummary,
+        summary: Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBSummary,
         issueTypeId: 'story',
-        statusId: Ts773ExplicitLoadSnapshotDeltaRepository.openStatusId,
+        statusId: Ts777ExplicitFalseLoadSnapshotDeltaRepository.openStatusId,
         priorityId: 'medium',
         assignee: 'qa-user',
         labels: <String>['search'],
@@ -294,7 +298,8 @@ TrackerSnapshot _snapshotWithUpdatedIssueB({
     project: snapshot.project,
     issues: <TrackStateIssue>[
       for (final issue in snapshot.issues)
-        if (issue.key == Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey)
+        if (issue.key ==
+            Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBKey)
           issue.copyWith(description: description, updatedLabel: updatedLabel)
         else
           issue,
@@ -302,7 +307,8 @@ TrackerSnapshot _snapshotWithUpdatedIssueB({
     repositoryIndex: RepositoryIndex(
       entries: <RepositoryIssueIndexEntry>[
         for (final entry in snapshot.repositoryIndex.entries)
-          if (entry.key == Ts773ExplicitLoadSnapshotDeltaRepository.issueBKey)
+          if (entry.key ==
+              Ts777ExplicitFalseLoadSnapshotDeltaRepository.issueBKey)
             entry.copyWith(updatedLabel: updatedLabel)
           else
             entry,
@@ -328,7 +334,7 @@ TrackStateIssue _issue({
     issueType: IssueType.story,
     issueTypeId: 'story',
     status: IssueStatus.todo,
-    statusId: Ts773ExplicitLoadSnapshotDeltaRepository.openStatusId,
+    statusId: Ts777ExplicitFalseLoadSnapshotDeltaRepository.openStatusId,
     priority: IssuePriority.medium,
     priorityId: 'medium',
     summary: summary,
@@ -347,8 +353,9 @@ TrackStateIssue _issue({
     progress: 0,
     updatedLabel: updatedLabel,
     acceptanceCriteria: const <String>[
-      'Do not default to a global reload when the explicit flag is absent.',
-      'Expose an explicit global reload request through the production sync contract.',
+      'Interpret load_snapshot_delta=0 as an explicit false request.',
+      'Expose an app-visible distinction between the explicit false request and the unflagged hosted sync path.',
+      'Bypass the global snapshot reload when the explicit false request is processed.',
     ],
     comments: const <IssueComment>[],
     links: const <IssueLink>[],
