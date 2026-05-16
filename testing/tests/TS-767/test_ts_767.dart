@@ -8,7 +8,7 @@ import 'package:trackstate/data/repositories/trackstate_repository.dart';
 
 import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
-import '../TS-734/support/ts734_refresh_matrix_repository.dart';
+import '../../fixtures/repositories/ts734_refresh_matrix_repository.dart';
 
 const String _ticketKey = 'TS-767';
 const String _ticketSummary =
