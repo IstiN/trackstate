@@ -38,6 +38,9 @@ class Ts734RefreshMatrixRepository extends ProviderBackedTrackStateRepository {
 
   Future<void> emitCommentsOnlyRefresh() => _provider.emitCommentsOnlyRefresh();
 
+  Future<void> emitProjectMetaOnlyRefresh() =>
+      _provider.emitProjectMetaOnlyRefresh();
+
   Future<void> emitProjectMetaRefresh() => _provider.emitProjectMetaRefresh();
 
   String get releaseTagPrefix => _provider.releaseTagPrefix;
@@ -175,6 +178,12 @@ class _Ts734MutableProvider
     _queueHostedRefresh(<String>{'TRACK-734C/comments/0001.md'});
   }
 
+  Future<void> emitProjectMetaOnlyRefresh() async {
+    _releaseTagPrefix = Ts734RefreshMatrixRepository.updatedTagPrefix;
+    _rebuildFiles();
+    _queueHostedRefresh(<String>{'project.json'});
+  }
+
   Future<void> emitProjectMetaRefresh() async {
     _releaseTagPrefix = Ts734RefreshMatrixRepository.updatedTagPrefix;
     final issue = _issue(Ts734RefreshMatrixRepository.issueAKey);
@@ -215,10 +224,7 @@ class _Ts734MutableProvider
 
   @override
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async =>
-      const RepositoryUser(
-        login: 'ts734-user',
-        displayName: 'TS-734 User',
-      );
+      const RepositoryUser(login: 'ts734-user', displayName: 'TS-734 User');
 
   @override
   Future<RepositoryBranch> getBranch(String name) async =>
@@ -331,7 +337,9 @@ class _Ts734MutableProvider
     _revision += 1;
     _queuedCheck = RepositorySyncCheck(
       state: _syncState(),
-      signals: const <WorkspaceSyncSignal>{WorkspaceSyncSignal.hostedRepository},
+      signals: const <WorkspaceSyncSignal>{
+        WorkspaceSyncSignal.hostedRepository,
+      },
       changedPaths: changedPaths,
     );
   }
@@ -402,9 +410,7 @@ class _Ts734MutableProvider
   }
 
   String _issueMarkdown(_Ts734IssueRecord issue) {
-    final labels = issue.labels
-        .map((label) => '  - $label')
-        .join('\n');
+    final labels = issue.labels.map((label) => '  - $label').join('\n');
     return '''
 ---
 key: ${issue.key}
@@ -485,7 +491,8 @@ class _Ts734IssueRecord {
   }
 }
 
-String _projectJson(String tagPrefix) => '''
+String _projectJson(String tagPrefix) =>
+    '''
 {
   "key": "TRACK",
   "name": "TrackState.AI",
