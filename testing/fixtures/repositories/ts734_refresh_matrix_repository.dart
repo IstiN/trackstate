@@ -38,6 +38,9 @@ class Ts734RefreshMatrixRepository extends ProviderBackedTrackStateRepository {
 
   Future<void> emitCommentsOnlyRefresh() => _provider.emitCommentsOnlyRefresh();
 
+  Future<void> emitProjectMetaOnlyRefresh() =>
+      _provider.emitProjectMetaOnlyRefresh();
+
   Future<void> emitProjectMetaRefresh() => _provider.emitProjectMetaRefresh();
 
   String get releaseTagPrefix => _provider.releaseTagPrefix;
@@ -173,6 +176,12 @@ class _Ts734MutableProvider
     );
     _rebuildFiles();
     _queueHostedRefresh(<String>{'TRACK-734C/comments/0001.md'});
+  }
+
+  Future<void> emitProjectMetaOnlyRefresh() async {
+    _releaseTagPrefix = Ts734RefreshMatrixRepository.updatedTagPrefix;
+    _rebuildFiles();
+    _queueHostedRefresh(<String>{'project.json'});
   }
 
   Future<void> emitProjectMetaRefresh() async {
