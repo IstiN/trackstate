@@ -10,15 +10,16 @@ import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../fixtures/repositories/ts734_refresh_matrix_repository.dart';
 
-const String _ticketKey = 'TS-767';
+const String _ticketKey = 'TS-772';
 const String _ticketSummary =
-    'Comments-only background sync does not trigger project metadata or issue meta hydration';
-const String _testFilePath = 'testing/tests/TS-767/test_ts_767.dart';
+    'Comments-only background sync does not trigger Issue-C detail hydration';
+const String _testFilePath = 'testing/tests/TS-772/test_ts_772.dart';
 const String _runCommand =
-    'flutter test testing/tests/TS-767/test_ts_767.dart --reporter expanded';
+    'flutter test testing/tests/TS-772/test_ts_772.dart --reporter expanded';
 const List<String> _requestSteps = <String>[
-  "Simulate a background sync event for Issue-C containing only the 'comments' domain.",
-  "Monitor the hydration service for any calls targeting the 'projectMeta' or issue 'meta' scopes.",
+  "Simulate a background sync event for Issue-C that includes only the 'comments' domain.",
+  'Monitor the hydration service calls specifically for Issue-C.',
+  "Verify the specific artifact scopes being hydrated (inspect hydration_delta_count for 'detail').",
 ];
 
 void main() {
@@ -29,7 +30,7 @@ void main() {
   });
 
   testWidgets(
-    'TS-767 comments-only sync stays out of project metadata and issue meta hydration paths',
+    'TS-772 comments-only sync bypasses Issue-C detail hydration',
     (tester) async {
       final result = <String, Object?>{
         'ticket': _ticketKey,
@@ -51,10 +52,10 @@ void main() {
 
         result['repository'] = 'trackstate/trackstate';
         result['issue_key'] = Ts734RefreshMatrixRepository.issueCKey;
-        result['expected_visible_comment'] =
-            Ts734RefreshMatrixRepository.updatedComment;
-        result['initial_visible_comment'] =
-            Ts734RefreshMatrixRepository.initialComment;
+        result['expected_comment_scope'] = IssueHydrationScope.comments.name;
+        result['blocked_scope'] = IssueHydrationScope.detail.name;
+        result['initial_comment'] = Ts734RefreshMatrixRepository.initialComment;
+        result['updated_comment'] = Ts734RefreshMatrixRepository.updatedComment;
 
         await screen.openSection('Board');
         await screen.openIssue(
@@ -65,22 +66,22 @@ void main() {
           Ts734RefreshMatrixRepository.issueCKey,
         );
         final commentsTabOpened = await screen.tapVisibleControl('Comments');
+        final issueDetailVisible = await screen.isIssueDetailVisible(
+          Ts734RefreshMatrixRepository.issueCKey,
+        );
         final initialCommentVisible =
             commentsTabOpened &&
             await screen.isTextVisible(
               Ts734RefreshMatrixRepository.initialComment,
             );
-        final issueDetailVisible = await screen.isIssueDetailVisible(
-          Ts734RefreshMatrixRepository.issueCKey,
-        );
         final preconditionObserved =
             'comments_tab_opened=$commentsTabOpened; '
-            'initial_comment_visible=$initialCommentVisible; '
-            'issue_detail_visible=$issueDetailVisible';
+            'issue_detail_visible=$issueDetailVisible; '
+            'initial_comment_visible=$initialCommentVisible';
         result['precondition'] = preconditionObserved;
         if (!commentsTabOpened ||
-            !initialCommentVisible ||
-            !issueDetailVisible) {
+            !issueDetailVisible ||
+            !initialCommentVisible) {
           throw AssertionError(
             'Precondition failed: the production app did not reach Issue-C with the visible Comments tab loaded before the comments-only sync was simulated.\n'
             'Observed: $preconditionObserved\n'
@@ -90,7 +91,6 @@ void main() {
         }
 
         final baselineHydrationCount = repository.hydrateCalls.length;
-        final baselineLoadSnapshotCount = repository.loadSnapshotCalls;
 
         await repository.emitCommentsOnlyRefresh();
         await _resumeApp(tester);
@@ -98,52 +98,52 @@ void main() {
         final hydrationDelta = repository.hydrateCalls
             .skip(baselineHydrationCount)
             .toList(growable: false);
-        final commentsHydrations = hydrationDelta
+        final issueCHydrationDelta = hydrationDelta
+            .where(
+              (call) => call.issueKey == Ts734RefreshMatrixRepository.issueCKey,
+            )
+            .toList(growable: false);
+        final issueCCommentsHydrations = issueCHydrationDelta
             .where(
               (call) =>
-                  call.issueKey == Ts734RefreshMatrixRepository.issueCKey &&
                   call.scopes.length == 1 &&
                   call.scopes.contains(IssueHydrationScope.comments),
             )
             .toList(growable: false);
-        final unexpectedIssueHydrations = hydrationDelta
+        final issueCDetailHydrations = issueCHydrationDelta
+            .where((call) => call.scopes.contains(IssueHydrationScope.detail))
+            .toList(growable: false);
+        final issueCNonCommentHydrations = issueCHydrationDelta
             .where(
               (call) =>
-                  call.issueKey != Ts734RefreshMatrixRepository.issueCKey ||
                   call.scopes.length != 1 ||
                   !call.scopes.contains(IssueHydrationScope.comments),
             )
             .toList(growable: false);
-        final nonCommentsIssueHydrations = hydrationDelta
-            .where(
-              (call) =>
-                  call.issueKey == Ts734RefreshMatrixRepository.issueCKey &&
-                  (call.scopes.length != 1 ||
-                      !call.scopes.contains(IssueHydrationScope.comments)),
-            )
+        final issueCForceFalseDetailHydrations = issueCDetailHydrations
+            .where((call) => call.force == false)
             .toList(growable: false);
-        final loadSnapshotDelta =
-            repository.loadSnapshotCalls - baselineLoadSnapshotCount;
         final updatedCommentVisible = await screen.isTextVisible(
           Ts734RefreshMatrixRepository.updatedComment,
         );
-        final initialCommentStillVisible = await screen.isTextVisible(
+        final staleCommentVisible = await screen.isTextVisible(
           Ts734RefreshMatrixRepository.initialComment,
-        );
-        final issueDetailStillVisible = await screen.isIssueDetailVisible(
-          Ts734RefreshMatrixRepository.issueCKey,
         );
         final visibleTextsAfterSync = screen.visibleTextsSnapshot();
         final visibleSemanticsAfterSync = screen
             .visibleSemanticsLabelsSnapshot();
 
-        result['load_snapshot_delta'] = loadSnapshotDelta;
-        result['comments_hydration_count'] = commentsHydrations.length;
-        result['unexpected_hydration_count'] = unexpectedIssueHydrations.length;
-        result['issue_meta_hydration_count'] =
-            nonCommentsIssueHydrations.length;
-        result['hydration_delta'] = [
-          for (final call in hydrationDelta)
+        result['hydration_delta_count'] = hydrationDelta.length;
+        result['issue_c_hydration_delta_count'] = issueCHydrationDelta.length;
+        result['issue_c_comments_hydration_count'] =
+            issueCCommentsHydrations.length;
+        result['detail_hydration_delta_count'] = issueCDetailHydrations.length;
+        result['issue_c_non_comments_hydration_count'] =
+            issueCNonCommentHydrations.length;
+        result['issue_c_force_false_detail_hydration_count'] =
+            issueCForceFalseDetailHydrations.length;
+        result['issue_c_hydrations'] = [
+          for (final call in issueCHydrationDelta)
             <String, Object?>{
               'issue_key': call.issueKey,
               'scopes': _scopeNames(call.scopes),
@@ -151,96 +151,104 @@ void main() {
             },
         ];
         result['updated_comment_visible'] = updatedCommentVisible;
-        result['initial_comment_still_visible'] = initialCommentStillVisible;
-        result['issue_detail_still_visible'] = issueDetailStillVisible;
-        result['repository_comment_after_sync'] =
-            repository.currentIssueCComment;
+        result['stale_comment_visible'] = staleCommentVisible;
         result['visible_texts_after_sync'] = visibleTextsAfterSync;
         result['visible_semantics_after_sync'] = visibleSemanticsAfterSync;
 
         final failures = <String>[];
 
         final stepOneObserved =
-            'comments_hydration_count=${commentsHydrations.length}; '
-            'hydrations=${_formatHydrationCalls(hydrationDelta)}; '
-            'updated_comment_visible=$updatedCommentVisible; '
-            'initial_comment_still_visible=$initialCommentStillVisible; '
-            'issue_detail_still_visible=$issueDetailStillVisible';
-        final commentsOnlyRefreshProcessed =
-            commentsHydrations.isNotEmpty &&
-            updatedCommentVisible &&
-            !initialCommentStillVisible &&
-            issueDetailStillVisible;
+            'hydration_delta_count=${hydrationDelta.length}; '
+            'issue_c_hydration_delta_count=${issueCHydrationDelta.length}; '
+            'all_hydrations=${_formatHydrationCalls(hydrationDelta)}';
         _recordStep(
           result,
           step: 1,
-          status: commentsOnlyRefreshProcessed ? 'passed' : 'failed',
+          status: hydrationDelta.isNotEmpty ? 'passed' : 'failed',
           action: _requestSteps[0],
           observed: stepOneObserved,
         );
-        if (!commentsOnlyRefreshProcessed) {
+        if (hydrationDelta.isEmpty) {
           failures.add(
-            'Step 1 failed: the comments-only background sync did not refresh the visible Issue-C Comments tab strictly through the comments domain.\n'
-            'Observed: $stepOneObserved\n'
+            'Step 1 failed: the comments-only background sync did not produce any hydration activity after Issue-C was updated.\n'
+            'Observed: $stepOneObserved',
+          );
+        }
+
+        final stepTwoObserved =
+            'issue_c_comments_hydration_count=${issueCCommentsHydrations.length}; '
+            'issue_c_hydrations=${_formatHydrationCalls(issueCHydrationDelta)}; '
+            'updated_comment_visible=$updatedCommentVisible; '
+            'stale_comment_visible=$staleCommentVisible';
+        _recordStep(
+          result,
+          step: 2,
+          status:
+              issueCCommentsHydrations.isNotEmpty &&
+                  updatedCommentVisible &&
+                  !staleCommentVisible
+              ? 'passed'
+              : 'failed',
+          action: _requestSteps[1],
+          observed: stepTwoObserved,
+        );
+        if (issueCCommentsHydrations.isEmpty ||
+            !updatedCommentVisible ||
+            staleCommentVisible) {
+          failures.add(
+            'Step 2 failed: the comments-only sync did not produce the expected Issue-C comments-only hydration and visible comment update.\n'
+            'Observed: $stepTwoObserved\n'
             'Visible texts: ${_formatSnapshot(visibleTextsAfterSync)}\n'
             'Visible semantics: ${_formatSnapshot(visibleSemanticsAfterSync)}',
           );
         }
 
-        final stepTwoObserved =
-            'issue_meta_hydration_count=${nonCommentsIssueHydrations.length}; '
-            'unexpected_hydration_count=${unexpectedIssueHydrations.length}; '
-            'non_comments_issue_hydrations=${_formatHydrationCalls(nonCommentsIssueHydrations)}; '
-            'all_hydrations=${_formatHydrationCalls(hydrationDelta)}';
-        final noIssueMetaHydration =
-            nonCommentsIssueHydrations.isEmpty &&
-            unexpectedIssueHydrations.isEmpty;
-        _recordStep(
-          result,
-          step: 2,
-          status: noIssueMetaHydration ? 'passed' : 'failed',
-          action: _requestSteps[1],
-          observed: stepTwoObserved,
-        );
-        if (!noIssueMetaHydration) {
-          failures.add(
-            "Step 2 failed: the comments-only sync still dispatched issue-level hydration outside the comments scope instead of staying out of issue 'meta' paths.\n"
-            'Observed: $stepTwoObserved',
-          );
-        }
-
         final stepThreeObserved =
-            'load_snapshot_delta=$loadSnapshotDelta; '
-            'baseline_load_snapshot_count=$baselineLoadSnapshotCount; '
-            'final_load_snapshot_count=${repository.loadSnapshotCalls}';
+            'detail_hydration_delta_count=${issueCDetailHydrations.length}; '
+            'issue_c_non_comments_hydration_count=${issueCNonCommentHydrations.length}; '
+            'issue_c_force_false_detail_hydration_count=${issueCForceFalseDetailHydrations.length}; '
+            'unexpected_issue_c_hydrations=${_formatHydrationCalls(issueCNonCommentHydrations)}';
         _recordStep(
           result,
           step: 3,
-          status: loadSnapshotDelta == 0 ? 'passed' : 'failed',
-          action:
-              "Inspect the project metadata refresh path by checking 'load_snapshot_delta' after processing.",
+          status:
+              issueCDetailHydrations.isEmpty &&
+                  issueCNonCommentHydrations.isEmpty &&
+                  issueCForceFalseDetailHydrations.isEmpty
+              ? 'passed'
+              : 'failed',
+          action: _requestSteps[2],
           observed: stepThreeObserved,
         );
-        if (loadSnapshotDelta != 0) {
+        if (issueCDetailHydrations.isNotEmpty ||
+            issueCNonCommentHydrations.isNotEmpty ||
+            issueCForceFalseDetailHydrations.isNotEmpty) {
           failures.add(
-            "Step 3 failed: the comments-only sync entered the projectMeta/global reload path and incremented 'load_snapshot_delta'.\n"
-            'Observed: $stepThreeObserved',
+            "Step 3 failed: the comments-only sync still dispatched Issue-C detail or other non-comments hydration scopes instead of bypassing the detail refresh.\n"
+            'Observed: $stepThreeObserved\n'
+            'Visible texts: ${_formatSnapshot(visibleTextsAfterSync)}\n'
+            'Visible semantics: ${_formatSnapshot(visibleSemanticsAfterSync)}',
           );
         }
 
         _recordHumanVerification(
           result,
           check:
-              'Kept the visible Issue-C Comments tab open and checked the exact comment text where a user would read it after the background sync completed.',
+              'Viewed the real Issue-C Comments tab after the background sync and confirmed the synced comment text replaced the previous wording in place.',
           observed:
-              'updated_comment_visible=$updatedCommentVisible; initial_comment_still_visible=$initialCommentStillVisible; expected_visible_comment="${Ts734RefreshMatrixRepository.updatedComment}"; visible_texts=${_formatSnapshot(visibleTextsAfterSync)}',
+              'updated_comment_visible=$updatedCommentVisible; '
+              'stale_comment_visible=$staleCommentVisible; '
+              'current_issue_c_comment=${repository.currentIssueCComment}; '
+              'visible_texts=${_formatSnapshot(visibleTextsAfterSync)}',
         );
         _recordHumanVerification(
           result,
           check:
-              'Confirmed the selected issue detail surface stayed on screen while only the Comments tab content changed.',
+              'Confirmed the selected issue detail surface stayed on screen while no Issue-C detail hydration call was dispatched.',
           observed:
-              'issue_detail_still_visible=$issueDetailStillVisible; visible_semantics=${_formatSnapshot(visibleSemanticsAfterSync)}',
+              'issue_detail_visible=$issueDetailVisible; '
+              'detail_hydration_delta_count=${issueCDetailHydrations.length}; '
+              'visible_semantics=${_formatSnapshot(visibleSemanticsAfterSync)}',
         );
 
         if (failures.isNotEmpty) {
@@ -344,17 +352,20 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '*Test Case:* $_ticketKey - $_ticketSummary',
     '',
     'h4. What was tested',
-    '* Reused the mutable TS-734 hosted repository fixture so the production TrackState workspace-sync path processed a comments-only Issue-C refresh.',
-    '* Opened Board, selected Issue-C, and kept the visible Comments tab open while publishing the comments-only background sync event.',
-    '* Verified the refresh dispatcher only emitted Issue-C comments hydration and that {noformat}load_snapshot_delta=0{noformat} after processing.',
-    '* Checked the exact comment text and selected issue detail surface the user would see after the sync.',
+    '* Reused the production hosted TS-734 repository fixture so the real workspace sync listener and issue hydration path processed the event.',
+    '* Opened Board, selected Issue-C, and kept the visible Comments tab open before publishing a comments-only background sync.',
+    '* Monitored Issue-C hydration deltas to confirm a comments refresh happened and that no Issue-C detail or other non-comments hydration scopes were dispatched.',
+    '* Verified the visible comment text changed in place exactly where a user reads it.',
     '',
     'h4. Result',
     passed
-        ? "* Matched the expected result: the comments-only sync refreshed the visible Issue-C comment, did not dispatch issue-level non-comments hydration, and did not enter the projectMeta snapshot-reload path."
+        ? '* Matched the expected result: the comments-only sync refreshed Issue-C comments without dispatching Issue-C detail hydration.'
         : '* Did not match the expected result. See the failed step details and exact error below.',
     '* Environment: {noformat}flutter test / ${Platform.operatingSystem}{noformat}',
     '* Repository: {noformat}${result['repository'] ?? '<missing>'}{noformat}',
+    '',
+    'h4. Preconditions',
+    '* {noformat}${result['precondition'] ?? '<missing>'}{noformat}',
     '',
     'h4. Step results',
     ..._jiraStepLines(result),
@@ -397,15 +408,18 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '**Test Case:** $_ticketKey - $_ticketSummary',
     '',
     '## What was automated',
-    '- Reused the mutable TS-734 hosted repository fixture so the production TrackState workspace-sync path processed a comments-only Issue-C refresh.',
-    '- Opened Board, selected Issue-C, and kept the visible Comments tab open while publishing the comments-only background sync event.',
-    '- Verified the refresh dispatcher only emitted Issue-C comments hydration and that `load_snapshot_delta` stayed `0`.',
-    '- Checked the exact comment text and selected issue detail surface a user would see after the sync.',
+    '- Reused the production TS-734 hosted repository fixture so the real workspace sync listener and issue hydration path processed the event.',
+    '- Opened Board, selected Issue-C, and kept the visible Comments tab open before simulating a comments-only background sync.',
+    '- Monitored Issue-C hydration deltas to confirm a comments refresh happened and that no Issue-C detail or other non-comments scopes were dispatched.',
+    '- Verified the visible comment text changed in place where a user would read it.',
     '',
     '## Result',
     passed
-        ? '- Matched the expected result: the comments-only sync refreshed the visible Issue-C comment, did not dispatch issue-level non-comments hydration, and did not enter the projectMeta snapshot-reload path.'
+        ? '- Matched the expected result: the comments-only sync refreshed Issue-C comments without dispatching Issue-C detail hydration.'
         : '- Did not match the expected result. See the failed step details and exact error below.',
+    '',
+    '## Preconditions',
+    '- `${result['precondition'] ?? '<missing>'}`',
     '',
     '## Step results',
     ..._markdownStepLines(result),
@@ -445,14 +459,17 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
     ..writeln()
     ..writeln(
       passed
-          ? 'Passed: the comments-only sync updated the visible Issue-C comment, dispatched no issue-level non-comments hydration, and kept `load_snapshot_delta` unchanged.'
-          : 'Failed: the comments-only sync leaked into issue-level non-comments hydration and/or the project metadata snapshot-reload path.',
+          ? 'Passed: the comments-only sync refreshed Issue-C comments without dispatching Issue-C detail hydration.'
+          : 'Failed: the comments-only sync still triggered Issue-C detail or other unexpected hydration behavior.',
     )
     ..writeln()
     ..writeln('Environment: `flutter test / ${Platform.operatingSystem}`')
     ..writeln('Repository: `${result['repository'] ?? '<missing>'}`')
     ..writeln(
-      'Observed load_snapshot_delta: `${result['load_snapshot_delta'] ?? '<missing>'}`',
+      'Observed detail_hydration_delta_count: `${result['detail_hydration_delta_count'] ?? '<missing>'}`',
+    )
+    ..writeln(
+      'Observed issue_c_non_comments_hydration_count: `${result['issue_c_non_comments_hydration_count'] ?? '<missing>'}`',
     );
 
   if (!passed) {
@@ -474,17 +491,20 @@ String _bugDescription(Map<String, Object?> result) {
     '# Bug Report - $_ticketKey',
     '',
     '## Summary',
-    'A comments-only hosted background sync for Issue-C does not stay isolated to the comments domain. The production sync flow still dispatches non-comments issue hydration and/or enters the project metadata snapshot-reload path.',
+    'A comments-only hosted background sync for Issue-C still dispatches Issue-C detail and/or other non-comments hydration scopes instead of staying limited to the comments surface.',
+    '',
+    '## Preconditions',
+    '- ${result['precondition'] ?? '<missing>'}',
     '',
     '## Steps to Reproduce',
     ..._bugStepLines(result),
     '',
     '## Actual vs Expected',
-    "- **Expected:** a comments-only Issue-C sync refresh updates the visible Comments tab, dispatches only Issue-C comments hydration, does not dispatch issue-level non-comments hydration, and keeps `load_snapshot_delta` at `0`.",
+    "- **Expected:** a background sync limited to the `comments` domain triggers an Issue-C comments hydration, dispatches no Issue-C `detail` or other non-comments scopes, and leaves the visible Comments tab showing only the synced comment text.",
     '- **Actual:** ${_actualResultLine(result)}',
     '',
     '## Missing/Broken Production Capability',
-    "- The production workspace-sync handler does not keep comments-only refreshes out of project metadata and issue 'meta' paths. A comments-only event should not trigger extra issue hydration scopes or a hosted snapshot reload.",
+    '- The production-visible hosted sync path does not keep Issue-C refresh handling scoped strictly to comments-only hydration during this scenario.',
     '',
     '## Exact Error Message or Assertion Failure',
     '```text',
@@ -499,16 +519,13 @@ String _bugDescription(Map<String, Object?> result) {
     '- OS: ${Platform.operatingSystem}',
     '- Run command: `$_runCommand`',
     '- Repository: `${result['repository'] ?? '<missing>'}`',
-    '- Issue key: `${result['issue_key'] ?? '<missing>'}`',
     '',
     '## Relevant Logs',
     '```text',
     'Precondition: ${result['precondition'] ?? '<missing>'}',
-    'load_snapshot_delta: ${result['load_snapshot_delta'] ?? '<missing>'}',
-    'comments_hydration_count: ${result['comments_hydration_count'] ?? '<missing>'}',
-    'issue_meta_hydration_count: ${result['issue_meta_hydration_count'] ?? '<missing>'}',
-    'unexpected_hydration_count: ${result['unexpected_hydration_count'] ?? '<missing>'}',
-    'repository_comment_after_sync: ${result['repository_comment_after_sync'] ?? '<missing>'}',
+    'detail_hydration_delta_count: ${result['detail_hydration_delta_count'] ?? '<missing>'}',
+    'issue_c_non_comments_hydration_count: ${result['issue_c_non_comments_hydration_count'] ?? '<missing>'}',
+    'issue_c_force_false_detail_hydration_count: ${result['issue_c_force_false_detail_hydration_count'] ?? '<missing>'}',
     'Visible texts after sync: ${_formatSnapshot((result['visible_texts_after_sync'] as List<Object?>?)?.map((value) => value.toString()).toList(growable: false) ?? const <String>[])}',
     'Visible semantics after sync: ${_formatSnapshot((result['visible_semantics_after_sync'] as List<Object?>?)?.map((value) => value.toString()).toList(growable: false) ?? const <String>[])}',
     'Step details:',
