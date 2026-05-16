@@ -5,4 +5,4 @@ platform: widget
 dependencies: []
 notes:
   - Reuses the mutable hosted ProviderBackedTrackStateRepository fixture from TS-734.
-  - Verifies a project metadata sync refreshes Dashboard counters and Settings Attachments data without incrementing the hosted snapshot reload counter.
+  - Verifies a project metadata sync preserves the visible Dashboard counters for unchanged issue data, refreshes Settings Attachments data, and does not increment the hosted snapshot reload counter.

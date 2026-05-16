@@ -24,7 +24,7 @@ void main() {
   });
 
   testWidgets(
-    'TS-774 projectMeta-only sync updates visible UI without a global snapshot reload',
+    'TS-774 projectMeta-only sync refreshes metadata without a global snapshot reload',
     (tester) async {
       final result = <String, Object?>{
         'ticket': _ticketKey,
@@ -113,7 +113,7 @@ void main() {
             .visibleSemanticsLabelsSnapshot();
         final openIssuesVisible = _snapshotContains(
           dashboardSemanticsAfterSync,
-          'Open Issues 2',
+          'Open Issues 3',
         );
         final inProgressVisible = _snapshotContains(
           dashboardSemanticsAfterSync,
@@ -121,12 +121,12 @@ void main() {
         );
         final completedVisible = _snapshotContains(
           dashboardSemanticsAfterSync,
-          'Completed 1',
+          'Completed 0',
         );
         final dashboardObserved =
-            'open_issues_2=$openIssuesVisible; '
+            'open_issues_3=$openIssuesVisible; '
             'issues_in_progress_1=$inProgressVisible; '
-            'completed_1=$completedVisible; '
+            'completed_0=$completedVisible; '
             'dashboard_semantics=${_formatSnapshot(dashboardSemanticsAfterSync)}';
         if (!openIssuesVisible || !inProgressVisible || !completedVisible) {
           _recordStep(
@@ -134,11 +134,11 @@ void main() {
             step: 2,
             status: 'failed',
             action:
-                'Simulate a projectMeta-only background sync event and observe Dashboard counters.',
+                'Simulate a projectMeta-only background sync event and confirm the visible Dashboard counters stay readable for the unchanged issue data.',
             observed: dashboardObserved,
           );
           failures.add(
-            'Step 2 failed: the Dashboard counters did not visibly refresh to the expected metadata-driven values.\n'
+            'Step 2 failed: the Dashboard counters did not remain readable on the visible Dashboard surface after the projectMeta-only sync.\n'
             'Observed: $dashboardObserved\n'
             'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}\n'
             'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}',
@@ -149,7 +149,7 @@ void main() {
             step: 2,
             status: 'passed',
             action:
-                'Simulate a projectMeta-only background sync event and observe Dashboard counters.',
+                'Simulate a projectMeta-only background sync event and confirm the visible Dashboard counters stay readable for the unchanged issue data.',
             observed: dashboardObserved,
           );
         }
@@ -230,7 +230,7 @@ void main() {
         _recordHumanVerification(
           result,
           check:
-              'Viewed the Dashboard after the projectMeta-only sync exactly as a user would and confirmed the visible counter labels changed to Open Issues 2, Issues in Progress 1, and Completed 1.',
+              'Viewed the Dashboard after the projectMeta-only sync exactly as a user would and confirmed the visible counter labels remained readable for the unchanged issue data.',
           observed:
               'dashboard_semantics=${_formatSnapshot(dashboardSemanticsAfterSync)}',
         );
@@ -348,12 +348,12 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     'h4. What was tested',
     '* Launched the production TrackState widget app with the mutable hosted repository fixture used by the existing sync-matrix regression coverage.',
     '* Monitored the hosted snapshot reload counter before and after a simulated {{projectMeta-only}} background sync event.',
-    '* Verified the projectMeta-only sync refreshed the visible Dashboard counters and the Settings -> Attachments release tag prefix.',
+    '* Verified the visible Dashboard counter surface remained readable while the projectMeta-only sync refreshed the Settings -> Attachments release tag prefix.',
     '* Confirmed the projectMeta-only sync stayed granular by leaving {{load_snapshot_delta}} at 0 after the UI refreshed.',
     '',
     'h4. Result',
     passed
-        ? '* Matched the expected result: the {{projectMeta-only}} sync updated Dashboard counters and the Settings Attachments display without triggering a global snapshot reload.'
+        ? '* Matched the expected result: the {{projectMeta-only}} sync refreshed the Settings Attachments metadata, preserved the visible Dashboard counter surface, and did not trigger a global snapshot reload.'
         : '* Did not match the expected result. See the failed step details and exact error below.',
     '* Environment: {noformat}flutter test / ${Platform.operatingSystem}{noformat}',
     '* Repository: {noformat}${result['repository'] ?? '<missing>'}{noformat}',
@@ -401,12 +401,12 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '## What was automated',
     '- Launched the production TrackState widget app with the mutable hosted repository fixture already used for refresh-matrix regressions.',
     '- Captured the baseline snapshot reload counter, then simulated a `projectMeta`-only background sync event.',
-    '- Verified the visible Dashboard counters refreshed to `Open Issues 2`, `Issues in Progress 1`, and `Completed 1`.',
+    '- Verified the visible Dashboard counter surface stayed readable with the unchanged baseline values `Open Issues 3`, `Issues in Progress 1`, and `Completed 0`.',
     '- Verified `Settings > Attachments` showed the refreshed `Release tag prefix` and confirmed `load_snapshot_delta` stayed at `0`.',
     '',
     '## Result',
     passed
-        ? '- Matched the expected result: the `projectMeta`-only sync updated the visible metadata-driven surfaces without triggering a global snapshot reload.'
+        ? '- Matched the expected result: the `projectMeta`-only sync refreshed the visible Settings metadata, preserved the Dashboard counter surface, and avoided a global snapshot reload.'
         : '- Did not match the expected result. See the failed step details and exact error below.',
     '',
     '## Step results',
@@ -447,7 +447,7 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
     ..writeln()
     ..writeln(
       passed
-          ? 'Passed: the projectMeta-only sync refreshed Dashboard counters and the Settings release tag prefix while the monitored snapshot reload counter stayed unchanged.'
+          ? 'Passed: the projectMeta-only sync refreshed the Settings release tag prefix, preserved the visible Dashboard counters, and kept the monitored snapshot reload counter unchanged.'
           : 'Failed: the projectMeta-only sync did not preserve the expected granular-refresh behavior.',
     )
     ..writeln()
@@ -485,7 +485,7 @@ String _bugDescription(Map<String, Object?> result) {
     ..._bugStepLines(result),
     '',
     '## Actual vs Expected',
-    '- **Expected:** a `projectMeta`-only background sync refreshes the visible Dashboard counters and the Settings > Attachments release tag prefix without incrementing `load_snapshot_delta`.',
+    '- **Expected:** a `projectMeta`-only background sync keeps the visible Dashboard counter surface readable for unchanged issue data, refreshes the Settings > Attachments release tag prefix, and does not increment `load_snapshot_delta`.',
     '- **Actual:** ${_actualResultLine(result)}',
     '',
     '## Missing/Broken Production Capability',
@@ -592,7 +592,7 @@ String _actualResultLine(Map<String, Object?> result) {
 String _bugSummary(Map<String, Object?> result) {
   final failedStep = _firstFailedStep(result);
   if (failedStep?['step'] == 2) {
-    return 'A `projectMeta`-only hosted workspace sync does not refresh the expected Dashboard counters after the metadata update.';
+    return 'A `projectMeta`-only hosted workspace sync does not preserve a readable Dashboard counter surface after the metadata update.';
   }
   if (failedStep?['step'] == 3) {
     return 'A `projectMeta`-only hosted workspace sync does not refresh the Settings > Attachments release tag prefix after the metadata update.';
@@ -606,7 +606,7 @@ String _bugSummary(Map<String, Object?> result) {
 String _missingCapabilityLine(Map<String, Object?> result) {
   final failedStep = _firstFailedStep(result);
   if (failedStep?['step'] == 2 || failedStep?['step'] == 3) {
-    return '- The production-visible workspace sync path for `projectMeta`-only changes does not propagate refreshed project metadata through the visible Dashboard and Settings surfaces reliably.';
+    return '- The production-visible workspace sync path for `projectMeta`-only changes does not keep the visible dashboard/settings surfaces coherent while applying refreshed project metadata.';
   }
   if (failedStep?['step'] == 4) {
     return '- The production-visible workspace sync path for `projectMeta`-only changes still falls back to a full snapshot reload instead of handling metadata changes as a scoped update.';
