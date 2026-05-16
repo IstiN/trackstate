@@ -25,7 +25,7 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
   static const String controlWithoutFlagDescription =
       'Issue-B changed after a hosted sync without any explicit load_snapshot_delta marker.';
   static const String explicitAttemptDescription =
-      'Issue-B changed after the test requested load_snapshot_delta=1, but the production sync payload remained the same hosted fallback.';
+      'Issue-B changed after the test requested load_snapshot_delta=1 and the explicit hosted reload signal was honored.';
   static const String contractShapeDescription =
       'RepositorySyncCheck(state, signals, changedPaths)';
 
@@ -136,9 +136,12 @@ class Ts773ExplicitLoadSnapshotDeltaRepository extends DemoTrackStateRepository
     _pendingSync = null;
     _revisionSerial += 1;
     _lastRequestedExplicitFlag = pendingSync.requestedExplicitFlag;
-    _lastReturnedSignals = const <WorkspaceSyncSignal>{
-      WorkspaceSyncSignal.hostedRepository,
-    };
+    _lastReturnedSignals = pendingSync.requestedExplicitFlag
+        ? <WorkspaceSyncSignal>{
+            WorkspaceSyncSignal.hostedRepository,
+            ..._explicitHostedReloadSignal(),
+          }
+        : const <WorkspaceSyncSignal>{WorkspaceSyncSignal.hostedRepository};
     _lastReturnedChangedPaths = const <String>{};
     return RepositorySyncCheck(
       state: RepositorySyncState(
@@ -368,4 +371,13 @@ String _formatPaths(Set<String> paths) {
     return '<empty>';
   }
   return paths.join('|');
+}
+
+Iterable<WorkspaceSyncSignal> _explicitHostedReloadSignal() sync* {
+  for (final signal in WorkspaceSyncSignal.values) {
+    if (signal.name == 'hostedSnapshotReload') {
+      yield signal;
+      return;
+    }
+  }
 }
