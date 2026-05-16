@@ -1,0 +1,9 @@
+test_id: JD-111
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Loads the project's `web/index.html` page through a browser, matching the ticket steps.
+  - Verifies the user-visible extended project information described in the ticket history: Browser Extensions, Key Features, AI Automation Workflow, and Tech Stack.
+  - Uses a page object and shared Playwright runtime from `testing/`.
