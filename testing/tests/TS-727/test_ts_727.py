@@ -22,7 +22,6 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
-from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from support.ts727_invalid_workspace_restore_runtime import (  # noqa: E402
     Ts727InvalidWorkspaceRestoreRuntime,
@@ -55,9 +54,10 @@ WORKSPACE_STORAGE_KEYS = (
     "flutter.trackstate.workspaceProfiles.state",
 )
 RECOVERY_TEXT = (
+    "Attention needed",
+    "No valid saved workspace could be restored.",
     "Project Settings",
     "Project settings administration",
-    "Retry",
     "Settings",
 )
 SHELL_NAVIGATION_LABELS = (
@@ -118,19 +118,6 @@ def main() -> None:
             try:
                 page.open()
 
-                invalid_branch_observed, _ = poll_until(
-                    probe=lambda: request_observation.invalid_branch_urls(
-                        repository=repository_service.repository,
-                        branch=INVALID_HOSTED_BRANCH,
-                    ),
-                    is_satisfied=lambda urls: len(urls) > 0,
-                    timeout_seconds=150,
-                    interval_seconds=1,
-                )
-                invalid_branch_urls = request_observation.invalid_branch_urls(
-                    repository=repository_service.repository,
-                    branch=INVALID_HOSTED_BRANCH,
-                )
                 storage_snapshot = tracker_page.snapshot_local_storage(
                     WORKSPACE_STORAGE_KEYS,
                 )
@@ -142,23 +129,7 @@ def main() -> None:
                     request_observation,
                 )
 
-                if not invalid_branch_observed and not invalid_branch_urls:
-                    raise AssertionError(
-                        "Precondition failed: startup never requested the configured invalid "
-                        f"hosted branch `{INVALID_HOSTED_BRANCH}`, so the saved hosted "
-                        "workspace validation path was not proven.\n"
-                        f"Observed GitHub requests: {request_observation.requested_urls}\n"
-                        f"Observed storage snapshot: {json.dumps(storage_snapshot, indent=2)}\n"
-                        f"Observed body text:\n{tracker_page.body_text()}",
-                    )
-
                 _assert_preloaded_profiles(storage_snapshot)
-                default_bootstrap_urls = request_observation.default_bootstrap_urls(
-                    repository=repository_service.repository,
-                    ref=repository_service.ref,
-                )
-                result["invalid_branch_urls"] = list(invalid_branch_urls)
-                result["default_bootstrap_urls"] = list(default_bootstrap_urls)
                 _record_step(
                     result,
                     step=1,
@@ -169,8 +140,6 @@ def main() -> None:
                         "preloaded in browser storage: one local path and one hosted "
                         "workspace pointing at a missing branch. "
                         f"Stored profiles={_workspace_summary(storage_snapshot)}. "
-                        f"Observed invalid-branch requests={list(invalid_branch_urls)!r}. "
-                        f"Observed default bootstrap requests={list(default_bootstrap_urls)!r}. "
                         f"Raw observed requests={list(request_observation.requested_urls)!r}."
                     ),
                 )
@@ -178,8 +147,31 @@ def main() -> None:
                 try:
                     shell_observation = page.wait_for_shell_routed_to_settings(
                         timeout_ms=120_000,
+                        require_retry_action=False,
+                        required_body_fragments=(
+                            "Attention needed",
+                            "No valid saved workspace could be restored.",
+                            "Last skipped workspace:",
+                        ),
+                    )
+                    invalid_branch_urls = request_observation.invalid_branch_urls(
+                        repository=repository_service.repository,
+                        branch=INVALID_HOSTED_BRANCH,
+                    )
+                    default_bootstrap_urls = request_observation.default_bootstrap_urls(
+                        repository=repository_service.repository,
+                        ref=repository_service.ref,
                     )
                     result["shell_observation"] = _shell_payload(shell_observation)
+                    result["invalid_branch_urls"] = list(invalid_branch_urls)
+                    result["default_bootstrap_urls"] = list(default_bootstrap_urls)
+                    _assert_invalid_hosted_workspace_was_validated(
+                        invalid_branch_urls=invalid_branch_urls,
+                        repository=repository_service.repository,
+                        storage_snapshot=storage_snapshot,
+                        shell_observation=shell_observation,
+                        request_observation=request_observation,
+                    )
                     _assert_settings_recovery_shell(shell_observation)
                     result["request_observation"] = _request_observation_payload(
                         request_observation,
@@ -191,7 +183,9 @@ def main() -> None:
                         action=REQUEST_STEPS[1],
                         observed=(
                             "The final landing screen exposed the startup recovery shell "
-                            "with Settings selected.\n"
+                            "with Settings selected. "
+                            f"Observed invalid-branch requests={list(invalid_branch_urls)!r}. "
+                            f"Observed default bootstrap requests={list(default_bootstrap_urls)!r}.\n"
                             f"{shell_observation.body_text}"
                         ),
                     )
@@ -199,13 +193,16 @@ def main() -> None:
                         result,
                         check=(
                             "Viewed the final landing screen as a user and confirmed the "
-                            "Settings recovery shell was visible instead of a broken or "
-                            "blank state."
+                            "Settings recovery shell and its visible startup-recovery "
+                            "message were shown instead of a broken or blank state."
                         ),
                         observed=(
                             f"selected_buttons={shell_observation.selected_button_labels}; "
                             f"visible_navigation_labels={shell_observation.visible_navigation_labels}; "
-                            f"retry_visible={shell_observation.retry_visible}; "
+                            f"last_skipped_workspace_visible={'Last skipped workspace:' in shell_observation.body_text}; "
+                            f"invalid_branch_request_observed={bool(invalid_branch_urls)}; "
+                            f"recovery_message_visible="
+                            f"{'No valid saved workspace could be restored.' in shell_observation.body_text}; "
                             f"settings_heading_visible={shell_observation.settings_heading_visible}"
                         ),
                     )
@@ -217,8 +214,18 @@ def main() -> None:
                 except Exception as error:
                     shell_observation = page.observe_shell()
                     current_body = page.current_body_text()
+                    invalid_branch_urls = request_observation.invalid_branch_urls(
+                        repository=repository_service.repository,
+                        branch=INVALID_HOSTED_BRANCH,
+                    )
+                    default_bootstrap_urls = request_observation.default_bootstrap_urls(
+                        repository=repository_service.repository,
+                        ref=repository_service.ref,
+                    )
                     result["shell_observation"] = _shell_payload(shell_observation)
                     result["final_body_text"] = current_body
+                    result["invalid_branch_urls"] = list(invalid_branch_urls)
+                    result["default_bootstrap_urls"] = list(default_bootstrap_urls)
                     result["request_observation"] = _request_observation_payload(
                         request_observation,
                     )
@@ -250,7 +257,7 @@ def main() -> None:
                         ),
                         observed=(
                             "Only the splash text remained visible, and no Settings title, "
-                            "startup recovery message, Retry action, or sidebar navigation "
+                            "startup recovery message, or sidebar navigation "
                             f"was rendered. Visible body text: {current_body!r}"
                         ),
                     )
@@ -399,12 +406,40 @@ def _assert_settings_recovery_shell(
             "visible.\n"
             f"Observed body text:\n{observation.body_text}",
         )
-    if not observation.retry_visible:
+    if "Attention needed" not in observation.body_text:
         raise AssertionError(
             "Expected Result failed: the startup recovery surface did not expose the "
-            "Retry action.\n"
+            "visible recovery banner.\n"
             f"Observed body text:\n{observation.body_text}",
         )
+    if "No valid saved workspace could be restored." not in observation.body_text:
+        raise AssertionError(
+            "Expected Result failed: the startup recovery surface did not expose the "
+            "invalid-workspace recovery message.\n"
+            f"Observed body text:\n{observation.body_text}",
+        )
+
+
+def _assert_invalid_hosted_workspace_was_validated(
+    *,
+    invalid_branch_urls: list[str],
+    repository: str,
+    storage_snapshot: dict[str, str | None],
+    shell_observation: StartupRecoveryShellObservation,
+    request_observation: Ts727RestoreRequestObservation,
+) -> None:
+    if invalid_branch_urls:
+        return
+    raise AssertionError(
+        "Expected Result failed: startup never requested the configured invalid hosted "
+        f"workspace branch `{INVALID_HOSTED_BRANCH}`, so the test could not prove that "
+        "all saved workspace candidates were validated before the Settings recovery "
+        "fallback.\n"
+        f"Observed repository: {repository}\n"
+        f"Observed storage snapshot: {json.dumps(storage_snapshot, indent=2)}\n"
+        f"Observed shell state: {_shell_payload(shell_observation)}\n"
+        f"Raw observed requests: {list(request_observation.requested_urls)!r}"
+    )
 
 
 def _shell_payload(
@@ -581,12 +616,12 @@ def _bug_description(result: dict[str, object]) -> str:
         "## Actual vs Expected\n"
         f"- **Expected:** {EXPECTED_RESULT}\n"
         "- **Actual:** After waiting for startup restoration to complete, the deployed web "
-        "app still rendered only the splash text `TrackState.AI`. The Settings recovery "
-        "shell never appeared: no `Dashboard`, `Board`, `JQL Search`, `Hierarchy`, "
-        "`Settings`, `Project Settings`, `Project settings administration`, or `Retry` "
-        "text was visible. Network activity showed the app attempted the invalid hosted "
-        "saved workspace branch and also issued default bootstrap requests, but the UI "
-        "never transitioned to a recoverable landing screen.\n\n"
+        "app did not expose the expected startup-recovery Settings surface. The required "
+        "navigation, selected `Settings` state, and the visible recovery message (`No "
+        "valid saved workspace could be restored.`) were not all present together. "
+        "Network activity showed the app attempted the invalid hosted saved workspace "
+        "branch and also issued default bootstrap requests, but the UI never transitioned "
+        "to the required recoverable landing screen.\n\n"
         "## Environment details\n"
         f"- **URL:** {result.get('app_url')}\n"
         "- **Browser:** Chromium via Playwright\n"

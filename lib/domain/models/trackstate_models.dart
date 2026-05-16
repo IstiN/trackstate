@@ -30,8 +30,11 @@ enum WorkspaceSyncSignal {
   localHead,
   localWorktree,
   hostedRepository,
+  hostedSnapshotReload,
   hostedSession,
 }
+
+enum HostedSnapshotReloadDirective { enabled, disabled }
 
 enum WorkspaceSyncTrigger { automatic, appResume, workspaceSwitch, manual }
 

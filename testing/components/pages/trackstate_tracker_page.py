@@ -66,7 +66,31 @@ class TrackStateTrackerPage:
         self._live_page = TrackStateLiveAppPage(session, app_url)
 
     def open_entrypoint(self) -> None:
-        self._live_page.open()
+        self.open_url(self.app_url)
+
+    def open_route(self, route: str) -> str:
+        route_url = self.build_route_url(route)
+        self.open_url(route_url)
+        return route_url
+
+    def open_url(self, url: str) -> None:
+        self.session.goto(
+            url,
+            wait_until="domcontentloaded",
+            timeout_ms=120_000,
+        )
+        self.session.activate_accessibility()
+
+    def build_route_url(self, route: str) -> str:
+        base_url = self.app_url.split("#", 1)[0]
+        if not base_url.endswith("/"):
+            base_url = f"{base_url}/"
+        if route.startswith("#"):
+            normalized_route = route
+        else:
+            normalized_route = route if route.startswith("/") else f"/{route}"
+            normalized_route = f"#{normalized_route}"
+        return f"{base_url}{normalized_route}"
 
     def open(self) -> RuntimeObservation:
         self.open_entrypoint()

@@ -457,6 +457,14 @@
       }
     }
   },
+  "selectedIssueUnavailable": "{issueKey} is no longer available in this workspace.",
+  "@selectedIssueUnavailable": {
+    "placeholders": {
+      "issueKey": {
+        "type": "String"
+      }
+    }
+  },
   "localGitTokensNotNeeded": "This runtime uses local Git commits. GitHub tokens are not needed.",
   "tokenEmpty": "Token is empty.",
   "githubConnectedDragCards": "Connected as {login} to {repository}. Drag cards to commit status changes.",

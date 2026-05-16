@@ -87,8 +87,8 @@ class AppleReleaseToolchainValidationProbeService:
         version_error_line = self._first_matching_line(
             run_log,
             (
-                f"Flutter {self._config.required_flutter_version} is required;",
-                f"::error::Flutter {self._config.required_flutter_version} is required;",
+                f"Flutter {self._config.required_flutter_version} or newer is required;",
+                f"::error::Flutter {self._config.required_flutter_version} or newer is required;",
             ),
         )
         setup_failure_line = None

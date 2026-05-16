@@ -891,6 +891,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String selectedIssueUnavailable(String issueKey) {
+    return '$issueKey is no longer available in this workspace.';
+  }
+
+  @override
   String get localGitTokensNotNeeded =>
       'This runtime uses local Git commits. GitHub tokens are not needed.';
 

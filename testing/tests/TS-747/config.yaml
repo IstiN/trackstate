@@ -1,0 +1,9 @@
+test_id: TS-747
+type: ui
+framework: flutter_test
+platform: linux
+dependencies: []
+notes:
+  - Pumps the production TrackStateApp with an in-memory hosted repository fixture.
+  - Seeds two Open issues with identical user-facing fields but different stable keys/storage paths.
+  - Selects TRACK-747-A, triggers the production app-resume workspace sync refresh path, and verifies the visible selected state stays on TRACK-747-A even after the refreshed snapshot recreates and reorders the identical issues.
