@@ -290,6 +290,68 @@ void main() {
       viewModel.dispose();
     },
   );
+
+  test(
+    'view model refreshes project metadata for projectMeta-only hosted syncs without reloading the full snapshot',
+    () async {
+      final loadedBaseline = await const DemoTrackStateRepository()
+          .loadSnapshot();
+      final baseline = TrackerSnapshot(
+        project: _copyProject(
+          loadedBaseline.project,
+          attachmentStorage: const ProjectAttachmentStorageSettings(
+            mode: AttachmentStorageMode.githubReleases,
+            githubReleases: GitHubReleasesAttachmentStorageSettings(
+              tagPrefix: 'ts734-release-',
+            ),
+          ),
+        ),
+        issues: loadedBaseline.issues,
+        repositoryIndex: loadedBaseline.repositoryIndex,
+        loadWarnings: loadedBaseline.loadWarnings,
+        readiness: loadedBaseline.readiness,
+        startupRecovery: loadedBaseline.startupRecovery,
+      );
+      final repository = _ProjectMetaRefreshRepository(snapshot: baseline);
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      repository.resetTracking();
+      repository.queueProjectMetaRefresh(
+        project: _copyProject(
+          baseline.project,
+          attachmentStorage: const ProjectAttachmentStorageSettings(
+            mode: AttachmentStorageMode.githubReleases,
+            githubReleases: GitHubReleasesAttachmentStorageSettings(
+              tagPrefix: 'ts734-sync-',
+            ),
+          ),
+        ),
+      );
+
+      await viewModel.handleAppResumed();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(repository.loadSnapshotCalls, 0);
+      expect(repository.loadProjectMetadataCalls, 1);
+      expect(
+        viewModel.project?.attachmentStorage.githubReleases?.tagPrefix,
+        'ts734-sync-',
+      );
+      expect(
+        viewModel.openIssueCount,
+        baseline.issues
+            .where((issue) => issue.status != IssueStatus.done)
+            .length,
+      );
+
+      viewModel.dispose();
+    },
+  );
 }
 
 class _SyncAwareRepository
@@ -574,6 +636,100 @@ class _ScopedCommentsRefreshRepository
   }
 }
 
+class _ProjectMetaRefreshRepository extends ProviderBackedTrackStateRepository {
+  _ProjectMetaRefreshRepository({required TrackerSnapshot snapshot})
+    : _snapshot = snapshot,
+      super(provider: _SyncTestProvider(), supportsGitHubAuth: false);
+
+  TrackerSnapshot _snapshot;
+  final JqlSearchService _searchService = const JqlSearchService();
+  RepositorySyncState _state = const RepositorySyncState(
+    providerType: ProviderType.github,
+    repositoryRevision: 'rev-1',
+    sessionRevision: 'connected:true:true',
+    connectionState: ProviderConnectionState.connected,
+  );
+  RepositorySyncCheck? _queuedCheck;
+  ProjectConfig? _pendingProject;
+  int loadSnapshotCalls = 0;
+  int loadProjectMetadataCalls = 0;
+
+  void resetTracking() {
+    loadSnapshotCalls = 0;
+    loadProjectMetadataCalls = 0;
+  }
+
+  void queueProjectMetaRefresh({required ProjectConfig project}) {
+    _pendingProject = project;
+    _state = const RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: 'rev-2',
+      sessionRevision: 'connected:true:true',
+      connectionState: ProviderConnectionState.connected,
+    );
+    _queuedCheck = RepositorySyncCheck(
+      state: _state,
+      signals: const {WorkspaceSyncSignal.hostedRepository},
+      changedPaths: const {'project.json'},
+    );
+  }
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async {
+    if (previousState == null) {
+      return RepositorySyncCheck(state: _state);
+    }
+    final queuedCheck = _queuedCheck;
+    _queuedCheck = null;
+    return queuedCheck ?? RepositorySyncCheck(state: _state);
+  }
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    loadSnapshotCalls += 1;
+    return _snapshot;
+  }
+
+  @override
+  Future<ProjectMetadataRefresh> loadProjectMetadata() async {
+    loadProjectMetadataCalls += 1;
+    final nextProject = _pendingProject ?? _snapshot.project;
+    _pendingProject = null;
+    _snapshot = TrackerSnapshot(
+      project: nextProject,
+      issues: _snapshot.issues,
+      repositoryIndex: _snapshot.repositoryIndex,
+      loadWarnings: _snapshot.loadWarnings,
+      readiness: _snapshot.readiness,
+      startupRecovery: _snapshot.startupRecovery,
+    );
+    replaceCachedState(snapshot: _snapshot);
+    return ProjectMetadataRefresh(
+      project: _snapshot.project,
+      loadWarnings: _snapshot.loadWarnings,
+    );
+  }
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    return _searchService.search(
+      issues: _snapshot.issues,
+      project: _snapshot.project,
+      jql: jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+  }
+}
+
 class _SyncTestProvider implements TrackStateProviderAdapter {
   static const RepositoryPermission _permission = RepositoryPermission(
     canRead: true,
@@ -704,6 +860,29 @@ TrackStateIssue _copyIssue(TrackStateIssue issue, {String? description}) {
     resolutionId: issue.resolutionId,
     storagePath: issue.storagePath,
     rawMarkdown: issue.rawMarkdown,
+  );
+}
+
+ProjectConfig _copyProject(
+  ProjectConfig project, {
+  ProjectAttachmentStorageSettings? attachmentStorage,
+}) {
+  return ProjectConfig(
+    key: project.key,
+    name: project.name,
+    repository: project.repository,
+    branch: project.branch,
+    defaultLocale: project.defaultLocale,
+    supportedLocales: project.supportedLocales,
+    issueTypeDefinitions: project.issueTypeDefinitions,
+    statusDefinitions: project.statusDefinitions,
+    fieldDefinitions: project.fieldDefinitions,
+    workflowDefinitions: project.workflowDefinitions,
+    priorityDefinitions: project.priorityDefinitions,
+    versionDefinitions: project.versionDefinitions,
+    componentDefinitions: project.componentDefinitions,
+    resolutionDefinitions: project.resolutionDefinitions,
+    attachmentStorage: attachmentStorage ?? project.attachmentStorage,
   );
 }
 

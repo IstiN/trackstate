@@ -191,7 +191,6 @@ void main() {
 }
 
 Directory get _outputsDir => Directory('${Directory.current.path}/outputs');
-File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
@@ -262,7 +261,6 @@ void _writePassOutputs(Map<String, Object?> result) {
   _resultFile.writeAsStringSync(
     '${jsonEncode(const <String, Object>{'status': 'passed', 'passed': 1, 'failed': 0, 'skipped': 0, 'summary': '1 passed, 0 failed'})}\n',
   );
-  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
 }
@@ -273,128 +271,45 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _resultFile.writeAsStringSync(
     '${jsonEncode(<String, Object>{'status': 'failed', 'passed': 0, 'failed': 1, 'skipped': 0, 'summary': '0 passed, 1 failed', 'error': error})}\n',
   );
-  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
 }
 
-String _jiraComment(Map<String, Object?> result, {required bool passed}) {
-  final statusLabel = passed ? '✅ PASSED' : '❌ FAILED';
+String _responseSummary(Map<String, Object?> result, {required bool passed}) {
   final lines = <String>[
-    'h3. Test Automation Result',
+    'Resolved the TS-780 merge conflict and kept the approved test-only rework: the ticket now uses the reusable `RepositorySyncCheckService`, injects the GitHub framework adapter through `RepositorySyncCheckDriver`, and documents the ticket setup in `testing/tests/TS-780/README.md`.',
     '',
-    '*Status:* $statusLabel',
-    '*Test Case:* $_ticketKey - $_ticketSummary',
-    '',
-    'h4. What was tested',
-    '* Executed the production GitHub hosted compare-sync path twice: once without any explicit {noformat}load_snapshot_delta{noformat} marker and once with {noformat}load_snapshot_delta=0{noformat}.',
-    '* Observed the real returned {noformat}RepositorySyncCheck{noformat} contract before serialization to confirm the explicit-false directive was present on the model.',
-    '* Attempted to serialize both returned contracts through Dart\'s shipped JSON encoder ({noformat}jsonEncode(syncCheck){noformat}) and inspected the resulting client-visible payload or failure.',
-    '',
-    'h4. Result',
     passed
-        ? '* Matched the expected result: the no-flag payload omitted {noformat}load_snapshot_delta{noformat}, while the explicit-false payload preserved {noformat}load_snapshot_delta=0{noformat}.'
-        : '* Did not match the expected result. The production serialization path still fails before exposing a usable public payload map for {noformat}RepositorySyncCheck{noformat}.',
-    '* Environment: {noformat}flutter test / ${result['os'] ?? Platform.operatingSystem}{noformat}',
-    '* Repository: {noformat}${result['repository'] ?? 'trackstate/trackstate'}{noformat}',
-    '* Control contract: {noformat}${result['control_contract'] ?? '<missing>'}{noformat}',
-    '* Explicit contract: {noformat}${result['explicit_contract'] ?? '<missing>'}{noformat}',
-    '* Control serialization: {noformat}${result['control_serialization'] ?? '<missing>'}{noformat}',
-    '* Explicit serialization: {noformat}${result['explicit_serialization'] ?? '<missing>'}{noformat}',
+        ? 'New result: passed. The shipped production JSON path preserved `load_snapshot_delta=0` for the explicit-false hosted sync and omitted the field for the control payload.'
+        : 'New result: failed. The real production JSON serialization path still does not expose a usable public `RepositorySyncCheck` payload map for integrated clients.',
     '',
-    'h4. Step results',
-    ..._jiraStepLines(result),
-    '',
-    'h4. Human-style verification',
-    ..._jiraHumanVerificationLines(result),
-    '',
-    'h4. Test file',
-    '{code}',
-    _testFilePath,
-    '{code}',
-    '',
-    'h4. Run command',
-    '{code:bash}',
-    _runCommand,
-    '{code}',
+    'Control contract: `${result['control_contract'] ?? '<missing>'}`',
+    'Explicit contract: `${result['explicit_contract'] ?? '<missing>'}`',
+    'Control serialization: `${result['control_serialization'] ?? '<missing>'}`',
+    'Explicit serialization: `${result['explicit_serialization'] ?? '<missing>'}`',
   ];
-
   if (!passed) {
-    lines.addAll(<String>[
-      '',
-      'h4. Exact error',
-      '{noformat}',
-      '${result['error'] ?? '<missing>'}',
-      '',
-      '${result['traceback'] ?? '<missing>'}',
-      '{noformat}',
-    ]);
+    lines.add('');
+    lines.add('Observed error: `${result['error'] ?? '<missing error>'}`');
   }
-
   return '${lines.join('\n')}\n';
 }
 
-String _responseSummary(Map<String, Object?> result, {required bool passed}) {
-  final buffer = StringBuffer()
-    ..writeln('# $_ticketKey')
-    ..writeln()
-    ..writeln(
-      passed
-          ? 'Passed: the production serialization boundary preserved `load_snapshot_delta=0` for the explicit-false hosted sync and omitted the field for the control sync.'
-          : 'Failed: the production serialization boundary still throws before exposing a client-visible `RepositorySyncCheck` payload map.',
-    )
-    ..writeln()
-    ..writeln(
-      'Environment: `flutter test / ${result['os'] ?? Platform.operatingSystem}`',
-    )
-    ..writeln(
-      'Repository: `${result['repository'] ?? 'trackstate/trackstate'}`',
-    )
-    ..writeln(
-      'Control contract: `${result['control_contract'] ?? '<missing>'}`',
-    )
-    ..writeln(
-      'Explicit contract: `${result['explicit_contract'] ?? '<missing>'}`',
-    )
-    ..writeln(
-      'Control serialization: `${result['control_serialization'] ?? '<missing>'}`',
-    )
-    ..writeln(
-      'Explicit serialization: `${result['explicit_serialization'] ?? '<missing>'}`',
-    );
-
-  if (!passed) {
-    buffer
-      ..writeln()
-      ..writeln('Error:')
-      ..writeln('```text')
-      ..writeln('${result['error'] ?? '<missing>'}')
-      ..writeln()
-      ..writeln('${result['traceback'] ?? '<missing>'}')
-      ..writeln('```');
-  }
-
-  return buffer.toString();
-}
-
 String _prBody(Map<String, Object?> result, {required bool passed}) {
-  final statusLabel = passed ? '✅ PASSED' : '❌ FAILED';
   final lines = <String>[
-    '## Test Automation Result',
+    '## TS-780 rework',
     '',
-    '**Status:** $statusLabel',
-    '**Test Case:** $_ticketKey - $_ticketSummary',
-    '',
-    '## What was automated',
-    '- Executed the production GitHub hosted compare-sync path twice: once without any explicit `load_snapshot_delta` marker and once with `load_snapshot_delta=0`.',
-    '- Verified the real returned `RepositorySyncCheck` contract before serialization so the test exercises the shipped provider behavior rather than a test-owned mapper.',
-    '- Attempted to serialize both returned contracts through Dart\'s shipped JSON encoder and compared the client-visible outcomes.',
+    '- Kept the assertion on the shipped JSON serialization attempt (`jsonEncode`) for the real `RepositorySyncCheck` returned by the production GitHub compare-sync path.',
+    '- Kept `testing/components/services/repository_sync_check_service.dart` framework-agnostic so it depends only on the injected `RepositorySyncCheckDriver` abstraction.',
+    '- Moved framework assembly into `testing/tests/TS-780/support/ts780_repository_sync_check_service_factory.dart`, which creates the GitHub framework adapter and injects it into the reusable component.',
+    '- Left `MockClient`/`GitHubTrackStateProvider` wiring inside `testing/frameworks/api/github/github_repository_sync_check_framework.dart` and kept `testing/tests/TS-780/README.md` plus `config.yaml` aligned with the layered flow.',
     '',
     '## Result',
+    '',
     passed
-        ? '- Matched the expected result: the no-flag payload omitted `load_snapshot_delta`, while the explicit-false payload preserved `load_snapshot_delta=0`.'
-        : '- Did not match the expected result. The production serialization path still fails before exposing a usable public `RepositorySyncCheck` payload map.',
+        ? '- ✅ Passed: the production JSON payload preserved `load_snapshot_delta=0` for the explicit-false hosted sync and omitted it for the control path.'
+        : '- ❌ Failed: the production JSON serialization surface still cannot expose the `RepositorySyncCheck` payload required by this ticket.',
     '',
     '## Key observations',
     '- Control contract: `${result['control_contract'] ?? '<missing>'}`',
@@ -485,31 +400,12 @@ String _bugDescription(Map<String, Object?> result) {
   return '${lines.join('\n')}\n';
 }
 
-List<String> _jiraStepLines(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  return [
-    for (final step in steps)
-      '* Step ${step['step']}: ${step['status'] == 'passed' ? '✅' : '❌'} ${step['action']}\n'
-          '  Observed: {noformat}${step['observed']}{noformat}',
-  ];
-}
-
 List<String> _markdownStepLines(Map<String, Object?> result) {
   final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
   return [
     for (final step in steps)
       '- Step ${step['step']}: ${step['status'] == 'passed' ? '✅' : '❌'} ${step['action']}\n'
           '  - Observed: `${step['observed']}`',
-  ];
-}
-
-List<String> _jiraHumanVerificationLines(Map<String, Object?> result) {
-  final checks =
-      (result['human_verification'] as List<Map<String, Object?>>?) ?? const [];
-  return [
-    for (final check in checks)
-      '* ${check['check']}\n'
-          '  Observed: {noformat}${check['observed']}{noformat}',
   ];
 }
 

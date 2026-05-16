@@ -60,7 +60,6 @@ class Ts777ExplicitFalseLoadSnapshotDeltaRepository
 
   HostedSnapshotReloadDirective? get lastHostedSnapshotReloadDirective =>
       _lastHostedSnapshotReloadDirective;
-
   void scheduleHostedSyncWithoutExplicitFlag() {
     _currentSnapshot = _snapshotWithUpdatedIssueB(
       snapshot: _currentSnapshot,
