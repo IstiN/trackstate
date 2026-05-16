@@ -5,8 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
-import '../../components/services/repository_sync_check_public_payload_service.dart';
-import 'support/ts780_repository_sync_check_fixture.dart';
+import '../../core/interfaces/repository_sync_check_driver.dart';
+import '../../frameworks/api/github/github_repository_sync_check_framework.dart';
 
 const String _ticketKey = 'TS-780';
 const String _ticketSummary =
@@ -17,13 +17,13 @@ const String _runCommand =
 const List<String> _requestSteps = <String>[
   'Read the ordinary hosted sync payload with no explicit load_snapshot_delta marker.',
   'Read the hosted sync payload produced by the real provider path when load_snapshot_delta=0 is explicitly requested.',
-  'Inspect the serialized public payload map for the presence of the load_snapshot_delta key.',
-  'Verify the serialized load_snapshot_delta value is exactly 0 and remains distinguishable from omission.',
+  'Invoke the production JSON serialization path for the public RepositorySyncCheck contract and inspect the generated payload.',
+  'Verify the serialized explicit-false payload keeps load_snapshot_delta=0 and stays distinguishable from omission.',
 ];
 
 void main() {
   test(
-    'TS-780 serializes explicit load_snapshot_delta=0 into the public RepositorySyncCheck payload',
+    'TS-780 serializes explicit load_snapshot_delta=0 through the shipped RepositorySyncCheck JSON path',
     () async {
       final result = <String, Object?>{
         'ticket': _ticketKey,
@@ -32,144 +32,148 @@ void main() {
         'os': Platform.operatingSystem,
         'repository': 'trackstate/trackstate',
         'contract_shape':
-            'RepositorySyncCheck(state, signals, changedPaths, hostedSnapshotReloadDirective) -> public payload map',
+            'RepositorySyncCheck -> jsonEncode(...) -> public payload map',
         'steps': <Map<String, Object?>>[],
         'human_verification': <Map<String, Object?>>[],
       };
 
-      final fixture = Ts780RepositorySyncCheckFixture();
-      final serializer = RepositorySyncCheckPublicPayloadService();
+      final RepositorySyncCheckDriver driver =
+          await GitHubRepositorySyncCheckFramework.create();
 
       try {
         final failures = <String>[];
 
-        final controlCheck = await fixture.readHostedSyncCheck();
-        final controlPayload = serializer.serialize(controlCheck);
-        final controlPayloadJson = jsonEncode(controlPayload);
-        result['control_payload'] = controlPayload;
-        result['control_payload_json'] = controlPayloadJson;
-
+        final controlCheck = await driver.readHostedSyncCheck();
+        final controlContractObservation = _describeSyncCheck(controlCheck);
+        result['control_contract'] = controlContractObservation;
         final controlStepPassed =
             controlCheck.signals.contains(
               WorkspaceSyncSignal.hostedRepository,
             ) &&
-            !controlPayload.containsKey('load_snapshot_delta') &&
             controlCheck.hostedSnapshotReloadDirective == null;
-        final controlObserved =
-            'signals=${_formatList(_signalNames(controlCheck.signals))}; '
-            'changed_paths=${_formatList(_stringList(controlPayload['changed_paths']))}; '
-            'hosted_snapshot_reload_directive=${_directiveLabel(controlCheck.hostedSnapshotReloadDirective)}; '
-            'serialized_payload=$controlPayloadJson';
         _recordStep(
           result,
           step: 1,
           status: controlStepPassed ? 'passed' : 'failed',
           action: _requestSteps[0],
-          observed: controlObserved,
+          observed: controlContractObservation,
         );
         if (!controlStepPassed) {
           failures.add(
-            'Step 1 failed: the ordinary hosted sync payload did not match the expected no-flag baseline.\n'
-            'Observed: $controlObserved',
+            'Step 1 failed: the ordinary hosted sync did not expose the expected control RepositorySyncCheck contract.\n'
+            'Observed: $controlContractObservation',
           );
         }
 
-        final explicitCheck = await fixture.readHostedSyncCheck(
+        final explicitCheck = await driver.readHostedSyncCheck(
           loadSnapshotDelta: 0,
         );
-        final explicitPayload = serializer.serialize(explicitCheck);
-        final explicitPayloadJson = jsonEncode(explicitPayload);
-        result['explicit_payload'] = explicitPayload;
-        result['explicit_payload_json'] = explicitPayloadJson;
-
+        final explicitContractObservation = _describeSyncCheck(explicitCheck);
+        result['explicit_contract'] = explicitContractObservation;
         final explicitStepPassed =
             explicitCheck.signals.contains(
               WorkspaceSyncSignal.hostedRepository,
             ) &&
             explicitCheck.hostedSnapshotReloadDirective ==
                 HostedSnapshotReloadDirective.disabled;
-        final explicitObserved =
-            'signals=${_formatList(_signalNames(explicitCheck.signals))}; '
-            'changed_paths=${_formatList(_stringList(explicitPayload['changed_paths']))}; '
-            'hosted_snapshot_reload_directive=${_directiveLabel(explicitCheck.hostedSnapshotReloadDirective)}; '
-            'serialized_payload=$explicitPayloadJson';
         _recordStep(
           result,
           step: 2,
           status: explicitStepPassed ? 'passed' : 'failed',
           action: _requestSteps[1],
-          observed: explicitObserved,
+          observed: explicitContractObservation,
         );
         if (!explicitStepPassed) {
           failures.add(
-            'Step 2 failed: the explicit load_snapshot_delta=0 provider path did not expose the disabled hosted snapshot reload directive before serialization.\n'
-            'Observed: $explicitObserved',
+            'Step 2 failed: the explicit load_snapshot_delta=0 hosted sync did not expose HostedSnapshotReloadDirective.disabled before serialization.\n'
+            'Observed: $explicitContractObservation',
           );
         }
 
-        final hasLoadSnapshotDeltaKey = explicitPayload.containsKey(
-          'load_snapshot_delta',
+        final controlSerialization = _attemptProductionSerialization(
+          controlCheck,
         );
-        result['serialized_load_snapshot_delta_present'] =
-            hasLoadSnapshotDeltaKey;
-        final presenceObserved =
-            'control_payload=$controlPayloadJson; '
-            'explicit_payload=$explicitPayloadJson; '
-            'load_snapshot_delta_present=$hasLoadSnapshotDeltaKey';
+        final explicitSerialization = _attemptProductionSerialization(
+          explicitCheck,
+        );
+
+        result['control_serialization'] = controlSerialization.describe();
+        result['explicit_serialization'] = explicitSerialization.describe();
+
+        final controlSerializationPassed =
+            controlSerialization.error == null &&
+            controlSerialization.payload != null &&
+            !controlSerialization.payload!.containsKey('load_snapshot_delta');
         _recordStep(
           result,
           step: 3,
-          status: hasLoadSnapshotDeltaKey ? 'passed' : 'failed',
+          status: controlSerializationPassed ? 'passed' : 'failed',
           action: _requestSteps[2],
-          observed: presenceObserved,
+          observed:
+              'control_serialization=${controlSerialization.describe()}; '
+              'explicit_serialization=${explicitSerialization.describe()}',
         );
-        if (!hasLoadSnapshotDeltaKey) {
+        if (!controlSerializationPassed) {
           failures.add(
-            'Step 3 failed: the serialized explicit-false payload omitted the load_snapshot_delta key.\n'
-            'Observed: $presenceObserved',
+            'Step 3 failed: the shipped JSON serialization path did not expose a usable public payload for the control RepositorySyncCheck.\n'
+            'Observed control serialization: ${controlSerialization.describe()}\n'
+            'Observed explicit serialization: ${explicitSerialization.describe()}',
           );
         }
 
-        final serializedLoadSnapshotDelta =
-            explicitPayload['load_snapshot_delta'];
-        result['load_snapshot_delta'] = serializedLoadSnapshotDelta;
+        final explicitPayload = explicitSerialization.payload;
+        final controlPayload = controlSerialization.payload;
         final payloadsDistinguishable =
-            controlPayloadJson != explicitPayloadJson;
+            controlSerialization.json != null &&
+            explicitSerialization.json != null &&
+            controlSerialization.json != explicitSerialization.json;
         result['payloads_distinguishable'] = payloadsDistinguishable;
-        final valueStepPassed =
-            serializedLoadSnapshotDelta == 0 && payloadsDistinguishable;
-        final valueObserved =
-            'serialized_load_snapshot_delta=$serializedLoadSnapshotDelta; '
-            'payloads_distinguishable=$payloadsDistinguishable; '
-            'control_payload=$controlPayloadJson; '
-            'explicit_payload=$explicitPayloadJson';
+        result['control_payload_json'] = controlSerialization.json;
+        result['explicit_payload_json'] = explicitSerialization.json;
+        result['serialized_load_snapshot_delta'] =
+            explicitPayload?['load_snapshot_delta'];
+
+        final explicitSerializationPassed =
+            explicitSerialization.error == null &&
+            explicitPayload != null &&
+            explicitPayload['load_snapshot_delta'] == 0 &&
+            payloadsDistinguishable &&
+            controlPayload != null;
         _recordStep(
           result,
           step: 4,
-          status: valueStepPassed ? 'passed' : 'failed',
+          status: explicitSerializationPassed ? 'passed' : 'failed',
           action: _requestSteps[3],
-          observed: valueObserved,
+          observed:
+              'control_payload=${controlPayload == null ? '<unavailable>' : jsonEncode(controlPayload)}; '
+              'explicit_payload=${explicitPayload == null ? '<unavailable>' : jsonEncode(explicitPayload)}; '
+              'payloads_distinguishable=$payloadsDistinguishable; '
+              'explicit_serialization=${explicitSerialization.describe()}',
         );
-        if (!valueStepPassed) {
+        if (!explicitSerializationPassed) {
+          final reason = explicitSerialization.error == null
+              ? 'the explicit-false payload did not keep load_snapshot_delta=0 or remained indistinguishable from omission'
+              : 'the shipped JSON serialization path failed before exposing a public payload';
           failures.add(
-            'Step 4 failed: the serialized explicit-false payload did not expose load_snapshot_delta as the exact numeric value 0 and distinct from omission.\n'
-            'Observed: $valueObserved',
+            'Step 4 failed: $reason.\n'
+            'Observed control serialization: ${controlSerialization.describe()}\n'
+            'Observed explicit serialization: ${explicitSerialization.describe()}',
           );
         }
 
         _recordHumanVerification(
           result,
           check:
-              'Viewed the serialized payloads exactly as an integrated client would consume them and confirmed the no-flag payload omitted load_snapshot_delta while the explicit-false payload showed it at the top level.',
+              'Viewed the provider-returned RepositorySyncCheck contract before serialization, the same boundary a production client hands to its serializer.',
           observed:
-              'control_payload=$controlPayloadJson; explicit_payload=$explicitPayloadJson',
+              'control_contract=$controlContractObservation; explicit_contract=$explicitContractObservation',
         );
         _recordHumanVerification(
           result,
           check:
-              'Confirmed the explicit-false payload preserved a numeric zero rather than dropping the field or converting it to a string.',
+              'Attempted to serialize the same production contract through Dart\'s shipped JSON encoder instead of a test-owned mapper.',
           observed:
-              'explicit_payload_value=${explicitPayload['load_snapshot_delta']}; runtime_type=${explicitPayload['load_snapshot_delta']?.runtimeType}',
+              'control_serialization=${controlSerialization.describe()}; explicit_serialization=${explicitSerialization.describe()}',
         );
 
         if (failures.isNotEmpty) {
@@ -189,9 +193,8 @@ void main() {
 }
 
 Directory get _outputsDir => Directory('${Directory.current.path}/outputs');
-File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
-File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
+File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
 
@@ -226,6 +229,32 @@ void _recordHumanVerification(
   });
 }
 
+String _describeSyncCheck(RepositorySyncCheck syncCheck) {
+  return 'signals=${_formatList(_signalNames(syncCheck.signals))}; '
+      'changed_paths=${_formatList(syncCheck.changedPaths.toList()..sort())}; '
+      'hosted_snapshot_reload_directive=${_directiveLabel(syncCheck.hostedSnapshotReloadDirective)}';
+}
+
+SerializationAttempt _attemptProductionSerialization(
+  RepositorySyncCheck syncCheck,
+) {
+  try {
+    final serialized = jsonEncode(syncCheck);
+    final decoded = jsonDecode(serialized);
+    if (decoded is! Map) {
+      throw StateError(
+        'Production serialization returned ${decoded.runtimeType} instead of a payload map.',
+      );
+    }
+    return SerializationAttempt(
+      json: serialized,
+      payload: Map<String, Object?>.from(decoded as Map),
+    );
+  } catch (error) {
+    return SerializationAttempt(error: '${error.runtimeType}: $error');
+  }
+}
+
 void _writePassOutputs(Map<String, Object?> result) {
   _outputsDir.createSync(recursive: true);
   if (_bugDescriptionFile.existsSync()) {
@@ -234,9 +263,8 @@ void _writePassOutputs(Map<String, Object?> result) {
   _resultFile.writeAsStringSync(
     '${jsonEncode(const <String, Object>{'status': 'passed', 'passed': 1, 'failed': 0, 'skipped': 0, 'summary': '1 passed, 0 failed'})}\n',
   );
-  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
-  _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: true));
+  _prBodyFile.writeAsStringSync(_prBody(result, passed: true));
 }
 
 void _writeFailureOutputs(Map<String, Object?> result) {
@@ -245,291 +273,120 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _resultFile.writeAsStringSync(
     '${jsonEncode(<String, Object>{'status': 'failed', 'passed': 0, 'failed': 1, 'skipped': 0, 'summary': '0 passed, 1 failed', 'error': error})}\n',
   );
-  _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
-  _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
+  _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
 }
 
-String _jiraComment(Map<String, Object?> result, {required bool passed}) {
-  final statusLabel = passed ? '✅ PASSED' : '❌ FAILED';
+String _responseSummary(Map<String, Object?> result, {required bool passed}) {
   final lines = <String>[
-    'h3. Test Automation Result',
-    '',
-    '*Status:* $statusLabel',
-    '*Test Case:* $_ticketKey - $_ticketSummary',
-    '',
-    'h4. What was tested',
-    '* Executed the production GitHub hosted-sync compare path twice: once without any explicit marker and once with {noformat}load_snapshot_delta=0{noformat} in the compare commit message.',
-    '* Serialized the returned public {noformat}RepositorySyncCheck{noformat} contract through the reusable testing payload service used by this ticket.',
-    '* Verified the explicit-false payload preserved a top-level {noformat}load_snapshot_delta{noformat} field with the numeric value {noformat}0{noformat}.',
-    '* Compared the serialized no-flag and explicit-false payloads to confirm omission and zero remain distinguishable for integrated clients.',
-    '',
-    'h4. Result',
     passed
-        ? '* Matched the expected result: the serialized public payload explicitly contained {noformat}load_snapshot_delta=0{noformat} for the explicit-false path and omitted the field for the no-flag path.'
-        : '* Did not match the expected result. See the failed step details and exact error below.',
-    '* Environment: {noformat}flutter test / ${Platform.operatingSystem}{noformat}',
-    '* Repository: {noformat}${result['repository'] ?? '<missing>'}{noformat}',
-    '* Control payload: {noformat}${result['control_payload_json'] ?? '<missing>'}{noformat}',
-    '* Explicit-false payload: {noformat}${result['explicit_payload_json'] ?? '<missing>'}{noformat}',
+        ? 'Removed the test-only payload mapper, moved GitHub provider wiring into `testing/frameworks/api/github/github_repository_sync_check_framework.dart`, and added `testing/tests/TS-780/README.md`.'
+        : 'Removed the test-only payload mapper, moved GitHub provider wiring into `testing/frameworks/api/github/github_repository_sync_check_framework.dart`, and added `testing/tests/TS-780/README.md`.',
     '',
-    'h4. Step results',
-    ..._jiraStepLines(result),
-    '',
-    'h4. Human-style verification',
-    ..._jiraHumanVerificationLines(result),
-    '',
-    'h4. Test file',
-    '{code}',
-    _testFilePath,
-    '{code}',
-    '',
-    'h4. Run command',
-    '{code:bash}',
-    _runCommand,
-    '{code}',
+    passed
+        ? 'New result: the shipped `RepositorySyncCheck` JSON path preserved `load_snapshot_delta=0` for the explicit-false hosted sync and omitted it for the control payload.'
+        : 'New result: failed. The real production serialization path still does not expose a usable public `RepositorySyncCheck` payload map for integrated clients.',
   ];
-
   if (!passed) {
-    lines.addAll(<String>[
-      '',
-      'h4. Exact error',
-      '{noformat}',
-      '${result['error'] ?? '<missing>'}',
-      '',
-      '${result['traceback'] ?? '<missing>'}',
-      '{noformat}',
-    ]);
+    lines.add('');
+    lines.add('Observed error: `${result['error'] ?? '<missing error>'}`');
   }
-
   return '${lines.join('\n')}\n';
 }
 
 String _prBody(Map<String, Object?> result, {required bool passed}) {
-  final statusLabel = passed ? '✅ PASSED' : '❌ FAILED';
   final lines = <String>[
-    '## Test Automation Result',
+    '## TS-780 rework',
     '',
-    '**Status:** $statusLabel',
-    '**Test Case:** $_ticketKey - $_ticketSummary',
-    '',
-    '## What was automated',
-    '- Exercised the production GitHub hosted-sync compare flow with a normal hosted sync and an explicit `load_snapshot_delta=0` hosted sync.',
-    '- Serialized the resulting public `RepositorySyncCheck` contract with the ticket-specific testing payload service.',
-    '- Verified the explicit-false payload includes a top-level `load_snapshot_delta` field with the numeric value `0`.',
-    '- Verified the no-flag payload omits that field so integrated clients can distinguish omission from explicit zero.',
+    '- Replaced the deleted testing-only payload mapper with the shipped JSON serialization attempt (`jsonEncode`) on the real `RepositorySyncCheck` returned by `GitHubTrackStateProvider`.',
+    '- Moved `MockClient`/`GitHubTrackStateProvider` wiring out of `testing/tests/TS-780/` into `testing/frameworks/api/github/github_repository_sync_check_framework.dart` behind `RepositorySyncCheckDriver`.',
+    '- Added `testing/tests/TS-780/README.md` and updated the ticket config notes.',
     '',
     '## Result',
+    '',
     passed
-        ? '- Matched the expected result: the explicit-false public payload serialized as `{"load_snapshot_delta":0}` at the top level while the no-flag payload left the field absent.'
-        : '- Did not match the expected result. See the failed step details and exact error below.',
+        ? '- ✅ Passed: the production JSON payload preserved `load_snapshot_delta=0` for the explicit-false hosted sync and omitted it for the control path.'
+        : '- ❌ Failed: the production JSON serialization surface still cannot expose the `RepositorySyncCheck` payload required by this ticket.',
+    '- Control contract: `${result['control_contract'] ?? '<missing>'}`',
+    '- Explicit contract: `${result['explicit_contract'] ?? '<missing>'}`',
+    '- Control serialization: `${result['control_serialization'] ?? '<missing>'}`',
+    '- Explicit serialization: `${result['explicit_serialization'] ?? '<missing>'}`',
     '',
-    '## Step results',
-    ..._markdownStepLines(result),
+    '## Run',
     '',
-    '## Human-style verification',
-    ..._markdownHumanVerificationLines(result),
-    '',
-    '## Observed payloads',
-    '- Control payload: `${result['control_payload_json'] ?? '<missing>'}`',
-    '- Explicit-false payload: `${result['explicit_payload_json'] ?? '<missing>'}`',
-    '',
-    '## Test file',
-    '```text',
-    _testFilePath,
-    '```',
-    '',
-    '## How to run',
     '```bash',
     _runCommand,
     '```',
   ];
-
-  if (!passed) {
-    lines.addAll(<String>[
-      '',
-      '## Exact error',
-      '```text',
-      '${result['error'] ?? '<missing>'}',
-      '',
-      '${result['traceback'] ?? '<missing>'}',
-      '```',
-    ]);
-  }
-
   return '${lines.join('\n')}\n';
-}
-
-String _responseSummary(Map<String, Object?> result, {required bool passed}) {
-  final buffer = StringBuffer()
-    ..writeln('# $_ticketKey')
-    ..writeln()
-    ..writeln(
-      passed
-          ? 'Passed: the serialized public RepositorySyncCheck payload preserved `load_snapshot_delta=0` for the explicit-false hosted sync path.'
-          : 'Failed: the serialized public RepositorySyncCheck payload did not preserve the explicit `load_snapshot_delta=0` signal as required.',
-    )
-    ..writeln()
-    ..writeln('Environment: `flutter test / ${Platform.operatingSystem}`')
-    ..writeln('Repository: `${result['repository'] ?? '<missing>'}`')
-    ..writeln(
-      'Control payload: `${result['control_payload_json'] ?? '<missing>'}`',
-    )
-    ..writeln(
-      'Explicit-false payload: `${result['explicit_payload_json'] ?? '<missing>'}`',
-    )
-    ..writeln(
-      'Observed load_snapshot_delta: `${result['load_snapshot_delta'] ?? '<missing>'}`',
-    );
-
-  if (!passed) {
-    buffer
-      ..writeln()
-      ..writeln('Error:')
-      ..writeln('```text')
-      ..writeln('${result['error'] ?? '<missing>'}')
-      ..writeln()
-      ..writeln('${result['traceback'] ?? '<missing>'}')
-      ..writeln('```');
-  }
-
-  return buffer.toString();
 }
 
 String _bugDescription(Map<String, Object?> result) {
   final lines = <String>[
-    '# Bug Report - $_ticketKey',
+    'h4. Environment',
+    '* Repository: {noformat}trackstate/trackstate{noformat}',
+    '* Environment: {noformat}flutter test / ${result['os'] ?? 'linux'}{noformat}',
+    '* Test file: {noformat}$_testFilePath{noformat}',
     '',
-    '## Summary',
-    'Serializing the public RepositorySyncCheck payload does not preserve the explicit `load_snapshot_delta=0` signal in a way that integrated clients can reliably distinguish from omission.',
+    'h4. Steps to Reproduce',
+    '# Create a real {noformat}GitHubTrackStateProvider{noformat} compare-sync check without an explicit {noformat}load_snapshot_delta{noformat} marker.',
+    '# Create a second compare-sync check through the same provider path with {noformat}load_snapshot_delta=0{noformat}.',
+    '# Pass each returned {noformat}RepositorySyncCheck{noformat} to Dart\'s shipped JSON serializer via {noformat}jsonEncode(syncCheck){noformat}.',
+    '# Inspect the serialized payload for a top-level {noformat}load_snapshot_delta{noformat} key.',
     '',
-    '## Steps to Reproduce',
-    ..._bugStepLines(result),
+    'h4. Expected Result',
+    'The control payload serializes without {noformat}load_snapshot_delta{noformat}, while the explicit-false payload serializes as a public payload map that includes {noformat}load_snapshot_delta: 0{noformat}.',
     '',
-    '## Actual vs Expected',
-    '- **Expected:** the explicit-false hosted sync serializes a public payload that contains a top-level `load_snapshot_delta` key with the numeric value `0`, while the no-flag hosted sync omits that key.',
-    '- **Actual:** ${_actualResultLine(result)}',
+    'h4. Actual Result',
+    'The provider now exposes the explicit-false directive at the object level, but the shipped serialization path still does not expose a usable public payload map for {noformat}RepositorySyncCheck{noformat}. The JSON encoding attempt fails before any payload with {noformat}load_snapshot_delta{noformat} can be inspected.',
+    '* Control contract: {noformat}${result['control_contract'] ?? '<missing>'}{noformat}',
+    '* Explicit contract: {noformat}${result['explicit_contract'] ?? '<missing>'}{noformat}',
+    '* Control serialization: {noformat}${result['control_serialization'] ?? '<missing>'}{noformat}',
+    '* Explicit serialization: {noformat}${result['explicit_serialization'] ?? '<missing>'}{noformat}',
     '',
-    '## Exact Error Message or Assertion Failure',
-    '```text',
-    '${result['error'] ?? '<missing>'}',
+    'h4. Logs / Error Output',
+    '{code}',
+    '${result['error'] ?? '<missing error>'}',
     '',
-    '${result['traceback'] ?? '<missing>'}',
-    '```',
+    '${result['traceback'] ?? '<missing traceback>'}',
+    '{code}',
     '',
-    '## Environment',
-    '- URL: local Flutter test execution',
-    '- Browser: none',
-    '- OS: ${Platform.operatingSystem}',
-    '- Run command: `$_runCommand`',
-    '- Repository: `${result['repository'] ?? '<missing>'}`',
-    '',
-    '## Relevant Logs',
-    '```text',
-    'Control payload: ${result['control_payload_json'] ?? '<missing>'}',
-    'Explicit-false payload: ${result['explicit_payload_json'] ?? '<missing>'}',
-    'Observed load_snapshot_delta: ${result['load_snapshot_delta'] ?? '<missing>'}',
-    'Step details:',
-    ..._bugLogLines(result),
-    '```',
+    'h4. Notes',
+    '* Missing production capability: {noformat}RepositorySyncCheck{noformat} does not expose a production-owned JSON/map serialization surface that integrated clients can use to observe {noformat}load_snapshot_delta=0{noformat}.',
+    '* The reworked TS-780 test no longer uses a testing-only serializer, so this failure reflects a real product-visible gap rather than a test artifact.',
   ];
   return '${lines.join('\n')}\n';
 }
 
-List<String> _jiraStepLines(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  return <String>[
-    for (final step in steps)
-      '* Step ${step['step']}: ${step['status'] == 'passed' ? '✅' : '❌'} ${step['action']}\n'
-          '  Observed: {noformat}${step['observed']}{noformat}',
-  ];
-}
-
-List<String> _markdownStepLines(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  return <String>[
-    for (final step in steps)
-      '- Step ${step['step']}: ${step['status'] == 'passed' ? '✅' : '❌'} ${step['action']}\n'
-          '  - Observed: `${step['observed']}`',
-  ];
-}
-
-List<String> _jiraHumanVerificationLines(Map<String, Object?> result) {
-  final checks =
-      (result['human_verification'] as List<Map<String, Object?>>?) ?? const [];
-  if (checks.isEmpty) {
-    return const <String>['* No additional human-style checks were recorded.'];
+String _formatList(List<String> values) {
+  if (values.isEmpty) {
+    return '<empty>';
   }
-  return <String>[
-    for (final check in checks)
-      '* ${check['check']}\n  Observed: {noformat}${check['observed']}{noformat}',
-  ];
-}
-
-List<String> _markdownHumanVerificationLines(Map<String, Object?> result) {
-  final checks =
-      (result['human_verification'] as List<Map<String, Object?>>?) ?? const [];
-  if (checks.isEmpty) {
-    return const <String>['- No additional human-style checks were recorded.'];
-  }
-  return <String>[
-    for (final check in checks)
-      '- ${check['check']}\n  - Observed: `${check['observed']}`',
-  ];
-}
-
-List<String> _bugStepLines(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  if (steps.isEmpty) {
-    return <String>['1. No step logs were recorded before the failure.'];
-  }
-  return <String>[
-    for (final step in steps)
-      '${step['step']}. ${step['action']} ${step['status'] == 'passed' ? '✅' : '❌'}\n'
-          '   - Observed: `${step['observed']}`',
-  ];
-}
-
-List<String> _bugLogLines(Map<String, Object?> result) {
-  final steps = (result['steps'] as List<Map<String, Object?>>?) ?? const [];
-  if (steps.isEmpty) {
-    return const <String>['<no step logs recorded>'];
-  }
-  return <String>[
-    for (final step in steps)
-      'Step ${step['step']} [${step['status']}]: ${step['action']} :: ${step['observed']}',
-  ];
-}
-
-String _actualResultLine(Map<String, Object?> result) {
-  return 'the control payload serialized as `${result['control_payload_json'] ?? '<missing>'}` and the explicit-false payload serialized as `${result['explicit_payload_json'] ?? '<missing>'}` instead of exposing a distinct top-level `load_snapshot_delta: 0` field for the explicit-false path.';
+  return values.join(',');
 }
 
 List<String> _signalNames(Set<WorkspaceSyncSignal> signals) =>
     signals.map((signal) => signal.name).toList(growable: false)..sort();
 
-String _directiveLabel(HostedSnapshotReloadDirective? directive) {
-  return switch (directive) {
-    HostedSnapshotReloadDirective.enabled => 'enabled',
-    HostedSnapshotReloadDirective.disabled => 'disabled',
-    null => '<absent>',
-  };
-}
+String _directiveLabel(HostedSnapshotReloadDirective? directive) =>
+    switch (directive) {
+      HostedSnapshotReloadDirective.enabled => 'enabled',
+      HostedSnapshotReloadDirective.disabled => 'disabled',
+      null => '<absent>',
+    };
 
-List<String> _stringList(Object? value) {
-  if (value is List<String>) {
-    return value;
-  }
-  if (value is List) {
-    return value.map((item) => '$item').toList(growable: false);
-  }
-  return value == null ? const <String>[] : <String>['$value'];
-}
+final class SerializationAttempt {
+  const SerializationAttempt({this.json, this.payload, this.error});
 
-String _formatList(List<String> items) {
-  if (items.isEmpty) {
-    return '<empty>';
+  final String? json;
+  final Map<String, Object?>? payload;
+  final String? error;
+
+  String describe() {
+    if (error != null) {
+      return 'error=$error';
+    }
+    return 'json=${json ?? '<missing>'}; payload=${payload == null ? '<missing>' : jsonEncode(payload)}';
   }
-  return items.join('|');
 }
