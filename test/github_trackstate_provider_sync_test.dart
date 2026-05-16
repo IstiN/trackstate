@@ -40,6 +40,10 @@ void main() {
         }),
       );
       expect(result.changedPaths, isEmpty);
+      expect(
+        result.hostedSnapshotReloadDirective,
+        HostedSnapshotReloadDirective.enabled,
+      );
     },
   );
 
@@ -73,6 +77,44 @@ void main() {
         isNot(contains(WorkspaceSyncSignal.hostedSnapshotReload)),
       );
       expect(result.changedPaths, isEmpty);
+      expect(result.hostedSnapshotReloadDirective, isNull);
+    },
+  );
+
+  test(
+    'GitHub provider preserves explicit load_snapshot_delta=0 as a public bypass directive',
+    () async {
+      final provider = await _createAuthenticatedProvider(
+        comparePayload: <String, Object?>{
+          'files': const <Object?>[],
+          'commits': <Object?>[
+            <String, Object?>{
+              'commit': <String, Object?>{
+                'message': 'Hosted sync refresh\n\nload_snapshot_delta=0',
+              },
+            },
+          ],
+        },
+      );
+
+      final baseline = await provider.checkSync();
+      final result = await provider.checkSync(
+        previousState: _previousStateWithRevision(
+          baseline.state,
+          repositoryRevision: 'old-revision',
+        ),
+      );
+
+      expect(result.signals, contains(WorkspaceSyncSignal.hostedRepository));
+      expect(
+        result.signals,
+        isNot(contains(WorkspaceSyncSignal.hostedSnapshotReload)),
+      );
+      expect(result.changedPaths, isEmpty);
+      expect(
+        result.hostedSnapshotReloadDirective,
+        HostedSnapshotReloadDirective.disabled,
+      );
     },
   );
 }
