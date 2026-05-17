@@ -1828,20 +1828,20 @@ class _LocalWorkspaceOnboardingScreenState
                             const SizedBox(height: 20),
                             Align(
                               alignment: Alignment.centerRight,
-                              child: FilledButton(
-                                key: const ValueKey(
-                                  'local-workspace-onboarding-submit',
+                                child: FilledButton(
+                                  key: const ValueKey(
+                                    'local-workspace-onboarding-submit',
+                                  ),
+                                  onPressed:
+                                      _isSubmitting ||
+                                          actionLabel == null ||
+                                          inspection.state ==
+                                              LocalWorkspaceInspectionState
+                                                  .blocked
+                                      ? null
+                                      : _submit,
+                                  child: Text(actionLabel ?? ''),
                                 ),
-                                onPressed:
-                                    _isSubmitting ||
-                                        actionLabel == null ||
-                                        inspection.state ==
-                                            LocalWorkspaceInspectionState
-                                                .blocked
-                                    ? null
-                                    : _submit,
-                                child: Text(actionLabel ?? ''),
-                              ),
                             ),
                           ],
                         ],
