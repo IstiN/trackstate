@@ -209,7 +209,7 @@ def main() -> None:
                         step=2,
                         status="passed",
                         action=REQUEST_STEPS[1],
-                        observed="Pressing Enter on the focused trigger opened the visible workspace switcher dialog.",
+                        observed="Pressing Enter on the focused trigger opened the visible workspace switcher surface.",
                     )
             else:
                 _record_step(
@@ -220,7 +220,7 @@ def main() -> None:
                     observed=(
                         "The keyboard Enter step was not reachable because Tab navigation "
                         "never focused the workspace switcher trigger. A pointer click was "
-                        "used next only to collect diagnostic observations from the live dialog."
+                        "used next only to collect diagnostic observations from the live surface."
                     ),
                 )
 
@@ -433,7 +433,7 @@ def _assert_sheet_accessibility(
 ) -> str:
     if surface.heading_text != "Workspace switcher":
         raise AssertionError(
-            "Step 3 failed: the visible dialog did not expose the expected "
+            "Step 3 failed: the visible surface did not expose the expected "
             "`Workspace switcher` heading.\n"
             f"Observed heading: {surface.heading_text!r}\n"
             f"Observed body text:\n{surface.body_text}",
@@ -474,7 +474,7 @@ def _assert_sheet_accessibility(
     has_remove_control = any(label == "Delete" for label in labels)
     if not has_workspace_list_control or not has_add_workspace_control or not has_remove_control:
         raise AssertionError(
-            "Step 3 failed: tabbing through the workspace switcher dialog did not reach "
+            "Step 3 failed: tabbing through the workspace switcher surface did not reach "
             "the expected list, add-workspace, and remove controls.\n"
             f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
             f"Observed interactive labels: {[item.label for item in surface.interactive_elements]!r}",
@@ -507,7 +507,7 @@ def _assert_accessible_contrast(
     )
     if not state_badges:
         raise AssertionError(
-            "Step 4 failed: the workspace switcher dialog did not expose any visible "
+            "Step 4 failed: the workspace switcher surface did not expose any visible "
             "state or type badges to evaluate for contrast."
         )
     if not surface.interactive_icons:
@@ -787,7 +787,7 @@ def _assert_logical_sheet_focus_order(
         ranked_groups.append((step.step, label, group))
         if rank < last_rank:
             raise AssertionError(
-                "Step 3 failed: tabbing through the workspace switcher dialog did not keep "
+                "Step 3 failed: tabbing through the workspace switcher surface did not keep "
                 "a logical focus order across the major control groups.\n"
                 f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
                 f"Observed focus groups: {_focus_group_summary(sequence)}"
@@ -795,7 +795,7 @@ def _assert_logical_sheet_focus_order(
         last_rank = rank
     if not ranked_groups:
         raise AssertionError(
-            "Step 3 failed: the workspace switcher dialog did not expose enough labeled "
+            "Step 3 failed: the workspace switcher surface did not expose enough labeled "
             "focus targets to verify logical group order.\n"
             f"Observed focus sequence: {_focus_sequence_summary(sequence)}"
         )
@@ -1176,6 +1176,28 @@ def _failure_summary(result: dict[str, object]) -> str:
     return f"First failed step: {first.get('step')} — {first.get('observed')}"
 
 
+def _failed_step_observations(result: dict[str, object]) -> list[str]:
+    failed_steps = [
+        step
+        for step in result.get("steps", [])
+        if isinstance(step, dict) and step.get("status") == "failed"
+    ]
+    observations: list[str] = []
+    for step in failed_steps:
+        step_number = step.get("step")
+        observed = str(step.get("observed", "")).strip()
+        if not observed:
+            continue
+        first_line = observed.splitlines()[0].strip()
+        observations.append(f"Step {step_number}: {first_line}")
+    if observations:
+        return observations
+    fallback_error = str(result.get("error", "")).strip()
+    if fallback_error:
+        return [fallback_error.splitlines()[0].strip()]
+    return ["The run failed before the test could record step-level observations."]
+
+
 def _bug_description(result: dict[str, object]) -> str:
     steps = result.get("steps", [])
     annotated_steps: list[str] = []
@@ -1195,6 +1217,7 @@ def _bug_description(result: dict[str, object]) -> str:
             )
         else:
             annotated_steps.append(f"{index}. ❌ {request_step}\n   Observed: Not reached.")
+    actual_lines = _failed_step_observations(result)
     return "\n".join(
         [
             f"# {TICKET_KEY} — {TEST_CASE_TITLE}",
@@ -1211,11 +1234,8 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Actual vs Expected",
             f"- **Expected:** {EXPECTED_RESULT}",
-            (
-                "- **Actual:** Keyboard focus did not reliably reach the workspace "
-                "switcher trigger in the live top bar, and the condensed mobile "
-                "trigger did not expose a visible focus state during the run."
-            ),
+            "- **Actual:**",
+            *[f"  - {line}" for line in actual_lines],
             "",
             "## Environment",
             f"- URL: {result.get('app_url', '')}",
