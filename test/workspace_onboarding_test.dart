@@ -335,6 +335,79 @@ void main() {
       expect(state.activeWorkspace?.defaultBranch, 'release');
     },
   );
+
+  testWidgets(
+    'add workspace local folder can browse for a repository path',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final service = SharedPreferencesWorkspaceProfileService(
+        now: () => DateTime.utc(2026, 5, 14, 10, 0),
+      );
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'owner/current',
+          defaultBranch: 'main',
+        ),
+      );
+
+      final openedRepositories = <String>[];
+      final pickerCalls = <String?>[];
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: DemoTrackStateRepository.new,
+          workspaceProfileService: service,
+          workspaceDirectoryPicker:
+              ({String? confirmButtonText, String? initialDirectory}) async {
+                pickerCalls.add(confirmButtonText);
+                return '/tmp/local-demo';
+              },
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                openedRepositories.add(
+                  '$repositoryPath@$defaultBranch@$writeBranch',
+                );
+                return const DemoTrackStateRepository();
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel('Add workspace').first);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-onboarding-local-browse')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        _editableTextValue(
+          tester,
+          const ValueKey('workspace-onboarding-local-path'),
+        ),
+        '/tmp/local-demo',
+      );
+      expect(pickerCalls.single, 'Choose existing folder');
+
+      await tester.tap(find.byKey(const ValueKey('workspace-onboarding-open')));
+      await tester.pumpAndSettle();
+
+      expect(openedRepositories.single, '/tmp/local-demo@main@main');
+      final state = await service.loadState();
+      expect(state.activeWorkspace?.target, '/tmp/local-demo');
+    },
+  );
 }
 
 class _FakeLocalWorkspaceOnboardingService

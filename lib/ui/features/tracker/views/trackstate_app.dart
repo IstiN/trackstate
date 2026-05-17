@@ -1060,6 +1060,7 @@ class _TrackStateAppState extends State<TrackStateApp>
                         canCancel: true,
                         canBrowseHostedRepositories:
                             viewModel.canBrowseHostedRepositories,
+                        directoryPicker: widget.workspaceDirectoryPicker,
                         loadHostedRepositories:
                             viewModel.canBrowseHostedRepositories
                             ? viewModel.loadAccessibleHostedRepositories
@@ -1751,6 +1752,7 @@ class _WorkspaceOnboardingScreen extends StatefulWidget {
   const _WorkspaceOnboardingScreen({
     required this.canCancel,
     required this.canBrowseHostedRepositories,
+    required this.directoryPicker,
     required this.onOpenLocalWorkspace,
     required this.onOpenHostedWorkspace,
     this.loadHostedRepositories,
@@ -1759,6 +1761,7 @@ class _WorkspaceOnboardingScreen extends StatefulWidget {
 
   final bool canCancel;
   final bool canBrowseHostedRepositories;
+  final WorkspaceDirectoryPicker directoryPicker;
   final _HostedRepositoryCatalogLoader? loadHostedRepositories;
   final LocalRepositoryConfigurationApplier onOpenLocalWorkspace;
   final _HostedWorkspaceOpener onOpenHostedWorkspace;
@@ -1851,6 +1854,35 @@ class _WorkspaceOnboardingScreenState
     setState(() {
       _errorText = null;
     });
+  }
+
+  Future<void> _browseLocalFolder() async {
+    if (_isSubmitting) {
+      return;
+    }
+    try {
+      final selectedPath = await widget.directoryPicker(
+        confirmButtonText:
+            AppLocalizations.of(context)!.localWorkspaceOnboardingFolderBrowseOpen,
+        initialDirectory: _localPathController.text.trim().isEmpty
+            ? null
+            : _localPathController.text.trim(),
+      );
+      if (!mounted || selectedPath == null || selectedPath.isEmpty) {
+        return;
+      }
+      setState(() {
+        _localPathController.text = selectedPath;
+        _errorText = null;
+      });
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorText = '$error';
+      });
+    }
   }
 
   Future<void> _submit() async {
@@ -2002,6 +2034,21 @@ class _WorkspaceOnboardingScreenState
                             controller: _localPathController,
                             helperText:
                                 l10n.workspaceOnboardingLocalFolderHelper,
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: OutlinedButton(
+                              key: const ValueKey(
+                                'workspace-onboarding-local-browse',
+                              ),
+                              onPressed: _isSubmitting
+                                  ? null
+                                  : () => unawaited(_browseLocalFolder()),
+                              child: Text(
+                                l10n.localWorkspaceOnboardingFolderBrowseOpen,
+                              ),
+                            ),
                           ),
                           const SizedBox(height: 12),
                           _SettingsTextField(
