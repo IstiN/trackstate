@@ -95,7 +95,7 @@ void main() {
       expect(inspection.detectedWriteBranch, 'main');
       expect(
         inspection.message,
-        'This folder already contains a committed TrackState workspace and is ready to open.',
+        'This folder is an existing committed Git repository and can be opened in TrackState without initialization.',
       );
     },
   );

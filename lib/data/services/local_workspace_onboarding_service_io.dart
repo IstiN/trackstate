@@ -184,7 +184,7 @@ class LocalGitWorkspaceOnboardingService
         folderPath: normalizedPath,
         state: LocalWorkspaceInspectionState.readyToOpen,
         message:
-            'This folder already contains a committed TrackState workspace and is ready to open.',
+            'This folder is an existing committed Git repository and can be opened in TrackState without initialization.',
         suggestedWorkspaceName: suggestedWorkspaceName,
         suggestedWriteBranch: suggestedWriteBranch,
         detectedWriteBranch: detectedWriteBranch,
