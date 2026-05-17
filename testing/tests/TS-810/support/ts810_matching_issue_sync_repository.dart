@@ -3,18 +3,18 @@ import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
-class Ts742MatchingIssueSyncRepository extends DemoTrackStateRepository
+class Ts810MatchingIssueSyncRepository extends DemoTrackStateRepository
     implements WorkspaceSyncRepository {
-  Ts742MatchingIssueSyncRepository() : super(snapshot: _initialSnapshot);
+  Ts810MatchingIssueSyncRepository() : super(snapshot: _initialSnapshot);
 
-  static const String issueAKey = 'TRACK-742-A';
-  static const String issueBKey = 'TRACK-742-B';
+  static const String issueAKey = 'TRACK-810-A';
+  static const String issueBKey = 'TRACK-810-B';
   static const String issueASummary =
       'Issue-A stays visible in the active query';
   static const String issueBSummary =
       'Issue-B remains selected after the refresh';
-  static const String issueAPath = 'TRACK-742-A/main.md';
-  static const String issueBPath = 'TRACK-742-B/main.md';
+  static const String issueAPath = 'TRACK-810-A/main.md';
+  static const String issueBPath = 'TRACK-810-B/main.md';
   static const String openStatusId = 'open';
   static const String closedStatusId = 'closed';
   static const String query = 'status = Open';
@@ -25,8 +25,8 @@ class Ts742MatchingIssueSyncRepository extends DemoTrackStateRepository
 
   static const JqlSearchService _searchService = JqlSearchService();
   static const RepositoryUser _connectedUser = RepositoryUser(
-    login: 'ts742-user',
-    displayName: 'TS-742 User',
+    login: 'ts810-user',
+    displayName: 'TS-810 User',
   );
 
   TrackerSnapshot _currentSnapshot = _initialSnapshot;
@@ -36,7 +36,7 @@ class Ts742MatchingIssueSyncRepository extends DemoTrackStateRepository
 
   int get syncCheckCount => _syncCheckCount;
 
-  String get repositoryRevision => 'ts742-revision-$_revisionSerial';
+  String get repositoryRevision => 'ts810-revision-$_revisionSerial';
 
   void scheduleSelectedIssueDescriptionRefresh() {
     _currentSnapshot = _snapshotWithUpdatedIssueB(_currentSnapshot);
@@ -81,7 +81,7 @@ class Ts742MatchingIssueSyncRepository extends DemoTrackStateRepository
         state: RepositorySyncState(
           providerType: ProviderType.github,
           repositoryRevision: repositoryRevision,
-          sessionRevision: 'ts742-session',
+          sessionRevision: 'ts810-session',
           connectionState: ProviderConnectionState.connected,
         ),
         signals: const <WorkspaceSyncSignal>{
@@ -97,7 +97,7 @@ class Ts742MatchingIssueSyncRepository extends DemoTrackStateRepository
       state: RepositorySyncState(
         providerType: ProviderType.github,
         repositoryRevision: repositoryRevision,
-        sessionRevision: 'ts742-session',
+        sessionRevision: 'ts810-session',
         connectionState: ProviderConnectionState.connected,
       ),
     );
@@ -122,13 +122,13 @@ final TrackerSnapshot _initialSnapshot = TrackerSnapshot(
     ],
     statusDefinitions: <TrackStateConfigEntry>[
       TrackStateConfigEntry(
-        id: Ts742MatchingIssueSyncRepository.openStatusId,
+        id: Ts810MatchingIssueSyncRepository.openStatusId,
         name: 'Open',
         localizedLabels: <String, String>{'en': 'Open'},
         category: 'new',
       ),
       TrackStateConfigEntry(
-        id: Ts742MatchingIssueSyncRepository.closedStatusId,
+        id: Ts810MatchingIssueSyncRepository.closedStatusId,
         name: 'Closed',
         localizedLabels: <String, String>{'en': 'Closed'},
         category: 'done',
@@ -181,42 +181,42 @@ final TrackerSnapshot _initialSnapshot = TrackerSnapshot(
   ),
   issues: <TrackStateIssue>[
     _issue(
-      key: Ts742MatchingIssueSyncRepository.issueAKey,
-      summary: Ts742MatchingIssueSyncRepository.issueASummary,
-      storagePath: Ts742MatchingIssueSyncRepository.issueAPath,
+      key: Ts810MatchingIssueSyncRepository.issueAKey,
+      summary: Ts810MatchingIssueSyncRepository.issueASummary,
+      storagePath: Ts810MatchingIssueSyncRepository.issueAPath,
       description:
           'Issue-A stays Open so the search results keep more than one visible row.',
       updatedLabel: '1 minute ago',
     ),
     _issue(
-      key: Ts742MatchingIssueSyncRepository.issueBKey,
-      summary: Ts742MatchingIssueSyncRepository.issueBSummary,
-      storagePath: Ts742MatchingIssueSyncRepository.issueBPath,
-      description: Ts742MatchingIssueSyncRepository.initialIssueBDescription,
+      key: Ts810MatchingIssueSyncRepository.issueBKey,
+      summary: Ts810MatchingIssueSyncRepository.issueBSummary,
+      storagePath: Ts810MatchingIssueSyncRepository.issueBPath,
+      description: Ts810MatchingIssueSyncRepository.initialIssueBDescription,
       updatedLabel: 'just now',
     ),
   ],
   repositoryIndex: RepositoryIndex(
     entries: <RepositoryIssueIndexEntry>[
       RepositoryIssueIndexEntry(
-        key: Ts742MatchingIssueSyncRepository.issueAKey,
-        path: Ts742MatchingIssueSyncRepository.issueAPath,
+        key: Ts810MatchingIssueSyncRepository.issueAKey,
+        path: Ts810MatchingIssueSyncRepository.issueAPath,
         childKeys: <String>[],
-        summary: Ts742MatchingIssueSyncRepository.issueASummary,
+        summary: Ts810MatchingIssueSyncRepository.issueASummary,
         issueTypeId: 'story',
-        statusId: Ts742MatchingIssueSyncRepository.openStatusId,
+        statusId: Ts810MatchingIssueSyncRepository.openStatusId,
         priorityId: 'medium',
         assignee: 'qa-user',
         labels: <String>['search'],
         updatedLabel: '1 minute ago',
       ),
       RepositoryIssueIndexEntry(
-        key: Ts742MatchingIssueSyncRepository.issueBKey,
-        path: Ts742MatchingIssueSyncRepository.issueBPath,
+        key: Ts810MatchingIssueSyncRepository.issueBKey,
+        path: Ts810MatchingIssueSyncRepository.issueBPath,
         childKeys: <String>[],
-        summary: Ts742MatchingIssueSyncRepository.issueBSummary,
+        summary: Ts810MatchingIssueSyncRepository.issueBSummary,
         issueTypeId: 'story',
-        statusId: Ts742MatchingIssueSyncRepository.openStatusId,
+        statusId: Ts810MatchingIssueSyncRepository.openStatusId,
         priorityId: 'medium',
         assignee: 'qa-user',
         labels: <String>['search'],
@@ -231,10 +231,10 @@ TrackerSnapshot _snapshotWithUpdatedIssueB(TrackerSnapshot snapshot) {
     project: snapshot.project,
     issues: <TrackStateIssue>[
       for (final issue in snapshot.issues)
-        if (issue.key == Ts742MatchingIssueSyncRepository.issueBKey)
+        if (issue.key == Ts810MatchingIssueSyncRepository.issueBKey)
           issue.copyWith(
             description:
-                Ts742MatchingIssueSyncRepository.updatedIssueBDescription,
+                Ts810MatchingIssueSyncRepository.updatedIssueBDescription,
             updatedLabel: 'moments ago',
           )
         else
@@ -243,7 +243,7 @@ TrackerSnapshot _snapshotWithUpdatedIssueB(TrackerSnapshot snapshot) {
     repositoryIndex: RepositoryIndex(
       entries: <RepositoryIssueIndexEntry>[
         for (final entry in snapshot.repositoryIndex.entries)
-          if (entry.key == Ts742MatchingIssueSyncRepository.issueBKey)
+          if (entry.key == Ts810MatchingIssueSyncRepository.issueBKey)
             entry.copyWith(updatedLabel: 'moments ago')
           else
             entry,
@@ -269,7 +269,7 @@ TrackStateIssue _issue({
     issueType: IssueType.story,
     issueTypeId: 'story',
     status: IssueStatus.todo,
-    statusId: Ts742MatchingIssueSyncRepository.openStatusId,
+    statusId: Ts810MatchingIssueSyncRepository.openStatusId,
     priority: IssuePriority.medium,
     priorityId: 'medium',
     summary: summary,

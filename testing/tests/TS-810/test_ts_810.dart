@@ -7,14 +7,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
-import '../TS-742/support/ts742_matching_issue_sync_repository.dart';
+import 'support/ts810_matching_issue_sync_repository.dart';
 
-const String _ticketKey = 'TS-748';
+const String _ticketKey = 'TS-810';
 const String _ticketSummary =
-    'JQL Search selection — selection CSS styles applied and maintained';
-const String _testFilePath = 'testing/tests/TS-748/test_ts_748.dart';
+    'JQL search results — selection highlight preserved across matching sync';
+const String _testFilePath = 'testing/tests/TS-810/test_ts_810.dart';
 const String _runCommand =
-    'flutter test testing/tests/TS-748/test_ts_748.dart --reporter expanded';
+    'flutter test testing/tests/TS-810/test_ts_810.dart --reporter expanded';
 const List<String> _requestSteps = <String>[
   'Inspect the UI properties (CSS classes or style attributes) of the selected issue row to confirm the highlight is active.',
   'Trigger a workspace sync refresh.',
@@ -29,14 +29,14 @@ void main() {
   });
 
   testWidgets(
-    'TS-748 preserves the selected JQL Search row styling before and after a matching sync refresh',
+    'TS-810 preserves the selected JQL Search row highlight before and after a matching sync refresh',
     (tester) async {
       final result = <String, Object?>{
         'ticket': _ticketKey,
         'ticket_summary': _ticketSummary,
         'environment': 'flutter test',
         'os': Platform.operatingSystem,
-        'query': Ts742MatchingIssueSyncRepository.query,
+        'query': Ts810MatchingIssueSyncRepository.query,
         'steps': <Map<String, Object?>>[],
         'human_verification': <Map<String, Object?>>[],
       };
@@ -44,49 +44,49 @@ void main() {
       final semantics = tester.ensureSemantics();
       final TrackStateAppComponent screen = defaultTestingDependencies
           .createTrackStateAppScreen(tester);
-      final repository = Ts742MatchingIssueSyncRepository();
+      final repository = Ts810MatchingIssueSyncRepository();
 
       try {
         await screen.pump(repository);
         await screen.openSection('JQL Search');
-        await screen.searchIssues(Ts742MatchingIssueSyncRepository.query);
+        await screen.searchIssues(Ts810MatchingIssueSyncRepository.query);
         await screen.expectIssueSearchResultVisible(
-          Ts742MatchingIssueSyncRepository.issueAKey,
-          Ts742MatchingIssueSyncRepository.issueASummary,
+          Ts810MatchingIssueSyncRepository.issueAKey,
+          Ts810MatchingIssueSyncRepository.issueASummary,
         );
         await screen.expectIssueSearchResultVisible(
-          Ts742MatchingIssueSyncRepository.issueBKey,
-          Ts742MatchingIssueSyncRepository.issueBSummary,
+          Ts810MatchingIssueSyncRepository.issueBKey,
+          Ts810MatchingIssueSyncRepository.issueBSummary,
         );
         await screen.openIssue(
-          Ts742MatchingIssueSyncRepository.issueBKey,
-          Ts742MatchingIssueSyncRepository.issueBSummary,
+          Ts810MatchingIssueSyncRepository.issueBKey,
+          Ts810MatchingIssueSyncRepository.issueBSummary,
         );
         await screen.expectIssueDetailVisible(
-          Ts742MatchingIssueSyncRepository.issueBKey,
+          Ts810MatchingIssueSyncRepository.issueBKey,
         );
         await screen.expectIssueDetailText(
-          Ts742MatchingIssueSyncRepository.issueBKey,
-          Ts742MatchingIssueSyncRepository.initialIssueBDescription,
+          Ts810MatchingIssueSyncRepository.issueBKey,
+          Ts810MatchingIssueSyncRepository.initialIssueBDescription,
         );
 
         final initialQuery = await screen.readJqlSearchFieldValue();
         final initialIssueBDetailVisible = await screen.isIssueDetailVisible(
-          Ts742MatchingIssueSyncRepository.issueBKey,
+          Ts810MatchingIssueSyncRepository.issueBKey,
         );
         final initialIssueADetailVisible = await screen.isIssueDetailVisible(
-          Ts742MatchingIssueSyncRepository.issueAKey,
+          Ts810MatchingIssueSyncRepository.issueAKey,
         );
         final initialSelectedObservation = await screen
             .readIssueSearchResultSelectionObservation(
-              Ts742MatchingIssueSyncRepository.issueBKey,
-              Ts742MatchingIssueSyncRepository.issueBSummary,
+              Ts810MatchingIssueSyncRepository.issueBKey,
+              Ts810MatchingIssueSyncRepository.issueBSummary,
               expectedSelected: true,
             );
         final initialUnselectedObservation = await screen
             .readIssueSearchResultSelectionObservation(
-              Ts742MatchingIssueSyncRepository.issueAKey,
-              Ts742MatchingIssueSyncRepository.issueASummary,
+              Ts810MatchingIssueSyncRepository.issueAKey,
+              Ts810MatchingIssueSyncRepository.issueASummary,
               expectedSelected: false,
             );
         final initialRows = screen.visibleIssueSearchResultLabelsSnapshot();
@@ -104,13 +104,13 @@ void main() {
         result['repository_revision_before_refresh'] =
             repository.repositoryRevision;
 
-        if (initialQuery != Ts742MatchingIssueSyncRepository.query ||
+        if (initialQuery != Ts810MatchingIssueSyncRepository.query ||
             !initialIssueBDetailVisible ||
             initialIssueADetailVisible) {
           throw AssertionError(
-            'Precondition failed: TS-748 expected the visible query to be '
-            '"${Ts742MatchingIssueSyncRepository.query}", only '
-            '${Ts742MatchingIssueSyncRepository.issueBKey} to have an open '
+            'Precondition failed: TS-810 expected the visible query to be '
+            '"${Ts810MatchingIssueSyncRepository.query}", only '
+            '${Ts810MatchingIssueSyncRepository.issueBKey} to have an open '
             'detail panel, and the JQL Search results to remain visible before '
             'the refresh.\n'
             'Observed query: ${initialQuery ?? '<missing>'}\n'
@@ -157,26 +157,26 @@ void main() {
 
         final queryAfterRefresh = await screen.readJqlSearchFieldValue();
         final issueBDetailVisible = await screen.isIssueDetailVisible(
-          Ts742MatchingIssueSyncRepository.issueBKey,
+          Ts810MatchingIssueSyncRepository.issueBKey,
         );
         final issueADetailVisible = await screen.isIssueDetailVisible(
-          Ts742MatchingIssueSyncRepository.issueAKey,
+          Ts810MatchingIssueSyncRepository.issueAKey,
         );
         final updatedDescriptionVisible = await screen.isTextVisible(
-          Ts742MatchingIssueSyncRepository.updatedIssueBDescription,
+          Ts810MatchingIssueSyncRepository.updatedIssueBDescription,
         );
         final rowsAfterRefresh = screen
             .visibleIssueSearchResultLabelsSnapshot();
         final selectedObservationAfterRefresh = await screen
             .readIssueSearchResultSelectionObservation(
-              Ts742MatchingIssueSyncRepository.issueBKey,
-              Ts742MatchingIssueSyncRepository.issueBSummary,
+              Ts810MatchingIssueSyncRepository.issueBKey,
+              Ts810MatchingIssueSyncRepository.issueBSummary,
               expectedSelected: true,
             );
         final unselectedObservationAfterRefresh = await screen
             .readIssueSearchResultSelectionObservation(
-              Ts742MatchingIssueSyncRepository.issueAKey,
-              Ts742MatchingIssueSyncRepository.issueASummary,
+              Ts810MatchingIssueSyncRepository.issueAKey,
+              Ts810MatchingIssueSyncRepository.issueASummary,
               expectedSelected: false,
             );
         final visibleTextsAfterRefresh = screen.visibleTextsSnapshot();
@@ -210,7 +210,7 @@ void main() {
             repository.syncCheckCount >= 2 &&
             repository.repositoryRevision !=
                 result['repository_revision_before_refresh'] &&
-            queryAfterRefresh == Ts742MatchingIssueSyncRepository.query &&
+            queryAfterRefresh == Ts810MatchingIssueSyncRepository.query &&
             updatedDescriptionVisible;
         _recordStep(
           result,
@@ -264,7 +264,7 @@ void main() {
             'selection styling indicators.\n'
             'Expected selected row styling to stay consistent before and after '
             'refresh while the detail panel remained open for '
-            '${Ts742MatchingIssueSyncRepository.issueBKey}.\n'
+            '${Ts810MatchingIssueSyncRepository.issueBKey}.\n'
             'Observed: $stepThreeObserved\n'
             'Visible semantics: ${_formatSnapshot(visibleSemanticsAfterRefresh)}',
           );
@@ -310,13 +310,13 @@ Future<bool> _hasUpdatedSelectedIssueState(
   TrackStateAppComponent screen,
 ) async {
   return await screen.isIssueDetailVisible(
-        Ts742MatchingIssueSyncRepository.issueBKey,
+        Ts810MatchingIssueSyncRepository.issueBKey,
       ) &&
       !(await screen.isIssueDetailVisible(
-        Ts742MatchingIssueSyncRepository.issueAKey,
+        Ts810MatchingIssueSyncRepository.issueAKey,
       )) &&
       await screen.isTextVisible(
-        Ts742MatchingIssueSyncRepository.updatedIssueBDescription,
+        Ts810MatchingIssueSyncRepository.updatedIssueBDescription,
       );
 }
 
@@ -414,7 +414,7 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '',
     'h4. What was tested',
     '* Opened the production {noformat}JQL Search{noformat} surface and ran the active query {noformat}${result['query']}{noformat}.',
-    '* Selected {noformat}${Ts742MatchingIssueSyncRepository.issueBKey}{noformat} and inspected the production-visible selection styling on the search result row before the refresh.',
+    '* Selected {noformat}${Ts810MatchingIssueSyncRepository.issueBKey}{noformat} and inspected the production-visible selection styling on the search result row before the refresh.',
     '* Triggered the production app-resume workspace sync refresh after updating only the selected issue description while its status stayed Open.',
     '* Re-inspected the same selected row after refresh and checked that the selected semantics flag, selection background, selection border, issue key emphasis, and summary emphasis stayed applied while the updated description remained visible.',
     '',
@@ -467,7 +467,7 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '',
     '### What was tested',
     '- Opened the production `JQL Search` surface and ran the active query `${result['query']}`.',
-    '- Selected `${Ts742MatchingIssueSyncRepository.issueBKey}` and inspected the production-visible selection styling on the search result row before the refresh.',
+    '- Selected `${Ts810MatchingIssueSyncRepository.issueBKey}` and inspected the production-visible selection styling on the search result row before the refresh.',
     '- Triggered the production app-resume workspace sync refresh after updating only the selected issue description while its status stayed Open.',
     '- Re-inspected the same selected row after refresh and checked that the selected semantics flag, selection background, selection border, issue key emphasis, and summary emphasis stayed applied while the updated description remained visible.',
     '',
@@ -519,7 +519,7 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
         : 'Added a widget regression for JQL Search selection styling, but the product behavior still fails the ticket expectations.',
     '',
     '- Status: ${passed ? 'PASSED' : 'FAILED'}',
-    '- Query: `${result['query'] ?? Ts742MatchingIssueSyncRepository.query}`',
+    '- Query: `${result['query'] ?? Ts810MatchingIssueSyncRepository.query}`',
     '- Repository revision before refresh: `${result['repository_revision_before_refresh'] ?? '<missing>'}`',
     '- Repository revision after refresh: `${result['repository_revision_after_refresh'] ?? '<missing>'}`',
     '- Initial selected-row observation: `${result['initial_selected_observation'] ?? '<missing>'}`',
@@ -591,7 +591,7 @@ String _bugDescription(Map<String, Object?> result) {
     '```',
     '',
     '## Actual vs Expected',
-    '- **Expected:** `${Ts742MatchingIssueSyncRepository.issueBKey}` stays visibly selected with the same selection styling before and after refresh, `${Ts742MatchingIssueSyncRepository.issueAKey}` stays visibly unselected, the query remains `${result['query'] ?? Ts742MatchingIssueSyncRepository.query}`, and the detail panel shows `${Ts742MatchingIssueSyncRepository.updatedIssueBDescription}`.',
+    '- **Expected:** `${Ts810MatchingIssueSyncRepository.issueBKey}` stays visibly selected with the same selection styling before and after refresh, `${Ts810MatchingIssueSyncRepository.issueAKey}` stays visibly unselected, the query remains `${result['query'] ?? Ts810MatchingIssueSyncRepository.query}`, and the detail panel shows `${Ts810MatchingIssueSyncRepository.updatedIssueBDescription}`.',
     '- **Actual:** initial selected observation=`${result['initial_selected_observation'] ?? '<missing>'}`, final selected observation=`${result['selected_observation_after_refresh'] ?? '<missing>'}`, initial unselected observation=`${result['initial_unselected_observation'] ?? '<missing>'}`, final unselected observation=`${result['unselected_observation_after_refresh'] ?? '<missing>'}`, issue B detail visible after refresh=`${result['issue_b_detail_visible_after_refresh'] ?? '<missing>'}`, issue A detail visible after refresh=`${result['issue_a_detail_visible_after_refresh'] ?? '<missing>'}`, updated description visible=`${result['updated_description_visible_after_refresh'] ?? '<missing>'}`.',
     '',
     '## Environment',
