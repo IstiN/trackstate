@@ -1,0 +1,728 @@
+from __future__ import annotations
+
+import json
+import platform
+import sys
+import traceback
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
+    LiveWorkspaceSwitcherPage,
+    WorkspaceSwitcherObservation,
+    WorkspaceSwitcherRowObservation,
+    WorkspaceSwitcherTriggerObservation,
+)
+from testing.components.services.live_setup_repository_service import (  # noqa: E402
+    LiveSetupRepositoryService,
+)
+from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
+from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
+    StoredWorkspaceProfilesRuntime,
+)
+
+TICKET_KEY = "TS-808"
+TEST_CASE_TITLE = (
+    "Active local workspace authenticated state - Connect GitHub control is hidden"
+)
+RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-808/test_ts_808.py"
+DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
+DEFAULT_BRANCH = "main"
+LOCAL_TARGET = "/tmp/trackstate-demo"
+LOCAL_DISPLAY_NAME = "Active local workspace"
+HOSTED_DISPLAY_NAME = "Hosted setup workspace"
+
+OUTPUTS_DIR = REPO_ROOT / "outputs"
+JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
+PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
+RESPONSE_PATH = OUTPUTS_DIR / "response.md"
+RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts808_success.png"
+FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts808_failure.png"
+
+REQUEST_STEPS = [
+    "Open the workspace switcher.",
+    "Inspect the row representing the currently active local workspace.",
+    "Verify that the 'Connect GitHub' control (button or action) is not visible.",
+]
+EXPECTED_RESULT = (
+    "The 'Connect GitHub' control is hidden on the active local workspace row "
+    "because a valid GitHub session is detected."
+)
+
+
+def main() -> None:
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    SUCCESS_SCREENSHOT_PATH.unlink(missing_ok=True)
+    FAILURE_SCREENSHOT_PATH.unlink(missing_ok=True)
+
+    config = load_live_setup_test_config()
+    service = LiveSetupRepositoryService(config=config)
+    token = service.token
+    if not token:
+        raise RuntimeError(
+            "TS-808 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
+        )
+    user = service.fetch_authenticated_user()
+    workspace_state = _workspace_state(service.repository)
+
+    result: dict[str, object] = {
+        "ticket": TICKET_KEY,
+        "test_case_title": TEST_CASE_TITLE,
+        "app_url": config.app_url,
+        "repository": service.repository,
+        "repository_ref": service.ref,
+        "browser": "Chromium (Playwright)",
+        "os": platform.platform(),
+        "run_command": RUN_COMMAND,
+        "expected_result": EXPECTED_RESULT,
+        "desktop_viewport": DESKTOP_VIEWPORT,
+        "user_login": user.login,
+        "preloaded_workspace_state": workspace_state,
+        "steps": [],
+        "human_verification": [],
+    }
+
+    page: LiveWorkspaceSwitcherPage | None = None
+    try:
+        with create_live_tracker_app(
+            config,
+            runtime_factory=lambda: StoredWorkspaceProfilesRuntime(
+                repository=config.repository,
+                token=token,
+                workspace_state=workspace_state,
+            ),
+        ) as tracker_page:
+            page = LiveWorkspaceSwitcherPage(tracker_page)
+            try:
+                runtime = tracker_page.open()
+                result["runtime_state"] = runtime.kind
+                result["runtime_body_text"] = runtime.body_text
+                if runtime.kind != "ready":
+                    raise AssertionError(
+                        "Precondition failed: the deployed app did not reach the "
+                        "interactive shell with the signed-in active-local workspace "
+                        "preload.\n"
+                        f"Observed runtime state: {runtime.kind}\n"
+                        f"Observed body text:\n{runtime.body_text}",
+                    )
+
+                page.dismiss_connection_banner()
+                page.set_viewport(**DESKTOP_VIEWPORT)
+                trigger = page.observe_trigger()
+                result["trigger_observation"] = _trigger_payload(trigger)
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Viewed the signed-in shell before opening the switcher and checked "
+                        "that the active workspace shown in the trigger was a Local Git workspace."
+                    ),
+                    observed=(
+                        f"trigger_label={trigger.semantic_label!r}; "
+                        f"trigger_text={trigger.visible_text!r}; "
+                        f"top_buttons={list(trigger.top_button_labels)!r}"
+                    ),
+                )
+
+                switcher = page.open_and_observe()
+                result["switcher_observation"] = _switcher_payload(switcher)
+                _record_step(
+                    result,
+                    step=1,
+                    status="passed",
+                    action=REQUEST_STEPS[0],
+                    observed=(
+                        f"Opened the workspace switcher from a signed-in session. "
+                        f"trigger_label={trigger.semantic_label!r}; "
+                        f"row_count={switcher.row_count}; "
+                        f"switcher_text={switcher.switcher_text!r}"
+                    ),
+                )
+
+                try:
+                    active_local_row = _find_active_local_row(
+                        switcher,
+                        trigger=trigger,
+                    )
+                except AssertionError as error:
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed=str(error),
+                    )
+                    _record_step(
+                        result,
+                        step=3,
+                        status="failed",
+                        action=REQUEST_STEPS[2],
+                        observed="Not reached because step 2 failed: no selected active local workspace row was available to inspect.",
+                    )
+                    raise
+                result["active_local_row"] = _row_payload(active_local_row)
+                _record_step(
+                    result,
+                    step=2,
+                    status="passed",
+                    action=REQUEST_STEPS[1],
+                    observed=(
+                        f"Selected row display_name={active_local_row.display_name!r}; "
+                        f"type={active_local_row.target_type_label!r}; "
+                        f"state={active_local_row.state_label!r}; "
+                        f"actions={list(active_local_row.action_labels)!r}; "
+                        f"buttons={list(active_local_row.button_labels)!r}; "
+                        f"visible_text={active_local_row.visible_text!r}"
+                    ),
+                )
+
+                try:
+                    _assert_connect_github_hidden(
+                        switcher=switcher,
+                        active_local_row=active_local_row,
+                    )
+                except AssertionError as error:
+                    _record_step(
+                        result,
+                        step=3,
+                        status="failed",
+                        action=REQUEST_STEPS[2],
+                        observed=str(error),
+                    )
+                    raise
+                _record_step(
+                    result,
+                    step=3,
+                    status="passed",
+                    action=REQUEST_STEPS[2],
+                    observed=(
+                        "The active local row did not expose any visible `Connect GitHub` "
+                        "button, action label, or row text, and the switcher surface itself "
+                        "did not show `Connect GitHub` anywhere."
+                    ),
+                )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Opened the workspace switcher and inspected the selected local row "
+                        "the way a signed-in user would, looking specifically for any visible "
+                        "`Connect GitHub` label or control."
+                    ),
+                    observed=(
+                        f"selected_row_text={active_local_row.visible_text!r}; "
+                        f"selected_row_actions={list(active_local_row.action_labels)!r}; "
+                        f"selected_row_buttons={list(active_local_row.button_labels)!r}; "
+                        f"switcher_contains_connect_github={'Connect GitHub' in switcher.switcher_text}"
+                    ),
+                )
+            except Exception:
+                if page is not None:
+                    try:
+                        page.screenshot(str(FAILURE_SCREENSHOT_PATH))
+                        result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
+                    except Exception as screenshot_error:
+                        result["screenshot_error"] = (
+                            f"{type(screenshot_error).__name__}: {screenshot_error}"
+                        )
+                raise
+            page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
+            result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
+    except AssertionError as error:
+        result["error"] = str(error)
+        result["traceback"] = traceback.format_exc()
+        _write_failure_outputs(result)
+        raise
+    except Exception as error:
+        result["error"] = f"{type(error).__name__}: {error}"
+        result["traceback"] = traceback.format_exc()
+        _write_failure_outputs(result)
+        raise
+
+    _write_pass_outputs(result)
+    print(f"{TICKET_KEY} passed")
+
+
+def _workspace_state(repository: str) -> dict[str, object]:
+    local_id = f"local:{LOCAL_TARGET}@{DEFAULT_BRANCH}"
+    hosted_id = f"hosted:{repository.lower()}@{DEFAULT_BRANCH}"
+    return {
+        "activeWorkspaceId": local_id,
+        "migrationComplete": True,
+        "profiles": [
+            {
+                "id": local_id,
+                "displayName": LOCAL_DISPLAY_NAME,
+                "customDisplayName": LOCAL_DISPLAY_NAME,
+                "targetType": "local",
+                "target": LOCAL_TARGET,
+                "defaultBranch": DEFAULT_BRANCH,
+                "writeBranch": DEFAULT_BRANCH,
+                "lastOpenedAt": "2026-05-17T12:00:00.000Z",
+            },
+            {
+                "id": hosted_id,
+                "displayName": HOSTED_DISPLAY_NAME,
+                "customDisplayName": HOSTED_DISPLAY_NAME,
+                "targetType": "hosted",
+                "target": repository,
+                "defaultBranch": DEFAULT_BRANCH,
+                "writeBranch": DEFAULT_BRANCH,
+                "lastOpenedAt": "2026-05-16T12:00:00.000Z",
+            },
+        ],
+    }
+
+
+def _find_active_local_row(
+    switcher: WorkspaceSwitcherObservation,
+    *,
+    trigger: WorkspaceSwitcherTriggerObservation,
+) -> WorkspaceSwitcherRowObservation:
+    for row in switcher.rows:
+        if (
+            row.selected
+            and row.target_type_label == "Local"
+            and row.state_label == "Local Git"
+        ):
+            return row
+    raise AssertionError(
+        "Step 2 failed: the workspace switcher did not show a selected active local "
+        "workspace row in the `Local Git` state after startup.\n"
+        f"Observed trigger label: {trigger.semantic_label!r}\n"
+        f"Observed rows: {[row.visible_text for row in switcher.rows]!r}\n"
+        f"Observed switcher text:\n{switcher.switcher_text}"
+    )
+
+
+def _assert_connect_github_hidden(
+    *,
+    switcher: WorkspaceSwitcherObservation,
+    active_local_row: WorkspaceSwitcherRowObservation,
+) -> None:
+    row_actions = [*active_local_row.action_labels, *active_local_row.button_labels]
+    if any(label == "Connect GitHub" for label in row_actions):
+        raise AssertionError(
+            "Step 3 failed: the active local workspace row still exposed a visible "
+            "`Connect GitHub` action while the user was already signed in.\n"
+            f"Observed row actions/buttons: {row_actions!r}\n"
+            f"Observed row text: {active_local_row.visible_text!r}"
+        )
+    if "Connect GitHub" in active_local_row.visible_text:
+        raise AssertionError(
+            "Step 3 failed: the active local workspace row still rendered "
+            "`Connect GitHub` in its visible text while the user was already signed in.\n"
+            f"Observed row text: {active_local_row.visible_text!r}"
+        )
+    if "Connect GitHub" in switcher.switcher_text:
+        raise AssertionError(
+            "Step 3 failed: the workspace switcher still displayed `Connect GitHub` "
+            "while the signed-in active local row was visible.\n"
+            f"Observed switcher text:\n{switcher.switcher_text}"
+        )
+
+
+def _record_step(
+    result: dict[str, object],
+    *,
+    step: int,
+    status: str,
+    action: str,
+    observed: str,
+) -> None:
+    steps = result.setdefault("steps", [])
+    assert isinstance(steps, list)
+    steps.append(
+        {
+            "step": step,
+            "status": status,
+            "action": action,
+            "observed": observed,
+        },
+    )
+
+
+def _record_human_verification(
+    result: dict[str, object],
+    *,
+    check: str,
+    observed: str,
+) -> None:
+    checks = result.setdefault("human_verification", [])
+    assert isinstance(checks, list)
+    checks.append({"check": check, "observed": observed})
+
+
+def _write_pass_outputs(result: dict[str, object]) -> None:
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "passed": 1,
+                "failed": 0,
+                "skipped": 0,
+                "summary": "1 passed, 0 failed",
+            },
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
+    PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+
+
+def _write_failure_outputs(result: dict[str, object]) -> None:
+    error = str(result.get("error", "AssertionError: TS-808 failed"))
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "passed": 0,
+                "failed": 1,
+                "skipped": 0,
+                "summary": "0 passed, 1 failed",
+                "error": error,
+            },
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
+    PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+
+
+def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
+    status = "✅ PASSED" if passed else "❌ FAILED"
+    lines = [
+        "h3. Test Automation Result",
+        "",
+        f"*Status:* {status}",
+        f"*Test Case:* {TICKET_KEY} - {TEST_CASE_TITLE}",
+        "",
+        "h4. What was automated",
+        "* Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
+        "* Opened *Workspace switcher* and verified the selected row represented the active local workspace in the visible {{Local Git}} state.",
+        "* Verified the selected active local row did not expose any visible {{Connect GitHub}} action, button, or visible row text while signed in.",
+        "",
+        "h4. Human-style verification",
+        *_human_lines(result, jira=True),
+        "",
+        "h4. Result",
+        (
+            "* Matched the expected result."
+            if passed
+            else f"* Did not match the expected result. {_failed_step_summary(result)}"
+        ),
+        (
+            f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
+            f"{{{{{result['repository']}}}}} @ {{{{{result['repository_ref']}}}}}, "
+            f"browser {{Chromium (Playwright)}}, OS {{{{{result['os']}}}}}."
+        ),
+        "",
+        "h4. Step results",
+        *_step_lines(result, jira=True),
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "h4. Exact error",
+                "{code}",
+                str(result.get("traceback", result.get("error", ""))),
+                "{code}",
+            ],
+        )
+    lines.extend(_artifact_lines(result, jira=True))
+    return "\n".join(lines) + "\n"
+
+
+def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
+    status = "✅ PASSED" if passed else "❌ FAILED"
+    lines = [
+        "## Test Automation Result",
+        "",
+        f"**Status:** {status}",
+        f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
+        "",
+        "## What was automated",
+        "- Opened the deployed TrackState app in Chromium with a stored signed-in GitHub session and a preloaded active local workspace profile.",
+        "- Opened **Workspace switcher** and verified the selected row represented the active local workspace in the visible `Local Git` state.",
+        "- Verified the selected active local row did not expose any visible `Connect GitHub` action, button, or visible row text while signed in.",
+        "",
+        "## Human-style verification",
+        *_human_lines(result, jira=False),
+        "",
+        "## Result",
+        (
+            "- Matched the expected result."
+            if passed
+            else f"- Did not match the expected result. {_failed_step_summary(result)}"
+        ),
+        (
+            f"- Environment: URL `{result['app_url']}`, repository "
+            f"`{result['repository']}` @ `{result['repository_ref']}`, browser "
+            f"`Chromium (Playwright)`, OS `{result['os']}`."
+        ),
+        "",
+        "## Step results",
+        *_step_lines(result, jira=False),
+        "",
+        "## How to run",
+        "```bash",
+        RUN_COMMAND,
+        "```",
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "## Exact error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
+            ],
+        )
+    lines.extend(_artifact_lines(result, jira=False))
+    return "\n".join(lines) + "\n"
+
+
+def _response_summary(result: dict[str, object], *, passed: bool) -> str:
+    status = "PASSED" if passed else "FAILED"
+    lines = [
+        "## Test Automation Summary",
+        "",
+        "- Added TS-808 live workspace-switcher coverage for the signed-in active-local workspace state.",
+        f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
+        f"- Result: **{status}**",
+        f"- Command: `{RUN_COMMAND}`",
+        (
+            f"- Environment: `{result['app_url']}` on Chromium/Playwright "
+            f"({result['os']}) against `{result['repository']}` @ "
+            f"`{result['repository_ref']}`."
+        ),
+        (
+            "- Outcome: the signed-in active local workspace row kept `Connect GitHub` hidden."
+            if passed
+            else f"- Outcome: {_failed_step_summary(result)}"
+        ),
+    ]
+    lines.extend(_artifact_lines(result, jira=False))
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "## Error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
+            ],
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _bug_description(result: dict[str, object]) -> str:
+    return "\n".join(
+        [
+            f"# {TICKET_KEY} - Active local workspace still shows Connect GitHub while signed in",
+            "",
+            "## Preconditions used during the run",
+            "- User was signed in to GitHub via a stored browser token.",
+            f"- Browser storage was preloaded with an active local workspace (`{LOCAL_TARGET}`) and one hosted workspace.",
+            "",
+            "## Exact steps to reproduce",
+            _annotated_step_line(result, 1, REQUEST_STEPS[0]),
+            _annotated_step_line(result, 2, REQUEST_STEPS[1]),
+            _annotated_step_line(result, 3, REQUEST_STEPS[2]),
+            "",
+            "## Expected result",
+            EXPECTED_RESULT,
+            "",
+            "## Actual result",
+            str(result.get("error", "<missing error>")),
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Environment details",
+            f"- URL: {result.get('app_url')}",
+            (
+                f"- Repository: {result.get('repository')} @ "
+                f"{result.get('repository_ref')}"
+            ),
+            f"- Browser: {result.get('browser')}",
+            f"- OS: {result.get('os')}",
+            f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
+            f"- Run command: {RUN_COMMAND}",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: {result.get('screenshot', '<no screenshot recorded>')}",
+            "```json",
+            json.dumps(
+                {
+                    "trigger_observation": result.get("trigger_observation"),
+                    "active_local_row": result.get("active_local_row"),
+                    "switcher_observation": result.get("switcher_observation"),
+                },
+                indent=2,
+            ),
+            "```",
+        ],
+    ) + "\n"
+
+
+def _annotated_step_line(
+    result: dict[str, object],
+    step_number: int,
+    action: str,
+) -> str:
+    status = _step_status(result, step_number)
+    marker = "✅" if status == "passed" else "❌"
+    observation = _step_observation(result, step_number)
+    if observation == "<no observation recorded>" and _has_prior_failed_step(
+        result,
+        step_number,
+    ):
+        observation = "Not reached because an earlier step failed."
+    return (
+        f"{step_number}. {marker} {action}\n"
+        f"   Actual: {observation}"
+    )
+
+
+def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    prefix = "*" if jira else "-"
+    steps = result.get("steps", [])
+    if not isinstance(steps, list):
+        return [f"{prefix} <no step data recorded>"]
+    lines: list[str] = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        marker = "✅" if step.get("status") == "passed" else "❌"
+        lines.append(
+            f"{prefix} {marker} Step {step.get('step')}: {step.get('action')} "
+            f"Observed: {step.get('observed')}"
+        )
+    return lines or [f"{prefix} <no step data recorded>"]
+
+
+def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    prefix = "*" if jira else "-"
+    checks = result.get("human_verification", [])
+    if not isinstance(checks, list):
+        return [f"{prefix} <no human-style verification recorded>"]
+    lines: list[str] = []
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        lines.append(f"{prefix} {check.get('check')}: {check.get('observed')}")
+    return lines or [f"{prefix} <no human-style verification recorded>"]
+
+
+def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    prefix = "*" if jira else "-"
+    screenshot = result.get("screenshot")
+    if not screenshot:
+        return []
+    if jira:
+        return [f"{prefix} Screenshot: {{{{{screenshot}}}}}"]
+    return [f"{prefix} Screenshot: `{screenshot}`"]
+
+
+def _failed_step_summary(result: dict[str, object]) -> str:
+    steps = result.get("steps", [])
+    if isinstance(steps, list):
+        for step in steps:
+            if isinstance(step, dict) and step.get("status") != "passed":
+                return f"Step {step.get('step')}: {step.get('observed')}"
+    return str(result.get("error", "No failed step recorded."))
+
+
+def _step_status(result: dict[str, object], step_number: int) -> str:
+    steps = result.get("steps", [])
+    if not isinstance(steps, list):
+        return "failed"
+    for step in steps:
+        if isinstance(step, dict) and int(step.get("step", -1)) == step_number:
+            return str(step.get("status", "failed"))
+    return "failed"
+
+
+def _step_observation(result: dict[str, object], step_number: int) -> str:
+    steps = result.get("steps", [])
+    if not isinstance(steps, list):
+        return "<no observation recorded>"
+    for step in steps:
+        if isinstance(step, dict) and int(step.get("step", -1)) == step_number:
+            return str(step.get("observed", "<no observation recorded>"))
+    return "<no observation recorded>"
+
+
+def _has_prior_failed_step(result: dict[str, object], step_number: int) -> bool:
+    steps = result.get("steps", [])
+    if not isinstance(steps, list):
+        return False
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        candidate_step = int(step.get("step", -1))
+        if candidate_step < step_number and step.get("status") != "passed":
+            return True
+    return False
+
+
+def _trigger_payload(trigger: WorkspaceSwitcherTriggerObservation) -> dict[str, object]:
+    return {
+        "semantic_label": trigger.semantic_label,
+        "visible_text": trigger.visible_text,
+        "raw_text_lines": list(trigger.raw_text_lines),
+        "display_name": trigger.display_name,
+        "workspace_type": trigger.workspace_type,
+        "state_label": trigger.state_label,
+        "viewport_width": trigger.viewport_width,
+        "viewport_height": trigger.viewport_height,
+        "bounds": {
+            "left": trigger.left,
+            "top": trigger.top,
+            "width": trigger.width,
+            "height": trigger.height,
+        },
+        "top_button_labels": list(trigger.top_button_labels),
+    }
+
+
+def _switcher_payload(switcher: WorkspaceSwitcherObservation) -> dict[str, object]:
+    return {
+        "row_count": switcher.row_count,
+        "switcher_text": switcher.switcher_text,
+        "rows": [_row_payload(row) for row in switcher.rows],
+    }
+
+
+def _row_payload(row: WorkspaceSwitcherRowObservation) -> dict[str, object]:
+    return {
+        "display_name": row.display_name,
+        "target_type_label": row.target_type_label,
+        "state_label": row.state_label,
+        "detail_text": row.detail_text,
+        "visible_text": row.visible_text,
+        "selected": row.selected,
+        "semantics_label": row.semantics_label,
+        "icon_accessibility_label": row.icon_accessibility_label,
+        "action_labels": list(row.action_labels),
+        "button_labels": list(row.button_labels),
+    }
+
+
+if __name__ == "__main__":
+    main()
