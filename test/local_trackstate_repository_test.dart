@@ -99,6 +99,35 @@ void main() {
   );
 
   test(
+    'local repository opens a plain committed Git repository with built-in defaults',
+    () async {
+      final repo = await _createPlainGitRepository();
+      addTearDown(() => repo.parent.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+
+      final initialSnapshot = await repository.loadSnapshot();
+      final created = await repository.createIssue(
+        summary: 'Bootstrap tracker from plain repo',
+        description: 'Create the first issue without re-initializing Git.',
+      );
+      final refreshed = await repository.loadSnapshot();
+
+      expect(initialSnapshot.project.name, 'plain-demo-repo');
+      expect(initialSnapshot.project.key, 'PDR');
+      expect(initialSnapshot.project.branch, 'main');
+      expect(initialSnapshot.issues, isEmpty);
+      expect(created.key, 'PDR-1');
+      expect(created.storagePath, 'PDR/PDR-1/main.md');
+      expect(
+        File('${repo.path}/PDR/PDR-1/main.md').readAsStringSync(),
+        contains('Bootstrap tracker from plain repo'),
+      );
+      expect(refreshed.issues.map((issue) => issue.key), contains('PDR-1'));
+    },
+  );
+
+  test(
     'local repository writes attachment metadata for repository-path uploads',
     () async {
       final repo = await _createLocalRepository();
@@ -1765,6 +1794,34 @@ Loaded from local git.
   );
   await _writeFile(directory, 'attachments/screenshot.png', 'binary-content');
 
+  await _git(directory.path, ['init', '-b', 'main']);
+  await _git(directory.path, [
+    'config',
+    '--local',
+    'user.name',
+    'Local Tester',
+  ]);
+  await _git(directory.path, [
+    'config',
+    '--local',
+    'user.email',
+    'local@example.com',
+  ]);
+  await _git(directory.path, ['add', '.']);
+  await _git(directory.path, ['commit', '-m', 'Initial import']);
+  return directory;
+}
+
+Future<Directory> _createPlainGitRepository() async {
+  final parent = await Directory.systemTemp.createTemp('trackstate-plain-');
+  final directory = Directory('${parent.path}/plain-demo-repo');
+  await directory.create(recursive: true);
+  await _writeFile(
+    directory,
+    'README.md',
+    '# Plain Git repository fixture\n\nNo TrackState metadata yet.\n',
+  );
+  await _writeFile(directory, 'docs/notes.txt', 'Plain repository notes\n');
   await _git(directory.path, ['init', '-b', 'main']);
   await _git(directory.path, [
     'config',
