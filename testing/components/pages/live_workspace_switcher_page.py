@@ -406,10 +406,57 @@ class LiveWorkspaceSwitcherPage:
               const visibleDialogs = Array.from(
                 document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
               ).filter(isVisible);
-              const dialog = visibleDialogs.find((candidate) =>
+              let switcher = visibleDialogs.find((candidate) =>
                 normalize(candidate.innerText || candidate.textContent).includes('Workspace switcher'),
               );
-              if (!dialog) {
+              if (!switcher) {
+                const headings = Array.from(document.querySelectorAll('*'))
+                  .filter(isVisible)
+                  .map((element) => ({
+                    element,
+                    label: normalize(element.getAttribute?.('aria-label') || ''),
+                    text: normalize(element.innerText || element.textContent || ''),
+                    area: (() => {
+                      const rect = element.getBoundingClientRect();
+                      return rect.width * rect.height;
+                    })(),
+                  }))
+                  .filter((candidate) =>
+                    candidate.label === 'Workspace switcher'
+                    || candidate.text === 'Workspace switcher'
+                    || (
+                      candidate.text.includes('Workspace switcher')
+                      && (
+                        candidate.text.includes('Saved workspaces')
+                        || candidate.text.includes('Save and switch')
+                        || candidate.text.includes('Hosted Local')
+                      )
+                    )
+                  )
+                  .sort((left, right) => left.area - right.area);
+                for (const headingCandidate of headings) {
+                  let current = headingCandidate.element;
+                  while (current && current !== document.body) {
+                    const text = normalize(current.innerText || current.textContent || '');
+                    if (
+                      text.includes('Workspace switcher')
+                      && (
+                        text.includes('Saved workspaces')
+                        || text.includes('Save and switch')
+                        || text.includes('Hosted Local')
+                      )
+                    ) {
+                      switcher = current;
+                      break;
+                    }
+                    current = current.parentElement;
+                  }
+                  if (switcher) {
+                    break;
+                  }
+                }
+              }
+              if (!switcher) {
                 return null;
               }
               const interactiveSelector = [
@@ -451,7 +498,7 @@ class LiveWorkspaceSwitcherPage:
                 return null;
               };
               const interactiveElements = Array.from(
-                dialog.querySelectorAll(interactiveSelector),
+                switcher.querySelectorAll(interactiveSelector),
               )
                 .filter(isVisible)
                 .map((element) => ({
@@ -470,12 +517,12 @@ class LiveWorkspaceSwitcherPage:
                 .map((element, index) =>
                   `${element.tagName}[${index}] role=${element.role ?? '<none>'}`,
                 );
-              const semanticsCandidates = [dialog, ...Array.from(dialog.querySelectorAll(semanticsSelector))]
+              const semanticsCandidates = [switcher, ...Array.from(switcher.querySelectorAll(semanticsSelector))]
                 .filter(isVisible)
                 .filter((element, index, all) => all.indexOf(element) === index);
               const semanticsNodes = semanticsCandidates
                 .filter((element) => {
-                  if (element === dialog) {
+                  if (element === switcher) {
                     return true;
                   }
                   return !Array.from(element.querySelectorAll(semanticsSelector)).some((descendant) =>
@@ -490,18 +537,21 @@ class LiveWorkspaceSwitcherPage:
                   ...rectPayload(element),
                 }));
               const missingSemanticsLabels = semanticsNodes
-                .filter((node) => node.label.length === 0)
+                .filter((node) =>
+                  node.label.length === 0
+                  && node.visibleText.length > 0
+                )
                 .map((node, index) =>
                   `${node.tagName}[${index}] role=${node.role ?? '<none>'} text=${node.visibleText || '<none>'}`,
                 );
-              const interactiveTexts = Array.from(dialog.querySelectorAll(interactiveSelector))
-                .filter(isVisible)
-                .map((element) => {
-                  const visibleText = visibleTextFor(element);
-                  const backgroundColor = resolveBackgroundColor(
-                    element,
-                    toHex(window.getComputedStyle(dialog).backgroundColor),
-                  );
+               const interactiveTexts = Array.from(switcher.querySelectorAll(interactiveSelector))
+                 .filter(isVisible)
+                 .map((element) => {
+                   const visibleText = visibleTextFor(element);
+                   const backgroundColor = resolveBackgroundColor(
+                     element,
+                     toHex(window.getComputedStyle(switcher).backgroundColor),
+                   );
                   const foregroundColor = resolveForegroundColor(element);
                   return {
                     label: labelFor(element),
@@ -525,8 +575,8 @@ class LiveWorkspaceSwitcherPage:
                 'Local Git',
                 'Saved hosted workspace',
               ]);
-              const dialogBackground = toHex(window.getComputedStyle(dialog).backgroundColor);
-              const badgeElements = Array.from(dialog.querySelectorAll('*'))
+              const dialogBackground = toHex(window.getComputedStyle(switcher).backgroundColor);
+              const badgeElements = Array.from(switcher.querySelectorAll('*'))
                 .filter(isVisible)
                 .filter((element) => badgeLabels.has(normalize(element.innerText || element.textContent)))
                 .filter((element) => {
@@ -544,51 +594,39 @@ class LiveWorkspaceSwitcherPage:
                   ...rectPayload(element),
                 };
               });
-              const workspaceTrigger = Array.from(
-                document.querySelectorAll('flt-semantics[role="button"]'),
-              ).find((candidate) =>
-                isVisible(candidate)
-                && labelFor(candidate).startsWith('Workspace switcher:'),
-              );
-              const iconSelector = [
-                'flt-semantics[role="img"]',
-                '[role="img"]',
-                'img',
-                'svg',
-                'canvas',
-              ].join(',');
-              const triggerAndDialogControls = [
-                ...(workspaceTrigger ? [workspaceTrigger] : []),
-                ...Array.from(dialog.querySelectorAll(interactiveSelector)).filter(isVisible),
-              ];
-              const interactiveIcons = triggerAndDialogControls.flatMap((element) => {
-                const icons = Array.from(element.querySelectorAll(iconSelector)).filter(isVisible);
-                const label = labelFor(element);
-                if (!icons.length && !label.startsWith('Workspace switcher:') && label !== 'Delete') {
-                  return [];
-                }
-                const iconElement = icons[0] ?? element;
-                const backgroundColor = resolveBackgroundColor(
-                  iconElement,
-                  resolveBackgroundColor(element, dialogBackground),
-                );
-                const foregroundColor = resolveForegroundColor(iconElement);
-                return [{
-                  label,
-                  foregroundColor,
-                  backgroundColor,
-                  contrastRatio: contrastRatio(foregroundColor, backgroundColor),
-                  ...rectPayload(iconElement),
-                }];
-              });
-              return {
-                bodyText: document.body?.innerText ?? '',
-                dialogVisible: true,
-                headingText: normalize(dialog.innerText || dialog.textContent).split(' ')[0] === 'Workspace'
-                  ? 'Workspace switcher'
-                  : normalize(dialog.innerText || dialog.textContent),
-                interactiveElements,
-                semanticsNodes,
+              const interactiveIcons = [
+                ...Array.from(document.querySelectorAll('flt-semantics[role="img"],[role="img"]'))
+                  .filter(isVisible)
+                  .filter((element) => {
+                    const label = labelFor(element);
+                    return label.startsWith('Workspace switcher:')
+                      || switcher.contains(element);
+                  }),
+                ...Array.from(switcher.querySelectorAll('img,svg,canvas'))
+                  .filter(isVisible),
+              ]
+                .filter((element, index, all) => all.indexOf(element) === index)
+                .map((element) => {
+                  const label = labelFor(element);
+                  const backgroundColor = resolveBackgroundColor(element, dialogBackground);
+                  const foregroundColor = resolveForegroundColor(element);
+                  return {
+                    label,
+                    foregroundColor,
+                    backgroundColor,
+                    contrastRatio: contrastRatio(foregroundColor, backgroundColor),
+                    ...rectPayload(element),
+                  };
+                })
+                .filter((element) => element.label.length > 0);
+                return {
+                  bodyText: document.body?.innerText ?? '',
+                  dialogVisible: true,
+                  headingText: normalize(switcher.innerText || switcher.textContent).split(' ')[0] === 'Workspace'
+                    ? 'Workspace switcher'
+                    : normalize(switcher.innerText || switcher.textContent),
+                  interactiveElements,
+                  semanticsNodes,
                 missingInteractiveLabels,
                 missingSemanticsLabels,
                 badges,
@@ -1346,13 +1384,32 @@ class LiveWorkspaceSwitcherPage:
                       && style.visibility !== 'hidden'
                       && style.display !== 'none';
                   };
-                  return Array.from(
+                  const visibleDialogs = Array.from(
                     document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
-                  )
-                    .filter(isVisible)
-                    .some((dialog) =>
+                  ).filter(isVisible);
+                  if (
+                    visibleDialogs.some((dialog) =>
                       normalize(dialog.innerText || dialog.textContent).includes('Workspace switcher'),
                     )
+                  ) {
+                    return true;
+                  }
+                  const headings = Array.from(document.querySelectorAll('*'))
+                    .filter(isVisible)
+                    .map((element) => normalize(
+                      element.getAttribute?.('aria-label')
+                      || element.innerText
+                      || element.textContent
+                      || '',
+                    ));
+                  return headings.some((text) =>
+                    text.includes('Workspace switcher')
+                    && (
+                      text.includes('Saved workspaces')
+                      || text.includes('Save and switch')
+                      || text.includes('Hosted Local')
+                    )
+                  )
                     ? true
                     : null;
                 }
