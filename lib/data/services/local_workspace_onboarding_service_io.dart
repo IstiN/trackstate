@@ -330,6 +330,9 @@ class LocalGitWorkspaceOnboardingService
     required String projectKey,
     required String workspaceName,
   }) async {
+    final starterIssueKey = '$projectKey-1';
+    final starterIssuePath = '$projectKey/$starterIssueKey/main.md';
+    const starterIssueUpdatedAt = '2026-05-17T00:00:00Z';
     final files = <String, String>{
       '$projectKey/project.json':
           '${jsonEncode(_projectJson(projectKey: projectKey, workspaceName: workspaceName))}\n',
@@ -344,8 +347,33 @@ class LocalGitWorkspaceOnboardingService
           '${jsonEncode(_resolutionsJson)}\n',
       '$projectKey/config/i18n/en.json':
           '${jsonEncode(_localizedLabelsJson)}\n',
-      '$projectKey/.trackstate/index/issues.json': '[]\n',
+      '$projectKey/.trackstate/index/issues.json':
+          '${jsonEncode([
+            {
+              'key': starterIssueKey,
+              'path': starterIssuePath,
+              'summary': 'Welcome to $workspaceName',
+              'issueType': 'story',
+              'status': 'todo',
+              'updated': starterIssueUpdatedAt,
+              'children': <String>[],
+              'archived': false,
+            },
+          ])}\n',
       '$projectKey/.trackstate/index/tombstones.json': '[]\n',
+      starterIssuePath: '''---
+key: $starterIssueKey
+project: $projectKey
+issueType: story
+status: todo
+summary: Welcome to $workspaceName
+updated: $starterIssueUpdatedAt
+---
+
+# Description
+
+TrackState initialized this workspace successfully. Start by editing this issue or creating a new one.
+''',
     };
 
     for (final entry in files.entries) {

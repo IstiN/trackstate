@@ -24,7 +24,7 @@ void main() {
   });
 
   test(
-    'inspectFolder allows initialization for a non-empty non-git folder',
+    'inspectFolder blocks a non-empty non-git folder',
     () async {
       final directory = await Directory.systemTemp.createTemp(
         'trackstate-non-git-',
@@ -35,9 +35,12 @@ void main() {
       final service = const LocalGitWorkspaceOnboardingService();
       final inspection = await service.inspectFolder(directory.path);
 
-      expect(inspection.state, LocalWorkspaceInspectionState.readyToInitialize);
+      expect(inspection.state, LocalWorkspaceInspectionState.blocked);
       expect(inspection.needsGitInitialization, isTrue);
-      expect(inspection.message, contains('not a Git repository yet'));
+      expect(
+        inspection.message,
+        contains('Choose an existing Git repository or an empty folder'),
+      );
     },
   );
 
@@ -113,7 +116,17 @@ void main() {
         File(
           '${directory.path}/STARTERWOR/.trackstate/index/issues.json',
         ).readAsStringSync(),
-        '[]\n',
+        contains('"key":"STARTERWOR-1"'),
+      );
+      expect(
+        File('${directory.path}/STARTERWOR/STARTERWOR-1/main.md').existsSync(),
+        isTrue,
+      );
+      expect(
+        File(
+          '${directory.path}/STARTERWOR/STARTERWOR-1/main.md',
+        ).readAsStringSync(),
+        contains('Welcome to Starter Workspace'),
       );
       final gitattributes = File(
         '${directory.path}/.gitattributes',
