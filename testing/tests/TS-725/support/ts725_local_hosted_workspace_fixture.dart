@@ -199,6 +199,12 @@ class Ts725LocalHostedWorkspaceScreen {
   bool canOpenWorkspace(String workspaceId) =>
       _workspaceOpenButton(workspaceId).evaluate().isNotEmpty;
 
+  bool workspaceRowHasControl(String workspaceId, String label) =>
+      _descendantControl(
+        _workspaceRow(workspaceId),
+        label,
+      ).evaluate().isNotEmpty;
+
   bool isTextVisible(String text) =>
       find.textContaining(text, findRichText: true).evaluate().isNotEmpty;
 
@@ -212,6 +218,17 @@ class Ts725LocalHostedWorkspaceScreen {
 
   Future<bool> tapVisibleControl(String label) async {
     final control = _control(label);
+    if (control.evaluate().isEmpty) {
+      return false;
+    }
+    await _tester.ensureVisible(control.first);
+    await _tester.tap(control.first, warnIfMissed: false);
+    await _tester.pumpAndSettle();
+    return true;
+  }
+
+  Future<bool> tapWorkspaceRowControl(String workspaceId, String label) async {
+    final control = _descendantControl(_workspaceRow(workspaceId), label);
     if (control.evaluate().isEmpty) {
       return false;
     }
@@ -296,6 +313,30 @@ class Ts725LocalHostedWorkspaceScreen {
       return semantics;
     }
     return find.text(label, findRichText: true);
+  }
+
+  Finder _descendantControl(Finder scope, String label) {
+    final semantics = find.descendant(
+      of: scope,
+      matching: _exactSemanticsLabel(label),
+    );
+    if (semantics.evaluate().isNotEmpty) {
+      return semantics;
+    }
+    final button = find.descendant(
+      of: scope,
+      matching: find.ancestor(
+        of: find.text(label, findRichText: true),
+        matching: find.bySubtype<ButtonStyleButton>(),
+      ),
+    );
+    if (button.evaluate().isNotEmpty) {
+      return button;
+    }
+    return find.descendant(
+      of: scope,
+      matching: find.text(label, findRichText: true),
+    );
   }
 
   Finder _labeledTextField(String label) {
