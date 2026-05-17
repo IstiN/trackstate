@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../components/factories/testing_dependencies.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
+import '../../core/models/issue_search_result_selection_observation.dart';
 import 'support/ts810_matching_issue_sync_repository.dart';
 
 const String _ticketKey = 'TS-810';
@@ -148,10 +149,11 @@ void main() {
         }
 
         repository.scheduleSelectedIssueDescriptionRefresh();
-        await _resumeApp(tester);
-        await _pumpUntil(
+        final resumeRefreshObservation = await _resumeAppAndObserveRefresh(
           tester,
-          condition: () async => await _hasUpdatedSelectedIssueState(screen),
+          screen,
+          initialSelectedObservation: initialSelectedObservation,
+          initialUnselectedObservation: initialUnselectedObservation,
           timeout: const Duration(seconds: 10),
         );
 
@@ -186,6 +188,11 @@ void main() {
         result['sync_check_count'] = repository.syncCheckCount;
         result['repository_revision_after_refresh'] =
             repository.repositoryRevision;
+        result['resume_refresh_frame_count'] =
+            resumeRefreshObservation.samples.length;
+        result['resume_refresh_updated_frame'] =
+            resumeRefreshObservation.updatedFrameIndex;
+        result['resume_refresh_samples'] = resumeRefreshObservation.samples;
         result['query_after_refresh'] = queryAfterRefresh ?? '<missing>';
         result['issue_b_detail_visible_after_refresh'] = issueBDetailVisible;
         result['issue_a_detail_visible_after_refresh'] = issueADetailVisible;
@@ -204,12 +211,16 @@ void main() {
             'sync_check_count=${repository.syncCheckCount}; '
             'repository_revision_before=${result['repository_revision_before_refresh']}; '
             'repository_revision_after=${repository.repositoryRevision}; '
+            'resume_refresh_frame_count=${resumeRefreshObservation.samples.length}; '
+            'resume_refresh_updated_frame=${resumeRefreshObservation.updatedFrameIndex ?? '<missing>'}; '
             'query_after_refresh=${queryAfterRefresh ?? '<missing>'}; '
-            'updated_description_visible=$updatedDescriptionVisible';
+            'updated_description_visible=$updatedDescriptionVisible; '
+            'resume_refresh_samples=${_formatSnapshot(resumeRefreshObservation.samples, limit: 12)}';
         final stepTwoPassed =
             repository.syncCheckCount >= 2 &&
             repository.repositoryRevision !=
                 result['repository_revision_before_refresh'] &&
+            resumeRefreshObservation.updatedFrameIndex != null &&
             queryAfterRefresh == Ts810MatchingIssueSyncRepository.query &&
             updatedDescriptionVisible;
         _recordStep(
@@ -273,9 +284,9 @@ void main() {
         _recordHumanVerification(
           result,
           check:
-              'Reviewed the same visible JQL Search row a user would rely on and confirmed the selected issue stayed visually highlighted with the selection background, border, emphasized issue key color, and emphasized summary weight.',
+              'Reviewed the resumed refresh frames and confirmed the same visible JQL Search row stayed highlighted with the selection background, border, emphasized issue key color, and emphasized summary weight throughout the refresh.',
           observed:
-              'before=${initialSelectedObservation.describe()}; after=${selectedObservationAfterRefresh.describe()}',
+              'before=${initialSelectedObservation.describe()}; resume_refresh_samples=${_formatSnapshot(resumeRefreshObservation.samples, limit: 12)}; after=${selectedObservationAfterRefresh.describe()}',
         );
         _recordHumanVerification(
           result,
@@ -306,34 +317,6 @@ void main() {
   );
 }
 
-Future<bool> _hasUpdatedSelectedIssueState(
-  TrackStateAppComponent screen,
-) async {
-  return await screen.isIssueDetailVisible(
-        Ts810MatchingIssueSyncRepository.issueBKey,
-      ) &&
-      !(await screen.isIssueDetailVisible(
-        Ts810MatchingIssueSyncRepository.issueAKey,
-      )) &&
-      await screen.isTextVisible(
-        Ts810MatchingIssueSyncRepository.updatedIssueBDescription,
-      );
-}
-
-Future<void> _pumpUntil(
-  WidgetTester tester, {
-  required Future<bool> Function() condition,
-  required Duration timeout,
-}) async {
-  final end = DateTime.now().add(timeout);
-  while (DateTime.now().isBefore(end)) {
-    if (await condition()) {
-      return;
-    }
-    await tester.pump(const Duration(milliseconds: 100));
-  }
-}
-
 Directory get _outputsDir => Directory('${Directory.current.path}/outputs');
 File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
@@ -341,11 +324,137 @@ File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
 
-Future<void> _resumeApp(WidgetTester tester) async {
+Future<_ResumeRefreshObservation> _resumeAppAndObserveRefresh(
+  WidgetTester tester,
+  TrackStateAppComponent screen, {
+  required IssueSearchResultSelectionObservation initialSelectedObservation,
+  required IssueSearchResultSelectionObservation initialUnselectedObservation,
+  required Duration timeout,
+}) async {
+  final samples = <String>[];
+  final end = DateTime.now().add(timeout);
+  int frameIndex = 0;
+
   tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 250));
+  while (DateTime.now().isBefore(end)) {
+    if (frameIndex == 0) {
+      await tester.pump();
+    } else {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+
+    final sample = await _readResumeRefreshFrameSample(
+      screen,
+      frameIndex: frameIndex,
+    );
+    samples.add(sample.describe());
+
+    final preservesContinuity =
+        sample.selectedObservation.usesExpectedTokens &&
+        sample.unselectedObservation.usesExpectedTokens &&
+        sample.selectedObservation.matchesRenderedTokens(
+          initialSelectedObservation,
+        ) &&
+        sample.unselectedObservation.matchesRenderedTokens(
+          initialUnselectedObservation,
+        ) &&
+        sample.issueBDetailVisible &&
+        !sample.issueADetailVisible;
+    if (!preservesContinuity) {
+      throw AssertionError(
+        'TS-810 failed during the resumed refresh frames: the selected row '
+        'highlight or detail panel did not remain continuously attached to '
+        '${Ts810MatchingIssueSyncRepository.issueBKey}.\n'
+        'Observed frame sample: ${sample.describe()}\n'
+        'Observed samples: ${samples.join(' || ')}',
+      );
+    }
+
+    if (sample.updatedDescriptionVisible) {
+      await tester.pumpAndSettle();
+      return _ResumeRefreshObservation(
+        samples: samples,
+        updatedFrameIndex: frameIndex,
+      );
+    }
+
+    frameIndex += 1;
+  }
+
   await tester.pumpAndSettle();
+  return _ResumeRefreshObservation(samples: samples, updatedFrameIndex: null);
+}
+
+Future<_ResumeRefreshFrameSample> _readResumeRefreshFrameSample(
+  TrackStateAppComponent screen, {
+  required int frameIndex,
+}) async {
+  final selectedObservation = await screen
+      .readIssueSearchResultSelectionObservation(
+        Ts810MatchingIssueSyncRepository.issueBKey,
+        Ts810MatchingIssueSyncRepository.issueBSummary,
+        expectedSelected: true,
+      );
+  final unselectedObservation = await screen
+      .readIssueSearchResultSelectionObservation(
+        Ts810MatchingIssueSyncRepository.issueAKey,
+        Ts810MatchingIssueSyncRepository.issueASummary,
+        expectedSelected: false,
+      );
+  final issueADetailVisible = await screen.isIssueDetailVisible(
+    Ts810MatchingIssueSyncRepository.issueAKey,
+  );
+  final issueBDetailVisible = await screen.isIssueDetailVisible(
+    Ts810MatchingIssueSyncRepository.issueBKey,
+  );
+  final updatedDescriptionVisible = await screen.isTextVisible(
+    Ts810MatchingIssueSyncRepository.updatedIssueBDescription,
+  );
+  return _ResumeRefreshFrameSample(
+    frameIndex: frameIndex,
+    selectedObservation: selectedObservation,
+    unselectedObservation: unselectedObservation,
+    issueADetailVisible: issueADetailVisible,
+    issueBDetailVisible: issueBDetailVisible,
+    updatedDescriptionVisible: updatedDescriptionVisible,
+  );
+}
+
+class _ResumeRefreshObservation {
+  const _ResumeRefreshObservation({
+    required this.samples,
+    required this.updatedFrameIndex,
+  });
+
+  final List<String> samples;
+  final int? updatedFrameIndex;
+}
+
+class _ResumeRefreshFrameSample {
+  const _ResumeRefreshFrameSample({
+    required this.frameIndex,
+    required this.selectedObservation,
+    required this.unselectedObservation,
+    required this.issueADetailVisible,
+    required this.issueBDetailVisible,
+    required this.updatedDescriptionVisible,
+  });
+
+  final int frameIndex;
+  final IssueSearchResultSelectionObservation selectedObservation;
+  final IssueSearchResultSelectionObservation unselectedObservation;
+  final bool issueADetailVisible;
+  final bool issueBDetailVisible;
+  final bool updatedDescriptionVisible;
+
+  String describe() {
+    return 'frame=$frameIndex '
+        'selected=${selectedObservation.describe()}; '
+        'unselected=${unselectedObservation.describe()}; '
+        'issue_a_detail_visible=$issueADetailVisible; '
+        'issue_b_detail_visible=$issueBDetailVisible; '
+        'updated_description_visible=$updatedDescriptionVisible';
+  }
 }
 
 void _recordStep(
