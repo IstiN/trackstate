@@ -9,6 +9,8 @@ abstract interface class LocalWorkspaceOnboardingScreenHandle {
 
   Future<void> enterWriteBranch(String value);
 
+  Future<void> submit();
+
   LocalWorkspaceOnboardingState captureState();
 
   void dispose();

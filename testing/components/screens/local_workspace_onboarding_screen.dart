@@ -28,6 +28,9 @@ class LocalWorkspaceOnboardingScreen
       _driver.enterWriteBranch(value);
 
   @override
+  Future<void> submit() => _driver.submit();
+
+  @override
   LocalWorkspaceOnboardingState captureState() => _driver.captureState();
 
   @override
