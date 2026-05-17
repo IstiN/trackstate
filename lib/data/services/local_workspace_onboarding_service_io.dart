@@ -86,9 +86,9 @@ class LocalGitWorkspaceOnboardingService
       }
       return LocalWorkspaceInspection(
         folderPath: normalizedPath,
-        state: LocalWorkspaceInspectionState.readyToInitialize,
+        state: LocalWorkspaceInspectionState.blocked,
         message:
-            'This folder is not a Git repository yet. TrackState can initialize Git and create the starter workspace here.',
+            'This folder is not a Git repository and is not empty. Choose an existing Git repository or an empty folder to initialize TrackState.',
         suggestedWorkspaceName: suggestedWorkspaceName,
         suggestedWriteBranch: _defaultBranchName,
         needsGitInitialization: true,
@@ -96,7 +96,7 @@ class LocalGitWorkspaceOnboardingService
     }
 
     final normalizedTopLevel = _normalizePath(repositoryTopLevel);
-    if (normalizedTopLevel != normalizedPath) {
+    if (!await _pathsReferToSameLocation(normalizedTopLevel, normalizedPath)) {
       return LocalWorkspaceInspection(
         folderPath: normalizedPath,
         state: LocalWorkspaceInspectionState.blocked,
@@ -330,6 +330,9 @@ class LocalGitWorkspaceOnboardingService
     required String projectKey,
     required String workspaceName,
   }) async {
+    final starterIssueKey = '$projectKey-1';
+    final starterIssuePath = '$projectKey/$starterIssueKey/main.md';
+    const starterIssueUpdatedAt = '2026-05-17T00:00:00Z';
     final files = <String, String>{
       '$projectKey/project.json':
           '${jsonEncode(_projectJson(projectKey: projectKey, workspaceName: workspaceName))}\n',
@@ -344,8 +347,33 @@ class LocalGitWorkspaceOnboardingService
           '${jsonEncode(_resolutionsJson)}\n',
       '$projectKey/config/i18n/en.json':
           '${jsonEncode(_localizedLabelsJson)}\n',
-      '$projectKey/.trackstate/index/issues.json': '[]\n',
+      '$projectKey/.trackstate/index/issues.json':
+          '${jsonEncode([
+            {
+              'key': starterIssueKey,
+              'path': starterIssuePath,
+              'summary': 'Welcome to $workspaceName',
+              'issueType': 'story',
+              'status': 'todo',
+              'updated': starterIssueUpdatedAt,
+              'children': <String>[],
+              'archived': false,
+            },
+          ])}\n',
       '$projectKey/.trackstate/index/tombstones.json': '[]\n',
+      starterIssuePath: '''---
+key: $starterIssueKey
+project: $projectKey
+issueType: story
+status: todo
+summary: Welcome to $workspaceName
+updated: $starterIssueUpdatedAt
+---
+
+# Description
+
+TrackState initialized this workspace successfully. Start by editing this issue or creating a new one.
+''',
     };
 
     for (final entry in files.entries) {
@@ -502,6 +530,24 @@ class LocalGitWorkspaceOnboardingService
       return 'TrackState could not $operation.';
     }
     return 'TrackState could not $operation. $trimmedError';
+  }
+}
+
+Future<bool> _pathsReferToSameLocation(String left, String right) async {
+  final normalizedLeft = await _canonicalizeExistingPath(left);
+  final normalizedRight = await _canonicalizeExistingPath(right);
+  return normalizedLeft == normalizedRight;
+}
+
+Future<String> _canonicalizeExistingPath(String path) async {
+  final normalized = _normalizePath(path);
+  if (normalized.isEmpty) {
+    return normalized;
+  }
+  try {
+    return _normalizePath(await Directory(normalized).resolveSymbolicLinks());
+  } on FileSystemException {
+    return normalized;
   }
 }
 
