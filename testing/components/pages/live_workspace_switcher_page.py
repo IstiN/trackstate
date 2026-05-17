@@ -6,7 +6,11 @@ import re
 
 from testing.components.pages.live_project_settings_page import LiveProjectSettingsPage
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
-from testing.core.interfaces.web_app_session import FocusedElementObservation, WebAppTimeoutError
+from testing.core.interfaces.web_app_session import (
+    ElementBoundingBox,
+    FocusedElementObservation,
+    WebAppTimeoutError,
+)
 from testing.core.utils.color_contrast import color_distance
 from testing.core.utils.png_image import RgbImage
 
@@ -82,6 +86,14 @@ class WorkspaceSwitcherInternalClickObservation:
     target_role: str | None
     target_label: str
     target_text: str
+
+
+class WorkspaceSwitcherOutsideDismissObservation:
+    click_x: float
+    click_y: float
+    body_text: str
+    dashboard_visible: bool
+    trigger_visible: bool
 
 
 @dataclass(frozen=True)
@@ -2152,6 +2164,115 @@ class LiveWorkspaceSwitcherPage:
         except WebAppTimeoutError:
             return
 
+    def dismiss_by_clicking_outside(
+        self,
+        panel: WorkspaceSwitcherPanelObservation,
+        *,
+        timeout_ms: int = 4_000,
+    ) -> WorkspaceSwitcherOutsideDismissObservation:
+        click_target = self.click_neutral_content_outside_panel(panel=panel)
+        return self.wait_for_dismissal_after_outside_click(
+            click_target=click_target,
+            timeout_ms=timeout_ms,
+        )
+
+    def click_neutral_content_outside_panel(
+        self,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+    ) -> ElementBoundingBox:
+        click_target = self._neutral_content_click_target(panel=panel)
+        self._session.mouse_click(click_target.x, click_target.y)
+        return click_target
+
+    def wait_for_dismissal_after_outside_click(
+        self,
+        *,
+        click_target: ElementBoundingBox,
+        timeout_ms: int = 4_000,
+    ) -> WorkspaceSwitcherOutsideDismissObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ heading }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const visibleText = (element) =>
+                    normalize(element.innerText || element.textContent || '');
+                  const isWorkspaceRow = (text) =>
+                    text.includes('Branch:')
+                    && text.includes('Delete')
+                    && (text.includes('Hosted') || text.includes('Local'))
+                    && (text.includes('Open') || text.includes('Active'));
+                  const surfaceStillVisible = Array.from(document.querySelectorAll('*'))
+                    .filter(isVisible)
+                    .some((element) => {
+                      const text = visibleText(element);
+                      return text.includes(heading)
+                        && (
+                          text.includes('Saved workspaces')
+                          || text.includes('Save and switch')
+                          || text.includes('Add workspace')
+                          || text.includes('Hosted Local')
+                          || isWorkspaceRow(text)
+                        );
+                    });
+                  if (surfaceStillVisible) {
+                    return null;
+                  }
+                  const bodyText = document.body?.innerText ?? '';
+                  const triggerVisible = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .some((element) =>
+                      normalize(element.getAttribute('aria-label') || element.innerText || '')
+                        .startsWith('Workspace switcher:'),
+                    );
+                  const dashboardVisible = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .some((element) => normalize(element.innerText || '') === 'Dashboard');
+                  return {
+                    bodyText,
+                    triggerVisible,
+                    dashboardVisible,
+                  };
+                }
+                """,
+                arg={"heading": self._switcher_heading},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 4 failed: clicking a neutral area outside the workspace switcher "
+                "did not dismiss the panel.\n"
+                f"Observed click target: x={click_target.x:.1f}, y={click_target.y:.1f}\n"
+                f"Observed body text after the outside click:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher outside-click dismissal did not return an observation."
+            )
+        return WorkspaceSwitcherOutsideDismissObservation(
+            click_x=click_target.x,
+            click_y=click_target.y,
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+        )
+
     def observe_mobile_trigger_focus(
         self,
         *,
@@ -2357,6 +2478,69 @@ class LiveWorkspaceSwitcherPage:
             self._button_selector,
             has_text=self._trigger_label_prefix,
             timeout_ms=timeout_ms,
+        )
+
+    def _neutral_content_click_target(
+        self,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+    ) -> ElementBoundingBox:
+        payload = self._session.evaluate(
+            """
+            ({ left, top, width, height }) => {
+              const viewportWidth = window.innerWidth;
+              const viewportHeight = window.innerHeight;
+              const panelRight = left + width;
+              const panelBottom = top + height;
+              const minimumHeaderBottom = 170;
+              const candidates = [
+                {
+                  x: 96,
+                  y: Math.min(viewportHeight - 64, Math.max(panelBottom + 40, minimumHeaderBottom + 40)),
+                },
+                {
+                  x: Math.max(48, Math.min((left / 2), viewportWidth - 48)),
+                  y: Math.max(minimumHeaderBottom + 24, Math.min(top + (height / 2), viewportHeight - 48)),
+                },
+                {
+                  x: Math.min(viewportWidth - 48, Math.max(panelRight + 48, viewportWidth * 0.8)),
+                  y: Math.max(minimumHeaderBottom + 24, Math.min(top + (height / 2), viewportHeight - 48)),
+                },
+                {
+                  x: Math.max(64, Math.min(viewportWidth / 2, viewportWidth - 64)),
+                  y: Math.min(viewportHeight - 48, Math.max(panelBottom + 48, minimumHeaderBottom + 48)),
+                },
+              ];
+              const outsidePanel = (point) =>
+                point.x < (left - 24)
+                || point.x > (panelRight + 24)
+                || point.y < (top - 24)
+                || point.y > (panelBottom + 24);
+              const outsideHeader = (point) => point.y >= minimumHeaderBottom;
+              const point = candidates.find((candidate) => outsidePanel(candidate) && outsideHeader(candidate))
+                ?? { x: Math.max(64, Math.min(viewportWidth / 2, viewportWidth - 64)), y: Math.max(minimumHeaderBottom + 48, Math.min(viewportHeight - 64, panelBottom + 48)) };
+              return {
+                x: point.x,
+                y: point.y,
+                width: 0,
+                height: 0,
+              };
+            }
+            """,
+            arg={
+                "left": panel.left,
+                "top": panel.top,
+                "width": panel.width,
+                "height": panel.height,
+            },
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError("Unable to calculate a neutral outside-click target.")
+        return ElementBoundingBox(
+            x=float(payload.get("x", 0.0)),
+            y=float(payload.get("y", 0.0)),
+            width=float(payload.get("width", 0.0)),
+            height=float(payload.get("height", 0.0)),
         )
 
 

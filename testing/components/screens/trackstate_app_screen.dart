@@ -390,6 +390,23 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<bool> workspaceRowHasControl(String workspaceId, String label) async {
+    await tester.pump();
+    final row = _workspaceRow(workspaceId);
+    final semanticsMatch = find.descendant(
+      of: row,
+      matching: _exactSemanticsLabel(label),
+    );
+    if (semanticsMatch.evaluate().isNotEmpty) {
+      return true;
+    }
+    return find
+        .descendant(of: row, matching: find.text(label, findRichText: true))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
   Future<void> closeDialog(String actionLabel) async {
     await tester.tap(find.text(actionLabel).first);
     await tester.pumpAndSettle();
