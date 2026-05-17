@@ -1690,7 +1690,8 @@ class _LocalWorkspaceOnboardingScreenState
                           if (inspection.state !=
                                   LocalWorkspaceInspectionState.blocked ||
                               _intent ==
-                                  _LocalWorkspaceOnboardingIntent.initialize) ...[
+                                  _LocalWorkspaceOnboardingIntent
+                                      .initialize) ...[
                             const SizedBox(height: 16),
                             Semantics(
                               header: true,
@@ -1724,20 +1725,20 @@ class _LocalWorkspaceOnboardingScreenState
                             const SizedBox(height: 20),
                             Align(
                               alignment: Alignment.centerRight,
-                                child: FilledButton(
-                                  key: const ValueKey(
-                                    'local-workspace-onboarding-submit',
-                                  ),
-                                  onPressed:
-                                      _isSubmitting ||
-                                          actionLabel == null ||
-                                          inspection.state ==
-                                              LocalWorkspaceInspectionState
-                                                  .blocked
-                                      ? null
-                                      : _submit,
-                                  child: Text(actionLabel ?? ''),
+                              child: FilledButton(
+                                key: const ValueKey(
+                                  'local-workspace-onboarding-submit',
                                 ),
+                                onPressed:
+                                    _isSubmitting ||
+                                        actionLabel == null ||
+                                        inspection.state ==
+                                            LocalWorkspaceInspectionState
+                                                .blocked
+                                    ? null
+                                    : _submit,
+                                child: Text(actionLabel ?? ''),
+                              ),
                             ),
                           ],
                         ],
@@ -2005,7 +2006,9 @@ class _LocalWorkspaceOnboardingPanelState
                 onPressed: _isSubmitting
                     ? null
                     : () => unawaited(
-                        _chooseFolder(_LocalWorkspaceOnboardingIntent.initialize),
+                        _chooseFolder(
+                          _LocalWorkspaceOnboardingIntent.initialize,
+                        ),
                       ),
               ),
             ),
@@ -2087,7 +2090,8 @@ class _LocalWorkspaceOnboardingPanelState
                           : () => unawaited(
                               _chooseFolder(
                                 _intent ??
-                                    _LocalWorkspaceOnboardingIntent.openExisting,
+                                    _LocalWorkspaceOnboardingIntent
+                                        .openExisting,
                               ),
                             ),
                       child: Text(l10n.localWorkspaceOnboardingChangeFolder),
@@ -2116,7 +2120,9 @@ class _LocalWorkspaceOnboardingPanelState
             ),
             const SizedBox(height: 12),
             _SettingsTextField(
-              fieldKey: const ValueKey('local-workspace-onboarding-write-branch'),
+              fieldKey: const ValueKey(
+                'local-workspace-onboarding-write-branch',
+              ),
               label: l10n.writeBranch,
               controller: _writeBranchController,
               helperText: l10n.localWorkspaceOnboardingWriteBranchHelper,
@@ -2129,7 +2135,8 @@ class _LocalWorkspaceOnboardingPanelState
                 onPressed:
                     _isSubmitting ||
                         actionLabel == null ||
-                        inspection.state == LocalWorkspaceInspectionState.blocked
+                        inspection.state ==
+                            LocalWorkspaceInspectionState.blocked
                     ? null
                     : _submit,
                 child: Text(actionLabel ?? ''),
@@ -2880,252 +2887,304 @@ class _TopBar extends StatelessWidget {
         : () => onOpenWorkspaceSwitcher(context, compact: compact);
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 12, 12, 6),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final condensedDesktop =
-              !compact &&
-              constraints.maxWidth < (canOpenWorkspaceOnboarding ? 1380 : 1240);
-          final iconOnlyActions = compact || condensedDesktop;
-          final actionGap = iconOnlyActions ? 8.0 : 12.0;
-          Widget buildHeaderActions() {
-            return Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(width: actionGap),
-                if (iconOnlyActions)
-                  _IconButtonSurface(
-                    label: l10n.createIssue,
-                    glyph: TrackStateIconGlyph.plus,
-                    onPressed: openCreateIssue,
-                    size: compact ? null : _desktopTopBarControlHeight,
-                  )
-                else
-                  _PrimaryButton(
-                    label: l10n.createIssue,
-                    icon: TrackStateIconGlyph.plus,
-                    onPressed: openCreateIssue,
-                    height: _desktopTopBarControlHeight,
-                  ),
-                if (canOpenWorkspaceOnboarding) ...[
-                  const SizedBox(width: 8),
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            Widget orderedControl(double order, Widget child) {
+              return FocusTraversalOrder(
+                order: NumericFocusOrder(order),
+                child: child,
+              );
+            }
+
+            final condensedDesktop =
+                !compact &&
+                constraints.maxWidth <
+                    (canOpenWorkspaceOnboarding ? 1380 : 1240);
+            final iconOnlyActions = compact || condensedDesktop;
+            final actionGap = iconOnlyActions ? 8.0 : 12.0;
+            final createIssueOrder = compact ? 2.0 : 3.0;
+            final addWorkspaceOrder = compact ? 3.0 : 4.0;
+            final workspaceSwitcherOrder = compact ? 5.0 : 5.0;
+            final themeToggleOrder = compact ? 4.0 : 6.0;
+            Widget buildHeaderActions() {
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(width: actionGap),
                   if (iconOnlyActions)
-                    _IconButtonSurface(
-                      label: l10n.addWorkspace,
-                      glyph: TrackStateIconGlyph.repository,
-                      onPressed: openWorkspaceOnboarding,
-                      size: compact ? null : _desktopTopBarControlHeight,
+                    orderedControl(
+                      createIssueOrder,
+                      _IconButtonSurface(
+                        label: l10n.createIssue,
+                        glyph: TrackStateIconGlyph.plus,
+                        onPressed: openCreateIssue,
+                        size: compact ? null : _desktopTopBarControlHeight,
+                      ),
                     )
                   else
-                    _SecondaryButton(
-                      label: l10n.addWorkspace,
-                      icon: TrackStateIconGlyph.repository,
-                      onPressed: openWorkspaceOnboarding,
-                      height: _desktopTopBarControlHeight,
-                    ),
-                ],
-                if (!compact) ...[
-                  const SizedBox(width: 8),
-                  KeyedSubtree(
-                    key: const ValueKey('workspace-switcher-trigger'),
-                    child: Semantics(
-                      container: true,
-                      button: true,
-                      enabled: openWorkspaceSwitcher != null,
-                      label: workspaceSummary.semanticLabel,
-                      child: ExcludeSemantics(
-                        child: condensedDesktop
-                            ? _WorkspaceSwitcherTriggerButton(
-                                summary: workspaceSummary,
-                                compact: false,
-                                condensed: true,
-                                onPressed: openWorkspaceSwitcher,
-                              )
-                            : _PrimaryButton(
-                                label: workspaceSummary.textLabel,
-                                icon: workspaceSummary.icon,
-                                onPressed: openWorkspaceSwitcher,
-                                height: _desktopTopBarControlHeight,
-                              ),
+                    orderedControl(
+                      createIssueOrder,
+                      _PrimaryButton(
+                        label: l10n.createIssue,
+                        icon: TrackStateIconGlyph.plus,
+                        onPressed: openCreateIssue,
+                        height: _desktopTopBarControlHeight,
                       ),
                     ),
+                  if (canOpenWorkspaceOnboarding) ...[
+                    const SizedBox(width: 8),
+                    if (iconOnlyActions)
+                      orderedControl(
+                        addWorkspaceOrder,
+                        _IconButtonSurface(
+                          label: l10n.addWorkspace,
+                          glyph: TrackStateIconGlyph.repository,
+                          onPressed: openWorkspaceOnboarding,
+                          size: compact ? null : _desktopTopBarControlHeight,
+                        ),
+                      )
+                    else
+                      orderedControl(
+                        addWorkspaceOrder,
+                        _SecondaryButton(
+                          label: l10n.addWorkspace,
+                          icon: TrackStateIconGlyph.repository,
+                          onPressed: openWorkspaceOnboarding,
+                          height: _desktopTopBarControlHeight,
+                        ),
+                      ),
+                  ],
+                  if (!compact) ...[
+                    const SizedBox(width: 8),
+                    orderedControl(
+                      workspaceSwitcherOrder,
+                      KeyedSubtree(
+                        key: const ValueKey('workspace-switcher-trigger'),
+                        child: Semantics(
+                          container: true,
+                          button: true,
+                          enabled: openWorkspaceSwitcher != null,
+                          label: workspaceSummary.semanticLabel,
+                          child: ExcludeSemantics(
+                            child: condensedDesktop
+                                ? _WorkspaceSwitcherTriggerButton(
+                                    summary: workspaceSummary,
+                                    compact: false,
+                                    condensed: true,
+                                    onPressed: openWorkspaceSwitcher,
+                                  )
+                                : _PrimaryButton(
+                                    label: workspaceSummary.textLabel,
+                                    icon: workspaceSummary.icon,
+                                    onPressed: openWorkspaceSwitcher,
+                                    height: _desktopTopBarControlHeight,
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(width: 8),
+                  orderedControl(
+                    themeToggleOrder,
+                    _IconButtonSurface(
+                      label: viewModel.themePreference == ThemePreference.dark
+                          ? l10n.lightTheme
+                          : l10n.darkTheme,
+                      glyph: viewModel.themePreference == ThemePreference.dark
+                          ? TrackStateIconGlyph.sun
+                          : TrackStateIconGlyph.moon,
+                      onPressed: viewModel.toggleTheme,
+                      size: compact ? null : _desktopTopBarControlHeight,
+                    ),
                   ),
-                ],
-                const SizedBox(width: 8),
-                _IconButtonSurface(
-                  label: viewModel.themePreference == ThemePreference.dark
-                      ? l10n.lightTheme
-                      : l10n.darkTheme,
-                  glyph: viewModel.themePreference == ThemePreference.dark
-                      ? TrackStateIconGlyph.sun
-                      : TrackStateIconGlyph.moon,
-                  onPressed: viewModel.toggleTheme,
-                  size: compact ? null : _desktopTopBarControlHeight,
-                ),
-                const SizedBox(width: 8),
-                Semantics(
-                  container: true,
-                  label: _profileDisplayName(viewModel),
-                  child: ExcludeSemantics(
-                    child: SizedBox(
-                      height: compact ? null : _desktopTopBarControlHeight,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          if (_hasVisibleProfileIdentity(viewModel) &&
-                              !compact &&
-                              !condensedDesktop) ...[
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 180),
-                              child: Align(
-                                alignment: Alignment.centerRight,
-                                child: Text(
-                                  _profileDisplayName(viewModel),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.labelLarge
-                                      ?.copyWith(
-                                        color: colors.text,
-                                        fontWeight: FontWeight.w600,
-                                        height: 1,
-                                      ),
+                  const SizedBox(width: 8),
+                  Semantics(
+                    container: true,
+                    label: _profileDisplayName(viewModel),
+                    child: ExcludeSemantics(
+                      child: SizedBox(
+                        height: compact ? null : _desktopTopBarControlHeight,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            if (_hasVisibleProfileIdentity(viewModel) &&
+                                !compact &&
+                                !condensedDesktop) ...[
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 180,
+                                ),
+                                child: Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    _profileDisplayName(viewModel),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelLarge
+                                        ?.copyWith(
+                                          color: colors.text,
+                                          fontWeight: FontWeight.w600,
+                                          height: 1,
+                                        ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            CircleAvatar(
+                              radius: compact ? 18 : _desktopTopBarAvatarRadius,
+                              backgroundColor: colors.primarySoft,
+                              child: Text(
+                                _profileInitials(l10n, viewModel),
+                                style: TextStyle(
+                                  color: colors.text,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: compact ? null : 12,
+                                  height: 1,
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 8),
                           ],
-                          CircleAvatar(
-                            radius: compact ? 18 : _desktopTopBarAvatarRadius,
-                            backgroundColor: colors.primarySoft,
-                            child: Text(
-                              _profileInitials(l10n, viewModel),
-                              style: TextStyle(
-                                color: colors.text,
-                                fontWeight: FontWeight.w700,
-                                fontSize: compact ? null : 12,
-                                height: 1,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            if (compact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      TrackStateIcon(
+                        TrackStateIconGlyph.logo,
+                        color: colors.secondary,
+                        size: 32,
+                        semanticLabel: l10n.appTitle,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          l10n.appTitle,
+                          style: Theme.of(context).textTheme.titleMedium,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      orderedControl(
+                        1,
+                        _IconButtonSurface(
+                          label: _workspaceSyncLabel(l10n, viewModel),
+                          glyph: TrackStateIconGlyph.sync,
+                          onPressed: () =>
+                              viewModel.selectSection(TrackerSection.settings),
+                          size: _desktopTopBarControlHeight,
+                        ),
+                      ),
+                      buildHeaderActions(),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  orderedControl(
+                    workspaceSwitcherOrder,
+                    KeyedSubtree(
+                      key: const ValueKey('workspace-switcher-trigger'),
+                      child: Semantics(
+                        container: true,
+                        button: true,
+                        enabled: openWorkspaceSwitcher != null,
+                        label: workspaceSummary.semanticLabel,
+                        child: ExcludeSemantics(
+                          child: _WorkspaceSwitcherTriggerButton(
+                            summary: workspaceSummary,
+                            compact: true,
+                            condensed: false,
+                            onPressed: openWorkspaceSwitcher,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            return Row(
+              children: [
+                orderedControl(
+                  1,
+                  _SyncPill(
+                    label: _workspaceSyncLabel(l10n, viewModel),
+                    tone: _workspaceSyncTone(viewModel),
+                    height: _desktopTopBarControlHeight,
+                    onPressed: () =>
+                        viewModel.selectSection(TrackerSection.settings),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: SizedBox(
+                    height: _desktopTopBarControlHeight,
+                    child: orderedControl(
+                      2,
+                      Semantics(
+                        label: l10n.searchIssues,
+                        textField: true,
+                        child: TextField(
+                          controller: TextEditingController(
+                            text: viewModel.jql,
+                          ),
+                          onSubmitted: viewModel.updateQuery,
+                          maxLines: 1,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.copyWith(height: 1),
+                          textAlignVertical: TextAlignVertical.center,
+                          decoration: InputDecoration(
+                            isDense: true,
+                            isCollapsed: true,
+                            constraints: const BoxConstraints.tightFor(
+                              height: _desktopTopBarControlHeight,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            prefixIcon: Padding(
+                              padding: const EdgeInsets.all(8),
+                              child: TrackStateIcon(
+                                TrackStateIconGlyph.search,
+                                color: colors.muted,
+                                size: _desktopTopBarIconSize,
+                                semanticLabel: l10n.searchIssues,
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          }
-
-          if (compact) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    TrackStateIcon(
-                      TrackStateIconGlyph.logo,
-                      color: colors.secondary,
-                      size: 32,
-                      semanticLabel: l10n.appTitle,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        l10n.appTitle,
-                        style: Theme.of(context).textTheme.titleMedium,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _IconButtonSurface(
-                      label: _workspaceSyncLabel(l10n, viewModel),
-                      glyph: TrackStateIconGlyph.sync,
-                      onPressed: () =>
-                          viewModel.selectSection(TrackerSection.settings),
-                      size: _desktopTopBarControlHeight,
-                    ),
-                    buildHeaderActions(),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                KeyedSubtree(
-                  key: const ValueKey('workspace-switcher-trigger'),
-                  child: Semantics(
-                    container: true,
-                    button: true,
-                    enabled: openWorkspaceSwitcher != null,
-                    label: workspaceSummary.semanticLabel,
-                    child: ExcludeSemantics(
-                      child: _WorkspaceSwitcherTriggerButton(
-                        summary: workspaceSummary,
-                        compact: true,
-                        condensed: false,
-                        onPressed: openWorkspaceSwitcher,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          }
-
-          return Row(
-            children: [
-              _SyncPill(
-                label: _workspaceSyncLabel(l10n, viewModel),
-                tone: _workspaceSyncTone(viewModel),
-                height: _desktopTopBarControlHeight,
-                onPressed: () =>
-                    viewModel.selectSection(TrackerSection.settings),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: SizedBox(
-                  height: _desktopTopBarControlHeight,
-                  child: Semantics(
-                    label: l10n.searchIssues,
-                    textField: true,
-                    child: TextField(
-                      controller: TextEditingController(text: viewModel.jql),
-                      onSubmitted: viewModel.updateQuery,
-                      maxLines: 1,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(height: 1),
-                      textAlignVertical: TextAlignVertical.center,
-                      decoration: InputDecoration(
-                        isDense: true,
-                        isCollapsed: true,
-                        constraints: const BoxConstraints.tightFor(
-                          height: _desktopTopBarControlHeight,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        prefixIcon: Padding(
-                          padding: const EdgeInsets.all(8),
-                          child: TrackStateIcon(
-                            TrackStateIconGlyph.search,
-                            color: colors.muted,
-                            size: _desktopTopBarIconSize,
-                            semanticLabel: l10n.searchIssues,
+                            prefixIconConstraints:
+                                const BoxConstraints.tightFor(
+                                  width: _desktopTopBarControlHeight,
+                                  height: _desktopTopBarControlHeight,
+                                ),
+                            hintText: l10n.jqlPlaceholder,
                           ),
                         ),
-                        prefixIconConstraints: const BoxConstraints.tightFor(
-                          width: _desktopTopBarControlHeight,
-                          height: _desktopTopBarControlHeight,
-                        ),
-                        hintText: l10n.jqlPlaceholder,
                       ),
                     ),
                   ),
                 ),
-              ),
-              buildHeaderActions(),
-            ],
-          );
-        },
+                buildHeaderActions(),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -5174,144 +5233,183 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
       widget.viewModel,
       widget.workspaces,
     );
+    final workspaceRowActionCount = widget.workspaces.profiles.length * 2;
+    final addWorkspaceOrderBase = workspaceRowActionCount.toDouble() + 1;
     return Padding(
       padding: const EdgeInsets.all(20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Semantics(
-            header: true,
-            label: l10n.workspaceSwitcher,
-            child: Text(
-              l10n.workspaceSwitcher,
-              style: Theme.of(context).textTheme.headlineSmall,
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(
+              header: true,
+              label: l10n.workspaceSwitcher,
+              child: Text(
+                l10n.workspaceSwitcher,
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: colors.surfaceAlt,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.border),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colors.surfaceAlt,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colors.border),
+              ),
+              child: Row(
+                children: [
+                  TrackStateIcon(
+                    activeSummary.icon,
+                    color: colors.primary,
+                    semanticLabel: activeSummary.semanticLabel,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      activeSummary.textLabel,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            child: Row(
-              children: [
-                TrackStateIcon(
-                  activeSummary.icon,
-                  color: colors.primary,
-                  semanticLabel: activeSummary.semanticLabel,
+            const SizedBox(height: 16),
+            Text(
+              l10n.savedWorkspaces,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 8),
+            if (!widget.workspaces.hasProfiles)
+              Text(
+                l10n.workspaceSwitcherEmptyState,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.muted),
+              )
+            else
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 280),
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      for (
+                        var index = 0;
+                        index < widget.workspaces.profiles.length;
+                        index += 1
+                      ) ...[
+                        _WorkspaceSwitcherRow(
+                          key: ValueKey(
+                            'workspace-${widget.workspaces.profiles[index].id}',
+                          ),
+                          workspace: widget.workspaces.profiles[index],
+                          isActive:
+                              widget.workspaces.profiles[index].id ==
+                              activeWorkspaceId,
+                          stateLabel: _workspaceStateLabel(
+                            l10n,
+                            widget.viewModel,
+                            widget.workspaces.profiles[index],
+                            activeWorkspaceId: activeWorkspaceId,
+                            authenticatedWorkspaceIds:
+                                widget.authenticatedWorkspaceIds,
+                            hostedWorkspaceAccessModes:
+                                widget.hostedWorkspaceAccessModes,
+                            localWorkspaceAvailability:
+                                widget.localWorkspaceAvailability,
+                          ),
+                          focusOrderBase: index * 2.0 + 1,
+                          onSelect:
+                              widget.workspaces.profiles[index].id ==
+                                  activeWorkspaceId
+                              ? null
+                              : () => widget.onSelectWorkspace(
+                                  widget.workspaces.profiles[index],
+                                ),
+                          onDelete: () => widget.onDeleteWorkspace(
+                            widget.workspaces.profiles[index],
+                          ),
+                        ),
+                        if (index != widget.workspaces.profiles.length - 1)
+                          const SizedBox(height: 8),
+                      ],
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 12),
+              ),
+            const SizedBox(height: 16),
+            Text(
+              l10n.addWorkspace,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
                 Expanded(
-                  child: Text(
-                    activeSummary.textLabel,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelLarge,
+                  child: FocusTraversalOrder(
+                    order: NumericFocusOrder(addWorkspaceOrderBase),
+                    child: _SettingsProviderButton(
+                      label: l10n.workspaceTargetTypeHosted,
+                      selected:
+                          _targetType == WorkspaceProfileTargetType.hosted,
+                      onPressed: () => setState(
+                        () => _targetType = WorkspaceProfileTargetType.hosted,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FocusTraversalOrder(
+                    order: NumericFocusOrder(addWorkspaceOrderBase + 1),
+                    child: _SettingsProviderButton(
+                      label: l10n.workspaceTargetTypeLocal,
+                      selected: _targetType == WorkspaceProfileTargetType.local,
+                      onPressed: () => setState(
+                        () => _targetType = WorkspaceProfileTargetType.local,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            l10n.savedWorkspaces,
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 8),
-          if (!widget.workspaces.hasProfiles)
-            Text(
-              l10n.workspaceSwitcherEmptyState,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: colors.muted),
-            )
-          else
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 280),
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    for (final workspace in widget.workspaces.profiles) ...[
-                      _WorkspaceSwitcherRow(
-                        key: ValueKey('workspace-${workspace.id}'),
-                        workspace: workspace,
-                        isActive: workspace.id == activeWorkspaceId,
-                        stateLabel: _workspaceStateLabel(
-                          l10n,
-                          widget.viewModel,
-                          workspace,
-                          activeWorkspaceId: activeWorkspaceId,
-                          authenticatedWorkspaceIds:
-                              widget.authenticatedWorkspaceIds,
-                          hostedWorkspaceAccessModes:
-                              widget.hostedWorkspaceAccessModes,
-                          localWorkspaceAvailability:
-                              widget.localWorkspaceAvailability,
-                        ),
-                        onSelect: workspace.id == activeWorkspaceId
-                            ? null
-                            : () => widget.onSelectWorkspace(workspace),
-                        onDelete: () => widget.onDeleteWorkspace(workspace),
-                      ),
-                      if (workspace != widget.workspaces.profiles.last)
-                        const SizedBox(height: 8),
-                    ],
-                  ],
+            const SizedBox(height: 12),
+            FocusTraversalOrder(
+              order: NumericFocusOrder(addWorkspaceOrderBase + 2),
+              child: _SettingsTextField(
+                label: _targetType == WorkspaceProfileTargetType.hosted
+                    ? l10n.repository
+                    : l10n.repositoryPath,
+                controller: _targetController,
+              ),
+            ),
+            const SizedBox(height: 12),
+            FocusTraversalOrder(
+              order: NumericFocusOrder(addWorkspaceOrderBase + 3),
+              child: _SettingsTextField(
+                label: l10n.branch,
+                controller: _branchController,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FocusTraversalOrder(
+                order: NumericFocusOrder(addWorkspaceOrderBase + 4),
+                child: FilledButton(
+                  key: const ValueKey('workspace-add-button'),
+                  onPressed: _saveWorkspace,
+                  child: Text(l10n.workspaceSaveAndSwitch),
                 ),
               ),
             ),
-          const SizedBox(height: 16),
-          Text(
-            l10n.addWorkspace,
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: _SettingsProviderButton(
-                  label: l10n.workspaceTargetTypeHosted,
-                  selected: _targetType == WorkspaceProfileTargetType.hosted,
-                  onPressed: () => setState(
-                    () => _targetType = WorkspaceProfileTargetType.hosted,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _SettingsProviderButton(
-                  label: l10n.workspaceTargetTypeLocal,
-                  selected: _targetType == WorkspaceProfileTargetType.local,
-                  onPressed: () => setState(
-                    () => _targetType = WorkspaceProfileTargetType.local,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _SettingsTextField(
-            label: _targetType == WorkspaceProfileTargetType.hosted
-                ? l10n.repository
-                : l10n.repositoryPath,
-            controller: _targetController,
-          ),
-          const SizedBox(height: 12),
-          _SettingsTextField(label: l10n.branch, controller: _branchController),
-          const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton(
-              key: const ValueKey('workspace-add-button'),
-              onPressed: _saveWorkspace,
-              child: Text(l10n.workspaceSaveAndSwitch),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -5323,6 +5421,7 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
     required this.workspace,
     required this.isActive,
     required this.stateLabel,
+    required this.focusOrderBase,
     required this.onDelete,
     this.onSelect,
   });
@@ -5330,6 +5429,7 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
   final WorkspaceProfile workspace;
   final bool isActive;
   final String stateLabel;
+  final double focusOrderBase;
   final VoidCallback onDelete;
   final VoidCallback? onSelect;
 
@@ -5397,16 +5497,34 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
                   style: Theme.of(context).textTheme.labelMedium,
                 )
               else
-                OutlinedButton(
-                  key: ValueKey('workspace-open-${workspace.id}'),
-                  onPressed: onSelect,
-                  child: Text(l10n.openWorkspace),
+                FocusTraversalOrder(
+                  order: NumericFocusOrder(focusOrderBase),
+                  child: Semantics(
+                    button: true,
+                    label: '${l10n.openWorkspace}: ${workspace.displayName}',
+                    child: ExcludeSemantics(
+                      child: OutlinedButton(
+                        key: ValueKey('workspace-open-${workspace.id}'),
+                        onPressed: onSelect,
+                        child: Text(l10n.openWorkspace),
+                      ),
+                    ),
+                  ),
                 ),
               const SizedBox(width: 8),
-              TextButton(
-                key: ValueKey('workspace-delete-${workspace.id}'),
-                onPressed: onDelete,
-                child: Text(l10n.delete),
+              FocusTraversalOrder(
+                order: NumericFocusOrder(focusOrderBase + 1),
+                child: Semantics(
+                  button: true,
+                  label: '${l10n.delete}: ${workspace.displayName}',
+                  child: ExcludeSemantics(
+                    child: TextButton(
+                      key: ValueKey('workspace-delete-${workspace.id}'),
+                      onPressed: onDelete,
+                      child: Text(l10n.delete),
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
@@ -5427,24 +5545,30 @@ class _WorkspaceStateBadge extends StatelessWidget {
     final colors = context.ts;
     final lowerLabel = label.toLowerCase();
     final Color backgroundColor;
+    final Color borderColor;
     final Color textColor;
     if (active) {
       backgroundColor = colors.primary;
+      borderColor = colors.primary;
       textColor = colors.page;
     } else if (lowerLabel.contains('unavailable')) {
       backgroundColor = colors.error.withValues(alpha: 0.12);
-      textColor = colors.error;
+      borderColor = colors.error.withValues(alpha: 0.45);
+      textColor = colors.text;
     } else if (lowerLabel.contains('sign') ||
         lowerLabel.contains('read-only') ||
         lowerLabel.contains('attachment')) {
       backgroundColor = colors.warning.withValues(alpha: 0.14);
-      textColor = colors.warning;
+      borderColor = colors.warning.withValues(alpha: 0.45);
+      textColor = colors.text;
     } else if (lowerLabel.contains('connected') ||
         lowerLabel.contains('local git')) {
       backgroundColor = colors.success.withValues(alpha: 0.14);
-      textColor = colors.success;
+      borderColor = colors.success.withValues(alpha: 0.45);
+      textColor = colors.text;
     } else {
       backgroundColor = colors.surfaceAlt;
+      borderColor = colors.border;
       textColor = colors.muted;
     }
     return Container(
@@ -5452,6 +5576,7 @@ class _WorkspaceStateBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: backgroundColor,
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: borderColor),
       ),
       child: Text(
         label,
@@ -9589,70 +9714,90 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
       button: true,
       enabled: enabled,
       label: summary.semanticLabel,
-      child: InkWell(
-        borderRadius: borderRadius,
-        onTap: onPressed,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            minHeight: compact ? 44 : _desktopTopBarControlHeight,
-            maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: compact ? 44 : _desktopTopBarControlHeight,
+          maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
+        ),
+        child: FilledButton(
+          onPressed: onPressed,
+          style: ButtonStyle(
+            animationDuration: Duration.zero,
+            backgroundColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.disabled)) {
+                return colors.primary.withValues(alpha: 0.5);
+              }
+              return colors.primary;
+            }),
+            foregroundColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.disabled)) {
+                return onPrimary.withValues(alpha: 0.72);
+              }
+              return onPrimary;
+            }),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+            minimumSize: WidgetStatePropertyAll(
+              Size(0, compact ? 44 : _desktopTopBarControlHeight),
+            ),
+            maximumSize: WidgetStatePropertyAll(
+              Size(double.infinity, compact ? 44 : _desktopTopBarControlHeight),
+            ),
+            padding: WidgetStatePropertyAll(
+              EdgeInsets.symmetric(
+                horizontal: compact ? 10 : 12,
+                vertical: compact ? 8 : 6,
+              ),
+            ),
+            overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+            shape: WidgetStatePropertyAll(
+              RoundedRectangleBorder(borderRadius: borderRadius),
+            ),
+            side: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.focused)) {
+                return BorderSide(color: onPrimary, width: 2);
+              }
+              return BorderSide(color: colors.primary);
+            }),
           ),
-          child: Container(
-            height: compact ? null : _desktopTopBarControlHeight,
-            padding: EdgeInsets.symmetric(
-              horizontal: compact ? 10 : 12,
-              vertical: compact ? 8 : 6,
-            ),
-            decoration: BoxDecoration(
-              color: colors.primary,
-              borderRadius: borderRadius,
-              border: Border.all(color: colors.primary),
-            ),
-            foregroundDecoration: enabled
-                ? null
-                : BoxDecoration(
-                    color: colors.page.withValues(alpha: 0.45),
-                    borderRadius: borderRadius,
-                  ),
-            child: Row(
-              mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
-              children: [
-                TrackStateIcon(
-                  summary.icon,
-                  color: onPrimary,
-                  size: compact ? 18 : _desktopTopBarIconSize,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: compact
-                      ? Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              summary.displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: nameStyle,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              summary.detailLabel,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: detailStyle,
-                            ),
-                          ],
-                        )
-                      : Text(
-                          summary.textLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: nameStyle,
-                        ),
-                ),
-              ],
-            ),
+          child: Row(
+            mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
+            children: [
+              TrackStateIcon(
+                summary.icon,
+                color: onPrimary,
+                size: compact ? 18 : _desktopTopBarIconSize,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: compact
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            summary.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: nameStyle,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            summary.detailLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: detailStyle,
+                          ),
+                        ],
+                      )
+                    : Text(
+                        summary.textLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: nameStyle,
+                      ),
+              ),
+            ],
           ),
         ),
       ),
