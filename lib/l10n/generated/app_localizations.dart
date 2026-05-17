@@ -1654,6 +1654,12 @@ abstract class AppLocalizations {
   /// **'No valid saved workspace could be restored. Last skipped workspace: {workspaceName}. {reason}'**
   String workspaceRestoreFailed(String workspaceName, String reason);
 
+  /// No description provided for @selectedIssueUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'{issueKey} is no longer available in this workspace.'**
+  String selectedIssueUnavailable(String issueKey);
+
   /// No description provided for @localGitTokensNotNeeded.
   ///
   /// In en, this message translates to:
@@ -1790,6 +1796,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.'**
   String get localGitRuntimeDescription;
+
+  /// No description provided for @localGitHostedAccessDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Local changes still use the checked-out repository. Connect GitHub here when you need hosted access without switching away from the active local workspace.'**
+  String get localGitHostedAccessDescription;
 
   /// No description provided for @close.
   ///

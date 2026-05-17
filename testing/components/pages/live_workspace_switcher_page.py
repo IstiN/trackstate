@@ -544,14 +544,14 @@ class LiveWorkspaceSwitcherPage:
                 .map((node, index) =>
                   `${node.tagName}[${index}] role=${node.role ?? '<none>'} text=${node.visibleText || '<none>'}`,
                 );
-               const interactiveTexts = Array.from(switcher.querySelectorAll(interactiveSelector))
-                 .filter(isVisible)
-                 .map((element) => {
-                   const visibleText = visibleTextFor(element);
-                   const backgroundColor = resolveBackgroundColor(
-                     element,
-                     toHex(window.getComputedStyle(switcher).backgroundColor),
-                   );
+              const interactiveTexts = Array.from(switcher.querySelectorAll(interactiveSelector))
+                .filter(isVisible)
+                .map((element) => {
+                  const visibleText = visibleTextFor(element);
+                  const backgroundColor = resolveBackgroundColor(
+                    element,
+                    toHex(window.getComputedStyle(switcher).backgroundColor),
+                  );
                   const foregroundColor = resolveForegroundColor(element);
                   return {
                     label: labelFor(element),
@@ -594,39 +594,55 @@ class LiveWorkspaceSwitcherPage:
                   ...rectPayload(element),
                 };
               });
-              const interactiveIcons = [
-                ...Array.from(document.querySelectorAll('flt-semantics[role="img"],[role="img"]'))
-                  .filter(isVisible)
-                  .filter((element) => {
-                    const label = labelFor(element);
-                    return label.startsWith('Workspace switcher:')
-                      || switcher.contains(element);
-                  }),
-                ...Array.from(switcher.querySelectorAll('img,svg,canvas'))
-                  .filter(isVisible),
-              ]
-                .filter((element, index, all) => all.indexOf(element) === index)
-                .map((element) => {
-                  const label = labelFor(element);
-                  const backgroundColor = resolveBackgroundColor(element, dialogBackground);
-                  const foregroundColor = resolveForegroundColor(element);
-                  return {
-                    label,
-                    foregroundColor,
-                    backgroundColor,
-                    contrastRatio: contrastRatio(foregroundColor, backgroundColor),
-                    ...rectPayload(element),
-                  };
-                })
-                .filter((element) => element.label.length > 0);
-                return {
-                  bodyText: document.body?.innerText ?? '',
-                  dialogVisible: true,
-                  headingText: normalize(switcher.innerText || switcher.textContent).split(' ')[0] === 'Workspace'
-                    ? 'Workspace switcher'
-                    : normalize(switcher.innerText || switcher.textContent),
-                  interactiveElements,
-                  semanticsNodes,
+              const workspaceTrigger = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              ).find((candidate) =>
+                isVisible(candidate)
+                && labelFor(candidate).startsWith('Workspace switcher:'),
+              );
+              const iconSelector = [
+                'flt-semantics[role="img"]',
+                '[role="img"]',
+                'img',
+                'svg',
+                'canvas',
+              ].join(',');
+              const triggerAndDialogControls = [
+                ...(workspaceTrigger ? [workspaceTrigger] : []),
+                ...Array.from(switcher.querySelectorAll(interactiveSelector)).filter(isVisible),
+              ];
+              const interactiveIcons = triggerAndDialogControls.flatMap((element) => {
+                const icons = Array.from(element.querySelectorAll(iconSelector)).filter(isVisible);
+                const label = labelFor(element);
+                if (
+                  !icons.length
+                  && !label.startsWith('Workspace switcher:')
+                  && !label.startsWith('Delete')
+                ) {
+                  return [];
+                }
+                const iconElement = icons[0] ?? element;
+                const backgroundColor = resolveBackgroundColor(
+                  iconElement,
+                  resolveBackgroundColor(element, dialogBackground),
+                );
+                const foregroundColor = resolveForegroundColor(iconElement);
+                return [{
+                  label,
+                  foregroundColor,
+                  backgroundColor,
+                  contrastRatio: contrastRatio(foregroundColor, backgroundColor),
+                  ...rectPayload(iconElement),
+                }];
+              });
+              return {
+                bodyText: document.body?.innerText ?? '',
+                dialogVisible: true,
+                headingText: normalize(switcher.innerText || switcher.textContent).split(' ')[0] === 'Workspace'
+                  ? 'Workspace switcher'
+                  : normalize(switcher.innerText || switcher.textContent),
+                interactiveElements,
+                semanticsNodes,
                 missingInteractiveLabels,
                 missingSemanticsLabels,
                 badges,

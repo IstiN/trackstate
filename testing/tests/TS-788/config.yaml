@@ -1,0 +1,9 @@
+test_id: TS-788
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Uses a mutable hosted ProviderBackedTrackStateRepository fixture to drive the real TrackState app through the production workspace sync listener.
+  - Publishes malformed changed paths that contain a partial comments keyword match but do not satisfy the allow-list structure.
+  - Verifies no issue refreshes are dispatched, no global snapshot reload occurs, and the visible Comments tab stays unchanged for the user.

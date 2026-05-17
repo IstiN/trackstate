@@ -5,25 +5,27 @@ import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 
-class Ts734RefreshMatrixRepository extends ProviderBackedTrackStateRepository {
-  Ts734RefreshMatrixRepository._(this._provider) : super(provider: _provider);
+class Ts788PartialAllowListRepository
+    extends ProviderBackedTrackStateRepository {
+  Ts788PartialAllowListRepository._(this._provider)
+    : super(provider: _provider);
 
-  factory Ts734RefreshMatrixRepository() =>
-      Ts734RefreshMatrixRepository._(_Ts734MutableProvider());
+  factory Ts788PartialAllowListRepository() =>
+      Ts788PartialAllowListRepository._(_Ts788MutableProvider());
 
-  static const String issueAKey = 'TRACK-734A';
-  static const String issueASummary = 'Issue A dashboard counter source';
-  static const String issueCKey = 'TRACK-734C';
-  static const String issueCSummary = 'Issue C refresh matrix target';
+  static const String issueCKey = 'TRACK-741C';
+  static const String issueCSummary = 'Issue C partial allow-list sync guard';
   static const String initialComment =
-      'Issue C original comment remains visible until the comments-only sync arrives.';
-  static const String updatedComment =
-      'Issue C synced comment appears after the comments-only refresh without rebuilding unrelated surfaces.';
-  static const String initialTagPrefix = 'ts734-release-';
-  static const String updatedTagPrefix = 'ts734-sync-';
+      'Issue C original comment remains visible before the malformed partial allow-list sync paths arrive.';
+  static const String hiddenUpdatedComment =
+      'Issue C hidden synced comment should stay invisible when malformed partial allow-list paths are filtered out.';
+  static const List<String> malformedChangedPaths = <String>[
+    'TRACK-741C/comments_and_more',
+    'comments/TRACK-741C',
+  ];
 
-  final _Ts734MutableProvider _provider;
-  final List<Ts734HydrationCall> hydrateCalls = <Ts734HydrationCall>[];
+  final _Ts788MutableProvider _provider;
+  final List<Ts788HydrationCall> hydrateCalls = <Ts788HydrationCall>[];
   int loadSnapshotCalls = 0;
 
   Future<void> connectForTest() {
@@ -31,18 +33,19 @@ class Ts734RefreshMatrixRepository extends ProviderBackedTrackStateRepository {
       const RepositoryConnection(
         repository: 'trackstate/trackstate',
         branch: 'main',
-        token: 'ts734-token',
+        token: 'ts788-token',
       ),
     );
   }
 
-  Future<void> emitCommentsOnlyRefresh() => _provider.emitCommentsOnlyRefresh();
-
-  Future<void> emitProjectMetaRefresh() => _provider.emitProjectMetaRefresh();
-
-  String get releaseTagPrefix => _provider.releaseTagPrefix;
+  Future<void> emitMalformedAllowListRefresh() =>
+      _provider.emitMalformedAllowListRefresh();
 
   String get currentIssueCComment => _provider.issueCommentBody(issueCKey);
+
+  int get syncCheckCount => _provider.syncCheckCount;
+
+  String get repositoryRevision => _provider.repositoryRevision;
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async {
@@ -76,7 +79,7 @@ class Ts734RefreshMatrixRepository extends ProviderBackedTrackStateRepository {
     bool force = false,
   }) {
     hydrateCalls.add(
-      Ts734HydrationCall(
+      Ts788HydrationCall(
         issueKey: issue.key,
         scopes: Set<IssueHydrationScope>.from(scopes),
         force: force,
@@ -86,8 +89,8 @@ class Ts734RefreshMatrixRepository extends ProviderBackedTrackStateRepository {
   }
 }
 
-class Ts734HydrationCall {
-  const Ts734HydrationCall({
+class Ts788HydrationCall {
+  const Ts788HydrationCall({
     required this.issueKey,
     required this.scopes,
     required this.force,
@@ -98,8 +101,7 @@ class Ts734HydrationCall {
   final bool force;
 }
 
-class _Ts734MutableProvider
-    implements TrackStateProviderAdapter, RepositoryFileMutator {
+class _Ts788MutableProvider implements TrackStateProviderAdapter {
   static const RepositoryPermission _permission = RepositoryPermission(
     canRead: true,
     canWrite: true,
@@ -111,45 +113,21 @@ class _Ts734MutableProvider
     canCheckCollaborators: false,
   );
 
-  _Ts734MutableProvider() {
+  _Ts788MutableProvider() {
     _rebuildFiles();
   }
 
-  final Map<String, _Ts734IssueRecord> _issues = <String, _Ts734IssueRecord>{
-    Ts734RefreshMatrixRepository.issueAKey: _Ts734IssueRecord(
-      key: Ts734RefreshMatrixRepository.issueAKey,
-      summary: Ts734RefreshMatrixRepository.issueASummary,
-      issueTypeId: 'story',
-      statusId: 'todo',
-      priorityId: 'medium',
-      updated: '2026-05-14T18:00:00Z',
-      description:
-          'Issue A starts open so the dashboard counters can change when project metadata refreshes.',
-      comments: const <String>[],
-      labels: const <String>['dashboard'],
-    ),
-    'TRACK-734B': _Ts734IssueRecord(
-      key: 'TRACK-734B',
-      summary: 'Issue B progress baseline',
-      issueTypeId: 'story',
-      statusId: 'in-progress',
-      priorityId: 'high',
-      updated: '2026-05-14T18:05:00Z',
-      description:
-          'Issue B keeps the in-progress dashboard metric visible throughout the scenario.',
-      comments: const <String>[],
-      labels: const <String>['dashboard'],
-    ),
-    Ts734RefreshMatrixRepository.issueCKey: _Ts734IssueRecord(
-      key: Ts734RefreshMatrixRepository.issueCKey,
-      summary: Ts734RefreshMatrixRepository.issueCSummary,
+  final Map<String, _Ts788IssueRecord> _issues = <String, _Ts788IssueRecord>{
+    Ts788PartialAllowListRepository.issueCKey: _Ts788IssueRecord(
+      key: Ts788PartialAllowListRepository.issueCKey,
+      summary: Ts788PartialAllowListRepository.issueCSummary,
       issueTypeId: 'story',
       statusId: 'todo',
       priorityId: 'high',
-      updated: '2026-05-14T18:10:00Z',
+      updated: '2026-05-16T20:10:00Z',
       description:
-          'Issue C stays selected while the sync coordinator publishes targeted refreshes.',
-      comments: const <String>[Ts734RefreshMatrixRepository.initialComment],
+          'Issue C stays selected while hosted workspace sync processes malformed changed paths that only partially match allow-listed domains.',
+      comments: const <String>[Ts788PartialAllowListRepository.initialComment],
       labels: const <String>['comments', 'board'],
     ),
   };
@@ -157,48 +135,33 @@ class _Ts734MutableProvider
   final Map<String, String> _textFiles = <String, String>{};
   RepositorySyncCheck? _queuedCheck;
   int _revision = 1;
-  String _releaseTagPrefix = Ts734RefreshMatrixRepository.initialTagPrefix;
+  int syncCheckCount = 0;
 
-  String get releaseTagPrefix => _releaseTagPrefix;
+  String get repositoryRevision => 'ts788-revision-$_revision';
 
   String issueDescription(String key) => _issue(key).description;
 
   String issueCommentBody(String key) => _issue(key).comments.join('\n');
 
-  Future<void> emitCommentsOnlyRefresh() async {
-    final issue = _issue(Ts734RefreshMatrixRepository.issueCKey);
+  Future<void> emitMalformedAllowListRefresh() async {
+    final issue = _issue(Ts788PartialAllowListRepository.issueCKey);
     _issues[issue.key] = issue.copyWith(
-      comments: const <String>[Ts734RefreshMatrixRepository.updatedComment],
-      updated: '2026-05-14T18:20:00Z',
+      comments: const <String>[
+        Ts788PartialAllowListRepository.hiddenUpdatedComment,
+      ],
+      updated: '2026-05-16T20:20:00Z',
     );
     _rebuildFiles();
-    _queueHostedRefresh(<String>{'TRACK-734C/comments/0001.md'});
-  }
-
-  Future<void> emitProjectMetaRefresh() async {
-    _releaseTagPrefix = Ts734RefreshMatrixRepository.updatedTagPrefix;
-    final issue = _issue(Ts734RefreshMatrixRepository.issueAKey);
-    _issues[issue.key] = issue.copyWith(
-      statusId: 'done',
-      updated: '2026-05-14T18:30:00Z',
-      description:
-          'Issue A is completed in the refreshed snapshot so the dashboard counters visibly change.',
+    _queueHostedRefresh(
+      Ts788PartialAllowListRepository.malformedChangedPaths.toSet(),
     );
-    _rebuildFiles();
-    _queueHostedRefresh(<String>{
-      'project.json',
-      '.trackstate/index/issues.json',
-      'TRACK-734A/main.md',
-    });
   }
 
   @override
   Future<RepositorySyncCheck> checkSync({
     RepositorySyncState? previousState,
   }) async {
-    if (previousState == null) {
-      return RepositorySyncCheck(state: _syncState());
-    }
+    syncCheckCount += 1;
     final queued = _queuedCheck;
     _queuedCheck = null;
     return queued ?? RepositorySyncCheck(state: _syncState());
@@ -215,10 +178,7 @@ class _Ts734MutableProvider
 
   @override
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async =>
-      const RepositoryUser(
-        login: 'ts734-user',
-        displayName: 'TS-734 User',
-      );
+      const RepositoryUser(login: 'ts788-user', displayName: 'TS-788 User');
 
   @override
   Future<RepositoryBranch> getBranch(String name) async =>
@@ -242,7 +202,7 @@ class _Ts734MutableProvider
     required String ref,
   }) async {
     throw const TrackStateProviderException(
-      'TS-734 does not require attachment downloads.',
+      'TS-788 does not require attachment downloads.',
     );
   }
 
@@ -251,7 +211,7 @@ class _Ts734MutableProvider
     RepositoryAttachmentWriteRequest request,
   ) async {
     throw const TrackStateProviderException(
-      'TS-734 does not require attachment uploads.',
+      'TS-788 does not require attachment uploads.',
     );
   }
 
@@ -262,7 +222,7 @@ class _Ts734MutableProvider
   }) async {
     final content = _textFiles[path];
     if (content == null) {
-      throw TrackStateProviderException('Missing TS-734 fixture for $path.');
+      throw TrackStateProviderException('Missing TS-788 fixture for $path.');
     }
     return RepositoryTextFile(
       path: path,
@@ -278,12 +238,8 @@ class _Ts734MutableProvider
   Future<RepositoryCommitResult> createCommit(
     RepositoryCommitRequest request,
   ) async {
-    _textFiles[request.path] = request.content;
-    _revision += 1;
-    return RepositoryCommitResult(
-      branch: request.branch,
-      message: request.message,
-      revision: _currentRevision,
+    throw const TrackStateProviderException(
+      'TS-788 should not create commits.',
     );
   }
 
@@ -303,53 +259,31 @@ class _Ts734MutableProvider
     );
   }
 
-  @override
-  Future<RepositoryCommitResult> applyFileChanges(
-    RepositoryFileChangeRequest request,
-  ) async {
-    for (final change in request.changes) {
-      switch (change) {
-        case RepositoryTextFileChange():
-          _textFiles[change.path] = change.content;
-        case RepositoryDeleteFileChange():
-          _textFiles.remove(change.path);
-        case RepositoryBinaryFileChange():
-          throw const TrackStateProviderException(
-            'TS-734 does not support binary repository changes.',
-          );
-      }
-    }
-    _revision += 1;
-    return RepositoryCommitResult(
-      branch: request.branch,
-      message: request.message,
-      revision: _currentRevision,
-    );
-  }
-
   void _queueHostedRefresh(Set<String> changedPaths) {
     _revision += 1;
     _queuedCheck = RepositorySyncCheck(
       state: _syncState(),
-      signals: const <WorkspaceSyncSignal>{WorkspaceSyncSignal.hostedRepository},
+      signals: const <WorkspaceSyncSignal>{
+        WorkspaceSyncSignal.hostedRepository,
+      },
       changedPaths: changedPaths,
     );
   }
 
   RepositorySyncState _syncState() => RepositorySyncState(
     providerType: providerType,
-    repositoryRevision: 'ts734-revision-$_revision',
-    sessionRevision: 'ts734-session',
+    repositoryRevision: repositoryRevision,
+    sessionRevision: 'ts788-session',
     connectionState: ProviderConnectionState.connected,
     permission: _permission,
   );
 
-  String get _currentRevision => 'ts734-r$_revision';
+  String get _currentRevision => 'ts788-r$_revision';
 
-  _Ts734IssueRecord _issue(String key) {
+  _Ts788IssueRecord _issue(String key) {
     final issue = _issues[key];
     if (issue == null) {
-      throw StateError('Missing TS-734 issue state for $key.');
+      throw StateError('Missing TS-788 issue state for $key.');
     }
     return issue;
   }
@@ -358,7 +292,7 @@ class _Ts734MutableProvider
     _textFiles
       ..clear()
       ..addAll(<String, String>{
-        'project.json': _projectJson(_releaseTagPrefix),
+        'project.json': _projectJson,
         'config/statuses.json': _statusesJson,
         'config/issue-types.json': _issueTypesJson,
         'config/fields.json': _fieldsJson,
@@ -401,10 +335,8 @@ class _Ts734MutableProvider
     return const JsonEncoder.withIndent('  ').convert(entries);
   }
 
-  String _issueMarkdown(_Ts734IssueRecord issue) {
-    final labels = issue.labels
-        .map((label) => '  - $label')
-        .join('\n');
+  String _issueMarkdown(_Ts788IssueRecord issue) {
+    final labels = issue.labels.map((label) => '  - $label').join('\n');
     return '''
 ---
 key: ${issue.key}
@@ -442,8 +374,8 @@ $body
   }
 }
 
-class _Ts734IssueRecord {
-  const _Ts734IssueRecord({
+class _Ts788IssueRecord {
+  const _Ts788IssueRecord({
     required this.key,
     required this.summary,
     required this.issueTypeId,
@@ -465,17 +397,16 @@ class _Ts734IssueRecord {
   final List<String> comments;
   final List<String> labels;
 
-  _Ts734IssueRecord copyWith({
-    String? statusId,
+  _Ts788IssueRecord copyWith({
     String? updated,
     String? description,
     List<String>? comments,
   }) {
-    return _Ts734IssueRecord(
+    return _Ts788IssueRecord(
       key: key,
       summary: summary,
       issueTypeId: issueTypeId,
-      statusId: statusId ?? this.statusId,
+      statusId: statusId,
       priorityId: priorityId,
       updated: updated ?? this.updated,
       description: description ?? this.description,
@@ -485,20 +416,14 @@ class _Ts734IssueRecord {
   }
 }
 
-String _projectJson(String tagPrefix) => '''
+const String _projectJson = '''
 {
   "key": "TRACK",
   "name": "TrackState.AI",
   "defaultLocale": "en",
   "issueKeyPattern": "TRACK-{number}",
   "dataModel": "nested-tree",
-  "configPath": "config",
-  "attachmentStorage": {
-    "mode": "github-releases",
-    "githubReleases": {
-      "tagPrefix": "$tagPrefix"
-    }
-  }
+  "configPath": "config"
 }
 ''';
 
@@ -525,8 +450,7 @@ const String _fieldsJson = '''
 
 const String _prioritiesJson = '''
 [
-  {"id": "high", "name": "High"},
-  {"id": "medium", "name": "Medium"}
+  {"id": "high", "name": "High"}
 ]
 ''';
 

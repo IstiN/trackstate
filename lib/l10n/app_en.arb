@@ -457,6 +457,14 @@
       }
     }
   },
+  "selectedIssueUnavailable": "{issueKey} is no longer available in this workspace.",
+  "@selectedIssueUnavailable": {
+    "placeholders": {
+      "issueKey": {
+        "type": "String"
+      }
+    }
+  },
   "localGitTokensNotNeeded": "This runtime uses local Git commits. GitHub tokens are not needed.",
   "tokenEmpty": "Token is empty.",
   "githubConnectedDragCards": "Connected as {login} to {repository}. Drag cards to commit status changes.",
@@ -586,6 +594,7 @@
   "configuredRepositoryFallback": "configured repository",
   "currentBranchFallback": "current branch",
   "localGitRuntimeDescription": "Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.",
+  "localGitHostedAccessDescription": "Local changes still use the checked-out repository. Connect GitHub here when you need hosted access without switching away from the active local workspace.",
   "close": "Close",
   "connectGitHub": "Connect GitHub",
   "retry": "Retry",

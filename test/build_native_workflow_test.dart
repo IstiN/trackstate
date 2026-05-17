@@ -25,7 +25,7 @@ void main() {
     );
     expect(
       workflow,
-      contains(r'target_commitish: ${{ env.release_checkout_ref }}'),
+      contains(r'-f target_commitish="$release_checkout_ref"'),
     );
     expect(workflow, isNot(contains('branches: [main]')));
     expect(workflow, contains('runs-on: ubuntu-latest'));
@@ -37,6 +37,8 @@ void main() {
       workflow,
       contains('[self-hosted, macOS, trackstate-release, ARM64]'),
     );
+    expect(workflow, contains('Use runner Flutter SDK'));
+    expect(workflow, isNot(contains('subosito/flutter-action')));
     expect(
       workflow,
       contains('./tool/check_macos_release_runner.sh'),
@@ -49,6 +51,11 @@ void main() {
             .readAsStringSync();
 
     expect(workflow, contains('flutter build macos --release'));
+    expect(
+      workflow,
+      contains('::notice::flutter build macos is still running...'),
+    );
+    expect(workflow, contains('cleanup_heartbeat'));
     expect(workflow, contains('dart compile exe bin/trackstate.dart'));
     expect(
       workflow,
@@ -56,7 +63,16 @@ void main() {
     );
     expect(workflow, contains('tar -czf'));
     expect(workflow, contains('shasum -a 256'));
-    expect(workflow, contains('overwrite_files: true'));
+    expect(workflow, contains(r'gh release create "$release_tag"'));
+    expect(workflow, contains(r'gh release upload "$release_tag"'));
+    expect(workflow, contains(r'gh release edit "$release_tag"'));
+    expect(workflow, contains('--draft=false'));
+    expect(workflow, contains('--prerelease=false'));
+    expect(workflow, contains('--clobber'));
+    expect(
+      workflow,
+      contains('::notice::GitHub release asset publishing is still running...'),
+    );
     expect(workflow, isNot(contains('Build iOS')));
     expect(workflow, isNot(contains('.dmg')));
   });

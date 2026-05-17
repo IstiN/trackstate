@@ -1176,6 +1176,28 @@ def _failure_summary(result: dict[str, object]) -> str:
     return f"First failed step: {first.get('step')} — {first.get('observed')}"
 
 
+def _failed_step_observations(result: dict[str, object]) -> list[str]:
+    failed_steps = [
+        step
+        for step in result.get("steps", [])
+        if isinstance(step, dict) and step.get("status") == "failed"
+    ]
+    observations: list[str] = []
+    for step in failed_steps:
+        step_number = step.get("step")
+        observed = str(step.get("observed", "")).strip()
+        if not observed:
+            continue
+        first_line = observed.splitlines()[0].strip()
+        observations.append(f"Step {step_number}: {first_line}")
+    if observations:
+        return observations
+    fallback_error = str(result.get("error", "")).strip()
+    if fallback_error:
+        return [fallback_error.splitlines()[0].strip()]
+    return ["The run failed before the test could record step-level observations."]
+
+
 def _bug_description(result: dict[str, object]) -> str:
     steps = result.get("steps", [])
     annotated_steps: list[str] = []
@@ -1195,6 +1217,7 @@ def _bug_description(result: dict[str, object]) -> str:
             )
         else:
             annotated_steps.append(f"{index}. ❌ {request_step}\n   Observed: Not reached.")
+    actual_lines = _failed_step_observations(result)
     return "\n".join(
         [
             f"# {TICKET_KEY} — {TEST_CASE_TITLE}",
@@ -1211,11 +1234,8 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Actual vs Expected",
             f"- **Expected:** {EXPECTED_RESULT}",
-            (
-                "- **Actual:** Keyboard focus did not reliably reach the workspace "
-                "switcher trigger in the live top bar, and the condensed mobile "
-                "trigger did not expose a visible focus state during the run."
-            ),
+            "- **Actual:**",
+            *[f"  - {line}" for line in actual_lines],
             "",
             "## Environment",
             f"- URL: {result.get('app_url', '')}",

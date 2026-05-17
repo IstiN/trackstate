@@ -335,6 +335,176 @@ void main() {
       expect(state.activeWorkspace?.defaultBranch, 'release');
     },
   );
+
+  testWidgets(
+    'add workspace local folder can browse and open an existing repository',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final service = SharedPreferencesWorkspaceProfileService(
+        now: () => DateTime.utc(2026, 5, 14, 10, 0),
+      );
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'owner/current',
+          defaultBranch: 'main',
+        ),
+      );
+
+      final openedRepositories = <String>[];
+      final onboardingService = _FakeLocalWorkspaceOnboardingService(
+        inspection: const LocalWorkspaceInspection(
+          folderPath: '/tmp/local-demo',
+          state: LocalWorkspaceInspectionState.readyToOpen,
+          message: 'Ready to open.',
+          suggestedWorkspaceName: 'local-demo',
+          suggestedWriteBranch: 'main',
+          detectedWriteBranch: 'main',
+          hasGitRepository: true,
+        ),
+      );
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: DemoTrackStateRepository.new,
+          workspaceProfileService: service,
+          localWorkspaceOnboardingService: onboardingService,
+          workspaceDirectoryPicker:
+              ({String? confirmButtonText, String? initialDirectory}) async =>
+                  '/tmp/local-demo',
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                openedRepositories.add(
+                  '$repositoryPath@$defaultBranch@$writeBranch',
+                );
+                return const DemoTrackStateRepository();
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel('Add workspace').first);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('local-workspace-onboarding-open-existing')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('/tmp/local-demo'), findsOneWidget);
+      expect(
+        _editableTextValue(
+          tester,
+          const ValueKey('local-workspace-onboarding-name'),
+        ),
+        'local-demo',
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('local-workspace-onboarding-submit')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(openedRepositories.single, '/tmp/local-demo@main@main');
+      final state = await service.loadState();
+      expect(state.activeWorkspace?.target, '/tmp/local-demo');
+    },
+  );
+
+  testWidgets(
+    'add workspace local folder can initialize an empty folder',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final service = SharedPreferencesWorkspaceProfileService(
+        now: () => DateTime.utc(2026, 5, 14, 10, 0),
+      );
+      await service.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'owner/current',
+          defaultBranch: 'main',
+        ),
+      );
+
+      final onboardingService = _FakeLocalWorkspaceOnboardingService(
+        inspection: const LocalWorkspaceInspection(
+          folderPath: '/tmp/new-workspace',
+          state: LocalWorkspaceInspectionState.readyToInitialize,
+          message: 'Initialize TrackState here.',
+          suggestedWorkspaceName: 'new-workspace',
+          suggestedWriteBranch: 'main',
+          needsGitInitialization: true,
+        ),
+        initializedResult: const LocalWorkspaceSetupResult(
+          folderPath: '/tmp/new-workspace',
+          displayName: 'new-workspace',
+          defaultBranch: 'main',
+          writeBranch: 'main',
+          projectKey: 'NW',
+        ),
+      );
+      final openedRepositories = <String>[];
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: DemoTrackStateRepository.new,
+          workspaceProfileService: service,
+          localWorkspaceOnboardingService: onboardingService,
+          workspaceDirectoryPicker:
+              ({String? confirmButtonText, String? initialDirectory}) async =>
+                  '/tmp/new-workspace',
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                openedRepositories.add(
+                  '$repositoryPath@$defaultBranch@$writeBranch',
+                );
+                return const DemoTrackStateRepository();
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel('Add workspace').first);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(
+          const ValueKey('local-workspace-onboarding-initialize-folder'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Initialize TrackState here.'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const ValueKey('local-workspace-onboarding-submit')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(onboardingService.initializeCalls, contains('new-workspace@main'));
+      expect(openedRepositories.single, '/tmp/new-workspace@main@main');
+      final state = await service.loadState();
+      expect(state.activeWorkspace?.target, '/tmp/new-workspace');
+    },
+  );
 }
 
 class _FakeLocalWorkspaceOnboardingService

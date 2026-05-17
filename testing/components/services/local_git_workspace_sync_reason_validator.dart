@@ -131,6 +131,8 @@ class LocalGitWorkspaceSyncReasonValidator
         WorkspaceSyncSignal.localHead => 'local head change',
         WorkspaceSyncSignal.localWorktree => 'local worktree change',
         WorkspaceSyncSignal.hostedRepository => 'hosted repository change',
+        WorkspaceSyncSignal.hostedSnapshotReload =>
+          'hosted snapshot reload request',
         WorkspaceSyncSignal.hostedSession => 'hosted session change',
       });
     }

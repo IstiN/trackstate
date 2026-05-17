@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -54,6 +54,24 @@ typedef LocalRepositoryConfigurationApplier =
       required String writeBranch,
     });
 
+@visibleForTesting
+bool shouldOpenProjectSettingsForStartupWithoutSavedWorkspaces({
+  required bool isWeb,
+  required bool hasRepository,
+  required bool hasProfiles,
+}) {
+  return isWeb && !hasRepository && !hasProfiles;
+}
+
+@visibleForTesting
+bool shouldShowWorkspaceOnboardingForStartup({
+  required bool isWeb,
+  required bool hasRepository,
+  required bool hasProfiles,
+}) {
+  return !isWeb && !hasRepository && !hasProfiles;
+}
+
 class TrackStateApp extends StatefulWidget {
   const TrackStateApp({
     super.key,
@@ -98,6 +116,9 @@ class _TrackStateAppState extends State<TrackStateApp>
       const <String, HostedWorkspaceAccessMode>{};
   Map<String, bool> _localWorkspaceAvailability = const <String, bool>{};
   final Map<String, String> _workspaceValidationFailures = <String, String>{};
+  final GlobalKey _workspaceSwitcherTriggerAnchorKey = GlobalKey(
+    debugLabel: 'workspace-switcher-trigger-anchor',
+  );
   _WorkspaceRestoreFailure? _pendingWorkspaceRestoreFailure;
 
   @override
@@ -453,6 +474,12 @@ class _TrackStateAppState extends State<TrackStateApp>
 
   Future<void> _initializeWorkspaceProfiles() async {
     final loadedState = await widget.workspaceProfileService.loadState();
+    final startsWithoutSavedWorkspaces =
+        shouldOpenProjectSettingsForStartupWithoutSavedWorkspaces(
+          isWeb: kIsWeb,
+          hasRepository: widget.repository != null,
+          hasProfiles: loadedState.hasProfiles,
+        );
     if (!mounted) {
       return;
     }
@@ -473,14 +500,11 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (loadedState.hasProfiles) {
       final restored = await _restoreWorkspaceFromSavedState(loadedState);
       if (!restored) {
-        await viewModel.load();
-        if (_pendingWorkspaceRestoreFailure case final failure?) {
-          viewModel.showMessage(
-            TrackerMessage.workspaceRestoreFailed(
-              workspaceName: failure.workspaceName,
-              reason: failure.reason,
-            ),
-          );
+        if (mounted) {
+          setState(() {
+            _showsWorkspaceOnboarding = true;
+            _workspaceProfilesReady = true;
+          });
         }
       }
       return;
@@ -506,10 +530,17 @@ class _TrackStateAppState extends State<TrackStateApp>
       _showsWorkspaceOnboarding = _shouldShowWorkspaceOnboarding(migratedState);
       _workspaceProfilesReady = true;
     });
+    if (startsWithoutSavedWorkspaces) {
+      viewModel.openProjectSettings();
+    }
   }
 
   bool _shouldShowWorkspaceOnboarding(WorkspaceProfilesState state) {
-    return !kIsWeb && widget.repository == null && !state.hasProfiles;
+    return shouldShowWorkspaceOnboardingForStartup(
+      isWeb: kIsWeb,
+      hasRepository: widget.repository != null,
+      hasProfiles: state.hasProfiles,
+    );
   }
 
   Future<void> _switchToLocalRepository({
@@ -717,6 +748,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       _createIssuePrefill = null;
       _showsWorkspaceOnboarding = false;
       _workspaceProfilesReady = true;
+      _pendingWorkspaceRestoreFailure = null;
       if (workspaceState != null) {
         _workspaceState = workspaceState;
       } else if (prepared.workspace != null) {
@@ -771,6 +803,39 @@ class _TrackStateAppState extends State<TrackStateApp>
       return;
     }
     await _switchToWorkspace(workspace);
+  }
+
+  Future<void> _retryWorkspaceRestore() async {
+    if (widget.repository != null) {
+      return;
+    }
+    final nextState = await widget.workspaceProfileService.loadState();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _workspaceState = nextState;
+      _workspaceProfilesReady = true;
+    });
+    await _refreshWorkspaceSwitcherState(nextState);
+    final restored = await _restoreWorkspaceFromSavedState(nextState);
+    if (restored) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    if (_pendingWorkspaceRestoreFailure case final failure?) {
+      viewModel.showMessage(
+        TrackerMessage.workspaceRestoreFailed(
+          workspaceName: failure.workspaceName,
+          reason: failure.reason,
+        ),
+      );
+    }
+    setState(() {
+      _showsWorkspaceOnboarding = true;
+    });
   }
 
   Future<void> _deleteWorkspaceProfile(WorkspaceProfile workspace) async {
@@ -904,17 +969,109 @@ class _TrackStateAppState extends State<TrackStateApp>
       );
       return;
     }
-    await showDialog<void>(
+    await _showDesktopWorkspaceSwitcherPanel(
       context: context,
-      builder: (dialogContext) {
-        return Dialog(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: content,
+      content: content,
+    );
+  }
+
+  Future<void> _showDesktopWorkspaceSwitcherPanel({
+    required BuildContext context,
+    required Widget content,
+  }) async {
+    final l10n = AppLocalizations.of(context)!;
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: l10n.workspaceSwitcher,
+      barrierColor: Colors.transparent,
+      pageBuilder: (dialogContext, _, _) {
+        final mediaQuery = MediaQuery.of(dialogContext);
+        final colors = dialogContext.ts;
+        final panelRect = _resolveWorkspaceSwitcherDesktopPanelRect(
+          viewportSize: mediaQuery.size,
+          safePadding: mediaQuery.padding,
+        );
+        final maxHeight = math.max(
+          280.0,
+          mediaQuery.size.height -
+              panelRect.top -
+              mediaQuery.padding.bottom -
+              12,
+        );
+        return SafeArea(
+          child: Stack(
+            children: [
+              Positioned(
+                left: panelRect.left,
+                top: panelRect.top,
+                width: panelRect.width,
+                child: Material(
+                  color: colors.surface,
+                  elevation: 16,
+                  shadowColor: colors.shadow,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    side: BorderSide(color: colors.border),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: maxHeight),
+                    child: SizedBox(width: panelRect.width, child: content),
+                  ),
+                ),
+              ),
+            ],
           ),
         );
       },
     );
+  }
+
+  Rect _resolveWorkspaceSwitcherDesktopPanelRect({
+    required Size viewportSize,
+    required EdgeInsets safePadding,
+  }) {
+    const horizontalMargin = 12.0;
+    const topGap = 8.0;
+    final availableWidth = math.max(
+      0.0,
+      viewportSize.width - (horizontalMargin * 2),
+    );
+    final panelWidth = availableWidth <= 360
+        ? availableWidth
+        : math.min(560.0, availableWidth);
+    final triggerRect = _workspaceSwitcherTriggerRect();
+    final anchoredRight =
+        triggerRect?.right ?? viewportSize.width - horizontalMargin;
+    final anchoredTop =
+        (triggerRect?.bottom ??
+            (safePadding.top + _desktopTopBarControlHeight)) +
+        topGap;
+    final maxLeft = math.max(
+      horizontalMargin,
+      viewportSize.width - horizontalMargin - panelWidth,
+    );
+    final left = (anchoredRight - panelWidth).clamp(horizontalMargin, maxLeft);
+    final maxTop = math.max(
+      safePadding.top + 8,
+      viewportSize.height - safePadding.bottom - 24,
+    );
+    final top = anchoredTop.clamp(safePadding.top + 8, maxTop);
+    return Rect.fromLTWH(left.toDouble(), top.toDouble(), panelWidth, 0);
+  }
+
+  Rect? _workspaceSwitcherTriggerRect() {
+    final triggerContext = _workspaceSwitcherTriggerAnchorKey.currentContext;
+    if (triggerContext == null) {
+      return null;
+    }
+    final renderObject = triggerContext.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) {
+      return null;
+    }
+    final offset = renderObject.localToGlobal(Offset.zero);
+    return offset & renderObject.size;
   }
 
   Future<void> _confirmAndDeleteWorkspaceFromSwitcher(
@@ -998,12 +1155,27 @@ class _TrackStateAppState extends State<TrackStateApp>
                         canCancel: true,
                         canBrowseHostedRepositories:
                             viewModel.canBrowseHostedRepositories,
+                        directoryPicker: widget.workspaceDirectoryPicker,
+                        localWorkspaceOnboardingService:
+                            widget.localWorkspaceOnboardingService ??
+                            createLocalWorkspaceOnboardingService(),
                         loadHostedRepositories:
                             viewModel.canBrowseHostedRepositories
                             ? viewModel.loadAccessibleHostedRepositories
                             : null,
                         onCancel: _closeWorkspaceOnboarding,
-                        onOpenLocalWorkspace: _switchToLocalRepository,
+                        onOpenLocalWorkspace:
+                            ({
+                              required String repositoryPath,
+                              required String displayName,
+                              required String defaultBranch,
+                              required String writeBranch,
+                            }) => _switchToLocalRepositoryWithProfile(
+                              repositoryPath: repositoryPath,
+                              defaultBranch: defaultBranch,
+                              writeBranch: writeBranch,
+                              displayName: displayName,
+                            ),
                         onOpenHostedWorkspace: _switchToHostedRepository,
                       )
                     : _LocalWorkspaceOnboardingScreen(
@@ -1027,6 +1199,8 @@ class _TrackStateAppState extends State<TrackStateApp>
               : _TrackerHome(
                   viewModel: viewModel,
                   workspaces: _workspaceState,
+                  workspaceSwitcherTriggerKey:
+                      _workspaceSwitcherTriggerAnchorKey,
                   isCreateIssueVisible: _isCreateIssueVisible,
                   onOpenCreateIssue: _openCreateIssue,
                   onOpenWorkspaceSwitcher: _openWorkspaceSwitcher,
@@ -1038,6 +1212,8 @@ class _TrackStateAppState extends State<TrackStateApp>
                   onApplyLocalGitConfiguration: _switchToLocalRepository,
                   onSelectWorkspace: _selectWorkspaceProfile,
                   onDeleteWorkspace: _deleteWorkspaceProfile,
+                  workspaceRestoreFailure: _pendingWorkspaceRestoreFailure,
+                  onRetryWorkspaceRestore: _retryWorkspaceRestore,
                   attachmentPicker: widget.attachmentPicker,
                 ),
         );
@@ -1050,6 +1226,7 @@ class _TrackerHome extends StatelessWidget {
   const _TrackerHome({
     required this.viewModel,
     required this.workspaces,
+    required this.workspaceSwitcherTriggerKey,
     required this.isCreateIssueVisible,
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
@@ -1060,11 +1237,14 @@ class _TrackerHome extends StatelessWidget {
     required this.onApplyLocalGitConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.workspaceRestoreFailure,
+    required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
   });
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final GlobalKey workspaceSwitcherTriggerKey;
   final bool isCreateIssueVisible;
   final _CreateIssueLauncher onOpenCreateIssue;
   final Future<void> Function(BuildContext context, {required bool compact})
@@ -1076,6 +1256,8 @@ class _TrackerHome extends StatelessWidget {
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
 
   @override
@@ -1150,6 +1332,8 @@ class _TrackerHome extends StatelessWidget {
                       ? _MobileShell(
                           viewModel: viewModel,
                           workspaces: workspaces,
+                          workspaceSwitcherTriggerKey:
+                              workspaceSwitcherTriggerKey,
                           isCreateIssueVisible: isCreateIssueVisible,
                           onOpenCreateIssue: onOpenCreateIssue,
                           onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
@@ -1162,11 +1346,15 @@ class _TrackerHome extends StatelessWidget {
                               onApplyLocalGitConfiguration,
                           onSelectWorkspace: onSelectWorkspace,
                           onDeleteWorkspace: onDeleteWorkspace,
+                          workspaceRestoreFailure: workspaceRestoreFailure,
+                          onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                           attachmentPicker: attachmentPicker,
                         )
                       : _DesktopShell(
                           viewModel: viewModel,
                           workspaces: workspaces,
+                          workspaceSwitcherTriggerKey:
+                              workspaceSwitcherTriggerKey,
                           isCreateIssueVisible: isCreateIssueVisible,
                           onOpenCreateIssue: onOpenCreateIssue,
                           onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
@@ -1179,6 +1367,8 @@ class _TrackerHome extends StatelessWidget {
                               onApplyLocalGitConfiguration,
                           onSelectWorkspace: onSelectWorkspace,
                           onDeleteWorkspace: onDeleteWorkspace,
+                          workspaceRestoreFailure: workspaceRestoreFailure,
+                          onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                           attachmentPicker: attachmentPicker,
                         ),
                 ),
@@ -1436,6 +1626,11 @@ class _LocalWorkspaceOnboardingScreenState
         l10n.localWorkspaceOnboardingOpenAction,
       (LocalWorkspaceInspectionState.readyToInitialize, _) =>
         l10n.localWorkspaceOnboardingInitializeAction,
+      (
+        LocalWorkspaceInspectionState.blocked,
+        _LocalWorkspaceOnboardingIntent.initialize,
+      ) =>
+        l10n.localWorkspaceOnboardingInitializeAction,
       _ => null,
     };
 
@@ -1596,7 +1791,10 @@ class _LocalWorkspaceOnboardingScreenState
                             ),
                           ),
                           if (inspection.state !=
-                              LocalWorkspaceInspectionState.blocked) ...[
+                                  LocalWorkspaceInspectionState.blocked ||
+                              _intent ==
+                                  _LocalWorkspaceOnboardingIntent
+                                      .initialize) ...[
                             const SizedBox(height: 16),
                             Semantics(
                               header: true,
@@ -1634,7 +1832,12 @@ class _LocalWorkspaceOnboardingScreenState
                                 key: const ValueKey(
                                   'local-workspace-onboarding-submit',
                                 ),
-                                onPressed: _isSubmitting || actionLabel == null
+                                onPressed:
+                                    _isSubmitting ||
+                                        actionLabel == null ||
+                                        inspection.state ==
+                                            LocalWorkspaceInspectionState
+                                                .blocked
                                     ? null
                                     : _submit,
                                 child: Text(actionLabel ?? ''),
@@ -1663,10 +1866,407 @@ class _LocalWorkspaceOnboardingScreenState
   }
 }
 
+class _LocalWorkspaceOnboardingPanel extends StatefulWidget {
+  const _LocalWorkspaceOnboardingPanel({
+    required this.directoryPicker,
+    required this.onboardingService,
+    required this.onComplete,
+  });
+
+  final WorkspaceDirectoryPicker directoryPicker;
+  final LocalWorkspaceOnboardingService onboardingService;
+  final _LocalWorkspaceOnboardingOpener onComplete;
+
+  @override
+  State<_LocalWorkspaceOnboardingPanel> createState() =>
+      _LocalWorkspaceOnboardingPanelState();
+}
+
+class _LocalWorkspaceOnboardingPanelState
+    extends State<_LocalWorkspaceOnboardingPanel> {
+  final TextEditingController _workspaceNameController =
+      TextEditingController();
+  final TextEditingController _writeBranchController = TextEditingController();
+
+  LocalWorkspaceInspection? _inspection;
+  _LocalWorkspaceOnboardingIntent? _intent;
+  bool _isPickingFolder = false;
+  bool _isSubmitting = false;
+  String? _errorText;
+
+  @override
+  void dispose() {
+    _workspaceNameController.dispose();
+    _writeBranchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _chooseFolder(_LocalWorkspaceOnboardingIntent intent) async {
+    if (_isPickingFolder || _isSubmitting) {
+      return;
+    }
+    final l10n = AppLocalizations.of(context)!;
+    setState(() {
+      _isPickingFolder = true;
+      _errorText = null;
+      _intent = intent;
+    });
+
+    try {
+      final selectedPath = await widget.directoryPicker(
+        confirmButtonText: switch (intent) {
+          _LocalWorkspaceOnboardingIntent.openExisting =>
+            l10n.localWorkspaceOnboardingFolderBrowseOpen,
+          _LocalWorkspaceOnboardingIntent.initialize =>
+            l10n.localWorkspaceOnboardingFolderBrowseInitialize,
+        },
+      );
+      if (!mounted || selectedPath == null || selectedPath.trim().isEmpty) {
+        return;
+      }
+      final inspection = await widget.onboardingService.inspectFolder(
+        selectedPath,
+      );
+      if (!mounted) {
+        return;
+      }
+      _workspaceNameController.text = inspection.suggestedWorkspaceName;
+      _writeBranchController.text = inspection.suggestedWriteBranch;
+      setState(() {
+        _inspection = inspection;
+      });
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorText = '$error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPickingFolder = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _submit() async {
+    final l10n = AppLocalizations.of(context)!;
+    final inspection = _inspection;
+    final intent = _intent;
+    if (_isSubmitting || inspection == null || intent == null) {
+      return;
+    }
+    final workspaceName = _workspaceNameController.text.trim();
+    final writeBranch = _writeBranchController.text.trim();
+    if (workspaceName.isEmpty) {
+      setState(() {
+        _errorText = l10n.localWorkspaceOnboardingWorkspaceNameRequired;
+      });
+      return;
+    }
+    if (writeBranch.isEmpty) {
+      setState(() {
+        _errorText = l10n.localWorkspaceOnboardingWriteBranchRequired;
+      });
+      return;
+    }
+    final detectedBranch = inspection.detectedWriteBranch?.trim();
+    if (inspection.hasGitRepository &&
+        detectedBranch != null &&
+        detectedBranch.isNotEmpty &&
+        detectedBranch != writeBranch) {
+      setState(() {
+        _errorText = l10n.localWorkspaceOnboardingCurrentBranchMismatch(
+          detectedBranch,
+        );
+      });
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+      _errorText = null;
+    });
+
+    try {
+      switch ((intent, inspection.state)) {
+        case (
+          _LocalWorkspaceOnboardingIntent.openExisting,
+          LocalWorkspaceInspectionState.readyToOpen,
+        ):
+        case (
+          _LocalWorkspaceOnboardingIntent.initialize,
+          LocalWorkspaceInspectionState.readyToOpen,
+        ):
+          await widget.onComplete(
+            repositoryPath: inspection.folderPath,
+            displayName: workspaceName,
+            defaultBranch: writeBranch,
+            writeBranch: writeBranch,
+          );
+        case (_, LocalWorkspaceInspectionState.readyToInitialize):
+          final initialized = await widget.onboardingService.initializeFolder(
+            inspection: inspection,
+            workspaceName: workspaceName,
+            writeBranch: writeBranch,
+          );
+          await widget.onComplete(
+            repositoryPath: initialized.folderPath,
+            displayName: initialized.displayName,
+            defaultBranch: initialized.defaultBranch,
+            writeBranch: initialized.writeBranch,
+          );
+        case (_, LocalWorkspaceInspectionState.blocked):
+          setState(() {
+            _errorText = inspection.message;
+          });
+      }
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorText = '$error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.ts;
+    final inspection = _inspection;
+    final statusTone = switch (inspection?.state) {
+      LocalWorkspaceInspectionState.readyToOpen => colors.success,
+      LocalWorkspaceInspectionState.readyToInitialize => colors.warning,
+      LocalWorkspaceInspectionState.blocked => colors.error,
+      null => colors.muted,
+    };
+    final statusLabel = switch (inspection?.state) {
+      LocalWorkspaceInspectionState.readyToOpen =>
+        l10n.localWorkspaceOnboardingReadyStatus,
+      LocalWorkspaceInspectionState.readyToInitialize =>
+        l10n.localWorkspaceOnboardingInitializeStatus,
+      LocalWorkspaceInspectionState.blocked =>
+        l10n.localWorkspaceOnboardingBlockedStatus,
+      null => null,
+    };
+    final actionLabel = switch ((inspection?.state, _intent)) {
+      (
+        LocalWorkspaceInspectionState.readyToOpen,
+        _LocalWorkspaceOnboardingIntent.initialize,
+      ) =>
+        l10n.localWorkspaceOnboardingOpenAction,
+      (LocalWorkspaceInspectionState.readyToOpen, _) =>
+        l10n.localWorkspaceOnboardingOpenAction,
+      (LocalWorkspaceInspectionState.readyToInitialize, _) =>
+        l10n.localWorkspaceOnboardingInitializeAction,
+      (
+        LocalWorkspaceInspectionState.blocked,
+        _LocalWorkspaceOnboardingIntent.initialize,
+      ) =>
+        l10n.localWorkspaceOnboardingInitializeAction,
+      _ => null,
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _PrimaryButton(
+                buttonKey: const ValueKey(
+                  'local-workspace-onboarding-open-existing',
+                ),
+                label: l10n.localWorkspaceOnboardingOpenExisting,
+                icon: TrackStateIconGlyph.folder,
+                onPressed: _isSubmitting
+                    ? null
+                    : () => unawaited(
+                        _chooseFolder(
+                          _LocalWorkspaceOnboardingIntent.openExisting,
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _SecondaryButton(
+                buttonKey: const ValueKey(
+                  'local-workspace-onboarding-initialize-folder',
+                ),
+                label: l10n.localWorkspaceOnboardingInitializeFolder,
+                icon: TrackStateIconGlyph.plus,
+                onPressed: _isSubmitting
+                    ? null
+                    : () => unawaited(
+                        _chooseFolder(
+                          _LocalWorkspaceOnboardingIntent.initialize,
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        ),
+        if (_isPickingFolder) ...[
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: colors.primary,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(l10n.loading),
+            ],
+          ),
+        ],
+        if (inspection != null) ...[
+          const SizedBox(height: 20),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (statusLabel != null) ...[
+                  Text(
+                    statusLabel,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelLarge?.copyWith(color: statusTone),
+                  ),
+                  const SizedBox(height: 4),
+                ],
+                Text(
+                  inspection.message,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TrackStateIcon(
+                      TrackStateIconGlyph.folder,
+                      color: colors.muted,
+                      semanticLabel: 'folder',
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            l10n.localWorkspaceOnboardingFolderLabel,
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
+                          const SizedBox(height: 4),
+                          SelectableText(inspection.folderPath),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      key: const ValueKey(
+                        'local-workspace-onboarding-change-folder',
+                      ),
+                      onPressed: _isSubmitting
+                          ? null
+                          : () => unawaited(
+                              _chooseFolder(
+                                _intent ??
+                                    _LocalWorkspaceOnboardingIntent
+                                        .openExisting,
+                              ),
+                            ),
+                      child: Text(l10n.localWorkspaceOnboardingChangeFolder),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          if (inspection.state != LocalWorkspaceInspectionState.blocked ||
+              _intent == _LocalWorkspaceOnboardingIntent.initialize) ...[
+            const SizedBox(height: 16),
+            Semantics(
+              header: true,
+              focusable: true,
+              readOnly: true,
+              label: l10n.localWorkspaceOnboardingDetailsTitle,
+              child: _SectionTitle(l10n.localWorkspaceOnboardingDetailsTitle),
+            ),
+            const SizedBox(height: 8),
+            _SettingsTextField(
+              fieldKey: const ValueKey('local-workspace-onboarding-name'),
+              label: l10n.localWorkspaceOnboardingWorkspaceName,
+              controller: _workspaceNameController,
+              helperText: l10n.localWorkspaceOnboardingWorkspaceNameHelper,
+            ),
+            const SizedBox(height: 12),
+            _SettingsTextField(
+              fieldKey: const ValueKey(
+                'local-workspace-onboarding-write-branch',
+              ),
+              label: l10n.writeBranch,
+              controller: _writeBranchController,
+              helperText: l10n.localWorkspaceOnboardingWriteBranchHelper,
+            ),
+            const SizedBox(height: 20),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                key: const ValueKey('local-workspace-onboarding-submit'),
+                onPressed:
+                    _isSubmitting ||
+                        actionLabel == null ||
+                        inspection.state ==
+                            LocalWorkspaceInspectionState.blocked
+                    ? null
+                    : _submit,
+                child: Text(actionLabel ?? ''),
+              ),
+            ),
+          ],
+        ],
+        if (_errorText != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            _errorText!,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: colors.error),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _WorkspaceOnboardingScreen extends StatefulWidget {
   const _WorkspaceOnboardingScreen({
     required this.canCancel,
     required this.canBrowseHostedRepositories,
+    required this.directoryPicker,
+    required this.localWorkspaceOnboardingService,
     required this.onOpenLocalWorkspace,
     required this.onOpenHostedWorkspace,
     this.loadHostedRepositories,
@@ -1675,8 +2275,10 @@ class _WorkspaceOnboardingScreen extends StatefulWidget {
 
   final bool canCancel;
   final bool canBrowseHostedRepositories;
+  final WorkspaceDirectoryPicker directoryPicker;
+  final LocalWorkspaceOnboardingService localWorkspaceOnboardingService;
   final _HostedRepositoryCatalogLoader? loadHostedRepositories;
-  final LocalRepositoryConfigurationApplier onOpenLocalWorkspace;
+  final _LocalWorkspaceOnboardingOpener onOpenLocalWorkspace;
   final _HostedWorkspaceOpener onOpenHostedWorkspace;
   final VoidCallback? onCancel;
 
@@ -1687,10 +2289,6 @@ class _WorkspaceOnboardingScreen extends StatefulWidget {
 
 class _WorkspaceOnboardingScreenState
     extends State<_WorkspaceOnboardingScreen> {
-  final TextEditingController _localPathController = TextEditingController();
-  final TextEditingController _localBranchController = TextEditingController(
-    text: 'main',
-  );
   final TextEditingController _hostedRepositoryController =
       TextEditingController();
   final TextEditingController _hostedBranchController = TextEditingController(
@@ -1707,8 +2305,6 @@ class _WorkspaceOnboardingScreenState
 
   @override
   void dispose() {
-    _localPathController.dispose();
-    _localBranchController.dispose();
     _hostedRepositoryController.dispose();
     _hostedBranchController.dispose();
     super.dispose();
@@ -1778,20 +2374,11 @@ class _WorkspaceOnboardingScreenState
       _errorText = null;
     });
     try {
-      switch (_selectedTarget) {
-        case _WorkspaceOnboardingTarget.local:
-          await widget.onOpenLocalWorkspace(
-            repositoryPath: _localPathController.text,
-            defaultBranch: _localBranchController.text,
-            writeBranch: _localBranchController.text,
-          );
-        case _WorkspaceOnboardingTarget.hosted:
-          await widget.onOpenHostedWorkspace(
-            repository: _hostedRepositoryController.text,
-            defaultBranch: _hostedBranchController.text,
-            writeBranch: _hostedBranchController.text,
-          );
-      }
+      await widget.onOpenHostedWorkspace(
+        repository: _hostedRepositoryController.text,
+        defaultBranch: _hostedBranchController.text,
+        writeBranch: _hostedBranchController.text,
+      );
     } on Object catch (error) {
       if (!mounted) {
         return;
@@ -1909,42 +2496,31 @@ class _WorkspaceOnboardingScreenState
                             onSelectRepository:
                                 _selectHostedRepositorySuggestion,
                           ),
+                          if (_errorText != null) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              _errorText!,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(color: colors.error),
+                            ),
+                          ],
+                          const SizedBox(height: 20),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: FilledButton(
+                              key: const ValueKey('workspace-onboarding-open'),
+                              onPressed: _isSubmitting ? null : _submit,
+                              child: Text(l10n.openWorkspace),
+                            ),
+                          ),
                         ] else ...[
-                          _SettingsTextField(
-                            fieldKey: const ValueKey(
-                              'workspace-onboarding-local-path',
-                            ),
-                            label: l10n.repositoryPath,
-                            controller: _localPathController,
-                            helperText:
-                                l10n.workspaceOnboardingLocalFolderHelper,
-                          ),
-                          const SizedBox(height: 12),
-                          _SettingsTextField(
-                            fieldKey: const ValueKey(
-                              'workspace-onboarding-local-branch',
-                            ),
-                            label: l10n.branch,
-                            controller: _localBranchController,
+                          _LocalWorkspaceOnboardingPanel(
+                            directoryPicker: widget.directoryPicker,
+                            onboardingService:
+                                widget.localWorkspaceOnboardingService,
+                            onComplete: widget.onOpenLocalWorkspace,
                           ),
                         ],
-                        if (_errorText != null) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            _errorText!,
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(color: colors.error),
-                          ),
-                        ],
-                        const SizedBox(height: 20),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: FilledButton(
-                            key: const ValueKey('workspace-onboarding-open'),
-                            onPressed: _isSubmitting ? null : _submit,
-                            child: Text(l10n.openWorkspace),
-                          ),
-                        ),
                       ],
                     ),
                   ),
@@ -2071,6 +2647,7 @@ class _DesktopShell extends StatelessWidget {
   const _DesktopShell({
     required this.viewModel,
     required this.workspaces,
+    required this.workspaceSwitcherTriggerKey,
     required this.isCreateIssueVisible,
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
@@ -2081,11 +2658,14 @@ class _DesktopShell extends StatelessWidget {
     required this.onApplyLocalGitConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.workspaceRestoreFailure,
+    required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
   });
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final GlobalKey workspaceSwitcherTriggerKey;
   final bool isCreateIssueVisible;
   final _CreateIssueLauncher onOpenCreateIssue;
   final Future<void> Function(BuildContext context, {required bool compact})
@@ -2097,6 +2677,8 @@ class _DesktopShell extends StatelessWidget {
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
 
   @override
@@ -2107,6 +2689,7 @@ class _DesktopShell extends StatelessWidget {
         Expanded(
           child: _TrackerMainPane(
             viewModel: viewModel,
+            workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
             isCreateIssueVisible: isCreateIssueVisible,
             onOpenCreateIssue: onOpenCreateIssue,
             onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
@@ -2118,6 +2701,8 @@ class _DesktopShell extends StatelessWidget {
             workspaces: workspaces,
             onSelectWorkspace: onSelectWorkspace,
             onDeleteWorkspace: onDeleteWorkspace,
+            workspaceRestoreFailure: workspaceRestoreFailure,
+            onRetryWorkspaceRestore: onRetryWorkspaceRestore,
             attachmentPicker: attachmentPicker,
           ),
         ),
@@ -2130,6 +2715,7 @@ class _MobileShell extends StatelessWidget {
   const _MobileShell({
     required this.viewModel,
     required this.workspaces,
+    required this.workspaceSwitcherTriggerKey,
     required this.isCreateIssueVisible,
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
@@ -2140,11 +2726,14 @@ class _MobileShell extends StatelessWidget {
     required this.onApplyLocalGitConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.workspaceRestoreFailure,
+    required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
   });
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final GlobalKey workspaceSwitcherTriggerKey;
   final bool isCreateIssueVisible;
   final _CreateIssueLauncher onOpenCreateIssue;
   final Future<void> Function(BuildContext context, {required bool compact})
@@ -2156,12 +2745,15 @@ class _MobileShell extends StatelessWidget {
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
 
   @override
   Widget build(BuildContext context) {
     return _TrackerMainPane(
       viewModel: viewModel,
+      workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
       compact: true,
       isCreateIssueVisible: isCreateIssueVisible,
       onOpenCreateIssue: onOpenCreateIssue,
@@ -2174,6 +2766,8 @@ class _MobileShell extends StatelessWidget {
       workspaces: workspaces,
       onSelectWorkspace: onSelectWorkspace,
       onDeleteWorkspace: onDeleteWorkspace,
+      workspaceRestoreFailure: workspaceRestoreFailure,
+      onRetryWorkspaceRestore: onRetryWorkspaceRestore,
       attachmentPicker: attachmentPicker,
     );
   }
@@ -2182,6 +2776,7 @@ class _MobileShell extends StatelessWidget {
 class _TrackerMainPane extends StatelessWidget {
   const _TrackerMainPane({
     required this.viewModel,
+    required this.workspaceSwitcherTriggerKey,
     required this.isCreateIssueVisible,
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
@@ -2193,11 +2788,14 @@ class _TrackerMainPane extends StatelessWidget {
     required this.workspaces,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.workspaceRestoreFailure,
+    required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
     this.compact = false,
   });
 
   final TrackerViewModel viewModel;
+  final GlobalKey workspaceSwitcherTriggerKey;
   final bool compact;
   final bool isCreateIssueVisible;
   final _CreateIssueLauncher onOpenCreateIssue;
@@ -2211,6 +2809,8 @@ class _TrackerMainPane extends StatelessWidget {
   final WorkspaceProfilesState workspaces;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
 
   @override
@@ -2223,6 +2823,7 @@ class _TrackerMainPane extends StatelessWidget {
               viewModel: viewModel,
               workspaces: workspaces,
               compact: compact,
+              workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
               onOpenCreateIssue: onOpenCreateIssue,
               onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
               onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
@@ -2238,6 +2839,8 @@ class _TrackerMainPane extends StatelessWidget {
                 workspaces: workspaces,
                 onSelectWorkspace: onSelectWorkspace,
                 onDeleteWorkspace: onDeleteWorkspace,
+                workspaceRestoreFailure: workspaceRestoreFailure,
+                onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                 attachmentPicker: attachmentPicker,
               ),
             ),
@@ -2357,6 +2960,7 @@ class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.viewModel,
     required this.workspaces,
+    required this.workspaceSwitcherTriggerKey,
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
     required this.onOpenWorkspaceOnboarding,
@@ -2366,6 +2970,7 @@ class _TopBar extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final GlobalKey workspaceSwitcherTriggerKey;
   final _CreateIssueLauncher onOpenCreateIssue;
   final Future<void> Function(BuildContext context, {required bool compact})
   onOpenWorkspaceSwitcher;
@@ -2396,252 +3001,307 @@ class _TopBar extends StatelessWidget {
         : () => onOpenWorkspaceSwitcher(context, compact: compact);
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 12 : 8, 12, 12, 6),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final condensedDesktop =
-              !compact &&
-              constraints.maxWidth < (canOpenWorkspaceOnboarding ? 1380 : 1240);
-          final iconOnlyActions = compact || condensedDesktop;
-          final actionGap = iconOnlyActions ? 8.0 : 12.0;
-          Widget buildHeaderActions() {
-            return Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(width: actionGap),
-                if (iconOnlyActions)
-                  _IconButtonSurface(
-                    label: l10n.createIssue,
-                    glyph: TrackStateIconGlyph.plus,
-                    onPressed: openCreateIssue,
-                    size: compact ? null : _desktopTopBarControlHeight,
-                  )
-                else
-                  _PrimaryButton(
-                    label: l10n.createIssue,
-                    icon: TrackStateIconGlyph.plus,
-                    onPressed: openCreateIssue,
-                    height: _desktopTopBarControlHeight,
-                  ),
-                if (canOpenWorkspaceOnboarding) ...[
-                  const SizedBox(width: 8),
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            Widget orderedControl(double order, Widget child) {
+              return FocusTraversalOrder(
+                order: NumericFocusOrder(order),
+                child: child,
+              );
+            }
+
+            final condensedDesktop =
+                !compact &&
+                constraints.maxWidth <
+                    (canOpenWorkspaceOnboarding ? 1380 : 1240);
+            final iconOnlyActions = compact || condensedDesktop;
+            final actionGap = iconOnlyActions ? 8.0 : 12.0;
+            final createIssueOrder = compact ? 2.0 : 3.0;
+            final addWorkspaceOrder = compact ? 3.0 : 4.0;
+            final workspaceSwitcherOrder = compact ? 5.0 : 5.0;
+            final themeToggleOrder = compact ? 4.0 : 6.0;
+            Widget buildHeaderActions() {
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(width: actionGap),
                   if (iconOnlyActions)
-                    _IconButtonSurface(
-                      label: l10n.addWorkspace,
-                      glyph: TrackStateIconGlyph.repository,
-                      onPressed: openWorkspaceOnboarding,
-                      size: compact ? null : _desktopTopBarControlHeight,
+                    orderedControl(
+                      createIssueOrder,
+                      _IconButtonSurface(
+                        label: l10n.createIssue,
+                        glyph: TrackStateIconGlyph.plus,
+                        onPressed: openCreateIssue,
+                        size: compact ? null : _desktopTopBarControlHeight,
+                      ),
                     )
                   else
-                    _SecondaryButton(
-                      label: l10n.addWorkspace,
-                      icon: TrackStateIconGlyph.repository,
-                      onPressed: openWorkspaceOnboarding,
-                      height: _desktopTopBarControlHeight,
-                    ),
-                ],
-                if (!compact) ...[
-                  const SizedBox(width: 8),
-                  KeyedSubtree(
-                    key: const ValueKey('workspace-switcher-trigger'),
-                    child: Semantics(
-                      container: true,
-                      button: true,
-                      enabled: openWorkspaceSwitcher != null,
-                      label: workspaceSummary.semanticLabel,
-                      child: ExcludeSemantics(
-                        child: condensedDesktop
-                            ? _WorkspaceSwitcherTriggerButton(
-                                summary: workspaceSummary,
-                                compact: false,
-                                condensed: true,
-                                onPressed: openWorkspaceSwitcher,
-                              )
-                            : _PrimaryButton(
-                                label: workspaceSummary.textLabel,
-                                icon: workspaceSummary.icon,
-                                onPressed: openWorkspaceSwitcher,
-                                height: _desktopTopBarControlHeight,
-                              ),
+                    orderedControl(
+                      createIssueOrder,
+                      _PrimaryButton(
+                        label: l10n.createIssue,
+                        icon: TrackStateIconGlyph.plus,
+                        onPressed: openCreateIssue,
+                        height: _desktopTopBarControlHeight,
                       ),
                     ),
+                  if (canOpenWorkspaceOnboarding) ...[
+                    const SizedBox(width: 8),
+                    if (iconOnlyActions)
+                      orderedControl(
+                        addWorkspaceOrder,
+                        _IconButtonSurface(
+                          label: l10n.addWorkspace,
+                          glyph: TrackStateIconGlyph.repository,
+                          onPressed: openWorkspaceOnboarding,
+                          size: compact ? null : _desktopTopBarControlHeight,
+                        ),
+                      )
+                    else
+                      orderedControl(
+                        addWorkspaceOrder,
+                        _SecondaryButton(
+                          label: l10n.addWorkspace,
+                          icon: TrackStateIconGlyph.repository,
+                          onPressed: openWorkspaceOnboarding,
+                          height: _desktopTopBarControlHeight,
+                        ),
+                      ),
+                  ],
+                  if (!compact) ...[
+                    const SizedBox(width: 8),
+                    orderedControl(
+                      workspaceSwitcherOrder,
+                      SizedBox(
+                        key: workspaceSwitcherTriggerKey,
+                        child: KeyedSubtree(
+                          key: const ValueKey('workspace-switcher-trigger'),
+                          child: Semantics(
+                            container: true,
+                            button: true,
+                            enabled: openWorkspaceSwitcher != null,
+                            label: workspaceSummary.semanticLabel,
+                            child: ExcludeSemantics(
+                              child: condensedDesktop
+                                  ? _WorkspaceSwitcherTriggerButton(
+                                      summary: workspaceSummary,
+                                      compact: false,
+                                      condensed: true,
+                                      onPressed: openWorkspaceSwitcher,
+                                    )
+                                  : _PrimaryButton(
+                                      label: workspaceSummary.textLabel,
+                                      icon: workspaceSummary.icon,
+                                      onPressed: openWorkspaceSwitcher,
+                                      height: _desktopTopBarControlHeight,
+                                    ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(width: 8),
+                  orderedControl(
+                    themeToggleOrder,
+                    _IconButtonSurface(
+                      label: viewModel.themePreference == ThemePreference.dark
+                          ? l10n.lightTheme
+                          : l10n.darkTheme,
+                      glyph: viewModel.themePreference == ThemePreference.dark
+                          ? TrackStateIconGlyph.sun
+                          : TrackStateIconGlyph.moon,
+                      onPressed: viewModel.toggleTheme,
+                      size: compact ? null : _desktopTopBarControlHeight,
+                    ),
                   ),
-                ],
-                const SizedBox(width: 8),
-                _IconButtonSurface(
-                  label: viewModel.themePreference == ThemePreference.dark
-                      ? l10n.lightTheme
-                      : l10n.darkTheme,
-                  glyph: viewModel.themePreference == ThemePreference.dark
-                      ? TrackStateIconGlyph.sun
-                      : TrackStateIconGlyph.moon,
-                  onPressed: viewModel.toggleTheme,
-                  size: compact ? null : _desktopTopBarControlHeight,
-                ),
-                const SizedBox(width: 8),
-                Semantics(
-                  container: true,
-                  label: _profileDisplayName(viewModel),
-                  child: ExcludeSemantics(
-                    child: SizedBox(
-                      height: compact ? null : _desktopTopBarControlHeight,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          if (_hasVisibleProfileIdentity(viewModel) &&
-                              !compact &&
-                              !condensedDesktop) ...[
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 180),
-                              child: Align(
-                                alignment: Alignment.centerRight,
-                                child: Text(
-                                  _profileDisplayName(viewModel),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.labelLarge
-                                      ?.copyWith(
-                                        color: colors.text,
-                                        fontWeight: FontWeight.w600,
-                                        height: 1,
-                                      ),
+                  const SizedBox(width: 8),
+                  Semantics(
+                    container: true,
+                    label: _profileDisplayName(viewModel),
+                    child: ExcludeSemantics(
+                      child: SizedBox(
+                        height: compact ? null : _desktopTopBarControlHeight,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            if (_hasVisibleProfileIdentity(viewModel) &&
+                                !compact &&
+                                !condensedDesktop) ...[
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 180,
+                                ),
+                                child: Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    _profileDisplayName(viewModel),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelLarge
+                                        ?.copyWith(
+                                          color: colors.text,
+                                          fontWeight: FontWeight.w600,
+                                          height: 1,
+                                        ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            CircleAvatar(
+                              radius: compact ? 18 : _desktopTopBarAvatarRadius,
+                              backgroundColor: colors.primarySoft,
+                              child: Text(
+                                _profileInitials(l10n, viewModel),
+                                style: TextStyle(
+                                  color: colors.text,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: compact ? null : 12,
+                                  height: 1,
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 8),
                           ],
-                          CircleAvatar(
-                            radius: compact ? 18 : _desktopTopBarAvatarRadius,
-                            backgroundColor: colors.primarySoft,
-                            child: Text(
-                              _profileInitials(l10n, viewModel),
-                              style: TextStyle(
-                                color: colors.text,
-                                fontWeight: FontWeight.w700,
-                                fontSize: compact ? null : 12,
-                                height: 1,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            if (compact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      TrackStateIcon(
+                        TrackStateIconGlyph.logo,
+                        color: colors.secondary,
+                        size: 32,
+                        semanticLabel: l10n.appTitle,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          l10n.appTitle,
+                          style: Theme.of(context).textTheme.titleMedium,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      orderedControl(
+                        1,
+                        _IconButtonSurface(
+                          label: _workspaceSyncLabel(l10n, viewModel),
+                          glyph: TrackStateIconGlyph.sync,
+                          onPressed: () =>
+                              viewModel.selectSection(TrackerSection.settings),
+                          size: _desktopTopBarControlHeight,
+                        ),
+                      ),
+                      buildHeaderActions(),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  orderedControl(
+                    workspaceSwitcherOrder,
+                    KeyedSubtree(
+                      key: const ValueKey('workspace-switcher-trigger'),
+                      child: Semantics(
+                        container: true,
+                        button: true,
+                        enabled: openWorkspaceSwitcher != null,
+                        label: workspaceSummary.semanticLabel,
+                        child: ExcludeSemantics(
+                          child: _WorkspaceSwitcherTriggerButton(
+                            summary: workspaceSummary,
+                            compact: true,
+                            condensed: false,
+                            onPressed: openWorkspaceSwitcher,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            return Row(
+              children: [
+                orderedControl(
+                  1,
+                  _SyncPill(
+                    label: _workspaceSyncLabel(l10n, viewModel),
+                    tone: _workspaceSyncTone(viewModel),
+                    height: _desktopTopBarControlHeight,
+                    onPressed: () =>
+                        viewModel.selectSection(TrackerSection.settings),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: SizedBox(
+                    height: _desktopTopBarControlHeight,
+                    child: orderedControl(
+                      2,
+                      Semantics(
+                        label: l10n.searchIssues,
+                        textField: true,
+                        child: TextField(
+                          controller: TextEditingController(
+                            text: viewModel.jql,
+                          ),
+                          onSubmitted: viewModel.updateQuery,
+                          maxLines: 1,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.copyWith(height: 1),
+                          textAlignVertical: TextAlignVertical.center,
+                          decoration: InputDecoration(
+                            isDense: true,
+                            isCollapsed: true,
+                            constraints: const BoxConstraints.tightFor(
+                              height: _desktopTopBarControlHeight,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            prefixIcon: Padding(
+                              padding: const EdgeInsets.all(8),
+                              child: TrackStateIcon(
+                                TrackStateIconGlyph.search,
+                                color: colors.muted,
+                                size: _desktopTopBarIconSize,
+                                semanticLabel: l10n.searchIssues,
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          }
-
-          if (compact) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    TrackStateIcon(
-                      TrackStateIconGlyph.logo,
-                      color: colors.secondary,
-                      size: 32,
-                      semanticLabel: l10n.appTitle,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        l10n.appTitle,
-                        style: Theme.of(context).textTheme.titleMedium,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _IconButtonSurface(
-                      label: _workspaceSyncLabel(l10n, viewModel),
-                      glyph: TrackStateIconGlyph.sync,
-                      onPressed: () =>
-                          viewModel.selectSection(TrackerSection.settings),
-                      size: _desktopTopBarControlHeight,
-                    ),
-                    buildHeaderActions(),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                KeyedSubtree(
-                  key: const ValueKey('workspace-switcher-trigger'),
-                  child: Semantics(
-                    container: true,
-                    button: true,
-                    enabled: openWorkspaceSwitcher != null,
-                    label: workspaceSummary.semanticLabel,
-                    child: ExcludeSemantics(
-                      child: _WorkspaceSwitcherTriggerButton(
-                        summary: workspaceSummary,
-                        compact: true,
-                        condensed: false,
-                        onPressed: openWorkspaceSwitcher,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          }
-
-          return Row(
-            children: [
-              _SyncPill(
-                label: _workspaceSyncLabel(l10n, viewModel),
-                tone: _workspaceSyncTone(viewModel),
-                height: _desktopTopBarControlHeight,
-                onPressed: () =>
-                    viewModel.selectSection(TrackerSection.settings),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: SizedBox(
-                  height: _desktopTopBarControlHeight,
-                  child: Semantics(
-                    label: l10n.searchIssues,
-                    textField: true,
-                    child: TextField(
-                      controller: TextEditingController(text: viewModel.jql),
-                      onSubmitted: viewModel.updateQuery,
-                      maxLines: 1,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(height: 1),
-                      textAlignVertical: TextAlignVertical.center,
-                      decoration: InputDecoration(
-                        isDense: true,
-                        isCollapsed: true,
-                        constraints: const BoxConstraints.tightFor(
-                          height: _desktopTopBarControlHeight,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        prefixIcon: Padding(
-                          padding: const EdgeInsets.all(8),
-                          child: TrackStateIcon(
-                            TrackStateIconGlyph.search,
-                            color: colors.muted,
-                            size: _desktopTopBarIconSize,
-                            semanticLabel: l10n.searchIssues,
+                            prefixIconConstraints:
+                                const BoxConstraints.tightFor(
+                                  width: _desktopTopBarControlHeight,
+                                  height: _desktopTopBarControlHeight,
+                                ),
+                            hintText: l10n.jqlPlaceholder,
                           ),
                         ),
-                        prefixIconConstraints: const BoxConstraints.tightFor(
-                          width: _desktopTopBarControlHeight,
-                          height: _desktopTopBarControlHeight,
-                        ),
-                        hintText: l10n.jqlPlaceholder,
                       ),
                     ),
                   ),
                 ),
-              ),
-              buildHeaderActions(),
-            ],
-          );
-        },
+                buildHeaderActions(),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -2757,11 +3417,101 @@ String _hostedWorkspaceAccessModeLabel(
 
 Future<void> _showRepositoryAccessDialog(
   BuildContext context,
-  TrackerViewModel viewModel,
-) async {
+  TrackerViewModel viewModel, {
+  bool allowLocalGitHubConnection = false,
+}) async {
   final l10n = AppLocalizations.of(context)!;
   if (viewModel.usesLocalPersistence) {
     final project = viewModel.project;
+    if (allowLocalGitHubConnection) {
+      final controller = TextEditingController();
+      var rememberToken = true;
+      final dialogTitle = viewModel.hasLocalHostedAccessSession
+          ? l10n.manageGitHubAccess
+          : l10n.connectGitHub;
+      final connectionRequest = await showDialog<({String token, bool remember})?>(
+        context: context,
+        builder: (context) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              void submitConnection() {
+                Navigator.of(
+                  context,
+                ).pop((token: controller.text, remember: rememberToken));
+              }
+
+              final connectionMessage =
+                  viewModel.hasLocalHostedAccessSession &&
+                      viewModel.connectedUser != null
+                  ? l10n.githubConnected(
+                      viewModel.connectedUser!.login,
+                      project?.repository ?? l10n.configuredRepositoryFallback,
+                    )
+                  : l10n.localGitHostedAccessDescription;
+              return AlertDialog(
+                title: Text(dialogTitle),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${l10n.repository}: '
+                        '${project?.repository ?? l10n.configuredRepositoryFallback}',
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${l10n.branch}: '
+                        '${project?.branch ?? l10n.currentBranchFallback}',
+                      ),
+                      const SizedBox(height: 12),
+                      Text(connectionMessage),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: controller,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: l10n.fineGrainedToken,
+                          helperText: l10n.fineGrainedTokenHelper,
+                        ),
+                        onSubmitted: (_) => submitConnection(),
+                      ),
+                      const SizedBox(height: 8),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: rememberToken,
+                        title: Text(l10n.rememberOnThisBrowser),
+                        subtitle: Text(l10n.rememberOnThisBrowserHelp),
+                        onChanged: (value) =>
+                            setDialogState(() => rememberToken = value ?? true),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(l10n.cancel),
+                  ),
+                  FilledButton(
+                    onPressed: submitConnection,
+                    child: Text(l10n.connectToken),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+      if (connectionRequest case final request?) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          unawaited(
+            viewModel.connectGitHub(request.token, remember: request.remember),
+          );
+        });
+      }
+      return;
+    }
     await showDialog<void>(
       context: context,
       builder: (context) {
@@ -3223,6 +3973,8 @@ String _trackerMessageText(AppLocalizations l10n, TrackerMessage message) {
     ),
     TrackerMessageKind.storedGitHubTokenInvalid =>
       l10n.storedGitHubTokenInvalid(message.error!),
+    TrackerMessageKind.selectedIssueUnavailable =>
+      l10n.selectedIssueUnavailable(message.issueKey!),
     TrackerMessageKind.workspaceSwitchFailed => l10n.workspaceSwitchFailed(
       message.repository!,
       message.error!,
@@ -3522,6 +4274,8 @@ class _SectionBody extends StatelessWidget {
     required this.workspaces,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.workspaceRestoreFailure,
+    required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
     this.compact = false,
   });
@@ -3532,11 +4286,16 @@ class _SectionBody extends StatelessWidget {
   final WorkspaceProfilesState workspaces;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    final showsWorkspaceRestoreRecovery =
+        workspaceRestoreFailure != null &&
+        viewModel.section == TrackerSection.settings;
     final body = switch (viewModel.section) {
       TrackerSection.dashboard => _Dashboard(viewModel: viewModel),
       TrackerSection.board => _Board(viewModel: viewModel),
@@ -3555,6 +4314,8 @@ class _SectionBody extends StatelessWidget {
         workspaces: workspaces,
         onSelectWorkspace: onSelectWorkspace,
         onDeleteWorkspace: onDeleteWorkspace,
+        workspaceRestoreFailure: workspaceRestoreFailure,
+        onRetryWorkspaceRestore: onRetryWorkspaceRestore,
       ),
     };
     return SingleChildScrollView(
@@ -3565,7 +4326,10 @@ class _SectionBody extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (viewModel.message != null) ...[
+              if (viewModel.message != null &&
+                  !(showsWorkspaceRestoreRecovery &&
+                      viewModel.message?.kind ==
+                          TrackerMessageKind.workspaceRestoreFailed)) ...[
                 _MessageBanner(
                   message: viewModel.message!,
                   onDismiss: viewModel.dismissMessage,
@@ -3793,19 +4557,25 @@ class _SearchAndDetail extends StatelessWidget {
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 980;
             final list = _IssueList(viewModel: viewModel);
-            final detail = _IssueDetail(
-              issue: viewModel.selectedIssue!,
-              viewModel: viewModel,
-              onCreateChildIssue: () => onOpenCreateIssue(
-                _CreateIssuePrefill.forChild(
-                  originSection:
-                      viewModel.issueDetailReturnSection ??
-                      TrackerSection.search,
-                  issue: viewModel.selectedIssue!,
-                ),
-              ),
-              attachmentPicker: attachmentPicker,
-            );
+            final selectedIssue = viewModel.selectedIssue;
+            final detail = selectedIssue == null
+                ? null
+                : _IssueDetail(
+                    issue: selectedIssue,
+                    viewModel: viewModel,
+                    onCreateChildIssue: () => onOpenCreateIssue(
+                      _CreateIssuePrefill.forChild(
+                        originSection:
+                            viewModel.issueDetailReturnSection ??
+                            TrackerSection.search,
+                        issue: selectedIssue,
+                      ),
+                    ),
+                    attachmentPicker: attachmentPicker,
+                  );
+            if (detail == null) {
+              return list;
+            }
             return compact
                 ? Column(children: [list, const SizedBox(height: 16), detail])
                 : Row(
@@ -4096,6 +4866,8 @@ class _Settings extends StatefulWidget {
     required this.workspaces,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.workspaceRestoreFailure,
+    required this.onRetryWorkspaceRestore,
   });
 
   final TrackerViewModel viewModel;
@@ -4103,6 +4875,8 @@ class _Settings extends StatefulWidget {
   final WorkspaceProfilesState workspaces;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final _WorkspaceRestoreFailure? workspaceRestoreFailure;
+  final VoidCallback onRetryWorkspaceRestore;
 
   @override
   State<_Settings> createState() => _SettingsState();
@@ -4229,6 +5003,10 @@ class _SettingsState extends State<_Settings> {
     final l10n = AppLocalizations.of(context)!;
     final project = widget.viewModel.project!;
     final hostedLabel = _repositoryAccessLabel(l10n, widget.viewModel);
+    final workspaceRestoreFailure = widget.workspaceRestoreFailure;
+    final showLocalGitHubAccess =
+        widget.workspaces.profiles.any((profile) => profile.isHosted) ||
+        widget.viewModel.hasLocalHostedAccessSession;
     final selectorChildren = <Widget>[
       if (widget.viewModel.supportsGitHubAuth) ...[
         _SettingsProviderButton(
@@ -4255,6 +5033,8 @@ class _SettingsState extends State<_Settings> {
       if (_selectedProvider == _SettingsProviderSelection.localGit) ...[
         const SizedBox(height: 12),
         _LocalGitConfiguration(
+          viewModel: widget.viewModel,
+          showGitHubAccess: showLocalGitHubAccess,
           repositoryPathController: _repositoryPathController,
           writeBranchController: _writeBranchController,
           repositoryPathFocusNode: _repositoryPathFocusNode,
@@ -4300,7 +5080,19 @@ class _SettingsState extends State<_Settings> {
           ),
           const SizedBox(height: 16),
         ],
-        if (widget.viewModel.startupRecovery case final recovery?) ...[
+        if (workspaceRestoreFailure != null) ...[
+          _AccessCallout(
+            semanticLabel: l10n.startupRecovery,
+            title: l10n.startupRecovery,
+            message: l10n.workspaceRestoreFailed(
+              workspaceRestoreFailure.workspaceName,
+              workspaceRestoreFailure.reason,
+            ),
+            primaryActionLabel: l10n.retry,
+            onPrimaryAction: widget.onRetryWorkspaceRestore,
+          ),
+          const SizedBox(height: 16),
+        ] else if (widget.viewModel.startupRecovery case final recovery?) ...[
           _AccessCallout(
             semanticLabel: l10n.startupRecovery,
             title: _startupRecoveryTitle(l10n, recovery),
@@ -4653,144 +5445,184 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
       widget.viewModel,
       widget.workspaces,
     );
+    final workspaceRowActionCount = widget.workspaces.profiles.length * 2;
+    final addWorkspaceOrderBase = workspaceRowActionCount.toDouble() + 1;
     return Padding(
+      key: const ValueKey('workspace-switcher-sheet'),
       padding: const EdgeInsets.all(20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Semantics(
-            header: true,
-            label: l10n.workspaceSwitcher,
-            child: Text(
-              l10n.workspaceSwitcher,
-              style: Theme.of(context).textTheme.headlineSmall,
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(
+              header: true,
+              label: l10n.workspaceSwitcher,
+              child: Text(
+                l10n.workspaceSwitcher,
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: colors.surfaceAlt,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.border),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colors.surfaceAlt,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colors.border),
+              ),
+              child: Row(
+                children: [
+                  TrackStateIcon(
+                    activeSummary.icon,
+                    color: colors.primary,
+                    semanticLabel: activeSummary.semanticLabel,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      activeSummary.textLabel,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            child: Row(
-              children: [
-                TrackStateIcon(
-                  activeSummary.icon,
-                  color: colors.primary,
-                  semanticLabel: activeSummary.semanticLabel,
+            const SizedBox(height: 16),
+            Text(
+              l10n.savedWorkspaces,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 8),
+            if (!widget.workspaces.hasProfiles)
+              Text(
+                l10n.workspaceSwitcherEmptyState,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.muted),
+              )
+            else
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 280),
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      for (
+                        var index = 0;
+                        index < widget.workspaces.profiles.length;
+                        index += 1
+                      ) ...[
+                        _WorkspaceSwitcherRow(
+                          key: ValueKey(
+                            'workspace-${widget.workspaces.profiles[index].id}',
+                          ),
+                          workspace: widget.workspaces.profiles[index],
+                          isActive:
+                              widget.workspaces.profiles[index].id ==
+                              activeWorkspaceId,
+                          stateLabel: _workspaceStateLabel(
+                            l10n,
+                            widget.viewModel,
+                            widget.workspaces.profiles[index],
+                            activeWorkspaceId: activeWorkspaceId,
+                            authenticatedWorkspaceIds:
+                                widget.authenticatedWorkspaceIds,
+                            hostedWorkspaceAccessModes:
+                                widget.hostedWorkspaceAccessModes,
+                            localWorkspaceAvailability:
+                                widget.localWorkspaceAvailability,
+                          ),
+                          focusOrderBase: index * 2.0 + 1,
+                          onSelect:
+                              widget.workspaces.profiles[index].id ==
+                                  activeWorkspaceId
+                              ? null
+                              : () => widget.onSelectWorkspace(
+                                  widget.workspaces.profiles[index],
+                                ),
+                          onDelete: () => widget.onDeleteWorkspace(
+                            widget.workspaces.profiles[index],
+                          ),
+                        ),
+                        if (index != widget.workspaces.profiles.length - 1)
+                          const SizedBox(height: 8),
+                      ],
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 12),
+              ),
+            const SizedBox(height: 16),
+            Text(
+              l10n.addWorkspace,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
                 Expanded(
-                  child: Text(
-                    activeSummary.textLabel,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelLarge,
+                  child: FocusTraversalOrder(
+                    order: NumericFocusOrder(addWorkspaceOrderBase),
+                    child: _SettingsProviderButton(
+                      label: l10n.workspaceTargetTypeHosted,
+                      selected:
+                          _targetType == WorkspaceProfileTargetType.hosted,
+                      onPressed: () => setState(
+                        () => _targetType = WorkspaceProfileTargetType.hosted,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FocusTraversalOrder(
+                    order: NumericFocusOrder(addWorkspaceOrderBase + 1),
+                    child: _SettingsProviderButton(
+                      label: l10n.workspaceTargetTypeLocal,
+                      selected: _targetType == WorkspaceProfileTargetType.local,
+                      onPressed: () => setState(
+                        () => _targetType = WorkspaceProfileTargetType.local,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            l10n.savedWorkspaces,
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 8),
-          if (!widget.workspaces.hasProfiles)
-            Text(
-              l10n.workspaceSwitcherEmptyState,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: colors.muted),
-            )
-          else
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 280),
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    for (final workspace in widget.workspaces.profiles) ...[
-                      _WorkspaceSwitcherRow(
-                        key: ValueKey('workspace-${workspace.id}'),
-                        workspace: workspace,
-                        isActive: workspace.id == activeWorkspaceId,
-                        stateLabel: _workspaceStateLabel(
-                          l10n,
-                          widget.viewModel,
-                          workspace,
-                          activeWorkspaceId: activeWorkspaceId,
-                          authenticatedWorkspaceIds:
-                              widget.authenticatedWorkspaceIds,
-                          hostedWorkspaceAccessModes:
-                              widget.hostedWorkspaceAccessModes,
-                          localWorkspaceAvailability:
-                              widget.localWorkspaceAvailability,
-                        ),
-                        onSelect: workspace.id == activeWorkspaceId
-                            ? null
-                            : () => widget.onSelectWorkspace(workspace),
-                        onDelete: () => widget.onDeleteWorkspace(workspace),
-                      ),
-                      if (workspace != widget.workspaces.profiles.last)
-                        const SizedBox(height: 8),
-                    ],
-                  ],
+            const SizedBox(height: 12),
+            FocusTraversalOrder(
+              order: NumericFocusOrder(addWorkspaceOrderBase + 2),
+              child: _SettingsTextField(
+                label: _targetType == WorkspaceProfileTargetType.hosted
+                    ? l10n.repository
+                    : l10n.repositoryPath,
+                controller: _targetController,
+              ),
+            ),
+            const SizedBox(height: 12),
+            FocusTraversalOrder(
+              order: NumericFocusOrder(addWorkspaceOrderBase + 3),
+              child: _SettingsTextField(
+                label: l10n.branch,
+                controller: _branchController,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FocusTraversalOrder(
+                order: NumericFocusOrder(addWorkspaceOrderBase + 4),
+                child: FilledButton(
+                  key: const ValueKey('workspace-add-button'),
+                  onPressed: _saveWorkspace,
+                  child: Text(l10n.workspaceSaveAndSwitch),
                 ),
               ),
             ),
-          const SizedBox(height: 16),
-          Text(
-            l10n.addWorkspace,
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: _SettingsProviderButton(
-                  label: l10n.workspaceTargetTypeHosted,
-                  selected: _targetType == WorkspaceProfileTargetType.hosted,
-                  onPressed: () => setState(
-                    () => _targetType = WorkspaceProfileTargetType.hosted,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _SettingsProviderButton(
-                  label: l10n.workspaceTargetTypeLocal,
-                  selected: _targetType == WorkspaceProfileTargetType.local,
-                  onPressed: () => setState(
-                    () => _targetType = WorkspaceProfileTargetType.local,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _SettingsTextField(
-            label: _targetType == WorkspaceProfileTargetType.hosted
-                ? l10n.repository
-                : l10n.repositoryPath,
-            controller: _targetController,
-          ),
-          const SizedBox(height: 12),
-          _SettingsTextField(label: l10n.branch, controller: _branchController),
-          const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton(
-              key: const ValueKey('workspace-add-button'),
-              onPressed: _saveWorkspace,
-              child: Text(l10n.workspaceSaveAndSwitch),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -4802,6 +5634,7 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
     required this.workspace,
     required this.isActive,
     required this.stateLabel,
+    required this.focusOrderBase,
     required this.onDelete,
     this.onSelect,
   });
@@ -4809,6 +5642,7 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
   final WorkspaceProfile workspace;
   final bool isActive;
   final String stateLabel;
+  final double focusOrderBase;
   final VoidCallback onDelete;
   final VoidCallback? onSelect;
 
@@ -4876,16 +5710,34 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
                   style: Theme.of(context).textTheme.labelMedium,
                 )
               else
-                OutlinedButton(
-                  key: ValueKey('workspace-open-${workspace.id}'),
-                  onPressed: onSelect,
-                  child: Text(l10n.openWorkspace),
+                FocusTraversalOrder(
+                  order: NumericFocusOrder(focusOrderBase),
+                  child: Semantics(
+                    button: true,
+                    label: '${l10n.openWorkspace}: ${workspace.displayName}',
+                    child: ExcludeSemantics(
+                      child: OutlinedButton(
+                        key: ValueKey('workspace-open-${workspace.id}'),
+                        onPressed: onSelect,
+                        child: Text(l10n.openWorkspace),
+                      ),
+                    ),
+                  ),
                 ),
               const SizedBox(width: 8),
-              TextButton(
-                key: ValueKey('workspace-delete-${workspace.id}'),
-                onPressed: onDelete,
-                child: Text(l10n.delete),
+              FocusTraversalOrder(
+                order: NumericFocusOrder(focusOrderBase + 1),
+                child: Semantics(
+                  button: true,
+                  label: '${l10n.delete}: ${workspace.displayName}',
+                  child: ExcludeSemantics(
+                    child: TextButton(
+                      key: ValueKey('workspace-delete-${workspace.id}'),
+                      onPressed: onDelete,
+                      child: Text(l10n.delete),
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
@@ -4906,24 +5758,30 @@ class _WorkspaceStateBadge extends StatelessWidget {
     final colors = context.ts;
     final lowerLabel = label.toLowerCase();
     final Color backgroundColor;
+    final Color borderColor;
     final Color textColor;
     if (active) {
       backgroundColor = colors.primary;
+      borderColor = colors.primary;
       textColor = colors.page;
     } else if (lowerLabel.contains('unavailable')) {
       backgroundColor = colors.error.withValues(alpha: 0.12);
-      textColor = colors.error;
+      borderColor = colors.error.withValues(alpha: 0.45);
+      textColor = colors.text;
     } else if (lowerLabel.contains('sign') ||
         lowerLabel.contains('read-only') ||
         lowerLabel.contains('attachment')) {
       backgroundColor = colors.warning.withValues(alpha: 0.14);
-      textColor = colors.warning;
+      borderColor = colors.warning.withValues(alpha: 0.45);
+      textColor = colors.text;
     } else if (lowerLabel.contains('connected') ||
         lowerLabel.contains('local git')) {
       backgroundColor = colors.success.withValues(alpha: 0.14);
-      textColor = colors.success;
+      borderColor = colors.success.withValues(alpha: 0.45);
+      textColor = colors.text;
     } else {
       backgroundColor = colors.surfaceAlt;
+      borderColor = colors.border;
       textColor = colors.muted;
     }
     return Container(
@@ -4931,6 +5789,7 @@ class _WorkspaceStateBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: backgroundColor,
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: borderColor),
       ),
       child: Text(
         label,
@@ -7926,6 +8785,8 @@ class _IssueList extends StatelessWidget {
                 order: NumericFocusOrder(index + 2.0),
                 child: _IssueListRow(
                   issue: visibleResults[index],
+                  selected:
+                      visibleResults[index].key == viewModel.selectedIssue?.key,
                   project: viewModel.project,
                   onSelect: viewModel.selectIssue,
                   trailingAction: showSearchBootstrapLoading
@@ -8234,12 +9095,14 @@ class _IssueListRow extends StatelessWidget {
   const _IssueListRow({
     required this.issue,
     required this.onSelect,
+    this.selected = false,
     this.project,
     this.trailingAction,
   });
 
   final TrackStateIssue issue;
   final ValueChanged<TrackStateIssue> onSelect;
+  final bool selected;
   final ProjectConfig? project;
   final Widget? trailingAction;
 
@@ -8249,73 +9112,94 @@ class _IssueListRow extends StatelessWidget {
     return Semantics(
       container: true,
       button: true,
+      selected: selected,
       label: 'Open ${issue.key} ${issue.summary}',
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 4),
         decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: colors.border)),
         ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Stack(
-                children: [
-                  ExcludeSemantics(
-                    child: Row(
-                      children: [
-                        _IssueTypeGlyph(issue.issueType),
-                        const SizedBox(width: 10),
-                        SizedBox(
-                          width: 86,
-                          child: Text(
-                            issue.key,
-                            style: TextStyle(
-                              fontFamily: 'JetBrains Mono',
-                              color: colors.muted,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? colors.primarySoft : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: selected ? Border.all(color: colors.primary) : null,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Stack(
+                  children: [
+                    ExcludeSemantics(
+                      child: Row(
+                        children: [
+                          _IssueTypeGlyph(issue.issueType),
+                          const SizedBox(width: 10),
+                          SizedBox(
+                            width: 86,
+                            child: Text(
+                              issue.key,
+                              style: TextStyle(
+                                fontFamily: 'JetBrains Mono',
+                                color: selected ? colors.primary : colors.muted,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(issue.summary)),
-                        _StatusBadge(
-                          status: issue.status,
-                          label: _resolvedIssueStatusLabel(
-                            context,
-                            project,
-                            issue,
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              issue.summary,
+                              style: TextStyle(
+                                fontWeight: selected
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                              ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        _Avatar(name: issue.assignee),
-                      ],
-                    ),
-                  ),
-                  Positioned.fill(
-                    child: TextButton(
-                      onPressed: () => onSelect(issue),
-                      style: TextButton.styleFrom(
-                        foregroundColor: colors.text,
-                        backgroundColor: Colors.transparent,
-                        overlayColor: Colors.transparent,
-                        shadowColor: Colors.transparent,
-                        surfaceTintColor: Colors.transparent,
-                        padding: EdgeInsets.zero,
-                        alignment: Alignment.centerLeft,
-                        shape: const RoundedRectangleBorder(),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          _StatusBadge(
+                            status: issue.status,
+                            label: _resolvedIssueStatusLabel(
+                              context,
+                              project,
+                              issue,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          _Avatar(name: issue.assignee),
+                        ],
                       ),
-                      child: const SizedBox.expand(),
                     ),
-                  ),
-                ],
+                    Positioned.fill(
+                      child: TextButton(
+                        onPressed: () => onSelect(issue),
+                        style: TextButton.styleFrom(
+                          foregroundColor: colors.text,
+                          backgroundColor: Colors.transparent,
+                          overlayColor: Colors.transparent,
+                          shadowColor: Colors.transparent,
+                          surfaceTintColor: Colors.transparent,
+                          padding: EdgeInsets.zero,
+                          alignment: Alignment.centerLeft,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            if (trailingAction != null) ...[
-              const SizedBox(width: 8),
-              trailingAction!,
+              if (trailingAction != null) ...[
+                const SizedBox(width: 8),
+                trailingAction!,
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -8821,12 +9705,16 @@ class _HostedProviderConfigurationState
 
 class _LocalGitConfiguration extends StatelessWidget {
   const _LocalGitConfiguration({
+    required this.viewModel,
+    required this.showGitHubAccess,
     required this.repositoryPathController,
     required this.writeBranchController,
     required this.repositoryPathFocusNode,
     required this.writeBranchFocusNode,
   });
 
+  final TrackerViewModel viewModel;
+  final bool showGitHubAccess;
   final TextEditingController repositoryPathController;
   final TextEditingController writeBranchController;
   final FocusNode repositoryPathFocusNode;
@@ -8835,8 +9723,39 @@ class _LocalGitConfiguration extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final project = viewModel.project;
+    final accessTitle = viewModel.hasLocalHostedAccessSession
+        ? l10n.repositoryAccessConnected
+        : l10n.localGitRuntimeTitle;
+    final accessMessage =
+        viewModel.hasLocalHostedAccessSession && viewModel.connectedUser != null
+        ? l10n.githubConnected(
+            viewModel.connectedUser!.login,
+            project?.repository ?? l10n.configuredRepositoryFallback,
+          )
+        : l10n.localGitHostedAccessDescription;
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (showGitHubAccess) ...[
+          _AccessCallout(
+            semanticLabel: accessTitle,
+            title: accessTitle,
+            message: accessMessage,
+            tone: viewModel.hasLocalHostedAccessSession
+                ? _AccessCalloutTone.success
+                : _AccessCalloutTone.warning,
+            primaryActionLabel: viewModel.hasLocalHostedAccessSession
+                ? l10n.manageGitHubAccess
+                : l10n.connectGitHub,
+            onPrimaryAction: () => _showRepositoryAccessDialog(
+              context,
+              viewModel,
+              allowLocalGitHubConnection: true,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         _SettingsTextField(
           label: l10n.repositoryPath,
           controller: repositoryPathController,
@@ -9043,70 +9962,90 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
       button: true,
       enabled: enabled,
       label: summary.semanticLabel,
-      child: InkWell(
-        borderRadius: borderRadius,
-        onTap: onPressed,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            minHeight: compact ? 44 : _desktopTopBarControlHeight,
-            maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: compact ? 44 : _desktopTopBarControlHeight,
+          maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
+        ),
+        child: FilledButton(
+          onPressed: onPressed,
+          style: ButtonStyle(
+            animationDuration: Duration.zero,
+            backgroundColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.disabled)) {
+                return colors.primary.withValues(alpha: 0.5);
+              }
+              return colors.primary;
+            }),
+            foregroundColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.disabled)) {
+                return onPrimary.withValues(alpha: 0.72);
+              }
+              return onPrimary;
+            }),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+            minimumSize: WidgetStatePropertyAll(
+              Size(0, compact ? 44 : _desktopTopBarControlHeight),
+            ),
+            maximumSize: WidgetStatePropertyAll(
+              Size(double.infinity, compact ? 44 : _desktopTopBarControlHeight),
+            ),
+            padding: WidgetStatePropertyAll(
+              EdgeInsets.symmetric(
+                horizontal: compact ? 10 : 12,
+                vertical: compact ? 8 : 6,
+              ),
+            ),
+            overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+            shape: WidgetStatePropertyAll(
+              RoundedRectangleBorder(borderRadius: borderRadius),
+            ),
+            side: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.focused)) {
+                return BorderSide(color: onPrimary, width: 2);
+              }
+              return BorderSide(color: colors.primary);
+            }),
           ),
-          child: Container(
-            height: compact ? null : _desktopTopBarControlHeight,
-            padding: EdgeInsets.symmetric(
-              horizontal: compact ? 10 : 12,
-              vertical: compact ? 8 : 6,
-            ),
-            decoration: BoxDecoration(
-              color: colors.primary,
-              borderRadius: borderRadius,
-              border: Border.all(color: colors.primary),
-            ),
-            foregroundDecoration: enabled
-                ? null
-                : BoxDecoration(
-                    color: colors.page.withValues(alpha: 0.45),
-                    borderRadius: borderRadius,
-                  ),
-            child: Row(
-              mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
-              children: [
-                TrackStateIcon(
-                  summary.icon,
-                  color: onPrimary,
-                  size: compact ? 18 : _desktopTopBarIconSize,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: compact
-                      ? Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              summary.displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: nameStyle,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              summary.detailLabel,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: detailStyle,
-                            ),
-                          ],
-                        )
-                      : Text(
-                          summary.textLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: nameStyle,
-                        ),
-                ),
-              ],
-            ),
+          child: Row(
+            mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
+            children: [
+              TrackStateIcon(
+                summary.icon,
+                color: onPrimary,
+                size: compact ? 18 : _desktopTopBarIconSize,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: compact
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            summary.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: nameStyle,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            summary.detailLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: detailStyle,
+                          ),
+                        ],
+                      )
+                    : Text(
+                        summary.textLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: nameStyle,
+                      ),
+              ),
+            ],
           ),
         ),
       ),

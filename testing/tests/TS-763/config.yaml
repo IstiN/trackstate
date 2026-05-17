@@ -1,0 +1,10 @@
+test_id: TS-763
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+notes:
+  - Opens the deployed TrackState web app in a fresh Playwright browser context with no saved workspaces configured.
+  - Navigates directly to the dashboard hash route and verifies the navigation guard reroutes the user away from Dashboard access.
+  - Confirms the final visible screen is Project Settings and the resolved route is no longer the direct dashboard URL.

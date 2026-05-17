@@ -1,0 +1,29 @@
+test_id: TS-707
+type: api
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - GitHub CLI authenticated with repo and workflow scopes
+  - Playwright for GitHub file-page verification
+runtime_inputs:
+  repository: IstiN/trackstate
+  default_branch: main
+  workflow_name: Apple Release Builds
+  workflow_file: build-native.yml
+  workflow_path: .github/workflows/build-native.yml
+  verify_runner_job_name: Verify macOS runner availability
+  build_job_name: Build macOS desktop and CLI artifacts
+  setup_flutter_step_name: Set up Flutter
+  validation_step_name: Verify runner toolchain
+  desktop_build_step_name: Build macOS desktop app
+  cli_build_step_name: Build macOS CLI
+  required_flutter_version: 3.35.3
+  incompatible_flutter_version: 3.30.0
+  ui_timeout_seconds: 60
+  run_timeout_seconds: 1800
+  poll_interval_seconds: 10
+  log_excerpt_lines: 40
+notes:
+  - Uses the live Apple release workflow from IstiN/trackstate and a disposable semantic tag whose workflow file is modified only for the test run to inject a Flutter 3.30.0 shim immediately before the validation step while leaving Set up Flutter on 3.35.3.
+  - Expects the production validation step to reject that mismatched Flutter version with an explicit 3.35.3-required error before the desktop or CLI build steps proceed.
+  - Treats the workflow's runner-availability guard as a precondition check; unavailable or offline release runners block the test instead of generating product-bug evidence.
