@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from testing.components.pages.live_desktop_header_layout_page import (  # noqa: E402
+    HeaderThemeToggleCycleObservation,
     LiveDesktopHeaderLayoutPage,
 )
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
@@ -97,11 +98,12 @@ def main() -> None:
                     workspace_page.set_viewport(**DESKTOP_VIEWPORT)
 
                     desktop_trigger = workspace_page.observe_trigger()
-                    interaction_label = _preferred_interaction_label(
+                    interaction_control = _preferred_interaction_label(
                         desktop_trigger.top_button_labels,
                     )
-                    interaction_button = header_page.observe_button(interaction_label)
+                    interaction_button = header_page.observe_button(interaction_control)
                     result["interaction_button_observation"] = asdict(interaction_button)
+                    result["interaction_control"] = interaction_control
                     result["desktop_trigger_observation"] = asdict(desktop_trigger)
                 except AssertionError as error:
                     _record_step(
@@ -120,7 +122,7 @@ def main() -> None:
                     observed=(
                         f"Opened {config.app_url} in Chromium at "
                         f"{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}; "
-                        f"interaction_button={interaction_button.label!r}; "
+                        f"interaction_control={interaction_control!r}; "
                         f"interaction_bounds=({interaction_button.left:.1f}, "
                         f"{interaction_button.top:.1f}, {interaction_button.width:.1f}, "
                         f"{interaction_button.height:.1f}); "
@@ -135,7 +137,7 @@ def main() -> None:
                         "showed the workspace switcher plus other interactive top-bar controls."
                     ),
                     observed=(
-                        f"interaction_button_label={interaction_button.label!r}; "
+                        f"interaction_control={interaction_control!r}; "
                         f"top_buttons={list(desktop_trigger.top_button_labels)!r}; "
                         f"trigger_text={desktop_trigger.visible_text!r}"
                     ),
@@ -219,26 +221,46 @@ def main() -> None:
                     observed=(
                         f"background_dimmed={desktop_panel.background_dimmed}; "
                         f"surface_kind={desktop_panel.container_kind}; "
-                        f"interaction_button_label={interaction_button.label!r}; "
+                        f"interaction_control={interaction_control!r}; "
                         f"top_buttons_still_visible={list(desktop_trigger.top_button_labels)!r}"
                     ),
                 )
 
                 try:
-                    interaction_center_x = interaction_button.left + (interaction_button.width / 2)
-                    interaction_center_y = interaction_button.top + (interaction_button.height / 2)
-                    interaction_pointer_target = header_page.pointer_target_at(
-                        x=interaction_center_x,
-                        y=interaction_center_y,
+                    expected_toggled_label = (
+                        "Light theme"
+                        if interaction_control == "Dark theme"
+                        else "Dark theme"
                     )
-                    result["interaction_pointer_target_observation"] = asdict(
-                        interaction_pointer_target,
+                    header_page.click_observed_button(interaction_button)
+                    workspace_page.close_switcher()
+                    try:
+                        toggled_button = header_page.observe_button(
+                            expected_toggled_label,
+                            timeout_ms=10_000,
+                        )
+                    except Exception as error:
+                        raise AssertionError(
+                            "Step 4 failed: clicking the visible desktop theme toggle while "
+                            "the workspace switcher was open did not change the header theme "
+                            "state after the panel closed.\n"
+                            f"Observed initial label: {interaction_control!r}\n"
+                            f"Expected toggled label: {expected_toggled_label!r}\n"
+                            f"Observed body text after closing the panel:\n"
+                            f"{header_page.current_body_text()}"
+                        ) from error
+                    restored_label = header_page.toggle_theme()
+                    theme_cycle = HeaderThemeToggleCycleObservation(
+                        initial_label=interaction_control,
+                        toggled_label=toggled_button.label,
+                        restored_label=restored_label,
                     )
+                    result["toggled_button_observation"] = asdict(toggled_button)
+                    result["theme_cycle_observation"] = asdict(theme_cycle)
                     _assert_header_interaction(
-                        button=interaction_button,
-                        pointer_target=interaction_pointer_target,
+                        interaction_control=interaction_control,
+                        theme_cycle=theme_cycle,
                     )
-                    header_page.click_at(x=interaction_center_x, y=interaction_center_y)
                 except Exception as error:
                     _record_step(
                         result,
@@ -260,23 +282,23 @@ def main() -> None:
                         "issues field or Create issue button."
                     ),
                     observed=(
-                        f"interaction_button={interaction_button.label!r}; "
-                        f"pointer_target_label={interaction_pointer_target.accessible_name!r}; "
-                        f"pointer_target_text={interaction_pointer_target.text!r}; "
-                        f"pointer_target_role={interaction_pointer_target.role!r}"
+                        f"interaction_control={interaction_control!r}; "
+                        f"initial_label={theme_cycle.initial_label!r}; "
+                        f"toggled_label={theme_cycle.toggled_label!r}; "
+                        f"restored_label={theme_cycle.restored_label!r}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Clicked another visible desktop header control while the workspace "
-                        "switcher was open to confirm the rest of the top bar still responded to input."
+                        "Toggled another visible desktop header control while the workspace "
+                        "switcher was open to confirm the rest of the top bar still responded "
+                        "to input."
                     ),
                     observed=(
-                        f"interaction_button={interaction_button.label!r}; "
-                        f"interaction_center=({interaction_center_x:.1f}, {interaction_center_y:.1f}); "
-                        f"pointer_target_text={interaction_pointer_target.text!r}; "
-                        f"pointer_target_role={interaction_pointer_target.role!r}"
+                        f"interaction_control={interaction_control!r}; "
+                        f"toggled_to={theme_cycle.toggled_label!r}; "
+                        f"restored_to={theme_cycle.restored_label!r}"
                     ),
                 )
 
@@ -326,34 +348,35 @@ def _assert_desktop_panel_is_non_modal(
         )
 def _assert_header_interaction(
     *,
-    button: object,
-    pointer_target: object,
+    interaction_control: str,
+    theme_cycle: HeaderThemeToggleCycleObservation,
 ) -> None:
-    interaction_button = button
-    topmost_target = pointer_target
-    if not interaction_button.label:
+    if interaction_control not in {"Dark theme", "Light theme"}:
         raise AssertionError(
             "Step 4 failed: the desktop header did not expose a visible interaction "
             "control before the workspace switcher probe.\n"
-            f"Observed button label: {interaction_button.label!r}",
+            f"Observed interaction control: {interaction_control!r}",
         )
-    if topmost_target.role != "button":
+    if theme_cycle.initial_label != interaction_control:
+        raise AssertionError(
+            "Step 4 failed: the visible desktop theme control changed before the "
+            "interaction probe started.\n"
+            f"Observed interaction control: {interaction_control!r}\n"
+            f"Observed initial label: {theme_cycle.initial_label!r}",
+        )
+    if theme_cycle.toggled_label == theme_cycle.initial_label:
         raise AssertionError(
             "Step 4 failed: another visible desktop header control did not react while "
             "the workspace switcher was open.\n"
-            f"Observed pointer target role: {topmost_target.role!r}\n"
-            f"Observed pointer target text: {topmost_target.text!r}",
+            f"Observed interaction control: {interaction_control!r}\n"
+            f"Observed toggled label: {theme_cycle.toggled_label!r}",
         )
-    if (
-        topmost_target.accessible_name != interaction_button.label
-        and interaction_button.label not in topmost_target.text
-    ):
+    if theme_cycle.restored_label != theme_cycle.initial_label:
         raise AssertionError(
-            "Step 4 failed: the topmost UI target at the selected visible desktop "
-            "control's location was not that control while the workspace switcher was open.\n"
-            f"Expected control label: {interaction_button.label!r}\n"
-            f"Observed pointer target accessible name: {topmost_target.accessible_name!r}\n"
-            f"Observed pointer target text: {topmost_target.text!r}",
+            "Step 4 failed: the visible desktop theme control did not return to its "
+            "original label after the interaction probe completed.\n"
+            f"Observed initial label: {theme_cycle.initial_label!r}\n"
+            f"Observed restored label: {theme_cycle.restored_label!r}",
         )
 
 
@@ -557,7 +580,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         (
             f"- Outcome: {_failed_step_summary(result)}"
             if not passed
-            else "- Outcome: the desktop workspace switcher opened without background dimming and the Search issues field remained interactive."
+            else f"- Outcome: {_successful_outcome_summary(result)}"
         ),
     ]
     lines.extend(_artifact_lines(result, jira=False))
@@ -699,6 +722,25 @@ def _failed_step_summary(result: dict[str, object]) -> str:
     return str(result.get("error", "No failed step recorded."))
 
 
+def _successful_outcome_summary(result: dict[str, object]) -> str:
+    interaction_control = str(result.get("interaction_control", "another visible header control"))
+    theme_cycle = result.get("theme_cycle_observation")
+    if isinstance(theme_cycle, dict):
+        toggled_label = str(theme_cycle.get("toggled_label", "")).strip()
+        restored_label = str(theme_cycle.get("restored_label", "")).strip()
+        if toggled_label and restored_label:
+            return (
+                "the desktop workspace switcher opened without background dimming and "
+                f"the visible `{interaction_control}` control toggled to "
+                f"`{toggled_label}` and back to `{restored_label}` while the switcher "
+                "stayed open."
+            )
+    return (
+        "the desktop workspace switcher opened without background dimming and another "
+        "visible header control remained interactive while the switcher stayed open."
+    )
+
+
 def _step_status(result: dict[str, object], step_number: int) -> str:
     steps = result.get("steps", [])
     if not isinstance(steps, list):
@@ -753,12 +795,12 @@ def _open_and_observe_panel(
 
 
 def _preferred_interaction_label(labels: tuple[str, ...]) -> str:
-    for candidate in ("Dashboard", "Dark theme", "Light theme", "Create issue"):
+    for candidate in ("Dark theme", "Light theme"):
         if candidate in labels:
             return candidate
     raise AssertionError(
-        "Step 1 failed: the desktop app shell did not expose any visible top-bar "
-        "control suitable for the interaction probe.\n"
+        "Step 1 failed: the desktop app shell did not expose a visible theme toggle "
+        "suitable for the interaction probe.\n"
         f"Observed top buttons: {list(labels)!r}",
     )
 

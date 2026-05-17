@@ -31,15 +31,10 @@ class HeaderActiveElementObservation:
 
 
 @dataclass(frozen=True)
-class HeaderPointerTargetObservation:
-    tag_name: str
-    role: str | None
-    accessible_name: str | None
-    text: str
-    left: float
-    top: float
-    width: float
-    height: float
+class HeaderThemeToggleCycleObservation:
+    initial_label: str
+    toggled_label: str
+    restored_label: str
 
 
 @dataclass(frozen=True)
@@ -279,116 +274,17 @@ class LiveDesktopHeaderLayoutPage:
             )
         return self._control_from_payload(payload)
 
-    def pointer_target_at(
+    def click_observed_button(
         self,
+        button: HeaderControlObservation,
         *,
-        x: float,
-        y: float,
-        expected_text: str | None = None,
-        timeout_ms: int = 10_000,
-    ) -> HeaderPointerTargetObservation:
-        if expected_text is None:
-            payload = self._session.evaluate(
-                """
-                ({ x, y }) => {
-                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-                  const leaf = document.elementFromPoint(x, y);
-                  if (!leaf) {
-                    return null;
-                  }
-                  const candidateChain = [];
-                  let current = leaf;
-                  while (current) {
-                    candidateChain.push(current);
-                    current = current.parentElement;
-                  }
-                  const element = candidateChain.find((candidate) => {
-                    const role = candidate.getAttribute('role');
-                    const ariaLabel = normalize(candidate.getAttribute('aria-label') || '');
-                    const text = normalize(candidate.innerText || candidate.textContent || '');
-                    return role === 'button' || ariaLabel.length > 0 || text.length > 0;
-                  }) ?? leaf;
-                  const rect = element.getBoundingClientRect();
-                  return {
-                    tagName: element.tagName.toLowerCase(),
-                    role: element.getAttribute('role'),
-                    accessibleName: element.getAttribute('aria-label'),
-                    text: normalize(element.innerText || element.textContent || ''),
-                    left: rect.left,
-                    top: rect.top,
-                    width: rect.width,
-                    height: rect.height,
-                  };
-                }
-                """,
-                arg={"x": x, "y": y},
-            )
-        else:
-            payload = self._session.wait_for_function(
-                """
-                ({ x, y, expectedText }) => {
-                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-                  const leaf = document.elementFromPoint(x, y);
-                  if (!leaf) {
-                    return null;
-                  }
-                  const candidateChain = [];
-                  let current = leaf;
-                  while (current) {
-                    candidateChain.push(current);
-                    current = current.parentElement;
-                  }
-                  const element = candidateChain.find((candidate) => {
-                    const role = candidate.getAttribute('role');
-                    const ariaLabel = normalize(candidate.getAttribute('aria-label') || '');
-                    const text = normalize(candidate.innerText || candidate.textContent || '');
-                    return (
-                      role === 'button'
-                      && (ariaLabel === expectedText || text === expectedText)
-                    );
-                  });
-                  if (!element) {
-                    return null;
-                  }
-                  const rect = element.getBoundingClientRect();
-                  return {
-                    tagName: element.tagName.toLowerCase(),
-                    role: element.getAttribute('role'),
-                    accessibleName: element.getAttribute('aria-label'),
-                    text: normalize(element.innerText || element.textContent || ''),
-                    left: rect.left,
-                    top: rect.top,
-                    width: rect.width,
-                    height: rect.height,
-                  };
-                }
-                """,
-                arg={"x": x, "y": y, "expectedText": expected_text},
-                timeout_ms=timeout_ms,
-            )
-        if not isinstance(payload, dict):
-            raise AssertionError(
-                "The live desktop header did not expose any pointer target at the "
-                "requested location.\n"
-                f"Observed body text:\n{self.current_body_text()}",
-            )
-        return HeaderPointerTargetObservation(
-            tag_name=str(payload["tagName"]),
-            role=str(payload["role"]) if payload["role"] is not None else None,
-            accessible_name=(
-                str(payload["accessibleName"])
-                if payload["accessibleName"] is not None
-                else None
-            ),
-            text=str(payload["text"]),
-            left=float(payload["left"]),
-            top=float(payload["top"]),
-            width=float(payload["width"]),
-            height=float(payload["height"]),
+        delay_ms: int = 0,
+    ) -> None:
+        self._session.mouse_click(
+            button.left + (button.width / 2),
+            button.top + (button.height / 2),
+            delay_ms=delay_ms,
         )
-
-    def click_at(self, *, x: float, y: float, delay_ms: int = 0) -> None:
-        self._session.mouse_click(x, y, delay_ms=delay_ms)
 
     def focus_search_field(self, *, timeout_ms: int = 30_000) -> None:
         self._session.focus(self._search_input_selector, timeout_ms=timeout_ms)
