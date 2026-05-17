@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from testing.components.pages.trackstate_live_app_page import TrackStateLiveAppPage
@@ -28,8 +29,22 @@ class CreateIssueObservation:
     created_issue_key: str | None
 
 
+@dataclass(frozen=True)
+class WorkspaceRestoreMessageObservation:
+    message_text: str
+    body_text: str
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherTriggerObservation:
+    aria_label: str
+    visible_text: str
+    body_text: str
+
+
 class TrackStateTrackerPage:
     LOAD_ERROR_TEXT = TrackStateLiveAppPage.LOAD_ERROR_TEXT
+    LOAD_ERROR_TEXT_VARIANTS = TrackStateLiveAppPage.LOAD_ERROR_TEXT_VARIANTS
     BOARD_LABEL = "Board"
     BOARD_HINT = "Drag-ready workflow columns backed by Git files"
     CREATE_ISSUE_LABEL = "Create issue"
@@ -50,11 +65,38 @@ class TrackStateTrackerPage:
         self.app_url = app_url
         self._live_page = TrackStateLiveAppPage(session, app_url)
 
+    def open_entrypoint(self) -> None:
+        self.open_url(self.app_url)
+
+    def open_route(self, route: str) -> str:
+        route_url = self.build_route_url(route)
+        self.open_url(route_url)
+        return route_url
+
+    def open_url(self, url: str) -> None:
+        self.session.goto(
+            url,
+            wait_until="domcontentloaded",
+            timeout_ms=120_000,
+        )
+        self.session.activate_accessibility()
+
+    def build_route_url(self, route: str) -> str:
+        base_url = self.app_url.split("#", 1)[0]
+        if not base_url.endswith("/"):
+            base_url = f"{base_url}/"
+        if route.startswith("#"):
+            normalized_route = route
+        else:
+            normalized_route = route if route.startswith("/") else f"/{route}"
+            normalized_route = f"#{normalized_route}"
+        return f"{base_url}{normalized_route}"
+
     def open(self) -> RuntimeObservation:
-        self._live_page.open()
+        self.open_entrypoint()
         try:
             wait_match = self.session.wait_for_any_text(
-                [self.LOAD_ERROR_TEXT, "Connect GitHub", self.BOARD_LABEL],
+                [*self.LOAD_ERROR_TEXT_VARIANTS, "Connect GitHub", self.BOARD_LABEL],
                 timeout_ms=120_000,
             )
         except WebAppTimeoutError as error:
@@ -62,7 +104,7 @@ class TrackStateTrackerPage:
                 "Step 1 failed: the deployed app never reached an interactive state. "
                 f"Visible body text: {self.body_text()}",
             ) from error
-        if wait_match.matched_text == self.LOAD_ERROR_TEXT:
+        if wait_match.matched_text in self.LOAD_ERROR_TEXT_VARIANTS:
             return RuntimeObservation(
                 kind="data-load-failed",
                 body_text=wait_match.body_text,
@@ -254,6 +296,193 @@ class TrackStateTrackerPage:
     def screenshot(self, path: str) -> None:
         self.session.screenshot(path)
 
+    def observe_workspace_restore_message(
+        self,
+        *,
+        workspace_name: str,
+        timeout_ms: int = 120_000,
+    ) -> WorkspaceRestoreMessageObservation:
+        payload = self.session.wait_for_function(
+            """
+            (workspaceName) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const bodyText = document.body?.innerText ?? '';
+              const normalizedBody = normalize(bodyText);
+              const anchor = `Skipped ${workspaceName} during restore.`;
+              const startIndex = normalizedBody.indexOf(anchor);
+              if (startIndex === -1) {
+                return null;
+              }
+              const tail = normalizedBody.slice(startIndex);
+              const stopTokens = [
+                ' Close ',
+                ' Dashboard ',
+                ' Board ',
+                ' JQL Search ',
+                ' Hierarchy ',
+                ' Settings ',
+              ];
+              let stopIndex = tail.length;
+              for (const token of stopTokens) {
+                const candidateIndex = tail.indexOf(token);
+                if (candidateIndex > 0 && candidateIndex < stopIndex) {
+                  stopIndex = candidateIndex;
+                }
+              }
+              return {
+                messageText: tail.slice(0, stopIndex).trim(),
+                bodyText,
+              };
+            }
+            """,
+            arg=workspace_name,
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Expected a workspace restore message observation payload, "
+                f"got: {payload!r}",
+            )
+        return WorkspaceRestoreMessageObservation(
+            message_text=str(payload.get("messageText", "")),
+            body_text=str(payload.get("bodyText", "")),
+        )
+
+    def observe_workspace_switcher_trigger(
+        self,
+        *,
+        timeout_ms: int = 120_000,
+    ) -> WorkspaceSwitcherTriggerObservation:
+        payload = self.session.wait_for_function(
+            """
+            () => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const candidates = Array.from(document.querySelectorAll('[aria-label]')).filter(
+                (element) => {
+                  const label = element.getAttribute('aria-label') || '';
+                  return label.startsWith('Workspace switcher:') && isVisible(element);
+                },
+              );
+              if (candidates.length > 0) {
+                const trigger = candidates[0];
+                return {
+                  ariaLabel: trigger.getAttribute('aria-label') || '',
+                  visibleText: normalize(trigger.innerText || trigger.textContent || ''),
+                  bodyText: document.body?.innerText ?? '',
+                };
+              }
+              const bodyText = document.body?.innerText ?? '';
+              const lines = bodyText
+                .split(/\\n+/)
+                .map((line) => normalize(line))
+                .filter((line) => line.length > 0);
+              const switcherLine = lines.find((line) =>
+                line.startsWith('Workspace switcher:'),
+              );
+              if (!switcherLine) {
+                return null;
+              }
+              return {
+                ariaLabel: switcherLine,
+                visibleText: switcherLine.replace(/^Workspace switcher:\\s*/, ''),
+                bodyText,
+              };
+            }
+            """,
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Expected a workspace switcher observation payload, "
+                f"got: {payload!r}",
+            )
+        return WorkspaceSwitcherTriggerObservation(
+            aria_label=str(payload.get("ariaLabel", "")),
+            visible_text=str(payload.get("visibleText", "")),
+            body_text=str(payload.get("bodyText", "")),
+        )
+
+    def observe_interactive_shell(
+        self,
+        required_navigation_labels: Sequence[str],
+        *,
+        timeout_ms: int = 120_000,
+    ) -> dict[str, object]:
+        try:
+            payload = self.session.wait_for_function(
+                """
+                (requiredNavigationLabels) => {
+                  const bodyText = document.body?.innerText ?? '';
+                  const visibleNavigationLabels = requiredNavigationLabels.filter(
+                    (label) => bodyText.includes(label),
+                  );
+                  const fatalBannerVisible = bodyText.includes('TrackState data was not found');
+                  const connectGitHubVisible = bodyText.includes('Connect GitHub');
+                  const shellReady = visibleNavigationLabels.length === requiredNavigationLabels.length;
+                  return shellReady || fatalBannerVisible || connectGitHubVisible
+                    ? {
+                        bodyText,
+                        visibleNavigationLabels,
+                        fatalBannerVisible,
+                        connectGitHubVisible,
+                        shellReady,
+                      }
+                    : null;
+                }
+                """,
+                arg=list(required_navigation_labels),
+                timeout_ms=timeout_ms,
+            )
+        except Exception:
+            return self._interactive_shell_fallback()
+        if not isinstance(payload, dict):
+            return self._interactive_shell_fallback()
+        return {
+            "body_text": str(payload.get("bodyText", "")),
+            "visible_navigation_labels": [
+                str(label) for label in payload.get("visibleNavigationLabels", [])
+            ],
+            "fatal_banner_visible": bool(payload.get("fatalBannerVisible")),
+            "connect_github_visible": bool(payload.get("connectGitHubVisible")),
+            "shell_ready": bool(payload.get("shellReady")),
+        }
+
+    def snapshot_local_storage(
+        self,
+        keys: Sequence[str],
+    ) -> dict[str, str | None]:
+        payload = self.session.evaluate(
+            """
+            (keys) => {
+              const snapshot = {};
+              for (const key of keys) {
+                snapshot[key] = window.localStorage.getItem(key);
+              }
+              return snapshot;
+            }
+            """,
+            arg=list(keys),
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Expected a workspace storage snapshot map, got: {payload!r}",
+            )
+        return {
+            str(key): (None if value is None else str(value))
+            for key, value in payload.items()
+        }
+
     @staticmethod
     def extract_issue_key(summary: str, body_text: str) -> str | None:
         pattern = re.compile(
@@ -288,3 +517,13 @@ class TrackStateTrackerPage:
             f'textarea[aria-label="{label}"]',
             f'[role="textbox"][aria-label="{label}"]',
         )
+
+    def _interactive_shell_fallback(self) -> dict[str, object]:
+        body_text = self.body_text()
+        return {
+            "body_text": body_text,
+            "visible_navigation_labels": [],
+            "fatal_banner_visible": "TrackState data was not found" in body_text,
+            "connect_github_visible": "Connect GitHub" in body_text,
+            "shell_ready": False,
+        }

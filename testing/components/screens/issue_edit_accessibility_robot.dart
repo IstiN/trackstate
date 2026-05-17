@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trackstate/ui/core/trackstate_icons.dart';
+import 'package:trackstate/ui/core/trackstate_theme.dart';
 
 import '../../core/models/issue_edit_text_contrast_observation.dart';
 import '../../core/utils/color_contrast.dart';
@@ -245,6 +247,156 @@ class IssueEditAccessibilityRobot {
     );
   }
 
+  Finder pendingInfoBanner(String message) {
+    final bannerText = textWithinEditIssueSurface(message);
+    if (bannerText.evaluate().isEmpty) {
+      return bannerText;
+    }
+
+    return _smallestByArea(
+      find.ancestor(
+        of: bannerText.first,
+        matching: find.byWidgetPredicate((widget) {
+          if (widget is! Container) {
+            return false;
+          }
+          final decoration = widget.decoration;
+          return decoration is BoxDecoration &&
+              decoration.color != null &&
+              decoration.border is Border;
+        }, description: 'pending info banner container'),
+      ),
+    );
+  }
+
+  String? pendingInfoBannerSemanticsLabel(String message) {
+    final semantics = _pendingInfoBannerSemantics(message);
+    if (semantics.evaluate().isEmpty) {
+      return null;
+    }
+    return tester.widget<Semantics>(semantics.first).properties.label;
+  }
+
+  List<String> pendingInfoBannerSemanticsLabels(String message) {
+    final semantics = _pendingInfoBannerSemantics(message);
+    if (semantics.evaluate().isEmpty) {
+      return const <String>[];
+    }
+
+    return tester
+        .widgetList<Semantics>(
+          find.descendant(
+            of: semantics.first,
+            matching: find.byType(Semantics),
+          ),
+        )
+        .map((widget) => _normalizedLabel(widget.properties.label))
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  int pendingInfoBannerIconCount(String message) => find
+      .descendant(
+        of: pendingInfoBanner(message),
+        matching: find.byType(TrackStateIcon),
+      )
+      .evaluate()
+      .length;
+
+  List<String> pendingInfoBannerIconSemanticsLabels(String message) {
+    final icons = find.descendant(
+      of: pendingInfoBanner(message),
+      matching: find.byType(TrackStateIcon),
+    );
+    final labels = <String>[];
+    final count = icons.evaluate().length;
+    for (var index = 0; index < count; index += 1) {
+      final label = _normalizedLabel(
+        tester.getSemantics(icons.at(index)).label,
+      );
+      if (label.isNotEmpty) {
+        labels.add(label);
+      }
+    }
+    return labels;
+  }
+
+  bool pendingInfoBannerIsWithinEditIssueSurface(String message) {
+    final banner = pendingInfoBanner(message);
+    final bannerText = textWithinEditIssueSurface(message);
+    if (banner.evaluate().isEmpty ||
+        bannerText.evaluate().isEmpty ||
+        editIssueSurface.evaluate().isEmpty) {
+      return false;
+    }
+    return find
+        .descendant(of: editIssueSurface.first, matching: banner)
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  Color? pendingInfoBannerBackgroundColor(String message) {
+    final banner = pendingInfoBanner(message);
+    if (banner.evaluate().isEmpty) {
+      return null;
+    }
+    final widget = tester.widget<Container>(banner.first);
+    final decoration = widget.decoration;
+    if (decoration is! BoxDecoration) {
+      return null;
+    }
+    return decoration.color;
+  }
+
+  Color? pendingInfoBannerBorderColor(String message) {
+    final banner = pendingInfoBanner(message);
+    if (banner.evaluate().isEmpty) {
+      return null;
+    }
+    final widget = tester.widget<Container>(banner.first);
+    final decoration = widget.decoration;
+    if (decoration is! BoxDecoration) {
+      return null;
+    }
+    final border = decoration.border;
+    if (border is Border) {
+      return border.top.color;
+    }
+    return null;
+  }
+
+  Color pendingInfoBannerTextColor(String message) =>
+      _renderedTextColorWithin(pendingInfoBanner(message), message);
+
+  TextStyle pendingInfoBannerTextStyle(String message) {
+    final texts = find.descendant(
+      of: pendingInfoBanner(message),
+      matching: find.text(message, findRichText: true),
+    );
+    for (final element in texts.evaluate()) {
+      final widget = element.widget;
+      if (widget is Text && widget.style != null) {
+        return widget.style!;
+      }
+      if (widget is RichText && widget.text.style != null) {
+        return widget.text.style!;
+      }
+    }
+    throw StateError('No pending info banner text style was rendered.');
+  }
+
+  TrackStateColors trackStateColors() {
+    final context = tester.element(editIssueSurface.first);
+    return context.ts;
+  }
+
+  TextStyle? pendingInfoBannerExpectedTextStyle() {
+    final context = tester.element(editIssueSurface.first);
+    return Theme.of(
+      context,
+    ).textTheme.bodySmall?.copyWith(color: context.ts.text);
+  }
+
   Future<void> submit() async {
     final save = controlWithinEditIssueSurface('Save');
     if (save.evaluate().isEmpty) {
@@ -279,6 +431,24 @@ class IssueEditAccessibilityRobot {
 
     visit(rootNode);
     return focusedLabel;
+  }
+
+  Finder _pendingInfoBannerSemantics(String message) {
+    final bannerText = textWithinEditIssueSurface(message);
+    if (bannerText.evaluate().isEmpty) {
+      return bannerText;
+    }
+    final semantics = find.ancestor(
+      of: bannerText.first,
+      matching: find.byWidgetPredicate((widget) {
+        return widget is Semantics &&
+            _normalizedLabel(widget.properties.label) == message;
+      }, description: 'pending info banner semantics'),
+    );
+    if (semantics.evaluate().isNotEmpty) {
+      return semantics.first;
+    }
+    return semantics;
   }
 
   Map<String, Finder> _focusCandidates() {
@@ -521,6 +691,69 @@ class IssueEditAccessibilityRobot {
 
     final element = editIssueSurface.first.evaluate().single;
     return Theme.of(element).colorScheme.surface;
+  }
+
+  Finder _smallestByArea(Finder candidates) {
+    Finder? bestMatch;
+    double? smallestArea;
+    final count = candidates.evaluate().length;
+    for (var index = 0; index < count; index += 1) {
+      final candidate = candidates.at(index);
+      final rect = tester.getRect(candidate);
+      final area = rect.width * rect.height;
+      if (smallestArea == null || area < smallestArea) {
+        smallestArea = area;
+        bestMatch = candidate;
+      }
+    }
+    return bestMatch ?? candidates;
+  }
+
+  Color _renderedTextColorWithin(Finder scope, String text) {
+    final richTextFinder = find.descendant(
+      of: scope,
+      matching: find.byType(RichText),
+    );
+    for (final element in richTextFinder.evaluate()) {
+      final widget = element.widget as RichText;
+      if (widget.text.toPlainText().trim() == text) {
+        final color =
+            widget.text.style?.color ??
+            DefaultTextStyle.of(element).style.color ??
+            _fallbackTextColor(scope);
+        if (color != null) {
+          return color;
+        }
+      }
+    }
+
+    final textFinder = find.descendant(
+      of: scope,
+      matching: find.text(text, findRichText: true),
+    );
+    for (final element in textFinder.evaluate()) {
+      final widget = element.widget;
+      if (widget is Text) {
+        final color =
+            widget.style?.color ??
+            DefaultTextStyle.of(element).style.color ??
+            _fallbackTextColor(scope);
+        if (color != null) {
+          return color;
+        }
+      }
+    }
+
+    throw StateError('No rendered text "$text" found within $scope.');
+  }
+
+  Color? _fallbackTextColor(Finder scope) {
+    final elements = scope.evaluate();
+    if (elements.isEmpty) {
+      return null;
+    }
+    final theme = Theme.of(elements.first);
+    return theme.textTheme.bodyMedium?.color ?? theme.colorScheme.onSurface;
   }
 
   String _rgbHex(Color color) {

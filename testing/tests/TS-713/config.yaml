@@ -1,0 +1,10 @@
+test_id: TS-713
+type: api
+framework: flutter_test
+platform: linux
+dependencies:
+  - Flutter SDK available on PATH
+  - Git available on PATH
+notes:
+  - Uses the production LocalTrackStateRepository and WorkspaceSyncService against a real temporary local Git repository.
+  - Verifies committed HEAD movement and unstaged main.md edits are reported as distinct workspace sync reasons while preserving the expected issue summary/detail domain mapping.

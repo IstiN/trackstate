@@ -604,6 +604,22 @@ class SettingsScreenRobot {
     await tester.pump();
   }
 
+  Future<List<String>> collectLocalWorkspaceDetailsFocusOrder({
+    required String submitLabel,
+    int tabs = 20,
+  }) async {
+    await clearFocus();
+    return collectFocusOrder(
+      candidates: <String, Finder>{
+        'Change folder': actionButton('Change folder'),
+        'Workspace name': labeledTextField('Workspace name'),
+        'Write Branch': labeledTextField('Write Branch'),
+        submitLabel: actionButton(submitLabel),
+      },
+      tabs: tabs,
+    );
+  }
+
   void expectVisibleSettingsContent() {
     expect(projectSettingsHeading, findsOneWidget);
     expect(projectSettingsAdmin, findsOneWidget);
@@ -729,6 +745,14 @@ class SettingsScreenRobot {
       }
     }
     throw StateError('No rendered text color found for $finder');
+  }
+
+  Color renderedVisibleTextColor(String text) {
+    final finder = find.text(text, findRichText: true);
+    if (finder.evaluate().isEmpty) {
+      throw StateError('Expected visible text "$text".');
+    }
+    return renderedTextColor(finder.first);
   }
 
   Color renderedTextColorWithin(Finder scope, String text) {
@@ -926,8 +950,15 @@ class SettingsScreenRobot {
     return labels.map((entry) => entry.label).toList();
   }
 
-  Finder topBarProviderControl(String label) =>
-      _buttonControlWithText(label, requiresTrackStateIcon: true);
+  Finder topBarProviderControl(String label) {
+    final exact = _buttonControlWithText(label, requiresTrackStateIcon: true);
+    if (exact.evaluate().isNotEmpty) {
+      return exact;
+    }
+    return find.bySemanticsLabel(
+      RegExp('Workspace switcher: .*${RegExp.escape(label)}'),
+    );
+  }
 
   Finder settingsProviderControl(String label) =>
       _buttonControlWithText(label, requiresTrackStateIcon: false);
@@ -1209,7 +1240,7 @@ class SettingsScreenRobot {
         return control;
       }
     }
-    return connectGitHubTopBarControl;
+    return find.bySemanticsLabel(RegExp('Workspace switcher: .*'));
   }
 
   bool _subtreeContainsWidget(Element root, bool Function(Widget) matches) {

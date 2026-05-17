@@ -141,6 +141,25 @@ class _Ts450DelayedSearchRepository implements TrackStateRepository {
 }
 
 class _Ts450BootstrapProvider implements TrackStateProviderAdapter {
+  static const RepositoryPermission _permission = RepositoryPermission(
+    canRead: true,
+    canWrite: true,
+    isAdmin: false,
+  );
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => const RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: 'ts450-bootstrap-revision',
+      sessionRevision: 'ts450',
+      connectionState: ProviderConnectionState.connected,
+      permission: _permission,
+    ),
+  );
+
   static const Map<String, String> _files = <String, String>{
     'TRACK/project.json': '''
 {
@@ -389,7 +408,7 @@ This issue keeps the completed counter non-zero while detail hydration is still 
 
   @override
   Future<RepositoryPermission> getPermission() async =>
-      const RepositoryPermission(canRead: true, canWrite: true, isAdmin: false);
+      _permission;
 
   @override
   Future<bool> isLfsTracked(String path) async => false;

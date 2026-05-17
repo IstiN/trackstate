@@ -52,6 +52,29 @@ abstract interface class ProjectSettingsRepository {
   Future<TrackerSnapshot> saveProjectSettings(ProjectSettingsCatalog settings);
 }
 
+class ProjectMetadataRefresh {
+  const ProjectMetadataRefresh({
+    required this.project,
+    required this.loadWarnings,
+  });
+
+  final ProjectConfig project;
+  final List<String> loadWarnings;
+}
+
+abstract interface class ProjectMetadataRepository {
+  Future<ProjectMetadataRefresh> loadProjectMetadata();
+}
+
+abstract interface class WorkspaceSyncRepository {
+  bool get usesLocalPersistence;
+  Future<RepositorySyncCheck> checkSync({RepositorySyncState? previousState});
+}
+
+abstract interface class HostedWorkspaceCatalogRepository {
+  Future<List<HostedRepositoryReference>> listAccessibleHostedRepositories();
+}
+
 enum IssueHydrationScope { detail, comments, attachments }
 
 extension TrackStateRepositoryAttachmentSupport on TrackStateRepository {
@@ -83,7 +106,12 @@ extension TrackStateRepositoryAttachmentSupport on TrackStateRepository {
 }
 
 class ProviderBackedTrackStateRepository
-    implements TrackStateRepository, ProjectSettingsRepository {
+    implements
+        TrackStateRepository,
+        ProjectSettingsRepository,
+        ProjectMetadataRepository,
+        WorkspaceSyncRepository,
+        HostedWorkspaceCatalogRepository {
   static const RepositoryPermission _restrictedPermission =
       RepositoryPermission(
         canRead: false,
@@ -144,6 +172,31 @@ class ProviderBackedTrackStateRepository
   TrackStateProviderAdapter get providerAdapter => _provider;
   ProviderSession? get session => _session;
   TrackerSnapshot? get cachedSnapshot => _snapshot;
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async {
+    try {
+      final check = await _provider.checkSync(previousState: previousState);
+      final permission = check.state.permission;
+      if (permission != null) {
+        _syncProviderSession(
+          connectionState: check.state.connectionState,
+          resolvedUserIdentity: _session.resolvedUserIdentity,
+          permission: permission,
+        );
+      }
+      return check;
+    } on Object {
+      _syncProviderSession(
+        connectionState: ProviderConnectionState.error,
+        resolvedUserIdentity: _session.resolvedUserIdentity,
+        permission: _restrictedPermission,
+      );
+      rethrow;
+    }
+  }
 
   void replaceCachedState({
     TrackerSnapshot? snapshot,
@@ -220,6 +273,16 @@ class ProviderBackedTrackStateRepository
     }
   }
 
+  @override
+  Future<List<HostedRepositoryReference>>
+  listAccessibleHostedRepositories() async {
+    final provider = _provider;
+    return switch (provider) {
+      RepositoryCatalogReader reader => reader.listAccessibleRepositories(),
+      _ => const <HostedRepositoryReference>[],
+    };
+  }
+
   String _resolveUserIdentity(RepositoryUser? user) {
     if (user == null) {
       return _provider.repositoryLabel;
@@ -240,6 +303,26 @@ class ProviderBackedTrackStateRepository
     final snapshot = await _loadSetupSnapshot();
     _snapshot = snapshot;
     return snapshot;
+  }
+
+  @override
+  Future<ProjectMetadataRefresh> loadProjectMetadata() async {
+    final metadata = await _loadSnapshotInputs();
+    final currentSnapshot = _snapshot;
+    if (currentSnapshot != null) {
+      _snapshot = TrackerSnapshot(
+        project: metadata.project,
+        issues: currentSnapshot.issues,
+        repositoryIndex: currentSnapshot.repositoryIndex,
+        loadWarnings: metadata.loadWarnings,
+        readiness: currentSnapshot.readiness,
+        startupRecovery: currentSnapshot.startupRecovery,
+      );
+    }
+    return ProjectMetadataRefresh(
+      project: metadata.project,
+      loadWarnings: metadata.loadWarnings,
+    );
   }
 
   Future<TrackStateIssue> hydrateIssue(
@@ -1613,6 +1696,144 @@ class ProviderBackedTrackStateRepository
   }
 
   Future<TrackerSnapshot> _loadSetupSnapshot() async {
+    final metadata = await _loadSnapshotInputs();
+    final loadWarnings = metadata.loadWarnings;
+    final tree = metadata.tree;
+    final blobPaths = metadata.blobPaths;
+    final dataRoot = metadata.dataRoot;
+    final repositoryIndex = metadata.repositoryIndex;
+    final project = metadata.project;
+    if (!usesLocalPersistence) {
+      final summaryIssues = _loadHostedBootstrapIssues(
+        dataRoot: dataRoot,
+        tree: tree,
+        repositoryIndex: repositoryIndex,
+        project: project,
+      );
+      return TrackerSnapshot(
+        project: project,
+        issues: summaryIssues,
+        repositoryIndex: _normalizeRepositoryIndex(
+          repositoryIndex,
+          summaryIssues,
+        ),
+        loadWarnings: loadWarnings,
+        readiness: const TrackerBootstrapReadiness(
+          domainStates: {
+            TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+            TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
+            TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+            TrackerDataDomain.issueDetails: TrackerLoadState.partial,
+          },
+          sectionStates: {
+            TrackerSectionKey.dashboard: TrackerLoadState.ready,
+            TrackerSectionKey.board: TrackerLoadState.ready,
+            TrackerSectionKey.search: TrackerLoadState.partial,
+            TrackerSectionKey.hierarchy: TrackerLoadState.ready,
+            TrackerSectionKey.settings: TrackerLoadState.ready,
+          },
+        ),
+        startupRecovery: _startupRecovery,
+      );
+    }
+    final issuePaths =
+        repositoryIndex.entries.isNotEmpty
+              ? repositoryIndex.entries.map((entry) => entry.path).toList()
+              : tree
+                    .where(
+                      (entry) =>
+                          entry.type == 'blob' &&
+                          entry.path.startsWith(
+                            dataRoot.isEmpty ? '' : '$dataRoot/',
+                          ) &&
+                          entry.path.endsWith('/main.md'),
+                    )
+                    .map((entry) => entry.path)
+                    .toList()
+          ..sort();
+    if (issuePaths.isEmpty) {
+      throw TrackStateRepositoryException(
+        'No issue markdown files were found under ${dataRoot.isEmpty ? 'repository root' : dataRoot}.',
+      );
+    }
+
+    final indexEntriesByPath = {
+      for (final entry in repositoryIndex.entries) entry.path: entry,
+    };
+    final issues = <TrackStateIssue>[];
+    for (final path in issuePaths..sort()) {
+      final markdown = await _getRepositoryText(path);
+      final issueRoot = path.substring(0, path.lastIndexOf('/'));
+      final acceptancePath = _joinPath(issueRoot, 'acceptance_criteria.md');
+      final acceptance = blobPaths.contains(acceptancePath)
+          ? await _getRepositoryText(acceptancePath)
+          : null;
+      final comments = await _loadComments(
+        blobPaths: blobPaths,
+        issueRoot: issueRoot,
+      );
+      final links = await _loadLinks(
+        blobPaths: blobPaths,
+        issueRoot: issueRoot,
+      );
+      final attachments = await _loadAttachments(
+        tree: tree,
+        issueRoot: issueRoot,
+      );
+      issues.add(
+        _parseIssue(
+          storagePath: path,
+          markdown: markdown,
+          acceptanceMarkdown: acceptance,
+          comments: comments,
+          links: links,
+          attachments: attachments,
+          repositoryIndexEntry: indexEntriesByPath[path],
+          issueTypeDefinitions: project.issueTypeDefinitions,
+          statusDefinitions: project.statusDefinitions,
+          priorityDefinitions: project.priorityDefinitions,
+          resolutionDefinitions: project.resolutionDefinitions,
+        ),
+      );
+    }
+    final resolvedIssues = _resolveIssueLinks(issues)
+      ..sort((a, b) => a.key.compareTo(b.key));
+
+    final normalizedIndex = _normalizeRepositoryIndex(
+      repositoryIndex.entries.isEmpty
+          ? _deriveRepositoryIndex(resolvedIssues, repositoryIndex.deleted)
+          : repositoryIndex,
+      resolvedIssues,
+    );
+    final indexedIssues = [
+      for (final issue in resolvedIssues)
+        issue.withRepositoryIndex(normalizedIndex.entryForKey(issue.key)),
+    ]..sort((a, b) => a.key.compareTo(b.key));
+    return TrackerSnapshot(
+      project: project,
+      issues: indexedIssues,
+      repositoryIndex: normalizedIndex,
+      loadWarnings: loadWarnings,
+      readiness: const TrackerBootstrapReadiness(
+        domainStates: {
+          TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+          TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
+          TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+          TrackerDataDomain.issueDetails: TrackerLoadState.ready,
+        },
+        sectionStates: {
+          TrackerSectionKey.dashboard: TrackerLoadState.ready,
+          TrackerSectionKey.board: TrackerLoadState.ready,
+          TrackerSectionKey.search: TrackerLoadState.ready,
+          TrackerSectionKey.hierarchy: TrackerLoadState.ready,
+          TrackerSectionKey.settings: TrackerLoadState.ready,
+        },
+      ),
+      startupRecovery: _startupRecovery,
+    );
+  }
+
+  Future<_LoadedSnapshotInputs> _loadSnapshotInputs() async {
     final loadWarnings = <String>[];
     final tree = await _provider.listTree(ref: _provider.dataRef);
     _snapshotTree = tree;
@@ -1715,132 +1936,13 @@ class ProviderBackedTrackStateRepository
       resolutionDefinitions: resolutions,
       attachmentStorage: attachmentStorage,
     );
-    if (!usesLocalPersistence) {
-      final summaryIssues = _loadHostedBootstrapIssues(
-        dataRoot: dataRoot,
-        tree: tree,
-        repositoryIndex: repositoryIndex,
-        project: project,
-      );
-      return TrackerSnapshot(
-        project: project,
-        issues: summaryIssues,
-        repositoryIndex: _normalizeRepositoryIndex(
-          repositoryIndex,
-          summaryIssues,
-        ),
-        loadWarnings: loadWarnings,
-        readiness: const TrackerBootstrapReadiness(
-          domainStates: {
-            TrackerDataDomain.projectMeta: TrackerLoadState.ready,
-            TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
-            TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
-            TrackerDataDomain.issueDetails: TrackerLoadState.partial,
-          },
-          sectionStates: {
-            TrackerSectionKey.dashboard: TrackerLoadState.ready,
-            TrackerSectionKey.board: TrackerLoadState.ready,
-            TrackerSectionKey.search: TrackerLoadState.partial,
-            TrackerSectionKey.hierarchy: TrackerLoadState.ready,
-            TrackerSectionKey.settings: TrackerLoadState.ready,
-          },
-        ),
-        startupRecovery: _startupRecovery,
-      );
-    }
-    final issuePaths =
-        repositoryIndex.entries.isNotEmpty
-              ? repositoryIndex.entries.map((entry) => entry.path).toList()
-              : tree
-                    .where(
-                      (entry) =>
-                          entry.type == 'blob' &&
-                          entry.path.startsWith(
-                            dataRoot.isEmpty ? '' : '$dataRoot/',
-                          ) &&
-                          entry.path.endsWith('/main.md'),
-                    )
-                    .map((entry) => entry.path)
-                    .toList()
-          ..sort();
-    if (issuePaths.isEmpty) {
-      throw TrackStateRepositoryException(
-        'No issue markdown files were found under ${dataRoot.isEmpty ? 'repository root' : dataRoot}.',
-      );
-    }
-
-    final indexEntriesByPath = {
-      for (final entry in repositoryIndex.entries) entry.path: entry,
-    };
-    final issues = <TrackStateIssue>[];
-    for (final path in issuePaths..sort()) {
-      final markdown = await _getRepositoryText(path);
-      final issueRoot = path.substring(0, path.lastIndexOf('/'));
-      final acceptancePath = _joinPath(issueRoot, 'acceptance_criteria.md');
-      final acceptance = blobPaths.contains(acceptancePath)
-          ? await _getRepositoryText(acceptancePath)
-          : null;
-      final comments = await _loadComments(
-        blobPaths: blobPaths,
-        issueRoot: issueRoot,
-      );
-      final links = await _loadLinks(
-        blobPaths: blobPaths,
-        issueRoot: issueRoot,
-      );
-      final attachments = await _loadAttachments(
-        tree: tree,
-        issueRoot: issueRoot,
-      );
-      issues.add(
-        _parseIssue(
-          storagePath: path,
-          markdown: markdown,
-          acceptanceMarkdown: acceptance,
-          comments: comments,
-          links: links,
-          attachments: attachments,
-          repositoryIndexEntry: indexEntriesByPath[path],
-          issueTypeDefinitions: issueTypes,
-          statusDefinitions: statuses,
-          priorityDefinitions: priorities,
-          resolutionDefinitions: resolutions,
-        ),
-      );
-    }
-    issues.sort((a, b) => a.key.compareTo(b.key));
-
-    final normalizedIndex = _normalizeRepositoryIndex(
-      repositoryIndex.entries.isEmpty
-          ? _deriveRepositoryIndex(issues, repositoryIndex.deleted)
-          : repositoryIndex,
-      issues,
-    );
-    final indexedIssues = [
-      for (final issue in issues)
-        issue.withRepositoryIndex(normalizedIndex.entryForKey(issue.key)),
-    ]..sort((a, b) => a.key.compareTo(b.key));
-    return TrackerSnapshot(
+    return _LoadedSnapshotInputs(
+      tree: tree,
+      blobPaths: blobPaths,
+      dataRoot: dataRoot,
       project: project,
-      issues: indexedIssues,
-      repositoryIndex: normalizedIndex,
+      repositoryIndex: repositoryIndex,
       loadWarnings: loadWarnings,
-      readiness: const TrackerBootstrapReadiness(
-        domainStates: {
-          TrackerDataDomain.projectMeta: TrackerLoadState.ready,
-          TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
-          TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
-          TrackerDataDomain.issueDetails: TrackerLoadState.ready,
-        },
-        sectionStates: {
-          TrackerSectionKey.dashboard: TrackerLoadState.ready,
-          TrackerSectionKey.board: TrackerLoadState.ready,
-          TrackerSectionKey.search: TrackerLoadState.ready,
-          TrackerSectionKey.hierarchy: TrackerLoadState.ready,
-          TrackerSectionKey.settings: TrackerLoadState.ready,
-        },
-      ),
-      startupRecovery: _startupRecovery,
     );
   }
 
@@ -2505,6 +2607,71 @@ class ProviderBackedTrackStateRepository
         )
         .where((link) => link.targetKey.isNotEmpty)
         .toList(growable: false);
+  }
+
+  List<TrackStateIssue> _resolveIssueLinks(List<TrackStateIssue> issues) {
+    final inboundByKey = <String, List<IssueLink>>{};
+    for (final issue in issues) {
+      for (final link in issue.links) {
+        final targetKey = link.targetKey.trim();
+        if (targetKey.isEmpty) {
+          continue;
+        }
+        inboundByKey
+            .putIfAbsent(targetKey, () => <IssueLink>[])
+            .add(_inverseIssueLink(link, sourceKey: issue.key));
+      }
+    }
+
+    return [
+      for (final issue in issues)
+        issue.copyWith(
+          links: _dedupeIssueLinks(<IssueLink>[
+            ...issue.links,
+            ...?inboundByKey[issue.key],
+          ]),
+        ),
+    ];
+  }
+
+  List<IssueLink> _dedupeIssueLinks(List<IssueLink> links) {
+    final seen = <String>{};
+    final deduped = <IssueLink>[];
+    for (final link in links) {
+      final signature =
+          '${_canonicalConfigId(link.type)}|${link.targetKey}|${_canonicalConfigId(link.direction)}';
+      if (seen.add(signature)) {
+        deduped.add(link);
+      }
+    }
+    return deduped;
+  }
+
+  IssueLink _inverseIssueLink(IssueLink link, {required String sourceKey}) {
+    final normalizedType = _canonicalConfigId(link.type);
+    final normalizedDirection = _canonicalConfigId(link.direction);
+    final invertedDirection = normalizedDirection == 'inward'
+        ? 'outward'
+        : 'inward';
+    final invertedType = switch (normalizedType) {
+      'blocks' => invertedDirection == 'inward' ? 'is blocked by' : 'blocks',
+      'is-blocked-by' =>
+        invertedDirection == 'inward' ? 'is blocked by' : 'blocks',
+      'duplicates' =>
+        invertedDirection == 'inward' ? 'is duplicated by' : 'duplicates',
+      'is-duplicated-by' =>
+        invertedDirection == 'inward' ? 'is duplicated by' : 'duplicates',
+      'clones' => invertedDirection == 'inward' ? 'is cloned by' : 'clones',
+      'is-cloned-by' =>
+        invertedDirection == 'inward' ? 'is cloned by' : 'clones',
+      'relates' || 'relates-to' => 'relates to',
+      _ => link.type,
+    };
+    return IssueLink(
+      type: invertedType,
+      targetKey: sourceKey,
+      direction: invertedDirection,
+    );
   }
 
   Future<List<IssueAttachment>> _loadAttachments({
@@ -4108,6 +4275,24 @@ String _defaultIssueTypeId(ProjectConfig project) =>
     _firstMatchingConfigId(project.issueTypeDefinitions, {'story'}) ??
     project.issueTypeDefinitions.firstOrNull?.id ??
     'story';
+
+class _LoadedSnapshotInputs {
+  const _LoadedSnapshotInputs({
+    required this.tree,
+    required this.blobPaths,
+    required this.dataRoot,
+    required this.project,
+    required this.repositoryIndex,
+    required this.loadWarnings,
+  });
+
+  final List<RepositoryTreeEntry> tree;
+  final Set<String> blobPaths;
+  final String dataRoot;
+  final ProjectConfig project;
+  final RepositoryIndex repositoryIndex;
+  final List<String> loadWarnings;
+}
 
 String _defaultStatusId(ProjectConfig project) =>
     _firstMatchingConfigId(project.statusDefinitions, {'todo', 'to-do'}) ??

@@ -147,6 +147,20 @@ class MutableIssueDetailTrackStateProvider
 
   static const String _revision = 'reactive-read-only-test-revision';
 
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: _revision,
+      sessionRevision:
+          '${_permission.canRead}:${_permission.canWrite}:${_permission.supportsReleaseAttachmentWrites}',
+      connectionState: ProviderConnectionState.connected,
+      permission: _permission,
+    ),
+  );
+
   static const Map<String, String> _textFixtures = {
     'project.json': '''
 {

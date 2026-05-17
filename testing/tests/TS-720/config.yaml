@@ -1,0 +1,11 @@
+test_id: TS-720
+type: web
+framework: flutter_test
+platform: linux
+dependencies:
+  - Flutter SDK available on PATH
+  - git available on PATH
+notes:
+  - Exercises the production first-run local workspace onboarding flow with a real temporary Git repository rooted at `alpha-project` on the `master` branch.
+  - Verifies the Workspace details step proposes the folder name as the editable workspace/display name and preserves the detected non-standard `master` branch as the editable write branch.
+  - Confirms user-visible copy, keyboard traversal order across the editable controls, and AA contrast for key details-step text and action surfaces.

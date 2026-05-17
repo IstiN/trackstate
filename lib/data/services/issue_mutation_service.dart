@@ -1048,10 +1048,25 @@ class IssueMutationService {
           message: 'Unsupported link type $type.',
         );
       }
+      if (issue.key == targetKey) {
+        return _failure(
+          operation: operation,
+          issueKey: issueKey,
+          category: IssueMutationErrorCategory.validation,
+          message: 'Issue $issueKey cannot be linked to itself.',
+          details: <String, Object?>{'targetKey': targetKey},
+        );
+      }
 
       final provider = providerRepository.providerAdapter;
       final writeBranch = await provider.resolveWriteBranch();
-      final issueRoot = _issueRoot(issue.storagePath);
+      final targetIssue = target.first;
+      final storesCanonicalOutwardLink = normalizedLink.direction == 'inward';
+      final issueRoot = _issueRoot(
+        storesCanonicalOutwardLink
+            ? targetIssue.storagePath
+            : issue.storagePath,
+      );
       final linksPath = '$issueRoot/links.json';
       final blobPaths = await _blobPaths(provider, writeBranch);
       final existingRevision = await _existingTextRevision(
@@ -1071,15 +1086,16 @@ class IssueMutationService {
       final duplicate = existingLinks.any(
         (entry) =>
             entry.type == normalizedLink.type &&
-            entry.targetKey == targetKey &&
-            entry.direction == normalizedLink.direction,
+            entry.targetKey ==
+                (storesCanonicalOutwardLink ? issueKey : targetKey) &&
+            entry.direction == 'outward',
       );
       if (!duplicate) {
         existingLinks.add(
           IssueLink(
             type: normalizedLink.type,
-            targetKey: targetKey,
-            direction: normalizedLink.direction,
+            targetKey: storesCanonicalOutwardLink ? issueKey : targetKey,
+            direction: 'outward',
           ),
         );
       }

@@ -108,7 +108,7 @@ class TrackStateCli {
         'jira_post_comment' => await _runJiraPostComment(
           arguments.skip(1).toList(),
         ),
-        'jira_link_issues' => await _runJiraLinkIssues(
+        'jira_link_issues' || 'jira-link-issues' => await _runJiraLinkIssues(
           arguments.skip(1).toList(),
         ),
         'jira_delete_ticket' => await _runJiraDeleteTicket(
@@ -895,6 +895,7 @@ class TrackStateCli {
     }
 
     return switch (arguments.first.toLowerCase()) {
+      'show' => _runTicketShow(arguments.skip(1).toList()),
       'create' => _runTicketCreate(arguments.skip(1).toList()),
       'update' => _runTicketUpdate(arguments.skip(1).toList()),
       'update-description' => _runTicketUpdateDescription(
@@ -921,6 +922,67 @@ class TrackStateCli {
         details: <String, Object?>{'action': arguments.first},
       ),
     };
+  }
+
+  Future<TrackStateCliExecution> _runTicketShow(List<String> arguments) async {
+    final parser = _mutationParser()
+      ..addOption('key', help: 'Issue key to resolve.')
+      ..addOption(
+        'locale',
+        help:
+            'Optional locale code for text labels. Canonical JSON values remain unchanged.',
+      );
+
+    late final ArgResults results;
+    try {
+      results = parser.parse(arguments);
+    } on FormatException catch (error) {
+      throw _TrackStateCliException(
+        code: 'INVALID_ARGUMENT',
+        category: TrackStateCliErrorCategory.validation,
+        message: error.message,
+        exitCode: 2,
+        details: <String, Object?>{'arguments': arguments},
+      );
+    }
+
+    if (results['help'] == true) {
+      return TrackStateCliExecution.success(
+        output: TrackStateCliOutput.text,
+        content: _ticketShowHelpText(parser),
+      );
+    }
+
+    final output = TrackStateCliOutput.values.byName(
+      results['output']!.toString(),
+    );
+    final target = await _resolveTarget(
+      results,
+      defaultTargetType: TrackStateCliTargetType.local,
+    );
+
+    try {
+      return await switch (target.type) {
+        TrackStateCliTargetType.local => _runLocalTicketShow(
+          target,
+          output,
+          results: results,
+        ),
+        TrackStateCliTargetType.hosted => _runHostedTicketShow(
+          target,
+          output,
+          results: results,
+        ),
+      };
+    } on _TrackStateCliException catch (error) {
+      return _error(
+        error,
+        targetType: target.type,
+        targetValue: target.value,
+        provider: target.provider,
+        output: output,
+      );
+    }
   }
 
   Future<TrackStateCliExecution> _runTicketCreate(
@@ -1381,28 +1443,18 @@ class TrackStateCli {
           type: requestedType,
         );
         final issue = _requireMutationSuccess(result);
-        final storedLink = issue.links
-            .where(
-              (candidate) =>
-                  candidate.targetKey == targetKey &&
-                  (normalizedLink == null ||
-                      (candidate.type == normalizedLink.canonicalKey &&
-                          candidate.direction == normalizedLink.direction)),
-            )
-            .toList(growable: false)
-            .lastOrNull;
         return <String, Object?>{
           'command': 'ticket-link',
           'operation': result.operation,
           'authSource': context.authSource,
           'revision': result.revision,
           'link': _linkPayload(
-            storedLink ??
-                IssueLink(
-                  type: normalizedLink?.canonicalKey ?? requestedType,
-                  targetKey: targetKey,
-                  direction: normalizedLink?.direction ?? 'outward',
-                ),
+            _canonicalCliLinkPayload(
+              normalizedLink: normalizedLink,
+              requestedType: requestedType,
+              issueKey: issueKey,
+              targetKey: targetKey,
+            ),
           ),
           'issue': _issueMutationPayload(issue),
         };
@@ -2112,7 +2164,9 @@ class TrackStateCli {
     return _runMutationCommand(
       arguments: _normalizeLegacyJiraArguments(arguments, const {
         '--sourceKey': '--issueKey',
+        '--key': '--issueKey',
         '--anotherKey': '--targetIssueKey',
+        '--target-key': '--targetIssueKey',
         '--relationship': '--type',
       }),
       parser: parser,
@@ -2131,28 +2185,18 @@ class TrackStateCli {
           type: requestedType,
         );
         final issue = _requireMutationSuccess(result);
-        final storedLink = issue.links
-            .where(
-              (candidate) =>
-                  candidate.targetKey == targetKey &&
-                  (normalizedLink == null ||
-                      (candidate.type == normalizedLink.canonicalKey &&
-                          candidate.direction == normalizedLink.direction)),
-            )
-            .toList(growable: false)
-            .lastOrNull;
         return <String, Object?>{
           'command': 'jira-link-issues',
           'operation': result.operation,
           'authSource': context.authSource,
           'revision': result.revision,
           'link': _linkPayload(
-            storedLink ??
-                IssueLink(
-                  type: normalizedLink?.canonicalKey ?? requestedType,
-                  targetKey: targetKey,
-                  direction: normalizedLink?.direction ?? 'outward',
-                ),
+            _canonicalCliLinkPayload(
+              normalizedLink: normalizedLink,
+              requestedType: requestedType,
+              issueKey: issueKey,
+              targetKey: targetKey,
+            ),
           ),
           'issue': _issueMutationPayload(issue),
         };
@@ -2535,6 +2579,97 @@ class TrackStateCli {
       );
     } on Object catch (error) {
       throw _mapReadError(error, target, resource: resource);
+    }
+  }
+
+  Future<TrackStateCliExecution> _runLocalTicketShow(
+    _ResolvedTarget target,
+    TrackStateCliOutput output, {
+    required ArgResults results,
+  }) async {
+    final branch = target.branch.ifEmpty('HEAD');
+    final repository = _repositoryFactory.createLocal(
+      repositoryPath: target.value,
+      dataRef: branch,
+      client: _httpClient,
+    );
+    try {
+      final response = await _buildTicketShowResponse(
+        repository: repository,
+        target: target,
+        results: results,
+        branch: branch,
+        token: '',
+      );
+      return _renderReadResponse(
+        target: target,
+        output: output,
+        response: response,
+      );
+    } on Object catch (error) {
+      throw _mapReadError(error, target, resource: 'ticket');
+    }
+  }
+
+  Future<TrackStateCliExecution> _runHostedTicketShow(
+    _ResolvedTarget target,
+    TrackStateCliOutput output, {
+    required ArgResults results,
+  }) async {
+    final credential = await _credentialResolver.resolve(
+      explicitToken: target.token,
+      environment: _environment.environment,
+      readGhToken: _environment.readGhAuthToken,
+    );
+    if (credential == null) {
+      throw _TrackStateCliException(
+        code: 'AUTHENTICATION_FAILED',
+        category: TrackStateCliErrorCategory.auth,
+        message:
+            'Authentication is required for the selected provider. Pass --token, set TRACKSTATE_TOKEN, or authenticate with gh.',
+        exitCode: 3,
+        details: <String, Object?>{
+          'provider': target.provider,
+          'repository': target.value,
+        },
+      );
+    }
+    final branch = target.branch.ifEmpty(
+      GitHubTrackStateProvider.defaultSourceRef,
+    );
+    final repository = _repositoryFactory.createHosted(
+      provider: target.provider,
+      repository: target.value,
+      branch: branch,
+      client: _httpClient,
+    );
+    final provider = _providerFactory.createHosted(
+      provider: target.provider,
+      repository: target.value,
+      branch: branch,
+      client: _httpClient,
+    );
+    final connection = RepositoryConnection(
+      repository: target.value,
+      branch: branch,
+      token: credential.token,
+    );
+    try {
+      await provider.authenticate(connection);
+      final response = await _buildTicketShowResponse(
+        repository: repository,
+        target: target,
+        results: results,
+        branch: branch,
+        token: credential.token,
+      );
+      return _renderReadResponse(
+        target: target,
+        output: output,
+        response: response,
+      );
+    } on Object catch (error) {
+      throw _mapReadError(error, target, resource: 'ticket');
     }
   }
 
@@ -3126,6 +3261,39 @@ class TrackStateCli {
     }
   }
 
+  Future<_ReadResponse> _buildTicketShowResponse({
+    required TrackStateRepository repository,
+    required _ResolvedTarget target,
+    required ArgResults results,
+    required String branch,
+    required String token,
+  }) async {
+    if (target.type == TrackStateCliTargetType.hosted) {
+      await repository.connect(
+        RepositoryConnection(
+          repository: target.value,
+          branch: branch,
+          token: token,
+        ),
+      );
+    }
+
+    final snapshot = await repository.loadSnapshot();
+    final issue = _issueFromSnapshot(
+      snapshot,
+      _requiredTrimmedOption(results, 'key'),
+    );
+    final locale = _optionalLocale(results);
+    return _ReadResponse(
+      text: _ticketShowText(
+        issue: issue,
+        project: snapshot.project,
+        locale: locale,
+      ),
+      jsonPayload: _ticketShowPayload(issue),
+    );
+  }
+
   int _parseNonNegativeIntOption(ArgResults results, String option) {
     final rawValue = results[option]?.toString().trim() ?? '';
     final parsed = int.tryParse(rawValue);
@@ -3715,6 +3883,19 @@ class TrackStateCli {
       return _mapCompatibilityError(error);
     }
     if (error is TrackStateProviderException) {
+      if (target.type == TrackStateCliTargetType.local &&
+          _looksLikeAttachmentStorageValidationFailure(error.message)) {
+        return _TrackStateCliException(
+          code: 'INVALID_REQUEST',
+          category: TrackStateCliErrorCategory.validation,
+          message: error.message,
+          exitCode: 4,
+          details: <String, Object?>{
+            'path': target.value,
+            'reason': error.message,
+          },
+        );
+      }
       if (_looksLikeAuthenticationFailure(error.message)) {
         return _TrackStateCliException(
           code: 'AUTHENTICATION_FAILED',
@@ -5000,11 +5181,122 @@ class TrackStateCli {
         'storagePath': comment.storagePath,
       };
 
-  Map<String, Object?> _linkPayload(IssueLink link) => <String, Object?>{
-    'type': link.type,
-    'target': link.targetKey,
-    'direction': link.direction,
-  };
+  Map<String, Object?> _ticketShowPayload(TrackStateIssue issue) =>
+      <String, Object?>{
+        ..._issueMutationPayload(issue),
+        'comments': [
+          for (final comment in issue.comments) _commentPayload(comment),
+        ],
+        'links': [for (final link in issue.links) _linkPayload(link)],
+        'attachments': [
+          for (final attachment in issue.attachments)
+            _attachmentPayload(attachment),
+        ],
+      };
+
+  Map<String, Object?> _linkPayload(IssueLink link) {
+    final warning = _nonCanonicalLinkMetadataWarning(link);
+    if (warning != null) {
+      stderr.writeln(warning);
+    }
+    final direction = link.direction.trim().toLowerCase();
+    return <String, Object?>{
+      'type': _displayLinkType(link.type, direction: direction),
+      'target': link.targetKey,
+      'direction': link.direction,
+    };
+  }
+
+  String _displayLinkType(String type, {required String direction}) {
+    final normalizedType = type.trim().toLowerCase();
+    for (final linkType in _jiraLinkTypes) {
+      final id = linkType['id']!.toString().trim().toLowerCase();
+      final name = linkType['name']!.toString().trim().toLowerCase();
+      final outward = linkType['outward']!.toString().trim().toLowerCase();
+      final inward = linkType['inward']!.toString().trim().toLowerCase();
+      if (normalizedType != id &&
+          normalizedType != name &&
+          normalizedType != outward &&
+          normalizedType != inward) {
+        continue;
+      }
+      if (normalizedType == inward) {
+        return linkType['inward']!.toString();
+      }
+      return linkType['outward']!.toString();
+    }
+    return type;
+  }
+
+  String? _nonCanonicalLinkMetadataWarning(IssueLink link) {
+    final normalizedType = link.type.trim().toLowerCase();
+    final normalizedDirection = link.direction.trim().toLowerCase();
+    if (normalizedType.isEmpty || normalizedDirection.isEmpty) {
+      return null;
+    }
+
+    for (final linkType in _jiraLinkTypes) {
+      final id = linkType['id']!.toString().trim().toLowerCase();
+      final name = linkType['name']!.toString().trim().toLowerCase();
+      final outward = linkType['outward']!.toString().trim().toLowerCase();
+      final inward = linkType['inward']!.toString().trim().toLowerCase();
+
+      if (normalizedType != id &&
+          normalizedType != name &&
+          normalizedType != outward &&
+          normalizedType != inward) {
+        continue;
+      }
+
+      if (outward == inward) {
+        return null;
+      }
+
+      final expectedDirection = normalizedType == inward ? 'inward' : 'outward';
+      if (normalizedDirection == expectedDirection) {
+        return null;
+      }
+
+      return 'Warning: link type "${link.type}" uses non-canonical '
+          'direction "${link.direction}"; expected "$expectedDirection".';
+    }
+
+    return null;
+  }
+
+  IssueLink _canonicalCliLinkPayload({
+    required _ResolvedMutationField? normalizedLink,
+    required String requestedType,
+    required String issueKey,
+    required String targetKey,
+  }) => IssueLink(
+    type: _canonicalCliLinkType(
+      normalizedLink: normalizedLink,
+      requestedType: requestedType,
+    ),
+    targetKey: normalizedLink?.direction == 'inward' ? issueKey : targetKey,
+    direction: 'outward',
+  );
+
+  String _canonicalCliLinkType({
+    required _ResolvedMutationField? normalizedLink,
+    required String requestedType,
+  }) {
+    final canonicalKey = normalizedLink?.canonicalKey.trim().toLowerCase();
+    if (canonicalKey == null || canonicalKey.isEmpty) {
+      return requestedType;
+    }
+
+    for (final linkType in _jiraLinkTypes) {
+      final id = linkType['id']!.toString().trim().toLowerCase();
+      if (id != canonicalKey) {
+        continue;
+      }
+      return linkType['outward']!.toString();
+    }
+
+    return requestedType;
+  }
 
   Map<String, Object?> _deletedIssuePayload(DeletedIssueTombstone tombstone) =>
       <String, Object?>{
@@ -5052,6 +5344,7 @@ class TrackStateCli {
   }) => <String, Object?>{
     'id': _jiraEntityId(issue.key),
     'key': issue.key,
+    'links': [for (final link in issue.links) _linkPayload(link)],
     'fields': <String, Object?>{
       'summary': issue.summary,
       'description': issue.description,
@@ -5118,8 +5411,50 @@ class TrackStateCli {
               'id': _jiraEntityId(issue.parentKey!),
               'key': issue.parentKey,
             },
+      'issuelinks': [
+        for (final link in issue.links) _jiraIssueLinkPayload(link),
+      ],
     },
   };
+
+  Map<String, Object?> _jiraIssueLinkPayload(IssueLink link) {
+    final direction = link.direction.trim().toLowerCase();
+    final issueKey = direction == 'inward' ? 'inwardIssue' : 'outwardIssue';
+    return <String, Object?>{
+      'type': _jiraIssueLinkTypePayload(link),
+      issueKey: <String, Object?>{
+        'id': _jiraEntityId(link.targetKey),
+        'key': link.targetKey,
+      },
+    };
+  }
+
+  Map<String, Object?> _jiraIssueLinkTypePayload(IssueLink link) {
+    final normalizedType = link.type.trim().toLowerCase();
+    for (final entry in _jiraLinkTypes) {
+      final id = entry['id']!.toString().trim().toLowerCase();
+      final name = entry['name']!.toString().trim().toLowerCase();
+      final outward = entry['outward']!.toString().trim().toLowerCase();
+      final inward = entry['inward']!.toString().trim().toLowerCase();
+      if (normalizedType == id ||
+          normalizedType == name ||
+          normalizedType == outward ||
+          normalizedType == inward) {
+        return <String, Object?>{
+          'id': entry['id'],
+          'name': entry['name'],
+          'inward': entry['inward'],
+          'outward': entry['outward'],
+        };
+      }
+    }
+    return <String, Object?>{
+      'id': normalizedType,
+      'name': link.type,
+      'inward': link.type,
+      'outward': link.type,
+    };
+  }
 
   Map<String, Object?> _jiraIssueTypePayload(
     TrackStateConfigEntry definition, {
@@ -5333,6 +5668,18 @@ class TrackStateCli {
     )}',
   ].join('\n');
 
+  String _ticketShowText({
+    required TrackStateIssue issue,
+    required ProjectConfig project,
+    String? locale,
+  }) => [
+    _ticketText(issue: issue, project: project, locale: locale),
+    'Links: ${issue.links.isEmpty ? 'none' : ''}'.trimRight(),
+    if (issue.links.isNotEmpty)
+      for (final link in issue.links)
+        '- ${link.type} (${link.direction}) -> ${link.targetKey}',
+  ].join('\n');
+
   String _listText({required String title, required Iterable<String> values}) {
     final items = values.toList(growable: false);
     if (items.isEmpty) {
@@ -5471,6 +5818,9 @@ class TrackStateCli {
         normalized.contains('trackstate_token') ||
         normalized.contains('credential');
   }
+
+  bool _looksLikeAttachmentStorageValidationFailure(String message) =>
+      message.startsWith('project.json attachmentStorage.');
 
   Map<String, Object?> _permissionJson(RepositoryPermission permission) =>
       <String, Object?>{
@@ -5819,9 +6169,10 @@ class TrackStateCli {
   String get _ticketHelpText => [
     'trackstate ticket',
     '',
-    'Mutate tracker data through the shared issue mutation service.',
+    'Show or mutate tracker data through the shared issue mutation service.',
     '',
     'Actions:',
+    '  show               Display one ticket with TrackState-native detail payload.',
     '  create             Create a ticket with explicit hierarchy options.',
     '  update             Update multiple fields in one mutation.',
     '  update-description Replace the issue description.',
@@ -5839,6 +6190,7 @@ class TrackStateCli {
     '  delete             Permanently delete one issue.',
     '',
     'Examples:',
+    '  trackstate ticket show --target local --key TRACK-1',
     '  trackstate ticket create --target local --summary "Implement mutations" --issue-type Story --epic TRACK-1',
     '  trackstate ticket update-field --target local --key TRACK-1 --field "Story Points" --value 8',
     '  trackstate ticket move-status --target local --key TRACK-1 --status Done --resolution Done',
@@ -5867,6 +6219,13 @@ class TrackStateCli {
     'trackstate ticket create',
     'Create a ticket using explicit TrackState-native hierarchy inputs.',
     'trackstate ticket create --target local --summary "CLI write parity" --issue-type Story --epic TRACK-1 --field customfield_10016=5',
+    parser,
+  );
+
+  String _ticketShowHelpText(ArgParser parser) => _mutationHelpText(
+    'trackstate ticket show',
+    'Display one ticket using the TrackState-native detail payload.',
+    'trackstate ticket show --target local --key TRACK-1',
     parser,
   );
 
@@ -6571,10 +6930,6 @@ const List<Map<String, Object?>> _jiraLinkTypes = [
 
 extension on String {
   String ifEmpty(String fallback) => trim().isEmpty ? fallback : this;
-}
-
-extension<T> on List<T> {
-  T? get lastOrNull => isEmpty ? null : last;
 }
 
 String _normalizeFieldTokenStatic(String value) =>

@@ -14,7 +14,7 @@ const String _attachmentsTabLabel = 'Attachments';
 const String _noticeTitle =
     'GitHub Releases uploads are unavailable in the browser';
 const String _noticeMessage =
-    'This project stores new attachments in GitHub Releases. Existing attachments remain available for download, but hosted release-backed uploads are not available in this browser session yet.';
+    'This project stores new attachments in GitHub Releases. Browser upload is handled through the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main. Existing attachments remain available for download here.';
 const String _openSettingsLabel = 'Open settings';
 const String _attachmentName = 'sync-sequence.svg';
 const String _downloadAttachmentLabel = 'Download sync-sequence.svg';

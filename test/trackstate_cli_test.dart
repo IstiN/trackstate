@@ -636,6 +636,90 @@ void main() {
     );
 
     test(
+      'returns native ticket detail JSON from ticket show with canonical links',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshotWithInwardLink(),
+              page: const TrackStateIssueSearchPage.empty(),
+            ),
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'ticket',
+          'show',
+          '--target',
+          'local',
+          '--key',
+          'TRACK-2',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json['key'], 'TRACK-2');
+        expect(json['summary'], 'Implement pagination');
+        expect(json['links'], <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'relates to',
+            'target': 'TRACK-1',
+            'direction': 'inward',
+          },
+        ]);
+      },
+    );
+
+    test(
+      'read ticket exposes Jira issue link metadata and canonical links',
+      () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshotWithInwardLink(),
+              page: const TrackStateIssueSearchPage.empty(),
+            ),
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'read',
+          'ticket',
+          '--key',
+          'TRACK-2',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final fields = json['fields']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json['links'], <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'relates to',
+            'target': 'TRACK-1',
+            'direction': 'inward',
+          },
+        ]);
+        expect(fields['issuelinks'], <Map<String, Object?>>[
+          <String, Object?>{
+            'type': <String, Object?>{
+              'id': 'relates-to',
+              'name': 'Relates',
+              'inward': 'relates to',
+              'outward': 'relates to',
+            },
+            'inwardIssue': <String, Object?>{'id': '1', 'key': 'TRACK-1'},
+          },
+        ]);
+      },
+    );
+
+    test(
       'supports compatibility aliases and returns Jira field metadata',
       () async {
         final cli = TrackStateCli(
@@ -1317,6 +1401,61 @@ void main() {
     );
 
     test(
+      'local attachment upload with an unsupported storage mode returns a validation error',
+      () async {
+        final repo = await _createCliLocalRepository();
+        addTearDown(() => repo.delete(recursive: true));
+        final uploadFile = File('${repo.path}/sample.txt');
+        await uploadFile.writeAsString('sample');
+        await _writeCliTestFile(
+          repo,
+          'DEMO/project.json',
+          '{"key":"DEMO","name":"Local Demo","attachmentStorage":{"mode":"unsupported-mode"}}\n',
+        );
+        await _gitCliTest(repo.path, ['add', 'DEMO/project.json']);
+        await _gitCliTest(repo.path, [
+          'commit',
+          '-m',
+          'Configure invalid attachment storage mode',
+        ]);
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: repo.path,
+            resolvePath: (path) => path,
+          ),
+        );
+
+        final result = await cli.run(<String>[
+          'attachment',
+          'upload',
+          '--target',
+          'local',
+          '--path',
+          repo.path,
+          '--issue',
+          'DEMO-1',
+          '--file',
+          uploadFile.path,
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+        final details = error['details']! as Map<String, Object?>;
+
+        expect(result.exitCode, 4);
+        expect(error['code'], 'INVALID_REQUEST');
+        expect(error['category'], 'validation');
+        expect(
+          error['message'],
+          'project.json attachmentStorage.mode must be one of: repository-path, github-releases.',
+        );
+        expect(
+          details['reason'],
+          'project.json attachmentStorage.mode must be one of: repository-path, github-releases.',
+        );
+      },
+    );
+
+    test(
       'local release-backed upload without a git remote does not query gh auth before preflight validation',
       () async {
         final repo = await _createCliLocalRepository();
@@ -1920,6 +2059,39 @@ const TrackStateIssue _sampleReadIssue = TrackStateIssue(
   isArchived: false,
 );
 
+const TrackStateIssue _sampleReadIssueWithInwardLink = TrackStateIssue(
+  key: 'TRACK-2',
+  project: 'TRACK',
+  issueType: IssueType.story,
+  issueTypeId: 'story',
+  status: IssueStatus.inProgress,
+  statusId: 'in-progress',
+  priority: IssuePriority.high,
+  priorityId: 'high',
+  summary: 'Implement pagination',
+  description: 'Adds paged JQL output.',
+  assignee: 'ana',
+  reporter: 'ana',
+  labels: <String>['release'],
+  components: <String>['tracker-core'],
+  fixVersionIds: <String>['mvp'],
+  watchers: <String>[],
+  customFields: <String, Object?>{},
+  parentKey: null,
+  epicKey: 'TRACK-1',
+  parentPath: null,
+  epicPath: null,
+  progress: 0,
+  updatedLabel: 'just now',
+  acceptanceCriteria: <String>['Expose next page tokens.'],
+  comments: <IssueComment>[],
+  links: <IssueLink>[
+    IssueLink(type: 'relates to', targetKey: 'TRACK-1', direction: 'inward'),
+  ],
+  attachments: <IssueAttachment>[],
+  isArchived: false,
+);
+
 TrackerSnapshot _sampleSnapshot() => TrackerSnapshot(
   project: const ProjectConfig(
     key: 'TRACK',
@@ -2013,6 +2185,12 @@ TrackerSnapshot _sampleSnapshot() => TrackerSnapshot(
     ],
   ),
   issues: const <TrackStateIssue>[_sampleIssue, _sampleReadIssue],
+);
+
+TrackerSnapshot _sampleSnapshotWithInwardLink() => TrackerSnapshot(
+  project: _sampleSnapshot().project,
+  repositoryIndex: _sampleSnapshot().repositoryIndex,
+  issues: const <TrackStateIssue>[_sampleIssue, _sampleReadIssueWithInwardLink],
 );
 
 Future<String?> _ghToken() async => 'gh-token';
@@ -2324,6 +2502,19 @@ class _FakeLocalGitTrackStateProvider extends LocalGitTrackStateProvider {
 
   @override
   Future<RepositoryPermission> getPermission() async => permission;
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'cli-provider-revision',
+      sessionRevision: '${permission.canRead}:${permission.canWrite}',
+      connectionState: ProviderConnectionState.connected,
+      permission: permission,
+    ),
+  );
 }
 
 class _FakeHostedTrackStateProvider
@@ -2376,6 +2567,19 @@ class _FakeHostedTrackStateProvider
 
   @override
   Future<RepositoryPermission> getPermission() async => permission;
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'cli-provider-revision',
+      sessionRevision: '${permission.canRead}:${permission.canWrite}',
+      connectionState: ProviderConnectionState.connected,
+      permission: permission,
+    ),
+  );
 
   @override
   Future<RepositoryBranch> getBranch(String name) async =>

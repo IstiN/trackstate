@@ -1,0 +1,14 @@
+test_id: TS-752
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Reuses the hosted removed-issue sync fixture from TS-732 so the production JQL Search, banner, and issue-detail flows execute unchanged.
+  - Removes the selected issue during a background sync, waits for the visible unavailable banner, then verifies the banner does not block selecting the remaining search result.
+  - Confirms the remaining row becomes visibly selected and its detail panel loads after the banner appears.
+runtime_inputs:
+  removed_issue_key: TRACK-12
+  remaining_issue_key: TRACK-11
+  expected_message_fragment: no longer available
+  run_command: flutter test testing/tests/TS-752/test_ts_752.dart --reporter expanded

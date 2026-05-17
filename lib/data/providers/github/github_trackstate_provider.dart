@@ -10,10 +10,21 @@ import '../trackstate_provider.dart';
 class GitHubTrackStateProvider
     implements
         TrackStateProviderAdapter,
+        RepositoryCatalogReader,
         RepositoryReleaseAttachmentStore,
         RepositoryUserLookup,
         RepositoryFileMutator,
         RepositoryHistoryReader {
+  static final RegExp _hostedSnapshotReloadRequestPattern = RegExp(
+    r'(^|[^\w])load_snapshot_delta\s*=\s*1([^\w]|$)',
+    caseSensitive: false,
+    multiLine: true,
+  );
+  static final RegExp _hostedSnapshotReloadBypassPattern = RegExp(
+    r'(^|[^\w])load_snapshot_delta\s*=\s*0([^\w]|$)',
+    caseSensitive: false,
+    multiLine: true,
+  );
   static const _releaseAssetDeletionVisibilityMaxAttempts = 8;
   static const _releaseAssetDeletionVisibilityDelay = Duration(
     milliseconds: 250,
@@ -124,6 +135,36 @@ class GitHubTrackStateProvider
   }
 
   @override
+  Future<List<HostedRepositoryReference>> listAccessibleRepositories() async {
+    final connection = _requireConnection();
+    final json =
+        await _getGitHubJson(
+              '/user/repos',
+              queryParameters: {
+                'per_page': '100',
+                'affiliation': 'owner,collaborator,organization_member',
+                'sort': 'updated',
+                'direction': 'desc',
+              },
+              token: connection.token,
+            )
+            as List<Object?>;
+    return json
+        .whereType<Map<String, Object?>>()
+        .map(
+          (entry) => HostedRepositoryReference(
+            fullName: entry['full_name']?.toString().trim() ?? '',
+            defaultBranch: entry['default_branch']?.toString().trim() ?? 'main',
+          ),
+        )
+        .where(
+          (entry) =>
+              entry.fullName.isNotEmpty && entry.defaultBranch.isNotEmpty,
+        )
+        .toList(growable: false);
+  }
+
+  @override
   Future<List<RepositoryTreeEntry>> listTree({required String ref}) async {
     final json =
         await _getGitHubJson(
@@ -204,6 +245,7 @@ class GitHubTrackStateProvider
   Future<RepositoryWriteResult> writeTextFile(
     RepositoryWriteRequest request,
   ) async {
+    validateRepositoryTextWrite(request);
     final connection = _requireConnection();
     final response = await _http.put(
       _githubUri('/repos/${connection.repository}/contents/${request.path}'),
@@ -290,6 +332,7 @@ class GitHubTrackStateProvider
     for (final change in request.changes) {
       switch (change) {
         case RepositoryTextFileChange():
+          validateRepositoryTextChange(change);
           treeEntries.add({
             'path': change.path,
             'mode': '100644',
@@ -369,6 +412,42 @@ class GitHubTrackStateProvider
   }
 
   @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async {
+    final currentState = await _readSyncState();
+    if (previousState == null) {
+      return RepositorySyncCheck(state: currentState);
+    }
+    final signals = <WorkspaceSyncSignal>{};
+    final changedPaths = <String>{};
+    HostedSnapshotReloadDirective? hostedSnapshotReloadDirective;
+    if (previousState.repositoryRevision != currentState.repositoryRevision) {
+      signals.add(WorkspaceSyncSignal.hostedRepository);
+      final delta = await _readHostedRepositoryDelta(
+        base: previousState.repositoryRevision,
+        head: currentState.repositoryRevision,
+      );
+      changedPaths.addAll(delta.changedPaths);
+      hostedSnapshotReloadDirective = delta.hostedSnapshotReloadDirective;
+      if (hostedSnapshotReloadDirective ==
+          HostedSnapshotReloadDirective.enabled) {
+        signals.add(WorkspaceSyncSignal.hostedSnapshotReload);
+      }
+    }
+    if (previousState.sessionRevision != currentState.sessionRevision ||
+        previousState.connectionState != currentState.connectionState) {
+      signals.add(WorkspaceSyncSignal.hostedSession);
+    }
+    return RepositorySyncCheck(
+      state: currentState,
+      signals: signals,
+      changedPaths: changedPaths,
+      hostedSnapshotReloadDirective: hostedSnapshotReloadDirective,
+    );
+  }
+
+  @override
   Future<RepositoryAttachment> readAttachment(
     String path, {
     required String ref,
@@ -406,6 +485,125 @@ class GitHubTrackStateProvider
       lfsOid: pointerInfo?.oid,
       declaredSizeBytes: pointerInfo?.sizeBytes,
     );
+  }
+
+  Future<RepositorySyncState> _readSyncState() async {
+    final branch = await resolveWriteBranch();
+    final repository = _connection?.repository ?? repositoryName;
+    final headSha = await _branchHeadSha(
+      repository: repository,
+      branch: branch,
+    );
+    final permission = await getPermission();
+    final connectionState = _connection == null
+        ? ProviderConnectionState.disconnected
+        : ProviderConnectionState.connected;
+    return RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: headSha,
+      sessionRevision:
+          '${connectionState.name}:${permission.canRead}:${permission.canWrite}:${permission.canCreateBranch}:${permission.canManageAttachments}:${permission.attachmentUploadMode.name}:${permission.supportsReleaseAttachmentWrites}',
+      connectionState: connectionState,
+      permission: permission,
+    );
+  }
+
+  Future<String> _branchHeadSha({
+    required String repository,
+    required String branch,
+  }) async {
+    final json =
+        await _getGitHubJson(
+              '/repos/$repository/branches/$branch',
+              token: _connection?.token,
+            )
+            as Map<String, Object?>;
+    final commit = json['commit'];
+    if (commit is! Map<String, Object?>) {
+      throw const TrackStateProviderException(
+        'GitHub branch response did not contain commit metadata.',
+      );
+    }
+    final sha = commit['sha']?.toString().trim() ?? '';
+    if (sha.isEmpty) {
+      throw const TrackStateProviderException(
+        'GitHub branch response did not contain a commit SHA.',
+      );
+    }
+    return sha;
+  }
+
+  Future<_HostedRepositoryDelta> _readHostedRepositoryDelta({
+    required String base,
+    required String head,
+  }) async {
+    if (base.trim().isEmpty ||
+        head.trim().isEmpty ||
+        base.trim() == head.trim()) {
+      return const _HostedRepositoryDelta();
+    }
+    try {
+      final json =
+          await _getGitHubJson(
+                '/repos/${_connection?.repository ?? repositoryName}/compare/$base...$head',
+                token: _connection?.token,
+              )
+              as Map<String, Object?>;
+      return _HostedRepositoryDelta(
+        changedPaths: _extractChangedPaths(json['files']),
+        hostedSnapshotReloadDirective: _readHostedSnapshotReloadDirective(
+          json['commits'],
+        ),
+      );
+    } on TrackStateProviderException {
+      return const _HostedRepositoryDelta();
+    }
+  }
+
+  Set<String> _extractChangedPaths(Object? files) {
+    if (files is! List<Object?>) {
+      return const <String>{};
+    }
+    final paths = <String>{};
+    for (final entry in files.whereType<Map<String, Object?>>()) {
+      final filename = entry['filename']?.toString().trim() ?? '';
+      if (filename.isNotEmpty) {
+        paths.add(filename);
+      }
+      final previousFilename =
+          entry['previous_filename']?.toString().trim() ?? '';
+      if (previousFilename.isNotEmpty) {
+        paths.add(previousFilename);
+      }
+    }
+    return paths;
+  }
+
+  HostedSnapshotReloadDirective? _readHostedSnapshotReloadDirective(
+    Object? commits,
+  ) {
+    if (commits is! List<Object?>) {
+      return null;
+    }
+    HostedSnapshotReloadDirective? directive;
+    for (final entry in commits.whereType<Map<String, Object?>>()) {
+      final commit = entry['commit'];
+      if (commit is! Map<String, Object?>) {
+        continue;
+      }
+      final message = commit['message']?.toString().trim() ?? '';
+      if (message.isEmpty) {
+        continue;
+      }
+      if (_hostedSnapshotReloadBypassPattern.hasMatch(message)) {
+        directive = HostedSnapshotReloadDirective.disabled;
+        continue;
+      }
+      if (_hostedSnapshotReloadRequestPattern.hasMatch(message)) {
+        directive = HostedSnapshotReloadDirective.enabled;
+      }
+    }
+    return directive;
   }
 
   @override
@@ -1308,6 +1506,16 @@ class GitHubTrackStateProvider
       isUtc: true,
     );
   }
+}
+
+class _HostedRepositoryDelta {
+  const _HostedRepositoryDelta({
+    this.changedPaths = const <String>{},
+    this.hostedSnapshotReloadDirective,
+  });
+
+  final Set<String> changedPaths;
+  final HostedSnapshotReloadDirective? hostedSnapshotReloadDirective;
 }
 
 RepositoryPermission _permissionFromRepoJson(Map<String, Object?> json) {

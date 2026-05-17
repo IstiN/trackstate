@@ -1,0 +1,12 @@
+test_id: TS-624
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+notes:
+  - Compiles a temporary `trackstate` executable from this checkout.
+  - Seeds a disposable Local Git repository with one existing issue because local mutation commands reject completely empty repositories.
+  - Creates Issue A and Issue B, then runs `trackstate ticket link --type "is blocked by"` from Issue A to Issue B.
+  - Verifies the persisted `links.json` representation is normalized into the canonical stored `blocks` relation from Issue B back to Issue A.

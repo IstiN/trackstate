@@ -1,0 +1,16 @@
+test_id: TS-725
+type: ui
+framework: flutter_test
+platform: linux
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Seeds the production workspace profile store with one active local workspace and one inactive hosted workspace.
+  - Verifies the active local row shows Local Git and the inactive hosted row stays at Needs sign-in in the production workspace switcher.
+  - Fails on the real product gap if the active local workspace does not expose a supported GitHub sign-in control for the ticket's auth step.
+runtime_inputs:
+  active_workspace_kind: local
+  inactive_workspace_kind: hosted
+  expected_active_state: Local Git
+  expected_inactive_state: Needs sign-in
+  run_command: flutter test testing/tests/TS-725/test_ts_725.dart --reporter expanded

@@ -1,0 +1,9 @@
+test_id: TS-712
+type: service
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Exercises the production WorkspaceSyncService with a controllable clock and probe repository.
+  - Reproduces a manual sync request, overlapping app-resume triggers, a resume inside the 30-second floor, and a resume after the floor expires.
+  - Verifies the coordinator coalesces overlapping triggers and does not start a second sync until at least 30 seconds have elapsed since the prior check completed.

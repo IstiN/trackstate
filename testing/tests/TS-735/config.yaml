@@ -1,0 +1,13 @@
+test_id: TS-735
+type: ui
+framework: flutter_test
+platform: widget
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Reuses the hosted deferred-sync repository fixture from TS-714 to reproduce the real pending-refresh banner while the production Edit issue dialog remains open.
+  - Verifies the inline banner stays visible inside the edit surface, exposes a meaningful screen-reader label, and keeps banner colors and typography aligned with the TrackState design tokens.
+runtime_inputs:
+  issue_key: TRACK-12
+  pending_label: Updates pending
+  run_command: flutter test testing/tests/TS-735/test_ts_735.dart --reporter expanded

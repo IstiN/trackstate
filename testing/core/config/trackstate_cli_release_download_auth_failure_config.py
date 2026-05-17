@@ -11,6 +11,7 @@ import yaml
 class TrackStateCliReleaseDownloadAuthFailureConfig:
     ticket_command: str
     requested_command: tuple[str, ...]
+    compiled_source_ref: str
     project_key: str
     project_name: str
     issue_key: str
@@ -54,6 +55,12 @@ class TrackStateCliReleaseDownloadAuthFailureConfig:
                 runtime_inputs,
                 "requested_command",
                 path,
+            ),
+            compiled_source_ref=cls._optional_string(
+                runtime_inputs,
+                "compiled_source_ref",
+                default="current checkout",
+                path=path,
             ),
             project_key=cls._require_string(runtime_inputs, "project_key", path),
             project_name=cls._require_string(runtime_inputs, "project_name", path),
@@ -144,6 +151,21 @@ class TrackStateCliReleaseDownloadAuthFailureConfig:
     @staticmethod
     def _require_string(payload: dict[str, Any], key: str, path: Path) -> str:
         value = payload.get(key)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"TS-522 config runtime_inputs.{key} must be a string in {path}.")
+        return value
+
+    @staticmethod
+    def _optional_string(
+        payload: dict[str, Any],
+        key: str,
+        *,
+        default: str,
+        path: Path,
+    ) -> str:
+        value = payload.get(key)
+        if value is None:
+            return default
         if not isinstance(value, str) or not value:
             raise ValueError(f"TS-522 config runtime_inputs.{key} must be a string in {path}.")
         return value

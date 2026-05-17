@@ -1,0 +1,9 @@
+test_id: TS-606
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Reuses the shared SettingsScreenRobot and the Local Git Attachments fixture from TS-483.
+  - Verifies keyboard-only traversal in Project Settings > Attachments when attachment storage mode is set to GitHub Releases.
+  - Confirms focus moves from Release tag prefix to Reset and then Save settings instead of leaking to global navigation.

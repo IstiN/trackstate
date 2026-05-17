@@ -1,0 +1,10 @@
+test_id: TS-683
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with malformed raw Flutter web preference values preloaded for the hosted workspace state and hosted token.
+  - Verifies startup repairs the malformed preload, checks for a descriptive diagnostic log, and confirms the interactive shell remains visible.

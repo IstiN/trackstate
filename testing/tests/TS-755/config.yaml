@@ -1,0 +1,9 @@
+test_id: TS-755
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Reuses the mutable hosted repository fixture from TS-741 to drive the production workspace sync listener through an unknown-domain hosted change path.
+  - Verifies hydration_delta_count stays zero so no TRACK-741C comments/detail hydration is dispatched.
+  - Confirms the visible Comments tab keeps the original comment text after the malformed sync scope is processed.

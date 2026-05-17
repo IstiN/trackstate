@@ -1,0 +1,9 @@
+name: ts653_canonical_link_formatter_probe
+publish_to: none
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  args: ^2.7.0
+  http: ^1.6.0

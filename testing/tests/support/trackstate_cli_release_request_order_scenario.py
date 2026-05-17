@@ -98,49 +98,74 @@ class TrackStateCliReleaseRequestOrderScenario(TrackStateCliReleaseReplacementSc
         rendered_requests = _render_requests(requests)
         result["api_request_flow"] = rendered_requests
 
-        lookup_index = _first_request_index(
+        lookup_indices = _matching_request_indices(
             requests,
             method="GET",
             host="api.github.com",
             path=lookup_path,
         )
-        if lookup_index is None:
+        if not lookup_indices:
             return [
                 "Step 2 failed: the upload flow never looked up the issue release by tag "
                 "before attempting asset replacement.\n"
                 f"Expected request: GET {lookup_path}\n"
                 f"Observed requests:\n{rendered_requests}"
             ]
+        lookup_index = lookup_indices[0]
 
-        delete_index = _first_request_index(
+        delete_indices = _matching_request_indices(
             requests,
             method="DELETE",
             host="api.github.com",
             path=delete_path,
-            start=lookup_index + 1,
         )
-        if delete_index is None:
+        if not delete_indices:
             return [
                 "Step 2 failed: the upload flow did not delete the existing asset after "
                 "looking up the issue release.\n"
-                f"Expected request after lookup: DELETE {delete_path}\n"
+                f"Expected request: DELETE {delete_path}\n"
+                f"Observed requests:\n{rendered_requests}"
+            ]
+        delete_index = delete_indices[0]
+        if delete_index < lookup_index:
+            return [
+                "Step 2 failed: the upload flow deleted the existing asset before it first "
+                "looked up the issue release by tag.\n"
+                f"Earliest matching lookup index: {lookup_index}\n"
+                f"Earliest matching delete index: {delete_index}\n"
                 f"Observed requests:\n{rendered_requests}"
             ]
 
-        upload_index = _first_request_index(
+        upload_indices = _matching_request_indices(
             requests,
             method="POST",
             host="uploads.github.com",
             path=upload_path,
             query_fragment=f"name={self.config.expected_attachment_name}",
-            start=delete_index + 1,
         )
-        if upload_index is None:
+        if not upload_indices:
             return [
                 "Step 2 failed: the upload flow did not start the replacement upload after "
                 "deleting the existing asset.\n"
-                f"Expected request after delete: POST {upload_path}?name="
+                f"Expected request: POST {upload_path}?name="
                 f"{self.config.expected_attachment_name}\n"
+                f"Observed requests:\n{rendered_requests}"
+            ]
+        upload_index = upload_indices[0]
+        if upload_index < lookup_index:
+            return [
+                "Step 2 failed: the upload flow started the replacement upload before it "
+                "looked up the issue release by tag.\n"
+                f"Earliest matching lookup index: {lookup_index}\n"
+                f"Earliest matching upload index: {upload_index}\n"
+                f"Observed requests:\n{rendered_requests}"
+            ]
+        if upload_index < delete_index:
+            return [
+                "Step 2 failed: the upload flow started the replacement upload before it "
+                "deleted the colliding release asset.\n"
+                f"Earliest matching delete index: {delete_index}\n"
+                f"Earliest matching upload index: {upload_index}\n"
                 f"Observed requests:\n{rendered_requests}"
             ]
 
@@ -250,7 +275,7 @@ class TrackStateCliReleaseRequestOrderScenario(TrackStateCliReleaseReplacementSc
         return failures
 
 
-def _first_request_index(
+def _matching_request_indices(
     requests,
     *,
     method: str,
@@ -258,15 +283,16 @@ def _first_request_index(
     path: str,
     start: int = 0,
     query_fragment: str | None = None,
-) -> int | None:
+) -> list[int]:
+    matches: list[int] = []
     for index in range(start, len(requests)):
         request = requests[index]
         if request.method != method or request.host != host or request.path != path:
             continue
         if query_fragment is not None and query_fragment not in (request.query or ""):
             continue
-        return index
-    return None
+        matches.append(index)
+    return matches
 
 
 def _request_signature(request) -> str:

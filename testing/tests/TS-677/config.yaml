@@ -1,0 +1,11 @@
+test_id: TS-677
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Flutter SDK available on PATH
+  - git CLI available on PATH
+notes:
+  - Seeds a disposable local-git repository with a single issue `TS-10` that has no inward or outward links.
+  - Executes the exact ticket step `trackstate read ticket --key TS-10` from the seeded repository working directory.
+  - Verifies the raw Jira issue preserves `fields.issuelinks: []` and that the top-level `links` array is either absent or empty.

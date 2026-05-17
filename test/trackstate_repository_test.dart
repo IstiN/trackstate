@@ -794,7 +794,7 @@ This comment demonstrates markdown-backed collaboration history.
   );
 
   test(
-    'checked-in setup template includes repository index artifacts and richer fixtures',
+    'checked-in setup template includes repository index artifacts',
     () async {
       final files = _fixtureFilesFromDisk('trackstate-setup/DEMO');
 
@@ -862,7 +862,10 @@ This comment demonstrates markdown-backed collaboration history.
       expect(boardIssue.customFields['releaseTrain'], ['web', 'mobile']);
       expect(epicIssue.customFields['created'], '2026-05-05T00:00:00Z');
       expect(boardIssue.links.single.targetKey, 'DEMO-4');
-      expect(boardIssue.attachments.single.name, 'board-preview.svg');
+      expect(
+        boardIssue.attachments.map((attachment) => attachment.name),
+        contains('board-preview.svg'),
+      );
       expect(doneIssue.statusId, 'done');
       expect(doneIssue.resolutionId, 'done');
     },
@@ -3310,6 +3313,19 @@ class _FakeReleaseAttachmentProvider
   Future<RepositoryPermission> getPermission() async => permission;
 
   @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'fake-release-provider-revision',
+      sessionRevision: '${permission.canRead}:${permission.canWrite}',
+      connectionState: ProviderConnectionState.connected,
+      permission: permission,
+    ),
+  );
+
+  @override
   Future<RepositoryAttachment> readAttachment(
     String path, {
     required String ref,
@@ -3383,6 +3399,19 @@ class _FakeRemoteIdentityProvider
 
   @override
   String get dataRef => 'HEAD';
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'fake-remote-identity-revision',
+      sessionRevision: '${permission.canRead}:${permission.canWrite}',
+      connectionState: ProviderConnectionState.connected,
+      permission: permission,
+    ),
+  );
 
   @override
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async {

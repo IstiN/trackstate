@@ -22,6 +22,26 @@ class _RecordingHostedProvider implements TrackStateProviderAdapter {
   RepositoryConnection? connection;
 
   @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => const RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: 'recording-hosted-provider-revision',
+      sessionRevision: 'recording',
+      connectionState: ProviderConnectionState.connected,
+      permission: RepositoryPermission(
+        canRead: true,
+        canWrite: false,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: false,
+        canCheckCollaborators: false,
+      ),
+    ),
+  );
+
+  @override
   String get dataRef => 'main';
 
   @override

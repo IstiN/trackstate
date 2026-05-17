@@ -1,0 +1,9 @@
+test_id: TS-664
+type: service
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Initializes SharedPreferencesWorkspaceProfileService with mock device storage and a fixed clock.
+  - Creates hosted workspace profiles for owner/repo on main and develop, then inspects the serialized trackstate.workspaceProfiles.state entry after each save.
+  - Verifies the stored workspace identifiers are deterministic, branch-specific, and accompanied by the expected persisted fields.

@@ -1,0 +1,31 @@
+test_id: TS-706
+type: api
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - GitHub CLI authenticated with repo and workflow scopes
+  - Playwright for human-style GitHub Actions page verification
+runtime_inputs:
+  repository: IstiN/trackstate
+  default_branch: main
+  workflow_name: Apple Release Builds
+  workflow_file: build-native.yml
+  workflow_path: .github/workflows/build-native.yml
+  preflight_job_name: Verify macOS runner availability
+  downstream_job_name: Build macOS desktop and CLI artifacts
+  expected_preflight_runner: ubuntu-latest
+  expected_runner_labels:
+    - self-hosted
+    - macOS
+    - trackstate-release
+    - ARM64
+  expected_failure_markers:
+    - No runner registered for
+    - none are online
+  recent_runs_limit: 20
+  poll_interval_seconds: 5
+  run_timeout_seconds: 240
+  ui_timeout_seconds: 60
+notes:
+  - Creates a disposable semantic version tag on the live main branch, waits for the Apple release workflow, and deletes the tag after observation.
+  - Verifies the Ubuntu preflight gate fails before any macOS release job can queue, then captures GitHub Actions UI evidence.

@@ -1,0 +1,11 @@
+test_id: TS-652
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Python 3 standard library
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN, or bootstrapped by the shared Dart probe runtime
+notes:
+  - Passes a non-canonical `IssueLink(type: "blocks", direction: "inward")` object to the production CLI formatter.
+  - Captures the real JSON success stdout, terminal-style text stdout, and stderr warning from the same formatting flow.
+  - Verifies the warning path is non-blocking and preserves the visible formatter output.

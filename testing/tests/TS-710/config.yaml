@@ -1,0 +1,10 @@
+test_id: TS-710
+type: web
+framework: unittest
+platform: python
+dependencies:
+  - network access to the public GitHub Releases API
+  - network access to the public GitHub release page
+  - Playwright Python package and Chromium browser runtime
+runtime_inputs:
+  repository: IstiN/trackstate

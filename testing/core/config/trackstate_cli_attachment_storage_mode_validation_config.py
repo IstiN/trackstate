@@ -8,6 +8,43 @@ import yaml
 
 
 @dataclass(frozen=True)
+class TrackStateCliAttachmentStorageModeValidationAllowedErrorContract:
+    name: str
+    category: str
+    exit_code: int
+    code: str | None = None
+
+    def matches(
+        self,
+        *,
+        observed_code: str | None,
+        observed_category: str | None,
+        observed_exit_code: int | None,
+    ) -> bool:
+        if observed_category != self.category or observed_exit_code != self.exit_code:
+            return False
+        if self.code is not None and observed_code != self.code:
+            return False
+        return True
+
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "name": self.name,
+            "category": self.category,
+            "exitCode": self.exit_code,
+        }
+        if self.code is not None:
+            payload["code"] = self.code
+        return payload
+
+    def describe(self) -> str:
+        details = [f"category={self.category}", f"exitCode={self.exit_code}"]
+        if self.code is not None:
+            details.insert(0, f"code={self.code}")
+        return f"{self.name} ({', '.join(details)})"
+
+
+@dataclass(frozen=True)
 class TrackStateCliAttachmentStorageModeValidationConfig:
     ticket_command: str
     supported_ticket_command: str
@@ -21,7 +58,10 @@ class TrackStateCliAttachmentStorageModeValidationConfig:
     unsupported_attachment_mode: str
     expected_provider: str
     expected_target_type: str
-    expected_exit_code: int
+    allowed_error_contracts: tuple[
+        TrackStateCliAttachmentStorageModeValidationAllowedErrorContract,
+        ...,
+    ]
     expected_reason_message: str
     expected_visible_reason_fragments: tuple[str, ...]
     disallowed_error_code: str
@@ -85,9 +125,8 @@ class TrackStateCliAttachmentStorageModeValidationConfig:
                 "expected_target_type",
                 path,
             ),
-            expected_exit_code=cls._require_int(
+            allowed_error_contracts=cls._require_allowed_error_contracts(
                 runtime_inputs,
-                "expected_exit_code",
                 path,
             ),
             expected_reason_message=cls._require_string(
@@ -125,11 +164,63 @@ class TrackStateCliAttachmentStorageModeValidationConfig:
         return value
 
     @staticmethod
-    def _require_int(payload: dict[str, Any], key: str, path: Path) -> int:
-        value = payload.get(key)
-        if isinstance(value, int):
-            return value
-        raise ValueError(f"TS-603 config runtime_inputs.{key} must be an integer in {path}.")
+    def _require_allowed_error_contracts(
+        payload: dict[str, Any],
+        path: Path,
+    ) -> tuple[TrackStateCliAttachmentStorageModeValidationAllowedErrorContract, ...]:
+        value = payload.get("allowed_error_contracts")
+        if not isinstance(value, list) or not value:
+            raise ValueError(
+                "TS-603 config runtime_inputs.allowed_error_contracts must be a "
+                f"non-empty list in {path}."
+            )
+
+        contracts: list[TrackStateCliAttachmentStorageModeValidationAllowedErrorContract] = []
+        for index, raw_contract in enumerate(value):
+            if not isinstance(raw_contract, dict):
+                raise ValueError(
+                    "TS-603 config runtime_inputs.allowed_error_contracts"
+                    f"[{index}] must be a mapping in {path}."
+                )
+
+            name = raw_contract.get("name")
+            if not isinstance(name, str) or not name:
+                raise ValueError(
+                    "TS-603 config runtime_inputs.allowed_error_contracts"
+                    f"[{index}].name must be a non-empty string in {path}."
+                )
+
+            category = raw_contract.get("category")
+            if not isinstance(category, str) or not category:
+                raise ValueError(
+                    "TS-603 config runtime_inputs.allowed_error_contracts"
+                    f"[{index}].category must be a non-empty string in {path}."
+                )
+
+            exit_code = raw_contract.get("exit_code")
+            if not isinstance(exit_code, int):
+                raise ValueError(
+                    "TS-603 config runtime_inputs.allowed_error_contracts"
+                    f"[{index}].exit_code must be an integer in {path}."
+                )
+
+            code = raw_contract.get("code")
+            if code is not None and (not isinstance(code, str) or not code):
+                raise ValueError(
+                    "TS-603 config runtime_inputs.allowed_error_contracts"
+                    f"[{index}].code must be a non-empty string when present in {path}."
+                )
+
+            contracts.append(
+                TrackStateCliAttachmentStorageModeValidationAllowedErrorContract(
+                    name=name,
+                    category=category,
+                    exit_code=exit_code,
+                    code=code,
+                )
+            )
+
+        return tuple(contracts)
 
     @staticmethod
     def _require_string_list(

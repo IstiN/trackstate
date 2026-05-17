@@ -1,0 +1,11 @@
+test_id: TS-645
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Flutter SDK available on PATH
+  - git CLI available on PATH
+notes:
+  - Reuses the disposable Local Git CLI harness used by the existing inverse-link tests.
+  - Creates Issue A and Issue B, then runs `trackstate ticket link --type "unsupported_link_type_label"` against the live CLI implementation.
+  - Verifies the CLI returns a controlled JSON validation error with `ok: false` and a descriptive unsupported-link-type message.

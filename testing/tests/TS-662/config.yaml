@@ -1,0 +1,11 @@
+test_id: TS-662
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Flutter SDK available on PATH
+  - git CLI available on PATH
+notes:
+  - Reuses the disposable Local Git CLI link-storage harness used by TS-624 and TS-649.
+  - Creates Issue A and Issue B, then runs `trackstate ticket link --key TS-1 --target-key TS-2 --type "relates to"` against the live local CLI implementation.
+  - Verifies the visible success response and the persisted `TS/TS-1/links.json` metadata both preserve the canonical outward relationship to TS-2.

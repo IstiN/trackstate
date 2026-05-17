@@ -266,17 +266,49 @@ void main() {
       );
 
       expect(result.isSuccess, isTrue);
+      expect(
+        File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
+        isFalse,
+      );
       final links =
           jsonDecode(
-                File(
-                  '${repo.path}/DEMO/DEMO-1/DEMO-2/links.json',
-                ).readAsStringSync(),
+                File('${repo.path}/DEMO/DEMO-10/links.json').readAsStringSync(),
               )
               as List<dynamic>;
       expect(links, hasLength(1));
       expect(links.single['type'], 'blocks');
-      expect(links.single['direction'], 'inward');
-      expect(links.single['target'], 'DEMO-10');
+      expect(links.single['direction'], 'outward');
+      expect(links.single['target'], 'DEMO-2');
+    },
+  );
+
+  test(
+    'service rejects self-referencing links without writing metadata',
+    () async {
+      final repo = await _createMutationRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final result = await service.createLink(
+        issueKey: 'DEMO-2',
+        targetKey: 'DEMO-2',
+        type: 'relates to',
+      );
+
+      expect(result.isSuccess, isFalse);
+      expect(result.failure?.category, IssueMutationErrorCategory.validation);
+      expect(result.failure?.message, contains('DEMO-2'));
+      expect(result.failure?.message, contains('itself'));
+      expect(
+        File('${repo.path}/DEMO/DEMO-1/DEMO-2/links.json').existsSync(),
+        isFalse,
+      );
     },
   );
 

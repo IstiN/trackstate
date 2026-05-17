@@ -205,6 +205,7 @@ void main() {
             openLocalRepository:
                 ({
                   required String repositoryPath,
+                  required String defaultBranch,
                   required String writeBranch,
                 }) async {
                   openAttempts += 1;
@@ -235,7 +236,7 @@ void main() {
             capturedError = error;
           },
         );
-        expect(capturedError, isA<StateError>());
+        expect(capturedError, isNull);
         expect(openAttempts, 1);
 
         await tester.tap(field('Repository Path'));
@@ -243,7 +244,7 @@ void main() {
         FocusManager.instance.primaryFocus?.unfocus();
         await tester.pumpAndSettle();
 
-        expect(openAttempts, 2);
+        expect(openAttempts, 1);
         expect(find.bySemanticsLabel(RegExp('Local Git')), findsWidgets);
       } finally {
         tester.view.resetPhysicalSize();

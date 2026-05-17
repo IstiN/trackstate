@@ -1,0 +1,8 @@
+test_id: TS-724
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Seeds the production SharedPreferencesWorkspaceProfileService with two local workspaces, keeping Workspace-A active and persisting Workspace-B after its folder has been deleted from disk.
+  - Uses the production workspace switcher flow and a real local Git repository for Workspace-A to verify invalid target selection does not replace the active runtime.

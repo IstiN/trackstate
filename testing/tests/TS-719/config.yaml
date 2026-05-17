@@ -1,0 +1,14 @@
+test_id: TS-719
+type: ui
+framework: flutter_test
+platform: linux
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Launches the production first-launch local-folder onboarding flow with an actual non-empty non-Git temp directory.
+  - Verifies the post-selection UI copy instructs users to choose an existing Git repository or an empty folder.
+  - Verifies the visible Initialize action is disabled for the blocked folder state.
+runtime_inputs:
+  picker_mode: initialize-folder
+  folder_fixture: non-empty non-git temp directory containing notes.txt
+  run_command: flutter test testing/tests/TS-719/test_ts_719.dart --reporter expanded

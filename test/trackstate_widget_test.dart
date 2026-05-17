@@ -31,16 +31,17 @@ const String _hostedReleaseProjectJson = '''
 }
 ''';
 
-const RepositoryPermission _hostedReleaseUploadPermission = RepositoryPermission(
-  canRead: true,
-  canWrite: true,
-  isAdmin: false,
-  canCreateBranch: true,
-  canManageAttachments: true,
-  attachmentUploadMode: AttachmentUploadMode.full,
-  supportsReleaseAttachmentWrites: true,
-  canCheckCollaborators: false,
-);
+const RepositoryPermission _hostedReleaseUploadPermission =
+    RepositoryPermission(
+      canRead: true,
+      canWrite: true,
+      isAdmin: false,
+      canCreateBranch: true,
+      canManageAttachments: true,
+      attachmentUploadMode: AttachmentUploadMode.full,
+      supportsReleaseAttachmentWrites: true,
+      canCheckCollaborators: false,
+    );
 
 void main() {
   setUp(() {
@@ -61,7 +62,10 @@ void main() {
 
       expect(find.bySemanticsLabel(RegExp('TrackState\\.AI')), findsWidgets);
       expect(find.bySemanticsLabel(RegExp('Dashboard')), findsWidgets);
-      expect(find.bySemanticsLabel(RegExp('Connect GitHub')), findsWidgets);
+      expect(
+        find.bySemanticsLabel(RegExp('Workspace switcher:')),
+        findsWidgets,
+      );
       expect(find.bySemanticsLabel(RegExp('Synced with Git')), findsWidgets);
       expect(find.textContaining('Platform Foundation'), findsWidgets);
     } finally {
@@ -551,11 +555,8 @@ void main() {
       await tester.tap(find.bySemanticsLabel(RegExp('Local Git')).first);
       await tester.pumpAndSettle();
 
-      expect(find.text('Local Git runtime'), findsOneWidget);
-      expect(
-        find.textContaining('GitHub tokens are not used in this runtime'),
-        findsOneWidget,
-      );
+      expect(find.text('Workspace switcher'), findsOneWidget);
+      expect(find.text('No saved workspaces yet.'), findsNothing);
     } finally {
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
@@ -671,7 +672,10 @@ void main() {
           find.text('Attachments stay download-only in the browser'),
           findsNothing,
         );
-        expect(find.widgetWithText(OutlinedButton, 'Open settings'), findsNothing);
+        expect(
+          find.widgetWithText(OutlinedButton, 'Open settings'),
+          findsNothing,
+        );
         expect(find.bySemanticsLabel('Choose attachment'), findsOneWidget);
         expect(find.bySemanticsLabel('Upload attachment'), findsOneWidget);
         expect(
