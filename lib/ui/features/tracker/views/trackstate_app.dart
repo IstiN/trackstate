@@ -1061,12 +1061,26 @@ class _TrackStateAppState extends State<TrackStateApp>
                         canBrowseHostedRepositories:
                             viewModel.canBrowseHostedRepositories,
                         directoryPicker: widget.workspaceDirectoryPicker,
+                        localWorkspaceOnboardingService:
+                            widget.localWorkspaceOnboardingService ??
+                            createLocalWorkspaceOnboardingService(),
                         loadHostedRepositories:
                             viewModel.canBrowseHostedRepositories
                             ? viewModel.loadAccessibleHostedRepositories
                             : null,
                         onCancel: _closeWorkspaceOnboarding,
-                        onOpenLocalWorkspace: _switchToLocalRepository,
+                        onOpenLocalWorkspace:
+                            ({
+                              required String repositoryPath,
+                              required String displayName,
+                              required String defaultBranch,
+                              required String writeBranch,
+                            }) => _switchToLocalRepositoryWithProfile(
+                              repositoryPath: repositoryPath,
+                              defaultBranch: defaultBranch,
+                              writeBranch: writeBranch,
+                              displayName: displayName,
+                            ),
                         onOpenHostedWorkspace: _switchToHostedRepository,
                       )
                     : _LocalWorkspaceOnboardingScreen(
@@ -1748,11 +1762,401 @@ class _LocalWorkspaceOnboardingScreenState
   }
 }
 
+class _LocalWorkspaceOnboardingPanel extends StatefulWidget {
+  const _LocalWorkspaceOnboardingPanel({
+    required this.directoryPicker,
+    required this.onboardingService,
+    required this.onComplete,
+  });
+
+  final WorkspaceDirectoryPicker directoryPicker;
+  final LocalWorkspaceOnboardingService onboardingService;
+  final _LocalWorkspaceOnboardingOpener onComplete;
+
+  @override
+  State<_LocalWorkspaceOnboardingPanel> createState() =>
+      _LocalWorkspaceOnboardingPanelState();
+}
+
+class _LocalWorkspaceOnboardingPanelState
+    extends State<_LocalWorkspaceOnboardingPanel> {
+  final TextEditingController _workspaceNameController =
+      TextEditingController();
+  final TextEditingController _writeBranchController = TextEditingController();
+
+  LocalWorkspaceInspection? _inspection;
+  _LocalWorkspaceOnboardingIntent? _intent;
+  bool _isPickingFolder = false;
+  bool _isSubmitting = false;
+  String? _errorText;
+
+  @override
+  void dispose() {
+    _workspaceNameController.dispose();
+    _writeBranchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _chooseFolder(_LocalWorkspaceOnboardingIntent intent) async {
+    if (_isPickingFolder || _isSubmitting) {
+      return;
+    }
+    final l10n = AppLocalizations.of(context)!;
+    setState(() {
+      _isPickingFolder = true;
+      _errorText = null;
+      _intent = intent;
+    });
+
+    try {
+      final selectedPath = await widget.directoryPicker(
+        confirmButtonText: switch (intent) {
+          _LocalWorkspaceOnboardingIntent.openExisting =>
+            l10n.localWorkspaceOnboardingFolderBrowseOpen,
+          _LocalWorkspaceOnboardingIntent.initialize =>
+            l10n.localWorkspaceOnboardingFolderBrowseInitialize,
+        },
+      );
+      if (!mounted || selectedPath == null || selectedPath.trim().isEmpty) {
+        return;
+      }
+      final inspection = await widget.onboardingService.inspectFolder(
+        selectedPath,
+      );
+      if (!mounted) {
+        return;
+      }
+      _workspaceNameController.text = inspection.suggestedWorkspaceName;
+      _writeBranchController.text = inspection.suggestedWriteBranch;
+      setState(() {
+        _inspection = inspection;
+      });
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorText = '$error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPickingFolder = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _submit() async {
+    final l10n = AppLocalizations.of(context)!;
+    final inspection = _inspection;
+    final intent = _intent;
+    if (_isSubmitting || inspection == null || intent == null) {
+      return;
+    }
+    final workspaceName = _workspaceNameController.text.trim();
+    final writeBranch = _writeBranchController.text.trim();
+    if (workspaceName.isEmpty) {
+      setState(() {
+        _errorText = l10n.localWorkspaceOnboardingWorkspaceNameRequired;
+      });
+      return;
+    }
+    if (writeBranch.isEmpty) {
+      setState(() {
+        _errorText = l10n.localWorkspaceOnboardingWriteBranchRequired;
+      });
+      return;
+    }
+    final detectedBranch = inspection.detectedWriteBranch?.trim();
+    if (inspection.hasGitRepository &&
+        detectedBranch != null &&
+        detectedBranch.isNotEmpty &&
+        detectedBranch != writeBranch) {
+      setState(() {
+        _errorText = l10n.localWorkspaceOnboardingCurrentBranchMismatch(
+          detectedBranch,
+        );
+      });
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+      _errorText = null;
+    });
+
+    try {
+      switch ((intent, inspection.state)) {
+        case (
+          _LocalWorkspaceOnboardingIntent.openExisting,
+          LocalWorkspaceInspectionState.readyToOpen,
+        ):
+        case (
+          _LocalWorkspaceOnboardingIntent.initialize,
+          LocalWorkspaceInspectionState.readyToOpen,
+        ):
+          await widget.onComplete(
+            repositoryPath: inspection.folderPath,
+            displayName: workspaceName,
+            defaultBranch: writeBranch,
+            writeBranch: writeBranch,
+          );
+        case (_, LocalWorkspaceInspectionState.readyToInitialize):
+          final initialized = await widget.onboardingService.initializeFolder(
+            inspection: inspection,
+            workspaceName: workspaceName,
+            writeBranch: writeBranch,
+          );
+          await widget.onComplete(
+            repositoryPath: initialized.folderPath,
+            displayName: initialized.displayName,
+            defaultBranch: initialized.defaultBranch,
+            writeBranch: initialized.writeBranch,
+          );
+        case (_, LocalWorkspaceInspectionState.blocked):
+          setState(() {
+            _errorText = inspection.message;
+          });
+      }
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorText = '$error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final colors = context.ts;
+    final inspection = _inspection;
+    final statusTone = switch (inspection?.state) {
+      LocalWorkspaceInspectionState.readyToOpen => colors.success,
+      LocalWorkspaceInspectionState.readyToInitialize => colors.warning,
+      LocalWorkspaceInspectionState.blocked => colors.error,
+      null => colors.muted,
+    };
+    final statusLabel = switch (inspection?.state) {
+      LocalWorkspaceInspectionState.readyToOpen =>
+        l10n.localWorkspaceOnboardingReadyStatus,
+      LocalWorkspaceInspectionState.readyToInitialize =>
+        l10n.localWorkspaceOnboardingInitializeStatus,
+      LocalWorkspaceInspectionState.blocked =>
+        l10n.localWorkspaceOnboardingBlockedStatus,
+      null => null,
+    };
+    final actionLabel = switch ((inspection?.state, _intent)) {
+      (
+        LocalWorkspaceInspectionState.readyToOpen,
+        _LocalWorkspaceOnboardingIntent.initialize,
+      ) =>
+        l10n.localWorkspaceOnboardingOpenAction,
+      (LocalWorkspaceInspectionState.readyToOpen, _) =>
+        l10n.localWorkspaceOnboardingOpenAction,
+      (LocalWorkspaceInspectionState.readyToInitialize, _) =>
+        l10n.localWorkspaceOnboardingInitializeAction,
+      (
+        LocalWorkspaceInspectionState.blocked,
+        _LocalWorkspaceOnboardingIntent.initialize,
+      ) =>
+        l10n.localWorkspaceOnboardingInitializeAction,
+      _ => null,
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _PrimaryButton(
+                buttonKey: const ValueKey(
+                  'local-workspace-onboarding-open-existing',
+                ),
+                label: l10n.localWorkspaceOnboardingOpenExisting,
+                icon: TrackStateIconGlyph.folder,
+                onPressed: _isSubmitting
+                    ? null
+                    : () => unawaited(
+                        _chooseFolder(
+                          _LocalWorkspaceOnboardingIntent.openExisting,
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _SecondaryButton(
+                buttonKey: const ValueKey(
+                  'local-workspace-onboarding-initialize-folder',
+                ),
+                label: l10n.localWorkspaceOnboardingInitializeFolder,
+                icon: TrackStateIconGlyph.plus,
+                onPressed: _isSubmitting
+                    ? null
+                    : () => unawaited(
+                        _chooseFolder(_LocalWorkspaceOnboardingIntent.initialize),
+                      ),
+              ),
+            ),
+          ],
+        ),
+        if (_isPickingFolder) ...[
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: colors.primary,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(l10n.loading),
+            ],
+          ),
+        ],
+        if (inspection != null) ...[
+          const SizedBox(height: 20),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (statusLabel != null) ...[
+                  Text(
+                    statusLabel,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelLarge?.copyWith(color: statusTone),
+                  ),
+                  const SizedBox(height: 4),
+                ],
+                Text(
+                  inspection.message,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TrackStateIcon(
+                      TrackStateIconGlyph.folder,
+                      color: colors.muted,
+                      semanticLabel: 'folder',
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            l10n.localWorkspaceOnboardingFolderLabel,
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
+                          const SizedBox(height: 4),
+                          SelectableText(inspection.folderPath),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      key: const ValueKey(
+                        'local-workspace-onboarding-change-folder',
+                      ),
+                      onPressed: _isSubmitting
+                          ? null
+                          : () => unawaited(
+                              _chooseFolder(
+                                _intent ??
+                                    _LocalWorkspaceOnboardingIntent.openExisting,
+                              ),
+                            ),
+                      child: Text(l10n.localWorkspaceOnboardingChangeFolder),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          if (inspection.state != LocalWorkspaceInspectionState.blocked ||
+              _intent == _LocalWorkspaceOnboardingIntent.initialize) ...[
+            const SizedBox(height: 16),
+            Semantics(
+              header: true,
+              focusable: true,
+              readOnly: true,
+              label: l10n.localWorkspaceOnboardingDetailsTitle,
+              child: _SectionTitle(l10n.localWorkspaceOnboardingDetailsTitle),
+            ),
+            const SizedBox(height: 8),
+            _SettingsTextField(
+              fieldKey: const ValueKey('local-workspace-onboarding-name'),
+              label: l10n.localWorkspaceOnboardingWorkspaceName,
+              controller: _workspaceNameController,
+              helperText: l10n.localWorkspaceOnboardingWorkspaceNameHelper,
+            ),
+            const SizedBox(height: 12),
+            _SettingsTextField(
+              fieldKey: const ValueKey('local-workspace-onboarding-write-branch'),
+              label: l10n.writeBranch,
+              controller: _writeBranchController,
+              helperText: l10n.localWorkspaceOnboardingWriteBranchHelper,
+            ),
+            const SizedBox(height: 20),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                key: const ValueKey('local-workspace-onboarding-submit'),
+                onPressed:
+                    _isSubmitting ||
+                        actionLabel == null ||
+                        inspection.state == LocalWorkspaceInspectionState.blocked
+                    ? null
+                    : _submit,
+                child: Text(actionLabel ?? ''),
+              ),
+            ),
+          ],
+        ],
+        if (_errorText != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            _errorText!,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: colors.error),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _WorkspaceOnboardingScreen extends StatefulWidget {
   const _WorkspaceOnboardingScreen({
     required this.canCancel,
     required this.canBrowseHostedRepositories,
     required this.directoryPicker,
+    required this.localWorkspaceOnboardingService,
     required this.onOpenLocalWorkspace,
     required this.onOpenHostedWorkspace,
     this.loadHostedRepositories,
@@ -1762,8 +2166,9 @@ class _WorkspaceOnboardingScreen extends StatefulWidget {
   final bool canCancel;
   final bool canBrowseHostedRepositories;
   final WorkspaceDirectoryPicker directoryPicker;
+  final LocalWorkspaceOnboardingService localWorkspaceOnboardingService;
   final _HostedRepositoryCatalogLoader? loadHostedRepositories;
-  final LocalRepositoryConfigurationApplier onOpenLocalWorkspace;
+  final _LocalWorkspaceOnboardingOpener onOpenLocalWorkspace;
   final _HostedWorkspaceOpener onOpenHostedWorkspace;
   final VoidCallback? onCancel;
 
@@ -1774,10 +2179,6 @@ class _WorkspaceOnboardingScreen extends StatefulWidget {
 
 class _WorkspaceOnboardingScreenState
     extends State<_WorkspaceOnboardingScreen> {
-  final TextEditingController _localPathController = TextEditingController();
-  final TextEditingController _localBranchController = TextEditingController(
-    text: 'main',
-  );
   final TextEditingController _hostedRepositoryController =
       TextEditingController();
   final TextEditingController _hostedBranchController = TextEditingController(
@@ -1794,8 +2195,6 @@ class _WorkspaceOnboardingScreenState
 
   @override
   void dispose() {
-    _localPathController.dispose();
-    _localBranchController.dispose();
     _hostedRepositoryController.dispose();
     _hostedBranchController.dispose();
     super.dispose();
@@ -1856,35 +2255,6 @@ class _WorkspaceOnboardingScreenState
     });
   }
 
-  Future<void> _browseLocalFolder() async {
-    if (_isSubmitting) {
-      return;
-    }
-    try {
-      final selectedPath = await widget.directoryPicker(
-        confirmButtonText:
-            AppLocalizations.of(context)!.localWorkspaceOnboardingFolderBrowseOpen,
-        initialDirectory: _localPathController.text.trim().isEmpty
-            ? null
-            : _localPathController.text.trim(),
-      );
-      if (!mounted || selectedPath == null || selectedPath.isEmpty) {
-        return;
-      }
-      setState(() {
-        _localPathController.text = selectedPath;
-        _errorText = null;
-      });
-    } on Object catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _errorText = '$error';
-      });
-    }
-  }
-
   Future<void> _submit() async {
     if (_isSubmitting) {
       return;
@@ -1894,20 +2264,11 @@ class _WorkspaceOnboardingScreenState
       _errorText = null;
     });
     try {
-      switch (_selectedTarget) {
-        case _WorkspaceOnboardingTarget.local:
-          await widget.onOpenLocalWorkspace(
-            repositoryPath: _localPathController.text,
-            defaultBranch: _localBranchController.text,
-            writeBranch: _localBranchController.text,
-          );
-        case _WorkspaceOnboardingTarget.hosted:
-          await widget.onOpenHostedWorkspace(
-            repository: _hostedRepositoryController.text,
-            defaultBranch: _hostedBranchController.text,
-            writeBranch: _hostedBranchController.text,
-          );
-      }
+      await widget.onOpenHostedWorkspace(
+        repository: _hostedRepositoryController.text,
+        defaultBranch: _hostedBranchController.text,
+        writeBranch: _hostedBranchController.text,
+      );
     } on Object catch (error) {
       if (!mounted) {
         return;
@@ -2025,57 +2386,31 @@ class _WorkspaceOnboardingScreenState
                             onSelectRepository:
                                 _selectHostedRepositorySuggestion,
                           ),
-                        ] else ...[
-                          _SettingsTextField(
-                            fieldKey: const ValueKey(
-                              'workspace-onboarding-local-path',
+                          if (_errorText != null) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              _errorText!,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(color: colors.error),
                             ),
-                            label: l10n.repositoryPath,
-                            controller: _localPathController,
-                            helperText:
-                                l10n.workspaceOnboardingLocalFolderHelper,
-                          ),
-                          const SizedBox(height: 8),
+                          ],
+                          const SizedBox(height: 20),
                           Align(
                             alignment: Alignment.centerRight,
-                            child: OutlinedButton(
-                              key: const ValueKey(
-                                'workspace-onboarding-local-browse',
-                              ),
-                              onPressed: _isSubmitting
-                                  ? null
-                                  : () => unawaited(_browseLocalFolder()),
-                              child: Text(
-                                l10n.localWorkspaceOnboardingFolderBrowseOpen,
-                              ),
+                            child: FilledButton(
+                              key: const ValueKey('workspace-onboarding-open'),
+                              onPressed: _isSubmitting ? null : _submit,
+                              child: Text(l10n.openWorkspace),
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          _SettingsTextField(
-                            fieldKey: const ValueKey(
-                              'workspace-onboarding-local-branch',
-                            ),
-                            label: l10n.branch,
-                            controller: _localBranchController,
+                        ] else ...[
+                          _LocalWorkspaceOnboardingPanel(
+                            directoryPicker: widget.directoryPicker,
+                            onboardingService:
+                                widget.localWorkspaceOnboardingService,
+                            onComplete: widget.onOpenLocalWorkspace,
                           ),
                         ],
-                        if (_errorText != null) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            _errorText!,
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(color: colors.error),
-                          ),
-                        ],
-                        const SizedBox(height: 20),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: FilledButton(
-                            key: const ValueKey('workspace-onboarding-open'),
-                            onPressed: _isSubmitting ? null : _submit,
-                            child: Text(l10n.openWorkspace),
-                          ),
-                        ),
                       ],
                     ),
                   ),

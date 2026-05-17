@@ -155,7 +155,13 @@ void main() {
       expect(find.text('Hosted repository'), findsOneWidget);
       expect(find.text('Project Settings'), findsNothing);
       expect(
-        find.byKey(const ValueKey('workspace-onboarding-local-path')),
+        find.byKey(const ValueKey('local-workspace-onboarding-open-existing')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(
+          const ValueKey('local-workspace-onboarding-initialize-folder'),
+        ),
         findsOneWidget,
       );
     },
@@ -232,7 +238,7 @@ void main() {
       expect(find.text('Hosted repository'), findsOneWidget);
       expect(hostedValidationAttempts, 1);
       expect(
-        find.byKey(const ValueKey('workspace-onboarding-local-path')),
+        find.byKey(const ValueKey('local-workspace-onboarding-open-existing')),
         findsOneWidget,
       );
     },
