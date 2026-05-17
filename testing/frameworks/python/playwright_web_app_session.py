@@ -600,8 +600,8 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out selecting files after clicking selector "{trigger_selector}".',
             ) from error
 
-    def screenshot(self, path: str) -> None:
-        self._page.screenshot(path=path, full_page=True)
+    def screenshot(self, path: str, *, full_page: bool = True) -> None:
+        self._page.screenshot(path=path, full_page=full_page)
 
     def bounding_box(
         self,
