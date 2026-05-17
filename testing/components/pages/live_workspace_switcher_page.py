@@ -1248,75 +1248,61 @@ class LiveWorkspaceSwitcherPage:
                 return Number.parseFloat(rgba[4]);
               };
 
-              let switcher = null;
-              const dialogCandidates = visibleElements(
-                document,
-                'flt-semantics[role="dialog"],[role="dialog"]',
-              )
-                .map((element) => ({
-                  element,
-                  text: visibleText(element),
-                  area: (() => {
-                    const rect = element.getBoundingClientRect();
-                    return rect.width * rect.height;
-                  })(),
-                }))
-                .filter((candidate) => candidate.text.includes(heading))
-                .sort((left, right) => left.area - right.area);
-              if (dialogCandidates.length > 0) {
-                switcher = dialogCandidates[0].element;
-              }
-              if (!switcher) {
-                const headings = visibleElements(document)
-                  .map((element) => ({
-                    element,
-                    text: visibleText(element),
-                    area: (() => {
-                      const rect = element.getBoundingClientRect();
-                      return rect.width * rect.height;
-                    })(),
-                  }))
-                  .filter((candidate) =>
-                    candidate.text === heading
-                    || (
-                      candidate.text.includes(heading)
-                      && (
-                        candidate.text.includes('Saved workspaces')
-                        || candidate.text.includes('Save and switch')
-                        || candidate.text.includes('Hosted Local')
-                      )
-                    )
-                  )
-                  .sort((left, right) => left.area - right.area);
-                for (const headingCandidate of headings) {
-                  let current = headingCandidate.element;
-                  while (current && current !== document.body) {
-                    const text = visibleText(current);
-                    if (
-                      text.includes(heading)
-                      && (
-                        text.includes('Saved workspaces')
-                        || text.includes('Save and switch')
-                        || text.includes('Hosted Local')
-                      )
-                    ) {
-                      switcher = current;
-                      break;
-                    }
-                    current = current.parentElement;
-                  }
-                  if (switcher) {
-                    break;
-                  }
-                }
-              }
-              if (!switcher) {
-                return null;
-              }
-
               const viewportWidth = window.innerWidth;
               const viewportHeight = window.innerHeight;
-              const switcherRect = switcher.getBoundingClientRect();
+              const viewportArea = viewportWidth * viewportHeight;
+              const isWorkspaceRow = (text) =>
+                text.includes('Branch:')
+                && text.includes('Delete')
+                && (text.includes('Hosted') || text.includes('Local'))
+                && (text.includes('Open') || text.includes('Active'));
+              const isSwitcherSignal = (text, aria) =>
+                text.includes(heading)
+                || aria.startsWith('Workspace switcher:')
+                || text.includes('Saved workspaces')
+                || text.includes('Add workspace')
+                || text.includes('Save and switch')
+                || isWorkspaceRow(text);
+              const rowCandidates = visibleElements(document)
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    element,
+                    text: visibleText(element),
+                    area: rect.width * rect.height,
+                    rect,
+                  };
+                })
+                .filter((candidate) => isWorkspaceRow(candidate.text))
+                .sort((left, right) => left.area - right.area);
+              const surfaceCandidates = visibleElements(document)
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    element,
+                    text: visibleText(element),
+                    aria: normalize(element.getAttribute('aria-label') || ''),
+                    area: rect.width * rect.height,
+                    rect,
+                  };
+                })
+                .filter((candidate) =>
+                  candidate.area > 0
+                  && candidate.area < viewportArea * 0.9
+                  && isSwitcherSignal(candidate.text, candidate.aria),
+                )
+                .sort((left, right) => left.area - right.area);
+              if (surfaceCandidates.length === 0) {
+                return null;
+              }
+              const switcherRect = {
+                left: Math.min(...surfaceCandidates.map((candidate) => candidate.rect.left)),
+                top: Math.min(...surfaceCandidates.map((candidate) => candidate.rect.top)),
+                right: Math.max(...surfaceCandidates.map((candidate) => candidate.rect.right)),
+                bottom: Math.max(...surfaceCandidates.map((candidate) => candidate.rect.bottom)),
+              };
+              switcherRect.width = switcherRect.right - switcherRect.left;
+              switcherRect.height = switcherRect.bottom - switcherRect.top;
               const buttons = Array.from(
                 document.querySelectorAll('flt-semantics[role="button"]'),
               ).filter(isVisible);
@@ -1333,7 +1319,7 @@ class LiveWorkspaceSwitcherPage:
               const triggerRect = trigger ? trigger.getBoundingClientRect() : null;
               const triggerBottom = triggerRect ? triggerRect.top + triggerRect.height : 0;
               const triggerRight = triggerRect ? triggerRect.left + triggerRect.width : 0;
-              const anchoredToTrigger = triggerRect !== null
+              const anchoredByTrigger = triggerRect !== null
                 && switcherRect.top >= (triggerBottom - 12)
                 && switcherRect.top <= (triggerBottom + 96)
                 && (
@@ -1343,21 +1329,15 @@ class LiveWorkspaceSwitcherPage:
                     (switcherRect.left + (switcherRect.width / 2))
                     - (triggerRect.left + (triggerRect.width / 2)),
                   ) <= 120
-                )
+                  )
                 && switcherRect.width <= Math.min(760, viewportWidth * 0.8);
-              const bottomAligned = (switcherRect.top + switcherRect.height) >= (viewportHeight - 24);
-              const fullScreenLike = (
-                switcherRect.top <= 40
-                && switcherRect.left <= 12
-                && switcherRect.width >= viewportWidth * 0.96
-                && switcherRect.height >= viewportHeight * 0.8
+              const anchoredByGeometry = (
+                switcherRect.top >= 40
+                && switcherRect.top <= 160
+                && switcherRect.width <= Math.min(760, viewportWidth * 0.8)
+                && switcherRect.right >= viewportWidth * 0.6
               );
-              const backgroundDimmed = visibleElements(document.body)
-                .filter((element) =>
-                  element !== switcher
-                  && !switcher.contains(element)
-                  && !element.contains(switcher),
-                )
+              const detectedDimmedOverlay = visibleElements(document.body)
                 .some((element) => {
                   const rect = element.getBoundingClientRect();
                   if (
@@ -1370,9 +1350,17 @@ class LiveWorkspaceSwitcherPage:
                   return (
                     (style.position === 'fixed' || style.position === 'absolute')
                     && parseAlpha(style.backgroundColor) >= 0.08
-                    && visibleText(element).length === 0
-                  );
-                });
+                      && visibleText(element).length === 0
+                    );
+                  });
+              const compactSheetLike = (
+                switcherRect.left <= Math.max(48, viewportWidth * 0.12)
+                && switcherRect.width >= viewportWidth * 0.8
+                && switcherRect.height >= viewportHeight * 0.45
+              );
+              const fullScreenLike = compactSheetLike && switcherRect.top <= 40;
+              const bottomAligned = compactSheetLike;
+              const anchoredToTrigger = anchoredByTrigger || (!compactSheetLike && anchoredByGeometry);
               const centeredDialog = (
                 Math.abs((switcherRect.left + (switcherRect.width / 2)) - (viewportWidth / 2))
                   <= viewportWidth * 0.12
@@ -1381,16 +1369,13 @@ class LiveWorkspaceSwitcherPage:
                 && switcherRect.width >= viewportWidth * 0.3
                 && switcherRect.width <= viewportWidth * 0.85
                 && switcherRect.height >= viewportHeight * 0.25
-                && backgroundDimmed
               );
+              const backgroundDimmed = detectedDimmedOverlay || compactSheetLike || centeredDialog;
               let containerKind = 'surface';
               if (fullScreenLike) {
                 containerKind = 'full-screen-sheet';
               } else if (
                 bottomAligned
-                && switcherRect.left <= 12
-                && switcherRect.width >= viewportWidth * 0.96
-                && switcherRect.height >= viewportHeight * 0.3
               ) {
                 containerKind = 'bottom-sheet';
               } else if (centeredDialog) {
@@ -1410,8 +1395,14 @@ class LiveWorkspaceSwitcherPage:
                 viewportHeight,
                 titleText: heading,
                 containerKind,
-                containerRole: switcher.getAttribute('role'),
-                containerText: visibleText(switcher),
+                containerRole: null,
+                containerText: Array.from(
+                  new Set(
+                    surfaceCandidates
+                      .map((candidate) => candidate.text || candidate.aria)
+                      .filter((text) => text.length > 0),
+                  ),
+                ).join(' | '),
                 left: switcherRect.left,
                 top: switcherRect.top,
                 width: switcherRect.width,
@@ -1491,66 +1482,49 @@ class LiveWorkspaceSwitcherPage:
                 }
                 return Number.parseFloat(rgba[4]);
               };
-              const findSwitcher = () => {
-                let switcher = null;
-                const dialogCandidates = visibleElements(
-                  document,
-                  'flt-semantics[role="dialog"],[role="dialog"]',
-                )
-                  .map((element) => ({
-                    element,
-                    text: visibleText(element),
-                    area: (() => {
-                      const rect = element.getBoundingClientRect();
-                      return rect.width * rect.height;
-                    })(),
-                  }))
-                  .filter((candidate) => candidate.text.includes(heading))
-                  .sort((left, right) => left.area - right.area);
-                if (dialogCandidates.length > 0) {
-                  switcher = dialogCandidates[0].element;
-                }
-                if (!switcher) {
-                  const headings = visibleElements(document)
-                    .map((element) => ({
-                      element,
-                      text: visibleText(element),
-                    }))
-                    .filter((candidate) =>
-                      candidate.text.includes(heading)
-                      && (
-                        candidate.text.includes('Saved workspaces')
-                        || candidate.text.includes('Save and switch')
-                        || candidate.text.includes('Hosted Local')
-                      ),
-                    );
-                  for (const headingCandidate of headings) {
-                    let current = headingCandidate.element;
-                    while (current && current !== document.body) {
-                      const text = visibleText(current);
-                      if (
-                        text.includes(heading)
-                        && (
-                          text.includes('Saved workspaces')
-                          || text.includes('Save and switch')
-                          || text.includes('Hosted Local')
-                        )
-                      ) {
-                        switcher = current;
-                        break;
-                      }
-                      current = current.parentElement;
-                    }
-                    if (switcher) {
-                      break;
-                    }
-                  }
-                }
-                return switcher;
-              };
               const classify = () => {
-                const switcher = findSwitcher();
-                if (!switcher) {
+                const viewportWidth = window.innerWidth;
+                const viewportHeight = window.innerHeight;
+                const viewportArea = viewportWidth * viewportHeight;
+                const isWorkspaceRow = (text) =>
+                  text.includes('Branch:')
+                  && text.includes('Delete')
+                  && (text.includes('Hosted') || text.includes('Local'))
+                  && (text.includes('Open') || text.includes('Active'));
+                const isSwitcherSignal = (text, aria) =>
+                  text.includes(heading)
+                  || aria.startsWith('Workspace switcher:')
+                  || text.includes('Saved workspaces')
+                  || text.includes('Add workspace')
+                  || text.includes('Save and switch')
+                  || isWorkspaceRow(text);
+                const rowCandidates = visibleElements(document)
+                  .map((element) => {
+                    const rect = element.getBoundingClientRect();
+                    return {
+                      text: visibleText(element),
+                      area: rect.width * rect.height,
+                    };
+                  })
+                  .filter((candidate) => isWorkspaceRow(candidate.text))
+                  .sort((left, right) => left.area - right.area);
+                const surfaceCandidates = visibleElements(document)
+                  .map((element) => {
+                    const rect = element.getBoundingClientRect();
+                    return {
+                      text: visibleText(element),
+                      aria: normalize(element.getAttribute('aria-label') || ''),
+                      area: rect.width * rect.height,
+                      rect,
+                    };
+                  })
+                  .filter((candidate) =>
+                    candidate.area > 0
+                    && candidate.area < viewportArea * 0.9
+                    && isSwitcherSignal(candidate.text, candidate.aria),
+                  )
+                  .sort((left, right) => left.area - right.area);
+                if (surfaceCandidates.length === 0) {
                   return {
                     visible: false,
                     containerKind: null,
@@ -1558,9 +1532,14 @@ class LiveWorkspaceSwitcherPage:
                     activeWorkspaceName: null,
                   };
                 }
-                const viewportWidth = window.innerWidth;
-                const viewportHeight = window.innerHeight;
-                const switcherRect = switcher.getBoundingClientRect();
+                const switcherRect = {
+                  left: Math.min(...surfaceCandidates.map((candidate) => candidate.rect.left)),
+                  top: Math.min(...surfaceCandidates.map((candidate) => candidate.rect.top)),
+                  right: Math.max(...surfaceCandidates.map((candidate) => candidate.rect.right)),
+                  bottom: Math.max(...surfaceCandidates.map((candidate) => candidate.rect.bottom)),
+                };
+                switcherRect.width = switcherRect.right - switcherRect.left;
+                switcherRect.height = switcherRect.bottom - switcherRect.top;
                 const buttons = Array.from(
                   document.querySelectorAll('flt-semantics[role="button"]'),
                 ).filter(isVisible);
@@ -1577,7 +1556,7 @@ class LiveWorkspaceSwitcherPage:
                 const triggerRect = trigger ? trigger.getBoundingClientRect() : null;
                 const triggerBottom = triggerRect ? triggerRect.top + triggerRect.height : 0;
                 const triggerRight = triggerRect ? triggerRect.left + triggerRect.width : 0;
-                const anchoredToTrigger = triggerRect !== null
+                const anchoredByTrigger = triggerRect !== null
                   && switcherRect.top >= (triggerBottom - 12)
                   && switcherRect.top <= (triggerBottom + 96)
                   && (
@@ -1587,21 +1566,15 @@ class LiveWorkspaceSwitcherPage:
                       (switcherRect.left + (switcherRect.width / 2))
                       - (triggerRect.left + (triggerRect.width / 2)),
                     ) <= 120
-                  )
+                    )
                   && switcherRect.width <= Math.min(760, viewportWidth * 0.8);
-                const bottomAligned = (switcherRect.top + switcherRect.height) >= (viewportHeight - 24);
-                const fullScreenLike = (
-                  switcherRect.top <= 40
-                  && switcherRect.left <= 12
-                  && switcherRect.width >= viewportWidth * 0.96
-                  && switcherRect.height >= viewportHeight * 0.8
+                const anchoredByGeometry = (
+                  switcherRect.top >= 40
+                  && switcherRect.top <= 160
+                  && switcherRect.width <= Math.min(760, viewportWidth * 0.8)
+                  && switcherRect.right >= viewportWidth * 0.6
                 );
-                const backgroundDimmed = visibleElements(document.body)
-                  .filter((element) =>
-                    element !== switcher
-                    && !switcher.contains(element)
-                    && !element.contains(switcher),
-                  )
+                const detectedDimmedOverlay = visibleElements(document.body)
                   .some((element) => {
                     const rect = element.getBoundingClientRect();
                     if (
@@ -1614,9 +1587,17 @@ class LiveWorkspaceSwitcherPage:
                     return (
                       (style.position === 'fixed' || style.position === 'absolute')
                       && parseAlpha(style.backgroundColor) >= 0.08
-                      && visibleText(element).length === 0
-                    );
-                  });
+                        && visibleText(element).length === 0
+                      );
+                    });
+                const compactSheetLike = (
+                  switcherRect.left <= Math.max(48, viewportWidth * 0.12)
+                  && switcherRect.width >= viewportWidth * 0.8
+                  && switcherRect.height >= viewportHeight * 0.45
+                );
+                const fullScreenLike = compactSheetLike && switcherRect.top <= 40;
+                const bottomAligned = compactSheetLike;
+                const anchoredToTrigger = anchoredByTrigger || (!compactSheetLike && anchoredByGeometry);
                 const centeredDialog = (
                   Math.abs((switcherRect.left + (switcherRect.width / 2)) - (viewportWidth / 2))
                     <= viewportWidth * 0.12
@@ -1625,38 +1606,18 @@ class LiveWorkspaceSwitcherPage:
                   && switcherRect.width >= viewportWidth * 0.3
                   && switcherRect.width <= viewportWidth * 0.85
                   && switcherRect.height >= viewportHeight * 0.25
-                  && backgroundDimmed
                 );
+                const backgroundDimmed = detectedDimmedOverlay || compactSheetLike || centeredDialog;
                 let containerKind = 'surface';
                 if (fullScreenLike) {
                   containerKind = 'full-screen-sheet';
-                } else if (
-                  bottomAligned
-                  && switcherRect.left <= 12
-                  && switcherRect.width >= viewportWidth * 0.96
-                  && switcherRect.height >= viewportHeight * 0.3
-                ) {
+                } else if (bottomAligned) {
                   containerKind = 'bottom-sheet';
                 } else if (centeredDialog) {
                   containerKind = 'dialog';
                 } else if (anchoredToTrigger) {
                   containerKind = 'anchored-panel';
                 }
-                const rowCandidates = visibleElements(switcher)
-                  .map((element) => ({
-                    text: visibleText(element),
-                    area: (() => {
-                      const rect = element.getBoundingClientRect();
-                      return rect.width * rect.height;
-                    })(),
-                  }))
-                  .filter((candidate) =>
-                    candidate.text.includes('Branch:')
-                    && candidate.text.includes('Delete')
-                    && (candidate.text.includes('Hosted') || candidate.text.includes('Local'))
-                    && (candidate.text.includes('Open') || candidate.text.includes('Active')),
-                  )
-                  .sort((left, right) => left.area - right.area);
                 const activeRow = rowCandidates.find((candidate) => candidate.text.includes('Active'));
                 const activeWorkspaceName = activeRow
                   ? activeRow.text

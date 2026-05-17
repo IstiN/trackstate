@@ -4,7 +4,6 @@ from dataclasses import asdict
 import json
 import platform
 import sys
-import tempfile
 import traceback
 from pathlib import Path
 
@@ -16,7 +15,6 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     LiveWorkspaceSwitcherPage,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherPanelObservation,
-    WorkspaceSwitcherTriggerObservation,
     WorkspaceSwitcherTransitionMonitorObservation,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
@@ -106,8 +104,8 @@ def main() -> None:
                 result["desktop_trigger_observation"] = asdict(desktop_trigger)
 
                 try:
-                    desktop_panel = _sample_panel_layout(page, trigger=desktop_trigger)
-                    desktop_switcher = page.observe_open_switcher()
+                    desktop_switcher = page.open_and_observe()
+                    desktop_panel = page.observe_open_panel()
                     _assert_desktop_open(
                         trigger_name=desktop_trigger.display_name,
                         switcher=desktop_switcher,
@@ -159,10 +157,7 @@ def main() -> None:
                     page.set_viewport(**COMPACT_VIEWPORT)
                     mobile_switcher = page.observe_open_switcher()
                     to_mobile_monitor = page.read_transition_monitor(clear=True)
-                    mobile_panel = _sample_panel_layout(
-                        page,
-                        trigger=_synthetic_trigger(COMPACT_VIEWPORT),
-                    )
+                    mobile_panel = page.observe_open_panel()
                     _assert_mobile_transition(
                         desktop_switcher=desktop_switcher,
                         mobile_switcher=mobile_switcher,
@@ -226,7 +221,7 @@ def main() -> None:
                     page.set_viewport(**DESKTOP_VIEWPORT)
                     restored_switcher = page.observe_open_switcher()
                     to_desktop_monitor = page.read_transition_monitor(clear=True)
-                    restored_panel = _sample_panel_layout(page, trigger=desktop_trigger)
+                    restored_panel = page.observe_open_panel()
                     _assert_desktop_restore(
                         desktop_switcher=desktop_switcher,
                         restored_switcher=restored_switcher,
@@ -800,67 +795,6 @@ def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     if jira:
         return [f"{prefix} Screenshot: {{{{{screenshot}}}}}"]
     return [f"{prefix} Screenshot: `{screenshot}`"]
-
-
-def _sample_panel_layout(
-    page: LiveWorkspaceSwitcherPage,
-    *,
-    trigger: WorkspaceSwitcherTriggerObservation,
-) -> WorkspaceSwitcherPanelObservation:
-    page.close_switcher()
-    page.set_viewport(
-        width=int(trigger.viewport_width),
-        height=int(trigger.viewport_height),
-    )
-    with tempfile.NamedTemporaryFile(
-        dir=OUTPUTS_DIR,
-        prefix="ts797_panel_before_",
-        suffix=".png",
-        delete=False,
-    ) as before_handle:
-        before_path = Path(before_handle.name)
-    with tempfile.NamedTemporaryFile(
-        dir=OUTPUTS_DIR,
-        prefix="ts797_panel_after_",
-        suffix=".png",
-        delete=False,
-    ) as after_handle:
-        after_path = Path(after_handle.name)
-    try:
-        page.screenshot(str(before_path), full_page=False)
-        page.open_switcher()
-        page.set_viewport(
-            width=int(trigger.viewport_width),
-            height=int(trigger.viewport_height),
-        )
-        page.screenshot(str(after_path), full_page=False)
-        return page.observe_panel(
-            trigger,
-            before_screenshot_path=before_path,
-            after_screenshot_path=after_path,
-        )
-    finally:
-        before_path.unlink(missing_ok=True)
-        after_path.unlink(missing_ok=True)
-
-
-def _synthetic_trigger(viewport: dict[str, int]) -> WorkspaceSwitcherTriggerObservation:
-    return WorkspaceSwitcherTriggerObservation(
-        viewport_width=float(viewport["width"]),
-        viewport_height=float(viewport["height"]),
-        semantic_label="Workspace switcher",
-        visible_text="Workspace switcher",
-        raw_text_lines=("Workspace switcher",),
-        display_name="",
-        workspace_type="",
-        state_label="",
-        icon_count=0,
-        left=0.0,
-        top=0.0,
-        width=0.0,
-        height=0.0,
-        top_button_labels=(),
-    )
 
 
 def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
