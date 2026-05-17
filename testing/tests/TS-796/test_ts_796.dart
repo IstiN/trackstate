@@ -1,11 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../TS-725/support/ts725_local_hosted_workspace_fixture.dart';
+import '../../components/factories/testing_dependencies.dart';
+import '../../core/interfaces/trackstate_app_component.dart';
+import '../../fixtures/local_hosted_workspace_fixture.dart';
 
 const String _ticketKey = 'TS-796';
 const String _ticketSummary =
@@ -33,14 +34,15 @@ void main() {
       };
 
       final semantics = tester.ensureSemantics();
-      Ts725LocalHostedWorkspaceFixture? fixture;
-      Ts725LocalHostedWorkspaceScreen? screen;
+      final TrackStateAppComponent app = defaultTestingDependencies
+          .createTrackStateAppScreen(tester);
+      LocalHostedWorkspaceFixture? fixture;
 
       try {
-        fixture = await Ts725LocalHostedWorkspaceFixture.create(tester);
-        screen = await fixture.launch();
-        await screen.waitForReady(
-          Ts725LocalHostedWorkspaceFixture.activeLocalDisplayName,
+        fixture = await LocalHostedWorkspaceFixture.create();
+        await app.pumpWorkspaceProfileApp(
+          workspaceProfileService: fixture.workspaceProfileService,
+          openLocalRepository: fixture.openLocalRepository,
         );
 
         result['active_local_workspace_id'] = fixture.activeLocalWorkspace.id;
@@ -51,51 +53,55 @@ void main() {
 
         final failures = <String>[];
 
-        await screen.openWorkspaceSwitcher();
-        result['visible_texts_in_switcher'] = screen.visibleTexts();
-        result['visible_semantics_in_switcher'] = screen
+        await app.openWorkspaceSwitcher();
+        result['visible_texts_in_switcher'] = app.visibleTextsSnapshot();
+        result['visible_semantics_in_switcher'] = app
             .visibleSemanticsLabelsSnapshot();
 
+        final workspaceSwitcherVisible = await app.isWorkspaceSwitcherVisible();
+
         final step1Observed =
-            'switcher_visible=${screen.isWorkspaceSwitcherVisible}; '
+            'switcher_visible=$workspaceSwitcherVisible; '
             'active_workspace_id=${fixture.activeLocalWorkspace.id}; '
-            'visible_texts=${_formatList(screen.visibleTexts())}';
+            'visible_texts=${_formatList(app.visibleTextsSnapshot())}';
         _recordStep(
           result,
           step: 1,
-          status: screen.isWorkspaceSwitcherVisible ? 'passed' : 'failed',
+          status: workspaceSwitcherVisible ? 'passed' : 'failed',
           action: 'Open the workspace switcher.',
           observed: step1Observed,
         );
-        if (!screen.isWorkspaceSwitcherVisible) {
+        if (!workspaceSwitcherVisible) {
           failures.add(
             'Step 1 failed: the workspace switcher did not open from the active local workspace.\n'
             'Observed: $step1Observed',
           );
         }
 
-        final activeLocalRowHasDisplayName = screen.workspaceRowContainsText(
+        final activeLocalRowHasDisplayName = await app.workspaceRowContainsText(
           fixture.activeLocalWorkspace.id,
-          Ts725LocalHostedWorkspaceFixture.activeLocalDisplayName,
+          LocalHostedWorkspaceFixture.activeLocalDisplayName,
         );
-        final activeLocalRowHasPath = screen.workspaceRowContainsTextContaining(
-          fixture.activeLocalWorkspace.id,
-          fixture.activeLocalRepositoryPath,
-        );
-        final activeLocalRowHasBranch = screen
+        final activeLocalRowHasPath = await app
+            .workspaceRowContainsTextContaining(
+              fixture.activeLocalWorkspace.id,
+              fixture.activeLocalRepositoryPath,
+            );
+        final activeLocalRowHasBranch = await app
             .workspaceRowContainsTextContaining(
               fixture.activeLocalWorkspace.id,
               'Branch: main',
             );
-        final activeLocalRowHasLocalBadge = screen.workspaceRowContainsText(
+        final activeLocalRowHasLocalBadge = await app.workspaceRowContainsText(
           fixture.activeLocalWorkspace.id,
           'Local',
         );
-        final activeLocalRowHasLocalGitBadge = screen.workspaceRowContainsText(
-          fixture.activeLocalWorkspace.id,
-          'Local Git',
-        );
-        final activeLocalRowHasActiveLabel = screen.workspaceRowContainsText(
+        final activeLocalRowHasLocalGitBadge = await app
+            .workspaceRowContainsText(
+              fixture.activeLocalWorkspace.id,
+              'Local Git',
+            );
+        final activeLocalRowHasActiveLabel = await app.workspaceRowContainsText(
           fixture.activeLocalWorkspace.id,
           'Active',
         );
@@ -133,38 +139,38 @@ void main() {
           check:
               'Viewed the active local row in Workspace switcher as a user would and checked its visible name, path, branch, and state badges.',
           observed:
-              'active_row=${Ts725LocalHostedWorkspaceFixture.activeLocalDisplayName}; '
+              'active_row=${LocalHostedWorkspaceFixture.activeLocalDisplayName}; '
               'path=${fixture.activeLocalRepositoryPath}; '
               'branch=main; '
-              'visible_texts=${_formatList(screen.visibleTexts())}',
+              'visible_texts=${_formatList(app.visibleTextsSnapshot())}',
         );
 
-        await screen.closeWorkspaceSwitcher();
-        await screen.openSettings();
+        await app.closeWorkspaceSwitcher();
+        await app.openSection('Settings');
 
         final repositoryAccessVisible =
-            screen.isTextVisible('Repository access') ||
-            screen.isSemanticsLabelVisible('Repository access');
+            await app.isTextVisible('Repository access') ||
+            await app.isSemanticsLabelVisible('Repository access');
         final localGitRuntimeVisible =
-            screen.isTextVisible('Local Git runtime') ||
-            screen.isSemanticsLabelVisible('Local Git runtime');
+            await app.isTextVisible('Local Git runtime') ||
+            await app.isSemanticsLabelVisible('Local Git runtime');
         final connectGitHubVisible =
-            screen.isControlVisible('Connect GitHub') ||
-            screen.isTextVisible('Connect GitHub') ||
-            screen.isSemanticsLabelVisible('Connect GitHub');
-        final repositoryPathFieldVisible = screen.isLabeledTextFieldVisible(
+            await app.isTextVisible('Connect GitHub') ||
+            await app.isSemanticsLabelVisible('Connect GitHub');
+        final repositoryPathFieldVisible = await app.isTextFieldVisible(
           'Repository Path',
         );
-        final writeBranchFieldVisible = screen.isLabeledTextFieldVisible(
+        final writeBranchFieldVisible = await app.isTextFieldVisible(
           'Write Branch',
         );
-        final repositoryPathValue = _readTextFieldValue(
-          tester,
+        final repositoryPathValue = await app.readLabeledTextFieldValue(
           'Repository Path',
         );
-        final writeBranchValue = _readTextFieldValue(tester, 'Write Branch');
-        result['visible_texts_in_settings'] = screen.visibleTexts();
-        result['visible_semantics_in_settings'] = screen
+        final writeBranchValue = await app.readLabeledTextFieldValue(
+          'Write Branch',
+        );
+        result['visible_texts_in_settings'] = app.visibleTextsSnapshot();
+        result['visible_semantics_in_settings'] = app
             .visibleSemanticsLabelsSnapshot();
         result['repository_path_value_in_settings'] = repositoryPathValue;
         result['write_branch_value_in_settings'] = writeBranchValue;
@@ -177,7 +183,7 @@ void main() {
             'write_branch_field_visible=$writeBranchFieldVisible; '
             'repository_path_value=${repositoryPathValue ?? '<missing>'}; '
             'write_branch_value=${writeBranchValue ?? '<missing>'}; '
-            'visible_texts=${_formatList(screen.visibleTexts())}';
+            'visible_texts=${_formatList(app.visibleTextsSnapshot())}';
         final step3Passed =
             repositoryAccessVisible &&
             localGitRuntimeVisible &&
@@ -221,32 +227,28 @@ void main() {
         var writeBranchFieldStillVisibleAfterCancel = false;
 
         if (connectGitHubVisible) {
-          tappedConnectGitHub = await screen.tapVisibleControl(
-            'Connect GitHub',
-          );
-          connectDialogVisible = await screen.waitForAnyVisibleText(const [
-            'Connect GitHub',
-            'Fine-grained token',
-            'Connect token',
-          ]);
-          fineGrainedTokenVisible = screen.isLabeledTextFieldVisible(
+          tappedConnectGitHub = await app.tapVisibleControl('Connect GitHub');
+          connectDialogVisible =
+              await app.isDialogTextVisible('Connect GitHub') ||
+              await app.isTextFieldVisible('Fine-grained token') ||
+              await app.isDialogTextVisible('Connect token');
+          fineGrainedTokenVisible = await app.isTextFieldVisible(
             'Fine-grained token',
           );
-          connectTokenVisible = screen.isControlVisible('Connect token');
-          cancelVisible =
-              screen.isControlVisible('Cancel') ||
-              screen.isTextVisible('Cancel');
+          connectTokenVisible = await app.isDialogTextVisible('Connect token');
+          cancelVisible = await app.isDialogTextVisible('Cancel');
           if (cancelVisible) {
-            cancelledDialog = await screen.tapVisibleControl('Cancel');
+            cancelledDialog = await app.tapDialogControl('Cancel');
           }
-          repositoryPathFieldStillVisibleAfterCancel = screen
-              .isLabeledTextFieldVisible('Repository Path');
-          writeBranchFieldStillVisibleAfterCancel = screen
-              .isLabeledTextFieldVisible('Write Branch');
+          repositoryPathFieldStillVisibleAfterCancel = await app
+              .isTextFieldVisible('Repository Path');
+          writeBranchFieldStillVisibleAfterCancel = await app
+              .isTextFieldVisible('Write Branch');
         }
 
-        result['visible_texts_after_connect_attempt'] = screen.visibleTexts();
-        result['visible_semantics_after_connect_attempt'] = screen
+        result['visible_texts_after_connect_attempt'] = app
+            .visibleTextsSnapshot();
+        result['visible_semantics_after_connect_attempt'] = app
             .visibleSemanticsLabelsSnapshot();
 
         final step4Observed =
@@ -258,7 +260,7 @@ void main() {
             'cancelled_dialog=$cancelledDialog; '
             'repository_path_still_visible_after_cancel=$repositoryPathFieldStillVisibleAfterCancel; '
             'write_branch_still_visible_after_cancel=$writeBranchFieldStillVisibleAfterCancel; '
-            'visible_texts=${_formatList(screen.visibleTexts())}';
+            'visible_texts=${_formatList(app.visibleTextsSnapshot())}';
         final step4Passed =
             connectGitHubVisible &&
             tappedConnectGitHub &&
@@ -305,7 +307,7 @@ void main() {
         _writeFailureOutputs(result);
         Error.throwWithStackTrace(error, stackTrace);
       } finally {
-        screen?.dispose();
+        app.resetView();
         await fixture?.dispose();
         semantics.dispose();
       }
@@ -350,17 +352,6 @@ void _recordHumanVerification(
     'check': check,
     'observed': observed,
   });
-}
-
-String? _readTextFieldValue(WidgetTester tester, String label) {
-  final finder = find.byWidgetPredicate((widget) {
-    return widget is TextField && widget.decoration?.labelText == label;
-  }, description: 'text field labeled $label');
-  if (finder.evaluate().isEmpty) {
-    return null;
-  }
-  final field = tester.widget<TextField>(finder.first);
-  return field.controller?.text;
 }
 
 void _writePassOutputs(Map<String, Object?> result) {
