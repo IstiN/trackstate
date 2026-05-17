@@ -71,6 +71,20 @@ class WorkspaceSwitcherPanelObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceSwitcherTransitionMonitorObservation:
+    sample_count: int
+    visible_sample_count: int
+    hidden_sample_count: int
+    ever_hidden_after_visible: bool
+    observed_container_kinds: tuple[str, ...]
+    observed_row_counts: tuple[int, ...]
+    observed_active_workspace_names: tuple[str, ...]
+    latest_visible_container_kind: str | None
+    latest_visible_row_count: int | None
+    latest_visible_active_workspace_name: str | None
+
+
+@dataclass(frozen=True)
 class FocusNavigationStep:
     step: int
     before_label: str | None
@@ -779,6 +793,13 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 60_000,
     ) -> WorkspaceSwitcherObservation:
         self._click_trigger(timeout_ms=timeout_ms)
+        return self.observe_open_switcher(timeout_ms=timeout_ms)
+
+    def observe_open_switcher(
+        self,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> WorkspaceSwitcherObservation:
         payload = self._session.wait_for_function(
             """
             ({ heading }) => {
@@ -1240,6 +1261,590 @@ class LiveWorkspaceSwitcherPage:
             background_dimmed=background_dimmed,
         )
 
+    def observe_open_panel(
+        self,
+        *,
+        expected_container_kinds: tuple[str, ...] = (),
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceSwitcherPanelObservation:
+        payload = self._session.wait_for_function(
+            """
+            ({ heading, expectedKinds }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const visibleElements = (root, selector = '*') =>
+                Array.from(root.querySelectorAll(selector)).filter((candidate) => isVisible(candidate));
+              const visibleText = (element) =>
+                normalize(element.innerText || element.textContent || '');
+              const parseAlpha = (value) => {
+                if (!value) {
+                  return 0;
+                }
+                const rgba = value.match(
+                  /rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([0-9.]+))?\\)/i,
+                );
+                if (!rgba) {
+                  return 0;
+                }
+                if (rgba[4] === undefined) {
+                  return 1;
+                }
+                return Number.parseFloat(rgba[4]);
+              };
+
+              const viewportWidth = window.innerWidth;
+              const viewportHeight = window.innerHeight;
+              const viewportArea = viewportWidth * viewportHeight;
+              const isWorkspaceRow = (text) =>
+                text.includes('Branch:')
+                && text.includes('Delete')
+                && (text.includes('Hosted') || text.includes('Local'))
+                && (text.includes('Open') || text.includes('Active'));
+              const isSwitcherSignal = (text, aria) =>
+                text.includes(heading)
+                || aria.startsWith('Workspace switcher:')
+                || text.includes('Saved workspaces')
+                || text.includes('Add workspace')
+                || text.includes('Save and switch')
+                || isWorkspaceRow(text);
+              const rowCandidates = visibleElements(document)
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    element,
+                    text: visibleText(element),
+                    area: rect.width * rect.height,
+                    rect,
+                  };
+                })
+                .filter((candidate) => isWorkspaceRow(candidate.text))
+                .sort((left, right) => left.area - right.area);
+              const surfaceCandidates = visibleElements(document)
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    element,
+                    text: visibleText(element),
+                    aria: normalize(element.getAttribute('aria-label') || ''),
+                    area: rect.width * rect.height,
+                    rect,
+                  };
+                })
+                .filter((candidate) =>
+                  candidate.area > 0
+                  && candidate.area < viewportArea * 0.9
+                  && isSwitcherSignal(candidate.text, candidate.aria),
+                )
+                .sort((left, right) => left.area - right.area);
+              if (surfaceCandidates.length === 0) {
+                return null;
+              }
+              const switcherRect = {
+                left: Math.min(...surfaceCandidates.map((candidate) => candidate.rect.left)),
+                top: Math.min(...surfaceCandidates.map((candidate) => candidate.rect.top)),
+                right: Math.max(...surfaceCandidates.map((candidate) => candidate.rect.right)),
+                bottom: Math.max(...surfaceCandidates.map((candidate) => candidate.rect.bottom)),
+              };
+              switcherRect.width = switcherRect.right - switcherRect.left;
+              switcherRect.height = switcherRect.bottom - switcherRect.top;
+              const buttons = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              ).filter(isVisible);
+              const trigger = buttons
+                .filter((element) =>
+                  normalize(element.getAttribute('aria-label') || element.innerText || '')
+                    .startsWith('Workspace switcher:'),
+                )
+                .sort((left, right) => {
+                  const leftRect = left.getBoundingClientRect();
+                  const rightRect = right.getBoundingClientRect();
+                  return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                })[0] ?? null;
+              const triggerRect = trigger ? trigger.getBoundingClientRect() : null;
+              const triggerBottom = triggerRect ? triggerRect.top + triggerRect.height : 0;
+              const triggerRight = triggerRect ? triggerRect.left + triggerRect.width : 0;
+              const anchoredByTrigger = triggerRect !== null
+                && switcherRect.top >= (triggerBottom - 12)
+                && switcherRect.top <= (triggerBottom + 96)
+                && (
+                  Math.abs(switcherRect.left - triggerRect.left) <= 56
+                  || Math.abs((switcherRect.left + switcherRect.width) - triggerRight) <= 96
+                  || Math.abs(
+                    (switcherRect.left + (switcherRect.width / 2))
+                    - (triggerRect.left + (triggerRect.width / 2)),
+                  ) <= 120
+                  )
+                && switcherRect.width <= Math.min(760, viewportWidth * 0.8);
+              const anchoredByGeometry = (
+                switcherRect.top >= 40
+                && switcherRect.top <= 160
+                && switcherRect.width <= Math.min(760, viewportWidth * 0.8)
+                && switcherRect.right >= viewportWidth * 0.6
+              );
+              const detectedDimmedOverlay = visibleElements(document.body)
+                .some((element) => {
+                  const rect = element.getBoundingClientRect();
+                  if (
+                    rect.width < viewportWidth * 0.75
+                    || rect.height < viewportHeight * 0.75
+                  ) {
+                    return false;
+                  }
+                  const style = window.getComputedStyle(element);
+                  return (
+                    (style.position === 'fixed' || style.position === 'absolute')
+                    && parseAlpha(style.backgroundColor) >= 0.08
+                      && visibleText(element).length === 0
+                    );
+                  });
+              const compactSheetLike = (
+                switcherRect.left <= Math.max(48, viewportWidth * 0.12)
+                && switcherRect.width >= viewportWidth * 0.8
+                && switcherRect.height >= viewportHeight * 0.45
+              );
+              const fullScreenLike = compactSheetLike && switcherRect.top <= 40;
+              const bottomAligned = compactSheetLike;
+              const anchoredToTrigger = anchoredByTrigger || (!compactSheetLike && anchoredByGeometry);
+              const centeredDialog = (
+                Math.abs((switcherRect.left + (switcherRect.width / 2)) - (viewportWidth / 2))
+                  <= viewportWidth * 0.12
+                && switcherRect.top >= 40
+                && (switcherRect.top + switcherRect.height) <= (viewportHeight - 40)
+                && switcherRect.width >= viewportWidth * 0.3
+                && switcherRect.width <= viewportWidth * 0.85
+                && switcherRect.height >= viewportHeight * 0.25
+              );
+              const backgroundDimmed = detectedDimmedOverlay || compactSheetLike || centeredDialog;
+              let containerKind = 'surface';
+              if (fullScreenLike) {
+                containerKind = 'full-screen-sheet';
+              } else if (
+                bottomAligned
+              ) {
+                containerKind = 'bottom-sheet';
+              } else if (centeredDialog) {
+                containerKind = 'dialog';
+              } else if (anchoredToTrigger) {
+                containerKind = 'anchored-panel';
+              }
+              if (
+                Array.isArray(expectedKinds)
+                && expectedKinds.length > 0
+                && !expectedKinds.includes(containerKind)
+              ) {
+                return null;
+              }
+              return {
+                viewportWidth,
+                viewportHeight,
+                titleText: heading,
+                containerKind,
+                containerRole: null,
+                containerText: Array.from(
+                  new Set(
+                    surfaceCandidates
+                      .map((candidate) => candidate.text || candidate.aria)
+                      .filter((text) => text.length > 0),
+                  ),
+                ).join(' | '),
+                left: switcherRect.left,
+                top: switcherRect.top,
+                width: switcherRect.width,
+                height: switcherRect.height,
+                anchoredToTrigger,
+                bottomAligned,
+                fullScreenLike,
+                backgroundDimmed,
+              };
+            }
+            """,
+            arg={
+                "heading": self._switcher_heading,
+                "expectedKinds": list(expected_container_kinds),
+            },
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose the expected open workspace switcher layout.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherPanelObservation(
+            viewport_width=float(payload.get("viewportWidth", 0.0)),
+            viewport_height=float(payload.get("viewportHeight", 0.0)),
+            title_text=str(payload.get("titleText", "")),
+            container_kind=str(payload.get("containerKind", "surface")),
+            container_role=(
+                str(payload.get("containerRole"))
+                if payload.get("containerRole") is not None
+                else None
+            ),
+            container_text=str(payload.get("containerText", "")),
+            bright_change_pixels=0,
+            left=float(payload.get("left", 0.0)),
+            top=float(payload.get("top", 0.0)),
+            width=float(payload.get("width", 0.0)),
+            height=float(payload.get("height", 0.0)),
+            anchored_to_trigger=bool(payload.get("anchoredToTrigger")),
+            bottom_aligned=bool(payload.get("bottomAligned")),
+            full_screen_like=bool(payload.get("fullScreenLike")),
+            background_dimmed=bool(payload.get("backgroundDimmed")),
+        )
+
+    def start_transition_monitor(self) -> None:
+        self._session.evaluate(
+            """
+            ({ heading }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const visibleElements = (root, selector = '*') =>
+                Array.from(root.querySelectorAll(selector)).filter((candidate) => isVisible(candidate));
+              const visibleText = (element) =>
+                normalize(element.innerText || element.textContent || '');
+              const parseAlpha = (value) => {
+                if (!value) {
+                  return 0;
+                }
+                const rgba = value.match(
+                  /rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([0-9.]+))?\\)/i,
+                );
+                if (!rgba) {
+                  return 0;
+                }
+                if (rgba[4] === undefined) {
+                  return 1;
+                }
+                return Number.parseFloat(rgba[4]);
+              };
+              const classify = () => {
+                const viewportWidth = window.innerWidth;
+                const viewportHeight = window.innerHeight;
+                const viewportArea = viewportWidth * viewportHeight;
+                const isWorkspaceRow = (text) =>
+                  text.includes('Branch:')
+                  && text.includes('Delete')
+                  && (text.includes('Hosted') || text.includes('Local'))
+                  && (text.includes('Open') || text.includes('Active'));
+                const isSwitcherSignal = (text, aria) =>
+                  text.includes(heading)
+                  || aria.startsWith('Workspace switcher:')
+                  || text.includes('Saved workspaces')
+                  || text.includes('Add workspace')
+                  || text.includes('Save and switch')
+                  || isWorkspaceRow(text);
+                const rowCandidates = visibleElements(document)
+                  .map((element) => {
+                    const rect = element.getBoundingClientRect();
+                    return {
+                      text: visibleText(element),
+                      area: rect.width * rect.height,
+                    };
+                  })
+                  .filter((candidate) => isWorkspaceRow(candidate.text))
+                  .sort((left, right) => left.area - right.area);
+                const surfaceCandidates = visibleElements(document)
+                  .map((element) => {
+                    const rect = element.getBoundingClientRect();
+                    return {
+                      text: visibleText(element),
+                      aria: normalize(element.getAttribute('aria-label') || ''),
+                      area: rect.width * rect.height,
+                      rect,
+                    };
+                  })
+                  .filter((candidate) =>
+                    candidate.area > 0
+                    && candidate.area < viewportArea * 0.9
+                    && isSwitcherSignal(candidate.text, candidate.aria),
+                  )
+                  .sort((left, right) => left.area - right.area);
+                if (surfaceCandidates.length === 0) {
+                  return {
+                    visible: false,
+                    containerKind: null,
+                    rowCount: null,
+                    activeWorkspaceName: null,
+                  };
+                }
+                const switcherRect = {
+                  left: Math.min(...surfaceCandidates.map((candidate) => candidate.rect.left)),
+                  top: Math.min(...surfaceCandidates.map((candidate) => candidate.rect.top)),
+                  right: Math.max(...surfaceCandidates.map((candidate) => candidate.rect.right)),
+                  bottom: Math.max(...surfaceCandidates.map((candidate) => candidate.rect.bottom)),
+                };
+                switcherRect.width = switcherRect.right - switcherRect.left;
+                switcherRect.height = switcherRect.bottom - switcherRect.top;
+                const buttons = Array.from(
+                  document.querySelectorAll('flt-semantics[role="button"]'),
+                ).filter(isVisible);
+                const trigger = buttons
+                  .filter((element) =>
+                    normalize(element.getAttribute('aria-label') || element.innerText || '')
+                      .startsWith('Workspace switcher:'),
+                  )
+                  .sort((left, right) => {
+                    const leftRect = left.getBoundingClientRect();
+                    const rightRect = right.getBoundingClientRect();
+                    return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                  })[0] ?? null;
+                const triggerRect = trigger ? trigger.getBoundingClientRect() : null;
+                const triggerBottom = triggerRect ? triggerRect.top + triggerRect.height : 0;
+                const triggerRight = triggerRect ? triggerRect.left + triggerRect.width : 0;
+                const anchoredByTrigger = triggerRect !== null
+                  && switcherRect.top >= (triggerBottom - 12)
+                  && switcherRect.top <= (triggerBottom + 96)
+                  && (
+                    Math.abs(switcherRect.left - triggerRect.left) <= 56
+                    || Math.abs((switcherRect.left + switcherRect.width) - triggerRight) <= 96
+                    || Math.abs(
+                      (switcherRect.left + (switcherRect.width / 2))
+                      - (triggerRect.left + (triggerRect.width / 2)),
+                    ) <= 120
+                    )
+                  && switcherRect.width <= Math.min(760, viewportWidth * 0.8);
+                const anchoredByGeometry = (
+                  switcherRect.top >= 40
+                  && switcherRect.top <= 160
+                  && switcherRect.width <= Math.min(760, viewportWidth * 0.8)
+                  && switcherRect.right >= viewportWidth * 0.6
+                );
+                const detectedDimmedOverlay = visibleElements(document.body)
+                  .some((element) => {
+                    const rect = element.getBoundingClientRect();
+                    if (
+                      rect.width < viewportWidth * 0.75
+                      || rect.height < viewportHeight * 0.75
+                    ) {
+                      return false;
+                    }
+                    const style = window.getComputedStyle(element);
+                    return (
+                      (style.position === 'fixed' || style.position === 'absolute')
+                      && parseAlpha(style.backgroundColor) >= 0.08
+                        && visibleText(element).length === 0
+                      );
+                    });
+                const compactSheetLike = (
+                  switcherRect.left <= Math.max(48, viewportWidth * 0.12)
+                  && switcherRect.width >= viewportWidth * 0.8
+                  && switcherRect.height >= viewportHeight * 0.45
+                );
+                const fullScreenLike = compactSheetLike && switcherRect.top <= 40;
+                const bottomAligned = compactSheetLike;
+                const anchoredToTrigger = anchoredByTrigger || (!compactSheetLike && anchoredByGeometry);
+                const centeredDialog = (
+                  Math.abs((switcherRect.left + (switcherRect.width / 2)) - (viewportWidth / 2))
+                    <= viewportWidth * 0.12
+                  && switcherRect.top >= 40
+                  && (switcherRect.top + switcherRect.height) <= (viewportHeight - 40)
+                  && switcherRect.width >= viewportWidth * 0.3
+                  && switcherRect.width <= viewportWidth * 0.85
+                  && switcherRect.height >= viewportHeight * 0.25
+                );
+                const backgroundDimmed = detectedDimmedOverlay || compactSheetLike || centeredDialog;
+                let containerKind = 'surface';
+                if (fullScreenLike) {
+                  containerKind = 'full-screen-sheet';
+                } else if (bottomAligned) {
+                  containerKind = 'bottom-sheet';
+                } else if (centeredDialog) {
+                  containerKind = 'dialog';
+                } else if (anchoredToTrigger) {
+                  containerKind = 'anchored-panel';
+                }
+                const activeRow = rowCandidates.find((candidate) => candidate.text.includes('Active'));
+                const activeWorkspaceName = activeRow
+                  ? activeRow.text
+                    .split('Branch:')[0]
+                    .replace('Hosted', '')
+                    .replace('Local', '')
+                    .replace('Active', '')
+                    .trim()
+                  : null;
+                return {
+                  visible: true,
+                  containerKind,
+                  rowCount: rowCandidates.length,
+                  activeWorkspaceName,
+                };
+              };
+
+              const existing = window.__tsWorkspaceSwitcherTransitionMonitor;
+              if (existing && typeof existing.stop === 'function') {
+                existing.stop();
+              }
+              const monitor = {
+                running: true,
+                samples: [],
+                stop() {
+                  this.running = false;
+                },
+              };
+              const sample = () => {
+                if (!monitor.running) {
+                  return;
+                }
+                const snapshot = classify();
+                monitor.samples.push({
+                  timestamp: window.performance.now(),
+                  visible: snapshot.visible,
+                  containerKind: snapshot.containerKind,
+                  rowCount: snapshot.rowCount,
+                  activeWorkspaceName: snapshot.activeWorkspaceName,
+                });
+                if (monitor.samples.length > 600) {
+                  monitor.samples.shift();
+                }
+                window.requestAnimationFrame(sample);
+              };
+              window.__tsWorkspaceSwitcherTransitionMonitor = monitor;
+              sample();
+              return true;
+            }
+            """,
+            arg={"heading": self._switcher_heading},
+        )
+
+    def read_transition_monitor(
+        self,
+        *,
+        clear: bool = False,
+    ) -> WorkspaceSwitcherTransitionMonitorObservation:
+        payload = self._session.evaluate(
+            """
+            ({ clear }) => {
+              const monitor = window.__tsWorkspaceSwitcherTransitionMonitor;
+              if (!monitor || !Array.isArray(monitor.samples)) {
+                return {
+                  sampleCount: 0,
+                  visibleSampleCount: 0,
+                  hiddenSampleCount: 0,
+                  everHiddenAfterVisible: false,
+                  observedContainerKinds: [],
+                  observedRowCounts: [],
+                  observedActiveWorkspaceNames: [],
+                  latestVisibleContainerKind: null,
+                  latestVisibleRowCount: null,
+                  latestVisibleActiveWorkspaceName: null,
+                };
+              }
+              const samples = clear ? monitor.samples.splice(0, monitor.samples.length) : [...monitor.samples];
+              let sawVisible = false;
+              let everHiddenAfterVisible = false;
+              let latestVisibleContainerKind = null;
+              let latestVisibleRowCount = null;
+              let latestVisibleActiveWorkspaceName = null;
+              const kinds = [];
+              const rowCounts = [];
+              const activeWorkspaceNames = [];
+              for (const sample of samples) {
+                if (sample.visible) {
+                  sawVisible = true;
+                  latestVisibleContainerKind = sample.containerKind ?? null;
+                  latestVisibleRowCount = sample.rowCount ?? null;
+                  latestVisibleActiveWorkspaceName = sample.activeWorkspaceName ?? null;
+                  if (sample.containerKind && !kinds.includes(sample.containerKind)) {
+                    kinds.push(sample.containerKind);
+                  }
+                  if (
+                    sample.rowCount !== null
+                    && sample.rowCount !== undefined
+                    && !rowCounts.includes(sample.rowCount)
+                  ) {
+                    rowCounts.push(sample.rowCount);
+                  }
+                  if (
+                    sample.activeWorkspaceName
+                    && !activeWorkspaceNames.includes(sample.activeWorkspaceName)
+                  ) {
+                    activeWorkspaceNames.push(sample.activeWorkspaceName);
+                  }
+                } else if (sawVisible) {
+                  everHiddenAfterVisible = true;
+                }
+              }
+              return {
+                sampleCount: samples.length,
+                visibleSampleCount: samples.filter((sample) => sample.visible).length,
+                hiddenSampleCount: samples.filter((sample) => !sample.visible).length,
+                everHiddenAfterVisible,
+                observedContainerKinds: kinds,
+                observedRowCounts: rowCounts,
+                observedActiveWorkspaceNames: activeWorkspaceNames,
+                latestVisibleContainerKind,
+                latestVisibleRowCount,
+                latestVisibleActiveWorkspaceName,
+              };
+            }
+            """,
+            arg={"clear": clear},
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError("The workspace switcher transition monitor did not return data.")
+        return WorkspaceSwitcherTransitionMonitorObservation(
+            sample_count=int(payload.get("sampleCount", 0)),
+            visible_sample_count=int(payload.get("visibleSampleCount", 0)),
+            hidden_sample_count=int(payload.get("hiddenSampleCount", 0)),
+            ever_hidden_after_visible=bool(payload.get("everHiddenAfterVisible")),
+            observed_container_kinds=tuple(
+                str(item) for item in payload.get("observedContainerKinds", [])
+            ),
+            observed_row_counts=tuple(
+                int(item) for item in payload.get("observedRowCounts", [])
+            ),
+            observed_active_workspace_names=tuple(
+                str(item) for item in payload.get("observedActiveWorkspaceNames", [])
+            ),
+            latest_visible_container_kind=(
+                str(payload.get("latestVisibleContainerKind"))
+                if payload.get("latestVisibleContainerKind") is not None
+                else None
+            ),
+            latest_visible_row_count=(
+                int(payload.get("latestVisibleRowCount"))
+                if payload.get("latestVisibleRowCount") is not None
+                else None
+            ),
+            latest_visible_active_workspace_name=(
+                str(payload.get("latestVisibleActiveWorkspaceName"))
+                if payload.get("latestVisibleActiveWorkspaceName") is not None
+                else None
+            ),
+        )
+
+    def stop_transition_monitor(self) -> None:
+        self._session.evaluate(
+            """
+            () => {
+              const monitor = window.__tsWorkspaceSwitcherTransitionMonitor;
+              if (monitor && typeof monitor.stop === 'function') {
+                monitor.stop();
+              }
+              return true;
+            }
+            """,
+        )
+
     def close_switcher(self) -> None:
         try:
             self._session.press_key("Escape", timeout_ms=10_000)
@@ -1295,8 +1900,8 @@ class LiveWorkspaceSwitcherPage:
             focus_sequence=tuple(steps),
         )
 
-    def screenshot(self, path: str) -> None:
-        self._tracker_page.screenshot(path)
+    def screenshot(self, path: str, *, full_page: bool = True) -> None:
+        self._tracker_page.screenshot(path, full_page=full_page)
 
     def body_text(self) -> str:
         return self.current_body_text()
