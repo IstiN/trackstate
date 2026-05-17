@@ -999,6 +999,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Changes are committed directly with the local Git checkout. GitHub tokens are not used in this runtime.';
 
   @override
+  String get localGitHostedAccessDescription =>
+      'Local changes still use the checked-out repository. Connect GitHub here when you need hosted access without switching away from the active local workspace.';
+
+  @override
   String get close => 'Close';
 
   @override

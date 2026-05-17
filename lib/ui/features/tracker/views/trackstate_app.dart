@@ -3300,11 +3300,101 @@ String _hostedWorkspaceAccessModeLabel(
 
 Future<void> _showRepositoryAccessDialog(
   BuildContext context,
-  TrackerViewModel viewModel,
-) async {
+  TrackerViewModel viewModel, {
+  bool allowLocalGitHubConnection = false,
+}) async {
   final l10n = AppLocalizations.of(context)!;
   if (viewModel.usesLocalPersistence) {
     final project = viewModel.project;
+    if (allowLocalGitHubConnection) {
+      final controller = TextEditingController();
+      var rememberToken = true;
+      final dialogTitle = viewModel.hasLocalHostedAccessSession
+          ? l10n.manageGitHubAccess
+          : l10n.connectGitHub;
+      final connectionRequest = await showDialog<({String token, bool remember})?>(
+        context: context,
+        builder: (context) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              void submitConnection() {
+                Navigator.of(
+                  context,
+                ).pop((token: controller.text, remember: rememberToken));
+              }
+
+              final connectionMessage =
+                  viewModel.hasLocalHostedAccessSession &&
+                      viewModel.connectedUser != null
+                  ? l10n.githubConnected(
+                      viewModel.connectedUser!.login,
+                      project?.repository ?? l10n.configuredRepositoryFallback,
+                    )
+                  : l10n.localGitHostedAccessDescription;
+              return AlertDialog(
+                title: Text(dialogTitle),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${l10n.repository}: '
+                        '${project?.repository ?? l10n.configuredRepositoryFallback}',
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${l10n.branch}: '
+                        '${project?.branch ?? l10n.currentBranchFallback}',
+                      ),
+                      const SizedBox(height: 12),
+                      Text(connectionMessage),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: controller,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: l10n.fineGrainedToken,
+                          helperText: l10n.fineGrainedTokenHelper,
+                        ),
+                        onSubmitted: (_) => submitConnection(),
+                      ),
+                      const SizedBox(height: 8),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: rememberToken,
+                        title: Text(l10n.rememberOnThisBrowser),
+                        subtitle: Text(l10n.rememberOnThisBrowserHelp),
+                        onChanged: (value) =>
+                            setDialogState(() => rememberToken = value ?? true),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(l10n.cancel),
+                  ),
+                  FilledButton(
+                    onPressed: submitConnection,
+                    child: Text(l10n.connectToken),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+      if (connectionRequest case final request?) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          unawaited(
+            viewModel.connectGitHub(request.token, remember: request.remember),
+          );
+        });
+      }
+      return;
+    }
     await showDialog<void>(
       context: context,
       builder: (context) {
@@ -4797,6 +4887,9 @@ class _SettingsState extends State<_Settings> {
     final project = widget.viewModel.project!;
     final hostedLabel = _repositoryAccessLabel(l10n, widget.viewModel);
     final workspaceRestoreFailure = widget.workspaceRestoreFailure;
+    final showLocalGitHubAccess =
+        widget.workspaces.profiles.any((profile) => profile.isHosted) ||
+        widget.viewModel.hasLocalHostedAccessSession;
     final selectorChildren = <Widget>[
       if (widget.viewModel.supportsGitHubAuth) ...[
         _SettingsProviderButton(
@@ -4823,6 +4916,8 @@ class _SettingsState extends State<_Settings> {
       if (_selectedProvider == _SettingsProviderSelection.localGit) ...[
         const SizedBox(height: 12),
         _LocalGitConfiguration(
+          viewModel: widget.viewModel,
+          showGitHubAccess: showLocalGitHubAccess,
           repositoryPathController: _repositoryPathController,
           writeBranchController: _writeBranchController,
           repositoryPathFocusNode: _repositoryPathFocusNode,
@@ -9492,12 +9587,16 @@ class _HostedProviderConfigurationState
 
 class _LocalGitConfiguration extends StatelessWidget {
   const _LocalGitConfiguration({
+    required this.viewModel,
+    required this.showGitHubAccess,
     required this.repositoryPathController,
     required this.writeBranchController,
     required this.repositoryPathFocusNode,
     required this.writeBranchFocusNode,
   });
 
+  final TrackerViewModel viewModel;
+  final bool showGitHubAccess;
   final TextEditingController repositoryPathController;
   final TextEditingController writeBranchController;
   final FocusNode repositoryPathFocusNode;
@@ -9506,8 +9605,39 @@ class _LocalGitConfiguration extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final project = viewModel.project;
+    final accessTitle = viewModel.hasLocalHostedAccessSession
+        ? l10n.repositoryAccessConnected
+        : l10n.localGitRuntimeTitle;
+    final accessMessage =
+        viewModel.hasLocalHostedAccessSession && viewModel.connectedUser != null
+        ? l10n.githubConnected(
+            viewModel.connectedUser!.login,
+            project?.repository ?? l10n.configuredRepositoryFallback,
+          )
+        : l10n.localGitHostedAccessDescription;
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (showGitHubAccess) ...[
+          _AccessCallout(
+            semanticLabel: accessTitle,
+            title: accessTitle,
+            message: accessMessage,
+            tone: viewModel.hasLocalHostedAccessSession
+                ? _AccessCalloutTone.success
+                : _AccessCalloutTone.warning,
+            primaryActionLabel: viewModel.hasLocalHostedAccessSession
+                ? l10n.manageGitHubAccess
+                : l10n.connectGitHub,
+            onPrimaryAction: () => _showRepositoryAccessDialog(
+              context,
+              viewModel,
+              allowLocalGitHubConnection: true,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         _SettingsTextField(
           label: l10n.repositoryPath,
           controller: repositoryPathController,
