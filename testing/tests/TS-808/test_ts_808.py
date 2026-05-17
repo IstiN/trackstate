@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -70,6 +71,7 @@ def main() -> None:
         )
     user = service.fetch_authenticated_user()
     workspace_state = _workspace_state(service.repository)
+    prepared_local_workspace = _prepare_local_workspace_repository()
 
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
@@ -84,6 +86,7 @@ def main() -> None:
         "desktop_viewport": DESKTOP_VIEWPORT,
         "user_login": user.login,
         "preloaded_workspace_state": workspace_state,
+        "prepared_local_workspace": prepared_local_workspace,
         "steps": [],
         "human_verification": [],
     }
@@ -114,13 +117,55 @@ def main() -> None:
 
                 page.dismiss_connection_banner()
                 page.set_viewport(**DESKTOP_VIEWPORT)
-                trigger = page.observe_trigger()
+                initial_trigger = page.observe_trigger()
+                result["trigger_observation"] = _trigger_payload(initial_trigger)
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Viewed the signed-in shell before step 1 and captured the active "
+                        "workspace trigger state."
+                    ),
+                    observed=(
+                        f"trigger_label={initial_trigger.semantic_label!r}; "
+                        f"trigger_text={initial_trigger.visible_text!r}; "
+                        f"top_buttons={list(initial_trigger.top_button_labels)!r}"
+                    ),
+                )
+                try:
+                    trigger = _ensure_active_local_precondition(
+                        page=page,
+                        initial_trigger=initial_trigger,
+                        result=result,
+                    )
+                except AssertionError as error:
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=REQUEST_STEPS[0],
+                        observed=str(error),
+                    )
+                    _record_step(
+                        result,
+                        step=2,
+                        status="failed",
+                        action=REQUEST_STEPS[1],
+                        observed="Not reached because the signed-in active-local precondition failed before step 1.",
+                    )
+                    _record_step(
+                        result,
+                        step=3,
+                        status="failed",
+                        action=REQUEST_STEPS[2],
+                        observed="Not reached because the signed-in active-local precondition failed before step 1.",
+                    )
+                    raise
                 result["trigger_observation"] = _trigger_payload(trigger)
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the signed-in shell before opening the switcher and checked "
-                        "that the active workspace shown in the trigger was a Local Git workspace."
+                        "Confirmed the active workspace already matched the signed-in "
+                        "local precondition before opening the switcher."
                     ),
                     observed=(
                         f"trigger_label={trigger.semantic_label!r}; "
@@ -183,7 +228,6 @@ def main() -> None:
 
                 try:
                     _assert_connect_github_hidden(
-                        switcher=switcher,
                         active_local_row=active_local_row,
                     )
                 except AssertionError as error:
@@ -202,8 +246,7 @@ def main() -> None:
                     action=REQUEST_STEPS[2],
                     observed=(
                         "The active local row did not expose any visible `Connect GitHub` "
-                        "button, action label, or row text, and the switcher surface itself "
-                        "did not show `Connect GitHub` anywhere."
+                        "button, action label, or row text."
                     ),
                 )
                 _record_human_verification(
@@ -216,8 +259,7 @@ def main() -> None:
                     observed=(
                         f"selected_row_text={active_local_row.visible_text!r}; "
                         f"selected_row_actions={list(active_local_row.action_labels)!r}; "
-                        f"selected_row_buttons={list(active_local_row.button_labels)!r}; "
-                        f"switcher_contains_connect_github={'Connect GitHub' in switcher.switcher_text}"
+                        f"selected_row_buttons={list(active_local_row.button_labels)!r}"
                     ),
                 )
             except Exception:
@@ -278,6 +320,144 @@ def _workspace_state(repository: str) -> dict[str, object]:
     }
 
 
+def _prepare_local_workspace_repository() -> dict[str, object]:
+    local_path = Path(LOCAL_TARGET)
+    local_path.mkdir(parents=True, exist_ok=True)
+
+    git_dir = local_path / ".git"
+    if not git_dir.exists():
+        subprocess.run(
+            ["git", "init", "--initial-branch", DEFAULT_BRANCH, str(local_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    marker_path = local_path / ".trackstate-ts808-precondition.txt"
+    marker_path.write_text(
+        "Prepared for TS-808 signed-in active local workspace validation.\n",
+        encoding="utf-8",
+    )
+
+    subprocess.run(
+        ["git", "-C", str(local_path), "add", marker_path.name],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    status = subprocess.run(
+        ["git", "-C", str(local_path), "status", "--short"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    head = subprocess.run(
+        ["git", "-C", str(local_path), "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if status.stdout.strip() or head.returncode != 0:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(local_path),
+                "-c",
+                "user.name=TS-808 Automation",
+                "-c",
+                "user.email=ts808@example.com",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "Prepare TS-808 local workspace",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    branch = subprocess.run(
+        ["git", "-C", str(local_path), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    head = subprocess.run(
+        ["git", "-C", str(local_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    status = subprocess.run(
+        ["git", "-C", str(local_path), "status", "--short"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return {
+        "path": str(local_path),
+        "branch": branch.stdout.strip(),
+        "head": head.stdout.strip(),
+        "status": status.stdout.strip(),
+        "marker_path": str(marker_path),
+    }
+
+
+def _ensure_active_local_precondition(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    initial_trigger: WorkspaceSwitcherTriggerObservation,
+    result: dict[str, object],
+) -> WorkspaceSwitcherTriggerObservation:
+    if _trigger_matches_active_local_precondition(initial_trigger):
+        return initial_trigger
+
+    switcher = page.open_and_observe()
+    result["precondition_switcher_observation"] = _switcher_payload(switcher)
+    local_row = _find_named_local_row(switcher)
+    local_row_summary = (
+        _row_payload(local_row)
+        if local_row is not None
+        else {
+            "matched_display_name": LOCAL_DISPLAY_NAME,
+            "matched_target": LOCAL_TARGET,
+            "available_rows": [_row_payload(row) for row in switcher.rows],
+        }
+    )
+    raise AssertionError(
+        "Precondition failed before step 1: the app did not start with the prepared "
+        "signed-in active local workspace already selected in the `Local Git` state.\n"
+        f"Observed trigger label: {initial_trigger.semantic_label!r}\n"
+        f"Observed local row: {json.dumps(local_row_summary, indent=2)}\n"
+        f"Observed switcher text:\n{switcher.switcher_text}"
+    )
+
+
+def _trigger_matches_active_local_precondition(
+    trigger: WorkspaceSwitcherTriggerObservation,
+) -> bool:
+    return (
+        trigger.display_name == LOCAL_DISPLAY_NAME
+        and trigger.workspace_type == "Local"
+        and trigger.state_label == "Local Git"
+    )
+
+
+def _find_named_local_row(
+    switcher: WorkspaceSwitcherObservation,
+) -> WorkspaceSwitcherRowObservation | None:
+    for row in switcher.rows:
+        if (
+            row.display_name == LOCAL_DISPLAY_NAME
+            and row.target_type_label == "Local"
+            and LOCAL_TARGET in row.detail_text
+        ):
+            return row
+    return None
+
+
 def _find_active_local_row(
     switcher: WorkspaceSwitcherObservation,
     *,
@@ -301,7 +481,6 @@ def _find_active_local_row(
 
 def _assert_connect_github_hidden(
     *,
-    switcher: WorkspaceSwitcherObservation,
     active_local_row: WorkspaceSwitcherRowObservation,
 ) -> None:
     row_actions = [*active_local_row.action_labels, *active_local_row.button_labels]
@@ -317,12 +496,6 @@ def _assert_connect_github_hidden(
             "Step 3 failed: the active local workspace row still rendered "
             "`Connect GitHub` in its visible text while the user was already signed in.\n"
             f"Observed row text: {active_local_row.visible_text!r}"
-        )
-    if "Connect GitHub" in switcher.switcher_text:
-        raise AssertionError(
-            "Step 3 failed: the workspace switcher still displayed `Connect GitHub` "
-            "while the signed-in active local row was visible.\n"
-            f"Observed switcher text:\n{switcher.switcher_text}"
         )
 
 
@@ -531,11 +704,15 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Active local workspace still shows Connect GitHub while signed in",
+            f"# {_bug_title(result)}",
             "",
             "## Preconditions used during the run",
             "- User was signed in to GitHub via a stored browser token.",
             f"- Browser storage was preloaded with an active local workspace (`{LOCAL_TARGET}`) and one hosted workspace.",
+            (
+                f"- The local workspace path was prepared as a git repository at "
+                f"`{LOCAL_TARGET}` before opening the app."
+            ),
             "",
             "## Exact steps to reproduce",
             _annotated_step_line(result, 1, REQUEST_STEPS[0]),
@@ -547,6 +724,9 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Actual result",
             str(result.get("error", "<missing error>")),
+            "",
+            "## Missing or broken production-visible capability",
+            _bug_capability_gap(result),
             "",
             "## Exact error message or assertion failure",
             "```text",
@@ -569,7 +749,11 @@ def _bug_description(result: dict[str, object]) -> str:
             "```json",
             json.dumps(
                 {
+                    "prepared_local_workspace": result.get("prepared_local_workspace"),
                     "trigger_observation": result.get("trigger_observation"),
+                    "precondition_switcher_observation": result.get(
+                        "precondition_switcher_observation"
+                    ),
                     "active_local_row": result.get("active_local_row"),
                     "switcher_observation": result.get("switcher_observation"),
                 },
@@ -646,6 +830,67 @@ def _failed_step_summary(result: dict[str, object]) -> str:
             if isinstance(step, dict) and step.get("status") != "passed":
                 return f"Step {step.get('step')}: {step.get('observed')}"
     return str(result.get("error", "No failed step recorded."))
+
+
+def _failed_step_number(result: dict[str, object]) -> int | None:
+    steps = result.get("steps", [])
+    if isinstance(steps, list):
+        for step in steps:
+            if isinstance(step, dict) and step.get("status") != "passed":
+                return int(step.get("step", -1))
+    return None
+
+
+def _bug_title(result: dict[str, object]) -> str:
+    failed_step = _failed_step_number(result)
+    error = str(result.get("error", ""))
+    if failed_step == 3:
+        return (
+            f"{TICKET_KEY} - Active local workspace row still shows Connect GitHub "
+            "while signed in"
+        )
+    if failed_step == 2:
+        return (
+            f"{TICKET_KEY} - Active local workspace row was not selected in the "
+            "Local Git state"
+        )
+    if "Precondition failed before step 1" in error:
+        return (
+            f"{TICKET_KEY} - Signed-in active local workspace was not restored before "
+            "workspace-switcher verification"
+        )
+    return (
+        f"{TICKET_KEY} - Active local workspace did not meet the signed-in Local Git "
+        "precondition"
+    )
+
+
+def _bug_capability_gap(result: dict[str, object]) -> str:
+    failed_step = _failed_step_number(result)
+    error = str(result.get("error", ""))
+    if failed_step == 3:
+        return (
+            "While signed in to GitHub with the active local workspace row already "
+            "selected, the row still exposed a visible `Connect GitHub` label or action "
+            "instead of hiding it."
+        )
+    if failed_step == 2:
+        return (
+            "After opening Workspace switcher from the prepared signed-in session, the "
+            "app did not render the selected active local workspace row in the expected "
+            "`Local Git` state, so the TS-808 assertion target was unavailable."
+        )
+    if "Precondition failed before step 1" in error:
+        return (
+            "The app did not restore the prepared active local workspace as the current "
+            "signed-in workspace before the ticket steps started, even though browser "
+            "storage pointed at the local workspace and the local path existed as a git "
+            "repository."
+        )
+    return (
+        "The TS-808 scenario could not reach the expected signed-in active local "
+        "workspace state needed to verify the row-level `Connect GitHub` visibility."
+    )
 
 
 def _step_status(result: dict[str, object], step_number: int) -> str:

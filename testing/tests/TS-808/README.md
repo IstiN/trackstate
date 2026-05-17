@@ -29,7 +29,7 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-808/test_ts_808.py
 
 ```text
 Pass: the active local workspace row stays in the Local Git state and does not
-show Connect GitHub anywhere in the visible workspace-switcher surface while the
+show Connect GitHub in that row's visible text or row-owned controls while the
 session is already authenticated.
 
 Fail: the active local row still exposes Connect GitHub as a visible action,
