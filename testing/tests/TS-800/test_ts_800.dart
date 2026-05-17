@@ -19,7 +19,7 @@ const String _runCommand =
     'flutter test testing/tests/TS-800/test_ts_800.dart --reporter expanded';
 const String _readyStatus = 'Ready to open';
 const String _readyMessage =
-    'This folder already contains a committed TrackState workspace and is ready to open.';
+    'This folder is an existing committed Git repository and can be opened in TrackState without initialization.';
 const String _openExistingFolderLabel = 'Open existing folder';
 const String _openWorkspaceLabel = 'Open workspace';
 const String _initializeHereLabel = 'Initialize TrackState here';
