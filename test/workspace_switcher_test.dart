@@ -446,6 +446,73 @@ void main() {
   );
 
   testWidgets(
+    'workspace switcher opens an anchored desktop panel instead of a dialog',
+    (tester) async {
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+      expect(trigger, findsOneWidget);
+      final triggerRect = tester.getRect(trigger);
+
+      await tester.tap(
+        find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
+      );
+      await tester.pumpAndSettle();
+
+      final switcherSurface = find.byKey(
+        const ValueKey('workspace-switcher-sheet'),
+      );
+      expect(switcherSurface, findsOneWidget);
+      expect(find.byType(Dialog), findsNothing);
+
+      final switcherRect = tester.getRect(switcherSurface);
+      expect(switcherRect.top, greaterThanOrEqualTo(triggerRect.bottom - 12));
+      expect(switcherRect.top, lessThanOrEqualTo(triggerRect.bottom + 120));
+      expect(
+        (switcherRect.right - triggerRect.right).abs(),
+        lessThanOrEqualTo(120),
+      );
+    },
+  );
+
+  testWidgets(
     'workspace switcher keeps the current section while switching to another saved workspace',
     (tester) async {
       final service = _MemoryWorkspaceProfileService(

@@ -116,6 +116,9 @@ class _TrackStateAppState extends State<TrackStateApp>
       const <String, HostedWorkspaceAccessMode>{};
   Map<String, bool> _localWorkspaceAvailability = const <String, bool>{};
   final Map<String, String> _workspaceValidationFailures = <String, String>{};
+  final GlobalKey _workspaceSwitcherTriggerAnchorKey = GlobalKey(
+    debugLabel: 'workspace-switcher-trigger-anchor',
+  );
   _WorkspaceRestoreFailure? _pendingWorkspaceRestoreFailure;
 
   @override
@@ -966,17 +969,109 @@ class _TrackStateAppState extends State<TrackStateApp>
       );
       return;
     }
-    await showDialog<void>(
+    await _showDesktopWorkspaceSwitcherPanel(
       context: context,
-      builder: (dialogContext) {
-        return Dialog(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: content,
+      content: content,
+    );
+  }
+
+  Future<void> _showDesktopWorkspaceSwitcherPanel({
+    required BuildContext context,
+    required Widget content,
+  }) async {
+    final l10n = AppLocalizations.of(context)!;
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: l10n.workspaceSwitcher,
+      barrierColor: Colors.transparent,
+      pageBuilder: (dialogContext, _, _) {
+        final mediaQuery = MediaQuery.of(dialogContext);
+        final colors = dialogContext.ts;
+        final panelRect = _resolveWorkspaceSwitcherDesktopPanelRect(
+          viewportSize: mediaQuery.size,
+          safePadding: mediaQuery.padding,
+        );
+        final maxHeight = math.max(
+          280.0,
+          mediaQuery.size.height -
+              panelRect.top -
+              mediaQuery.padding.bottom -
+              12,
+        );
+        return SafeArea(
+          child: Stack(
+            children: [
+              Positioned(
+                left: panelRect.left,
+                top: panelRect.top,
+                width: panelRect.width,
+                child: Material(
+                  color: colors.surface,
+                  elevation: 16,
+                  shadowColor: colors.shadow,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    side: BorderSide(color: colors.border),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: maxHeight),
+                    child: SizedBox(width: panelRect.width, child: content),
+                  ),
+                ),
+              ),
+            ],
           ),
         );
       },
     );
+  }
+
+  Rect _resolveWorkspaceSwitcherDesktopPanelRect({
+    required Size viewportSize,
+    required EdgeInsets safePadding,
+  }) {
+    const horizontalMargin = 12.0;
+    const topGap = 8.0;
+    final availableWidth = math.max(
+      0.0,
+      viewportSize.width - (horizontalMargin * 2),
+    );
+    final panelWidth = availableWidth <= 360
+        ? availableWidth
+        : math.min(560.0, availableWidth);
+    final triggerRect = _workspaceSwitcherTriggerRect();
+    final anchoredRight =
+        triggerRect?.right ?? viewportSize.width - horizontalMargin;
+    final anchoredTop =
+        (triggerRect?.bottom ??
+            (safePadding.top + _desktopTopBarControlHeight)) +
+        topGap;
+    final maxLeft = math.max(
+      horizontalMargin,
+      viewportSize.width - horizontalMargin - panelWidth,
+    );
+    final left = (anchoredRight - panelWidth).clamp(horizontalMargin, maxLeft);
+    final maxTop = math.max(
+      safePadding.top + 8,
+      viewportSize.height - safePadding.bottom - 24,
+    );
+    final top = anchoredTop.clamp(safePadding.top + 8, maxTop);
+    return Rect.fromLTWH(left.toDouble(), top.toDouble(), panelWidth, 0);
+  }
+
+  Rect? _workspaceSwitcherTriggerRect() {
+    final triggerContext = _workspaceSwitcherTriggerAnchorKey.currentContext;
+    if (triggerContext == null) {
+      return null;
+    }
+    final renderObject = triggerContext.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) {
+      return null;
+    }
+    final offset = renderObject.localToGlobal(Offset.zero);
+    return offset & renderObject.size;
   }
 
   Future<void> _confirmAndDeleteWorkspaceFromSwitcher(
@@ -1104,6 +1199,8 @@ class _TrackStateAppState extends State<TrackStateApp>
               : _TrackerHome(
                   viewModel: viewModel,
                   workspaces: _workspaceState,
+                  workspaceSwitcherTriggerKey:
+                      _workspaceSwitcherTriggerAnchorKey,
                   isCreateIssueVisible: _isCreateIssueVisible,
                   onOpenCreateIssue: _openCreateIssue,
                   onOpenWorkspaceSwitcher: _openWorkspaceSwitcher,
@@ -1129,6 +1226,7 @@ class _TrackerHome extends StatelessWidget {
   const _TrackerHome({
     required this.viewModel,
     required this.workspaces,
+    required this.workspaceSwitcherTriggerKey,
     required this.isCreateIssueVisible,
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
@@ -1146,6 +1244,7 @@ class _TrackerHome extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final GlobalKey workspaceSwitcherTriggerKey;
   final bool isCreateIssueVisible;
   final _CreateIssueLauncher onOpenCreateIssue;
   final Future<void> Function(BuildContext context, {required bool compact})
@@ -1233,6 +1332,8 @@ class _TrackerHome extends StatelessWidget {
                       ? _MobileShell(
                           viewModel: viewModel,
                           workspaces: workspaces,
+                          workspaceSwitcherTriggerKey:
+                              workspaceSwitcherTriggerKey,
                           isCreateIssueVisible: isCreateIssueVisible,
                           onOpenCreateIssue: onOpenCreateIssue,
                           onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
@@ -1252,6 +1353,8 @@ class _TrackerHome extends StatelessWidget {
                       : _DesktopShell(
                           viewModel: viewModel,
                           workspaces: workspaces,
+                          workspaceSwitcherTriggerKey:
+                              workspaceSwitcherTriggerKey,
                           isCreateIssueVisible: isCreateIssueVisible,
                           onOpenCreateIssue: onOpenCreateIssue,
                           onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
@@ -2544,6 +2647,7 @@ class _DesktopShell extends StatelessWidget {
   const _DesktopShell({
     required this.viewModel,
     required this.workspaces,
+    required this.workspaceSwitcherTriggerKey,
     required this.isCreateIssueVisible,
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
@@ -2561,6 +2665,7 @@ class _DesktopShell extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final GlobalKey workspaceSwitcherTriggerKey;
   final bool isCreateIssueVisible;
   final _CreateIssueLauncher onOpenCreateIssue;
   final Future<void> Function(BuildContext context, {required bool compact})
@@ -2584,6 +2689,7 @@ class _DesktopShell extends StatelessWidget {
         Expanded(
           child: _TrackerMainPane(
             viewModel: viewModel,
+            workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
             isCreateIssueVisible: isCreateIssueVisible,
             onOpenCreateIssue: onOpenCreateIssue,
             onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
@@ -2609,6 +2715,7 @@ class _MobileShell extends StatelessWidget {
   const _MobileShell({
     required this.viewModel,
     required this.workspaces,
+    required this.workspaceSwitcherTriggerKey,
     required this.isCreateIssueVisible,
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
@@ -2626,6 +2733,7 @@ class _MobileShell extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final GlobalKey workspaceSwitcherTriggerKey;
   final bool isCreateIssueVisible;
   final _CreateIssueLauncher onOpenCreateIssue;
   final Future<void> Function(BuildContext context, {required bool compact})
@@ -2645,6 +2753,7 @@ class _MobileShell extends StatelessWidget {
   Widget build(BuildContext context) {
     return _TrackerMainPane(
       viewModel: viewModel,
+      workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
       compact: true,
       isCreateIssueVisible: isCreateIssueVisible,
       onOpenCreateIssue: onOpenCreateIssue,
@@ -2667,6 +2776,7 @@ class _MobileShell extends StatelessWidget {
 class _TrackerMainPane extends StatelessWidget {
   const _TrackerMainPane({
     required this.viewModel,
+    required this.workspaceSwitcherTriggerKey,
     required this.isCreateIssueVisible,
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
@@ -2685,6 +2795,7 @@ class _TrackerMainPane extends StatelessWidget {
   });
 
   final TrackerViewModel viewModel;
+  final GlobalKey workspaceSwitcherTriggerKey;
   final bool compact;
   final bool isCreateIssueVisible;
   final _CreateIssueLauncher onOpenCreateIssue;
@@ -2712,6 +2823,7 @@ class _TrackerMainPane extends StatelessWidget {
               viewModel: viewModel,
               workspaces: workspaces,
               compact: compact,
+              workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
               onOpenCreateIssue: onOpenCreateIssue,
               onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
               onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
@@ -2848,6 +2960,7 @@ class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.viewModel,
     required this.workspaces,
+    required this.workspaceSwitcherTriggerKey,
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
     required this.onOpenWorkspaceOnboarding,
@@ -2857,6 +2970,7 @@ class _TopBar extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final GlobalKey workspaceSwitcherTriggerKey;
   final _CreateIssueLauncher onOpenCreateIssue;
   final Future<void> Function(BuildContext context, {required bool compact})
   onOpenWorkspaceSwitcher;
@@ -2960,27 +3074,30 @@ class _TopBar extends StatelessWidget {
                     const SizedBox(width: 8),
                     orderedControl(
                       workspaceSwitcherOrder,
-                      KeyedSubtree(
-                        key: const ValueKey('workspace-switcher-trigger'),
-                        child: Semantics(
-                          container: true,
-                          button: true,
-                          enabled: openWorkspaceSwitcher != null,
-                          label: workspaceSummary.semanticLabel,
-                          child: ExcludeSemantics(
-                            child: condensedDesktop
-                                ? _WorkspaceSwitcherTriggerButton(
-                                    summary: workspaceSummary,
-                                    compact: false,
-                                    condensed: true,
-                                    onPressed: openWorkspaceSwitcher,
-                                  )
-                                : _PrimaryButton(
-                                    label: workspaceSummary.textLabel,
-                                    icon: workspaceSummary.icon,
-                                    onPressed: openWorkspaceSwitcher,
-                                    height: _desktopTopBarControlHeight,
-                                  ),
+                      SizedBox(
+                        key: workspaceSwitcherTriggerKey,
+                        child: KeyedSubtree(
+                          key: const ValueKey('workspace-switcher-trigger'),
+                          child: Semantics(
+                            container: true,
+                            button: true,
+                            enabled: openWorkspaceSwitcher != null,
+                            label: workspaceSummary.semanticLabel,
+                            child: ExcludeSemantics(
+                              child: condensedDesktop
+                                  ? _WorkspaceSwitcherTriggerButton(
+                                      summary: workspaceSummary,
+                                      compact: false,
+                                      condensed: true,
+                                      onPressed: openWorkspaceSwitcher,
+                                    )
+                                  : _PrimaryButton(
+                                      label: workspaceSummary.textLabel,
+                                      icon: workspaceSummary.icon,
+                                      onPressed: openWorkspaceSwitcher,
+                                      height: _desktopTopBarControlHeight,
+                                    ),
+                            ),
                           ),
                         ),
                       ),
@@ -5331,6 +5448,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
     final workspaceRowActionCount = widget.workspaces.profiles.length * 2;
     final addWorkspaceOrderBase = workspaceRowActionCount.toDouble() + 1;
     return Padding(
+      key: const ValueKey('workspace-switcher-sheet'),
       padding: const EdgeInsets.all(20),
       child: FocusTraversalGroup(
         policy: OrderedTraversalPolicy(),
