@@ -1,15 +1,13 @@
-import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 
 import '../../../core/utils/local_git_test_repository.dart';
 import '../../TS-724/support/ts724_workspace_switch_validation_fixture.dart';
-import '../../TS-725/support/ts725_local_hosted_workspace_fixture.dart';
 
 class Ts809DualLocalWorkspaceFixture {
   Ts809DualLocalWorkspaceFixture._({
-    required this.tester,
     required this.workspaceProfileService,
     required this.activeLocalWorkspace,
     required this.inactiveLocalWorkspace,
@@ -21,7 +19,6 @@ class Ts809DualLocalWorkspaceFixture {
   static const String activeLocalDisplayName = 'Active local workspace';
   static const String inactiveLocalDisplayName = 'Inactive local workspace';
 
-  final WidgetTester tester;
   final WorkspaceProfileService workspaceProfileService;
   final WorkspaceProfile activeLocalWorkspace;
   final WorkspaceProfile inactiveLocalWorkspace;
@@ -32,9 +29,7 @@ class Ts809DualLocalWorkspaceFixture {
   String get activeLocalRepositoryPath => _activeLocalRepositoryHandle.path;
   String get inactiveLocalRepositoryPath => _inactiveLocalRepositoryHandle.path;
 
-  static Future<Ts809DualLocalWorkspaceFixture> create(
-    WidgetTester tester,
-  ) async {
+  static Future<Ts809DualLocalWorkspaceFixture> create() async {
     SharedPreferences.setMockInitialValues(const <String, Object>{});
 
     final activeLocalRepositoryHandle = await LocalGitTestRepository.create();
@@ -61,7 +56,6 @@ class Ts809DualLocalWorkspaceFixture {
     );
 
     return Ts809DualLocalWorkspaceFixture._(
-      tester: tester,
       workspaceProfileService: workspaceProfileService,
       activeLocalWorkspace: activeLocalWorkspace,
       inactiveLocalWorkspace: inactiveLocalWorkspace,
@@ -74,28 +68,18 @@ class Ts809DualLocalWorkspaceFixture {
     return workspaceProfileService.loadState();
   }
 
-  Future<Ts725LocalHostedWorkspaceScreen> launch() async {
-    final screen = Ts725LocalHostedWorkspaceScreen(tester);
-    await screen.launchApp(
-      workspaceProfileService: workspaceProfileService,
-      openLocalRepository:
-          ({
-            required String repositoryPath,
-            required String defaultBranch,
-            required String writeBranch,
-          }) async {
-            if (repositoryPath == activeLocalRepositoryPath ||
-                repositoryPath == inactiveLocalRepositoryPath) {
-              return createTs724LocalWorkspaceRepository(
-                repositoryPath: repositoryPath,
-              );
-            }
-            throw StateError(
-              'TS-809 does not know how to open "$repositoryPath".',
-            );
-          },
-    );
-    return screen;
+  Future<TrackStateRepository> openLocalRepository({
+    required String repositoryPath,
+    required String defaultBranch,
+    required String writeBranch,
+  }) async {
+    if (repositoryPath == activeLocalRepositoryPath ||
+        repositoryPath == inactiveLocalRepositoryPath) {
+      return createTs724LocalWorkspaceRepository(
+        repositoryPath: repositoryPath,
+      );
+    }
+    throw StateError('TS-809 does not know how to open "$repositoryPath".');
   }
 
   Future<void> dispose() async {

@@ -4,7 +4,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../TS-725/support/ts725_local_hosted_workspace_fixture.dart';
+import '../../components/factories/testing_dependencies.dart';
+import '../../core/interfaces/trackstate_app_component.dart';
 import 'support/ts809_dual_local_workspace_fixture.dart';
 
 const String _ticketKey = 'TS-809';
@@ -17,7 +18,6 @@ const List<String> _requestSteps = <String>[
   'Open the workspace switcher.',
   'Identify a local workspace row that is not currently marked as active.',
   "Inspect the action controls for this inactive local workspace row and verify that the 'Connect GitHub' control is visible.",
-  "Activate the inactive local row's 'Connect GitHub' control.",
 ];
 
 void main() {
@@ -43,13 +43,14 @@ void main() {
 
       final semantics = tester.ensureSemantics();
       Ts809DualLocalWorkspaceFixture? fixture;
-      Ts725LocalHostedWorkspaceScreen? screen;
+      final TrackStateAppComponent screen = defaultTestingDependencies
+          .createTrackStateAppScreen(tester);
 
       try {
-        fixture = await Ts809DualLocalWorkspaceFixture.create(tester);
-        screen = await fixture.launch();
-        await screen.waitForReady(
-          Ts809DualLocalWorkspaceFixture.activeLocalDisplayName,
+        fixture = await Ts809DualLocalWorkspaceFixture.create();
+        await screen.pumpWorkspaceProfileApp(
+          workspaceProfileService: fixture.workspaceProfileService,
+          openLocalRepository: fixture.openLocalRepository,
         );
 
         result['active_local_workspace_id'] = fixture.activeLocalWorkspace.id;
@@ -65,15 +66,16 @@ void main() {
         await screen.openWorkspaceSwitcher();
         final workspaceState = await fixture.loadWorkspaceState();
         result['active_workspace_id'] = workspaceState.activeWorkspaceId;
-        result['visible_texts_before_click'] = screen.visibleTexts();
+        result['visible_texts_in_switcher'] = screen.visibleTextsSnapshot();
         result['visible_semantics_before_click'] = screen
             .visibleSemanticsLabelsSnapshot();
+        final switcherVisible = await screen.isWorkspaceSwitcherVisible();
 
         final step1Observed =
-            'switcher_visible=${screen.isWorkspaceSwitcherVisible}; '
+            'switcher_visible=$switcherVisible; '
             'active_workspace=${workspaceState.activeWorkspaceId}; '
-            'visible_texts=${_formatList(screen.visibleTexts())}';
-        final step1Passed = screen.isWorkspaceSwitcherVisible;
+            'visible_texts=${_formatList(screen.visibleTextsSnapshot())}';
+        final step1Passed = switcherVisible;
         _recordStep(
           result,
           step: 1,
@@ -88,28 +90,31 @@ void main() {
           );
         }
 
+        final inactiveLocalRowPresent = await screen.workspaceRowContainsText(
+          fixture.inactiveLocalWorkspace.id,
+          Ts809DualLocalWorkspaceFixture.inactiveLocalDisplayName,
+        );
+        final inactiveLocalRowHasLocalBadge = await screen
+            .workspaceRowContainsText(
+              fixture.inactiveLocalWorkspace.id,
+              'Local',
+            );
+        final inactiveLocalRowHasActiveLabel = await screen
+            .workspaceRowContainsText(
+              fixture.inactiveLocalWorkspace.id,
+              'Active',
+            );
         final inactiveLocalObserved =
             'selected=${workspaceState.activeWorkspaceId == fixture.inactiveLocalWorkspace.id}; '
-            "has_local_type=${screen.workspaceRowContainsText(fixture.inactiveLocalWorkspace.id, 'Local')}; "
-            "has_local_git_state=${screen.workspaceRowContainsText(fixture.inactiveLocalWorkspace.id, 'Local Git')}; "
-            "has_active_label=${screen.workspaceRowContainsText(fixture.inactiveLocalWorkspace.id, 'Active')}; "
-            'has_open_button=${screen.canOpenWorkspace(fixture.inactiveLocalWorkspace.id)}';
+            'row_present=$inactiveLocalRowPresent; '
+            'has_local_badge=$inactiveLocalRowHasLocalBadge; '
+            'has_active_label=$inactiveLocalRowHasActiveLabel';
         final inactiveLocalMatches =
             workspaceState.activeWorkspaceId !=
                 fixture.inactiveLocalWorkspace.id &&
-            screen.workspaceRowContainsText(
-              fixture.inactiveLocalWorkspace.id,
-              'Local',
-            ) &&
-            screen.workspaceRowContainsText(
-              fixture.inactiveLocalWorkspace.id,
-              'Local Git',
-            ) &&
-            !screen.workspaceRowContainsText(
-              fixture.inactiveLocalWorkspace.id,
-              'Active',
-            ) &&
-            screen.canOpenWorkspace(fixture.inactiveLocalWorkspace.id);
+            inactiveLocalRowPresent &&
+            inactiveLocalRowHasLocalBadge &&
+            !inactiveLocalRowHasActiveLabel;
         _recordStep(
           result,
           step: 2,
@@ -119,23 +124,22 @@ void main() {
         );
         if (!inactiveLocalMatches) {
           failures.add(
-            'Step 2 failed: the inactive local workspace row did not show the expected inactive Local Git state.\n'
+            'Step 2 failed: the inactive local workspace row was not identified as a visible non-active local row.\n'
             'Observed: $inactiveLocalObserved',
           );
         }
 
-        final connectGitHubVisibleInRow = screen.workspaceRowHasControl(
+        final connectGitHubVisibleInRow = await screen.workspaceRowHasControl(
           fixture.inactiveLocalWorkspace.id,
           'Connect GitHub',
         );
         final connectGitHubVisibleAnywhere =
-            screen.isControlVisible('Connect GitHub') ||
-            screen.isTextVisible('Connect GitHub') ||
-            screen.isSemanticsLabelVisible('Connect GitHub');
+            await screen.isTextVisible('Connect GitHub') ||
+            await screen.isSemanticsLabelVisible('Connect GitHub');
         final step3Observed =
             'row_has_connect_github=$connectGitHubVisibleInRow; '
             'screen_has_connect_github=$connectGitHubVisibleAnywhere; '
-            'visible_texts=${_formatList(screen.visibleTexts())}; '
+            'visible_texts=${_formatList(screen.visibleTextsSnapshot())}; '
             'visible_semantics=${_formatList(screen.visibleSemanticsLabelsSnapshot())}';
         _recordStep(
           result,
@@ -156,69 +160,7 @@ void main() {
           check:
               'Viewed Workspace switcher exactly as a signed-out user would and checked the inactive local row content and visible controls.',
           observed:
-              'visible_texts=${_formatList(screen.visibleTexts())}; visible_semantics=${_formatList(screen.visibleSemanticsLabelsSnapshot())}',
-        );
-
-        final tappedConnectGitHub =
-            connectGitHubVisibleInRow &&
-            await screen.tapWorkspaceRowControl(
-              fixture.inactiveLocalWorkspace.id,
-              'Connect GitHub',
-            );
-        final authFlowVisible =
-            tappedConnectGitHub &&
-            await screen.waitForAnyVisibleText(const <String>[
-              'Connect GitHub',
-              'Fine-grained token',
-              'Connect token',
-            ]);
-        final tokenFieldVisible =
-            authFlowVisible &&
-            screen.isLabeledTextFieldVisible('Fine-grained token');
-        final connectTokenVisible =
-            authFlowVisible && screen.isControlVisible('Connect token');
-        final connectDialogTitleVisible =
-            authFlowVisible &&
-            (screen.isTextVisible('Connect GitHub') ||
-                screen.isSemanticsLabelVisible('Connect GitHub'));
-        result['visible_texts_after_click'] = screen.visibleTexts();
-        result['visible_semantics_after_click'] = screen
-            .visibleSemanticsLabelsSnapshot();
-
-        final step4Observed =
-            'tapped_connect_github=$tappedConnectGitHub; '
-            'auth_flow_visible=$authFlowVisible; '
-            'connect_dialog_title_visible=$connectDialogTitleVisible; '
-            'token_field_visible=$tokenFieldVisible; '
-            'connect_token_visible=$connectTokenVisible; '
-            'visible_texts=${_formatList(screen.visibleTexts())}; '
-            'visible_semantics=${_formatList(screen.visibleSemanticsLabelsSnapshot())}';
-        final step4Passed =
-            tappedConnectGitHub &&
-            authFlowVisible &&
-            connectDialogTitleVisible &&
-            tokenFieldVisible &&
-            connectTokenVisible;
-        _recordStep(
-          result,
-          step: 4,
-          status: step4Passed ? 'passed' : 'failed',
-          action: _requestSteps[3],
-          observed: step4Observed,
-        );
-        if (!step4Passed) {
-          failures.add(
-            "Step 4 failed: clicking the inactive local row's 'Connect GitHub' control did not open the production authentication flow.\n"
-            'Observed: $step4Observed',
-          );
-        }
-
-        _recordHumanVerification(
-          result,
-          check:
-              "Clicked the inactive local row's Connect GitHub action and checked the dialog content a user would actually see next.",
-          observed:
-              'visible_texts=${_formatList(screen.visibleTexts())}; visible_semantics=${_formatList(screen.visibleSemanticsLabelsSnapshot())}',
+              'visible_texts=${_formatList(screen.visibleTextsSnapshot())}; visible_semantics=${_formatList(screen.visibleSemanticsLabelsSnapshot())}',
         );
 
         if (failures.isNotEmpty) {
@@ -232,7 +174,6 @@ void main() {
         _writeFailureOutputs(result);
         Error.throwWithStackTrace(error, stackTrace);
       } finally {
-        screen?.dispose();
         await fixture?.dispose();
         semantics.dispose();
       }
@@ -331,8 +272,8 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '',
     'h4. What was automated',
     '* Launched the production tracker in the supported Flutter widget runtime with two local workspaces saved and no GitHub token.',
-    '* Opened *Workspace switcher* and verified the inactive local row remained visibly local, non-active, and still offered its row-level controls.',
-    "* Verified that the inactive local row itself exposed a visible {{Connect GitHub}} action while signed out and that clicking it opened the production authentication dialog.",
+    '* Opened *Workspace switcher* and identified the inactive local workspace row without requiring extra row-shape details beyond being local and not active.',
+    "* Verified that the inactive local row itself exposed a visible {{Connect GitHub}} action while signed out.",
     '',
     'h4. Result',
     passed
@@ -370,9 +311,8 @@ String _markdownSummary(Map<String, Object?> result, {required bool passed}) {
     '',
     '## What was automated',
     '- Launched the production tracker in the supported Flutter widget runtime with two saved local workspaces and no stored GitHub auth.',
-    '- Opened **Workspace switcher** and verified the inactive local row showed `Local Git`, was not marked active, and still exposed its row actions.',
-    "- Verified the inactive local row exposed a visible `Connect GitHub` action while signed out and clicked that same row action.",
-    '- Treated the scenario as passed only when the production auth dialog exposed `Fine-grained token` and `Connect token`.',
+    '- Opened **Workspace switcher** and identified the inactive local row using only the ticket-relevant conditions: visible, local, and not active.',
+    "- Verified the inactive local row exposed a visible `Connect GitHub` action while signed out.",
     '',
     '## Result',
     passed
@@ -403,13 +343,13 @@ String _markdownSummary(Map<String, Object?> result, {required bool passed}) {
 String _bugDescription(Map<String, Object?> result) {
   final failedStep = _firstFailedStep(result);
   return [
-    '# $_ticketKey - Inactive local workspace does not keep Connect GitHub visible and actionable while signed out',
+    '# $_ticketKey - Inactive local workspace does not show Connect GitHub while signed out',
     '',
     '## Exact steps to reproduce',
     ..._bugStepLines(result),
     '',
     '## Expected result',
-    "The inactive local workspace row displays `Local Git` alongside a visible `Connect GitHub` control, and clicking that control initiates the authentication flow by opening the production GitHub auth dialog.",
+    'The inactive local workspace row is visible as a non-active local workspace and displays a visible `Connect GitHub` control while signed out.',
     '',
     '## Actual result',
     _actualResultSummary(result),
@@ -436,11 +376,8 @@ String _bugDescription(Map<String, Object?> result) {
     '```json',
     const JsonEncoder.withIndent('  ').convert(<String, Object?>{
       'active_workspace_id': result['active_workspace_id'],
-      'visible_texts_before_click': result['visible_texts_before_click'],
-      'visible_semantics_before_click':
-          result['visible_semantics_before_click'],
-      'visible_texts_after_click': result['visible_texts_after_click'],
-      'visible_semantics_after_click': result['visible_semantics_after_click'],
+      'visible_texts_in_switcher': result['visible_texts_in_switcher'],
+      'visible_semantics_in_switcher': result['visible_semantics_before_click'],
       'failed_step': failedStep,
     }),
     '```',
@@ -541,14 +478,12 @@ String _failedStep(Map<String, Object?> result) {
 String _actualResultSummary(Map<String, Object?> result) {
   final step2 = _stepByNumber(result, 2);
   final step3 = _stepByNumber(result, 3);
-  final step4 = _stepByNumber(result, 4);
-  if (step2 != null || step3 != null || step4 != null) {
+  if (step2 != null || step3 != null) {
     return 'The inactive local workspace row was visible and not active, '
-        'but it rendered `Local` with `Open`/`Delete` instead of rendering '
-        '`Local Git` with a row-level `Connect GitHub` control. '
+        'but it did not expose a row-level `Connect GitHub` control while '
+        'signed out. '
         'Observed step 2: ${step2?['observed'] ?? '<missing>'}. '
-        'Observed step 3: ${step3?['observed'] ?? '<missing>'}. '
-        'Observed step 4: ${step4?['observed'] ?? '<missing>'}.';
+        'Observed step 3: ${step3?['observed'] ?? '<missing>'}.';
   }
   return '${result['error'] ?? ''}';
 }

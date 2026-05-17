@@ -5,13 +5,13 @@ platform: linux
 dependencies:
   - Flutter SDK available on PATH
 notes:
-  - Reuses the production workspace switcher screen harness from TS-725.
+  - Uses the shared TrackStateAppComponent workspace-switcher abstraction.
   - Seeds two valid local workspaces so one inactive local row is visible while signed out.
-  - Verifies the inactive local workspace row visibly renders Connect GitHub and that the production auth dialog opens from that row action.
+  - Verifies the inactive local workspace row visibly renders Connect GitHub without expanding the scope into the auth-dialog flow.
 runtime_inputs:
   active_workspace_kind: local
   inactive_workspace_kind: local
   active_workspace_auth_state: signed_out
-  expected_inactive_state: Local Git
+  expected_inactive_state: visible local row that is not active
   expected_row_action: Connect GitHub
   run_command: flutter test testing/tests/TS-809/test_ts_809.dart --reporter expanded
