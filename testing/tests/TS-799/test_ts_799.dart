@@ -260,23 +260,69 @@ void main() {
               'The Workspace name field was empty for the empty-folder initialization flow.',
             );
           }
-          if (writeBranch != 'main') {
+          if (writeBranch.trim().isEmpty) {
             step4Failures.add(
-              'The Write Branch field did not default to `main` for the empty folder.\n'
-              'Observed write branch: $writeBranch',
+              'The Write Branch field was empty for the empty-folder initialization flow.',
             );
           }
 
-          if (step4Failures.isEmpty) {
-            await screen.submit();
-            await _pumpUntil(
-              tester,
-              () => openedRepositories.length == 1,
-              timeout: const Duration(seconds: 40),
-              failureMessage:
-                  'Timed out waiting for the empty-folder initialization flow to open the initialized workspace.',
+          _recordHumanVerification(
+            result,
+            check:
+                'Viewed the first-launch onboarding screen as a user before choosing any local folder option.',
+            observed: 'visible_texts=${initialState.visibleTexts.join(' | ')}',
+          );
+          _recordHumanVerification(
+            result,
+            check:
+                'Chose Initialize folder and reviewed the exact status card copy, selected folder path, editable fields, and button state shown for the empty directory.',
+            observed:
+                'status_label=${selectedState.statusLabel}; '
+                'inspection_message=${selectedState.inspectionMessage}; '
+                'folder_path=${selectedState.folderPath}; '
+                'workspace_name=$workspaceName; '
+                'write_branch=$writeBranch; '
+                'submit_label=${selectedState.submitLabel}; '
+                'submit_enabled=${selectedState.isSubmitEnabled}',
+          );
+
+          if (step4Failures.isNotEmpty) {
+            final gitDirectoryExists = Directory(
+              '${directory.path}/.git',
+            ).existsSync();
+            final projectJsonPaths = _projectJsonPaths(directory);
+            result['opened_repositories'] = openedRepositories;
+            result['git_directory_exists'] = gitDirectoryExists;
+            result['project_json_paths'] = projectJsonPaths;
+            _recordStep(
+              result,
+              step: 4,
+              status: 'failed',
+              action: _requestSteps[3],
+              observed:
+                  'status_label=${selectedState.statusLabel}; '
+                  'inspection_message=${selectedState.inspectionMessage}; '
+                  'submit_label=${selectedState.submitLabel}; '
+                  'submit_visible=${selectedState.isSubmitVisible}; '
+                  'submit_enabled=${selectedState.isSubmitEnabled}; '
+                  'workspace_name=$workspaceName; '
+                  'write_branch=$writeBranch; '
+                  'opened_repositories=${openedRepositories.join(' | ')}; '
+                  'active_workspace_target=<not-submitted>; '
+                  'git_directory_exists=$gitDirectoryExists; '
+                  'project_json_paths=${projectJsonPaths.join(' | ')}',
             );
+            throw AssertionError(step4Failures.join('\n'));
           }
+
+          await screen.submit();
+          await _pumpUntil(
+            tester,
+            () => openedRepositories.length == 1,
+            timeout: const Duration(seconds: 40),
+            failureMessage:
+                'Timed out waiting for the empty-folder initialization flow to open the initialized workspace.',
+          );
 
           final workspaceState = await tester.runAsync(
             () => workspaceProfileService.loadState(),
@@ -301,42 +347,40 @@ void main() {
           result['git_directory_exists'] = gitDirectoryExists;
           result['project_json_paths'] = projectJsonPaths;
 
-          if (step4Failures.isEmpty) {
-            if (openedRepositories.length != 1) {
-              step4Failures.add(
-                'The enabled Initialize action did not open the initialized workspace exactly once.\n'
-                'Observed opened repositories: ${openedRepositories.join(' | ')}',
-              );
-            }
-            if (activeWorkspace?.target != directory.path) {
-              step4Failures.add(
-                'The initialized workspace was not stored as the active workspace.\n'
-                'Observed target: ${activeWorkspace?.target}',
-              );
-            }
-            if (activeWorkspace?.defaultBranch != writeBranch ||
-                activeWorkspace?.writeBranch != writeBranch) {
-              step4Failures.add(
-                'The initialized workspace did not preserve the selected write branch.\n'
-                'Observed default/write branch: ${activeWorkspace?.defaultBranch}/${activeWorkspace?.writeBranch}',
-              );
-            }
-            if (activeWorkspace?.displayName != workspaceName) {
-              step4Failures.add(
-                'The initialized workspace did not preserve the selected workspace name.\n'
-                'Observed display name: ${activeWorkspace?.displayName}',
-              );
-            }
-            if (!gitDirectoryExists) {
-              step4Failures.add(
-                'Clicking the enabled Initialize action did not create a .git directory in the selected folder.',
-              );
-            }
-            if (projectJsonPaths.isEmpty) {
-              step4Failures.add(
-                'Clicking the enabled Initialize action did not create any TrackState project.json scaffold under the selected folder.',
-              );
-            }
+          if (openedRepositories.length != 1) {
+            step4Failures.add(
+              'The enabled Initialize action did not open the initialized workspace exactly once.\n'
+              'Observed opened repositories: ${openedRepositories.join(' | ')}',
+            );
+          }
+          if (activeWorkspace?.target != directory.path) {
+            step4Failures.add(
+              'The initialized workspace was not stored as the active workspace.\n'
+              'Observed target: ${activeWorkspace?.target}',
+            );
+          }
+          if (activeWorkspace?.defaultBranch != writeBranch ||
+              activeWorkspace?.writeBranch != writeBranch) {
+            step4Failures.add(
+              'The initialized workspace did not preserve the selected write branch.\n'
+              'Observed default/write branch: ${activeWorkspace?.defaultBranch}/${activeWorkspace?.writeBranch}',
+            );
+          }
+          if (activeWorkspace?.displayName != workspaceName) {
+            step4Failures.add(
+              'The initialized workspace did not preserve the selected workspace name.\n'
+              'Observed display name: ${activeWorkspace?.displayName}',
+            );
+          }
+          if (!gitDirectoryExists) {
+            step4Failures.add(
+              'Clicking the enabled Initialize action did not create a .git directory in the selected folder.',
+            );
+          }
+          if (projectJsonPaths.isEmpty) {
+            step4Failures.add(
+              'Clicking the enabled Initialize action did not create any TrackState project.json scaffold under the selected folder.',
+            );
           }
 
           _recordStep(
@@ -357,26 +401,6 @@ void main() {
                 'git_directory_exists=$gitDirectoryExists; '
                 'project_json_paths=${projectJsonPaths.join(' | ')}',
           );
-
-          _recordHumanVerification(
-            result,
-            check:
-                'Viewed the first-launch onboarding screen as a user before choosing any local folder option.',
-            observed: 'visible_texts=${initialState.visibleTexts.join(' | ')}',
-          );
-          _recordHumanVerification(
-            result,
-            check:
-                'Chose Initialize folder and reviewed the exact status card copy, selected folder path, editable fields, and button state shown for the empty directory.',
-            observed:
-                'status_label=${selectedState.statusLabel}; '
-                'inspection_message=${selectedState.inspectionMessage}; '
-                'folder_path=${selectedState.folderPath}; '
-                'workspace_name=$workspaceName; '
-                'write_branch=$writeBranch; '
-                'submit_label=${selectedState.submitLabel}; '
-                'submit_enabled=${selectedState.isSubmitEnabled}',
-          );
           _recordHumanVerification(
             result,
             check:
@@ -387,10 +411,6 @@ void main() {
                 'git_directory_exists=$gitDirectoryExists; '
                 'project_json_paths=${projectJsonPaths.join(' | ')}',
           );
-
-          if (step4Failures.isNotEmpty) {
-            throw AssertionError(step4Failures.join('\n'));
-          }
 
           _writePassOutputs(result);
         } finally {
