@@ -243,6 +243,7 @@ File get _jiraCommentFile => File('${_outputsDir.path}/jira_comment.md');
 File get _prBodyFile => File('${_outputsDir.path}/pr_body.md');
 File get _responseFile => File('${_outputsDir.path}/response.md');
 File get _resultFile => File('${_outputsDir.path}/test_automation_result.json');
+File get _reviewRepliesFile => File('${_outputsDir.path}/review_replies.json');
 File get _bugDescriptionFile => File('${_outputsDir.path}/bug_description.md');
 
 void _recordStep(
@@ -295,6 +296,7 @@ void _writePassOutputs(Map<String, Object?> result) {
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: true));
   _prBodyFile.writeAsStringSync(summary);
   _responseFile.writeAsStringSync(summary);
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: true));
 }
 
 void _writeFailureOutputs(Map<String, Object?> result) {
@@ -315,6 +317,7 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _jiraCommentFile.writeAsStringSync(_jiraComment(result, passed: false));
   _prBodyFile.writeAsStringSync(summary);
   _responseFile.writeAsStringSync(summary);
+  _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: false));
   _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
 }
 
@@ -442,6 +445,17 @@ String _bugDescription(Map<String, Object?> result) {
     }),
     '```',
   ].join('\n');
+}
+
+String _reviewReplies(Map<String, Object?> result, {required bool passed}) {
+  final reply = passed
+      ? 'Fixed: resolved the TS-795 merge conflict, kept the detailed failure reporting from the ticket branch, added the required `outputs/review_replies.json` artifact, and reran the test successfully against the merged code.'
+      : 'Fixed: resolved the TS-795 merge conflict, kept the detailed failure reporting from the ticket branch, added the required `outputs/review_replies.json` artifact, and reran the test. The remaining failure is product-visible: ${result['error'] ?? 'see attached failure output'}.';
+  return '${jsonEncode(<String, Object>{
+    'replies': <Map<String, Object?>>[
+      <String, Object?>{'inReplyToId': null, 'threadId': null, 'reply': reply},
+    ],
+  })}\n';
 }
 
 List<String> _bugStepLines(Map<String, Object?> result) {

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
@@ -34,6 +36,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   );
 
   Finder get localGitAccessButton => find.bySemanticsLabel(RegExp('Local Git'));
+
+  Finder get _workspaceSwitcherTrigger =>
+      find.byKey(const ValueKey<String>('workspace-switcher-trigger'));
+
+  Finder get _workspaceSwitcherSheet =>
+      find.byKey(const ValueKey<String>('workspace-switcher-sheet'));
 
   Finder get topBar {
     final repositoryAccess = repositoryAccessButton.evaluate().toList();
@@ -223,6 +231,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Finder _statusColumn(String label) =>
       find.bySemanticsLabel(RegExp('${RegExp.escape(label)} column'));
 
+  Finder _workspaceRow(String workspaceId) =>
+      find.byKey(ValueKey<String>('workspace-$workspaceId'));
+
   @override
   Future<void> pumpLocalGitApp({
     required String repositoryPath,
@@ -251,8 +262,53 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await _pumpWidget(resolvedRepository);
   }
 
+  @override
+  Future<void> pumpWorkspaceProfileApp({
+    required WorkspaceProfileService workspaceProfileService,
+    LocalRepositoryLoader? openLocalRepository,
+  }) async {
+    await _pumpTrackStateApp(
+      TrackStateApp(
+        key: UniqueKey(),
+        workspaceProfileService: workspaceProfileService,
+        openLocalRepository:
+            openLocalRepository ??
+            ({
+              required String repositoryPath,
+              required String defaultBranch,
+              required String writeBranch,
+            }) => _repositoryService.openRepository(
+              repositoryPath: repositoryPath,
+            ),
+      ),
+      resetSharedPreferences: false,
+    );
+  }
+
   Future<void> _pumpWidget(TrackStateRepository repository) async {
-    SharedPreferences.setMockInitialValues({});
+    await _pumpTrackStateApp(
+      TrackStateApp(
+        key: UniqueKey(),
+        repository: repository,
+        openLocalRepository:
+            ({
+              required String repositoryPath,
+              required String defaultBranch,
+              required String writeBranch,
+            }) => _repositoryService.openRepository(
+              repositoryPath: repositoryPath,
+            ),
+      ),
+    );
+  }
+
+  Future<void> _pumpTrackStateApp(
+    TrackStateApp app, {
+    bool resetSharedPreferences = true,
+  }) async {
+    if (resetSharedPreferences) {
+      SharedPreferences.setMockInitialValues({});
+    }
     tester.view.physicalSize = const Size(1440, 960);
     tester.view.devicePixelRatio = 1;
     addTearDown(() {
@@ -260,23 +316,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       tester.view.resetDevicePixelRatio();
     });
 
-    await tester.pumpWidget(
-      KeyedSubtree(
-        key: _goldenTargetKey,
-        child: TrackStateApp(
-          key: UniqueKey(),
-          repository: repository,
-          openLocalRepository:
-              ({
-                required String repositoryPath,
-                required String defaultBranch,
-                required String writeBranch,
-              }) => _repositoryService.openRepository(
-                repositoryPath: repositoryPath,
-              ),
-        ),
-      ),
-    );
+    await tester.pumpWidget(KeyedSubtree(key: _goldenTargetKey, child: app));
     await _pumpFrames();
   }
 
@@ -290,6 +330,80 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Future<void> openRepositoryAccess() async {
     await tester.tap(repositoryAccessButton.first);
     await tester.pumpAndSettle();
+  }
+
+  @override
+  Future<void> openWorkspaceSwitcher() async {
+    await _waitForVisible(
+      _workspaceSwitcherTrigger,
+      timeout: const Duration(seconds: 10),
+    );
+    await tester.tap(_workspaceSwitcherTrigger.first, warnIfMissed: false);
+    await _waitForVisible(_workspaceSwitcherSheet);
+  }
+
+  @override
+  Future<void> closeWorkspaceSwitcher() async {
+    await tester.pump();
+    if (_workspaceSwitcherSheet.evaluate().isEmpty) {
+      return;
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    if (_workspaceSwitcherSheet.evaluate().isNotEmpty) {
+      await tester.tapAt(const Offset(8, 8));
+      await tester.pumpAndSettle();
+    }
+  }
+
+  @override
+  Future<bool> isWorkspaceSwitcherVisible() async {
+    await tester.pump();
+    return _workspaceSwitcherSheet.evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<bool> workspaceRowContainsText(String workspaceId, String text) async {
+    await tester.pump();
+    return find
+        .descendant(
+          of: _workspaceRow(workspaceId),
+          matching: find.text(text, findRichText: true),
+        )
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  Future<bool> workspaceRowContainsTextContaining(
+    String workspaceId,
+    String text,
+  ) async {
+    await tester.pump();
+    return find
+        .descendant(
+          of: _workspaceRow(workspaceId),
+          matching: find.textContaining(text, findRichText: true),
+        )
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  Future<bool> workspaceRowHasControl(String workspaceId, String label) async {
+    await tester.pump();
+    final row = _workspaceRow(workspaceId);
+    final semanticsMatch = find.descendant(
+      of: row,
+      matching: _exactSemanticsLabel(label),
+    );
+    if (semanticsMatch.evaluate().isNotEmpty) {
+      return true;
+    }
+    return find
+        .descendant(of: row, matching: find.text(label, findRichText: true))
+        .evaluate()
+        .isNotEmpty;
   }
 
   @override

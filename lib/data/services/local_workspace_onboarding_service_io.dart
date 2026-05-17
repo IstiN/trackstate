@@ -182,9 +182,9 @@ class LocalGitWorkspaceOnboardingService
     if (!hasTrackStateArtifacts) {
       return LocalWorkspaceInspection(
         folderPath: normalizedPath,
-        state: LocalWorkspaceInspectionState.readyToInitialize,
+        state: LocalWorkspaceInspectionState.readyToOpen,
         message:
-            'Git is already initialized here, but TrackState metadata is missing. Initialize TrackState here to create the project scaffold.',
+            'This folder is an existing committed Git repository and can be opened in TrackState without initialization.',
         suggestedWorkspaceName: suggestedWorkspaceName,
         suggestedWriteBranch: suggestedWriteBranch,
         detectedWriteBranch: detectedWriteBranch,
@@ -349,19 +349,11 @@ class LocalGitWorkspaceOnboardingService
           '${jsonEncode(_localizedLabelsJson)}\n',
       '$projectKey/.trackstate/index/issues.json':
           '${jsonEncode([
-            {
-              'key': starterIssueKey,
-              'path': starterIssuePath,
-              'summary': 'Welcome to $workspaceName',
-              'issueType': 'story',
-              'status': 'todo',
-              'updated': starterIssueUpdatedAt,
-              'children': <String>[],
-              'archived': false,
-            },
+            {'key': starterIssueKey, 'path': starterIssuePath, 'summary': 'Welcome to $workspaceName', 'issueType': 'story', 'status': 'todo', 'updated': starterIssueUpdatedAt, 'children': <String>[], 'archived': false},
           ])}\n',
       '$projectKey/.trackstate/index/tombstones.json': '[]\n',
-      starterIssuePath: '''---
+      starterIssuePath:
+          '''---
 key: $starterIssueKey
 project: $projectKey
 issueType: story

@@ -299,8 +299,8 @@ class UrllibWebAppSession(WebAppSession):
             "Download capture is not supported by the urllib web session fallback."
         )
 
-    def screenshot(self, path: str) -> None:
-        del path
+    def screenshot(self, path: str, *, full_page: bool = True) -> None:
+        del path, full_page
         return None
 
 
