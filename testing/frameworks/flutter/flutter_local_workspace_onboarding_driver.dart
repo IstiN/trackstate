@@ -114,6 +114,21 @@ class FlutterLocalWorkspaceOnboardingDriver
   }
 
   @override
+  Future<void> submit() async {
+    final submit = find.byKey(_submitKey);
+    if (submit.evaluate().isEmpty) {
+      throw TestFailure('Expected the local onboarding submit action.');
+    }
+    await _tester.ensureVisible(submit.first);
+    await _tester.runAsync(() async {
+      await _tester.tap(submit.first, warnIfMissed: false);
+      await _tester.pump();
+      await Future<void>.delayed(_pumpStep);
+    });
+    await _tester.pump();
+  }
+
+  @override
   LocalWorkspaceOnboardingState captureState() {
     final visibleTexts = _uniqueVisibleTexts(find.byType(Text));
     final submit = find.byKey(_submitKey);
