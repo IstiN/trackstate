@@ -499,19 +499,10 @@ class _TrackStateAppState extends State<TrackStateApp>
       if (!restored) {
         if (mounted) {
           setState(() {
+            _showsWorkspaceOnboarding = true;
             _workspaceProfilesReady = true;
           });
         }
-        await viewModel.load();
-        if (_pendingWorkspaceRestoreFailure case final failure?) {
-          viewModel.showMessage(
-            TrackerMessage.workspaceRestoreFailed(
-              workspaceName: failure.workspaceName,
-              reason: failure.reason,
-            ),
-          );
-        }
-        viewModel.openProjectSettings();
       }
       return;
     }
@@ -839,8 +830,9 @@ class _TrackStateAppState extends State<TrackStateApp>
         ),
       );
     }
-    viewModel.openProjectSettings();
-    setState(() {});
+    setState(() {
+      _showsWorkspaceOnboarding = true;
+    });
   }
 
   Future<void> _deleteWorkspaceProfile(WorkspaceProfile workspace) async {

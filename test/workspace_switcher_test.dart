@@ -86,7 +86,7 @@ void main() {
   );
 
   testWidgets(
-    'startup restore routes to settings recovery when every saved workspace is invalid',
+    'startup restore routes to add workspace when every saved workspace is invalid',
     (tester) async {
       final service = _MemoryWorkspaceProfileService(
         WorkspaceProfilesState(
@@ -150,17 +150,19 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Project Settings'), findsOneWidget);
+      expect(find.text('Add workspace'), findsOneWidget);
+      expect(find.text('Local folder'), findsOneWidget);
+      expect(find.text('Hosted repository'), findsOneWidget);
+      expect(find.text('Project Settings'), findsNothing);
       expect(
-        find.textContaining('No valid saved workspace could be restored.'),
+        find.byKey(const ValueKey('workspace-onboarding-local-path')),
         findsOneWidget,
       );
-      expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
     },
   );
 
   testWidgets(
-    'saved workspace recovery keeps Retry visible and revalidates invalid workspaces',
+    'saved workspace recovery keeps onboarding available when every saved workspace is invalid',
     (tester) async {
       final service = _MemoryWorkspaceProfileService(
         WorkspaceProfilesState(
@@ -225,24 +227,14 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Project Settings'), findsOneWidget);
-      expect(
-        find.textContaining('No valid saved workspace could be restored.'),
-        findsOneWidget,
-      );
-      expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
+      expect(find.text('Add workspace'), findsOneWidget);
+      expect(find.text('Local folder'), findsOneWidget);
+      expect(find.text('Hosted repository'), findsOneWidget);
       expect(hostedValidationAttempts, 1);
-
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Retry'));
-      await tester.pumpAndSettle();
-
-      expect(hostedValidationAttempts, 2);
-      expect(find.text('Project Settings'), findsOneWidget);
       expect(
-        find.textContaining('No valid saved workspace could be restored.'),
+        find.byKey(const ValueKey('workspace-onboarding-local-path')),
         findsOneWidget,
       );
-      expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
     },
   );
 
