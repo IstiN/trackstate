@@ -293,8 +293,8 @@ class TrackStateTrackerPage:
     def body_text(self) -> str:
         return self.session.body_text()
 
-    def screenshot(self, path: str) -> None:
-        self.session.screenshot(path)
+    def screenshot(self, path: str, *, full_page: bool = True) -> None:
+        self.session.screenshot(path, full_page=full_page)
 
     def observe_workspace_restore_message(
         self,
