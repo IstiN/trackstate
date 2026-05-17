@@ -1879,20 +1879,20 @@ class _LocalWorkspaceOnboardingScreenState
                             const SizedBox(height: 20),
                             Align(
                               alignment: Alignment.centerRight,
-                                child: FilledButton(
-                                  key: const ValueKey(
-                                    'local-workspace-onboarding-submit',
-                                  ),
-                                  onPressed:
-                                      _isSubmitting ||
-                                          actionLabel == null ||
-                                          inspection.state ==
-                                              LocalWorkspaceInspectionState
-                                                  .blocked
-                                      ? null
-                                      : _submit,
-                                  child: Text(actionLabel ?? ''),
+                              child: FilledButton(
+                                key: const ValueKey(
+                                  'local-workspace-onboarding-submit',
                                 ),
+                                onPressed:
+                                    _isSubmitting ||
+                                        actionLabel == null ||
+                                        inspection.state ==
+                                            LocalWorkspaceInspectionState
+                                                .blocked
+                                    ? null
+                                    : _submit,
+                                child: Text(actionLabel ?? ''),
+                              ),
                             ),
                           ],
                         ],
@@ -5596,7 +5596,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
       widget.viewModel,
       widget.workspaces,
     );
-    final workspaceRowActionCount = widget.workspaces.profiles.length * 2;
+    final workspaceRowActionCount = widget.workspaces.profiles.length * 3;
     final addWorkspaceOrderBase = workspaceRowActionCount.toDouble() + 1;
     return Padding(
       key: const ValueKey('workspace-switcher-sheet'),
@@ -5687,7 +5687,27 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                             localWorkspaceAvailability:
                                 widget.localWorkspaceAvailability,
                           ),
-                          focusOrderBase: index * 2.0 + 1,
+                          focusOrderBase: index * 3.0 + 1,
+                          primaryActionLabel:
+                              widget.workspaces.profiles[index].id ==
+                                      activeWorkspaceId &&
+                                  widget.workspaces.profiles[index].isLocal &&
+                                  widget.viewModel.usesLocalPersistence
+                              ? (widget.viewModel.hasLocalHostedAccessSession
+                                    ? l10n.manageGitHubAccess
+                                    : l10n.connectGitHub)
+                              : null,
+                          onPrimaryAction:
+                              widget.workspaces.profiles[index].id ==
+                                      activeWorkspaceId &&
+                                  widget.workspaces.profiles[index].isLocal &&
+                                  widget.viewModel.usesLocalPersistence
+                              ? () => _showRepositoryAccessDialog(
+                                  context,
+                                  widget.viewModel,
+                                  allowLocalGitHubConnection: true,
+                                )
+                              : null,
                           onSelect:
                               widget.workspaces.profiles[index].id ==
                                   activeWorkspaceId
@@ -5787,6 +5807,8 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
     required this.stateLabel,
     required this.focusOrderBase,
     required this.onDelete,
+    this.primaryActionLabel,
+    this.onPrimaryAction,
     this.onSelect,
   });
 
@@ -5795,6 +5817,8 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
   final String stateLabel;
   final double focusOrderBase;
   final VoidCallback onDelete;
+  final String? primaryActionLabel;
+  final VoidCallback? onPrimaryAction;
   final VoidCallback? onSelect;
 
   @override
@@ -5852,8 +5876,11 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
             children: [
               if (isActive)
                 Text(
@@ -5875,9 +5902,25 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
                     ),
                   ),
                 ),
-              const SizedBox(width: 8),
+              if (primaryActionLabel != null && onPrimaryAction != null)
+                FocusTraversalOrder(
+                  order: NumericFocusOrder(focusOrderBase + 1),
+                  child: Semantics(
+                    button: true,
+                    label: primaryActionLabel,
+                    child: ExcludeSemantics(
+                      child: OutlinedButton(
+                        key: ValueKey(
+                          'workspace-primary-action-${workspace.id}',
+                        ),
+                        onPressed: onPrimaryAction,
+                        child: Text(primaryActionLabel!),
+                      ),
+                    ),
+                  ),
+                ),
               FocusTraversalOrder(
-                order: NumericFocusOrder(focusOrderBase + 1),
+                order: NumericFocusOrder(focusOrderBase + 2),
                 child: Semantics(
                   button: true,
                   label: '${l10n.delete}: ${workspace.displayName}',
