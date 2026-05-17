@@ -1,13 +1,14 @@
 # TS-800
 
-Validates that selecting an existing Git repository during first-launch
+Validates that selecting an existing plain Git repository during first-launch
 onboarding is recognized correctly, skips re-initialization, and allows the
-user to continue with the ready-to-open flow.
+user to continue without requiring a new TrackState initialization.
 
 The automation:
-1. creates a temporary committed local TrackState repository fixture
-2. verifies the production local onboarding service classifies that folder as
-   `readyToOpen`
+1. creates a temporary committed local Git repository fixture without any
+   TrackState scaffold
+2. verifies the production local onboarding service inspects that folder
+   through the live picker-driven onboarding flow
 3. launches the onboarding screen, chooses `Open existing folder`, and selects
    the prepared repository through the directory picker
 4. verifies the rendered ready-state copy, selected folder path, and enabled

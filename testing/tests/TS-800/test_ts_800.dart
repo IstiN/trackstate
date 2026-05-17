@@ -9,7 +9,7 @@ import 'package:trackstate/data/services/local_workspace_onboarding_service_io.d
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 
 import '../../fixtures/workspace_onboarding_screen_fixture.dart';
-import '../TS-717/support/ts717_ready_workspace_fixture.dart';
+import 'support/ts800_existing_git_repository_fixture.dart';
 
 const String _ticketKey = 'TS-800';
 const String _ticketSummary =
@@ -51,7 +51,9 @@ void main() {
       };
 
       final semantics = tester.ensureSemantics();
-      final fixture = await tester.runAsync(Ts717ReadyWorkspaceFixture.create);
+      final fixture = await tester.runAsync(
+        Ts800ExistingGitRepositoryFixture.create,
+      );
       if (fixture == null) {
         semantics.dispose();
         throw StateError('TS-800 fixture creation did not complete.');
@@ -70,7 +72,7 @@ void main() {
         }
 
         result['repository_path'] = fixture.repositoryPath;
-        result['workspace_folder_name'] = fixture.workspaceFolderName;
+        result['workspace_folder_name'] = fixture.repositoryFolderName;
         result['before_head_revision'] = beforeSnapshot.headRevision;
         result['before_worktree_status'] = beforeSnapshot.worktreeStatusLines;
         result['before_files'] = beforeSnapshot.files;
@@ -93,17 +95,17 @@ void main() {
           'canOpen': inspection.canOpen,
         };
 
-        if (inspection.state != LocalWorkspaceInspectionState.readyToOpen ||
-            !inspection.canOpen ||
+        if (inspection.state == LocalWorkspaceInspectionState.blocked ||
             inspection.folderPath != fixture.repositoryPath ||
             !inspection.hasGitRepository) {
           throw AssertionError(
-            'Precondition failed: the production LocalWorkspaceOnboardingService did not classify the prepared folder as a ready existing Git repository.\n'
+            'Precondition failed: the production LocalWorkspaceOnboardingService did not recognize the prepared folder as an existing Git repository.\n'
             'Observed state: ${inspection.state.name}\n'
             'Observed message: ${inspection.message}\n'
             'Observed folder path: ${inspection.folderPath}\n'
             'Observed hasGitRepository: ${inspection.hasGitRepository}\n'
-            'Observed canOpen: ${inspection.canOpen}',
+            'Observed canOpen: ${inspection.canOpen}\n'
+            'Observed canInitialize: ${inspection.canInitialize}',
           );
         }
 
@@ -231,11 +233,10 @@ void main() {
               onboardingService.inspectedFolderPaths.length == 1 &&
               onboardingService.inspectedFolderPaths.single ==
                   fixture.repositoryPath &&
-              productionInspection.state ==
-                  LocalWorkspaceInspectionState.readyToOpen &&
+              productionInspection.state !=
+                  LocalWorkspaceInspectionState.blocked &&
               productionInspection.folderPath == fixture.repositoryPath &&
               productionInspection.hasGitRepository &&
-              productionInspection.canOpen &&
               selectedState.localFolderPath == fixture.repositoryPath;
           _recordStep(
             result,
@@ -254,7 +255,8 @@ void main() {
               'Observed recorded inspection state: ${productionInspection.state.name}\n'
               'Observed recorded inspection folder path: ${productionInspection.folderPath}\n'
               'Observed recorded hasGitRepository: ${productionInspection.hasGitRepository}\n'
-              'Observed recorded canOpen: ${productionInspection.canOpen}',
+              'Observed recorded canOpen: ${productionInspection.canOpen}\n'
+              'Observed recorded canInitialize: ${productionInspection.canInitialize}',
             );
           }
 
@@ -443,7 +445,7 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '',
     'h4. What was tested',
     '* Opened the production first-launch onboarding screen and used the local folder picker flow for an existing Git repository.',
-    '* Selected a real committed local TrackState repository containing a {.git} directory.',
+    '* Selected a real committed local Git repository containing a {.git} directory but no existing TrackState workspace metadata.',
     '* Checked the ready-state status text, guidance message, selected folder path, workspace details fields, and the visible primary action to confirm initialization was skipped.',
     '* Activated the visible {noformat}Open workspace{noformat} action to confirm the user could continue.',
     '',
@@ -496,7 +498,7 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '',
     '### What was tested',
     '- Opened the production first-launch onboarding screen and used the local folder picker flow for an existing Git repository.',
-    '- Selected a real committed local TrackState repository containing a `.git` directory.',
+    '- Selected a real committed local Git repository containing a `.git` directory but no existing TrackState workspace metadata.',
     '- Checked the ready-state status text, guidance message, selected folder path, workspace details fields, and the visible primary action to confirm initialization was skipped.',
     '- Activated the visible `Open workspace` action to confirm the user could continue.',
     '',
@@ -590,7 +592,7 @@ String _bugDescription(Map<String, Object?> result) {
     'The onboarding UI should recognize the selected folder as an existing Git repository, skip re-initialization by replacing the initialization path with an enabled `Open workspace` action, and allow the user to continue.',
     '',
     '## Actual result',
-    'After selecting `${result['repository_path']}`, the UI showed status `${result['status_label'] ?? '<missing>'}` with message `${result['inspection_message'] ?? '<missing>'}` and primary action `${result['primary_action_label'] ?? '<missing>'}` (`enabled=${result['primary_action_enabled']}`). Dashboard visible after continuing: `${result['dashboard_visible'] ?? '<missing>'}`.',
+    'After selecting `${result['repository_path']}`, the production inspection reported `${(result['production_inspection'] as Map?)?['state'] ?? '<missing>'}` and the UI showed status `${result['status_label'] ?? '<missing>'}` with message `${result['inspection_message'] ?? '<missing>'}` and primary action `${result['primary_action_label'] ?? '<missing>'}` (`enabled=${result['primary_action_enabled']}`). Dashboard visible after continuing: `${result['dashboard_visible'] ?? '<missing>'}`.',
     '',
     '## Exact error message / stack trace',
     '```',
@@ -601,7 +603,7 @@ String _bugDescription(Map<String, Object?> result) {
     '',
     '## Actual vs Expected',
     '- **Expected:** selecting an existing Git repository should show ready-to-open feedback, avoid a re-initialization CTA, and allow the user to continue with `Open workspace`.',
-    '- **Actual:** visible texts were `${_formatList((result['visible_texts'] as List?)?.cast<Object?>() ?? const <Object?>[])}` and the primary action was `${result['primary_action_label'] ?? '<missing>'}` with `enabled=${result['primary_action_enabled']}`.',
+    '- **Actual:** the real onboarding inspection for the plain Git repository returned `${(result['production_inspection'] as Map?)?['state'] ?? '<missing>'}`, visible texts were `${_formatList((result['visible_texts'] as List?)?.cast<Object?>() ?? const <Object?>[])}`, and the primary action was `${result['primary_action_label'] ?? '<missing>'}` with `enabled=${result['primary_action_enabled']}`.',
     '',
     '## Environment',
     '- Command: `$_runCommand`',
@@ -613,6 +615,7 @@ String _bugDescription(Map<String, Object?> result) {
     '## Relevant logs',
     '```',
     'Picker invocation: ${jsonEncode(result['picker_invocation'])}',
+    'Production inspection: ${jsonEncode(result['production_inspection'])}',
     'Inspected folder paths: ${_inspectionPaths(result)}',
     'Visible texts: ${_formatList((result['visible_texts'] as List?)?.cast<Object?>() ?? const <Object?>[])}',
     'Interactive semantics labels: ${_formatList((result['interactive_semantics_labels'] as List?)?.cast<Object?>() ?? const <Object?>[])}',
