@@ -514,6 +514,7 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       if (finders.any((finder) => finder.evaluate().isNotEmpty)) {
         return;
       }
+      await _drainRealAsyncWork(step);
       await _tester.pump(step);
       elapsed += step;
     }
@@ -543,6 +544,7 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
           detailsTitle.evaluate().isNotEmpty) {
         return;
       }
+      await _drainRealAsyncWork(step);
       await _tester.pump(step);
       elapsed += step;
     }
@@ -557,6 +559,12 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
       'selected_folder=${_selectedFolderPath() ?? '<none>'}; '
       'visible_texts=${_uniqueVisibleTexts().join(' | ')}',
     );
+  }
+
+  Future<void> _drainRealAsyncWork(Duration step) async {
+    await _tester.runAsync(() async {
+      await Future<void>.delayed(step);
+    });
   }
 
   List<String> _uniqueVisibleTexts() {

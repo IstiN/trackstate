@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -166,16 +165,7 @@ void main() {
             );
           }
 
-          await tester.tap(
-            find.byKey(
-              const ValueKey('local-workspace-onboarding-open-existing'),
-            ),
-          );
-          await tester.pump();
-          await _waitForLocalWorkspaceDetailsForm(
-            tester,
-            onboardingService: onboardingService,
-          );
+          await screen.chooseExistingFolder();
 
           final recordedInspection = onboardingService.lastInspection;
           final pickerInvocation = _singleOrNullMap(pickerInvocations);
@@ -779,49 +769,4 @@ String _inspectionPaths(Map<String, Object?> result) {
     return _formatList(inspectionPaths.cast<Object?>());
   }
   return '<missing>';
-}
-
-Future<void> _waitForLocalWorkspaceDetailsForm(
-  WidgetTester tester, {
-  required _RecordingRealOnboardingService onboardingService,
-}) async {
-  final nameField = find.descendant(
-    of: find.byKey(const ValueKey('local-workspace-onboarding-name')),
-    matching: find.byType(EditableText),
-  );
-  final submitButton = find.byKey(
-    const ValueKey('local-workspace-onboarding-submit'),
-  );
-  final changeFolderButton = find.byKey(
-    const ValueKey('local-workspace-onboarding-change-folder'),
-  );
-  final detailsTitle = find.text('Workspace details');
-  final loadingIndicator = find.text('Loading...');
-  const step = Duration(milliseconds: 100);
-  const timeout = Duration(seconds: 10);
-  var elapsed = Duration.zero;
-
-  while (elapsed < timeout) {
-    if (nameField.evaluate().isNotEmpty &&
-        submitButton.evaluate().isNotEmpty &&
-        changeFolderButton.evaluate().isNotEmpty &&
-        detailsTitle.evaluate().isNotEmpty) {
-      return;
-    }
-    await tester.runAsync(() => Future<void>.delayed(step));
-    await tester.pump(step);
-    elapsed += step;
-  }
-
-  throw StateError(
-    'Local workspace details did not render within ${timeout.inSeconds}s after folder selection. '
-    'Observed loading=${loadingIndicator.evaluate().isNotEmpty}; '
-    'name_field=${nameField.evaluate().isNotEmpty}; '
-    'submit_button=${submitButton.evaluate().isNotEmpty}; '
-    'change_folder=${changeFolderButton.evaluate().isNotEmpty}; '
-    'details_title=${detailsTitle.evaluate().isNotEmpty}; '
-    'selected_folder=${find.textContaining(Directory.systemTemp.path).evaluate().isNotEmpty ? '<visible>' : '<none>'}; '
-    'recorded_inspection_state=${onboardingService.lastInspection?.state.name ?? '<missing>'}; '
-    'visible_texts=${find.byType(Text).evaluate().map((element) => (element.widget as Text).data?.trim()).whereType<String>().where((text) => text.isNotEmpty).join(' | ')}',
-  );
 }
