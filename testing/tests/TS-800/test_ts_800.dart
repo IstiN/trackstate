@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -109,8 +110,8 @@ void main() {
 
         final pickerInvocations = <Map<String, String?>>[];
         final openedRepositories = <String>[];
-        final onboardingService = _RecordingLocalWorkspaceOnboardingService(
-          inspection,
+        final onboardingService = _RecordingRealOnboardingService(
+          delegate: service,
         );
         final workspaceProfileService =
             SharedPreferencesWorkspaceProfileService(
@@ -165,27 +166,55 @@ void main() {
             );
           }
 
-          await screen.chooseExistingFolder();
+          await tester.tap(
+            find.byKey(
+              const ValueKey('local-workspace-onboarding-open-existing'),
+            ),
+          );
+          await tester.pump();
+          await _waitForLocalWorkspaceDetailsForm(
+            tester,
+            onboardingService: onboardingService,
+          );
 
+          final recordedInspection = onboardingService.lastInspection;
           final pickerInvocation = _singleOrNullMap(pickerInvocations);
           final step2Passed =
               pickerInvocation != null &&
-              pickerInvocation['confirmButtonText'] == 'Choose existing folder';
+              pickerInvocation['confirmButtonText'] ==
+                  'Choose existing folder' &&
+              recordedInspection != null;
           result['picker_invocation'] = pickerInvocation;
+          result['production_inspection'] = recordedInspection == null
+              ? null
+              : <String, Object?>{
+                  'state': recordedInspection.state.name,
+                  'message': recordedInspection.message,
+                  'folderPath': recordedInspection.folderPath,
+                  'suggestedWorkspaceName':
+                      recordedInspection.suggestedWorkspaceName,
+                  'suggestedWriteBranch':
+                      recordedInspection.suggestedWriteBranch,
+                  'detectedWriteBranch': recordedInspection.detectedWriteBranch,
+                  'hasGitRepository': recordedInspection.hasGitRepository,
+                  'canOpen': recordedInspection.canOpen,
+                };
           _recordStep(
             result,
             step: 2,
             status: step2Passed ? 'passed' : 'failed',
             action: _requestSteps[1],
             observed:
-                'picker_invocations=${jsonEncode(pickerInvocations)}; inspected_folder_paths=${_formatList(onboardingService.inspectedFolderPaths)}',
+                'picker_invocations=${jsonEncode(pickerInvocations)}; inspected_folder_paths=${_formatList(onboardingService.inspectedFolderPaths)}; production_inspection_state=${recordedInspection?.state.name ?? '<missing>'}',
           );
           if (!step2Passed) {
             throw AssertionError(
-              'Step 2 failed: selecting the local folder flow did not invoke the directory picker with the expected existing-folder action.\n'
-              'Observed picker invocations: ${jsonEncode(pickerInvocations)}',
+              'Step 2 failed: selecting the local folder flow did not invoke the real onboarding inspection through the expected existing-folder picker action.\n'
+              'Observed picker invocations: ${jsonEncode(pickerInvocations)}\n'
+              'Observed recorded inspection: ${recordedInspection == null ? '<missing>' : recordedInspection.state.name}',
             );
           }
+          final productionInspection = recordedInspection;
 
           final selectedState = screen.captureState();
           final visibleTexts = selectedState.visibleTexts;
@@ -212,6 +241,11 @@ void main() {
               onboardingService.inspectedFolderPaths.length == 1 &&
               onboardingService.inspectedFolderPaths.single ==
                   fixture.repositoryPath &&
+              productionInspection.state ==
+                  LocalWorkspaceInspectionState.readyToOpen &&
+              productionInspection.folderPath == fixture.repositoryPath &&
+              productionInspection.hasGitRepository &&
+              productionInspection.canOpen &&
               selectedState.localFolderPath == fixture.repositoryPath;
           _recordStep(
             result,
@@ -219,14 +253,18 @@ void main() {
             status: step3Passed ? 'passed' : 'failed',
             action: _requestSteps[2],
             observed:
-                'selected_folder=${selectedState.localFolderPath}; expected_folder=${fixture.repositoryPath}; inspected_folder_paths=${_formatList(onboardingService.inspectedFolderPaths)}',
+                'selected_folder=${selectedState.localFolderPath}; expected_folder=${fixture.repositoryPath}; inspected_folder_paths=${_formatList(onboardingService.inspectedFolderPaths)}; production_inspection_state=${productionInspection.state.name}',
           );
           if (!step3Passed) {
             throw AssertionError(
               'Step 3 failed: the onboarding flow did not keep the selected existing Git repository visible after folder selection.\n'
               'Expected folder path: ${fixture.repositoryPath}\n'
               'Observed folder path: ${selectedState.localFolderPath}\n'
-              'Observed inspected folder paths: ${_formatList(onboardingService.inspectedFolderPaths)}',
+              'Observed inspected folder paths: ${_formatList(onboardingService.inspectedFolderPaths)}\n'
+              'Observed recorded inspection state: ${productionInspection.state.name}\n'
+              'Observed recorded inspection folder path: ${productionInspection.folderPath}\n'
+              'Observed recorded hasGitRepository: ${productionInspection.hasGitRepository}\n'
+              'Observed recorded canOpen: ${productionInspection.canOpen}',
             );
           }
 
@@ -683,16 +721,21 @@ bool _mapEquals(Map<String, String> left, Map<String, String> right) {
   return true;
 }
 
-class _RecordingLocalWorkspaceOnboardingService
+class _RecordingRealOnboardingService
     implements LocalWorkspaceOnboardingService {
-  _RecordingLocalWorkspaceOnboardingService(this.inspection);
+  _RecordingRealOnboardingService({
+    required LocalWorkspaceOnboardingService delegate,
+  }) : _delegate = delegate;
 
-  final LocalWorkspaceInspection inspection;
+  final LocalWorkspaceOnboardingService _delegate;
   final List<String> inspectedFolderPaths = <String>[];
+  LocalWorkspaceInspection? lastInspection;
 
   @override
   Future<LocalWorkspaceInspection> inspectFolder(String folderPath) async {
     inspectedFolderPaths.add(folderPath);
+    final inspection = await _delegate.inspectFolder(folderPath);
+    lastInspection = inspection;
     return inspection;
   }
 
@@ -702,8 +745,10 @@ class _RecordingLocalWorkspaceOnboardingService
     required String workspaceName,
     required String writeBranch,
   }) {
-    throw UnimplementedError(
-      'TS-800 only exercises the ready-to-open onboarding path.',
+    return _delegate.initializeFolder(
+      inspection: inspection,
+      workspaceName: workspaceName,
+      writeBranch: writeBranch,
     );
   }
 }
@@ -734,4 +779,49 @@ String _inspectionPaths(Map<String, Object?> result) {
     return _formatList(inspectionPaths.cast<Object?>());
   }
   return '<missing>';
+}
+
+Future<void> _waitForLocalWorkspaceDetailsForm(
+  WidgetTester tester, {
+  required _RecordingRealOnboardingService onboardingService,
+}) async {
+  final nameField = find.descendant(
+    of: find.byKey(const ValueKey('local-workspace-onboarding-name')),
+    matching: find.byType(EditableText),
+  );
+  final submitButton = find.byKey(
+    const ValueKey('local-workspace-onboarding-submit'),
+  );
+  final changeFolderButton = find.byKey(
+    const ValueKey('local-workspace-onboarding-change-folder'),
+  );
+  final detailsTitle = find.text('Workspace details');
+  final loadingIndicator = find.text('Loading...');
+  const step = Duration(milliseconds: 100);
+  const timeout = Duration(seconds: 10);
+  var elapsed = Duration.zero;
+
+  while (elapsed < timeout) {
+    if (nameField.evaluate().isNotEmpty &&
+        submitButton.evaluate().isNotEmpty &&
+        changeFolderButton.evaluate().isNotEmpty &&
+        detailsTitle.evaluate().isNotEmpty) {
+      return;
+    }
+    await tester.runAsync(() => Future<void>.delayed(step));
+    await tester.pump(step);
+    elapsed += step;
+  }
+
+  throw StateError(
+    'Local workspace details did not render within ${timeout.inSeconds}s after folder selection. '
+    'Observed loading=${loadingIndicator.evaluate().isNotEmpty}; '
+    'name_field=${nameField.evaluate().isNotEmpty}; '
+    'submit_button=${submitButton.evaluate().isNotEmpty}; '
+    'change_folder=${changeFolderButton.evaluate().isNotEmpty}; '
+    'details_title=${detailsTitle.evaluate().isNotEmpty}; '
+    'selected_folder=${find.textContaining(Directory.systemTemp.path).evaluate().isNotEmpty ? '<visible>' : '<none>'}; '
+    'recorded_inspection_state=${onboardingService.lastInspection?.state.name ?? '<missing>'}; '
+    'visible_texts=${find.byType(Text).evaluate().map((element) => (element.widget as Text).data?.trim()).whereType<String>().where((text) => text.isNotEmpty).join(' | ')}',
+  );
 }
