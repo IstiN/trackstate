@@ -348,7 +348,7 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
       '',
       'h4. Exact error',
       '{code}',
-      '${result['traceback'] ?? result['error'] ?? ''}',
+      _exactErrorText(result),
       '{code}',
     ]);
   }
@@ -386,7 +386,7 @@ String _markdownSummary(Map<String, Object?> result, {required bool passed}) {
       '',
       '## Exact error',
       '```text',
-      '${result['traceback'] ?? result['error'] ?? ''}',
+      _exactErrorText(result),
       '```',
     ]);
   }
@@ -397,7 +397,13 @@ String _bugDescription(Map<String, Object?> result) {
   final failedStep = _firstFailedStep(result);
   final actualSummary = failedStep == null
       ? '${result['error'] ?? ''}'
-      : '${failedStep['observed']}';
+      : 'The active local workspace row remained visible in the workspace '
+            'switcher and still showed `Local Git`, but no visible '
+            '`Connect GitHub` control was rendered in that row or anywhere '
+            'on the visible sheet. Because the control was missing, the user '
+            'could not open the production GitHub authentication dialog that '
+            'should show `Fine-grained token` and `Connect token`.\n\n'
+            'Observed: ${failedStep['observed']}';
   return [
     '# $_ticketKey - Active local workspace does not keep Connect GitHub visible and actionable while signed out',
     '',
@@ -412,7 +418,7 @@ String _bugDescription(Map<String, Object?> result) {
     '',
     '## Exact error message or assertion failure',
     '```text',
-    '${result['traceback'] ?? result['error'] ?? ''}',
+    _exactErrorText(result),
     '```',
     '',
     '## Environment details',
@@ -527,6 +533,18 @@ String _failedStep(Map<String, Object?> result) {
     return 'Step ${failedStep['step']}: ${failedStep['observed']}';
   }
   return '${result['error'] ?? ''}';
+}
+
+String _exactErrorText(Map<String, Object?> result) {
+  final error = '${result['error'] ?? ''}'.trim();
+  final traceback = '${result['traceback'] ?? ''}'.trim();
+  if (error.isEmpty) {
+    return traceback;
+  }
+  if (traceback.isEmpty) {
+    return error;
+  }
+  return '$error\n\n$traceback';
 }
 
 String _formatList(List<String> values) =>
