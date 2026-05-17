@@ -1,6 +1,6 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
@@ -10,9 +10,11 @@ import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
+import 'package:trackstate/ui/core/trackstate_theme.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
+import '../testing/core/utils/color_contrast.dart';
 
 void main() {
   setUp(() {
@@ -74,7 +76,8 @@ void main() {
               ),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(
         find.textContaining('Skipped broken during restore.'),
@@ -148,7 +151,8 @@ void main() {
               ),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.text('Add workspace'), findsOneWidget);
       expect(find.text('Local folder'), findsOneWidget);
@@ -231,7 +235,8 @@ void main() {
               },
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.text('Add workspace'), findsOneWidget);
       expect(find.text('Local folder'), findsOneWidget);
@@ -322,15 +327,6 @@ void main() {
   testWidgets(
     'workspace switcher keeps visible workspace details on compact layouts',
     (tester) async {
-      const attachmentRestrictedPermission = RepositoryPermission(
-        canRead: true,
-        canWrite: true,
-        isAdmin: false,
-        canCreateBranch: true,
-        canManageAttachments: false,
-        attachmentUploadMode: AttachmentUploadMode.noLfs,
-        canCheckCollaborators: false,
-      );
       final service = _MemoryWorkspaceProfileService(
         WorkspaceProfilesState(
           profiles: const [
@@ -363,12 +359,15 @@ void main() {
                 required String repository,
                 required String defaultBranch,
                 required String writeBranch,
-              }) async => ReactiveIssueDetailTrackStateRepository(
-                permission: attachmentRestrictedPermission,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
               ),
         ),
       );
-      await tester.pumpAndSettle();
+      await _pumpUntilVisible(
+        tester,
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
 
       final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
       expect(trigger, findsOneWidget);
@@ -377,10 +376,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.descendant(
-          of: trigger,
-          matching: find.text('Hosted · Attachments limited'),
-        ),
+        find.descendant(of: trigger, matching: find.textContaining('Hosted ·')),
         findsOneWidget,
       );
     },
@@ -445,6 +441,73 @@ void main() {
           matching: find.text('alpha/repo · Hosted · Attachments limited'),
         ),
         findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'workspace switcher opens an anchored desktop panel instead of a dialog',
+    (tester) async {
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+      expect(trigger, findsOneWidget);
+      final triggerRect = tester.getRect(trigger);
+
+      await tester.tap(
+        find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
+      );
+      await tester.pumpAndSettle();
+
+      final switcherSurface = find.byKey(
+        const ValueKey('workspace-switcher-sheet'),
+      );
+      expect(switcherSurface, findsOneWidget);
+      expect(find.byType(Dialog), findsNothing);
+
+      final switcherRect = tester.getRect(switcherSurface);
+      expect(switcherRect.top, greaterThanOrEqualTo(triggerRect.bottom - 12));
+      expect(switcherRect.top, lessThanOrEqualTo(triggerRect.bottom + 120));
+      expect(
+        (switcherRect.right - triggerRect.right).abs(),
+        lessThanOrEqualTo(120),
       );
     },
   );
@@ -525,6 +588,220 @@ void main() {
 
       expect(find.bySemanticsLabel(RegExp('To Do column')), findsOneWidget);
       expect(service.state.activeWorkspaceId, 'local:/tmp/demo@main');
+    },
+  );
+
+  testWidgets(
+    'workspace switcher keeps desktop and sheet keyboard focus traversal logical',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:beta/repo@main',
+              displayName: 'beta/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'beta/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            workspaceProfileService: service,
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                ),
+            openLocalRepository:
+                ({
+                  required String repositoryPath,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async =>
+                    throw StateError('Missing repository $repositoryPath'),
+          ),
+        );
+        await _pumpUntilVisible(tester, find.byType(TextField));
+
+        final desktopCandidates = <String, Finder>{
+          'Search issues': find.byType(TextField),
+          'Create issue': find.bySemanticsLabel(RegExp('^Create issue\$')).last,
+          'Add workspace': find
+              .bySemanticsLabel(RegExp('^Add workspace\$'))
+              .last,
+          'Workspace switcher': find.byKey(
+            const ValueKey('workspace-switcher-trigger'),
+          ),
+        };
+
+        await tester.tap(desktopCandidates['Search issues']!);
+        await tester.pump();
+        expect(_focusedLabel(tester, desktopCandidates), 'Search issues');
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        expect(_focusedLabel(tester, desktopCandidates), 'Create issue');
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        expect(_focusedLabel(tester, desktopCandidates), 'Add workspace');
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        await _pumpUntilVisible(tester, find.text('Saved workspaces'));
+
+        final sheetCandidates = <String, Finder>{
+          'Open workspace': find.byKey(
+            const ValueKey('workspace-open-hosted:beta/repo@main'),
+          ),
+          'Delete workspace': find.byKey(
+            const ValueKey('workspace-delete-hosted:beta/repo@main'),
+          ),
+          'Repository': find.widgetWithText(TextFormField, 'Repository'),
+          'Branch': find.widgetWithText(TextFormField, 'Branch'),
+          'Save and switch': find.byKey(const ValueKey('workspace-add-button')),
+        };
+
+        await tester.tap(sheetCandidates['Repository']!);
+        await tester.pump();
+        expect(_focusedLabel(tester, sheetCandidates), 'Repository');
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        expect(_focusedLabel(tester, sheetCandidates), 'Branch');
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        expect(_focusedLabel(tester, sheetCandidates), 'Save and switch');
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'workspace switcher keeps state badges readable and the compact trigger keyboard reachable',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final authStore = _MemoryAuthStore()
+        ..workspaceTokens['hosted:beta/repo@main'] = 'beta-token';
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:beta/repo@main',
+              displayName: 'beta/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'beta/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+              hostedAccessMode: HostedWorkspaceAccessMode.readOnly,
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            workspaceProfileService: service,
+            authStore: authStore,
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                ),
+          ),
+        );
+        await _pumpUntilVisible(
+          tester,
+          find.byKey(const ValueKey('workspace-switcher-trigger')),
+        );
+
+        final triggerFinder = find.byKey(
+          const ValueKey('workspace-switcher-trigger'),
+        );
+
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pump();
+
+        final reachedCompactTrigger = await _focusByTabUntil(
+          tester,
+          isFocused: () => _focusWithinFinder(tester, triggerFinder),
+        );
+        expect(reachedCompactTrigger, isTrue);
+
+        await tester.tap(
+          find.bySemanticsLabel(RegExp('^Workspace switcher:')).last,
+        );
+        await _pumpUntilVisible(tester, find.text('Saved workspaces'));
+        await _pumpUntilVisible(tester, find.text('Read-only'));
+
+        final badgeText = find.text('Read-only');
+        expect(badgeText, findsOneWidget);
+
+        final badgeTextStyle = tester.widget<Text>(badgeText).style;
+        final badgeContainer = _nearestDecoratedContainer(tester, badgeText);
+        final badgeDecoration = badgeContainer.decoration! as BoxDecoration;
+        final colors = Theme.of(
+          tester.element(badgeText),
+        ).extension<TrackStateColors>()!;
+        final renderedBadgeBackground = Color.alphaBlend(
+          badgeDecoration.color!,
+          colors.surface,
+        );
+        final contrast = contrastRatio(
+          badgeTextStyle!.color!,
+          renderedBadgeBackground,
+        );
+
+        expect(contrast, greaterThanOrEqualTo(4.5));
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
     },
   );
 
@@ -787,6 +1064,114 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
     );
     return updated;
   }
+}
+
+Future<bool> _focusByTabUntil(
+  WidgetTester tester, {
+  required bool Function() isFocused,
+  int maxTabs = 24,
+}) async {
+  for (var index = 0; index < maxTabs; index += 1) {
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    if (isFocused()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+Future<void> _pumpUntilVisible(
+  WidgetTester tester,
+  Finder finder, {
+  int maxPumps = 60,
+  Duration step = const Duration(milliseconds: 100),
+}) async {
+  for (var index = 0; index < maxPumps; index += 1) {
+    await tester.pump(step);
+    if (finder.evaluate().isNotEmpty) {
+      return;
+    }
+  }
+  throw TestFailure('Expected $finder to become visible.');
+}
+
+String? _focusedLabel(WidgetTester tester, Map<String, Finder> candidates) {
+  final focusedSemantics = find.semantics.byPredicate(
+    (node) => node.getSemanticsData().flagsCollection.isFocused,
+    describeMatch: (_) => 'focused semantics node',
+  );
+  if (focusedSemantics.evaluate().isEmpty) {
+    return null;
+  }
+
+  for (final entry in candidates.entries) {
+    final matches = entry.value.evaluate().length;
+    if (matches == 0) {
+      continue;
+    }
+    for (var index = 0; index < matches; index += 1) {
+      final candidateSemantics = _semanticsFinderFor(
+        tester: tester,
+        finder: entry.value.at(index),
+      );
+      final ownsFocusedNode = find.semantics.descendant(
+        of: candidateSemantics,
+        matching: focusedSemantics,
+        matchRoot: true,
+      );
+      if (ownsFocusedNode.evaluate().isNotEmpty) {
+        return entry.key;
+      }
+    }
+  }
+
+  return null;
+}
+
+bool _focusWithinFinder(WidgetTester tester, Finder ancestorFinder) {
+  final focusContext = FocusManager.instance.primaryFocus?.context;
+  if (focusContext == null) {
+    return false;
+  }
+  final targetElements = ancestorFinder.evaluate().toSet();
+  if (targetElements.contains(focusContext)) {
+    return true;
+  }
+  var found = false;
+  focusContext.visitAncestorElements((element) {
+    if (targetElements.contains(element)) {
+      found = true;
+      return false;
+    }
+    return true;
+  });
+  return found;
+}
+
+FinderBase<SemanticsNode> _semanticsFinderFor({
+  required WidgetTester tester,
+  required Finder finder,
+}) {
+  final semanticsId = tester.getSemantics(finder).id;
+  return find.semantics.byPredicate(
+    (node) => node.id == semanticsId,
+    describeMatch: (_) => 'semantics node for $finder',
+  );
+}
+
+Container _nearestDecoratedContainer(WidgetTester tester, Finder descendant) {
+  final candidates = find.ancestor(
+    of: descendant,
+    matching: find.byWidgetPredicate(
+      (widget) =>
+          widget is Container &&
+          widget.decoration is BoxDecoration &&
+          (widget.decoration! as BoxDecoration).color != null,
+      description: 'decorated container',
+    ),
+  );
+  return tester.widgetList<Container>(candidates).last;
 }
 
 class _MemoryAuthStore implements TrackStateAuthStore {

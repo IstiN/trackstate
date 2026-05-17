@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/workspace_profile_service.dart';
+import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart'
+    show LocalRepositoryLoader;
 
 import '../models/issue_search_result_selection_observation.dart';
 
@@ -7,6 +10,11 @@ abstract interface class TrackStateAppComponent {
   Finder get goldenTarget;
 
   Future<void> pump(TrackStateRepository repository);
+
+  Future<void> pumpWorkspaceProfileApp({
+    required WorkspaceProfileService workspaceProfileService,
+    LocalRepositoryLoader? openLocalRepository,
+  });
 
   Future<void> pumpLocalGitApp({
     required String repositoryPath,
@@ -110,6 +118,19 @@ abstract interface class TrackStateAppComponent {
   void expectLocalRuntimeChrome();
 
   Future<void> openRepositoryAccess();
+
+  Future<void> openWorkspaceSwitcher();
+
+  Future<void> closeWorkspaceSwitcher();
+
+  Future<bool> isWorkspaceSwitcherVisible();
+
+  Future<bool> workspaceRowContainsText(String workspaceId, String text);
+
+  Future<bool> workspaceRowContainsTextContaining(
+    String workspaceId,
+    String text,
+  );
 
   Future<void> closeDialog(String actionLabel);
 

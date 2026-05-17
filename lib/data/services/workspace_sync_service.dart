@@ -208,6 +208,21 @@ class WorkspaceSyncService {
     return result;
   }
 
+  // Returns true only when a full snapshot reload is necessary to correctly
+  // reflect the incoming sync event. The evaluation order is intentional:
+  //
+  //  1. Local-head / local-worktree signals always require a reload.
+  //  2. An explicit directive from the server overrides path-based logic.
+  //  3. A dedicated hostedSnapshotReload signal triggers a reload.
+  //  4. If no hostedRepository signal is present the event carries no
+  //     remote-content changes — skip the reload.
+  //  5. [changedPaths.isEmpty] — the server reported a repository signal
+  //     with no individual paths; treat as a no-op to avoid spurious reloads.
+  //  6. [pathChanges.isEmpty] — all reported paths fall outside every known
+  //     sync domain (e.g. an internal bookkeeping file such as
+  //     "sync-domains/unknown-domain.md"). An unrecognised path must NOT
+  //     trigger a global snapshot reload; doing so would be incorrect and
+  //     could expose stale or hidden content to the UI (TS-741 / TS-789).
   bool _requiresSnapshotReload({
     required RepositorySyncCheck syncCheck,
     required List<WorkspaceSyncDomainChange> pathChanges,
@@ -234,6 +249,8 @@ class WorkspaceSyncService {
       return false;
     }
     if (pathChanges.isEmpty) {
+      // All reported paths are outside every known sync domain.
+      // An unrecognised path must not trigger a global snapshot reload.
       return false;
     }
     for (final change in pathChanges) {

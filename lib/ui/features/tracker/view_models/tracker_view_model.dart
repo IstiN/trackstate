@@ -347,6 +347,7 @@ class TrackerViewModel extends ChangeNotifier {
   TrackerStartupRecovery? _startupRecovery;
   bool _isConnected = false;
   RepositoryUser? _connectedUser;
+  bool _hasLocalHostedAccessSession = false;
   bool _isLoadingMoreSearchResults = false;
   bool _didAutoResumeStartupRecoveryAfterAuthentication = false;
   bool _hasLoadedInitialSearchResults = false;
@@ -405,6 +406,7 @@ class TrackerViewModel extends ChangeNotifier {
   bool get hasStartupRecovery => startupRecovery != null;
   bool get isConnected => _isConnected;
   RepositoryUser? get connectedUser => _connectedUser;
+  bool get hasLocalHostedAccessSession => _hasLocalHostedAccessSession;
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
   bool get supportsGitHubAuth => _repository.supportsGitHubAuth;
   bool get supportsProjectSettingsAdmin =>
@@ -545,6 +547,7 @@ class TrackerViewModel extends ChangeNotifier {
       await _loadSnapshotAndSearch();
       if (usesLocalPersistence) {
         await _loadLocalRepositoryUser();
+        await _restoreLocalHostedAccess();
       } else if (supportsGitHubAuth) {
         await _restoreGitHubConnection();
       }
@@ -787,7 +790,7 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   Future<void> connectGitHub(String token, {bool remember = false}) async {
-    if (!supportsGitHubAuth) {
+    if (!supportsGitHubAuth && !usesLocalPersistence) {
       _message = TrackerMessage.localGitTokensNotNeeded();
       notifyListeners();
       return;
@@ -821,6 +824,7 @@ class TrackerViewModel extends ChangeNotifier {
         );
       }
       _isConnected = true;
+      _hasLocalHostedAccessSession = usesLocalPersistence;
       _connectedUser = user;
       await _resumeStartupRecoveryAfterAuthentication();
       _message = TrackerMessage.githubConnectedDragCards(
@@ -830,6 +834,7 @@ class TrackerViewModel extends ChangeNotifier {
     } on Object catch (error) {
       _message = TrackerMessage.githubConnectionFailed(error);
       _isConnected = false;
+      _hasLocalHostedAccessSession = false;
     } finally {
       _bindProviderSession();
       _isSaving = false;
@@ -1836,7 +1841,37 @@ class TrackerViewModel extends ChangeNotifier {
         token: '',
       ),
     );
+    _hasLocalHostedAccessSession = false;
     _bindProviderSession();
+  }
+
+  Future<void> _restoreLocalHostedAccess() async {
+    if (!usesLocalPersistence || _workspaceId == null) {
+      return;
+    }
+    final storedToken = await _authStore.readToken(workspaceId: _workspaceId);
+    if (storedToken == null || storedToken.trim().isEmpty) {
+      return;
+    }
+    final target = await _connectionTarget();
+    if (target == null) {
+      return;
+    }
+    try {
+      _connectedUser = await _repository.connect(
+        RepositoryConnection(
+          repository: target.repository,
+          branch: target.branch,
+          token: storedToken,
+        ),
+      );
+      _isConnected = true;
+      _hasLocalHostedAccessSession = true;
+    } on Object {
+      _hasLocalHostedAccessSession = false;
+    } finally {
+      _bindProviderSession();
+    }
   }
 
   Future<void> _ensureIssueHydrated(
