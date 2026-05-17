@@ -86,9 +86,9 @@ class LocalGitWorkspaceOnboardingService
       }
       return LocalWorkspaceInspection(
         folderPath: normalizedPath,
-        state: LocalWorkspaceInspectionState.readyToInitialize,
+        state: LocalWorkspaceInspectionState.blocked,
         message:
-            'This folder is not a Git repository yet. TrackState can initialize Git and create the starter workspace here.',
+            'This folder is not a Git repository and is not empty. Choose an existing Git repository or an empty folder to initialize TrackState.',
         suggestedWorkspaceName: suggestedWorkspaceName,
         suggestedWriteBranch: _defaultBranchName,
         needsGitInitialization: true,
@@ -96,7 +96,7 @@ class LocalGitWorkspaceOnboardingService
     }
 
     final normalizedTopLevel = _normalizePath(repositoryTopLevel);
-    if (normalizedTopLevel != normalizedPath) {
+    if (!await _pathsReferToSameLocation(normalizedTopLevel, normalizedPath)) {
       return LocalWorkspaceInspection(
         folderPath: normalizedPath,
         state: LocalWorkspaceInspectionState.blocked,
@@ -502,6 +502,24 @@ class LocalGitWorkspaceOnboardingService
       return 'TrackState could not $operation.';
     }
     return 'TrackState could not $operation. $trimmedError';
+  }
+}
+
+Future<bool> _pathsReferToSameLocation(String left, String right) async {
+  final normalizedLeft = await _canonicalizeExistingPath(left);
+  final normalizedRight = await _canonicalizeExistingPath(right);
+  return normalizedLeft == normalizedRight;
+}
+
+Future<String> _canonicalizeExistingPath(String path) async {
+  final normalized = _normalizePath(path);
+  if (normalized.isEmpty) {
+    return normalized;
+  }
+  try {
+    return _normalizePath(await Directory(normalized).resolveSymbolicLinks());
+  } on FileSystemException {
+    return normalized;
   }
 }
 

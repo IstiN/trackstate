@@ -1516,6 +1516,11 @@ class _LocalWorkspaceOnboardingScreenState
         l10n.localWorkspaceOnboardingOpenAction,
       (LocalWorkspaceInspectionState.readyToInitialize, _) =>
         l10n.localWorkspaceOnboardingInitializeAction,
+      (
+        LocalWorkspaceInspectionState.blocked,
+        _LocalWorkspaceOnboardingIntent.initialize,
+      ) =>
+        l10n.localWorkspaceOnboardingInitializeAction,
       _ => null,
     };
 
@@ -1676,7 +1681,9 @@ class _LocalWorkspaceOnboardingScreenState
                             ),
                           ),
                           if (inspection.state !=
-                              LocalWorkspaceInspectionState.blocked) ...[
+                                  LocalWorkspaceInspectionState.blocked ||
+                              _intent ==
+                                  _LocalWorkspaceOnboardingIntent.initialize) ...[
                             const SizedBox(height: 16),
                             Semantics(
                               header: true,
@@ -1710,15 +1717,20 @@ class _LocalWorkspaceOnboardingScreenState
                             const SizedBox(height: 20),
                             Align(
                               alignment: Alignment.centerRight,
-                              child: FilledButton(
-                                key: const ValueKey(
-                                  'local-workspace-onboarding-submit',
+                                child: FilledButton(
+                                  key: const ValueKey(
+                                    'local-workspace-onboarding-submit',
+                                  ),
+                                  onPressed:
+                                      _isSubmitting ||
+                                          actionLabel == null ||
+                                          inspection.state ==
+                                              LocalWorkspaceInspectionState
+                                                  .blocked
+                                      ? null
+                                      : _submit,
+                                  child: Text(actionLabel ?? ''),
                                 ),
-                                onPressed: _isSubmitting || actionLabel == null
-                                    ? null
-                                    : _submit,
-                                child: Text(actionLabel ?? ''),
-                              ),
                             ),
                           ],
                         ],
