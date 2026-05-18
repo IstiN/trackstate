@@ -8,5 +8,5 @@ dependencies:
 notes:
   - Opens the deployed TrackState web app with a stored hosted token and two preloaded saved hosted workspaces.
   - Resizes to a desktop viewport, confirms the live Settings background surface is scrollable, and moves it to a non-zero scroll position.
-  - Starts Arrow Down from the visible saved-workspace surface so the key path targets actual workspace rows.
+  - Tabs to a real visible in-panel workspace-switcher button and verifies switcher-owned focus before Arrow Down.
   - Verifies Arrow Down moves the active saved workspace to another visible row without changing the background page scroll position.

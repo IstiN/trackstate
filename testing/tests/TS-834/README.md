@@ -9,8 +9,8 @@ The automation:
 2. navigates to Settings, where the live background surface is scrollable
 3. resizes to a desktop viewport and scrolls the Settings background surface to a non-zero vertical position
 4. opens the desktop workspace switcher from Settings
-5. starts `ArrowDown` from the visible saved-workspace surface so the key path
-   targets the actual workspace list instead of the add-workspace form
+5. tabs to a real visible in-panel button and verifies the open switcher still
+   owns keyboard focus before sending `ArrowDown`
 6. checks whether `ArrowDown` moves the active saved workspace to another row
    while keeping the background page at the same scroll position
 
