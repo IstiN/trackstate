@@ -379,7 +379,9 @@ void main() {
         findsNothing,
       );
 
-      await tester.tap(find.byKey(const ValueKey('workspace-switcher-trigger')));
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
       await tester.pumpAndSettle();
 
       final activeRow = find.byKey(
@@ -1062,6 +1064,7 @@ void main() {
   testWidgets(
     'desktop workspace switcher row click keeps keyboard focus inside the active row before Arrow Down navigation',
     (tester) async {
+      final semantics = tester.ensureSemantics();
       final service = _MemoryWorkspaceProfileService(
         WorkspaceProfilesState(
           profiles: const [
@@ -1094,65 +1097,94 @@ void main() {
         tester.view.resetDevicePixelRatio();
       });
 
-      await tester.pumpWidget(
-        TrackStateApp(
-          workspaceProfileService: service,
-          openHostedRepository:
-              ({
-                required String repository,
-                required String defaultBranch,
-                required String writeBranch,
-              }) async => DemoTrackStateRepository(
-                snapshot: await _snapshotForRepository(repository),
-              ),
-        ),
-      );
-      await tester.pumpAndSettle();
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            workspaceProfileService: service,
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                ),
+          ),
+        );
+        await tester.pumpAndSettle();
 
-      await tester.tap(
-        find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
-      );
-      await tester.pumpAndSettle();
+        await tester.tap(
+          find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
+        );
+        await tester.pumpAndSettle();
 
-      final switcherSheet = find.byKey(
-        const ValueKey('workspace-switcher-sheet'),
-      );
-      final mainRow = find.byKey(
-        const ValueKey('workspace-hosted:main/repo@main'),
-      );
-      final altRow = find.byKey(
-        const ValueKey('workspace-hosted:alt/repo@main'),
-      );
+        final switcherSheet = find.byKey(
+          const ValueKey('workspace-switcher-sheet'),
+        );
+        final mainRow = find.byKey(
+          const ValueKey('workspace-hosted:main/repo@main'),
+        );
+        final altRow = find.byKey(
+          const ValueKey('workspace-hosted:alt/repo@main'),
+        );
 
-      expect(switcherSheet, findsOneWidget);
-      expect(mainRow, findsOneWidget);
-      expect(altRow, findsOneWidget);
+        expect(switcherSheet, findsOneWidget);
+        expect(mainRow, findsOneWidget);
+        expect(altRow, findsOneWidget);
+        final semanticsLabels = tester
+            .widgetList<Semantics>(find.byType(Semantics))
+            .map((widget) => widget.properties.label ?? '')
+            .where((label) => label.isNotEmpty)
+            .toList();
 
-      final mainRowRect = tester.getRect(mainRow);
-      await tester.tapAt(mainRowRect.topLeft + const Offset(40, 28));
-      await tester.pumpAndSettle();
+        expect(
+          semanticsLabels.any(
+            (label) => label.startsWith('Hosted main workspace, Hosted, '),
+          ),
+          isTrue,
+        );
+        expect(
+          semanticsLabels.any(
+            (label) => label.startsWith('Hosted alt workspace, Hosted, '),
+          ),
+          isTrue,
+        );
+        expect(
+          semanticsLabels.any(
+            (label) =>
+                label.contains("Instance of 'WorkspaceProfile'.displayName"),
+          ),
+          isFalse,
+        );
 
-      expect(
-        _focusWithinFinder(tester, mainRow),
-        isTrue,
-        reason:
-            'Clicking the active saved-workspace row should move keyboard focus '
-            'to a focusable target inside that row.',
-      );
+        final mainRowRect = tester.getRect(mainRow);
+        await tester.tapAt(mainRowRect.topLeft + const Offset(40, 28));
+        await tester.pumpAndSettle();
 
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.pumpAndSettle();
+        expect(
+          _focusWithinFinder(tester, mainRow),
+          isTrue,
+          reason:
+              'Clicking the active saved-workspace row should move keyboard focus '
+              'to a focusable target inside that row.',
+        );
 
-      expect(switcherSheet, findsOneWidget);
-      expect(service.state.activeWorkspaceId, 'hosted:alt/repo@main');
-      expect(
-        find.descendant(of: mainRow, matching: find.text('Active')),
-        findsNothing,
-      );
-      expect(
-        find.descendant(of: altRow, matching: find.text('Active')),
-        findsOneWidget,
-      );
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+
+        expect(switcherSheet, findsOneWidget);
+        expect(service.state.activeWorkspaceId, 'hosted:alt/repo@main');
+        expect(
+          find.descendant(of: mainRow, matching: find.text('Active')),
+          findsNothing,
+        );
+        expect(
+          find.descendant(of: altRow, matching: find.text('Active')),
+          findsOneWidget,
+        );
+      } finally {
+        semantics.dispose();
+      }
     },
   );
 

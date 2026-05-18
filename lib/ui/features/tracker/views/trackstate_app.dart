@@ -608,9 +608,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         return;
       }
       final delay = retryDelays[math.min(attempt, retryDelays.length - 1)];
-      await Future<void>.delayed(
-        remaining < delay ? remaining : delay,
-      );
+      await Future<void>.delayed(remaining < delay ? remaining : delay);
       if (!mounted) {
         return;
       }
@@ -6102,7 +6100,8 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
             button: true,
             enabled: true,
             focusable: true,
-            label: '$workspace.displayName, $typeLabel, $stateLabel, $detailText',
+            label:
+                '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
             child: ExcludeSemantics(
               child: SizedBox(
                 width: double.infinity,
@@ -6145,9 +6144,8 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                             const SizedBox(height: 4),
                             Text(
                               detailText,
-                              style: Theme.of(
-                                context,
-                              ).textTheme.bodySmall?.copyWith(color: colors.muted),
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: colors.muted),
                             ),
                           ],
                         ),
