@@ -516,6 +516,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     setState(() {
       _workspaceState = loadedState;
     });
+    await _awaitActiveLocalWorkspaceRevalidation(loadedState);
     await _refreshWorkspaceSwitcherState(loadedState);
     if (widget.repository != null) {
       if (loadedState.activeWorkspace case final activeWorkspace?) {
@@ -563,6 +564,68 @@ class _TrackStateAppState extends State<TrackStateApp>
     if (startsWithoutSavedWorkspaces) {
       viewModel.openProjectSettings();
     }
+  }
+
+  Future<void> _awaitActiveLocalWorkspaceRevalidation(
+    WorkspaceProfilesState state,
+  ) async {
+    if (widget.repository != null) {
+      return;
+    }
+    final activeWorkspace = state.activeWorkspace;
+    if (activeWorkspace == null || !activeWorkspace.isLocal) {
+      return;
+    }
+    const retryDelays = <Duration>[
+      Duration(milliseconds: 100),
+      Duration(milliseconds: 150),
+      Duration(milliseconds: 250),
+      Duration(milliseconds: 400),
+      Duration(milliseconds: 600),
+    ];
+    for (final delay in retryDelays) {
+      final validationReady = await _tryAwaitActiveLocalWorkspaceOpen(
+        activeWorkspace,
+      );
+      if (validationReady) {
+        return;
+      }
+      if (!mounted) {
+        return;
+      }
+      await Future<void>.delayed(delay);
+      if (!mounted) {
+        return;
+      }
+    }
+    await _tryAwaitActiveLocalWorkspaceOpen(activeWorkspace);
+  }
+
+  Future<bool> _tryAwaitActiveLocalWorkspaceOpen(
+    WorkspaceProfile workspace,
+  ) async {
+    try {
+      final repository = await _openLocalRepository(
+        repositoryPath: workspace.target,
+        defaultBranch: workspace.defaultBranch,
+        writeBranch: workspace.writeBranch,
+      );
+      await repository.loadSnapshot();
+      return true;
+    } on UnsupportedError {
+      return true;
+    } on Object catch (error) {
+      return !_shouldRetryActiveLocalWorkspaceRevalidation(error);
+    }
+  }
+
+  bool _shouldRetryActiveLocalWorkspaceRevalidation(Object error) {
+    final reason = _normalizeWorkspaceFailureReason(error).toLowerCase();
+    return reason.contains('file system access') ||
+        reason.contains('handle revalidation') ||
+        reason.contains('revalidation') ||
+        reason.contains('permission') ||
+        reason.contains('pending');
   }
 
   bool _shouldShowWorkspaceOnboarding(WorkspaceProfilesState state) {
