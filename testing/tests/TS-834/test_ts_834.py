@@ -714,26 +714,53 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
-    status = "PASSED" if passed else "FAILED"
+    status = "passed" if passed else "failed"
+    screenshot_path = result.get(
+        "screenshot",
+        SUCCESS_SCREENSHOT_PATH if passed else FAILURE_SCREENSHOT_PATH,
+    )
+    failure_summary = _response_failure_summary(result)
     lines = [
-        "## Test Automation Summary",
+        f"# {TICKET_KEY} {status}",
         "",
-        "- Added TS-834 live desktop coverage for Arrow Down in the workspace switcher.",
-        f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
-        f"- Result: **{status}**",
+        "## Issues/Notes",
+        (
+            "- No outstanding harness issues. The verified in-panel keyboard path is in place."
+            if passed
+            else (
+                "- Resolved the merge conflict in "
+                "`testing/components/pages/live_workspace_switcher_page.py` and kept the "
+                "switcher-owned focus helpers used by TS-834.\n"
+                f"- Re-run failed: {failure_summary}"
+            )
+        ),
+        "",
+        "## Approach",
+        "- Exercised the deployed hosted TrackState app in Chromium against the live setup repository.",
+        "- Scrolled the Settings background surface to a non-zero position before opening the workspace switcher.",
+        "- Tabbed to a real visible in-panel button, asserted switcher-owned focus, then sent `ArrowDown` and compared both selection and background scroll state.",
+        "",
+        "## Files Modified",
+        "- `testing/components/pages/live_workspace_switcher_page.py`",
+        "- `testing/tests/TS-834/test_ts_834.py`",
+        "",
+        "## Test Coverage",
+        f"- Test case: `{TICKET_KEY} - {TEST_CASE_TITLE}`",
+        f"- Result: `{status}`",
         f"- Command: `{RUN_COMMAND}`",
+        f"- Screenshot: `{screenshot_path}`",
         (
             f"- Environment: `{result['app_url']}` on Chromium/Playwright "
             f"({result['os']}) against `{result['repository']}` @ "
             f"`{result['repository_ref']}`."
         ),
         (
-            f"- Outcome: {_failed_step_summary(result)}"
+            f"- Outcome: {failure_summary}"
             if not passed
             else "- Outcome: Arrow Down moved the active saved workspace from Hosted main workspace to Hosted alt workspace while the background page stayed at the same scroll position."
         ),
+        f"- Step results: {', '.join(_step_status_summary(result))}",
     ]
-    lines.extend(_artifact_lines(result, jira=False))
     if not passed:
         lines.extend(
             [
@@ -784,7 +811,16 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- Browser: {result.get('browser')}",
             f"- OS: {result.get('os')}",
             f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
-            f"- Run command: {RUN_COMMAND}",
+            "",
+            "## Failing command",
+            "```bash",
+            RUN_COMMAND,
+            "```",
+            "",
+            "## Failing command output",
+            "```text",
+            str(result.get("traceback", result.get("error", "<missing error>"))),
+            "```",
             "",
             "## Screenshots or logs",
             f"- Screenshot: {result.get('screenshot', '<no screenshot recorded>')}",
@@ -837,6 +873,19 @@ def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     return lines or [f"{prefix} <no step data recorded>"]
 
 
+def _step_status_summary(result: dict[str, object]) -> list[str]:
+    steps = result.get("steps", [])
+    if not isinstance(steps, list):
+        return ["no step data recorded"]
+    summary: list[str] = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        status = "passed" if step.get("status") == "passed" else "failed"
+        summary.append(f"Step {step.get('step')}: {status}")
+    return summary or ["no step data recorded"]
+
+
 def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     prefix = "*" if jira else "-"
     checks = result.get("human_verification", [])
@@ -870,6 +919,29 @@ def _failed_step_summary(result: dict[str, object]) -> str:
                     f"{step.get('observed')}"
                 )
     return str(result.get("error", "No failure details recorded."))
+
+
+def _response_failure_summary(result: dict[str, object]) -> str:
+    arrow_down = result.get("arrow_down_observation")
+    if not isinstance(arrow_down, dict):
+        return _failed_step_summary(result)
+    before_focus = arrow_down.get("before_key_focus")
+    after_scroll = arrow_down.get("after_scroll")
+    focus_label = None
+    focus_owned = None
+    if isinstance(before_focus, dict):
+        focus_label = before_focus.get("active_label")
+        focus_owned = before_focus.get("focus_owned_by_switcher")
+    scroll_after = None
+    if isinstance(after_scroll, dict):
+        scroll_after = after_scroll.get("scroll_y")
+    return (
+        f"focus was on {focus_label!r} with switcher-owned focus={focus_owned}; "
+        f"`ArrowDown` kept the active workspace on "
+        f"{result.get('active_workspace_before_arrow')!r} instead of "
+        f"{SECONDARY_WORKSPACE_DISPLAY_NAME!r}, and background scroll stayed at "
+        f"{scroll_after!r}px."
+    )
 
 
 def _step_status(result: dict[str, object], step_number: int) -> str:
