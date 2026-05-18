@@ -608,9 +608,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         return;
       }
       final delay = retryDelays[math.min(attempt, retryDelays.length - 1)];
-      await Future<void>.delayed(
-        remaining < delay ? remaining : delay,
-      );
+      await Future<void>.delayed(remaining < delay ? remaining : delay);
       if (!mounted) {
         return;
       }
@@ -6026,7 +6024,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   }
 }
 
-class _WorkspaceSwitcherRow extends StatelessWidget {
+class _WorkspaceSwitcherRow extends StatefulWidget {
   const _WorkspaceSwitcherRow({
     super.key,
     required this.workspace,
@@ -6049,9 +6047,38 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
   final VoidCallback? onSelect;
 
   @override
+  State<_WorkspaceSwitcherRow> createState() => _WorkspaceSwitcherRowState();
+}
+
+class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
+  late final FocusNode _summaryFocusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _summaryFocusNode = FocusNode(
+      debugLabel: 'workspace-switcher-row-summary-${widget.workspace.id}',
+    );
+  }
+
+  @override
+  void dispose() {
+    _summaryFocusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
+    final workspace = widget.workspace;
+    final isActive = widget.isActive;
+    final stateLabel = widget.stateLabel;
+    final focusOrderBase = widget.focusOrderBase;
+    final onSelect = widget.onSelect;
+    final onDelete = widget.onDelete;
+    final primaryActionLabel = widget.primaryActionLabel;
+    final onPrimaryAction = widget.onPrimaryAction;
     final typeLabel = workspace.isHosted
         ? l10n.workspaceTargetTypeHosted
         : l10n.workspaceTargetTypeLocal;
@@ -6068,39 +6095,70 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              TrackStateIcon(
-                workspace.isHosted
-                    ? TrackStateIconGlyph.repository
-                    : TrackStateIconGlyph.folder,
-                color: isActive ? colors.primary : colors.muted,
-                semanticLabel: workspace.isHosted ? 'repository' : 'folder',
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      workspace.displayName,
-                      style: Theme.of(context).textTheme.titleSmall,
+          Semantics(
+            container: true,
+            button: true,
+            enabled: true,
+            focusable: true,
+            label:
+                '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
+            child: ExcludeSemantics(
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  focusNode: _summaryFocusNode,
+                  onPressed: () {
+                    _summaryFocusNode.requestFocus();
+                    onSelect?.call();
+                  },
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.all(4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    side: BorderSide.none,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      detailText,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodySmall?.copyWith(color: colors.muted),
-                    ),
-                  ],
+                    foregroundColor: colors.text,
+                  ),
+                  child: Row(
+                    children: [
+                      TrackStateIcon(
+                        workspace.isHosted
+                            ? TrackStateIconGlyph.repository
+                            : TrackStateIconGlyph.folder,
+                        color: isActive ? colors.primary : colors.muted,
+                        semanticLabel: workspace.isHosted
+                            ? 'repository'
+                            : 'folder',
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              workspace.displayName,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              detailText,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: colors.muted),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      _WorkspaceStateBadge(label: typeLabel, active: isActive),
+                      const SizedBox(width: 8),
+                      _WorkspaceStateBadge(label: stateLabel, active: isActive),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(width: 12),
-              _WorkspaceStateBadge(label: typeLabel, active: isActive),
-              const SizedBox(width: 8),
-              _WorkspaceStateBadge(label: stateLabel, active: isActive),
-            ],
+            ),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -6141,7 +6199,7 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
                           'workspace-primary-action-${workspace.id}',
                         ),
                         onPressed: onPrimaryAction,
-                        child: Text(primaryActionLabel!),
+                        child: Text(primaryActionLabel),
                       ),
                     ),
                   ),
