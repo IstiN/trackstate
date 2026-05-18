@@ -1203,6 +1203,44 @@ class LiveWorkspaceSwitcherPage:
                         row.selected,
                     ),
                 )
+        if not parsed_rows:
+            body_lines = [
+                re.sub(r"^(.+)\s+\1$", r"\1", " ".join(line.split()).strip())
+                for line in body_text.splitlines()
+                if line.strip()
+            ]
+            body_heading_indexes = [
+                index for index, line in enumerate(body_lines) if line == self._switcher_heading
+            ]
+            if body_heading_indexes:
+                candidate_lines = body_lines[body_heading_indexes[-1] + 1 :]
+                index = 0
+                while index + 2 < len(candidate_lines):
+                    summary_line = candidate_lines[index]
+                    action_label = candidate_lines[index + 1]
+                    delete_label = candidate_lines[index + 2]
+                    if (
+                        "Branch:" in summary_line
+                        and (action_label == "Active" or action_label.startswith("Open: "))
+                        and delete_label.startswith("Delete: ")
+                    ):
+                        summary_parts = [
+                            part.strip() for part in summary_line.split(",") if part.strip()
+                        ]
+                        if len(summary_parts) >= 4:
+                            parsed_rows.append(
+                                (
+                                    summary_parts[0],
+                                    ", ".join(summary_parts[3:]),
+                                    summary_parts[1],
+                                    summary_parts[2],
+                                    (action_label, delete_label),
+                                    action_label == "Active",
+                                ),
+                            )
+                            index += 3
+                            continue
+                    index += 1
         for (
             display_name,
             detail_text,
@@ -1213,7 +1251,7 @@ class LiveWorkspaceSwitcherPage:
         ) in parsed_rows:
             bounds = self._session.evaluate(
                 """
-                ({ text }) => {
+                ({ displayName, detailText, actionLabels, targetTypeLabel }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                   const isVisible = (element) => {
                     if (!element) {
@@ -1226,9 +1264,27 @@ class LiveWorkspaceSwitcherPage:
                       && style.visibility !== 'hidden'
                       && style.display !== 'none';
                   };
+                  const normalizedActions = (actionLabels || [])
+                    .map((label) => normalize(label))
+                    .filter((label) => label.length > 0)
+                    .map((label) => label.split(':')[0]);
                   const candidate = Array.from(document.querySelectorAll('*'))
                     .filter((element) => isVisible(element))
-                    .find((element) => normalize(element.innerText || element.textContent || '') === text);
+                    .map((element) => ({
+                      element,
+                      text: normalize(element.innerText || element.textContent || ''),
+                      area: (() => {
+                        const rect = element.getBoundingClientRect();
+                        return rect.width * rect.height;
+                      })(),
+                    }))
+                    .filter((candidate) =>
+                      candidate.text.includes(displayName)
+                      && candidate.text.includes(detailText)
+                      && (!targetTypeLabel || candidate.text.includes(targetTypeLabel))
+                      && normalizedActions.every((label) => candidate.text.includes(label))
+                    )
+                    .sort((left, right) => left.area - right.area)[0]?.element || null;
                   if (!candidate) {
                     return null;
                   }
@@ -1241,7 +1297,12 @@ class LiveWorkspaceSwitcherPage:
                   };
                 }
                 """,
-                arg={"text": display_name},
+                arg={
+                    "displayName": display_name,
+                    "detailText": detail_text,
+                    "actionLabels": action_labels,
+                    "targetTypeLabel": target_type_label,
+                },
             )
             if not isinstance(bounds, dict):
                 raise AssertionError(
