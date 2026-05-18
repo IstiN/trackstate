@@ -1197,68 +1197,86 @@ void main() {
   );
 
   testWidgets(
-    'desktop workspace switcher exports a single explicit button semantics node',
+    'desktop workspace switcher exports a single explicit button semantics node across desktop layouts',
     (tester) async {
       final semantics = tester.ensureSemantics();
-      final service = _MemoryWorkspaceProfileService(
-        WorkspaceProfilesState(
-          profiles: const [
-            WorkspaceProfile(
-              id: 'hosted:alpha/repo@main',
-              displayName: 'alpha/repo',
-              targetType: WorkspaceProfileTargetType.hosted,
-              target: 'alpha/repo',
-              defaultBranch: 'main',
-              writeBranch: 'main',
-            ),
-          ],
-          activeWorkspaceId: 'hosted:alpha/repo@main',
-          migrationComplete: true,
-        ),
-      );
-
-      tester.view.physicalSize = const Size(1440, 960);
-      tester.view.devicePixelRatio = 1;
+      const label = 'Workspace switcher: alpha/repo, Hosted, Needs sign-in';
+      final layouts = <({String name, Size size})>[
+        (name: 'wide', size: const Size(1440, 960)),
+        (name: 'condensed', size: const Size(1180, 900)),
+        (name: 'compact', size: const Size(390, 844)),
+      ];
       try {
-        await tester.pumpWidget(
-          TrackStateApp(
-            workspaceProfileService: service,
-            openHostedRepository:
-                ({
-                  required String repository,
-                  required String defaultBranch,
-                  required String writeBranch,
-                }) async => DemoTrackStateRepository(
-                  snapshot: await _snapshotForRepository(repository),
+        for (final layout in layouts) {
+          final service = _MemoryWorkspaceProfileService(
+            WorkspaceProfilesState(
+              profiles: const [
+                WorkspaceProfile(
+                  id: 'hosted:alpha/repo@main',
+                  displayName: 'alpha/repo',
+                  targetType: WorkspaceProfileTargetType.hosted,
+                  target: 'alpha/repo',
+                  defaultBranch: 'main',
+                  writeBranch: 'main',
                 ),
-          ),
-        );
-        await tester.pumpAndSettle();
+              ],
+              activeWorkspaceId: 'hosted:alpha/repo@main',
+              migrationComplete: true,
+            ),
+          );
 
-        const label = 'Workspace switcher: alpha/repo, Hosted, Needs sign-in';
-        final trigger = find.byKey(
-          const ValueKey('workspace-switcher-trigger'),
-        );
-        final explicitButtonSemantics = find.descendant(
-          of: trigger,
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget is Semantics &&
-                widget.properties.label == label &&
-                widget.properties.button == true,
-            description:
-                'explicit button semantics for the desktop workspace switcher trigger',
-          ),
-        );
+          tester.view.physicalSize = layout.size;
+          tester.view.devicePixelRatio = 1;
 
-        expect(
-          explicitButtonSemantics,
-          findsOneWidget,
-          reason:
-              'The desktop workspace switcher trigger should export a single explicit '
-              'button semantics node so Flutter web exposes one keyboard-focusable '
-              'control instead of an inert outer wrapper.',
-        );
+          await tester.pumpWidget(
+            TrackStateApp(
+              workspaceProfileService: service,
+              openHostedRepository:
+                  ({
+                    required String repository,
+                    required String defaultBranch,
+                    required String writeBranch,
+                  }) async => DemoTrackStateRepository(
+                    snapshot: await _snapshotForRepository(repository),
+                  ),
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          final trigger = find.byKey(
+            const ValueKey('workspace-switcher-trigger'),
+          );
+          final explicitButtonSemantics = find.descendant(
+            of: trigger,
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is Semantics &&
+                  widget.properties.label == label &&
+                  widget.properties.button == true,
+              description:
+                  'explicit button semantics for the desktop workspace switcher trigger',
+            ),
+          );
+
+          expect(
+            explicitButtonSemantics,
+            findsOneWidget,
+            reason:
+                'The ${layout.name} workspace switcher trigger should export a '
+                'single explicit button semantics node so Flutter web exposes one '
+                'keyboard-focusable control instead of an inert outer wrapper.',
+          );
+          expect(
+            find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
+            findsOneWidget,
+            reason:
+                'The ${layout.name} workspace switcher trigger should expose only '
+                'one labeled semantics node.',
+          );
+
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump();
+        }
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
