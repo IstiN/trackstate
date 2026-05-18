@@ -193,6 +193,11 @@ class WorkspaceSwitcherInternalFocusObservation:
     before_role: str | None
     before_tag_name: str
     before_outer_html: str
+    before_visible: bool
+    before_in_viewport: bool
+    before_within_switcher: bool
+    before_on_trigger: bool
+    before_owned_by_switcher: bool
     after_label: str | None
     after_role: str | None
     after_tag_name: str
@@ -797,6 +802,14 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 10_000,
     ) -> None:
         self._session.press_key("Enter", timeout_ms=timeout_ms)
+        self._wait_for_surface(timeout_ms=timeout_ms)
+
+    def press_space_on_active_element_and_wait_for_surface(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> None:
+        self._session.press_key("Space", timeout_ms=timeout_ms)
         self._wait_for_surface(timeout_ms=timeout_ms)
 
     def open_surface_with_click(self, *, timeout_ms: int = 30_000) -> None:
@@ -3288,6 +3301,12 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 4_000,
     ) -> WorkspaceSwitcherInternalFocusObservation:
         before = self._session.active_element()
+        before_payload = self._probe_blur_focus_state(panel)
+        if not isinstance(before_payload, dict):
+            raise AssertionError(
+                "The workspace switcher internal-focus pre-Tab probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
         self._session.press_key("Tab", timeout_ms=timeout_ms)
 
         probe_script = """
@@ -3447,6 +3466,11 @@ class LiveWorkspaceSwitcherPage:
             before_role=before.role,
             before_tag_name=before.tag_name,
             before_outer_html=before.outer_html,
+            before_visible=bool(before_payload.get("activeVisible")),
+            before_in_viewport=bool(before_payload.get("activeInViewport")),
+            before_within_switcher=bool(before_payload.get("activeWithinSwitcher")),
+            before_on_trigger=bool(before_payload.get("activeOnTrigger")),
+            before_owned_by_switcher=bool(before_payload.get("focusOwnedBySwitcher")),
             after_label=after.accessible_name,
             after_role=after.role,
             after_tag_name=after.tag_name,
