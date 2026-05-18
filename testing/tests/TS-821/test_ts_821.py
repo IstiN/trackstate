@@ -184,6 +184,14 @@ def main() -> None:
                     _assert_external_focus_reached(blur_observation)
                     result["blur_observation"] = _blur_payload(blur_observation)
                 except Exception as error:
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened the visible desktop workspace switcher and tried to "
+                            "continue the keyboard flow like a user."
+                        ),
+                        observed=str(error),
+                    )
                     _record_step(
                         result,
                         step=3,
