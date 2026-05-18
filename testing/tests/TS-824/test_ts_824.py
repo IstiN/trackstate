@@ -35,6 +35,8 @@ TEST_CASE_TITLE = (
     "Press Escape with focus on internal panel element — workspace switcher "
     "dismisses and restores focus"
 )
+INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
+DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-824/test_ts_824.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
 TAB_FOCUS_TIMEOUT_MS = 4_000
@@ -58,6 +60,7 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts824_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts824_failure.png"
 
@@ -327,6 +330,11 @@ def main() -> None:
                     result["focused_after_escape"] = _focused_element_payload(
                         focused_after_escape,
                     )
+                    _assert_escape_focus_restored_to_trigger(
+                        trigger_before=trigger_before,
+                        trigger_after=trigger_after,
+                        focused_after_escape=focused_after_escape,
+                    )
                     page.press_enter_on_active_element_and_wait_for_surface(
                         timeout_ms=ESCAPE_DISMISS_TIMEOUT_MS,
                     )
@@ -343,10 +351,8 @@ def main() -> None:
                     result["keyboard_reopen_panel_observation"] = asdict(
                         keyboard_reopen_panel,
                     )
-                    _assert_escape_focus_return(
-                        trigger_before=trigger_before,
+                    _assert_keyboard_reopen_after_escape(
                         trigger_after=trigger_after,
-                        focused_after_escape=focused_after_escape,
                         keyboard_reopen_switcher=keyboard_reopen_switcher,
                         keyboard_reopen_panel=keyboard_reopen_panel,
                     )
@@ -530,13 +536,11 @@ def _assert_escape_surface_dismissal(
         )
 
 
-def _assert_escape_focus_return(
+def _assert_escape_focus_restored_to_trigger(
     *,
     trigger_before: WorkspaceSwitcherTriggerObservation,
     trigger_after: WorkspaceSwitcherTriggerObservation,
     focused_after_escape: FocusedElementObservation,
-    keyboard_reopen_switcher: WorkspaceSwitcherObservation,
-    keyboard_reopen_panel: WorkspaceSwitcherPanelObservation,
 ) -> None:
     failures: list[str] = []
 
@@ -546,6 +550,34 @@ def _assert_escape_focus_return(
             f"workspace state (before={trigger_before.semantic_label!r}, "
             f"after={trigger_after.semantic_label!r})",
         )
+    if not _is_workspace_trigger_focus(
+        focused_after_escape.accessible_name,
+        fallback_text=focused_after_escape.text,
+    ):
+        failures.append(
+            "keyboard focus after Escape was not restored to the workspace switcher "
+            "trigger",
+        )
+
+    if failures:
+        raise AssertionError(
+            "Step 5 failed: after Escape, the active element was not the workspace "
+            "switcher trigger.\n"
+            + "\n".join(f"- {item}" for item in failures)
+            + "\n"
+            + "Observed focused element after Escape: "
+            + f"label={focused_after_escape.accessible_name!r}, "
+            + f"role={focused_after_escape.role!r}, tag={focused_after_escape.tag_name!r}, "
+            + f"text={focused_after_escape.text!r}",
+        )
+
+
+def _assert_keyboard_reopen_after_escape(
+    *,
+    trigger_after: WorkspaceSwitcherTriggerObservation,
+    keyboard_reopen_switcher: WorkspaceSwitcherObservation,
+    keyboard_reopen_panel: WorkspaceSwitcherPanelObservation,
+) -> None:
     try:
         _assert_desktop_panel_open(
             trigger=trigger_after,
@@ -553,21 +585,10 @@ def _assert_escape_focus_return(
             panel=keyboard_reopen_panel,
         )
     except AssertionError as error:
-        failures.append(
-            "pressing Enter immediately after Escape did not reopen the visible "
-            f"workspace switcher from the restored trigger focus ({error})",
-        )
-
-    if failures:
         raise AssertionError(
-            "Step 5 failed: after Escape, the workspace switcher trigger was not left "
-            "in the expected keyboard-usable state.\n"
-            + "\n".join(f"- {item}" for item in failures)
-            + "\n"
-            + f"Observed focused element after Escape: "
-            + f"label={focused_after_escape.accessible_name!r}, "
-            + f"role={focused_after_escape.role!r}, tag={focused_after_escape.tag_name!r}",
-        )
+            "Step 5 failed: pressing Enter immediately after Escape did not reopen the "
+            f"visible workspace switcher from the restored trigger focus ({error})",
+        ) from error
 
 
 def _record_step(
@@ -619,6 +640,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    _write_review_replies(result, passed=True)
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -641,6 +663,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    _write_review_replies(result, passed=False)
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -697,6 +720,10 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Status:** {status}",
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
+        "## Rework summary",
+        "- Fixed the post-Escape validation so TS-824 now checks that the active element is the workspace switcher trigger before any Enter-based reopen check.",
+        "- Fixed `outputs/bug_description.md` so it now derives the bug title, reproduction path, and missing-capability details from the first failed step.",
+        "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token.",
         "- Opened the desktop workspace switcher from Dashboard.",
@@ -745,7 +772,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Added TS-824 live desktop coverage for Escape dismissal after focus moves inside the workspace switcher panel.",
+        "- Fixed the post-Escape assertion so TS-824 now requires focus to be restored to the workspace switcher trigger before the Enter-based reopen check.",
+        "- Fixed the failure artifact generation so `outputs/bug_description.md` now follows the first failed step and captures the trigger-focusability evidence when the flow stops early.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -775,16 +803,14 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    first_failed_step = _first_failed_step_number(result)
+    title, reproduction_steps, missing_capability = _bug_context(result)
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Workspace switcher Escape dismissal fails after focus moves inside the panel",
+            f"# {title}",
             "",
             "## Steps to reproduce",
-            "1. Launch the application on a desktop browser.",
-            "2. Click the workspace switcher trigger to open the panel.",
-            "3. Press the 'Tab' key to move keyboard focus to an item within the workspace switcher panel.",
-            "4. Press the 'Escape' key on the keyboard.",
-            "5. Observe the state of the workspace switcher panel.",
+            *reproduction_steps,
             "",
             "## Exact steps from the test case with observations",
             _annotated_step_line(result, 1, REQUEST_STEPS[0]),
@@ -800,7 +826,7 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Actual vs Expected",
             f"- Expected: {EXPECTED_RESULT}",
-            f"- Actual: {result.get('error', '<missing error>')}",
+            f"- Actual: {_failed_step_summary(result)}",
             "",
             "## Environment details",
             f"- URL: {result.get('app_url')}",
@@ -810,11 +836,29 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
             f"- Run command: {RUN_COMMAND}",
             "",
+            "## Missing or broken production capability",
+            missing_capability,
+            "",
+            "## Failing command",
+            "```bash",
+            RUN_COMMAND,
+            "```",
+            "",
+            "## Failing command output",
+            "```text",
+            str(result.get("traceback", result.get("error", "<missing error>"))),
+            "```",
+            "",
             "## Screenshots or logs",
             f"- Screenshot: {result.get('screenshot', '<no screenshot recorded>')}",
             "```json",
             json.dumps(
                 {
+                    "first_failed_step": first_failed_step,
+                    "trigger_focusability_observation": result.get(
+                        "trigger_focusability_observation",
+                    ),
+                    "trigger_focus_sequence": result.get("trigger_focus_sequence"),
                     "trigger_before": result.get("trigger_before"),
                     "open_switcher_observation": result.get("open_switcher_observation"),
                     "open_panel_observation": result.get("open_panel_observation"),
@@ -829,6 +873,72 @@ def _bug_description(result: dict[str, object]) -> str:
             "```",
         ],
     ) + "\n"
+
+
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(
+                root_comment_id=thread.get("rootCommentId"),
+                passed=passed,
+                result=result,
+            ),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(
+    *,
+    root_comment_id: object,
+    passed: bool,
+    result: dict[str, object],
+) -> str:
+    rerun_summary = (
+        "Re-ran "
+        f"`{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else "Re-ran "
+        f"`{RUN_COMMAND}`: failed at {_failed_step_summary(result)}"
+    )
+    if root_comment_id == 3258555749:
+        return (
+            "Fixed: TS-824 now asserts the post-Escape active element is trigger-owned "
+            "before using Enter as the follow-on usability check. "
+            + rerun_summary
+        )
+    if root_comment_id == 3258555907:
+        return (
+            "Fixed: `outputs/bug_description.md` now derives its title, reproduction, "
+            "and missing-capability section from the first failed step, and it includes "
+            "the recorded trigger-focusability and Tab-sequence evidence when the run "
+            "stops before the Escape assertion. "
+            + rerun_summary
+        )
+    return "Fixed the requested TS-824 review item. " + rerun_summary
 
 
 def _annotated_step_line(
@@ -890,6 +1000,99 @@ def _failed_step_summary(result: dict[str, object]) -> str:
             if isinstance(step, dict) and step.get("status") != "passed":
                 return f"Step {step.get('step')}: {step.get('observed')}"
     return str(result.get("error", "No failed step recorded."))
+
+
+def _first_failed_step_number(result: dict[str, object]) -> int | None:
+    steps = result.get("steps", [])
+    if not isinstance(steps, list):
+        return None
+    for step in steps:
+        if isinstance(step, dict) and step.get("status") != "passed":
+            return int(step.get("step", -1))
+    return None
+
+
+def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
+    failed_step = _first_failed_step_number(result)
+    if failed_step == 2:
+        return (
+            f"{TICKET_KEY} - Workspace switcher trigger is not keyboard-focusable in desktop web",
+            [
+                "1. Launch the application on a desktop browser.",
+                "2. Navigate to Dashboard in the desktop web app.",
+                "3. Move keyboard focus to the visible top-bar search field.",
+                "4. Press `Tab` repeatedly to reach the visible workspace switcher trigger.",
+                "5. Observe that focus cycles other controls and never lands on the workspace switcher trigger.",
+            ],
+            (
+                "The production desktop web UI does not expose the visible workspace "
+                "switcher trigger as a keyboard-focusable control. In the failing run the "
+                "visible trigger was rendered with role `button` but `tabindex=None`, and "
+                "real Tab navigation from the search field never reached it. Because the "
+                "trigger cannot own keyboard focus, the required `trigger -> internal panel "
+                "element -> Escape` flow cannot be exercised from the production UI."
+            ),
+        )
+    if failed_step == 3:
+        return (
+            f"{TICKET_KEY} - Tab does not move focus into the open workspace switcher panel",
+            [
+                "1. Launch the application on a desktop browser.",
+                "2. Reach the workspace switcher trigger by keyboard and open the panel.",
+                "3. Press `Tab` once while the panel is open.",
+                "4. Observe the newly focused element.",
+            ],
+            (
+                "After the workspace switcher is opened from a keyboard-focused trigger, "
+                "the next Tab press does not move focus to a visible interactive element "
+                "inside the panel. The production panel therefore does not expose the "
+                "ticket's required keyboard path into the switcher surface."
+            ),
+        )
+    if failed_step == 4:
+        return (
+            f"{TICKET_KEY} - Escape does not dismiss the open workspace switcher panel",
+            [
+                "1. Launch the application on a desktop browser.",
+                "2. Reach the workspace switcher trigger by keyboard and open the panel.",
+                "3. Press `Tab` to move focus to an interactive element inside the panel.",
+                "4. Press `Escape`.",
+                "5. Observe whether the visible switcher surface disappears.",
+            ],
+            (
+                "The production workspace switcher does not reliably dismiss the visible "
+                "desktop panel when Escape is pressed from an internally focused panel "
+                "element."
+            ),
+        )
+    if failed_step == 5:
+        return (
+            f"{TICKET_KEY} - Escape dismissal does not restore focus to the workspace switcher trigger",
+            [
+                "1. Launch the application on a desktop browser.",
+                "2. Reach the workspace switcher trigger by keyboard and open the panel.",
+                "3. Press `Tab` to move focus to an interactive element inside the panel.",
+                "4. Press `Escape` to dismiss the panel.",
+                "5. Observe the active element after dismissal.",
+            ],
+            (
+                "After Escape dismisses the visible workspace switcher panel, the "
+                "production UI does not restore keyboard focus to the workspace switcher "
+                "trigger as required."
+            ),
+        )
+    return (
+        f"{TICKET_KEY} - Desktop workspace switcher Escape flow is broken",
+        [
+            "1. Launch the application on a desktop browser.",
+            "2. Attempt the TS-824 workspace-switcher keyboard scenario.",
+            "3. Observe the first failing boundary.",
+        ],
+        (
+            "The production desktop workspace-switcher flow does not satisfy the TS-824 "
+            "keyboard-dismissal requirement."
+        ),
+    )
 
 
 def _step_status(result: dict[str, object], step_number: int) -> str:
@@ -1038,5 +1241,16 @@ def _focused_element_payload(focused: FocusedElementObservation) -> dict[str, ob
         "tabindex": focused.tabindex,
         "outer_html": focused.outer_html,
     }
+
+
+def _is_workspace_trigger_focus(
+    accessible_name: str | None,
+    *,
+    fallback_text: str | None = None,
+) -> bool:
+    candidates = (accessible_name or "", fallback_text or "")
+    return any(candidate.startswith("Workspace switcher:") for candidate in candidates)
+
+
 if __name__ == "__main__":
     main()
