@@ -1442,6 +1442,87 @@ void main() {
   );
 
   testWidgets(
+    'desktop header exports browser semantics sort keys through the workspace switcher trigger',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            workspaceProfileService: service,
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                ),
+          ),
+        );
+        await _pumpUntilVisible(tester, find.byType(TextField));
+
+        expect(
+          _findSemanticsWithSortOrder(
+            label: 'Search issues',
+            sortOrder: 2,
+            textField: true,
+          ),
+          findsOneWidget,
+        );
+        expect(
+          _findSemanticsWithSortOrder(label: 'Create issue', sortOrder: 3),
+          findsOneWidget,
+        );
+        expect(
+          _findSemanticsWithSortOrder(label: 'Add workspace', sortOrder: 4),
+          findsOneWidget,
+        );
+
+        final trigger = find.byKey(
+          const ValueKey('workspace-switcher-trigger'),
+        );
+        expect(
+          find.descendant(
+            of: trigger,
+            matching: _findSemanticsWithSortOrder(
+              label: 'Workspace switcher: alpha/repo, Hosted, Needs sign-in',
+              sortOrder: 5,
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          _findSemanticsWithSortOrder(label: 'Dark theme', sortOrder: 6),
+          findsOneWidget,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'desktop workspace switcher exports a single explicit button semantics node across desktop layouts',
     (tester) async {
       final semantics = tester.ensureSemantics();
@@ -1904,6 +1985,23 @@ Future<bool> _focusByTabUntil(
     }
   }
   return false;
+}
+
+Finder _findSemanticsWithSortOrder({
+  required String label,
+  required double sortOrder,
+  bool? textField,
+}) {
+  return find.byWidgetPredicate(
+    (widget) =>
+        widget is Semantics &&
+        widget.properties.label == label &&
+        widget.properties.sortKey is OrdinalSortKey &&
+        (widget.properties.sortKey as OrdinalSortKey).order == sortOrder &&
+        (textField == null || widget.properties.textField == textField),
+    description:
+        'Semantics(label: $label, sortKey: OrdinalSortKey($sortOrder))',
+  );
 }
 
 Future<void> _pumpUntilVisible(

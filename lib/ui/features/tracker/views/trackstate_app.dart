@@ -3412,6 +3412,7 @@ class _TopBar extends StatelessWidget {
                         label: l10n.createIssue,
                         glyph: TrackStateIconGlyph.plus,
                         onPressed: openCreateIssue,
+                        semanticsSortOrder: createIssueOrder,
                         size: compact ? null : _desktopTopBarControlHeight,
                       ),
                     )
@@ -3423,6 +3424,7 @@ class _TopBar extends StatelessWidget {
                         icon: TrackStateIconGlyph.plus,
                         onPressed: openCreateIssue,
                         height: _desktopTopBarControlHeight,
+                        semanticsSortOrder: createIssueOrder,
                       ),
                     ),
                   if (canOpenWorkspaceOnboarding) ...[
@@ -3434,6 +3436,7 @@ class _TopBar extends StatelessWidget {
                           label: l10n.addWorkspace,
                           glyph: TrackStateIconGlyph.repository,
                           onPressed: openWorkspaceOnboarding,
+                          semanticsSortOrder: addWorkspaceOrder,
                           size: compact ? null : _desktopTopBarControlHeight,
                         ),
                       )
@@ -3445,6 +3448,7 @@ class _TopBar extends StatelessWidget {
                           icon: TrackStateIconGlyph.repository,
                           onPressed: openWorkspaceOnboarding,
                           height: _desktopTopBarControlHeight,
+                          semanticsSortOrder: addWorkspaceOrder,
                         ),
                       ),
                   ],
@@ -3464,6 +3468,7 @@ class _TopBar extends StatelessWidget {
                                     compact: false,
                                     condensed: true,
                                     onPressed: openWorkspaceSwitcher,
+                                    semanticsSortOrder: workspaceSwitcherOrder,
                                     focusNode:
                                         workspaceSwitcherTriggerFocusNode,
                                   )
@@ -3474,6 +3479,7 @@ class _TopBar extends StatelessWidget {
                                     icon: workspaceSummary.icon,
                                     onPressed: openWorkspaceSwitcher,
                                     height: _desktopTopBarControlHeight,
+                                    semanticsSortOrder: workspaceSwitcherOrder,
                                     focusNode:
                                         workspaceSwitcherTriggerFocusNode,
                                   ),
@@ -3493,6 +3499,7 @@ class _TopBar extends StatelessWidget {
                           ? TrackStateIconGlyph.sun
                           : TrackStateIconGlyph.moon,
                       onPressed: viewModel.toggleTheme,
+                      semanticsSortOrder: themeToggleOrder,
                       size: compact ? null : _desktopTopBarControlHeight,
                     ),
                   ),
@@ -3583,6 +3590,7 @@ class _TopBar extends StatelessWidget {
                           glyph: TrackStateIconGlyph.sync,
                           onPressed: () =>
                               viewModel.selectSection(TrackerSection.settings),
+                          semanticsSortOrder: 1,
                           size: _desktopTopBarControlHeight,
                         ),
                       ),
@@ -3618,6 +3626,7 @@ class _TopBar extends StatelessWidget {
                     label: _workspaceSyncLabel(l10n, viewModel),
                     tone: _workspaceSyncTone(viewModel),
                     height: _desktopTopBarControlHeight,
+                    semanticsSortOrder: 1,
                     onPressed: () =>
                         viewModel.selectSection(TrackerSection.settings),
                   ),
@@ -3630,6 +3639,7 @@ class _TopBar extends StatelessWidget {
                       2,
                       Semantics(
                         label: l10n.searchIssues,
+                        sortKey: const OrdinalSortKey(2),
                         textField: true,
                         child: TextField(
                           controller: TextEditingController(
@@ -10360,6 +10370,7 @@ class _PrimaryButton extends StatelessWidget {
     this.height,
     this.semanticLabel,
     this.focusNode,
+    this.semanticsSortOrder,
   });
 
   final Key? buttonKey;
@@ -10369,6 +10380,7 @@ class _PrimaryButton extends StatelessWidget {
   final double? height;
   final String? semanticLabel;
   final FocusNode? focusNode;
+  final double? semanticsSortOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -10381,6 +10393,7 @@ class _PrimaryButton extends StatelessWidget {
       enabled: enabled,
       focusable: enabled,
       label: semanticLabel ?? label,
+      sortKey: _semanticsSortKey(semanticsSortOrder),
       child: ExcludeSemantics(
         child: SizedBox(
           height: height,
@@ -10417,6 +10430,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
     required this.condensed,
     required this.onPressed,
     this.focusNode,
+    this.semanticsSortOrder,
   });
 
   final _WorkspaceDisplaySummary summary;
@@ -10424,6 +10438,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
   final bool condensed;
   final VoidCallback? onPressed;
   final FocusNode? focusNode;
+  final double? semanticsSortOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -10455,6 +10470,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
       enabled: enabled,
       focusable: enabled,
       label: summary.semanticLabel,
+      sortKey: _semanticsSortKey(semanticsSortOrder),
       child: ExcludeSemantics(
         child: ConstrainedBox(
           constraints: BoxConstraints(
@@ -10559,6 +10575,7 @@ class _SecondaryButton extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     this.height,
+    this.semanticsSortOrder,
   });
 
   final Key? buttonKey;
@@ -10566,6 +10583,7 @@ class _SecondaryButton extends StatelessWidget {
   final TrackStateIconGlyph icon;
   final VoidCallback? onPressed;
   final double? height;
+  final double? semanticsSortOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -10573,6 +10591,7 @@ class _SecondaryButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
+      sortKey: _semanticsSortKey(semanticsSortOrder),
       child: OutlinedButton.icon(
         key: buttonKey,
         onPressed: onPressed,
@@ -10594,12 +10613,14 @@ class _IconButtonSurface extends StatelessWidget {
     required this.glyph,
     required this.onPressed,
     this.size,
+    this.semanticsSortOrder,
   });
 
   final String label;
   final TrackStateIconGlyph glyph;
   final VoidCallback? onPressed;
   final double? size;
+  final double? semanticsSortOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -10609,6 +10630,7 @@ class _IconButtonSurface extends StatelessWidget {
       button: true,
       enabled: enabled,
       label: label,
+      sortKey: _semanticsSortKey(semanticsSortOrder),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: onPressed,
@@ -10670,6 +10692,10 @@ class _CompactActionIconButton extends StatelessWidget {
       ),
     );
   }
+}
+
+SemanticsSortKey? _semanticsSortKey(double? sortOrder) {
+  return sortOrder == null ? null : OrdinalSortKey(sortOrder);
 }
 
 class _DropdownCreateField extends StatelessWidget {
@@ -12268,12 +12294,14 @@ class _SyncPill extends StatelessWidget {
     required this.tone,
     this.height,
     this.onPressed,
+    this.semanticsSortOrder,
   });
 
   final String label;
   final _SyncPillTone tone;
   final double? height;
   final VoidCallback? onPressed;
+  final double? semanticsSortOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -12294,6 +12322,7 @@ class _SyncPill extends StatelessWidget {
       button: onPressed != null,
       container: true,
       label: label,
+      sortKey: _semanticsSortKey(semanticsSortOrder),
       child: ExcludeSemantics(
         child: Material(
           color: Colors.transparent,
