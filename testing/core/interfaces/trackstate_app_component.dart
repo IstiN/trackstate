@@ -134,6 +134,7 @@ abstract interface class TrackStateAppComponent {
 
   Future<bool> workspaceRowHasControl(String workspaceId, String label);
 
+  Future<bool> tapWorkspaceRowControl(String workspaceId, String label);
   Future<void> closeDialog(String actionLabel);
 
   void expectProfileIdentityVisible({

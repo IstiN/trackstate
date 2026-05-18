@@ -89,6 +89,93 @@ void main() {
   );
 
   testWidgets(
+    'startup restore keeps the saved active local workspace selected when local startup access is unavailable',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: activeLocalWorkspaceId,
+              displayName: 'Active local workspace',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/trackstate-demo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:stable/repo@main',
+              displayName: 'stable/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'stable/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: activeLocalWorkspaceId,
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: DemoTrackStateRepository.new,
+          workspaceProfileService: service,
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => throw UnsupportedError(
+                'Local Git startup access is unavailable.',
+              ),
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(service.state.activeWorkspaceId, activeLocalWorkspaceId);
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      final activeRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
+      );
+      expect(activeRow, findsOneWidget);
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Local Git')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Open')),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
     'startup restore routes to add workspace when every saved workspace is invalid',
     (tester) async {
       final service = _MemoryWorkspaceProfileService(
@@ -509,6 +596,69 @@ void main() {
         (switcherRect.right - triggerRect.right).abs(),
         lessThanOrEqualTo(120),
       );
+    },
+  );
+
+  testWidgets(
+    'desktop workspace switcher dismisses when tapping neutral main content',
+    (tester) async {
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-sheet')),
+        findsOneWidget,
+      );
+
+      await tester.tapAt(const Offset(96, 632));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-sheet')),
+        findsNothing,
+      );
+      expect(find.text('Dashboard'), findsWidgets);
     },
   );
 

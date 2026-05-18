@@ -54,6 +54,8 @@ typedef LocalRepositoryConfigurationApplier =
       required String writeBranch,
     });
 
+const _desktopWorkspaceSwitcherTapRegionGroupId = 'desktop-workspace-switcher';
+
 @visibleForTesting
 bool shouldOpenProjectSettingsForStartupWithoutSavedWorkspaces({
   required bool isWeb,
@@ -319,6 +321,8 @@ class _TrackStateAppState extends State<TrackStateApp>
         workspace,
         previousViewModel: previousViewModel,
         showFailureMessage: false,
+        preserveActiveLocalSelectionOnUnsupportedAccess:
+            workspace.id == activeWorkspaceId && workspace.isLocal,
       );
       if (prepared == null) {
         lastFailure = _WorkspaceRestoreFailure(
@@ -356,6 +360,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
     required bool showFailureMessage,
+    bool preserveActiveLocalSelectionOnUnsupportedAccess = false,
   }) async {
     try {
       final repository = workspace.isLocal
@@ -399,6 +404,18 @@ class _TrackStateAppState extends State<TrackStateApp>
       }
       return null;
     } on Object catch (error) {
+      if (preserveActiveLocalSelectionOnUnsupportedAccess &&
+          error is UnsupportedError) {
+        if (previousViewModel.snapshot == null) {
+          await previousViewModel.load();
+        }
+        _workspaceValidationFailures.remove(workspace.id);
+        return _PreparedWorkspaceSwitch(
+          viewModel: previousViewModel,
+          workspace: workspace,
+          localConfigurationKey: null,
+        );
+      }
       final reason = _normalizeWorkspaceFailureReason(error);
       _rememberWorkspaceValidationFailure(workspace, reason);
       if (showFailureMessage) {
@@ -2952,6 +2969,7 @@ class _TrackerMainPane extends StatelessWidget {
               desktopWorkspaceSwitcherContent != null)
             _DesktopWorkspaceSwitcherOverlay(
               panelRect: desktopWorkspaceSwitcherPanelRect,
+              onDismiss: onCloseDesktopWorkspaceSwitcher,
               child: desktopWorkspaceSwitcherContent!,
             ),
           if (isCreateIssueVisible)
@@ -2976,10 +2994,12 @@ class _TrackerMainPane extends StatelessWidget {
 class _DesktopWorkspaceSwitcherOverlay extends StatelessWidget {
   const _DesktopWorkspaceSwitcherOverlay({
     required this.panelRect,
+    required this.onDismiss,
     required this.child,
   });
 
   final Rect? panelRect;
+  final VoidCallback onDismiss;
   final Widget child;
 
   @override
@@ -2997,18 +3017,22 @@ class _DesktopWorkspaceSwitcherOverlay extends StatelessWidget {
       left: resolvedPanelRect.left,
       top: resolvedPanelRect.top,
       width: resolvedPanelRect.width,
-      child: Material(
-        color: colors.surface,
-        elevation: 16,
-        shadowColor: colors.shadow,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: colors.border),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: maxHeight),
-          child: SizedBox(width: resolvedPanelRect.width, child: child),
+      child: TapRegion(
+        groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
+        onTapOutside: (_) => onDismiss(),
+        child: Material(
+          color: colors.surface,
+          elevation: 16,
+          shadowColor: colors.shadow,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: colors.border),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: SizedBox(width: resolvedPanelRect.width, child: child),
+          ),
         ),
       ),
     );
@@ -3225,29 +3249,32 @@ class _TopBar extends StatelessWidget {
                     const SizedBox(width: 8),
                     orderedControl(
                       workspaceSwitcherOrder,
-                      SizedBox(
-                        key: workspaceSwitcherTriggerKey,
-                        child: KeyedSubtree(
-                          key: const ValueKey('workspace-switcher-trigger'),
-                          child: Semantics(
-                            container: true,
-                            button: true,
-                            enabled: openWorkspaceSwitcher != null,
-                            label: workspaceSummary.semanticLabel,
-                            child: ExcludeSemantics(
-                              child: condensedDesktop
-                                  ? _WorkspaceSwitcherTriggerButton(
-                                      summary: workspaceSummary,
-                                      compact: false,
-                                      condensed: true,
-                                      onPressed: openWorkspaceSwitcher,
-                                    )
-                                  : _PrimaryButton(
-                                      label: workspaceSummary.textLabel,
-                                      icon: workspaceSummary.icon,
-                                      onPressed: openWorkspaceSwitcher,
-                                      height: _desktopTopBarControlHeight,
-                                    ),
+                      TapRegion(
+                        groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
+                        child: SizedBox(
+                          key: workspaceSwitcherTriggerKey,
+                          child: KeyedSubtree(
+                            key: const ValueKey('workspace-switcher-trigger'),
+                            child: Semantics(
+                              container: true,
+                              button: true,
+                              enabled: openWorkspaceSwitcher != null,
+                              label: workspaceSummary.semanticLabel,
+                              child: ExcludeSemantics(
+                                child: condensedDesktop
+                                    ? _WorkspaceSwitcherTriggerButton(
+                                        summary: workspaceSummary,
+                                        compact: false,
+                                        condensed: true,
+                                        onPressed: openWorkspaceSwitcher,
+                                      )
+                                    : _PrimaryButton(
+                                        label: workspaceSummary.textLabel,
+                                        icon: workspaceSummary.icon,
+                                        onPressed: openWorkspaceSwitcher,
+                                        height: _desktopTopBarControlHeight,
+                                      ),
+                              ),
                             ),
                           ),
                         ),
@@ -3364,19 +3391,22 @@ class _TopBar extends StatelessWidget {
                   const SizedBox(height: 8),
                   orderedControl(
                     workspaceSwitcherOrder,
-                    KeyedSubtree(
-                      key: const ValueKey('workspace-switcher-trigger'),
-                      child: Semantics(
-                        container: true,
-                        button: true,
-                        enabled: openWorkspaceSwitcher != null,
-                        label: workspaceSummary.semanticLabel,
-                        child: ExcludeSemantics(
-                          child: _WorkspaceSwitcherTriggerButton(
-                            summary: workspaceSummary,
-                            compact: true,
-                            condensed: false,
-                            onPressed: openWorkspaceSwitcher,
+                    TapRegion(
+                      groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
+                      child: KeyedSubtree(
+                        key: const ValueKey('workspace-switcher-trigger'),
+                        child: Semantics(
+                          container: true,
+                          button: true,
+                          enabled: openWorkspaceSwitcher != null,
+                          label: workspaceSummary.semanticLabel,
+                          child: ExcludeSemantics(
+                            child: _WorkspaceSwitcherTriggerButton(
+                              summary: workspaceSummary,
+                              compact: true,
+                              condensed: false,
+                              onPressed: openWorkspaceSwitcher,
+                            ),
                           ),
                         ),
                       ),
@@ -3513,7 +3543,11 @@ _WorkspaceDisplaySummary _activeWorkspaceSummary(
   final typeLabel = isLocal
       ? l10n.workspaceTargetTypeLocal
       : l10n.workspaceTargetTypeHosted;
-  final stateLabel = _activeWorkspaceStateLabel(l10n, viewModel);
+  final stateLabel = _activeWorkspaceStateLabel(
+    l10n,
+    viewModel,
+    activeWorkspace: activeWorkspace,
+  );
   return _WorkspaceDisplaySummary(
     displayName: displayName,
     detailLabel: '$typeLabel · $stateLabel',
@@ -3526,9 +3560,10 @@ _WorkspaceDisplaySummary _activeWorkspaceSummary(
 
 String _activeWorkspaceStateLabel(
   AppLocalizations l10n,
-  TrackerViewModel viewModel,
-) {
-  if (viewModel.usesLocalPersistence) {
+  TrackerViewModel viewModel, {
+  WorkspaceProfile? activeWorkspace,
+}) {
+  if (activeWorkspace?.isLocal ?? viewModel.usesLocalPersistence) {
     return l10n.workspaceStateLocalGit;
   }
   return switch (viewModel.hostedRepositoryAccessMode) {
@@ -5689,18 +5724,14 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                           ),
                           focusOrderBase: index * 3.0 + 1,
                           primaryActionLabel:
-                              widget.workspaces.profiles[index].id ==
-                                      activeWorkspaceId &&
-                                  widget.workspaces.profiles[index].isLocal &&
+                              widget.workspaces.profiles[index].isLocal &&
                                   widget.viewModel.usesLocalPersistence
                               ? (widget.viewModel.hasLocalHostedAccessSession
                                     ? l10n.manageGitHubAccess
                                     : l10n.connectGitHub)
                               : null,
                           onPrimaryAction:
-                              widget.workspaces.profiles[index].id ==
-                                      activeWorkspaceId &&
-                                  widget.workspaces.profiles[index].isLocal &&
+                              widget.workspaces.profiles[index].isLocal &&
                                   widget.viewModel.usesLocalPersistence
                               ? () => _showRepositoryAccessDialog(
                                   context,
@@ -6005,7 +6036,11 @@ String _workspaceStateLabel(
   required Map<String, bool> localWorkspaceAvailability,
 }) {
   if (workspace.id == activeWorkspaceId) {
-    return _activeWorkspaceStateLabel(l10n, viewModel);
+    return _activeWorkspaceStateLabel(
+      l10n,
+      viewModel,
+      activeWorkspace: workspace,
+    );
   }
   if (workspace.isLocal) {
     return localWorkspaceAvailability[workspace.id] == false
