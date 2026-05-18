@@ -1854,13 +1854,25 @@ class LiveWorkspaceSwitcherPage:
                   && text.includes('Delete')
                   && (text.includes('Hosted') || text.includes('Local'))
                   && (text.includes('Open') || text.includes('Active'));
-                const isSwitcherSignal = (text, aria) =>
+                const isPanelSignal = (text) =>
                   text.includes(heading)
-                  || aria.startsWith('Workspace switcher:')
                   || text.includes('Saved workspaces')
                   || text.includes('Add workspace')
                   || text.includes('Save and switch')
                   || isWorkspaceRow(text);
+                const buttons = Array.from(
+                  document.querySelectorAll('flt-semantics[role="button"]'),
+                ).filter(isVisible);
+                const trigger = buttons
+                  .filter((element) =>
+                    normalize(element.getAttribute('aria-label') || element.innerText || '')
+                      .startsWith('Workspace switcher:'),
+                  )
+                  .sort((left, right) => {
+                    const leftRect = left.getBoundingClientRect();
+                    const rightRect = right.getBoundingClientRect();
+                    return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                  })[0] ?? null;
                 const rowCandidates = visibleElements(document)
                   .map((element) => {
                     const rect = element.getBoundingClientRect();
@@ -1875,16 +1887,17 @@ class LiveWorkspaceSwitcherPage:
                   .map((element) => {
                     const rect = element.getBoundingClientRect();
                     return {
+                      element,
                       text: visibleText(element),
-                      aria: normalize(element.getAttribute('aria-label') || ''),
                       area: rect.width * rect.height,
                       rect,
                     };
                   })
                   .filter((candidate) =>
-                    candidate.area > 0
+                    candidate.element !== trigger
+                    && candidate.area > 0
                     && candidate.area < viewportArea * 0.9
-                    && isSwitcherSignal(candidate.text, candidate.aria),
+                    && isPanelSignal(candidate.text),
                   )
                   .sort((left, right) => left.area - right.area);
                 if (surfaceCandidates.length === 0) {
@@ -1903,19 +1916,6 @@ class LiveWorkspaceSwitcherPage:
                 };
                 switcherRect.width = switcherRect.right - switcherRect.left;
                 switcherRect.height = switcherRect.bottom - switcherRect.top;
-                const buttons = Array.from(
-                  document.querySelectorAll('flt-semantics[role="button"]'),
-                ).filter(isVisible);
-                const trigger = buttons
-                  .filter((element) =>
-                    normalize(element.getAttribute('aria-label') || element.innerText || '')
-                      .startsWith('Workspace switcher:'),
-                  )
-                  .sort((left, right) => {
-                    const leftRect = left.getBoundingClientRect();
-                    const rightRect = right.getBoundingClientRect();
-                    return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
-                  })[0] ?? null;
                 const triggerRect = trigger ? trigger.getBoundingClientRect() : null;
                 const triggerBottom = triggerRect ? triggerRect.top + triggerRect.height : 0;
                 const triggerRight = triggerRect ? triggerRect.left + triggerRect.width : 0;
