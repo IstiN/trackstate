@@ -22,8 +22,7 @@ import '../../../core/trackstate_theme.dart';
 import '../services/attachment_picker.dart';
 import '../services/browser_workspace_switcher_focus_matcher.dart';
 import '../services/browser_workspace_switcher_focus_monitor_stub.dart'
-    if (dart.library.js_interop)
-        '../services/browser_workspace_switcher_focus_monitor_web.dart'
+    if (dart.library.js_interop) '../services/browser_workspace_switcher_focus_monitor_web.dart'
     as browser_workspace_switcher_focus_monitor;
 import '../services/workspace_directory_picker.dart';
 import '../view_models/tracker_view_model.dart';
@@ -136,8 +135,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   final FocusScopeNode _desktopWorkspaceSwitcherFocusScopeNode = FocusScopeNode(
     debugLabel: 'desktop-workspace-switcher',
   );
-  browser_workspace_switcher_focus_monitor
-      .BrowserWorkspaceSwitcherFocusMonitorSubscription?
+  browser_workspace_switcher_focus_monitor.BrowserWorkspaceSwitcherFocusMonitorSubscription?
   _desktopWorkspaceSwitcherBrowserFocusMonitor;
   _WorkspaceRestoreFailure? _pendingWorkspaceRestoreFailure;
 
@@ -863,6 +861,14 @@ class _TrackStateAppState extends State<TrackStateApp>
       previousViewModel.dispose();
     }
     await _refreshWorkspaceSwitcherState(workspaceState ?? _workspaceState);
+    if (_isDesktopWorkspaceSwitcherVisible) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+          return;
+        }
+        _desktopWorkspaceSwitcherFocusScopeNode.requestFocus();
+      });
+    }
   }
 
   Future<void> _ensureCurrentContextWorkspaceMigration() async {
@@ -1215,7 +1221,8 @@ class _TrackStateAppState extends State<TrackStateApp>
           identifier: browserWorkspaceSwitcherSemanticsIdentifier,
           onDidLoseAccessibilityFocus: compact
               ? null
-              : () => _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false),
+              : () =>
+                    _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false),
           child: _WorkspaceSwitcherSheet(
             viewModel: viewModel,
             workspaces: _workspaceState,
@@ -1250,6 +1257,10 @@ class _TrackStateAppState extends State<TrackStateApp>
       bindings: <ShortcutActivator, VoidCallback>{
         const SingleActivator(LogicalKeyboardKey.escape):
             _closeDesktopWorkspaceSwitcher,
+        const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+            unawaited(_switchToAdjacentWorkspace(step: 1)),
+        const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+            unawaited(_switchToAdjacentWorkspace(step: -1)),
       },
       child: FocusScope(
         node: _desktopWorkspaceSwitcherFocusScopeNode,
@@ -1276,6 +1287,23 @@ class _TrackStateAppState extends State<TrackStateApp>
     setState(() {
       _showsWorkspaceOnboarding = false;
     });
+  }
+
+  Future<void> _switchToAdjacentWorkspace({required int step}) async {
+    final profiles = _workspaceState.profiles;
+    if (!_isDesktopWorkspaceSwitcherVisible || profiles.length < 2) {
+      return;
+    }
+    final activeWorkspaceId = _workspaceState.activeWorkspaceId;
+    final currentIndex = activeWorkspaceId == null
+        ? 0
+        : profiles.indexWhere((profile) => profile.id == activeWorkspaceId);
+    final safeCurrentIndex = currentIndex < 0 ? 0 : currentIndex;
+    final nextIndex = (safeCurrentIndex + step).clamp(0, profiles.length - 1);
+    if (nextIndex == safeCurrentIndex) {
+      return;
+    }
+    await _switchToWorkspace(profiles[nextIndex]);
   }
 
   void _openCreateIssue([_CreateIssuePrefill? prefill]) {
