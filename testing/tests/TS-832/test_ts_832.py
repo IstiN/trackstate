@@ -15,6 +15,7 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     FocusNavigationStep,
     LiveWorkspaceSwitcherPage,
     WorkspaceSwitcherTriggerObservation,
+    WorkspaceTriggerForwardFocusObservation,
     WorkspaceTriggerFocusabilityObservation,
     WorkspaceTriggerReverseFocusObservation,
 )
@@ -217,12 +218,13 @@ def main() -> None:
                     ),
                 )
 
+                forward_focus: WorkspaceTriggerForwardFocusObservation | None = None
                 try:
-                    reverse_focus = page.observe_reverse_focus_return_to_trigger(
+                    forward_focus = page.observe_forward_focus_from_trigger(
                         timeout_ms=REVERSE_FOCUS_TIMEOUT_MS,
                     )
-                    result["reverse_focus_observation"] = _reverse_focus_payload(reverse_focus)
-                    _assert_forward_focus_target(reverse_focus)
+                    result["forward_focus_observation"] = _forward_focus_payload(forward_focus)
+                    _assert_forward_focus_target(forward_focus)
                 except Exception as error:
                     _record_step(
                         result,
@@ -239,9 +241,9 @@ def main() -> None:
                     action=REQUEST_STEPS[2],
                     observed=(
                         "Pressed Tab once from the focused workspace switcher trigger and "
-                        f"moved focus to {reverse_focus.next_focus_label!r} "
-                        f"(role={reverse_focus.next_focus_role!r}, "
-                        f"tag={reverse_focus.next_focus_tag_name!r})."
+                        f"moved focus to {forward_focus.next_focus_label!r} "
+                        f"(role={forward_focus.next_focus_role!r}, "
+                        f"tag={forward_focus.next_focus_tag_name!r})."
                     ),
                 )
                 _record_human_verification(
@@ -251,15 +253,20 @@ def main() -> None:
                         "control received focus next."
                     ),
                     observed=(
-                        f"next_focus={reverse_focus.next_focus_label!r}; "
-                        f"role={reverse_focus.next_focus_role!r}; "
-                        f"tag={reverse_focus.next_focus_tag_name!r}; "
-                        f"visible={reverse_focus.next_focus_visible}; "
-                        f"in_viewport={reverse_focus.next_focus_in_viewport}"
+                        f"next_focus={forward_focus.next_focus_label!r}; "
+                        f"role={forward_focus.next_focus_role!r}; "
+                        f"tag={forward_focus.next_focus_tag_name!r}; "
+                        f"visible={forward_focus.next_focus_visible}; "
+                        f"in_viewport={forward_focus.next_focus_in_viewport}"
                     ),
                 )
 
+                reverse_focus: WorkspaceTriggerReverseFocusObservation | None = None
                 try:
+                    reverse_focus = page.observe_reverse_focus_return_to_trigger(
+                        timeout_ms=REVERSE_FOCUS_TIMEOUT_MS,
+                    )
+                    result["reverse_focus_observation"] = _reverse_focus_payload(reverse_focus)
                     _assert_reverse_focus_returned_to_trigger(reverse_focus)
                 except Exception as error:
                     _record_step(
@@ -360,7 +367,7 @@ def _assert_workspace_trigger_focused(
     )
 
 
-def _assert_forward_focus_target(observation: WorkspaceTriggerReverseFocusObservation) -> None:
+def _assert_forward_focus_target(observation: WorkspaceTriggerForwardFocusObservation) -> None:
     failures: list[str] = []
     if not _is_workspace_trigger_focus(
         observation.starting_focus_label,
@@ -706,6 +713,7 @@ def _bug_description(result: dict[str, object]) -> str:
                     "focused_trigger_before_reverse": result.get(
                         "focused_trigger_before_reverse",
                     ),
+                    "forward_focus_observation": result.get("forward_focus_observation"),
                     "reverse_focus_observation": result.get("reverse_focus_observation"),
                 },
                 indent=2,
@@ -970,8 +978,8 @@ def _focused_element_payload(focused: FocusedElementObservation) -> dict[str, ob
     }
 
 
-def _reverse_focus_payload(
-    observation: WorkspaceTriggerReverseFocusObservation,
+def _forward_focus_payload(
+    observation: WorkspaceTriggerForwardFocusObservation,
 ) -> dict[str, object]:
     return {
         "trigger_label": observation.trigger_label,
@@ -985,6 +993,19 @@ def _reverse_focus_payload(
         "next_focus_outer_html": observation.next_focus_outer_html,
         "next_focus_visible": observation.next_focus_visible,
         "next_focus_in_viewport": observation.next_focus_in_viewport,
+    }
+
+
+def _reverse_focus_payload(
+    observation: WorkspaceTriggerReverseFocusObservation,
+) -> dict[str, object]:
+    return {
+        "trigger_label": observation.trigger_label,
+        "trigger_text": observation.trigger_text,
+        "starting_focus_label": observation.starting_focus_label,
+        "starting_focus_role": observation.starting_focus_role,
+        "starting_focus_tag_name": observation.starting_focus_tag_name,
+        "starting_focus_outer_html": observation.starting_focus_outer_html,
         "before_reverse_outline": observation.before_reverse_outline,
         "before_reverse_outline_color": observation.before_reverse_outline_color,
         "before_reverse_outline_width": observation.before_reverse_outline_width,

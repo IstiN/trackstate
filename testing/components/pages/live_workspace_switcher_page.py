@@ -305,7 +305,7 @@ class MobileTriggerFocusObservation:
 
 
 @dataclass(frozen=True)
-class WorkspaceTriggerReverseFocusObservation:
+class WorkspaceTriggerForwardFocusObservation:
     trigger_label: str
     trigger_text: str
     starting_focus_label: str | None
@@ -317,6 +317,16 @@ class WorkspaceTriggerReverseFocusObservation:
     next_focus_outer_html: str
     next_focus_visible: bool
     next_focus_in_viewport: bool
+
+
+@dataclass(frozen=True)
+class WorkspaceTriggerReverseFocusObservation:
+    trigger_label: str
+    trigger_text: str
+    starting_focus_label: str | None
+    starting_focus_role: str | None
+    starting_focus_tag_name: str
+    starting_focus_outer_html: str
     before_reverse_outline: str
     before_reverse_outline_color: str
     before_reverse_outline_width: str
@@ -3516,94 +3526,28 @@ class LiveWorkspaceSwitcherPage:
             focus_sequence=tuple(steps),
         )
 
-    def observe_reverse_focus_return_to_trigger(
+    def observe_forward_focus_from_trigger(
         self,
         *,
         timeout_ms: int = 10_000,
-    ) -> WorkspaceTriggerReverseFocusObservation:
+    ) -> WorkspaceTriggerForwardFocusObservation:
         starting_focus = self._session.active_element()
         if not self._is_workspace_trigger_label(starting_focus.accessible_name) and not self._is_workspace_trigger_label(
             starting_focus.text,
         ):
             raise AssertionError(
-                "Reverse keyboard navigation must start with the workspace switcher "
+                "Forward keyboard navigation must start with the workspace switcher "
                 "trigger focused.\n"
                 f"Observed active element: label={starting_focus.accessible_name!r}, "
                 f"role={starting_focus.role!r}, tag={starting_focus.tag_name!r}, "
                 f"text={starting_focus.text!r}",
             )
 
+        trigger_snapshot = self._desktop_trigger_snapshot(timeout_ms=timeout_ms)
         try:
             self._session.press_key("Tab", timeout_ms=timeout_ms)
-            next_focus_payload = self._session.wait_for_function(
-                """
-                ({ triggerLabelPrefix }) => {
-                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-                  const isVisible = (element) => {
-                    if (!element) {
-                      return false;
-                    }
-                    const rect = element.getBoundingClientRect();
-                    const style = window.getComputedStyle(element);
-                    return rect.width > 0
-                      && rect.height > 0
-                      && style.visibility !== 'hidden'
-                      && style.display !== 'none';
-                  };
-                  const isInViewport = (element) => {
-                    if (!element) {
-                      return false;
-                    }
-                    const rect = element.getBoundingClientRect();
-                    return rect.width > 0
-                      && rect.height > 0
-                      && rect.right > 0
-                      && rect.bottom > 0
-                      && rect.left < window.innerWidth
-                      && rect.top < window.innerHeight;
-                  };
-                  const labelFor = (element) =>
-                    normalize(
-                      element?.getAttribute?.('aria-label')
-                      || element?.getAttribute?.('placeholder')
-                      || element?.getAttribute?.('title')
-                      || element?.innerText
-                      || element?.textContent
-                      || '',
-                    );
-                  const active = document.activeElement;
-                  if (!active) {
-                    return null;
-                  }
-                  const label = labelFor(active);
-                  const tagName = active.tagName || '';
-                  const role = active.getAttribute?.('role') || null;
-                  const visible = isVisible(active);
-                  const inViewport = isInViewport(active);
-                  const differentFromTrigger = !label.startsWith(triggerLabelPrefix);
-                  if (
-                    !visible
-                    || !inViewport
-                    || !differentFromTrigger
-                    || tagName === 'BODY'
-                    || tagName === 'HTML'
-                    || tagName === 'FLUTTER-VIEW'
-                  ) {
-                    return null;
-                  }
-                  return {
-                    label,
-                    role,
-                    tagName,
-                    outerHtml: active.outerHTML?.slice?.(0, 400) || '',
-                    visible,
-                    inViewport,
-                  };
-                }
-                """,
-                arg={"triggerLabelPrefix": self._trigger_label_prefix},
-                timeout_ms=timeout_ms,
-            )
+            next_focus = self._session.active_element()
+            next_focus_visibility = self._active_element_visibility_snapshot()
         except WebAppTimeoutError as error:
             active = self._session.active_element()
             raise AssertionError(
@@ -3613,11 +3557,36 @@ class LiveWorkspaceSwitcherPage:
                 f"role={active.role!r}, tag={active.tag_name!r}, text={active.text!r}\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
-        if not isinstance(next_focus_payload, dict):
+
+        return WorkspaceTriggerForwardFocusObservation(
+            trigger_label=str(trigger_snapshot.get("triggerLabel", "")),
+            trigger_text=str(trigger_snapshot.get("triggerText", "")),
+            starting_focus_label=starting_focus.accessible_name,
+            starting_focus_role=starting_focus.role,
+            starting_focus_tag_name=starting_focus.tag_name,
+            next_focus_label=next_focus.accessible_name,
+            next_focus_role=next_focus.role,
+            next_focus_tag_name=next_focus.tag_name,
+            next_focus_outer_html=next_focus.outer_html,
+            next_focus_visible=bool(next_focus_visibility.get("visible")),
+            next_focus_in_viewport=bool(next_focus_visibility.get("inViewport")),
+        )
+
+    def observe_reverse_focus_return_to_trigger(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceTriggerReverseFocusObservation:
+        starting_focus = self._session.active_element()
+        if self._is_workspace_trigger_label(starting_focus.accessible_name) or self._is_workspace_trigger_label(
+            starting_focus.text,
+        ):
             raise AssertionError(
-                "The reverse keyboard navigation probe did not capture the focus target "
-                "after pressing Tab from the workspace switcher trigger.\n"
-                f"Observed body text:\n{self.current_body_text()}",
+                "Reverse keyboard navigation must start from the control after the "
+                "workspace switcher trigger, not from the trigger itself.\n"
+                f"Observed active element: label={starting_focus.accessible_name!r}, "
+                f"role={starting_focus.role!r}, tag={starting_focus.tag_name!r}, "
+                f"text={starting_focus.text!r}",
             )
 
         before_reverse = self._desktop_trigger_snapshot(timeout_ms=timeout_ms)
@@ -3674,20 +3643,7 @@ class LiveWorkspaceSwitcherPage:
             starting_focus_label=starting_focus.accessible_name,
             starting_focus_role=starting_focus.role,
             starting_focus_tag_name=starting_focus.tag_name,
-            next_focus_label=(
-                str(next_focus_payload.get("label"))
-                if next_focus_payload.get("label") is not None
-                else None
-            ),
-            next_focus_role=(
-                str(next_focus_payload.get("role"))
-                if next_focus_payload.get("role") is not None
-                else None
-            ),
-            next_focus_tag_name=str(next_focus_payload.get("tagName", "")),
-            next_focus_outer_html=str(next_focus_payload.get("outerHtml", "")),
-            next_focus_visible=bool(next_focus_payload.get("visible")),
-            next_focus_in_viewport=bool(next_focus_payload.get("inViewport")),
+            starting_focus_outer_html=starting_focus.outer_html,
             before_reverse_outline=str(before_reverse.get("outline", "")),
             before_reverse_outline_color=str(before_reverse.get("outlineColor", "")),
             before_reverse_outline_width=str(before_reverse.get("outlineWidth", "")),
@@ -3900,6 +3856,38 @@ class LiveWorkspaceSwitcherPage:
             raise AssertionError(
                 "The desktop layout did not expose the workspace switcher trigger for "
                 "focus-style inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return payload
+
+    def _active_element_visibility_snapshot(self) -> dict[str, object]:
+        payload = self._session.evaluate(
+            """
+            () => {
+              const active = document.activeElement;
+              if (!active) {
+                return null;
+              }
+              const rect = active.getBoundingClientRect();
+              const style = window.getComputedStyle(active);
+              return {
+                visible: rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none',
+                inViewport: rect.width > 0
+                  && rect.height > 0
+                  && rect.right > 0
+                  && rect.bottom > 0
+                  && rect.left < window.innerWidth
+                  && rect.top < window.innerHeight,
+              };
+            }
+            """,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The active-element visibility probe did not return an observation.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
         return payload
