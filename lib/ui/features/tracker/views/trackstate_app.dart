@@ -590,7 +590,10 @@ class _TrackStateAppState extends State<TrackStateApp>
       Duration(milliseconds: 400),
       Duration(milliseconds: 600),
     ];
-    for (final delay in retryDelays) {
+    const maxStartupRevalidationWait = Duration(seconds: 10);
+    final stopwatch = Stopwatch()..start();
+    var attempt = 0;
+    while (true) {
       final validationReady = await _tryAwaitActiveLocalWorkspaceOpen(
         activeWorkspace,
       );
@@ -600,12 +603,19 @@ class _TrackStateAppState extends State<TrackStateApp>
       if (!mounted) {
         return;
       }
-      await Future<void>.delayed(delay);
+      final remaining = maxStartupRevalidationWait - stopwatch.elapsed;
+      if (remaining <= Duration.zero) {
+        return;
+      }
+      final delay = retryDelays[math.min(attempt, retryDelays.length - 1)];
+      await Future<void>.delayed(
+        remaining < delay ? remaining : delay,
+      );
       if (!mounted) {
         return;
       }
+      attempt += 1;
     }
-    await _tryAwaitActiveLocalWorkspaceOpen(activeWorkspace);
   }
 
   Future<bool> _tryAwaitActiveLocalWorkspaceOpen(
