@@ -2211,7 +2211,10 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 4_000,
     ) -> WorkspaceSwitcherOutsideDismissObservation:
         try:
-            payload = self._wait_for_dismissal_payload(timeout_ms=timeout_ms)
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=0,
+            )
         except WebAppTimeoutError as error:
             raise AssertionError(
                 "Step 4 failed: clicking a neutral area outside the workspace switcher "
@@ -2463,7 +2466,7 @@ class LiveWorkspaceSwitcherPage:
         self,
         *,
         timeout_ms: int,
-        stability_window_ms: int,
+        stability_window_ms: int = 0,
     ) -> dict[str, object]:
         payload = self._session.wait_for_function(
             """
