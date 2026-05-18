@@ -1,0 +1,12 @@
+test_id: TS-834
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored hosted token and two preloaded saved hosted workspaces.
+  - Resizes to a desktop viewport, confirms the live Settings background surface is scrollable, and moves it to a non-zero scroll position.
+  - Tabs to a real visible in-panel workspace-switcher button and verifies switcher-owned focus before Arrow Down.
+  - Verifies Arrow Down moves the active saved workspace to another visible row without changing the background page scroll position.

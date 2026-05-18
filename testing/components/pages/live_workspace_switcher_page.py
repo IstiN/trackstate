@@ -99,6 +99,14 @@ class WorkspaceSwitcherPanelObservation:
 
 
 @dataclass(frozen=True)
+class BackgroundScrollObservation:
+    scroll_y: float
+    viewport_height: float
+    scroll_height: float
+    max_scroll_y: float
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherInternalClickObservation:
     click_x: float
     click_y: float
@@ -234,6 +242,19 @@ class WorkspaceSwitcherInteractiveObservation:
     y: float
     width: float
     height: float
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherFocusTargetObservation:
+    active_label: str | None
+    active_role: str | None
+    active_tag_name: str
+    active_outer_html: str
+    active_visible: bool
+    active_in_viewport: bool
+    active_within_switcher: bool
+    active_on_trigger: bool
+    focus_owned_by_switcher: bool
 
 
 @dataclass(frozen=True)
@@ -423,6 +444,298 @@ class LiveWorkspaceSwitcherPage:
             ) from error
         self._session.mouse_move(1, 1)
 
+    def observe_background_scroll(self) -> BackgroundScrollObservation:
+        payload = self._session.evaluate(
+            """
+            () => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const candidateScore = (candidate) => {
+                const area = candidate.rect.width * candidate.rect.height;
+                const overflowBonus =
+                  candidate.overflowY === 'scroll' || candidate.overflowY === 'auto'
+                    ? 1_000_000
+                    : 0;
+                return overflowBonus + area + candidate.scrollHeight;
+              };
+              const windowScrollHeight = Math.max(
+                document.scrollingElement?.scrollHeight || 0,
+                document.documentElement?.scrollHeight || 0,
+                document.body?.scrollHeight || 0,
+              );
+              const windowViewportHeight =
+                window.innerHeight || document.documentElement?.clientHeight || 0;
+              const windowScrollY =
+                window.scrollY
+                || window.pageYOffset
+                || document.scrollingElement?.scrollTop
+                || document.documentElement?.scrollTop
+                || document.body?.scrollTop
+                || 0;
+              const windowMaxScrollY = Math.max(0, windowScrollHeight - windowViewportHeight);
+              const elementCandidates = Array.from(document.querySelectorAll('*'))
+                .filter(isVisible)
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  const style = window.getComputedStyle(element);
+                  return {
+                    scrollTop: element.scrollTop || 0,
+                    clientHeight: element.clientHeight || 0,
+                    scrollHeight: element.scrollHeight || 0,
+                    overflowY: style.overflowY,
+                    text: normalize(element.innerText || element.textContent || ''),
+                    rect: {
+                      width: rect.width,
+                      height: rect.height,
+                    },
+                  };
+                })
+                .filter((candidate) =>
+                  candidate.scrollHeight - candidate.clientHeight > 40
+                  && candidate.rect.width >= Math.min(window.innerWidth * 0.35, 280)
+                  && candidate.rect.height >= Math.min(window.innerHeight * 0.35, 200)
+                  && !candidate.text.startsWith('Workspace switcher'),
+                )
+                .sort((left, right) => candidateScore(right) - candidateScore(left));
+              const bestCandidate = elementCandidates[0] || null;
+              const scrollingElement =
+                document.scrollingElement || document.documentElement || document.body;
+              const useWindow =
+                windowMaxScrollY > 0
+                || bestCandidate === null
+                || (windowMaxScrollY >= Math.max(80, (bestCandidate.scrollHeight - bestCandidate.clientHeight)));
+              const scrollHeight = useWindow
+                ? Math.max(
+                    scrollingElement?.scrollHeight || 0,
+                    document.documentElement?.scrollHeight || 0,
+                    document.body?.scrollHeight || 0,
+                  )
+                : bestCandidate.scrollHeight;
+              const viewportHeight = useWindow
+                ? (window.innerHeight || document.documentElement?.clientHeight || 0)
+                : bestCandidate.clientHeight;
+              const scrollY = useWindow
+                ? (
+                    window.scrollY
+                    || window.pageYOffset
+                    || scrollingElement?.scrollTop
+                    || 0
+                  )
+                : bestCandidate.scrollTop;
+              return {
+                scrollY,
+                viewportHeight,
+                scrollHeight,
+                maxScrollY: Math.max(0, scrollHeight - viewportHeight),
+              };
+            }
+            """,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The hosted tracker did not expose readable background scroll metrics.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return BackgroundScrollObservation(
+            scroll_y=float(payload.get("scrollY", 0.0)),
+            viewport_height=float(payload.get("viewportHeight", 0.0)),
+            scroll_height=float(payload.get("scrollHeight", 0.0)),
+            max_scroll_y=float(payload.get("maxScrollY", 0.0)),
+        )
+
+    def scroll_background_to(
+        self,
+        *,
+        y: float,
+        timeout_ms: int = 15_000,
+    ) -> BackgroundScrollObservation:
+        payload = self._session.evaluate(
+            """
+            (targetY) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const candidateScore = (candidate) => {
+                const area = candidate.rect.width * candidate.rect.height;
+                const overflowBonus =
+                  candidate.overflowY === 'scroll' || candidate.overflowY === 'auto'
+                    ? 1_000_000
+                    : 0;
+                return overflowBonus + area + candidate.scrollHeight;
+              };
+              const scrollingElement =
+                document.scrollingElement || document.documentElement || document.body;
+              const windowScrollHeight = Math.max(
+                scrollingElement?.scrollHeight || 0,
+                document.documentElement?.scrollHeight || 0,
+                document.body?.scrollHeight || 0,
+              );
+              const windowViewportHeight =
+                window.innerHeight || document.documentElement?.clientHeight || 0;
+              const windowMaxScrollY = Math.max(0, windowScrollHeight - windowViewportHeight);
+              const elementCandidates = Array.from(document.querySelectorAll('*'))
+                .filter(isVisible)
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  const style = window.getComputedStyle(element);
+                  return {
+                    element,
+                    scrollHeight: element.scrollHeight || 0,
+                    clientHeight: element.clientHeight || 0,
+                    overflowY: style.overflowY,
+                    text: normalize(element.innerText || element.textContent || ''),
+                    rect: {
+                      width: rect.width,
+                      height: rect.height,
+                    },
+                  };
+                })
+                .filter((candidate) =>
+                  candidate.scrollHeight - candidate.clientHeight > 40
+                  && candidate.rect.width >= Math.min(window.innerWidth * 0.35, 280)
+                  && candidate.rect.height >= Math.min(window.innerHeight * 0.35, 200)
+                  && !candidate.text.startsWith('Workspace switcher'),
+                )
+                .sort((left, right) => candidateScore(right) - candidateScore(left));
+              const bestCandidate = elementCandidates[0] || null;
+              const useWindow =
+                windowMaxScrollY > 0
+                || bestCandidate === null
+                || (windowMaxScrollY >= Math.max(80, (bestCandidate.scrollHeight - bestCandidate.clientHeight)));
+              const scrollHeight = useWindow
+                ? windowScrollHeight
+                : bestCandidate.scrollHeight;
+              const viewportHeight = useWindow
+                ? windowViewportHeight
+                : bestCandidate.clientHeight;
+              const maxScrollY = Math.max(0, scrollHeight - viewportHeight);
+              const clampedY = Math.min(Math.max(Number(targetY) || 0, 0), maxScrollY);
+              if (useWindow) {
+                window.scrollTo({ top: clampedY, behavior: 'instant' });
+              } else {
+                bestCandidate.element.scrollTop = clampedY;
+              }
+              return {
+                expectedScrollY: clampedY,
+              };
+            }
+            """,
+            arg=float(y),
+        )
+        expected_scroll_y = (
+            float(payload.get("expectedScrollY", 0.0))
+            if isinstance(payload, dict)
+            else float(y)
+        )
+        try:
+            self._session.wait_for_function(
+                """
+                ({ expectedScrollY }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const candidateScore = (candidate) => {
+                    const area = candidate.rect.width * candidate.rect.height;
+                    const overflowBonus =
+                      candidate.overflowY === 'scroll' || candidate.overflowY === 'auto'
+                        ? 1_000_000
+                        : 0;
+                    return overflowBonus + area + candidate.scrollHeight;
+                  };
+                  const scrollingElement =
+                    document.scrollingElement || document.documentElement || document.body;
+                  const windowScrollHeight = Math.max(
+                    scrollingElement?.scrollHeight || 0,
+                    document.documentElement?.scrollHeight || 0,
+                    document.body?.scrollHeight || 0,
+                  );
+                  const windowViewportHeight =
+                    window.innerHeight || document.documentElement?.clientHeight || 0;
+                  const windowMaxScrollY = Math.max(0, windowScrollHeight - windowViewportHeight);
+                  const elementCandidates = Array.from(document.querySelectorAll('*'))
+                    .filter(isVisible)
+                    .map((element) => {
+                      const rect = element.getBoundingClientRect();
+                      const style = window.getComputedStyle(element);
+                      return {
+                        scrollTop: element.scrollTop || 0,
+                        scrollHeight: element.scrollHeight || 0,
+                        clientHeight: element.clientHeight || 0,
+                        overflowY: style.overflowY,
+                        text: normalize(element.innerText || element.textContent || ''),
+                        rect: {
+                          width: rect.width,
+                          height: rect.height,
+                        },
+                      };
+                    })
+                    .filter((candidate) =>
+                      candidate.scrollHeight - candidate.clientHeight > 40
+                      && candidate.rect.width >= Math.min(window.innerWidth * 0.35, 280)
+                      && candidate.rect.height >= Math.min(window.innerHeight * 0.35, 200)
+                      && !candidate.text.startsWith('Workspace switcher'),
+                    )
+                    .sort((left, right) => candidateScore(right) - candidateScore(left));
+                  const bestCandidate = elementCandidates[0] || null;
+                  const useWindow =
+                    windowMaxScrollY > 0
+                    || bestCandidate === null
+                    || (
+                      windowMaxScrollY >= Math.max(
+                        80,
+                        bestCandidate.scrollHeight - bestCandidate.clientHeight,
+                      )
+                    );
+                  const scrollY = useWindow
+                    ? (
+                        window.scrollY
+                        || window.pageYOffset
+                        || scrollingElement?.scrollTop
+                        || 0
+                      )
+                    : bestCandidate.scrollTop;
+                  return Math.abs(scrollY - expectedScrollY) <= 1;
+                }
+                """,
+                arg={"expectedScrollY": expected_scroll_y},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Scrolling the background page to the requested position did not settle.\n"
+                f"Requested scroll Y: {expected_scroll_y:.1f}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        return self.observe_background_scroll()
+
     def navigate_to_section(self, label: str) -> None:
         clicked = self._session.evaluate(
             """
@@ -566,6 +879,145 @@ class LiveWorkspaceSwitcherPage:
             active_on_trigger=bool(payload.get("activeOnTrigger")),
             focus_owned_by_switcher=bool(payload.get("focusOwnedBySwitcher")),
         )
+
+    def observe_switcher_focus_target(
+        self,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+    ) -> WorkspaceSwitcherFocusTargetObservation:
+        active = self._session.active_element()
+        payload = self._probe_blur_focus_state(panel)
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher focus probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherFocusTargetObservation(
+            active_label=active.accessible_name,
+            active_role=active.role,
+            active_tag_name=active.tag_name,
+            active_outer_html=active.outer_html,
+            active_visible=bool(payload.get("activeVisible")),
+            active_in_viewport=bool(payload.get("activeInViewport")),
+            active_within_switcher=bool(payload.get("activeWithinSwitcher")),
+            active_on_trigger=bool(payload.get("activeOnTrigger")),
+            focus_owned_by_switcher=bool(payload.get("focusOwnedBySwitcher")),
+        )
+
+    def focus_switcher_button(
+        self,
+        label: str,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceSwitcherFocusTargetObservation:
+        try:
+            self._session.wait_for_function(
+                """
+                ({ heading, label }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const visibleText = (element) =>
+                    normalize(element?.innerText || element?.textContent || '');
+                  const labelFor = (element) =>
+                    normalize(
+                      element?.getAttribute?.('aria-label')
+                      || element?.getAttribute?.('placeholder')
+                      || element?.getAttribute?.('title')
+                      || element?.innerText
+                      || element?.textContent
+                      || '',
+                    );
+                  let switcher = Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => visibleText(element).includes(heading)) || null;
+                  if (!switcher) {
+                    const candidates = Array.from(document.querySelectorAll('*'))
+                      .filter(isVisible)
+                      .filter((element) => {
+                        const text = visibleText(element);
+                        return text.includes(heading)
+                          && (
+                            text.includes('Saved workspaces')
+                            || text.includes('Save and switch')
+                            || text.includes('Hosted Local')
+                          );
+                      })
+                      .sort((left, right) => {
+                        const leftRect = left.getBoundingClientRect();
+                        const rightRect = right.getBoundingClientRect();
+                        return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                      });
+                    switcher = candidates[0] || null;
+                  }
+                  if (!switcher) {
+                    return null;
+                  }
+                  const buttonSelector = [
+                    'flt-semantics[role="button"]',
+                    'button',
+                    '[role="button"]',
+                  ].join(',');
+                  const candidate = Array.from(switcher.querySelectorAll(buttonSelector))
+                    .filter(isVisible)
+                    .find((element) => {
+                      const elementLabel = labelFor(element);
+                      const elementText = visibleText(element);
+                      return elementLabel === label || elementText === label;
+                    });
+                  if (!candidate) {
+                    return null;
+                  }
+                  candidate.focus({ preventScroll: true });
+                  const active = document.activeElement;
+                  return active === candidate || candidate.contains(active)
+                    ? {
+                        activeLabel: labelFor(active),
+                        activeTagName: active?.tagName || '',
+                      }
+                    : null;
+                }
+                """,
+                arg={
+                    "heading": self._switcher_heading,
+                    "label": label,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a focusable "{label}" button.\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        observation = self.observe_switcher_focus_target(panel=panel)
+        if (
+            not observation.focus_owned_by_switcher
+            or not observation.active_within_switcher
+        ):
+            raise AssertionError(
+                f'Focusing the visible "{label}" button did not keep keyboard focus inside '
+                "the open workspace switcher.\n"
+                f"Observed focus label: {observation.active_label!r}\n"
+                f"Observed focus role: {observation.active_role!r}\n"
+                f"Observed focus tag: {observation.active_tag_name!r}\n"
+                f"Observed focus within switcher: {observation.active_within_switcher!r}\n"
+                f"Observed focus owned by switcher: {observation.focus_owned_by_switcher!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return observation
+
     def focus_switcher_text_field(
         self,
         label: str,
