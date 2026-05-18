@@ -80,7 +80,7 @@ def main() -> None:
         "run_command": RUN_COMMAND,
         "desktop_viewport": DESKTOP_VIEWPORT,
         "expected_result": EXPECTED_RESULT,
-        "linked_bugs": ["TS-828"],
+        "linked_bugs": ["TS-828", "TS-835"],
         "user_login": user.login,
         "steps": [],
         "human_verification": [],
@@ -146,26 +146,17 @@ def main() -> None:
                     result["trigger_focusability_observation"] = _trigger_focusability_payload(
                         trigger_focusability,
                     )
-                    try:
-                        trigger_focus_steps = page.focus_trigger_via_keyboard(
-                            max_tabs=KEYBOARD_TAB_LIMIT,
-                        )
-                    except AssertionError as error:
-                        raise AssertionError(
-                            f"{error}\n"
-                            "Observed trigger focusability: "
-                            f"label={trigger_focusability.label!r}, "
-                            f"role={trigger_focusability.role!r}, "
-                            f"tag={trigger_focusability.tag_name!r}, "
-                            f"tabindex={trigger_focusability.tabindex!r}, "
-                            f"keyboard_focusable={trigger_focusability.keyboard_focusable}\n"
-                            f"Observed trigger HTML: {trigger_focusability.outer_html}"
-                        ) from error
+                    trigger_focus_steps, navigation_strategy = _focus_trigger_for_ts831(
+                        page=page,
+                        result=result,
+                        trigger_focusability=trigger_focusability,
+                    )
                     focused_trigger = page.active_element()
                     _assert_workspace_trigger_focused(
                         focused=focused_trigger,
                         focus_steps=trigger_focus_steps,
                     )
+                    result["trigger_navigation_strategy"] = navigation_strategy
                     result["trigger_focus_sequence"] = [
                         asdict(step) for step in trigger_focus_steps
                     ]
@@ -193,6 +184,7 @@ def main() -> None:
                         "switcher trigger and ensure it has active keyboard focus."
                     ),
                     observed=(
+                        f"strategy={navigation_strategy}; "
                         f"tab_steps_to_trigger={len(trigger_focus_steps)}; "
                         f"focused_trigger={focused_trigger.accessible_name!r}; "
                         f"tabindex={trigger_focusability.tabindex!r}; "
@@ -206,6 +198,7 @@ def main() -> None:
                         "from the visible search field and confirmed the active element was the trigger."
                     ),
                     observed=(
+                        f"strategy={navigation_strategy}; "
                         f"tab_steps_to_trigger={len(trigger_focus_steps)}; "
                         f"focused_trigger={focused_trigger.accessible_name!r}; "
                         f"focus_sequence_tail={_focus_sequence_tail(trigger_focus_steps)!r}"
@@ -430,6 +423,71 @@ def _assert_internal_panel_focus(observation: WorkspaceSwitcherInternalFocusObse
         )
 
 
+def _focus_trigger_for_ts831(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    result: dict[str, object],
+    trigger_focusability: WorkspaceTriggerFocusabilityObservation,
+) -> tuple[tuple[object, ...], str]:
+    attempts: list[str] = []
+
+    initial_active = page.active_element()
+    result["initial_active_element_before_tab"] = _focused_element_payload(initial_active)
+
+    try:
+        current_focus_steps = page.focus_trigger_via_keyboard_from_current_focus(
+            max_tabs=KEYBOARD_TAB_LIMIT,
+        )
+        return current_focus_steps, "current-active-element"
+    except AssertionError as error:
+        attempts.append(
+            "Attempt 1 from the current active element "
+            f"({initial_active.accessible_name!r}, role={initial_active.role!r}, "
+            f"tag={initial_active.tag_name!r}) failed.\n{error}",
+        )
+
+    try:
+        search_focus_steps = page.focus_trigger_via_keyboard(
+            max_tabs=KEYBOARD_TAB_LIMIT,
+        )
+        return search_focus_steps, "search-field"
+    except AssertionError as error:
+        attempts.append(
+            "Attempt 2 from the visible search field failed.\n"
+            f"{error}",
+        )
+
+    result["trigger_keyboard_navigation_attempts"] = attempts
+    _record_human_verification(
+        result,
+        check=(
+            "Used visible keyboard-only Tab navigation from the current active control "
+            "and from the visible search field to verify whether the header workspace "
+            "switcher could actually receive focus as a user would experience it."
+        ),
+        observed=(
+            "The visible workspace switcher trigger stayed rendered in the desktop header, "
+            "and the browser focus ring moved through other visible controls instead of the "
+            "trigger in both attempts. "
+            f"trigger_tabindex={trigger_focusability.tabindex!r}; "
+            f"keyboard_focusable={trigger_focusability.keyboard_focusable}; "
+            f"attempt_count={len(attempts)}"
+        ),
+    )
+    raise AssertionError(
+        "Keyboard Tab navigation never reached the workspace switcher trigger during "
+        "two realistic keyboard-entry attempts.\n"
+        + "\n\n".join(attempts)
+        + "\nObserved trigger focusability: "
+        + f"label={trigger_focusability.label!r}, "
+        + f"role={trigger_focusability.role!r}, "
+        + f"tag={trigger_focusability.tag_name!r}, "
+        + f"tabindex={trigger_focusability.tabindex!r}, "
+        + f"keyboard_focusable={trigger_focusability.keyboard_focusable}\n"
+        + f"Observed trigger HTML: {trigger_focusability.outer_html}"
+    )
+
+
 def _record_step(
     result: dict[str, object],
     *,
@@ -518,7 +576,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "* Pressed Tab again after the Space-opened panel appeared and checked whether focus moved to a visible control inside the panel.",
         "",
         "h4. Linked bug context applied",
-        "* Reviewed linked bug TS-828, which fixed the trigger's keyboard focusability so this run expects the production deployment to pass without workaround timing.",
+        "* Reviewed linked bugs TS-828 and TS-835. Both are Done, and neither fix adds delayed async behavior, so this run checks the live deployment for immediate keyboard focus and Space activation without extra waits.",
         "",
         "h4. Result",
         (
@@ -571,6 +629,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "- Checked the visible workspace switcher trigger before keyboard activation.",
         "- Checked the visible `Workspace switcher` title and workspace content after pressing `Space`.",
         "- Checked that keyboard focus could continue moving inside the opened panel without any mouse interaction.",
+        "",
+        "## Linked bug context applied",
+        "- Reviewed linked bugs `TS-828` and `TS-835`. Both are Done, and neither fix adds delayed async behavior, so this run checks the live deployment for immediate keyboard focus and `Space` activation without extra waits.",
         "",
         "## Result",
         (
@@ -826,15 +887,16 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
     failed_step = _first_failed_step_number(result)
     if failed_step == 2:
         return (
-            f"{TICKET_KEY} - Workspace switcher trigger is not keyboard-focusable for Space activation",
+            f"{TICKET_KEY} - Workspace switcher trigger is skipped by forward Tab navigation before Space activation",
             [
                 "1. Launch the application in a desktop browser.",
-                "2. Use keyboard navigation (`Tab`) from the visible top-bar controls to reach the workspace switcher trigger.",
-                "3. Observe whether the visible workspace switcher trigger receives active keyboard focus.",
+                "2. Use forward keyboard navigation (`Tab`) from visible desktop controls to reach the workspace switcher trigger.",
+                "3. Observe whether the visible workspace switcher trigger ever receives active keyboard focus before Space activation.",
             ],
             (
-                "The production desktop web UI does not reliably allow a keyboard user to "
-                "tab to the visible workspace switcher trigger before attempting Space activation."
+                "The production desktop web UI still skips the visible workspace switcher "
+                "during real forward Tab navigation, so a keyboard user cannot reliably reach "
+                "the trigger to activate it with Space."
             ),
         )
     if failed_step == 3:

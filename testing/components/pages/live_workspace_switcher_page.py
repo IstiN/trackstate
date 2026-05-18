@@ -769,6 +769,31 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 30_000,
     ) -> tuple[FocusNavigationStep, ...]:
         self.focus_search_field(timeout_ms=timeout_ms)
+        return self._focus_trigger_via_keyboard_after_current_focus(
+            max_tabs=max_tabs,
+            timeout_ms=timeout_ms,
+            start_description="the visible top-bar search field",
+        )
+
+    def focus_trigger_via_keyboard_from_current_focus(
+        self,
+        *,
+        max_tabs: int = 12,
+        timeout_ms: int = 30_000,
+    ) -> tuple[FocusNavigationStep, ...]:
+        return self._focus_trigger_via_keyboard_after_current_focus(
+            max_tabs=max_tabs,
+            timeout_ms=timeout_ms,
+            start_description="the current active element",
+        )
+
+    def _focus_trigger_via_keyboard_after_current_focus(
+        self,
+        *,
+        max_tabs: int,
+        timeout_ms: int,
+        start_description: str,
+    ) -> tuple[FocusNavigationStep, ...]:
         steps: list[FocusNavigationStep] = []
         for step_index in range(1, max_tabs + 1):
             before = self._session.active_element()
@@ -787,14 +812,26 @@ class LiveWorkspaceSwitcherPage:
             if self._is_workspace_trigger_label(after.accessible_name):
                 return tuple(steps)
         raise AssertionError(
-            "Keyboard Tab navigation from the visible top-bar search field never "
-            "reached the workspace switcher trigger.\n"
+            f"Keyboard Tab navigation from {start_description} never reached the "
+            "workspace switcher trigger.\n"
             + "Observed focus sequence: "
             + " -> ".join(
-                step.after_label or f"<{step.after_tag_name}>"
+                self._describe_focus_step_target(
+                    step.after_label,
+                    step.after_tag_name,
+                )
                 for step in steps
             )
         )
+
+    @staticmethod
+    def _describe_focus_step_target(label: str | None, tag_name: str | None) -> str:
+        normalized = re.sub(r"\s+", " ", label or "").strip()
+        if not normalized:
+            return f"<{tag_name or 'unknown'}>"
+        if len(normalized) > 96:
+            return normalized[:93] + "..."
+        return normalized
 
     def press_enter_on_active_element_and_wait_for_surface(
         self,
