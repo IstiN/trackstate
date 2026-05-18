@@ -6,10 +6,9 @@ dependencies:
   - Flutter SDK available on PATH
 notes:
   - Reuses a real committed local Git repository fixture without TrackState metadata to verify first-launch onboarding recognizes an existing Git repository.
-  - Verifies the onboarding UI skips re-initialization by surfacing the ready-to-open state and an enabled Open workspace action instead of an Initialize action.
-  - Verifies the user can continue through the live onboarding flow into the dashboard without mutating the selected repository.
+  - Verifies the onboarding UI does not require re-initialization for the selected existing Git repository and does not leave an enabled Initialize action as the user-facing next step.
+  - Verifies the user can continue through the live onboarding flow into the dashboard without mutating the selected repository when a continue/open action is available.
 runtime_inputs:
   run_command: flutter test testing/tests/TS-800/test_ts_800.dart --reporter expanded
   selected_fixture: plain_committed_git_repository_without_trackstate_metadata
-  expected_status_label: Ready to open
-  expected_action_label: Open workspace
+  expected_behavior: existing_git_repository_recognized_without_reinitialization

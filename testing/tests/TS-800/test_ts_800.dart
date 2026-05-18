@@ -17,12 +17,14 @@ const String _ticketSummary =
 const String _testFilePath = 'testing/tests/TS-800/test_ts_800.dart';
 const String _runCommand =
     'flutter test testing/tests/TS-800/test_ts_800.dart --reporter expanded';
-const String _readyStatus = 'Ready to open';
-const String _readyMessage =
-    'This folder already contains a committed TrackState workspace and is ready to open.';
 const String _openExistingFolderLabel = 'Open existing folder';
 const String _openWorkspaceLabel = 'Open workspace';
 const String _initializeHereLabel = 'Initialize TrackState here';
+const Set<String> _statusLabels = <String>{
+  'Ready to open',
+  'Initialization required',
+  'Folder not supported',
+};
 const List<String> _requestSteps = <String>[
   'Open the first-launch onboarding screen.',
   'Select the option to pick a folder/initialize.',
@@ -222,12 +224,16 @@ void main() {
               selectedState.localWorkspaceNameValue;
           result['local_write_branch_value'] =
               selectedState.localWriteBranchValue;
-          result['status_label'] = visibleTexts.contains(_readyStatus)
-              ? _readyStatus
-              : null;
-          result['inspection_message'] = visibleTexts.contains(_readyMessage)
-              ? _readyMessage
-              : null;
+          final visibleStatusLabel = _extractVisibleStatusLabel(visibleTexts);
+          final visibleInspectionMessage = _extractVisibleInspectionMessage(
+            visibleTexts,
+            folderPath: selectedState.localFolderPath,
+            workspaceName: selectedState.localWorkspaceNameValue,
+            writeBranch: selectedState.localWriteBranchValue,
+            primaryActionLabel: selectedState.primaryActionLabel,
+          );
+          result['status_label'] = visibleStatusLabel;
+          result['inspection_message'] = visibleInspectionMessage;
 
           final step3Passed =
               onboardingService.inspectedFolderPaths.length == 1 &&
@@ -260,38 +266,67 @@ void main() {
             );
           }
 
+          _recordHumanVerification(
+            result,
+            check:
+                'Viewed the onboarding state a user sees after selecting an existing Git repository, including the status text, guidance copy, selected folder path, workspace details labels, and primary CTA text.',
+            observed:
+                'status_label=${visibleStatusLabel ?? '<missing>'}; inspection_message=${visibleInspectionMessage ?? '<missing>'}; visible_texts=${_formatList(visibleTexts)}; interactive_semantics_labels=${_formatList(interactiveLabels)}',
+          );
+
           final missingTexts =
               <String>[
-                    _readyStatus,
-                    _readyMessage,
                     'Selected folder',
                     fixture.repositoryPath,
                     'Workspace details',
                     'Workspace name',
                     'Write Branch',
-                    _openWorkspaceLabel,
                   ]
                   .where((text) => !visibleTexts.contains(text))
                   .toList(growable: false);
           final step4Failures = <String>[];
           if (missingTexts.isNotEmpty) {
             step4Failures.add(
-              'The ready-state feedback was missing: ${_formatList(missingTexts)}.',
+              'The selected-folder details were missing: ${_formatList(missingTexts)}.',
             );
           }
-          if (selectedState.primaryActionLabel != _openWorkspaceLabel) {
+          if (visibleStatusLabel == null || visibleStatusLabel.trim().isEmpty) {
             step4Failures.add(
-              'The primary action did not switch to `$_openWorkspaceLabel`. Observed: ${selectedState.primaryActionLabel}',
+              'The onboarding state did not show any visible status label after selecting the existing Git repository.',
+            );
+          }
+          if (visibleInspectionMessage == null ||
+              visibleInspectionMessage.trim().isEmpty) {
+            step4Failures.add(
+              'The onboarding state did not show any visible guidance message after selecting the existing Git repository.',
+            );
+          }
+          if (visibleStatusLabel == 'Initialization required') {
+            step4Failures.add(
+              'The onboarding UI still told the user initialization was required for the selected existing Git repository.',
+            );
+          }
+          if ((visibleInspectionMessage ?? '').contains(
+            'Initialize TrackState here',
+          )) {
+            step4Failures.add(
+              'The user-facing guidance still instructed the user to initialize TrackState instead of continuing without re-initialization.',
             );
           }
           if (!selectedState.isPrimaryActionEnabled) {
             step4Failures.add(
-              'The ready-state primary action was disabled, so the user was blocked from continuing.',
+              'The primary action was disabled, so the user could not continue onboarding from the selected existing Git repository.',
+            );
+          }
+          if (selectedState.primaryActionLabel == null ||
+              selectedState.primaryActionLabel!.trim().isEmpty) {
+            step4Failures.add(
+              'No visible primary action was available after selecting the existing Git repository.',
             );
           }
           if (selectedState.primaryActionLabel == _initializeHereLabel) {
             step4Failures.add(
-              'The UI still exposed the initialization CTA instead of skipping re-initialization.',
+              'The visible primary action still allowed re-initialization instead of a continue/open action.',
             );
           }
           _recordStep(
@@ -343,14 +378,7 @@ void main() {
           _recordHumanVerification(
             result,
             check:
-                'Viewed the onboarding state a user sees after selecting an existing Git repository, including the ready status, selected folder path, workspace details labels, and the primary CTA text.',
-            observed:
-                'visible_texts=${_formatList(visibleTexts)}; interactive_semantics_labels=${_formatList(interactiveLabels)}',
-          );
-          _recordHumanVerification(
-            result,
-            check:
-                'Used the visible Open workspace action and confirmed the dashboard opened without triggering re-initialization or mutating the selected repository on disk.',
+                'Used the visible continue/open action and confirmed the dashboard opened without triggering re-initialization or mutating the selected repository on disk.',
             observed:
                 'dashboard_visible=${postOpenState.isDashboardVisible}; opened_repositories=${_formatList(openedRepositories)}; head_revision=${afterSnapshot.headRevision}; worktree_status=${_formatList(afterSnapshot.worktreeStatusLines)}; file_manifest_unchanged=${_mapEquals(afterSnapshot.files, beforeSnapshot.files)}',
           );
@@ -446,12 +474,12 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     'h4. What was tested',
     '* Opened the production first-launch onboarding screen and used the local folder picker flow for an existing Git repository.',
     '* Selected a real committed local Git repository containing a {.git} directory but no existing TrackState workspace metadata.',
-    '* Checked the ready-state status text, guidance message, selected folder path, workspace details fields, and the visible primary action to confirm initialization was skipped.',
-    '* Activated the visible {noformat}Open workspace{noformat} action to confirm the user could continue.',
+    '* Checked the visible status text, guidance message, selected folder path, workspace details fields, and primary action to confirm the user was not asked to re-initialize TrackState.',
+    '* If a continue/open action was available, activated it to confirm the user could proceed without mutating the selected repository.',
     '',
     'h4. Result',
     passed
-        ? '* Matched the expected result: the folder was recognized as an existing Git repository, the onboarding UI skipped re-initialization by surfacing {noformat}Open workspace{noformat}, and the user could continue into the dashboard.'
+        ? '* Matched the expected result: the folder was recognized as an existing Git repository, the onboarding UI did not require re-initialization, and the user could continue into the dashboard.'
         : '* Did not match the expected result. See the failed step details and exact error below.',
     '* Environment: {noformat}flutter test / ${Platform.operatingSystem}{noformat}',
     '* Repository fixture: {noformat}${result['repository_path']}{noformat}',
@@ -499,12 +527,12 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '### What was tested',
     '- Opened the production first-launch onboarding screen and used the local folder picker flow for an existing Git repository.',
     '- Selected a real committed local Git repository containing a `.git` directory but no existing TrackState workspace metadata.',
-    '- Checked the ready-state status text, guidance message, selected folder path, workspace details fields, and the visible primary action to confirm initialization was skipped.',
-    '- Activated the visible `Open workspace` action to confirm the user could continue.',
+    '- Checked the visible status text, guidance message, selected folder path, workspace details fields, and primary action to confirm the user was not asked to re-initialize TrackState.',
+    '- If a continue/open action was available, activated it to confirm the user could proceed without mutating the selected repository.',
     '',
     '### Result',
     passed
-        ? '- Matched the expected result: the folder was recognized as an existing Git repository, the onboarding UI skipped re-initialization by surfacing `Open workspace`, and the user could continue into the dashboard.'
+        ? '- Matched the expected result: the folder was recognized as an existing Git repository, the onboarding UI did not require re-initialization, and the user could continue into the dashboard.'
         : '- Did not match the expected result. See the failed step details and exact error below.',
     '- Environment: `flutter test` / `${Platform.operatingSystem}`',
     '- Repository fixture: `${result['repository_path']}`',
@@ -589,7 +617,7 @@ String _bugDescription(Map<String, Object?> result) {
     '   - ${_stepOutcome(result, 4)}',
     '',
     '## Expected result',
-    'The onboarding UI should recognize the selected folder as an existing Git repository, skip re-initialization by replacing the initialization path with an enabled `Open workspace` action, and allow the user to continue.',
+    'The onboarding UI should recognize the selected folder as an existing Git repository, avoid requiring re-initialization, and allow the user to continue onboarding without using `Initialize TrackState here`.',
     '',
     '## Actual result',
     'After selecting `${result['repository_path']}`, the production inspection reported `${(result['production_inspection'] as Map?)?['state'] ?? '<missing>'}` and the UI showed status `${result['status_label'] ?? '<missing>'}` with message `${result['inspection_message'] ?? '<missing>'}` and primary action `${result['primary_action_label'] ?? '<missing>'}` (`enabled=${result['primary_action_enabled']}`). Dashboard visible after continuing: `${result['dashboard_visible'] ?? '<missing>'}`.',
@@ -602,7 +630,7 @@ String _bugDescription(Map<String, Object?> result) {
     '```',
     '',
     '## Actual vs Expected',
-    '- **Expected:** selecting an existing Git repository should show ready-to-open feedback, avoid a re-initialization CTA, and allow the user to continue with `Open workspace`.',
+    '- **Expected:** selecting an existing Git repository should show user-facing feedback that the folder is already usable, avoid an enabled `Initialize TrackState here` CTA, and allow the user to continue onboarding without re-initialization.',
     '- **Actual:** the real onboarding inspection for the plain Git repository returned `${(result['production_inspection'] as Map?)?['state'] ?? '<missing>'}`, visible texts were `${_formatList((result['visible_texts'] as List?)?.cast<Object?>() ?? const <Object?>[])}`, and the primary action was `${result['primary_action_label'] ?? '<missing>'}` with `enabled=${result['primary_action_enabled']}`.',
     '',
     '## Environment',
@@ -688,6 +716,54 @@ String _formatList(List<Object?> values) {
     return '<empty>';
   }
   return values.map((value) => value.toString()).join(' | ');
+}
+
+String? _extractVisibleStatusLabel(List<String> visibleTexts) {
+  for (final text in visibleTexts) {
+    if (_statusLabels.contains(text)) {
+      return text;
+    }
+  }
+  return null;
+}
+
+String? _extractVisibleInspectionMessage(
+  List<String> visibleTexts, {
+  required String? folderPath,
+  required String? workspaceName,
+  required String? writeBranch,
+  required String? primaryActionLabel,
+}) {
+  const ignoredTexts = <String>{
+    'Add workspace',
+    'Choose a local folder to open an existing workspace or initialize TrackState in a new one.',
+    'Open existing folder',
+    'Initialize folder',
+    'Selected folder',
+    'Change folder',
+    'Workspace details',
+    'Workspace name',
+    'Defaults to the selected folder name. You can rename it before saving the workspace profile.',
+    'Write Branch',
+    'TrackState opens and writes to this local branch. Existing repositories must stay on their current branch during onboarding.',
+  };
+  final ignoredDynamicTexts = <String?>{
+    folderPath,
+    workspaceName,
+    writeBranch,
+    primaryActionLabel,
+  };
+  for (final text in visibleTexts) {
+    if (_statusLabels.contains(text) ||
+        ignoredTexts.contains(text) ||
+        ignoredDynamicTexts.contains(text)) {
+      continue;
+    }
+    if (text.trim().isNotEmpty) {
+      return text;
+    }
+  }
+  return null;
 }
 
 bool _listEquals(List<String> left, List<String> right) {
