@@ -1,9 +1,9 @@
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
-import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 
+import '../components/services/demo_local_workspace_repository.dart';
 import '../core/utils/local_git_test_repository.dart';
 
 class LocalHostedWorkspaceFixture {
@@ -36,9 +36,7 @@ class LocalHostedWorkspaceFixture {
         'LocalHostedWorkspaceFixture does not know how to open "$repositoryPath".',
       );
     }
-    return _LocalHostedWorkspaceRepository(
-      snapshot: await _snapshotForRepository(repositoryPath),
-    );
+    return createDemoLocalWorkspaceRepository(repositoryPath: repositoryPath);
   }
 
   static Future<LocalHostedWorkspaceFixture> create() async {
@@ -75,42 +73,4 @@ class LocalHostedWorkspaceFixture {
   }
 
   Future<void> dispose() => _localRepositoryHandle.dispose();
-}
-
-Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
-  final base = await const DemoTrackStateRepository().loadSnapshot();
-  return TrackerSnapshot(
-    project: ProjectConfig(
-      key: base.project.key,
-      name: base.project.name,
-      repository: repository,
-      branch: base.project.branch,
-      defaultLocale: base.project.defaultLocale,
-      supportedLocales: base.project.supportedLocales,
-      issueTypeDefinitions: base.project.issueTypeDefinitions,
-      statusDefinitions: base.project.statusDefinitions,
-      fieldDefinitions: base.project.fieldDefinitions,
-      workflowDefinitions: base.project.workflowDefinitions,
-      priorityDefinitions: base.project.priorityDefinitions,
-      versionDefinitions: base.project.versionDefinitions,
-      componentDefinitions: base.project.componentDefinitions,
-      resolutionDefinitions: base.project.resolutionDefinitions,
-      attachmentStorage: base.project.attachmentStorage,
-    ),
-    issues: base.issues,
-    repositoryIndex: base.repositoryIndex,
-    loadWarnings: base.loadWarnings,
-    readiness: base.readiness,
-    startupRecovery: base.startupRecovery,
-  );
-}
-
-class _LocalHostedWorkspaceRepository extends DemoTrackStateRepository {
-  const _LocalHostedWorkspaceRepository({required super.snapshot});
-
-  @override
-  bool get usesLocalPersistence => true;
-
-  @override
-  bool get supportsGitHubAuth => false;
 }
