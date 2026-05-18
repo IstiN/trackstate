@@ -2235,9 +2235,13 @@ class LiveWorkspaceSwitcherPage:
         self,
         *,
         timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
     ) -> WorkspaceSwitcherTriggerDismissObservation:
         try:
-            payload = self._wait_for_dismissal_payload(timeout_ms=timeout_ms)
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
         except WebAppTimeoutError as error:
             raise AssertionError(
                 "Step 4 failed: clicking the workspace switcher trigger a second time "
@@ -2455,10 +2459,15 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
 
-    def _wait_for_dismissal_payload(self, *, timeout_ms: int) -> dict[str, object]:
+    def _wait_for_dismissal_payload(
+        self,
+        *,
+        timeout_ms: int,
+        stability_window_ms: int,
+    ) -> dict[str, object]:
         payload = self._session.wait_for_function(
             """
-            ({ heading }) => {
+            ({ heading, stabilityWindowMs }) => {
               const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
               const isVisible = (element) => {
                 if (!element) {
@@ -2488,10 +2497,24 @@ class LiveWorkspaceSwitcherPage:
                       || text.includes('Save and switch')
                       || text.includes('Add workspace')
                       || text.includes('Hosted Local')
-                      || isWorkspaceRow(text)
-                    );
-                });
+                        || isWorkspaceRow(text)
+                     );
+                 });
+              window.__tsWorkspaceSwitcherDismissalState ??= {
+                hiddenSinceMs: null,
+              };
+              const dismissalState = window.__tsWorkspaceSwitcherDismissalState;
               if (surfaceStillVisible) {
+                dismissalState.hiddenSinceMs = null;
+                return null;
+              }
+              const now = window.performance.now();
+              if (typeof dismissalState.hiddenSinceMs !== 'number') {
+                dismissalState.hiddenSinceMs = now;
+                return null;
+              }
+              const hiddenForMs = now - dismissalState.hiddenSinceMs;
+              if (hiddenForMs < stabilityWindowMs) {
                 return null;
               }
               const bodyText = document.body?.innerText ?? '';
@@ -2515,10 +2538,15 @@ class LiveWorkspaceSwitcherPage:
                   ? normalize(trigger.getAttribute('aria-label') || trigger.innerText || '')
                   : null,
                 dashboardVisible,
+                hiddenForMs,
+                stabilityWindowMs,
               };
             }
             """,
-            arg={"heading": self._switcher_heading},
+            arg={
+                "heading": self._switcher_heading,
+                "stabilityWindowMs": stability_window_ms,
+            },
             timeout_ms=timeout_ms,
         )
         if not isinstance(payload, dict):
