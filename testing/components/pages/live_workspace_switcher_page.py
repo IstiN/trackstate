@@ -70,6 +70,16 @@ class WorkspaceSwitcherTriggerObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceTriggerFocusabilityObservation:
+    label: str
+    role: str | None
+    tag_name: str
+    tabindex: str | None
+    keyboard_focusable: bool
+    outer_html: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherPanelObservation:
     viewport_width: float
     viewport_height: float
@@ -175,6 +185,24 @@ class FocusNavigationStep:
     after_role: str | None
     after_tag_name: str
     after_outer_html: str
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherInternalFocusObservation:
+    before_label: str | None
+    before_role: str | None
+    before_tag_name: str
+    before_outer_html: str
+    after_label: str | None
+    after_role: str | None
+    after_tag_name: str
+    after_outer_html: str
+    after_visible: bool
+    after_in_viewport: bool
+    after_within_switcher: bool
+    after_on_trigger: bool
+    after_owned_by_switcher: bool
+    after_different_from_before: bool
 
 
 @dataclass(frozen=True)
@@ -599,6 +627,103 @@ class LiveWorkspaceSwitcherPage:
         sequence: tuple[FocusNavigationStep, ...],
     ) -> bool:
         return any(self._is_workspace_trigger_label(step.after_label) for step in sequence)
+
+    def observe_trigger_focusability(
+        self,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceTriggerFocusabilityObservation:
+        payload = self._session.wait_for_function(
+            """
+            ({ triggerLabelPrefix }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const labelFor = (element) =>
+                normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+              const trigger = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+              )
+                .filter(isVisible)
+                .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+              if (!trigger) {
+                return null;
+              }
+              const tabindex = trigger.getAttribute('tabindex');
+              return {
+                label: labelFor(trigger),
+                role: trigger.getAttribute('role'),
+                tagName: trigger.tagName,
+                tabindex,
+                keyboardFocusable: tabindex !== null && tabindex !== '-1',
+                outerHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+              };
+            }
+            """,
+            arg={"triggerLabelPrefix": self._trigger_label_prefix},
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose a visible workspace switcher trigger for "
+                "keyboard-focus inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceTriggerFocusabilityObservation(
+            label=str(payload.get("label", "")),
+            role=str(payload.get("role")) if payload.get("role") is not None else None,
+            tag_name=str(payload.get("tagName", "")),
+            tabindex=(
+                str(payload.get("tabindex"))
+                if payload.get("tabindex") is not None
+                else None
+            ),
+            keyboard_focusable=bool(payload.get("keyboardFocusable")),
+            outer_html=str(payload.get("outerHtml", "")),
+        )
+
+    def focus_trigger_via_keyboard(
+        self,
+        *,
+        max_tabs: int = 12,
+        timeout_ms: int = 30_000,
+    ) -> tuple[FocusNavigationStep, ...]:
+        self.focus_search_field(timeout_ms=timeout_ms)
+        steps: list[FocusNavigationStep] = []
+        for step_index in range(1, max_tabs + 1):
+            before = self._session.active_element()
+            self._session.press_key("Tab", timeout_ms=timeout_ms)
+            after = self._session.active_element()
+            step = FocusNavigationStep(
+                step=step_index,
+                before_label=before.accessible_name,
+                before_role=before.role,
+                after_label=after.accessible_name,
+                after_role=after.role,
+                after_tag_name=after.tag_name,
+                after_outer_html=after.outer_html,
+            )
+            steps.append(step)
+            if self._is_workspace_trigger_label(after.accessible_name):
+                return tuple(steps)
+        raise AssertionError(
+            "Keyboard Tab navigation from the visible top-bar search field never "
+            "reached the workspace switcher trigger.\n"
+            + "Observed focus sequence: "
+            + " -> ".join(
+                step.after_label or f"<{step.after_tag_name}>"
+                for step in steps
+            )
+        )
 
     def press_enter_on_active_element_and_wait_for_surface(
         self,
@@ -3189,6 +3314,184 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 4_000,
     ) -> WorkspaceSwitcherEscapeDismissObservation:
         return self.close(timeout_ms=timeout_ms)
+
+    def observe_internal_focus_after_tab(
+        self,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+        timeout_ms: int = 4_000,
+    ) -> WorkspaceSwitcherInternalFocusObservation:
+        before = self._session.active_element()
+        self._session.press_key("Tab", timeout_ms=timeout_ms)
+
+        probe_script = """
+            ({
+              triggerLabelPrefix,
+              panelLeft,
+              panelTop,
+              panelRight,
+              panelBottom,
+              beforeFocusLabel,
+              beforeFocusRole,
+              beforeFocusTagName,
+              beforeFocusOuterHtml,
+            }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const isInViewport = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                return rect.width > 0
+                  && rect.height > 0
+                  && rect.right > 0
+                  && rect.bottom > 0
+                  && rect.left < window.innerWidth
+                  && rect.top < window.innerHeight;
+              };
+              const labelFor = (element) =>
+                normalize(
+                  element?.getAttribute?.('aria-label')
+                  || element?.getAttribute?.('placeholder')
+                  || element?.getAttribute?.('title')
+                  || element?.innerText
+                  || element?.textContent
+                  || '',
+                );
+              const buttons = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+              ).filter(isVisible);
+              const trigger = buttons.find((element) =>
+                labelFor(element).startsWith(triggerLabelPrefix),
+              ) || null;
+              const active = document.activeElement;
+              const activeLabel = labelFor(active);
+              const activeRole = active?.getAttribute?.('role') || null;
+              const activeTagName = active?.tagName || '';
+              const activeOuterHtml = active?.outerHTML?.slice?.(0, 400) || '';
+              const activeRect = active?.getBoundingClientRect?.() || null;
+              const activeCenterX = activeRect
+                ? activeRect.left + (activeRect.width / 2)
+                : null;
+              const activeCenterY = activeRect
+                ? activeRect.top + (activeRect.height / 2)
+                : null;
+              const activeWithinSwitcher = Boolean(
+                activeRect
+                && activeCenterX !== null
+                && activeCenterY !== null
+                && activeCenterX >= panelLeft
+                && activeCenterX <= panelRight
+                && activeCenterY >= panelTop
+                && activeCenterY <= panelBottom
+              );
+              const activeOnTrigger = Boolean(
+                active
+                && trigger
+                && (active === trigger || trigger.contains(active))
+              );
+              const activeVisible = isVisible(active);
+              const activeInViewport = isInViewport(active);
+              const activeDifferentFromBefore = Boolean(
+                active
+                && (
+                  (beforeFocusOuterHtml && activeOuterHtml && activeOuterHtml !== beforeFocusOuterHtml)
+                  || activeTagName !== beforeFocusTagName
+                  || activeRole !== beforeFocusRole
+                  || activeLabel !== beforeFocusLabel
+                )
+              );
+              const payload = {
+                activeLabel,
+                activeRole,
+                activeTagName,
+                activeOuterHtml,
+                activeVisible,
+                activeInViewport,
+                activeWithinSwitcher,
+                activeOnTrigger,
+                activeOwnedBySwitcher: Boolean(
+                  active
+                  && activeVisible
+                  && activeInViewport
+                  && (activeWithinSwitcher || activeOnTrigger)
+                ),
+                activeDifferentFromBefore,
+              };
+              return payload;
+            }
+        """
+        wait_script = f"""
+            (args) => {{
+              const payload = ({probe_script})(args);
+              if (!payload) {{
+                return null;
+              }}
+              if (
+                payload.activeVisible
+                && payload.activeInViewport
+                && payload.activeWithinSwitcher
+                && !payload.activeOnTrigger
+                && payload.activeDifferentFromBefore
+              ) {{
+                return payload;
+              }}
+              return null;
+            }}
+        """
+        probe_args = {
+            "triggerLabelPrefix": self._trigger_label_prefix,
+            "panelLeft": panel.left,
+            "panelTop": panel.top,
+            "panelRight": panel.left + panel.width,
+            "panelBottom": panel.top + panel.height,
+            "beforeFocusLabel": before.accessible_name or "",
+            "beforeFocusRole": before.role,
+            "beforeFocusTagName": before.tag_name,
+            "beforeFocusOuterHtml": before.outer_html,
+        }
+        payload: object
+        try:
+            payload = self._session.wait_for_function(
+                wait_script,
+                arg=probe_args,
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError:
+            payload = self._session.evaluate(probe_script, arg=probe_args)
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher internal-focus probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        after = self._session.active_element()
+        return WorkspaceSwitcherInternalFocusObservation(
+            before_label=before.accessible_name,
+            before_role=before.role,
+            before_tag_name=before.tag_name,
+            before_outer_html=before.outer_html,
+            after_label=after.accessible_name,
+            after_role=after.role,
+            after_tag_name=after.tag_name,
+            after_outer_html=after.outer_html,
+            after_visible=bool(payload.get("activeVisible")),
+            after_in_viewport=bool(payload.get("activeInViewport")),
+            after_within_switcher=bool(payload.get("activeWithinSwitcher")),
+            after_on_trigger=bool(payload.get("activeOnTrigger")),
+            after_owned_by_switcher=bool(payload.get("activeOwnedBySwitcher")),
+            after_different_from_before=bool(payload.get("activeDifferentFromBefore")),
+        )
 
     def observe_mobile_trigger_focus(
         self,
