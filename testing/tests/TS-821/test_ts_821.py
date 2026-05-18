@@ -201,7 +201,11 @@ def main() -> None:
                         "Pressing Tab moved focus away from the switcher to "
                         f"{blur_observation.after_focus_label!r} "
                         f"(role={blur_observation.after_focus_role!r}, "
-                        f"tag={blur_observation.after_focus_tag_name!r})."
+                        f"tag={blur_observation.after_focus_tag_name!r}, "
+                        f"visible={blur_observation.after_focus_visible}, "
+                        f"in_viewport={blur_observation.after_focus_in_viewport}, "
+                        f"different_from_before="
+                        f"{blur_observation.after_focus_different_from_before})."
                     ),
                 )
                 _record_human_verification(
@@ -213,7 +217,11 @@ def main() -> None:
                     observed=(
                         f"focus_target={blur_observation.after_focus_label!r}; "
                         f"role={blur_observation.after_focus_role!r}; "
-                        f"tag={blur_observation.after_focus_tag_name!r}"
+                        f"tag={blur_observation.after_focus_tag_name!r}; "
+                        f"visible={blur_observation.after_focus_visible}; "
+                        f"in_viewport={blur_observation.after_focus_in_viewport}; "
+                        f"different_from_before="
+                        f"{blur_observation.after_focus_different_from_before}"
                     ),
                 )
                 _record_human_verification(
@@ -313,11 +321,15 @@ def _assert_external_focus_reached(
         return
     raise AssertionError(
         "Step 3 failed: pressing Tab after opening the workspace switcher did not "
-        "move focus to an interactive element outside the switcher.\n"
+        "move focus to a visible, different interactive element outside the "
+        "switcher.\n"
         f"Observed focus before Tab: label={observation.before_focus_label!r}, "
         f"role={observation.before_focus_role!r}, tag={observation.before_focus_tag_name!r}\n"
         f"Observed focus after Tab: label={observation.after_focus_label!r}, "
         f"role={observation.after_focus_role!r}, tag={observation.after_focus_tag_name!r}\n"
+        f"Focused element visible: {observation.after_focus_visible}\n"
+        f"Focused element in viewport: {observation.after_focus_in_viewport}\n"
+        f"Focused element changed after Tab: {observation.after_focus_different_from_before}\n"
         f"Active element remained within switcher: {observation.after_focus_within_switcher}",
     )
 
@@ -744,6 +756,11 @@ def _blur_payload(
             "tag_name": observation.after_focus_tag_name,
             "outer_html": observation.after_focus_outer_html,
         },
+        "after_focus_visible": observation.after_focus_visible,
+        "after_focus_in_viewport": observation.after_focus_in_viewport,
+        "after_focus_different_from_before": (
+            observation.after_focus_different_from_before
+        ),
         "after_focus_within_switcher": observation.after_focus_within_switcher,
         "external_focus_reached": observation.external_focus_reached,
         "panel_visible_after_wait": observation.panel_visible_after_wait,

@@ -107,6 +107,9 @@ class WorkspaceSwitcherBlurDismissObservation:
     after_focus_role: str | None
     after_focus_tag_name: str
     after_focus_outer_html: str
+    after_focus_visible: bool
+    after_focus_in_viewport: bool
+    after_focus_different_from_before: bool
     after_focus_within_switcher: bool
     external_focus_reached: bool
     panel_visible_after_wait: bool
@@ -2305,7 +2308,18 @@ class LiveWorkspaceSwitcherPage:
         try:
             self._session.wait_for_function(
                 """
-                ({ heading, triggerLabelPrefix, panelLeft, panelTop, panelRight, panelBottom }) => {
+                ({
+                  heading,
+                  triggerLabelPrefix,
+                  panelLeft,
+                  panelTop,
+                  panelRight,
+                  panelBottom,
+                  beforeFocusLabel,
+                  beforeFocusRole,
+                  beforeFocusTagName,
+                  beforeFocusOuterHtml,
+                }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                   const isVisible = (element) => {
                     if (!element) {
@@ -2317,6 +2331,18 @@ class LiveWorkspaceSwitcherPage:
                       && rect.height > 0
                       && style.visibility !== 'hidden'
                       && style.display !== 'none';
+                  };
+                  const isInViewport = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    return rect.width > 0
+                      && rect.height > 0
+                      && rect.right > 0
+                      && rect.bottom > 0
+                      && rect.left < window.innerWidth
+                      && rect.top < window.innerHeight;
                   };
                   const visibleElements = (root, selector = '*') =>
                     Array.from(root.querySelectorAll(selector)).filter((candidate) => isVisible(candidate));
@@ -2404,6 +2430,7 @@ class LiveWorkspaceSwitcherPage:
                   const activeLabel = labelFor(active);
                   const activeRole = active?.getAttribute?.('role') || null;
                   const activeTagName = active?.tagName || '';
+                  const activeOuterHtml = active?.outerHTML?.slice?.(0, 400) || '';
                   const activeRect = active?.getBoundingClientRect?.() || null;
                   const activeCenterX = activeRect
                     ? activeRect.left + (activeRect.width / 2)
@@ -2427,9 +2454,21 @@ class LiveWorkspaceSwitcherPage:
                       || active?.getAttribute?.('tabindex') === '0'
                     ),
                   );
+                  const activeDifferentFromBefore = Boolean(
+                    active
+                    && (
+                      (beforeFocusOuterHtml && activeOuterHtml && activeOuterHtml !== beforeFocusOuterHtml)
+                      || activeTagName !== beforeFocusTagName
+                      || activeRole !== beforeFocusRole
+                      || activeLabel !== beforeFocusLabel
+                    ),
+                  );
                   return Boolean(
                     active
+                    && isVisible(active)
+                    && isInViewport(active)
                     && activeIsInteractive
+                    && activeDifferentFromBefore
                     && !activeWithinSwitcher
                     && !activeLabel.startsWith(triggerLabelPrefix)
                     && activeTagName !== 'BODY'
@@ -2445,6 +2484,10 @@ class LiveWorkspaceSwitcherPage:
                     "panelTop": panel.top,
                     "panelRight": panel.left + panel.width,
                     "panelBottom": panel.top + panel.height,
+                    "beforeFocusLabel": before.accessible_name or "",
+                    "beforeFocusRole": before.role,
+                    "beforeFocusTagName": before.tag_name,
+                    "beforeFocusOuterHtml": before.outer_html,
                 },
                 timeout_ms=focus_timeout_ms,
             )
@@ -2503,6 +2546,10 @@ class LiveWorkspaceSwitcherPage:
                 "panelTop": panel.top,
                 "panelRight": panel.left + panel.width,
                 "panelBottom": panel.top + panel.height,
+                "beforeFocusLabel": before.accessible_name or "",
+                "beforeFocusRole": before.role,
+                "beforeFocusTagName": before.tag_name,
+                "beforeFocusOuterHtml": before.outer_html,
             },
         )
         if not isinstance(payload, dict):
@@ -2530,6 +2577,11 @@ class LiveWorkspaceSwitcherPage:
             ),
             after_focus_outer_html=str(
                 payload.get("activeOuterHtml") or after.outer_html,
+            ),
+            after_focus_visible=bool(payload.get("activeVisible")),
+            after_focus_in_viewport=bool(payload.get("activeInViewport")),
+            after_focus_different_from_before=bool(
+                payload.get("activeDifferentFromBefore"),
             ),
             after_focus_within_switcher=bool(payload.get("activeWithinSwitcher")),
             external_focus_reached=bool(payload.get("externalFocusReached")),
@@ -2750,7 +2802,18 @@ class LiveWorkspaceSwitcherPage:
     @staticmethod
     def _blur_dismissal_probe_script() -> str:
         return """
-        ({ heading, triggerLabelPrefix, panelLeft, panelTop, panelRight, panelBottom }) => {
+        ({
+          heading,
+          triggerLabelPrefix,
+          panelLeft,
+          panelTop,
+          panelRight,
+          panelBottom,
+          beforeFocusLabel,
+          beforeFocusRole,
+          beforeFocusTagName,
+          beforeFocusOuterHtml,
+        }) => {
           const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
           const isVisible = (element) => {
             if (!element) {
@@ -2762,6 +2825,18 @@ class LiveWorkspaceSwitcherPage:
               && rect.height > 0
               && style.visibility !== 'hidden'
               && style.display !== 'none';
+          };
+          const isInViewport = (element) => {
+            if (!element) {
+              return false;
+            }
+            const rect = element.getBoundingClientRect();
+            return rect.width > 0
+              && rect.height > 0
+              && rect.right > 0
+              && rect.bottom > 0
+              && rect.left < window.innerWidth
+              && rect.top < window.innerHeight;
           };
           const visibleElements = (root, selector = '*') =>
             Array.from(root.querySelectorAll(selector)).filter((candidate) => isVisible(candidate));
@@ -2873,9 +2948,23 @@ class LiveWorkspaceSwitcherPage:
               || active?.getAttribute?.('tabindex') === '0'
             ),
           );
+          const activeVisible = isVisible(active);
+          const activeInViewport = isInViewport(active);
+          const activeDifferentFromBefore = Boolean(
+            active
+            && (
+              (beforeFocusOuterHtml && activeOuterHtml && activeOuterHtml !== beforeFocusOuterHtml)
+              || activeTagName !== beforeFocusTagName
+              || activeRole !== beforeFocusRole
+              || activeLabel !== beforeFocusLabel
+            ),
+          );
           const externalFocusReached = Boolean(
             active
+            && activeVisible
+            && activeInViewport
             && activeIsInteractive
+            && activeDifferentFromBefore
             && !activeWithinSwitcher
             && !activeLabel.startsWith(triggerLabelPrefix)
             && activeTagName !== 'BODY'
@@ -2900,6 +2989,9 @@ class LiveWorkspaceSwitcherPage:
             activeRole,
             activeTagName,
             activeOuterHtml,
+            activeVisible,
+            activeInViewport,
+            activeDifferentFromBefore,
             activeWithinSwitcher,
             externalFocusReached,
             panelVisible: Boolean(switcher),
