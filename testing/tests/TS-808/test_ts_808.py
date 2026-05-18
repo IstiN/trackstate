@@ -45,6 +45,7 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts808_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts808_failure.png"
@@ -438,7 +439,6 @@ def _ensure_active_local_precondition(
                 "switcher_text": switcher.switcher_text,
             }
         )
-        page.close()
         try:
             trigger = page.switch_to_workspace(
                 display_name=LOCAL_DISPLAY_NAME,
@@ -602,6 +602,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
         + "\n",
         encoding="utf-8",
     )
+    REVIEW_REPLIES_PATH.write_text('{"replies":[]}\n', encoding="utf-8")
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
@@ -623,6 +624,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         + "\n",
         encoding="utf-8",
     )
+    REVIEW_REPLIES_PATH.write_text('{"replies":[]}\n', encoding="utf-8")
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
@@ -638,7 +640,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         f"*Test Case:* {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "h4. What was automated",
-        "* Opened the deployed TrackState app in Chromium with a preloaded active local workspace profile and used the configured GitHub token to establish the local GitHub session before the ticket steps.",
+        "* Opened the deployed TrackState app in Chromium with a preloaded active local workspace profile and the configured GitHub credentials available for the signed-in precondition flow.",
         "* Opened *Workspace switcher* and verified the selected row represented the active local workspace in the visible {{Local Git}} state.",
         "* Verified the selected active local row did not expose any visible {{Connect GitHub}} action, button, or visible row text while signed in.",
         "",
@@ -683,7 +685,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## What was automated",
-        "- Opened the deployed TrackState app in Chromium with a preloaded active local workspace profile and used the configured GitHub token to establish the local GitHub session before the ticket steps.",
+        "- Opened the deployed TrackState app in Chromium with a preloaded active local workspace profile and the configured GitHub credentials available for the signed-in precondition flow.",
         "- Opened **Workspace switcher** and verified the selected row represented the active local workspace in the visible `Local Git` state.",
         "- Verified the selected active local row did not expose any visible `Connect GitHub` action, button, or visible row text while signed in.",
         "",
@@ -729,7 +731,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Added TS-808 live workspace-switcher coverage for the signed-in active-local workspace state, including setup that switches to the local workspace and connects GitHub there before the ticket steps.",
+        "- Added TS-808 live workspace-switcher coverage for the signed-in active-local workspace state, including precondition handling that tries to switch to the prepared local workspace before the ticket steps.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -940,9 +942,9 @@ def _bug_capability_gap(result: dict[str, object]) -> str:
     if "Precondition failed before step 1" in error:
         return (
             "The app could not reach the signed-in active local workspace state needed "
-            "for the TS-808 row-level visibility check, even after the automation "
-            "switched to the prepared local workspace and attempted to connect GitHub "
-            "there."
+            "for the TS-808 row-level visibility check. After the automation selected "
+            "`Open: Active local workspace` and `Save and switch`, the trigger still "
+            "showed the hosted workspace and the local row remained `Local Unavailable`."
         )
     return (
         "The TS-808 scenario could not reach the expected signed-in active local "
