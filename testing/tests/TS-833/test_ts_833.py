@@ -58,11 +58,14 @@ EXPECTED_RESULT = (
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+INPUTS_DIR = REPO_ROOT / "input" / TICKET_KEY
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+DISCUSSIONS_RAW_PATH = INPUTS_DIR / "pr_discussions_raw.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts833_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts833_failure.png"
 
@@ -198,6 +201,12 @@ def main() -> None:
                         timeout_ms=4_000,
                     )
                     focus_precondition = page.observe_focus_ownership(panel=panel)
+                    result["focus_precondition"] = _focus_ownership_payload(
+                        focus_precondition,
+                    )
+                    result["saved_workspace_rows_after_click"] = _saved_workspace_rows_payload(
+                        saved_workspace_rows_after_click,
+                    )
                     _assert_arrow_down_interaction_precondition(
                         observation=focus_precondition,
                         clicked_x=click_x,
@@ -205,13 +214,13 @@ def main() -> None:
                         expected_workspace_name=active_workspace.display_name,
                         saved_workspace_rows=saved_workspace_rows_after_click,
                     )
-                    result["focus_precondition"] = _focus_ownership_payload(
-                        focus_precondition,
-                    )
-                    result["saved_workspace_rows_after_click"] = _saved_workspace_rows_payload(
-                        saved_workspace_rows_after_click,
-                    )
                 except AssertionError as error:
+                    result["product_gap"] = (
+                        "Clicking the active saved-workspace row does not transfer keyboard "
+                        "focus to a switcher-owned target inside the open panel, so the "
+                        "saved-workspace list cannot be exercised from a validated Arrow Down "
+                        "keyboard state."
+                    )
                     _record_step(
                         result,
                         step=2,
@@ -428,6 +437,18 @@ def _assert_arrow_down_interaction_precondition(
 ) -> None:
     active_workspace = _selected_saved_workspace(saved_workspace_rows)
     failures: list[str] = []
+    if not observation.focus_owned_by_switcher:
+        failures.append(
+            "keyboard focus was not owned by the open workspace switcher after clicking the active row",
+        )
+    if not observation.active_within_switcher:
+        failures.append(
+            "the focused element remained outside the open workspace switcher after clicking the active row",
+        )
+    if observation.active_on_trigger:
+        failures.append(
+            "keyboard focus remained on the workspace-switcher trigger after clicking the active row",
+        )
     if len(saved_workspace_rows) < 2:
         failures.append("fewer than two saved workspace rows remained visible after clicking the active row")
     if active_workspace is None:
@@ -594,10 +615,11 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
                 "skipped": 0,
                 "summary": "1 passed, 0 failed",
             },
-        )
+    )
         + "\n",
         encoding="utf-8",
     )
+    _write_review_replies(result, passed=True)
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
@@ -615,10 +637,11 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
                 "summary": "0 passed, 1 failed",
                 "error": error,
             },
-        )
+    )
         + "\n",
         encoding="utf-8",
     )
+    _write_review_replies(result, passed=False)
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
@@ -856,6 +879,54 @@ def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     if jira:
         return [f"{prefix} Screenshot: {{{{{screenshot}}}}}"]
     return [f"{prefix} Screenshot: `{screenshot}`"]
+
+
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(passed=passed, result=result),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
+    rerun_summary = (
+        "Re-ran "
+        f"`{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else "Re-ran "
+        f"`{RUN_COMMAND}`: failed at {_failed_step_summary(result)}"
+    )
+    return (
+        "Fixed: Step 2 now asserts the saved-row focus-ownership probe after the click, "
+        "requiring visible switcher-owned focus inside the open panel and off the trigger "
+        "before `ArrowDown`. "
+        + rerun_summary
+    )
 
 
 def _failed_step_summary(result: dict[str, object]) -> str:
