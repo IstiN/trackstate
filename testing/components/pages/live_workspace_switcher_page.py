@@ -258,6 +258,22 @@ class WorkspaceSwitcherFocusTargetObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceSwitcherRowFocusObservation:
+    active_label: str | None
+    active_role: str | None
+    active_tag_name: str
+    active_outer_html: str
+    active_visible: bool
+    active_in_viewport: bool
+    active_within_switcher: bool
+    active_on_trigger: bool
+    focus_owned_by_switcher: bool
+    row_found: bool
+    row_contains_active: bool
+    row_text: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherSemanticsObservation:
     label: str
     role: str | None
@@ -904,6 +920,109 @@ class LiveWorkspaceSwitcherPage:
             focus_owned_by_switcher=bool(payload.get("focusOwnedBySwitcher")),
         )
 
+    def observe_saved_workspace_row_focus(
+        self,
+        *,
+        display_name: str,
+        panel: WorkspaceSwitcherPanelObservation,
+    ) -> WorkspaceSwitcherRowFocusObservation:
+        active = self._session.active_element()
+        focus_payload = self._probe_blur_focus_state(panel)
+        if not isinstance(focus_payload, dict):
+            raise AssertionError(
+                "The workspace switcher focus probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        row_payload = self._session.evaluate(
+            """
+            ({ displayName, panelLeft, panelTop, panelRight, panelBottom }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const isInsidePanel = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const centerX = rect.left + (rect.width / 2);
+                const centerY = rect.top + (rect.height / 2);
+                return centerX >= panelLeft - 1
+                  && centerX <= panelRight + 1
+                  && centerY >= panelTop - 1
+                  && centerY <= panelBottom + 1;
+              };
+              const matchesRow = (element) => {
+                const text = normalize(element?.innerText || element?.textContent || '');
+                return text.includes(displayName)
+                  && text.includes('Branch:')
+                  && text.includes('Delete:');
+              };
+
+              const active = document.activeElement instanceof Element
+                ? document.activeElement
+                : null;
+              let focusedRow = null;
+              let current = active;
+              while (current && current !== document.body) {
+                if (isVisible(current) && isInsidePanel(current) && matchesRow(current)) {
+                  focusedRow = current;
+                  break;
+                }
+                current = current.parentElement;
+              }
+
+              const visibleRow = Array.from(document.querySelectorAll('*'))
+                .filter((element) => isVisible(element) && isInsidePanel(element) && matchesRow(element))
+                .sort((left, right) => {
+                  const leftRect = left.getBoundingClientRect();
+                  const rightRect = right.getBoundingClientRect();
+                  return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                })[0] || null;
+              const targetRow = focusedRow || visibleRow;
+              return {
+                rowFound: Boolean(targetRow),
+                rowContainsActive: Boolean(focusedRow),
+                rowText: normalize(targetRow?.innerText || targetRow?.textContent || ''),
+              };
+            }
+            """,
+            arg={
+                "displayName": display_name,
+                "panelLeft": panel.left,
+                "panelTop": panel.top,
+                "panelRight": panel.left + panel.width,
+                "panelBottom": panel.top + panel.height,
+            },
+        )
+        if not isinstance(row_payload, dict):
+            raise AssertionError(
+                "The workspace switcher row-focus probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherRowFocusObservation(
+            active_label=active.accessible_name,
+            active_role=active.role,
+            active_tag_name=active.tag_name,
+            active_outer_html=active.outer_html,
+            active_visible=bool(focus_payload.get("activeVisible")),
+            active_in_viewport=bool(focus_payload.get("activeInViewport")),
+            active_within_switcher=bool(focus_payload.get("activeWithinSwitcher")),
+            active_on_trigger=bool(focus_payload.get("activeOnTrigger")),
+            focus_owned_by_switcher=bool(focus_payload.get("focusOwnedBySwitcher")),
+            row_found=bool(row_payload.get("rowFound")),
+            row_contains_active=bool(row_payload.get("rowContainsActive")),
+            row_text=str(row_payload.get("rowText", "")),
+        )
+
     def focus_switcher_button(
         self,
         label: str,
@@ -1187,6 +1306,45 @@ class LiveWorkspaceSwitcherPage:
                     index += 6
                     continue
                 index += 1
+            if not parsed_rows:
+                index = 0
+                while index + 2 < len(candidate_lines):
+                    header = candidate_lines[index]
+                    action_label = candidate_lines[index + 1]
+                    delete_label = candidate_lines[index + 2]
+                    if "Branch:" not in header or not delete_label.startswith("Delete: "):
+                        index += 1
+                        continue
+
+                    display_name: str | None = None
+                    target_type_label: str | None = None
+                    state_label: str | None = None
+                    detail_text = header
+                    header_parts = [part.strip() for part in header.split(", ", 3)]
+                    if len(header_parts) >= 4:
+                        display_name = header_parts[0] or None
+                        target_type_label = header_parts[1] or None
+                        state_label = header_parts[2] or None
+                        detail_text = header_parts[3]
+                    elif len(header_parts) >= 2:
+                        display_name = header_parts[0] or None
+                        target_type_label = header_parts[1] or None
+                        detail_text = ", ".join(header_parts[2:]) or header
+                    if not display_name:
+                        index += 1
+                        continue
+
+                    parsed_rows.append(
+                        (
+                            display_name,
+                            detail_text,
+                            target_type_label,
+                            state_label,
+                            (action_label, delete_label),
+                            action_label == "Active",
+                        ),
+                    )
+                    index += 3
         if not parsed_rows:
             for row in switcher.rows:
                 display_name = row.display_name
@@ -1213,7 +1371,7 @@ class LiveWorkspaceSwitcherPage:
         ) in parsed_rows:
             bounds = self._session.evaluate(
                 """
-                ({ text }) => {
+                ({ displayName, detailText, actionLabels, deleteLabel }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                   const isVisible = (element) => {
                     if (!element) {
@@ -1226,9 +1384,44 @@ class LiveWorkspaceSwitcherPage:
                       && style.visibility !== 'hidden'
                       && style.display !== 'none';
                   };
-                  const candidate = Array.from(document.querySelectorAll('*'))
+                  const textFor = (element) => normalize(element.innerText || element.textContent || '');
+                  const areaFor = (element) => {
+                    const rect = element.getBoundingClientRect();
+                    return rect.width * rect.height;
+                  };
+                  const matchesRow = (element) => {
+                    const text = textFor(element);
+                    return text.includes(displayName)
+                      && text.includes(detailText)
+                      && (!deleteLabel || text.includes(deleteLabel));
+                  };
+                  const anchors = Array.from(document.querySelectorAll('*'))
                     .filter((element) => isVisible(element))
-                    .find((element) => normalize(element.innerText || element.textContent || '') === text);
+                    .filter((element) => {
+                      const text = textFor(element);
+                      const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                      return text === deleteLabel || ariaLabel === deleteLabel;
+                    })
+                    .sort((left, right) => areaFor(left) - areaFor(right));
+                  let candidate = null;
+                  for (const anchor of anchors) {
+                    let current = anchor;
+                    while (current && current !== document.body) {
+                      if (isVisible(current) && matchesRow(current)) {
+                        candidate = current;
+                        break;
+                      }
+                      current = current.parentElement;
+                    }
+                    if (candidate) {
+                      break;
+                    }
+                  }
+                  if (!candidate) {
+                    candidate = Array.from(document.querySelectorAll('*'))
+                      .filter((element) => isVisible(element) && matchesRow(element))
+                      .sort((left, right) => areaFor(left) - areaFor(right))[0];
+                  }
                   if (!candidate) {
                     return null;
                   }
@@ -1241,7 +1434,12 @@ class LiveWorkspaceSwitcherPage:
                   };
                 }
                 """,
-                arg={"text": display_name},
+                arg={
+                    "displayName": display_name,
+                    "detailText": detail_text,
+                    "actionLabels": list(action_labels),
+                    "deleteLabel": action_labels[-1] if action_labels else "",
+                },
             )
             if not isinstance(bounds, dict):
                 raise AssertionError(
@@ -1280,7 +1478,7 @@ class LiveWorkspaceSwitcherPage:
                 )
                 bounds = self._session.evaluate(
                     """
-                    ({ text }) => {
+                    ({ displayName, detailText, actionLabels, deleteLabel }) => {
                       const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                       const isVisible = (element) => {
                         if (!element) {
@@ -1293,9 +1491,44 @@ class LiveWorkspaceSwitcherPage:
                           && style.visibility !== 'hidden'
                           && style.display !== 'none';
                       };
-                      const candidate = Array.from(document.querySelectorAll('*'))
+                      const textFor = (element) => normalize(element.innerText || element.textContent || '');
+                      const areaFor = (element) => {
+                        const rect = element.getBoundingClientRect();
+                        return rect.width * rect.height;
+                      };
+                      const matchesRow = (element) => {
+                        const text = textFor(element);
+                        return text.includes(displayName)
+                          && text.includes(detailText)
+                          && (!deleteLabel || text.includes(deleteLabel));
+                      };
+                      const anchors = Array.from(document.querySelectorAll('*'))
                         .filter((element) => isVisible(element))
-                        .find((element) => normalize(element.innerText || element.textContent || '') === text);
+                        .filter((element) => {
+                          const text = textFor(element);
+                          const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                          return text === deleteLabel || ariaLabel === deleteLabel;
+                        })
+                        .sort((left, right) => areaFor(left) - areaFor(right));
+                      let candidate = null;
+                      for (const anchor of anchors) {
+                        let current = anchor;
+                        while (current && current !== document.body) {
+                          if (isVisible(current) && matchesRow(current)) {
+                            candidate = current;
+                            break;
+                          }
+                          current = current.parentElement;
+                        }
+                        if (candidate) {
+                          break;
+                        }
+                      }
+                      if (!candidate) {
+                        candidate = Array.from(document.querySelectorAll('*'))
+                          .filter((element) => isVisible(element) && matchesRow(element))
+                          .sort((left, right) => areaFor(left) - areaFor(right))[0];
+                      }
                       if (!candidate) {
                         return null;
                       }
@@ -1308,7 +1541,12 @@ class LiveWorkspaceSwitcherPage:
                       };
                     }
                     """,
-                    arg={"text": display_name},
+                    arg={
+                        "displayName": display_name,
+                        "detailText": detail_text,
+                        "actionLabels": list(action_labels),
+                        "deleteLabel": action_labels[-1] if action_labels else "",
+                    },
                 )
                 if not isinstance(bounds, dict):
                     continue
