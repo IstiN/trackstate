@@ -19,9 +19,8 @@ const String _runCommand =
 const List<String> _requestSteps = <String>[
   'Open the workspace switcher with at least two saved workspaces visible.',
   'Confirm the second workspace in the list is currently highlighted as active.',
-  'Click the active second workspace row to engage keyboard interaction for the switcher.',
   "Press the 'Arrow Up' key.",
-  'Verify the active selection moves to the previous workspace in the list and the switcher panel remains open.',
+  'Verify the active selection and keyboard focus move to the previous workspace in the list and the switcher panel remains open.',
 ];
 
 void main() {
@@ -155,41 +154,9 @@ void main() {
           );
         }
 
-        final focusBeforeRowClick =
+        final focusBeforeArrowUp =
             FocusManager.instance.primaryFocus?.debugLabel;
-        final clickedActiveSecondRow = await screen.tapWorkspaceRowControl(
-          fixture.secondWorkspace.id,
-          Ts841DualLocalWorkspaceFixture.secondWorkspaceDisplayName,
-        );
-        final focusAfterRowClick =
-            FocusManager.instance.primaryFocus?.debugLabel;
-        result['focus_before_row_click'] = focusBeforeRowClick;
-        result['focus_after_row_click'] = focusAfterRowClick;
-
-        final expectedFocusedRowLabel =
-            'workspace-switcher-row-summary-${fixture.secondWorkspace.id}';
-        final step3Observed =
-            'clicked_active_second_row=$clickedActiveSecondRow; '
-            'focus_before_row_click=${focusBeforeRowClick ?? '<none>'}; '
-            'focus_after_row_click=${focusAfterRowClick ?? '<none>'}; '
-            'expected_focus=$expectedFocusedRowLabel';
-        final step3Passed =
-            clickedActiveSecondRow &&
-            focusAfterRowClick == expectedFocusedRowLabel;
-        _recordStep(
-          result,
-          step: 3,
-          status: step3Passed ? 'passed' : 'failed',
-          action: _requestSteps[2],
-          observed: step3Observed,
-        );
-        if (!step3Passed) {
-          failures.add(
-            'Step 3 failed: clicking the active second row did not engage keyboard interaction on the workspace switcher row.\n'
-            'Observed: $step3Observed',
-          );
-        }
-
+        result['focus_before_arrow_up'] = focusBeforeArrowUp;
         await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
         await tester.pump();
         await tester.pumpAndSettle();
@@ -210,17 +177,21 @@ void main() {
         result['visible_texts_after_arrow_up'] = visibleTextsAfterKey;
         result['visible_semantics_after_arrow_up'] = visibleSemanticsAfterKey;
 
+        final expectedFocusedRowLabel =
+            'workspace-switcher-row-summary-${fixture.firstWorkspace.id}';
         final step4Observed =
             'pressed_arrow_up=true; '
+            'focus_before_arrow_up=${focusBeforeArrowUp ?? '<none>'}; '
             'active_workspace_after_arrow_up=${stateAfterArrowUp.activeWorkspaceId}; '
             'switcher_visible_after_arrow_up=$switcherVisibleAfterKey; '
             'focus_after_arrow_up=${focusAfterArrowUp ?? '<none>'}; '
+            'expected_focus_after_arrow_up=$expectedFocusedRowLabel; '
             'visible_texts=${_formatList(visibleTextsAfterKey)}';
         _recordStep(
           result,
-          step: 4,
+          step: 3,
           status: 'passed',
-          action: _requestSteps[3],
+          action: _requestSteps[2],
           observed: step4Observed,
         );
 
@@ -239,6 +210,8 @@ void main() {
             'second_row_has_active_label=$secondRowHasActiveLabelAfterKey; '
             'second_row_has_open_control=$secondRowHasOpenControlAfterKey; '
             'switcher_visible_after_arrow_up=$switcherVisibleAfterKey; '
+            'focus_after_arrow_up=${focusAfterArrowUp ?? '<none>'}; '
+            'expected_focus_after_arrow_up=$expectedFocusedRowLabel; '
             'visible_texts=${_formatList(visibleTextsAfterKey)}; '
             'visible_semantics=${_formatList(visibleSemanticsAfterKey)}';
         final step5Passed =
@@ -247,17 +220,18 @@ void main() {
             !firstRowHasOpenControlAfterKey &&
             !secondRowHasActiveLabelAfterKey &&
             secondRowHasOpenControlAfterKey &&
+            focusAfterArrowUp == expectedFocusedRowLabel &&
             switcherVisibleAfterKey;
         _recordStep(
           result,
-          step: 5,
+          step: 4,
           status: step5Passed ? 'passed' : 'failed',
-          action: _requestSteps[4],
+          action: _requestSteps[3],
           observed: step5Observed,
         );
         if (!step5Passed) {
           failures.add(
-            'Step 5 failed: pressing Arrow Up did not move the active selection to the previous workspace while keeping the switcher open.\n'
+            'Step 4 failed: pressing Arrow Up did not move both the active selection and keyboard focus to the previous workspace while keeping the switcher open.\n'
             'Observed: $step5Observed',
           );
         }
@@ -272,9 +246,9 @@ void main() {
         _recordHumanVerification(
           result,
           check:
-              'Clicked the active second row and pressed Arrow Up like a keyboard user, then checked which row visibly kept the Active badge and whether the panel stayed open.',
+              'Pressed Arrow Up directly from the preselected second-row state, then checked which row became Active, which element held keyboard focus, and whether the panel stayed open.',
           observed:
-              'focus_after_row_click=${focusAfterRowClick ?? '<none>'}; switcher_visible_after_arrow_up=$switcherVisibleAfterKey; visible_texts_after_arrow_up=${_formatList(visibleTextsAfterKey)}; visible_semantics_after_arrow_up=${_formatList(visibleSemanticsAfterKey)}',
+              'focus_before_arrow_up=${focusBeforeArrowUp ?? '<none>'}; focus_after_arrow_up=${focusAfterArrowUp ?? '<none>'}; expected_focus_after_arrow_up=$expectedFocusedRowLabel; switcher_visible_after_arrow_up=$switcherVisibleAfterKey; visible_texts_after_arrow_up=${_formatList(visibleTextsAfterKey)}; visible_semantics_after_arrow_up=${_formatList(visibleSemanticsAfterKey)}',
         );
 
         if (failures.isNotEmpty) {
@@ -386,8 +360,8 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     '',
     'h4. What was automated',
     '* Launched the production tracker in the supported Flutter widget runtime with two saved local workspaces and the second workspace already selected.',
-    '* Opened *Workspace switcher*, confirmed the second row was visibly active, and clicked that same row to engage keyboard interaction for the switcher.',
-    '* Pressed {{Arrow Up}} and verified the active selection moved to the previous workspace while the panel remained open.',
+    '* Opened *Workspace switcher*, confirmed the second row was visibly active, and pressed {{Arrow Up}} directly from that preconditioned state.',
+    '* Verified the previous workspace became active, the switcher panel stayed open, and keyboard focus moved to the previous workspace row.',
     '',
     'h4. Result',
     passed
@@ -425,8 +399,8 @@ String _markdownSummary(Map<String, Object?> result, {required bool passed}) {
     '',
     '## What was automated',
     '- Ran the production Flutter widget runtime with two saved local workspaces and the second workspace already active.',
-    '- Opened **Workspace switcher**, confirmed the second row visibly showed the active state, and clicked that row to engage keyboard navigation.',
-    '- Pressed `Arrow Up` and verified the previous workspace became active while the switcher panel stayed open.',
+    '- Opened **Workspace switcher**, confirmed the second row visibly showed the active state, and pressed `Arrow Up` directly from that preconditioned state.',
+    '- Verified the previous workspace became active, the switcher panel stayed open, and keyboard focus moved to the previous workspace row.',
     '',
     '## Result',
     passed
@@ -463,7 +437,7 @@ String _bugDescription(Map<String, Object?> result) {
     ..._bugStepLines(result),
     '',
     '## Expected result',
-    'With the second saved workspace active in Workspace switcher, clicking that row and pressing `Arrow Up` should move the active selection to the previous workspace and keep the switcher panel open.',
+    'With the second saved workspace already active in Workspace switcher, pressing `Arrow Up` should move the active selection and keyboard focus to the previous workspace and keep the switcher panel open.',
     '',
     '## Actual result',
     _actualResultSummary(result),
@@ -490,8 +464,7 @@ String _bugDescription(Map<String, Object?> result) {
     '```json',
     const JsonEncoder.withIndent('  ').convert(<String, Object?>{
       'initial_active_workspace_id': result['initial_active_workspace_id'],
-      'focus_before_row_click': result['focus_before_row_click'],
-      'focus_after_row_click': result['focus_after_row_click'],
+      'focus_before_arrow_up': result['focus_before_arrow_up'],
       'focus_after_arrow_up': result['focus_after_arrow_up'],
       'active_workspace_after_arrow_up':
           result['active_workspace_after_arrow_up'],
@@ -601,12 +574,12 @@ String _failedStep(Map<String, Object?> result) {
 String _actualResultSummary(Map<String, Object?> result) {
   final step2 = _stepByNumber(result, 2);
   final step3 = _stepByNumber(result, 3);
-  final step5 = _stepByNumber(result, 5);
-  if (step2 != null || step3 != null || step5 != null) {
-    return 'The second saved workspace was prepared as the active row, but after engaging keyboard interaction and sending `Arrow Up`, the previous workspace did not become the active selection while leaving the switcher open. '
+  final step4 = _stepByNumber(result, 4);
+  if (step2 != null || step3 != null || step4 != null) {
+    return 'The second saved workspace was prepared as the active row, but after sending `Arrow Up` from the open switcher the previous workspace did not satisfy the full ticket expectation of becoming both the active selection and the focused row while leaving the switcher open. '
         'Observed step 2: ${step2?['observed'] ?? '<missing>'}. '
         'Observed step 3: ${step3?['observed'] ?? '<missing>'}. '
-        'Observed step 5: ${step5?['observed'] ?? '<missing>'}.';
+        'Observed step 4: ${step4?['observed'] ?? '<missing>'}.';
   }
   return '${result['error'] ?? ''}';
 }

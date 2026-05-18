@@ -9,10 +9,9 @@ The automation:
    and preselects the second workspace
 2. launches the production tracker through the shared `TrackStateAppComponent`
 3. opens **Workspace switcher** and confirms the second row is visibly active
-4. clicks that active second row to engage keyboard interaction for the
-   switcher, matching the TS-836 regression path
-5. presses **Arrow Up** and verifies the first workspace becomes active while
-   the switcher panel stays open
+4. presses **Arrow Up** directly from that preconditioned state
+5. verifies the first workspace becomes active, keyboard focus moves to that
+   previous row, and the switcher panel stays open
 
 ## Run this test
 
@@ -29,5 +28,6 @@ mkdir -p outputs && flutter test testing/tests/TS-841/test_ts_841.dart --reporte
 
 ```text
 Pass: with the second saved workspace active, pressing Arrow Up moves the
-selection to the previous workspace and leaves the workspace switcher open.
+selection and keyboard focus to the previous workspace and leaves the
+workspace switcher open.
 ```
