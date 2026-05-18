@@ -1,0 +1,19 @@
+test_id: TS-815
+type: ui
+framework: flutter_test
+platform: linux
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Launches the production TrackState workspace-profile app with three saved local workspaces and no stored GitHub auth token.
+  - Verifies the workspace switcher shows one active local row plus two inactive local rows at the same time while signed out.
+  - Asserts every visible local workspace row exposes its own row-level Connect GitHub control simultaneously instead of limiting the action to a single row.
+runtime_inputs:
+  active_workspace_kind: local
+  inactive_workspace_kinds:
+    - local
+    - local
+  active_workspace_auth_state: signed_out
+  expected_row_action: Connect GitHub
+  expected_visible_row_count: 3
+  run_command: flutter test testing/tests/TS-815/test_ts_815.dart --reporter expanded
