@@ -1079,7 +1079,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         browser_workspace_switcher_focus_monitor
             .createBrowserWorkspaceSwitcherFocusMonitorSubscription(
               onBrowserTab: () {
-                scheduleMicrotask(() {
+                Timer.run(() {
                   if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
                     return;
                   }
