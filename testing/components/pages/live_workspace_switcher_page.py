@@ -211,6 +211,20 @@ class WorkspaceSwitcherInternalFocusObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceSwitcherFocusOwnershipObservation:
+    active_label: str | None
+    active_role: str | None
+    active_tag_name: str
+    active_outer_html: str
+    active_visible: bool
+    active_in_viewport: bool
+    switcher_focus_within: bool
+    active_within_switcher: bool
+    active_on_trigger: bool
+    focus_owned_by_switcher: bool
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherInteractiveObservation:
     label: str
     accessible_label: str
@@ -486,6 +500,31 @@ class LiveWorkspaceSwitcherPage:
 
     def active_element(self) -> FocusedElementObservation:
         return self._session.active_element()
+
+    def observe_focus_ownership(
+        self,
+        *,
+        panel: WorkspaceSwitcherPanelObservation,
+    ) -> WorkspaceSwitcherFocusOwnershipObservation:
+        active = self._session.active_element()
+        payload = self._probe_blur_focus_state(panel)
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher focus probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherFocusOwnershipObservation(
+            active_label=active.accessible_name,
+            active_role=active.role,
+            active_tag_name=active.tag_name,
+            active_outer_html=active.outer_html,
+            active_visible=bool(payload.get("activeVisible")),
+            active_in_viewport=bool(payload.get("activeInViewport")),
+            switcher_focus_within=bool(payload.get("switcherFocusWithin")),
+            active_within_switcher=bool(payload.get("activeWithinSwitcher")),
+            active_on_trigger=bool(payload.get("activeOnTrigger")),
+            focus_owned_by_switcher=bool(payload.get("focusOwnedBySwitcher")),
+        )
 
     def focus_switcher_text_field(
         self,
