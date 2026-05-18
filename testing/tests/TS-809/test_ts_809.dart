@@ -17,7 +17,8 @@ const String _runCommand =
 const List<String> _requestSteps = <String>[
   'Open the workspace switcher.',
   'Identify a local workspace row that is not currently marked as active.',
-  "Inspect the action controls for this inactive local workspace row and verify that the 'Connect GitHub' control is visible.",
+  'Inspect the action controls for this inactive local workspace row.',
+  "Verify that the 'Connect GitHub' control is visible.",
 ];
 
 void main() {
@@ -129,6 +130,13 @@ void main() {
           );
         }
 
+        final inactiveLocalRowHasOpenControl = await screen
+            .workspaceRowHasControl(fixture.inactiveLocalWorkspace.id, 'Open');
+        final inactiveLocalRowHasDeleteControl = await screen
+            .workspaceRowHasControl(
+              fixture.inactiveLocalWorkspace.id,
+              'Delete',
+            );
         final connectGitHubVisibleInRow = await screen.workspaceRowHasControl(
           fixture.inactiveLocalWorkspace.id,
           'Connect GitHub',
@@ -137,21 +145,37 @@ void main() {
             await screen.isTextVisible('Connect GitHub') ||
             await screen.isSemanticsLabelVisible('Connect GitHub');
         final step3Observed =
+            'row_has_open=$inactiveLocalRowHasOpenControl; '
+            'row_has_delete=$inactiveLocalRowHasDeleteControl; '
             'row_has_connect_github=$connectGitHubVisibleInRow; '
-            'screen_has_connect_github=$connectGitHubVisibleAnywhere; '
             'visible_texts=${_formatList(screen.visibleTextsSnapshot())}; '
             'visible_semantics=${_formatList(screen.visibleSemanticsLabelsSnapshot())}';
         _recordStep(
           result,
           step: 3,
-          status: connectGitHubVisibleInRow ? 'passed' : 'failed',
+          status: 'passed',
           action: _requestSteps[2],
           observed: step3Observed,
         );
+
+        final step4Observed =
+            'row_has_connect_github=$connectGitHubVisibleInRow; '
+            'screen_has_connect_github=$connectGitHubVisibleAnywhere; '
+            'row_has_open=$inactiveLocalRowHasOpenControl; '
+            'row_has_delete=$inactiveLocalRowHasDeleteControl; '
+            'visible_texts=${_formatList(screen.visibleTextsSnapshot())}; '
+            'visible_semantics=${_formatList(screen.visibleSemanticsLabelsSnapshot())}';
+        _recordStep(
+          result,
+          step: 4,
+          status: connectGitHubVisibleInRow ? 'passed' : 'failed',
+          action: _requestSteps[3],
+          observed: step4Observed,
+        );
         if (!connectGitHubVisibleInRow) {
           failures.add(
-            "Step 3 failed: the inactive local workspace row did not expose a visible 'Connect GitHub' control while signed out.\n"
-            'Observed: $step3Observed',
+            "Step 4 failed: the inactive local workspace row did not expose a visible 'Connect GitHub' control while signed out.\n"
+            'Observed: $step4Observed',
           );
         }
 
@@ -478,12 +502,14 @@ String _failedStep(Map<String, Object?> result) {
 String _actualResultSummary(Map<String, Object?> result) {
   final step2 = _stepByNumber(result, 2);
   final step3 = _stepByNumber(result, 3);
-  if (step2 != null || step3 != null) {
+  final step4 = _stepByNumber(result, 4);
+  if (step2 != null || step3 != null || step4 != null) {
     return 'The inactive local workspace row was visible and not active, '
-        'but it did not expose a row-level `Connect GitHub` control while '
-        'signed out. '
+        'its action controls were inspectable, but it did not expose a '
+        'row-level `Connect GitHub` control while signed out. '
         'Observed step 2: ${step2?['observed'] ?? '<missing>'}. '
-        'Observed step 3: ${step3?['observed'] ?? '<missing>'}.';
+        'Observed step 3: ${step3?['observed'] ?? '<missing>'}. '
+        'Observed step 4: ${step4?['observed'] ?? '<missing>'}.';
   }
   return '${result['error'] ?? ''}';
 }

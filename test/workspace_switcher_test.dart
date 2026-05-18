@@ -176,6 +176,120 @@ void main() {
   );
 
   testWidgets(
+    'startup restore waits for active local workspace revalidation before falling back to hosted',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: activeLocalWorkspaceId,
+              displayName: 'Active local workspace',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/trackstate-demo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:stable/repo@main',
+              displayName: 'stable/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'stable/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: activeLocalWorkspaceId,
+          migrationComplete: true,
+        ),
+      );
+      var localAccessReady = false;
+      var localOpenAttempts = 0;
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: DemoTrackStateRepository.new,
+          workspaceProfileService: service,
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                localOpenAttempts += 1;
+                if (!localAccessReady) {
+                  throw StateError(
+                    'File System Access handle revalidation is still pending.',
+                  );
+                }
+                return DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repositoryPath),
+                );
+              },
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+
+      await tester.pump();
+
+      localAccessReady = true;
+      await tester.pump(const Duration(milliseconds: 800));
+      await tester.pumpAndSettle();
+
+      expect(localOpenAttempts, greaterThan(1));
+      expect(service.state.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        find.bySemanticsLabel(
+          'Workspace switcher: Active local workspace, Local, Local Git',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(
+          'Workspace switcher: stable/repo, Hosted, Needs sign-in',
+        ),
+        findsNothing,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      final activeRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/trackstate-demo@main'),
+      );
+      expect(activeRow, findsOneWidget);
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Local Git')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Open')),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
     'startup restore routes to add workspace when every saved workspace is invalid',
     (tester) async {
       final service = _MemoryWorkspaceProfileService(
@@ -659,6 +773,173 @@ void main() {
         findsNothing,
       );
       expect(find.text('Dashboard'), findsWidgets);
+    },
+  );
+
+  testWidgets(
+    'desktop workspace switcher dismisses on Escape and returns focus to the trigger',
+    (tester) async {
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+      expect(trigger, findsOneWidget);
+
+      await tester.tap(
+        find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-sheet')),
+        findsOneWidget,
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('workspace-switcher-sheet')),
+        findsNothing,
+      );
+      expect(_focusWithinFinder(tester, trigger), isTrue);
+    },
+  );
+
+  testWidgets(
+    'desktop workspace switcher keeps open on non-Escape keys and Arrow Down switches to the next saved workspace',
+    (tester) async {
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:main/repo@main',
+              displayName: 'Hosted main workspace',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'main/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:alt/repo@main',
+              displayName: 'Hosted alt workspace',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alt/repo',
+              defaultBranch: 'main',
+              writeBranch: 'ts-825-alt',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:main/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
+      );
+      await tester.pumpAndSettle();
+
+      final switcherSheet = find.byKey(
+        const ValueKey('workspace-switcher-sheet'),
+      );
+      final mainRow = find.byKey(
+        const ValueKey('workspace-hosted:main/repo@main'),
+      );
+      final altRow = find.byKey(
+        const ValueKey('workspace-hosted:alt/repo@main'),
+      );
+
+      expect(switcherSheet, findsOneWidget);
+      expect(
+        find.descendant(of: mainRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: altRow, matching: find.text('Active')),
+        findsNothing,
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+
+      expect(switcherSheet, findsOneWidget);
+      expect(service.state.activeWorkspaceId, 'hosted:alt/repo@main');
+      expect(
+        find.descendant(of: mainRow, matching: find.text('Active')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: altRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      expect(switcherSheet, findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      expect(switcherSheet, findsOneWidget);
     },
   );
 
