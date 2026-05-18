@@ -253,7 +253,7 @@ void main() {
       expect(localOpenAttempts, greaterThan(1));
       expect(service.state.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
-        find.bySemanticsLabel(
+        _findExplicitWorkspaceSwitcherSemantics(
           'Workspace switcher: Active local workspace, Local, Local Git',
         ),
         findsOneWidget,
@@ -367,7 +367,7 @@ void main() {
       expect(localOpenAttempts, greaterThan(4));
       expect(service.state.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
-        find.bySemanticsLabel(
+        _findExplicitWorkspaceSwitcherSemantics(
           'Workspace switcher: Active local workspace, Local, Local Git',
         ),
         findsOneWidget,
@@ -1523,6 +1523,64 @@ void main() {
   );
 
   testWidgets(
+    'desktop workspace switcher trigger exports an actionable semantics node for browser keyboard flow',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            workspaceProfileService: service,
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                ),
+          ),
+        );
+        await _pumpUntilVisible(tester, find.byType(TextField));
+
+        final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+        expect(
+          find.descendant(
+            of: trigger,
+            matching: _findActionableSemanticsWithSortOrder(
+              label: 'Workspace switcher: alpha/repo, Hosted, Needs sign-in',
+              sortOrder: 5,
+            ),
+          ),
+          findsOneWidget,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'desktop workspace switcher exports a single explicit button semantics node across desktop layouts',
     (tester) async {
       final semantics = tester.ensureSemantics();
@@ -1593,11 +1651,11 @@ void main() {
                 'keyboard-focusable control instead of an inert outer wrapper.',
           );
           expect(
-            find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
+            _findExplicitWorkspaceSwitcherSemantics(label),
             findsOneWidget,
             reason:
-                'The ${layout.name} workspace switcher trigger should expose only '
-                'one labeled semantics node.',
+                'The ${layout.name} workspace switcher trigger should expose one '
+                'explicit labeled button semantics node.',
           );
 
           await tester.pumpWidget(const SizedBox.shrink());
@@ -2001,6 +2059,32 @@ Finder _findSemanticsWithSortOrder({
         (textField == null || widget.properties.textField == textField),
     description:
         'Semantics(label: $label, sortKey: OrdinalSortKey($sortOrder))',
+  );
+}
+
+Finder _findActionableSemanticsWithSortOrder({
+  required String label,
+  required double sortOrder,
+}) {
+  return find.byWidgetPredicate(
+    (widget) =>
+        widget is Semantics &&
+        widget.properties.label == label &&
+        widget.properties.sortKey is OrdinalSortKey &&
+        (widget.properties.sortKey as OrdinalSortKey).order == sortOrder &&
+        widget.properties.onTap != null,
+    description:
+        'Semantics(label: $label, sortKey: OrdinalSortKey($sortOrder), onTap: set)',
+  );
+}
+
+Finder _findExplicitWorkspaceSwitcherSemantics(String label) {
+  return find.byWidgetPredicate(
+    (widget) =>
+        widget is Semantics &&
+        widget.properties.label == label &&
+        widget.properties.button == true,
+    description: 'explicit workspace switcher semantics for $label',
   );
 }
 
