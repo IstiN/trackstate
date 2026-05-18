@@ -546,17 +546,25 @@ class LiveWorkspaceSwitcherPage:
                     .filter(isVisible)
                     .map((element) => {
                       const rect = element.getBoundingClientRect();
+                      const text = visibleText(element);
                       return {
                         element,
-                        text: visibleText(element),
+                        text,
                         area: rect.width * rect.height,
+                        hasLegacyWorkspaceLabels:
+                          text.includes('Saved workspaces') && text.includes('Add workspace'),
+                        hasCurrentWorkspaceLabels:
+                          text.includes('Save and switch')
+                          && (text.includes('Hosted') || text.includes('Local'))
+                          && (text.includes('Delete') || text.includes('Branch:')),
                       };
                     })
                     .filter((candidate) =>
                       candidate.text.includes(heading)
-                      && candidate.text.includes('Saved workspaces')
-                      && candidate.text.includes('Add workspace')
-                      && candidate.text.includes('Save and switch'),
+                      && (
+                        candidate.hasLegacyWorkspaceLabels
+                        || candidate.hasCurrentWorkspaceLabels
+                      ),
                     )
                     .sort((left, right) => left.area - right.area);
                   const surfaceVisible = panelCandidates.length > 0;
@@ -596,30 +604,12 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 10_000,
     ) -> tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...]:
         body_text = self.current_body_text()
-        if "Saved workspaces" not in body_text or "Add workspace" not in body_text:
-            raise AssertionError(
-                "The open workspace switcher did not expose any readable saved workspace rows.\n"
-                f"Observed body text:\n{body_text}",
-            )
-        panel_text = body_text.split("Saved workspaces", 1)[1].split("Add workspace", 1)[0]
-        row_pattern = re.compile(
-            r"(?P<display>[^\n]+)\n"
-            r"(?P<detail>[^\n]*Branch:[^\n]+)\n"
-            r"(?P<type>Hosted|Local)\n"
-            r"(?P<state>[^\n]+)\n"
-            r"(?P<action>Active|Open: [^\n]+)\n"
-            r"(?P<delete>Delete: [^\n]+)",
-            re.MULTILINE,
-        )
-        matches = list(row_pattern.finditer(panel_text))
-        if not matches:
-            raise AssertionError(
-                "The open workspace switcher did not expose any readable saved workspace rows.\n"
-                f"Observed body text:\n{body_text}",
-            )
+        switcher = self.observe_open_switcher(timeout_ms=timeout_ms)
         rows: list[WorkspaceSwitcherSavedWorkspaceRowObservation] = []
-        for match in matches:
-            display_name = match.group("display").strip()
+        for row in switcher.rows:
+            display_name = (row.display_name or "").strip()
+            if not display_name or "Branch:" not in row.detail_text:
+                continue
             bounds = self._session.evaluate(
                 """
                 ({ text }) => {
@@ -658,20 +648,95 @@ class LiveWorkspaceSwitcherPage:
                     "but its visible label could not be located for interaction.\n"
                     f"Observed body text:\n{body_text}",
                 )
-            action_labels = (match.group("action").strip(), match.group("delete").strip())
+            action_labels = tuple(
+                label
+                for label in (
+                    *row.action_labels,
+                    *row.button_labels,
+                )
+                if label
+            )
             rows.append(
                 WorkspaceSwitcherSavedWorkspaceRowObservation(
                     display_name=display_name,
-                    target_type_label=match.group("type").strip(),
-                    state_label=match.group("state").strip(),
-                    detail_text=match.group("detail").strip(),
-                    selected=match.group("action").strip() == "Active",
+                    target_type_label=row.target_type_label,
+                    state_label=row.state_label,
+                    detail_text=row.detail_text.strip(),
+                    selected=row.selected,
                     action_labels=action_labels,
                     left=float(bounds.get("left", 0.0)),
                     top=float(bounds.get("top", 0.0)),
                     width=float(bounds.get("width", 0.0)),
                     height=float(bounds.get("height", 0.0)),
                 ),
+            )
+        if not rows:
+            row_pattern = re.compile(
+                r"(?P<display>[^\n]+)\n"
+                r"(?P<detail>[^\n]*Branch:[^\n]+)\n"
+                r"(?P<type>Hosted|Local)\n"
+                r"(?P<state>[^\n]+)\n"
+                r"(?P<action>Active|Open: [^\n]+)\n"
+                r"(?P<delete>Delete: [^\n]+)",
+                re.MULTILINE,
+            )
+            for match in row_pattern.finditer(body_text):
+                display_name = match.group("display").strip()
+                bounds = self._session.evaluate(
+                    """
+                    ({ text }) => {
+                      const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                      const isVisible = (element) => {
+                        if (!element) {
+                          return false;
+                        }
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0
+                          && rect.height > 0
+                          && style.visibility !== 'hidden'
+                          && style.display !== 'none';
+                      };
+                      const candidate = Array.from(document.querySelectorAll('*'))
+                        .filter((element) => isVisible(element))
+                        .find((element) => normalize(element.innerText || element.textContent || '') === text);
+                      if (!candidate) {
+                        return null;
+                      }
+                      const rect = candidate.getBoundingClientRect();
+                      return {
+                        left: rect.left,
+                        top: rect.top,
+                        width: rect.width,
+                        height: rect.height,
+                      };
+                    }
+                    """,
+                    arg={"text": display_name},
+                )
+                if not isinstance(bounds, dict):
+                    continue
+                rows.append(
+                    WorkspaceSwitcherSavedWorkspaceRowObservation(
+                        display_name=display_name,
+                        target_type_label=match.group("type").strip(),
+                        state_label=match.group("state").strip(),
+                        detail_text=match.group("detail").strip(),
+                        selected=match.group("action").strip() == "Active",
+                        action_labels=(
+                            match.group("action").strip(),
+                            match.group("delete").strip(),
+                        ),
+                        left=float(bounds.get("left", 0.0)),
+                        top=float(bounds.get("top", 0.0)),
+                        width=float(bounds.get("width", 0.0)),
+                        height=float(bounds.get("height", 0.0)),
+                    ),
+                )
+        if not rows:
+            raise AssertionError(
+                "The open workspace switcher did not expose any readable saved workspace rows.\n"
+                f"Observed body text:\n{body_text}",
             )
         return tuple(rows)
 
