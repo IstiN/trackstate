@@ -125,6 +125,12 @@ class _TrackStateAppState extends State<TrackStateApp>
   final GlobalKey _workspaceSwitcherOverlayHostKey = GlobalKey(
     debugLabel: 'workspace-switcher-overlay-host',
   );
+  final FocusNode _workspaceSwitcherTriggerFocusNode = FocusNode(
+    debugLabel: 'workspace-switcher-trigger',
+  );
+  final FocusScopeNode _desktopWorkspaceSwitcherFocusScopeNode = FocusScopeNode(
+    debugLabel: 'desktop-workspace-switcher',
+  );
   _WorkspaceRestoreFailure? _pendingWorkspaceRestoreFailure;
 
   @override
@@ -158,6 +164,8 @@ class _TrackStateAppState extends State<TrackStateApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _workspaceSwitcherTriggerFocusNode.dispose();
+    _desktopWorkspaceSwitcherFocusScopeNode.dispose();
     viewModel.dispose();
     super.dispose();
   }
@@ -981,6 +989,12 @@ class _TrackStateAppState extends State<TrackStateApp>
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = true;
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+        return;
+      }
+      _desktopWorkspaceSwitcherFocusScopeNode.requestFocus();
+    });
   }
 
   void _closeDesktopWorkspaceSwitcher() {
@@ -989,6 +1003,12 @@ class _TrackStateAppState extends State<TrackStateApp>
     }
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _workspaceSwitcherTriggerFocusNode.requestFocus();
     });
   }
 
@@ -1080,7 +1100,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   }
 
   Widget _buildWorkspaceSwitcherContent({required bool compact}) {
-    return Builder(
+    final content = Builder(
       builder: (sheetContext) {
         final closeSwitcher = compact
             ? () => Navigator.of(sheetContext, rootNavigator: true).pop()
@@ -1110,6 +1130,20 @@ class _TrackStateAppState extends State<TrackStateApp>
           },
         );
       },
+    );
+    if (compact) {
+      return content;
+    }
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.escape):
+            _closeDesktopWorkspaceSwitcher,
+      },
+      child: FocusScope(
+        node: _desktopWorkspaceSwitcherFocusScopeNode,
+        autofocus: true,
+        child: content,
+      ),
     );
   }
 
@@ -1227,6 +1261,8 @@ class _TrackStateAppState extends State<TrackStateApp>
                   workspaces: _workspaceState,
                   workspaceSwitcherTriggerKey:
                       _workspaceSwitcherTriggerAnchorKey,
+                  workspaceSwitcherTriggerFocusNode:
+                      _workspaceSwitcherTriggerFocusNode,
                   workspaceSwitcherOverlayHostKey:
                       _workspaceSwitcherOverlayHostKey,
                   isCreateIssueVisible: _isCreateIssueVisible,
@@ -1265,6 +1301,7 @@ class _TrackerHome extends StatelessWidget {
     required this.viewModel,
     required this.workspaces,
     required this.workspaceSwitcherTriggerKey,
+    required this.workspaceSwitcherTriggerFocusNode,
     required this.workspaceSwitcherOverlayHostKey,
     required this.isCreateIssueVisible,
     required this.isDesktopWorkspaceSwitcherVisible,
@@ -1288,6 +1325,7 @@ class _TrackerHome extends StatelessWidget {
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
   final GlobalKey workspaceSwitcherTriggerKey;
+  final FocusNode workspaceSwitcherTriggerFocusNode;
   final GlobalKey workspaceSwitcherOverlayHostKey;
   final bool isCreateIssueVisible;
   final bool isDesktopWorkspaceSwitcherVisible;
@@ -1382,6 +1420,8 @@ class _TrackerHome extends StatelessWidget {
                           workspaces: workspaces,
                           workspaceSwitcherTriggerKey:
                               workspaceSwitcherTriggerKey,
+                          workspaceSwitcherTriggerFocusNode:
+                              workspaceSwitcherTriggerFocusNode,
                           workspaceSwitcherOverlayHostKey:
                               workspaceSwitcherOverlayHostKey,
                           isCreateIssueVisible: isCreateIssueVisible,
@@ -1413,6 +1453,8 @@ class _TrackerHome extends StatelessWidget {
                           workspaces: workspaces,
                           workspaceSwitcherTriggerKey:
                               workspaceSwitcherTriggerKey,
+                          workspaceSwitcherTriggerFocusNode:
+                              workspaceSwitcherTriggerFocusNode,
                           workspaceSwitcherOverlayHostKey:
                               workspaceSwitcherOverlayHostKey,
                           isCreateIssueVisible: isCreateIssueVisible,
@@ -2716,6 +2758,7 @@ class _DesktopShell extends StatelessWidget {
     required this.viewModel,
     required this.workspaces,
     required this.workspaceSwitcherTriggerKey,
+    required this.workspaceSwitcherTriggerFocusNode,
     required this.workspaceSwitcherOverlayHostKey,
     required this.isCreateIssueVisible,
     required this.isDesktopWorkspaceSwitcherVisible,
@@ -2739,6 +2782,7 @@ class _DesktopShell extends StatelessWidget {
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
   final GlobalKey workspaceSwitcherTriggerKey;
+  final FocusNode workspaceSwitcherTriggerFocusNode;
   final GlobalKey workspaceSwitcherOverlayHostKey;
   final bool isCreateIssueVisible;
   final bool isDesktopWorkspaceSwitcherVisible;
@@ -2768,6 +2812,8 @@ class _DesktopShell extends StatelessWidget {
           child: _TrackerMainPane(
             viewModel: viewModel,
             workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
+            workspaceSwitcherTriggerFocusNode:
+                workspaceSwitcherTriggerFocusNode,
             workspaceSwitcherOverlayHostKey: workspaceSwitcherOverlayHostKey,
             isCreateIssueVisible: isCreateIssueVisible,
             isDesktopWorkspaceSwitcherVisible:
@@ -2801,6 +2847,7 @@ class _MobileShell extends StatelessWidget {
     required this.viewModel,
     required this.workspaces,
     required this.workspaceSwitcherTriggerKey,
+    required this.workspaceSwitcherTriggerFocusNode,
     required this.workspaceSwitcherOverlayHostKey,
     required this.isCreateIssueVisible,
     required this.isDesktopWorkspaceSwitcherVisible,
@@ -2824,6 +2871,7 @@ class _MobileShell extends StatelessWidget {
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
   final GlobalKey workspaceSwitcherTriggerKey;
+  final FocusNode workspaceSwitcherTriggerFocusNode;
   final GlobalKey workspaceSwitcherOverlayHostKey;
   final bool isCreateIssueVisible;
   final bool isDesktopWorkspaceSwitcherVisible;
@@ -2849,6 +2897,7 @@ class _MobileShell extends StatelessWidget {
     return _TrackerMainPane(
       viewModel: viewModel,
       workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
+      workspaceSwitcherTriggerFocusNode: workspaceSwitcherTriggerFocusNode,
       workspaceSwitcherOverlayHostKey: workspaceSwitcherOverlayHostKey,
       compact: true,
       isCreateIssueVisible: isCreateIssueVisible,
@@ -2877,6 +2926,7 @@ class _TrackerMainPane extends StatelessWidget {
   const _TrackerMainPane({
     required this.viewModel,
     required this.workspaceSwitcherTriggerKey,
+    required this.workspaceSwitcherTriggerFocusNode,
     required this.workspaceSwitcherOverlayHostKey,
     required this.isCreateIssueVisible,
     required this.isDesktopWorkspaceSwitcherVisible,
@@ -2901,6 +2951,7 @@ class _TrackerMainPane extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final GlobalKey workspaceSwitcherTriggerKey;
+  final FocusNode workspaceSwitcherTriggerFocusNode;
   final GlobalKey workspaceSwitcherOverlayHostKey;
   final bool compact;
   final bool isCreateIssueVisible;
@@ -2942,6 +2993,8 @@ class _TrackerMainPane extends StatelessWidget {
                 workspaces: workspaces,
                 compact: compact,
                 workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
+                workspaceSwitcherTriggerFocusNode:
+                    workspaceSwitcherTriggerFocusNode,
                 onOpenCreateIssue: onOpenCreateIssue,
                 onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
                 onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
@@ -3136,6 +3189,7 @@ class _TopBar extends StatelessWidget {
     required this.viewModel,
     required this.workspaces,
     required this.workspaceSwitcherTriggerKey,
+    required this.workspaceSwitcherTriggerFocusNode,
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
     required this.onOpenWorkspaceOnboarding,
@@ -3146,6 +3200,7 @@ class _TopBar extends StatelessWidget {
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
   final GlobalKey workspaceSwitcherTriggerKey;
+  final FocusNode workspaceSwitcherTriggerFocusNode;
   final _CreateIssueLauncher onOpenCreateIssue;
   final Future<void> Function(BuildContext context, {required bool compact})
   onOpenWorkspaceSwitcher;
@@ -3267,12 +3322,16 @@ class _TopBar extends StatelessWidget {
                                         compact: false,
                                         condensed: true,
                                         onPressed: openWorkspaceSwitcher,
+                                        focusNode:
+                                            workspaceSwitcherTriggerFocusNode,
                                       )
                                     : _PrimaryButton(
                                         label: workspaceSummary.textLabel,
                                         icon: workspaceSummary.icon,
                                         onPressed: openWorkspaceSwitcher,
                                         height: _desktopTopBarControlHeight,
+                                        focusNode:
+                                            workspaceSwitcherTriggerFocusNode,
                                       ),
                               ),
                             ),
@@ -3406,6 +3465,7 @@ class _TopBar extends StatelessWidget {
                               compact: true,
                               condensed: false,
                               onPressed: openWorkspaceSwitcher,
+                              focusNode: workspaceSwitcherTriggerFocusNode,
                             ),
                           ),
                         ),
@@ -10104,6 +10164,7 @@ class _PrimaryButton extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     this.height,
+    this.focusNode,
   });
 
   final Key? buttonKey;
@@ -10111,6 +10172,7 @@ class _PrimaryButton extends StatelessWidget {
   final TrackStateIconGlyph icon;
   final VoidCallback? onPressed;
   final double? height;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -10126,6 +10188,7 @@ class _PrimaryButton extends StatelessWidget {
           height: height,
           child: FilledButton.icon(
             key: buttonKey,
+            focusNode: focusNode,
             onPressed: onPressed,
             style: FilledButton.styleFrom(
               backgroundColor: colors.primary,
@@ -10155,12 +10218,14 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
     required this.compact,
     required this.condensed,
     required this.onPressed,
+    this.focusNode,
   });
 
   final _WorkspaceDisplaySummary summary;
   final bool compact;
   final bool condensed;
   final VoidCallback? onPressed;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -10197,6 +10262,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
           maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
         ),
         child: FilledButton(
+          focusNode: focusNode,
           onPressed: onPressed,
           style: ButtonStyle(
             animationDuration: Duration.zero,
