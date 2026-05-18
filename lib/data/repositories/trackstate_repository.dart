@@ -1703,6 +1703,7 @@ class ProviderBackedTrackStateRepository
     final dataRoot = metadata.dataRoot;
     final repositoryIndex = metadata.repositoryIndex;
     final project = metadata.project;
+    final hasTrackStateMetadata = metadata.hasTrackStateMetadata;
     if (!usesLocalPersistence) {
       final summaryIssues = _loadHostedBootstrapIssues(
         dataRoot: dataRoot,
@@ -1743,15 +1744,41 @@ class ProviderBackedTrackStateRepository
                     .where(
                       (entry) =>
                           entry.type == 'blob' &&
-                          entry.path.startsWith(
-                            dataRoot.isEmpty ? '' : '$dataRoot/',
-                          ) &&
-                          entry.path.endsWith('/main.md'),
+                          (hasTrackStateMetadata
+                              ? entry.path.startsWith(
+                                      dataRoot.isEmpty ? '' : '$dataRoot/',
+                                    ) &&
+                                    entry.path.endsWith('/main.md')
+                              : _looksLikeTrackStateIssuePath(entry.path)),
                     )
                     .map((entry) => entry.path)
                     .toList()
           ..sort();
     if (issuePaths.isEmpty) {
+      if (usesLocalPersistence && !hasTrackStateMetadata) {
+        return TrackerSnapshot(
+          project: project,
+          issues: const <TrackStateIssue>[],
+          repositoryIndex: repositoryIndex,
+          loadWarnings: loadWarnings,
+          readiness: const TrackerBootstrapReadiness(
+            domainStates: {
+              TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+              TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
+              TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+              TrackerDataDomain.issueDetails: TrackerLoadState.ready,
+            },
+            sectionStates: {
+              TrackerSectionKey.dashboard: TrackerLoadState.ready,
+              TrackerSectionKey.board: TrackerLoadState.ready,
+              TrackerSectionKey.search: TrackerLoadState.ready,
+              TrackerSectionKey.hierarchy: TrackerLoadState.ready,
+              TrackerSectionKey.settings: TrackerLoadState.ready,
+            },
+          ),
+          startupRecovery: _startupRecovery,
+        );
+      }
       throw TrackStateRepositoryException(
         'No issue markdown files were found under ${dataRoot.isEmpty ? 'repository root' : dataRoot}.',
       );
@@ -1844,10 +1871,40 @@ class ProviderBackedTrackStateRepository
     _snapshotBlobPaths = blobPaths;
     final projectPath = blobPaths.firstWhere(
       (path) => path.endsWith('/project.json') || path == 'project.json',
-      orElse: () => throw const TrackStateRepositoryException(
-        'project.json was not found in the repository.',
-      ),
+      orElse: () => '',
     );
+    if (projectPath.isEmpty) {
+      if (!usesLocalPersistence) {
+        throw const TrackStateRepositoryException(
+          'project.json was not found in the repository.',
+        );
+      }
+      final workspaceName = _repositoryWorkspaceName(_provider.repositoryLabel);
+      return _LoadedSnapshotInputs(
+        tree: tree,
+        blobPaths: blobPaths,
+        dataRoot: '',
+        project: ProjectConfig(
+          key: _deriveFallbackProjectKey(workspaceName),
+          name: workspaceName,
+          repository: _provider.repositoryLabel,
+          branch: await _provider.resolveWriteBranch(),
+          defaultLocale: 'en',
+          supportedLocales: const <String>['en'],
+          issueTypeDefinitions: _issueTypeDefinitions,
+          statusDefinitions: _statusDefinitions,
+          fieldDefinitions: _fieldDefinitions,
+          workflowDefinitions: _workflowDefinitions,
+          priorityDefinitions: _priorityDefinitions,
+          versionDefinitions: _versionDefinitions,
+          componentDefinitions: _componentDefinitions,
+          resolutionDefinitions: _resolutionDefinitions,
+        ),
+        repositoryIndex: const RepositoryIndex(),
+        loadWarnings: loadWarnings,
+        hasTrackStateMetadata: false,
+      );
+    }
     final dataRoot = projectPath.contains('/')
         ? projectPath.substring(0, projectPath.lastIndexOf('/'))
         : '';
@@ -1943,6 +2000,7 @@ class ProviderBackedTrackStateRepository
       project: project,
       repositoryIndex: repositoryIndex,
       loadWarnings: loadWarnings,
+      hasTrackStateMetadata: true,
     );
   }
 
@@ -4284,6 +4342,7 @@ class _LoadedSnapshotInputs {
     required this.project,
     required this.repositoryIndex,
     required this.loadWarnings,
+    required this.hasTrackStateMetadata,
   });
 
   final List<RepositoryTreeEntry> tree;
@@ -4292,6 +4351,53 @@ class _LoadedSnapshotInputs {
   final ProjectConfig project;
   final RepositoryIndex repositoryIndex;
   final List<String> loadWarnings;
+  final bool hasTrackStateMetadata;
+}
+
+final RegExp _fallbackIssuePathPattern = RegExp(
+  r'(^|/)[A-Z][A-Z0-9]+-\d+/main\.md$',
+);
+
+bool _looksLikeTrackStateIssuePath(String path) =>
+    _fallbackIssuePathPattern.hasMatch(path);
+
+String _repositoryWorkspaceName(String repositoryLabel) {
+  final normalized = repositoryLabel.replaceAll('\\', '/').trim();
+  final segments = normalized.split('/');
+  for (var index = segments.length - 1; index >= 0; index -= 1) {
+    final candidate = segments[index].trim();
+    if (candidate.isEmpty) {
+      continue;
+    }
+    return candidate.endsWith('.git')
+        ? candidate.substring(0, candidate.length - 4)
+        : candidate;
+  }
+  return normalized;
+}
+
+String _deriveFallbackProjectKey(String workspaceName) {
+  final normalized = workspaceName
+      .toUpperCase()
+      .replaceAll(RegExp(r'[^A-Z0-9]+'), ' ')
+      .trim();
+  if (normalized.isEmpty) {
+    return 'TRACK';
+  }
+  final parts = normalized
+      .split(RegExp(r'\s+'))
+      .where((part) => part.isNotEmpty)
+      .toList(growable: false);
+  if (parts.length > 1) {
+    final acronym = parts.map((part) => part[0]).join();
+    if (acronym.length >= 3) {
+      final endIndex = acronym.length > 10 ? 10 : acronym.length;
+      return acronym.substring(0, endIndex);
+    }
+  }
+  final collapsed = parts.join();
+  final endIndex = collapsed.length > 10 ? 10 : collapsed.length;
+  return collapsed.substring(0, endIndex);
 }
 
 String _defaultStatusId(ProjectConfig project) =>

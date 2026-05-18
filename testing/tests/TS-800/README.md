@@ -11,11 +11,10 @@ The automation:
    through the live picker-driven onboarding flow
 3. launches the onboarding screen, chooses `Open existing folder`, and selects
    the prepared repository through the directory picker
-4. verifies the rendered status copy, selected folder path, workspace details,
-   and primary action do not require re-initialization for the existing Git
-   repository
-5. if a continue/open action is available, uses it and verifies the dashboard
-   becomes visible without mutating the selected repository on disk
+4. verifies the rendered ready-state copy, selected folder path, and enabled
+   `Open workspace` action instead of a re-initialization CTA
+5. opens the workspace and verifies the dashboard becomes visible without
+   mutating the selected repository on disk
 
 ## Run this test
 
