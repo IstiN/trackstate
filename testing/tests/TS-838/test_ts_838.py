@@ -15,6 +15,7 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     LiveWorkspaceSwitcherPage,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherPanelObservation,
+    WorkspaceSwitcherSavedWorkspaceRowObservation,
     WorkspaceSwitcherTriggerObservation,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
@@ -166,21 +167,33 @@ def main() -> None:
                 panel = page.observe_open_panel(
                     expected_container_kinds=("anchored-panel", "surface"),
                 )
+                (
+                    saved_workspace_rows,
+                    saved_workspace_row_source,
+                ) = _observe_saved_workspace_rows(
+                    page=page,
+                    switcher=switcher,
+                )
                 result["open_switcher_observation"] = _switcher_payload(switcher)
                 result["open_panel_observation"] = asdict(panel)
+                result["saved_workspace_rows"] = _saved_workspace_rows_payload(
+                    saved_workspace_rows,
+                )
+                result["saved_workspace_row_source"] = saved_workspace_row_source
                 _assert_surface_open(
                     trigger=trigger,
                     switcher=switcher,
                     panel=panel,
+                    saved_workspace_rows=saved_workspace_rows,
+                    saved_workspace_row_source=saved_workspace_row_source,
                 )
                 visible_row_names = [
-                    name
-                    for name in (
-                        ACTIVE_WORKSPACE_DISPLAY_NAME,
-                        SECONDARY_WORKSPACE_DISPLAY_NAME,
-                    )
-                    if name in switcher.switcher_text
+                    row.display_name for row in saved_workspace_rows
                 ]
+                active_workspace = next(
+                    (row.display_name for row in saved_workspace_rows if row.selected),
+                    None,
+                )
                 result["visible_row_names"] = visible_row_names
                 _record_step(
                     result,
@@ -191,10 +204,13 @@ def main() -> None:
                         f"panel_kind={panel.container_kind!r}; "
                         f"anchored_to_trigger={panel.anchored_to_trigger}; "
                         f"row_count={switcher.row_count}; "
-                        f"active_workspace_visible={ACTIVE_WORKSPACE_DISPLAY_NAME in switcher.switcher_text}; "
-                        f"secondary_workspace_visible={SECONDARY_WORKSPACE_DISPLAY_NAME in switcher.switcher_text}; "
-                        f"active_label_visible={'Active' in switcher.switcher_text}; "
-                        f"open_label_visible={'Open:' in switcher.switcher_text}; "
+                        f"parsed_saved_row_count={len(saved_workspace_rows)}; "
+                        f"saved_workspace_row_source={saved_workspace_row_source!r}; "
+                        f"active_workspace_visible={ACTIVE_WORKSPACE_DISPLAY_NAME in visible_row_names}; "
+                        f"secondary_workspace_visible={SECONDARY_WORKSPACE_DISPLAY_NAME in visible_row_names}; "
+                        f"active_workspace_selected={active_workspace == ACTIVE_WORKSPACE_DISPLAY_NAME}; "
+                        f"active_label_visible={any('Active' in row.action_labels for row in saved_workspace_rows)}; "
+                        f"open_label_visible={any(any(label.startswith('Open: ') for label in row.action_labels) for row in saved_workspace_rows)}; "
                         "heading_visible="
                         f"{'Workspace switcher' in switcher.switcher_text}"
                     ),
@@ -274,6 +290,8 @@ def _assert_surface_open(
     trigger: WorkspaceSwitcherTriggerObservation,
     switcher: WorkspaceSwitcherObservation,
     panel: WorkspaceSwitcherPanelObservation,
+    saved_workspace_rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...],
+    saved_workspace_row_source: str,
 ) -> None:
     failures: list[str] = []
     if "Workspace switcher" not in switcher.switcher_text:
@@ -286,18 +304,57 @@ def _assert_surface_open(
         failures.append(
             "the opened surface did not expose positive visible bounds",
         )
-    if ACTIVE_WORKSPACE_DISPLAY_NAME not in switcher.switcher_text:
+    if len(saved_workspace_rows) <= 0:
+        failures.append("the opened surface did not expose any parsed saved workspace rows")
+    if len(saved_workspace_rows) < 2:
         failures.append(
-            f"{ACTIVE_WORKSPACE_DISPLAY_NAME!r} was missing from the visible switcher text",
+            "the opened surface did not expose both preloaded saved workspace rows",
         )
-    if SECONDARY_WORKSPACE_DISPLAY_NAME not in switcher.switcher_text:
+    saved_workspace_names = {row.display_name for row in saved_workspace_rows}
+    if ACTIVE_WORKSPACE_DISPLAY_NAME not in saved_workspace_names:
         failures.append(
-            f"{SECONDARY_WORKSPACE_DISPLAY_NAME!r} was missing from the visible switcher text",
+            f"{ACTIVE_WORKSPACE_DISPLAY_NAME!r} was missing from the parsed saved workspace rows",
         )
-    if "Active" not in switcher.switcher_text:
+    if SECONDARY_WORKSPACE_DISPLAY_NAME not in saved_workspace_names:
+        failures.append(
+            f"{SECONDARY_WORKSPACE_DISPLAY_NAME!r} was missing from the parsed saved workspace rows",
+        )
+    active_row = next((row for row in saved_workspace_rows if row.selected), None)
+    if active_row is None:
+        failures.append("none of the parsed saved workspace rows was marked active")
+    elif active_row.display_name != ACTIVE_WORKSPACE_DISPLAY_NAME:
+        failures.append(
+            f"the selected saved workspace row was {active_row.display_name!r} instead of "
+            f"{ACTIVE_WORKSPACE_DISPLAY_NAME!r}",
+        )
+    if not any("Active" in row.action_labels for row in saved_workspace_rows):
         failures.append("the opened surface did not show the active-row label")
-    if "Open:" not in switcher.switcher_text:
+    if not any(
+        any(label.startswith("Open: ") for label in row.action_labels)
+        for row in saved_workspace_rows
+    ):
         failures.append("the opened surface did not show an inactive row open action")
+    expected_rows = {
+        row.display_name: row for row in saved_workspace_rows
+    }
+    for expected_name in (
+        ACTIVE_WORKSPACE_DISPLAY_NAME,
+        SECONDARY_WORKSPACE_DISPLAY_NAME,
+    ):
+        row = expected_rows.get(expected_name)
+        if row is None:
+            continue
+        if (
+            saved_workspace_row_source == "page.observe_saved_workspace_rows"
+            and (row.width <= 0 or row.height <= 0)
+        ):
+            failures.append(
+                f"the parsed saved workspace row {expected_name!r} did not expose positive visible bounds",
+            )
+        if "Branch:" not in row.detail_text:
+            failures.append(
+                f"the parsed saved workspace row {expected_name!r} did not expose repository branch details",
+            )
     if failures:
         raise AssertionError(
             "Step 3 failed: clicking the workspace switcher trigger did not open "
@@ -305,6 +362,8 @@ def _assert_surface_open(
             f"Observed trigger: {json.dumps(_trigger_payload(trigger), indent=2)}\n"
             f"Observed switcher: {json.dumps(_switcher_payload(switcher), indent=2)}\n"
             f"Observed panel: {json.dumps(asdict(panel), indent=2)}\n"
+            f"Saved workspace row source: {saved_workspace_row_source}\n"
+            f"Observed saved workspace rows: {json.dumps(_saved_workspace_rows_payload(saved_workspace_rows), indent=2)}\n"
             f"Problems: {'; '.join(failures)}",
         )
 
@@ -719,6 +778,118 @@ def _switcher_payload(switcher: WorkspaceSwitcherObservation) -> dict[str, objec
             for row in switcher.rows
         ],
     }
+
+
+def _observe_saved_workspace_rows(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    switcher: WorkspaceSwitcherObservation,
+) -> tuple[tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...], str]:
+    try:
+        return page.observe_saved_workspace_rows(), "page.observe_saved_workspace_rows"
+    except AssertionError as error:
+        parsed_rows = _parse_saved_workspace_rows_from_switcher_text(
+            switcher,
+            fallback_error=error,
+        )
+        return parsed_rows, "switcher_text_parser"
+
+
+def _parse_saved_workspace_rows_from_switcher_text(
+    switcher: WorkspaceSwitcherObservation,
+    *,
+    fallback_error: AssertionError,
+) -> tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...]:
+    lines = [
+        " ".join(line.split()).strip()
+        for line in switcher.body_text.splitlines()
+        if line.strip()
+    ]
+    heading_indexes = [
+        index for index, line in enumerate(lines) if line == "Workspace switcher"
+    ]
+    candidate_lines = lines[heading_indexes[-1] + 1 :] if heading_indexes else lines
+    rows: list[WorkspaceSwitcherSavedWorkspaceRowObservation] = []
+    index = 0
+    while index + 2 < len(candidate_lines):
+        header = candidate_lines[index]
+        action = candidate_lines[index + 1]
+        delete_action = candidate_lines[index + 2]
+        if "Branch:" not in header or not delete_action.startswith("Delete: "):
+            index += 1
+            continue
+
+        display_name: str | None = None
+        target_type_label: str | None = None
+        state_label: str | None = None
+        detail_text = header
+        header_parts = [part.strip() for part in header.split(", ", 3)]
+        if len(header_parts) >= 4:
+            display_name = header_parts[0]
+            target_type_label = header_parts[1] or None
+            state_label = header_parts[2] or None
+            detail_text = header_parts[3]
+        elif len(header_parts) >= 2:
+            display_name = header_parts[0]
+            target_type_label = header_parts[1] or None
+            detail_text = ", ".join(header_parts[2:]) or header
+
+        if not display_name:
+            index += 1
+            continue
+
+        rows.append(
+            WorkspaceSwitcherSavedWorkspaceRowObservation(
+                display_name=display_name,
+                target_type_label=target_type_label,
+                state_label=state_label,
+                detail_text=detail_text,
+                selected=action == "Active",
+                action_labels=(action, delete_action),
+                left=0.0,
+                top=0.0,
+                width=0.0,
+                height=0.0,
+            ),
+        )
+        index += 3
+
+    if rows:
+        return tuple(rows)
+
+    raise AssertionError(
+        "The open workspace switcher did not expose any structurally parseable "
+        "saved workspace rows after the click.\n"
+        f"Fallback observer error: {fallback_error}\n"
+        f"Observed switcher text:\n{switcher.switcher_text}\n"
+        f"Observed body text:\n{switcher.body_text}",
+    ) from fallback_error
+
+
+def _saved_workspace_rows_payload(
+    rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...] | list[object],
+) -> list[dict[str, object]]:
+    payload: list[dict[str, object]] = []
+    for row in rows:
+        if not isinstance(row, WorkspaceSwitcherSavedWorkspaceRowObservation):
+            continue
+        payload.append(
+            {
+                "display_name": row.display_name,
+                "target_type_label": row.target_type_label,
+                "state_label": row.state_label,
+                "detail_text": row.detail_text,
+                "selected": row.selected,
+                "action_labels": list(row.action_labels),
+                "bounds": {
+                    "left": row.left,
+                    "top": row.top,
+                    "width": row.width,
+                    "height": row.height,
+                },
+            },
+        )
+    return payload
 
 
 def _snippet(text: str, *, limit: int = 220) -> str:
