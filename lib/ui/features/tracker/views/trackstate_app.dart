@@ -5689,18 +5689,14 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                           ),
                           focusOrderBase: index * 3.0 + 1,
                           primaryActionLabel:
-                              widget.workspaces.profiles[index].id ==
-                                      activeWorkspaceId &&
-                                  widget.workspaces.profiles[index].isLocal &&
+                              widget.workspaces.profiles[index].isLocal &&
                                   widget.viewModel.usesLocalPersistence
                               ? (widget.viewModel.hasLocalHostedAccessSession
                                     ? l10n.manageGitHubAccess
                                     : l10n.connectGitHub)
                               : null,
                           onPrimaryAction:
-                              widget.workspaces.profiles[index].id ==
-                                      activeWorkspaceId &&
-                                  widget.workspaces.profiles[index].isLocal &&
+                              widget.workspaces.profiles[index].isLocal &&
                                   widget.viewModel.usesLocalPersistence
                               ? () => _showRepositoryAccessDialog(
                                   context,
