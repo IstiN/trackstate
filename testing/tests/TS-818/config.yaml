@@ -1,0 +1,18 @@
+test_id: TS-818
+type: ui
+framework: flutter_test
+platform: linux
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Runs in the supported Flutter widget runtime instead of the web build.
+  - Seeds a saved active local workspace plus one hosted workspace in the production workspace profile service.
+  - Delays a dedicated local-workspace runtime so the hydration guard remains visible long enough to inspect.
+  - Fails if startup exposes an interactive switcher or incorrect transient state text before local validation finishes, or if the restored active workspace does not settle to Local Git.
+runtime_inputs:
+  active_workspace_kind: local
+  inactive_workspace_kind: hosted
+  hydration_probe_delay: 2 seconds
+  expected_guard: startup initialization view blocks workspace-switcher interaction
+  expected_final_state: active local workspace restored as Local Git
+  run_command: flutter test testing/tests/TS-818/test_ts_818.dart --reporter expanded
