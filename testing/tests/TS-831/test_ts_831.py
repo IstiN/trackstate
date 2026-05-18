@@ -392,9 +392,9 @@ def _assert_desktop_panel_open(
 def _assert_internal_panel_focus(observation: WorkspaceSwitcherInternalFocusObservation) -> None:
     failures: list[str] = []
 
-    if not (observation.before_label or "").startswith("Workspace switcher:"):
+    if not observation.before_owned_by_switcher:
         failures.append(
-            "pre-Tab focus was not on the workspace switcher trigger before moving inside the panel",
+            "pre-Tab focus was neither on the workspace switcher trigger nor already inside the open workspace switcher panel",
         )
     if not observation.after_visible:
         failures.append("the focused element after Tab was not visible")
@@ -418,7 +418,12 @@ def _assert_internal_panel_focus(observation: WorkspaceSwitcherInternalFocusObse
             + "\n".join(f"- {item}" for item in failures)
             + "\n"
             + f"Observed before focus: label={observation.before_label!r}, "
-            + f"role={observation.before_role!r}, tag={observation.before_tag_name!r}\n"
+            + f"role={observation.before_role!r}, tag={observation.before_tag_name!r}, "
+            + f"visible={observation.before_visible}, "
+            + f"in_viewport={observation.before_in_viewport}, "
+            + f"within_switcher={observation.before_within_switcher}, "
+            + f"on_trigger={observation.before_on_trigger}, "
+            + f"owned_by_switcher={observation.before_owned_by_switcher}\n"
             + f"Observed after focus: label={observation.after_label!r}, "
             + f"role={observation.after_role!r}, tag={observation.after_tag_name!r}\n"
             + f"Observed after HTML: {observation.after_outer_html}",
@@ -935,6 +940,11 @@ def _internal_focus_payload(
             "role": observation.before_role,
             "tag_name": observation.before_tag_name,
             "outer_html": observation.before_outer_html,
+            "visible": observation.before_visible,
+            "in_viewport": observation.before_in_viewport,
+            "within_switcher": observation.before_within_switcher,
+            "on_trigger": observation.before_on_trigger,
+            "owned_by_switcher": observation.before_owned_by_switcher,
         },
         "after_focus": {
             "label": observation.after_label,
