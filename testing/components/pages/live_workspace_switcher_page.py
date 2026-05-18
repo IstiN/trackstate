@@ -309,6 +309,29 @@ class MobileTriggerFocusObservation:
     focus_sequence: tuple[FocusNavigationStep, ...]
 
 
+@dataclass(frozen=True)
+class WorkspaceTriggerKeyboardFocusObservation:
+    trigger_label: str
+    trigger_text: str
+    trigger_x: float
+    trigger_y: float
+    trigger_width: float
+    trigger_height: float
+    before_outline: str
+    before_outline_color: str
+    before_outline_width: str
+    before_box_shadow: str
+    after_outline: str
+    after_outline_color: str
+    after_outline_width: str
+    after_box_shadow: str
+    active_label_after_focus: str | None
+    active_role_after_focus: str | None
+    active_tag_name_after_focus: str
+    active_outer_html_after_focus: str
+    focus_sequence: tuple[FocusNavigationStep, ...]
+
+
 class LiveWorkspaceSwitcherPage:
     _settings_page = LiveProjectSettingsPage
     _search_input_selector = 'input[aria-label="Search issues"]'
@@ -3466,7 +3489,39 @@ class LiveWorkspaceSwitcherPage:
         tab_count: int = 24,
         timeout_ms: int = 10_000,
     ) -> MobileTriggerFocusObservation:
-        before = self._mobile_trigger_snapshot(timeout_ms=timeout_ms)
+        observation = self.observe_trigger_keyboard_focus(
+            tab_count=tab_count,
+            timeout_ms=timeout_ms,
+        )
+        return MobileTriggerFocusObservation(
+            trigger_label=observation.trigger_label,
+            trigger_text=observation.trigger_text,
+            trigger_x=observation.trigger_x,
+            trigger_y=observation.trigger_y,
+            trigger_width=observation.trigger_width,
+            trigger_height=observation.trigger_height,
+            before_outline=observation.before_outline,
+            before_outline_color=observation.before_outline_color,
+            before_outline_width=observation.before_outline_width,
+            before_box_shadow=observation.before_box_shadow,
+            after_outline=observation.after_outline,
+            after_outline_color=observation.after_outline_color,
+            after_outline_width=observation.after_outline_width,
+            after_box_shadow=observation.after_box_shadow,
+            active_label_after_focus=observation.active_label_after_focus,
+            active_role_after_focus=observation.active_role_after_focus,
+            active_tag_name_after_focus=observation.active_tag_name_after_focus,
+            active_outer_html_after_focus=observation.active_outer_html_after_focus,
+            focus_sequence=observation.focus_sequence,
+        )
+
+    def observe_trigger_keyboard_focus(
+        self,
+        *,
+        tab_count: int = 24,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceTriggerKeyboardFocusObservation:
+        before = self._trigger_snapshot(timeout_ms=timeout_ms)
         steps: list[FocusNavigationStep] = []
         for step_index in range(1, tab_count + 1):
             active_before = self._session.active_element()
@@ -3485,9 +3540,9 @@ class LiveWorkspaceSwitcherPage:
             )
             if self._is_workspace_trigger_label(active_after.accessible_name):
                 break
-        after = self._mobile_trigger_snapshot(timeout_ms=timeout_ms)
+        after = self._trigger_snapshot(timeout_ms=timeout_ms)
         active = self._session.active_element()
-        return MobileTriggerFocusObservation(
+        return WorkspaceTriggerKeyboardFocusObservation(
             trigger_label=str(before.get("triggerLabel", "")),
             trigger_text=str(before.get("triggerText", "")),
             trigger_x=float(before.get("triggerX", 0.0)),
@@ -3591,7 +3646,7 @@ class LiveWorkspaceSwitcherPage:
             )
         return payload
 
-    def _mobile_trigger_snapshot(
+    def _trigger_snapshot(
         self,
         *,
         timeout_ms: int,
@@ -3641,7 +3696,7 @@ class LiveWorkspaceSwitcherPage:
         )
         if not isinstance(payload, dict):
             raise AssertionError(
-                "The mobile layout did not expose the condensed workspace switcher trigger.\n"
+                "The live app did not expose the workspace switcher trigger.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
         return payload
