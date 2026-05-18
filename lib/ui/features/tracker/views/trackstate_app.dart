@@ -20,6 +20,7 @@ import '../../../../../l10n/generated/app_localizations.dart';
 import '../../../core/trackstate_icons.dart';
 import '../../../core/trackstate_theme.dart';
 import '../services/attachment_picker.dart';
+import '../services/browser_workspace_switcher_focus_matcher.dart';
 import '../services/browser_workspace_switcher_focus_monitor_stub.dart'
     if (dart.library.js_interop)
         '../services/browser_workspace_switcher_focus_monitor_web.dart'
@@ -1057,9 +1058,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       _closeDesktopWorkspaceSwitcher();
       return;
     }
-    _startDesktopWorkspaceSwitcherBrowserFocusMonitor(
-      savedWorkspacesLabel: AppLocalizations.of(context)!.savedWorkspaces,
-    );
+    _startDesktopWorkspaceSwitcherBrowserFocusMonitor();
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = true;
     });
@@ -1071,9 +1070,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     });
   }
 
-  void _startDesktopWorkspaceSwitcherBrowserFocusMonitor({
-    required String savedWorkspacesLabel,
-  }) {
+  void _startDesktopWorkspaceSwitcherBrowserFocusMonitor() {
     _stopDesktopWorkspaceSwitcherBrowserFocusMonitor();
     if (!kIsWeb) {
       return;
@@ -1087,9 +1084,7 @@ class _TrackStateAppState extends State<TrackStateApp>
                     return;
                   }
                   if (browser_workspace_switcher_focus_monitor
-                      .isBrowserFocusWithinWorkspaceSwitcher(
-                        savedWorkspacesLabel: savedWorkspacesLabel,
-                      )) {
+                      .isBrowserFocusWithinWorkspaceSwitcher()) {
                     return;
                   }
                   _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
@@ -1217,6 +1212,7 @@ class _TrackStateAppState extends State<TrackStateApp>
             : _closeDesktopWorkspaceSwitcher;
         return Semantics(
           container: true,
+          identifier: browserWorkspaceSwitcherSemanticsIdentifier,
           onDidLoseAccessibilityFocus: compact
               ? null
               : () => _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false),

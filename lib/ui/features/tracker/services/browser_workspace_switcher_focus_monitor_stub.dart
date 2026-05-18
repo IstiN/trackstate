@@ -9,6 +9,4 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserTab,
 }) => BrowserWorkspaceSwitcherFocusMonitorSubscription();
 
-bool isBrowserFocusWithinWorkspaceSwitcher({
-  required String savedWorkspacesLabel,
-}) => false;
+bool isBrowserFocusWithinWorkspaceSwitcher() => false;

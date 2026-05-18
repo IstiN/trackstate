@@ -28,18 +28,17 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   return BrowserWorkspaceSwitcherFocusMonitorSubscription(subscription);
 }
 
-bool isBrowserFocusWithinWorkspaceSwitcher({
-  required String savedWorkspacesLabel,
-}) {
-  final ancestorTexts = <String?>[];
+bool isBrowserFocusWithinWorkspaceSwitcher() {
+  final ancestors = <BrowserWorkspaceSwitcherFocusAncestorSnapshot>[];
   web.Element? element = web.document.activeElement;
   while (element != null) {
-    ancestorTexts.add(element.getAttribute('aria-label'));
-    ancestorTexts.add(element.textContent);
+    ancestors.add(
+      BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+        semanticsIdentifier: element.getAttribute('flt-semantics-identifier'),
+        textContent: element.textContent,
+      ),
+    );
     element = element.parentElement;
   }
-  return browserFocusWithinWorkspaceSwitcher(
-    ancestorTexts: ancestorTexts,
-    savedWorkspacesLabel: savedWorkspacesLabel,
-  );
+  return browserFocusWithinWorkspaceSwitcher(ancestors: ancestors);
 }

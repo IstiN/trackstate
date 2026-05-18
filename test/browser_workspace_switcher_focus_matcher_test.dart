@@ -7,11 +7,16 @@ void main() {
     () {
       expect(
         browserFocusWithinWorkspaceSwitcher(
-          ancestorTexts: const [
-            'Save and switch',
-            'Workspace switcher alpha/repo Hosted Saved workspaces Repository Branch Save and switch',
+          ancestors: const [
+            BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+              textContent: 'Save and switch',
+            ),
+            BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+              semanticsIdentifier: browserWorkspaceSwitcherSemanticsIdentifier,
+              textContent:
+                  'Workspace switcher alpha/repo Hosted Saved workspaces Repository Branch Save and switch',
+            ),
           ],
-          savedWorkspacesLabel: 'Saved workspaces',
         ),
         isTrue,
       );
@@ -19,15 +24,19 @@ void main() {
   );
 
   test(
-    'browser focus matcher dismisses when focus moves to an external control',
+    'browser focus matcher dismisses external controls even when a shared ancestor text still contains Saved workspaces',
     () {
       expect(
         browserFocusWithinWorkspaceSwitcher(
-          ancestorTexts: const [
-            'Search issues',
-            'TrackState.AI Dashboard Board JQL Search Hierarchy Settings',
+          ancestors: const [
+            BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+              textContent: 'Board',
+            ),
+            BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+              textContent:
+                  'TrackState.AI Dashboard Board JQL Search Hierarchy Settings Saved workspaces Repository Branch Save and switch',
+            ),
           ],
-          savedWorkspacesLabel: 'Saved workspaces',
         ),
         isFalse,
       );

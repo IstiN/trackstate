@@ -1,19 +1,22 @@
-String _normalizeWorkspaceSwitcherFocusText(String value) =>
-    value.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+const String browserWorkspaceSwitcherSemanticsIdentifier =
+    'trackstate-workspace-switcher';
+
+class BrowserWorkspaceSwitcherFocusAncestorSnapshot {
+  const BrowserWorkspaceSwitcherFocusAncestorSnapshot({
+    this.semanticsIdentifier,
+    this.textContent,
+  });
+
+  final String? semanticsIdentifier;
+  final String? textContent;
+}
 
 bool browserFocusWithinWorkspaceSwitcher({
-  required Iterable<String?> ancestorTexts,
-  required String savedWorkspacesLabel,
+  required Iterable<BrowserWorkspaceSwitcherFocusAncestorSnapshot> ancestors,
 }) {
-  final normalizedSavedWorkspacesLabel = _normalizeWorkspaceSwitcherFocusText(
-    savedWorkspacesLabel,
-  );
-  if (normalizedSavedWorkspacesLabel.isEmpty) {
-    return false;
-  }
-  for (final rawText in ancestorTexts) {
-    final normalizedText = _normalizeWorkspaceSwitcherFocusText(rawText ?? '');
-    if (normalizedText.contains(normalizedSavedWorkspacesLabel)) {
+  for (final ancestor in ancestors) {
+    if (ancestor.semanticsIdentifier?.trim() ==
+        browserWorkspaceSwitcherSemanticsIdentifier) {
       return true;
     }
   }
