@@ -20,6 +20,10 @@ import '../../../../../l10n/generated/app_localizations.dart';
 import '../../../core/trackstate_icons.dart';
 import '../../../core/trackstate_theme.dart';
 import '../services/attachment_picker.dart';
+import '../services/browser_workspace_switcher_focus_matcher.dart';
+import '../services/browser_workspace_switcher_focus_monitor_stub.dart'
+    if (dart.library.js_interop) '../services/browser_workspace_switcher_focus_monitor_web.dart'
+    as browser_workspace_switcher_focus_monitor;
 import '../services/workspace_directory_picker.dart';
 import '../view_models/tracker_view_model.dart';
 
@@ -131,6 +135,8 @@ class _TrackStateAppState extends State<TrackStateApp>
   final FocusScopeNode _desktopWorkspaceSwitcherFocusScopeNode = FocusScopeNode(
     debugLabel: 'desktop-workspace-switcher',
   );
+  browser_workspace_switcher_focus_monitor.BrowserWorkspaceSwitcherFocusMonitorSubscription?
+  _desktopWorkspaceSwitcherBrowserFocusMonitor;
   _WorkspaceRestoreFailure? _pendingWorkspaceRestoreFailure;
 
   @override
@@ -164,6 +170,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _stopDesktopWorkspaceSwitcherBrowserFocusMonitor();
     _workspaceSwitcherTriggerFocusNode.dispose();
     _desktopWorkspaceSwitcherFocusScopeNode.dispose();
     viewModel.dispose();
@@ -583,7 +590,10 @@ class _TrackStateAppState extends State<TrackStateApp>
       Duration(milliseconds: 400),
       Duration(milliseconds: 600),
     ];
-    for (final delay in retryDelays) {
+    const maxStartupRevalidationWait = Duration(seconds: 10);
+    final stopwatch = Stopwatch()..start();
+    var attempt = 0;
+    while (true) {
       final validationReady = await _tryAwaitActiveLocalWorkspaceOpen(
         activeWorkspace,
       );
@@ -593,12 +603,19 @@ class _TrackStateAppState extends State<TrackStateApp>
       if (!mounted) {
         return;
       }
-      await Future<void>.delayed(delay);
+      final remaining = maxStartupRevalidationWait - stopwatch.elapsed;
+      if (remaining <= Duration.zero) {
+        return;
+      }
+      final delay = retryDelays[math.min(attempt, retryDelays.length - 1)];
+      await Future<void>.delayed(
+        remaining < delay ? remaining : delay,
+      );
       if (!mounted) {
         return;
       }
+      attempt += 1;
     }
-    await _tryAwaitActiveLocalWorkspaceOpen(activeWorkspace);
   }
 
   Future<bool> _tryAwaitActiveLocalWorkspaceOpen(
@@ -854,6 +871,14 @@ class _TrackStateAppState extends State<TrackStateApp>
       previousViewModel.dispose();
     }
     await _refreshWorkspaceSwitcherState(workspaceState ?? _workspaceState);
+    if (_isDesktopWorkspaceSwitcherVisible) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+          return;
+        }
+        _desktopWorkspaceSwitcherFocusScopeNode.requestFocus();
+      });
+    }
   }
 
   Future<void> _ensureCurrentContextWorkspaceMigration() async {
@@ -1049,6 +1074,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       _closeDesktopWorkspaceSwitcher();
       return;
     }
+    _startDesktopWorkspaceSwitcherBrowserFocusMonitor();
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = true;
     });
@@ -1060,13 +1086,45 @@ class _TrackStateAppState extends State<TrackStateApp>
     });
   }
 
-  void _closeDesktopWorkspaceSwitcher() {
+  void _startDesktopWorkspaceSwitcherBrowserFocusMonitor() {
+    _stopDesktopWorkspaceSwitcherBrowserFocusMonitor();
+    if (!kIsWeb) {
+      return;
+    }
+    _desktopWorkspaceSwitcherBrowserFocusMonitor =
+        browser_workspace_switcher_focus_monitor
+            .createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {
+                Timer.run(() {
+                  if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+                    return;
+                  }
+                  if (browser_workspace_switcher_focus_monitor
+                      .isBrowserFocusWithinWorkspaceSwitcher()) {
+                    return;
+                  }
+                  _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
+                });
+              },
+            );
+  }
+
+  void _stopDesktopWorkspaceSwitcherBrowserFocusMonitor() {
+    _desktopWorkspaceSwitcherBrowserFocusMonitor?.cancel();
+    _desktopWorkspaceSwitcherBrowserFocusMonitor = null;
+  }
+
+  void _closeDesktopWorkspaceSwitcher({bool restoreTriggerFocus = true}) {
     if (!_isDesktopWorkspaceSwitcherVisible) {
       return;
     }
+    _stopDesktopWorkspaceSwitcherBrowserFocusMonitor();
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = false;
     });
+    if (!restoreTriggerFocus) {
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -1168,29 +1226,37 @@ class _TrackStateAppState extends State<TrackStateApp>
         final closeSwitcher = compact
             ? () => Navigator.of(sheetContext, rootNavigator: true).pop()
             : _closeDesktopWorkspaceSwitcher;
-        return _WorkspaceSwitcherSheet(
-          viewModel: viewModel,
-          workspaces: _workspaceState,
-          authenticatedWorkspaceIds: _authenticatedWorkspaceIds,
-          hostedWorkspaceAccessModes: _hostedWorkspaceAccessModes,
-          localWorkspaceAvailability: _localWorkspaceAvailability,
-          onSelectWorkspace: (workspace) {
-            closeSwitcher();
-            unawaited(_switchToWorkspace(workspace));
-          },
-          onDeleteWorkspace: (workspace) {
-            unawaited(
-              _confirmAndDeleteWorkspaceFromSwitcher(
-                sheetContext,
-                workspace,
-                closeSwitcher: closeSwitcher,
-              ),
-            );
-          },
-          onAddWorkspace: (input) async {
-            closeSwitcher();
-            await _addWorkspaceProfile(input);
-          },
+        return Semantics(
+          container: true,
+          identifier: browserWorkspaceSwitcherSemanticsIdentifier,
+          onDidLoseAccessibilityFocus: compact
+              ? null
+              : () =>
+                    _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false),
+          child: _WorkspaceSwitcherSheet(
+            viewModel: viewModel,
+            workspaces: _workspaceState,
+            authenticatedWorkspaceIds: _authenticatedWorkspaceIds,
+            hostedWorkspaceAccessModes: _hostedWorkspaceAccessModes,
+            localWorkspaceAvailability: _localWorkspaceAvailability,
+            onSelectWorkspace: (workspace) {
+              closeSwitcher();
+              unawaited(_switchToWorkspace(workspace));
+            },
+            onDeleteWorkspace: (workspace) {
+              unawaited(
+                _confirmAndDeleteWorkspaceFromSwitcher(
+                  sheetContext,
+                  workspace,
+                  closeSwitcher: closeSwitcher,
+                ),
+              );
+            },
+            onAddWorkspace: (input) async {
+              closeSwitcher();
+              await _addWorkspaceProfile(input);
+            },
+          ),
         );
       },
     );
@@ -1201,6 +1267,10 @@ class _TrackStateAppState extends State<TrackStateApp>
       bindings: <ShortcutActivator, VoidCallback>{
         const SingleActivator(LogicalKeyboardKey.escape):
             _closeDesktopWorkspaceSwitcher,
+        const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+            unawaited(_switchToAdjacentWorkspace(step: 1)),
+        const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+            unawaited(_switchToAdjacentWorkspace(step: -1)),
       },
       child: FocusScope(
         node: _desktopWorkspaceSwitcherFocusScopeNode,
@@ -1227,6 +1297,23 @@ class _TrackStateAppState extends State<TrackStateApp>
     setState(() {
       _showsWorkspaceOnboarding = false;
     });
+  }
+
+  Future<void> _switchToAdjacentWorkspace({required int step}) async {
+    final profiles = _workspaceState.profiles;
+    if (!_isDesktopWorkspaceSwitcherVisible || profiles.length < 2) {
+      return;
+    }
+    final activeWorkspaceId = _workspaceState.activeWorkspaceId;
+    final currentIndex = activeWorkspaceId == null
+        ? 0
+        : profiles.indexWhere((profile) => profile.id == activeWorkspaceId);
+    final safeCurrentIndex = currentIndex < 0 ? 0 : currentIndex;
+    final nextIndex = (safeCurrentIndex + step).clamp(0, profiles.length - 1);
+    if (nextIndex == safeCurrentIndex) {
+      return;
+    }
+    await _switchToWorkspace(profiles[nextIndex]);
   }
 
   void _openCreateIssue([_CreateIssuePrefill? prefill]) {
@@ -3373,31 +3460,25 @@ class _TopBar extends StatelessWidget {
                           key: workspaceSwitcherTriggerKey,
                           child: KeyedSubtree(
                             key: const ValueKey('workspace-switcher-trigger'),
-                            child: Semantics(
-                              container: true,
-                              button: true,
-                              enabled: openWorkspaceSwitcher != null,
-                              label: workspaceSummary.semanticLabel,
-                              child: ExcludeSemantics(
-                                child: condensedDesktop
-                                    ? _WorkspaceSwitcherTriggerButton(
-                                        summary: workspaceSummary,
-                                        compact: false,
-                                        condensed: true,
-                                        onPressed: openWorkspaceSwitcher,
-                                        focusNode:
-                                            workspaceSwitcherTriggerFocusNode,
-                                      )
-                                    : _PrimaryButton(
-                                        label: workspaceSummary.textLabel,
-                                        icon: workspaceSummary.icon,
-                                        onPressed: openWorkspaceSwitcher,
-                                        height: _desktopTopBarControlHeight,
-                                        focusNode:
-                                            workspaceSwitcherTriggerFocusNode,
-                                      ),
-                              ),
-                            ),
+                            child: condensedDesktop
+                                ? _WorkspaceSwitcherTriggerButton(
+                                    summary: workspaceSummary,
+                                    compact: false,
+                                    condensed: true,
+                                    onPressed: openWorkspaceSwitcher,
+                                    focusNode:
+                                        workspaceSwitcherTriggerFocusNode,
+                                  )
+                                : _PrimaryButton(
+                                    label: workspaceSummary.textLabel,
+                                    semanticLabel:
+                                        workspaceSummary.semanticLabel,
+                                    icon: workspaceSummary.icon,
+                                    onPressed: openWorkspaceSwitcher,
+                                    height: _desktopTopBarControlHeight,
+                                    focusNode:
+                                        workspaceSwitcherTriggerFocusNode,
+                                  ),
                           ),
                         ),
                       ),
@@ -3517,20 +3598,12 @@ class _TopBar extends StatelessWidget {
                       groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
                       child: KeyedSubtree(
                         key: const ValueKey('workspace-switcher-trigger'),
-                        child: Semantics(
-                          container: true,
-                          button: true,
-                          enabled: openWorkspaceSwitcher != null,
-                          label: workspaceSummary.semanticLabel,
-                          child: ExcludeSemantics(
-                            child: _WorkspaceSwitcherTriggerButton(
-                              summary: workspaceSummary,
-                              compact: true,
-                              condensed: false,
-                              onPressed: openWorkspaceSwitcher,
-                              focusNode: workspaceSwitcherTriggerFocusNode,
-                            ),
-                          ),
+                        child: _WorkspaceSwitcherTriggerButton(
+                          summary: workspaceSummary,
+                          compact: true,
+                          condensed: false,
+                          onPressed: openWorkspaceSwitcher,
+                          focusNode: workspaceSwitcherTriggerFocusNode,
                         ),
                       ),
                     ),
@@ -10227,6 +10300,7 @@ class _PrimaryButton extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     this.height,
+    this.semanticLabel,
     this.focusNode,
   });
 
@@ -10235,17 +10309,20 @@ class _PrimaryButton extends StatelessWidget {
   final TrackStateIconGlyph icon;
   final VoidCallback? onPressed;
   final double? height;
+  final String? semanticLabel;
   final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
     final onPrimary = Theme.of(context).colorScheme.onPrimary;
+    final enabled = onPressed != null;
     return Semantics(
       container: true,
       button: true,
-      enabled: onPressed != null,
-      label: label,
+      enabled: enabled,
+      focusable: enabled,
+      label: semanticLabel ?? label,
       child: ExcludeSemantics(
         child: SizedBox(
           height: height,
@@ -10318,92 +10395,98 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
       container: true,
       button: true,
       enabled: enabled,
+      focusable: enabled,
       label: summary.semanticLabel,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          minHeight: compact ? 44 : _desktopTopBarControlHeight,
-          maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
-        ),
-        child: FilledButton(
-          focusNode: focusNode,
-          onPressed: onPressed,
-          style: ButtonStyle(
-            animationDuration: Duration.zero,
-            backgroundColor: WidgetStateProperty.resolveWith((states) {
-              if (states.contains(WidgetState.disabled)) {
-                return colors.primary.withValues(alpha: 0.5);
-              }
-              return colors.primary;
-            }),
-            foregroundColor: WidgetStateProperty.resolveWith((states) {
-              if (states.contains(WidgetState.disabled)) {
-                return onPrimary.withValues(alpha: 0.72);
-              }
-              return onPrimary;
-            }),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            visualDensity: VisualDensity.compact,
-            minimumSize: WidgetStatePropertyAll(
-              Size(0, compact ? 44 : _desktopTopBarControlHeight),
-            ),
-            maximumSize: WidgetStatePropertyAll(
-              Size(double.infinity, compact ? 44 : _desktopTopBarControlHeight),
-            ),
-            padding: WidgetStatePropertyAll(
-              EdgeInsets.symmetric(
-                horizontal: compact ? 10 : 12,
-                vertical: compact ? 8 : 6,
-              ),
-            ),
-            overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-            shape: WidgetStatePropertyAll(
-              RoundedRectangleBorder(borderRadius: borderRadius),
-            ),
-            side: WidgetStateProperty.resolveWith((states) {
-              if (states.contains(WidgetState.focused)) {
-                return BorderSide(color: onPrimary, width: 2);
-              }
-              return BorderSide(color: colors.primary);
-            }),
+      child: ExcludeSemantics(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: compact ? 44 : _desktopTopBarControlHeight,
+            maxWidth: compact ? double.infinity : (condensed ? 240 : 320),
           ),
-          child: Row(
-            mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
-            children: [
-              TrackStateIcon(
-                summary.icon,
-                color: onPrimary,
-                size: compact ? 18 : _desktopTopBarIconSize,
+          child: FilledButton(
+            focusNode: focusNode,
+            onPressed: onPressed,
+            style: ButtonStyle(
+              animationDuration: Duration.zero,
+              backgroundColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.disabled)) {
+                  return colors.primary.withValues(alpha: 0.5);
+                }
+                return colors.primary;
+              }),
+              foregroundColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.disabled)) {
+                  return onPrimary.withValues(alpha: 0.72);
+                }
+                return onPrimary;
+              }),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              minimumSize: WidgetStatePropertyAll(
+                Size(0, compact ? 44 : _desktopTopBarControlHeight),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: compact
-                    ? Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            summary.displayName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: nameStyle,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            summary.detailLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: detailStyle,
-                          ),
-                        ],
-                      )
-                    : Text(
-                        summary.textLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: nameStyle,
-                      ),
+              maximumSize: WidgetStatePropertyAll(
+                Size(
+                  double.infinity,
+                  compact ? 44 : _desktopTopBarControlHeight,
+                ),
               ),
-            ],
+              padding: WidgetStatePropertyAll(
+                EdgeInsets.symmetric(
+                  horizontal: compact ? 10 : 12,
+                  vertical: compact ? 8 : 6,
+                ),
+              ),
+              overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+              shape: WidgetStatePropertyAll(
+                RoundedRectangleBorder(borderRadius: borderRadius),
+              ),
+              side: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.focused)) {
+                  return BorderSide(color: onPrimary, width: 2);
+                }
+                return BorderSide(color: colors.primary);
+              }),
+            ),
+            child: Row(
+              mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
+              children: [
+                TrackStateIcon(
+                  summary.icon,
+                  color: onPrimary,
+                  size: compact ? 18 : _desktopTopBarIconSize,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: compact
+                      ? Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              summary.displayName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: nameStyle,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              summary.detailLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: detailStyle,
+                            ),
+                          ],
+                        )
+                      : Text(
+                          summary.textLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: nameStyle,
+                        ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
