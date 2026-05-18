@@ -10388,12 +10388,12 @@ class _PrimaryButton extends StatelessWidget {
     final onPrimary = Theme.of(context).colorScheme.onPrimary;
     final enabled = onPressed != null;
     return Semantics(
-      container: true,
       button: true,
       enabled: enabled,
       focusable: enabled,
       label: semanticLabel ?? label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
+      onTap: enabled ? onPressed : null,
       child: ExcludeSemantics(
         child: SizedBox(
           height: height,
@@ -10464,14 +10464,14 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
       height: 1,
     );
 
-    return Semantics(
-      container: true,
-      button: true,
-      enabled: enabled,
-      focusable: enabled,
-      label: summary.semanticLabel,
-      sortKey: _semanticsSortKey(semanticsSortOrder),
-      child: ExcludeSemantics(
+    return MergeSemantics(
+      child: Semantics(
+        button: true,
+        enabled: enabled,
+        focusable: enabled,
+        label: summary.semanticLabel,
+        sortKey: _semanticsSortKey(semanticsSortOrder),
+        onTap: enabled ? onPressed : null,
         child: ConstrainedBox(
           constraints: BoxConstraints(
             minHeight: compact ? 44 : _desktopTopBarControlHeight,
@@ -10522,44 +10522,48 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
                 return BorderSide(color: colors.primary);
               }),
             ),
-            child: Row(
-              mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
-              children: [
-                TrackStateIcon(
-                  summary.icon,
-                  color: onPrimary,
-                  size: compact ? 18 : _desktopTopBarIconSize,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: compact
-                      ? Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              summary.displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: nameStyle,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              summary.detailLabel,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: detailStyle,
-                            ),
-                          ],
-                        )
-                      : Text(
-                          summary.textLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: nameStyle,
-                        ),
-                ),
-              ],
+            child: Semantics(
+              label: summary.semanticLabel,
+              excludeSemantics: true,
+              child: Row(
+                mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
+                children: [
+                  TrackStateIcon(
+                    summary.icon,
+                    color: onPrimary,
+                    size: compact ? 18 : _desktopTopBarIconSize,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: compact
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                summary.displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: nameStyle,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                summary.detailLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: detailStyle,
+                              ),
+                            ],
+                          )
+                        : Text(
+                            summary.textLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: nameStyle,
+                          ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
