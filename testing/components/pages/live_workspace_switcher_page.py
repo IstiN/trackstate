@@ -425,8 +425,6 @@ class LiveWorkspaceSwitcherPage:
                 focus_probe.get("focusOwnedBySwitcher"),
             ):
                 return
-            if active.tag_name == "FLUTTER-VIEW":
-                return
 
         raise AssertionError(
             "The visible workspace switcher trigger could not be focused into a "
@@ -2869,7 +2867,55 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{self.current_body_text()}",
             )
         if not bool(before_payload.get("focusOwnedBySwitcher")):
-            self.focus_workspace_trigger(panel=panel, timeout_ms=focus_timeout_ms)
+            try:
+                self.focus_workspace_trigger(panel=panel, timeout_ms=focus_timeout_ms)
+            except AssertionError:
+                before = self._session.active_element()
+                before_payload = self._probe_blur_focus_state(panel)
+                if not isinstance(before_payload, dict):
+                    raise AssertionError(
+                        "The workspace switcher blur-dismissal pre-focus probe did not "
+                        "return an observation after focusing the trigger failed.\n"
+                        f"Observed body text:\n{self.current_body_text()}",
+                    ) from None
+                current_body_text = self.current_body_text()
+                return WorkspaceSwitcherBlurDismissObservation(
+                    before_focus_label=before.accessible_name,
+                    before_focus_role=before.role,
+                    before_focus_tag_name=before.tag_name,
+                    before_focus_outer_html=before.outer_html,
+                    before_focus_visible=bool(before_payload.get("activeVisible")),
+                    before_focus_in_viewport=bool(
+                        before_payload.get("activeInViewport"),
+                    ),
+                    before_focus_within_switcher=bool(
+                        before_payload.get("activeWithinSwitcher"),
+                    ),
+                    before_focus_on_trigger=bool(before_payload.get("activeOnTrigger")),
+                    before_focus_owned_by_switcher=bool(
+                        before_payload.get("focusOwnedBySwitcher"),
+                    ),
+                    after_focus_label=before.accessible_name,
+                    after_focus_role=before.role,
+                    after_focus_tag_name=before.tag_name,
+                    after_focus_outer_html=before.outer_html,
+                    after_focus_visible=bool(before_payload.get("activeVisible")),
+                    after_focus_in_viewport=bool(
+                        before_payload.get("activeInViewport"),
+                    ),
+                    after_focus_different_from_before=False,
+                    after_focus_within_switcher=bool(
+                        before_payload.get("activeWithinSwitcher"),
+                    ),
+                    external_focus_reached=False,
+                    panel_visible_after_wait="Workspace switcher" in current_body_text,
+                    panel_text_after_wait=current_body_text,
+                    dashboard_visible_after_wait="Dashboard" in current_body_text,
+                    trigger_visible_after_wait=(
+                        self._trigger_label_prefix in current_body_text
+                    ),
+                    waited_ms=0,
+                )
             before = self._session.active_element()
             before_payload = self._probe_blur_focus_state(panel)
             if not isinstance(before_payload, dict):
@@ -2878,14 +2924,6 @@ class LiveWorkspaceSwitcherPage:
                     "an observation after focusing the trigger.\n"
                     f"Observed body text:\n{self.current_body_text()}",
                 )
-            if (
-                not bool(before_payload.get("focusOwnedBySwitcher"))
-                and before.tag_name == "FLUTTER-VIEW"
-            ):
-                before_payload = {
-                    **before_payload,
-                    "focusOwnedBySwitcher": True,
-                }
         self._session.press_key("Tab", timeout_ms=focus_timeout_ms)
         try:
             self._session.wait_for_function(

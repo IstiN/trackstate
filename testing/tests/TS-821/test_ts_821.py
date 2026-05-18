@@ -528,8 +528,8 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## Rework summary",
-        "- Fixed the blur helper so TS-821 accepts switcher-owned focus after the direct focus call and no longer requires the trigger itself to be keyboard-reachable before pressing Tab.",
-        "- Fixed failure artifact generation so `outputs/bug_description.md` only describes the blur product bug when the run proves focus left the switcher and the panel stayed visible; earlier failures now produce a neutral automation-failure summary.",
+        "- Removed the `FLUTTER-VIEW` fallback that could mark the pre-Tab blur setup as switcher-owned even when the ownership probe failed.",
+        "- TS-821 now proceeds only when the blur helper can positively prove switcher-owned focus via switcher-specific signals before pressing `Tab`.",
         "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token.",
@@ -579,8 +579,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        "- Fixed the blur helper so TS-821 now accepts switcher-owned focus after the direct focus call instead of requiring the trigger itself to become keyboard-reachable before Tab.",
-        "- Fixed failure artifact generation so the blur-specific bug report is only emitted after the run proves focus left the switcher and the panel stayed visible; earlier failures now get a neutral automation-failure summary.",
+        "- Removed the `FLUTTER-VIEW` fallback that could turn a failed pre-Tab ownership probe into a false success.",
+        "- TS-821 now only treats the blur setup as valid when the ownership probe positively attributes focus to the switcher or its trigger.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -611,6 +611,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 def _bug_description(result: dict[str, object]) -> str:
     if not _product_blur_bug_proven(result):
+        if _pre_tab_focus_ownership_bug_proven(result):
+            return _pre_tab_focus_ownership_bug_description(result)
         if _step3_product_bug_proven(result):
             return _step3_product_bug_description(result)
         return _test_failure_bug_description(result)
@@ -727,6 +729,74 @@ def _step3_product_bug_description(result: dict[str, object]) -> str:
     ) + "\n"
 
 
+def _pre_tab_focus_ownership_bug_description(result: dict[str, object]) -> str:
+    blur = result.get("blur_observation")
+    return "\n".join(
+        [
+            f"# {TICKET_KEY} - Workspace switcher does not expose switcher-owned focus after opening",
+            "",
+            "## Steps to reproduce",
+            "1. Launch the application on a desktop browser.",
+            "2. Click the workspace switcher trigger to open the panel.",
+            "3. Attempt to continue the keyboard flow from the open switcher by moving focus into the switcher/trigger and then pressing `Tab` once.",
+            "4. Observe the focused element before the `Tab` blur step.",
+            "",
+            "## Exact steps from the test case with observations",
+            _annotated_step_line(result, 1, REQUEST_STEPS[0]),
+            _annotated_step_line(result, 2, REQUEST_STEPS[1]),
+            _annotated_step_line(result, 3, REQUEST_STEPS[2]),
+            _annotated_step_line(result, 4, REQUEST_STEPS[3]),
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Actual vs Expected",
+            (
+                "- Expected: after the workspace switcher opens, the visible trigger or "
+                "panel should own focus so pressing `Tab` can move focus to a different "
+                "interactive element outside the component and exercise blur dismissal."
+            ),
+            f"- Actual: {_failed_step_summary(result)}",
+            "",
+            "## Missing or broken production capability",
+            (
+                "The live workspace switcher does not expose a production-visible "
+                "switcher-owned focus state after opening. Even after a direct focus "
+                "attempt on the visible trigger, the active element remains the root "
+                "`FLUTTER-VIEW` instead of the trigger or an element inside the open "
+                "workspace-switcher panel, so the required blur path cannot be exercised "
+                "from the UI."
+            ),
+            "",
+            "## Failing command",
+            "```bash",
+            RUN_COMMAND,
+            "```",
+            "",
+            "## Failing command output",
+            "```text",
+            str(result.get("traceback", result.get("error", "<missing error>"))),
+            "```",
+            "",
+            "## Environment details",
+            f"- URL: {result.get('app_url')}",
+            f"- Repository: {result.get('repository')} @ {result.get('repository_ref')}",
+            f"- Browser: {result.get('browser')}",
+            f"- OS: {result.get('os')}",
+            f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
+            f"- Blur wait: {BLUR_WAIT_MS / 1000:.1f} seconds",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: {result.get('screenshot', '<no screenshot recorded>')}",
+            "```json",
+            json.dumps({"blur_observation": blur}, indent=2),
+            "```",
+        ],
+    ) + "\n"
+
+
 def _test_failure_bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
@@ -795,6 +865,16 @@ def _product_blur_bug_proven(result: dict[str, object]) -> bool:
         return False
     return bool(blur.get("external_focus_reached")) and bool(
         blur.get("panel_visible_after_wait"),
+    )
+
+
+def _pre_tab_focus_ownership_bug_proven(result: dict[str, object]) -> bool:
+    blur = result.get("blur_observation")
+    if not isinstance(blur, dict):
+        return False
+    before_focus = blur.get("before_focus")
+    return isinstance(before_focus, dict) and not bool(
+        before_focus.get("owned_by_switcher"),
     )
 
 
@@ -933,6 +1013,14 @@ def _review_reply_text(
             "product bug after the run proves focus left the switcher and the panel "
             "stayed visible; earlier failures now produce a neutral automation-failure "
             "summary instead of a misleading product bug. "
+            + rerun_summary
+        )
+    if root_comment_id == 3260501228:
+        return (
+            "Fixed: removed the `FLUTTER-VIEW` fallback from the blur helper, so a "
+            "failed ownership probe is no longer rewritten into success. TS-821 now "
+            "continues only when switcher-owned focus is positively proven via "
+            "switcher-specific signals before `Tab`. "
             + rerun_summary
         )
     return "Fixed and re-ran the requested TS-821 review changes. " + rerun_summary
