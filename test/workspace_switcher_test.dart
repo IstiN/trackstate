@@ -1197,6 +1197,77 @@ void main() {
   );
 
   testWidgets(
+    'desktop workspace switcher exports a single explicit button semantics node',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            workspaceProfileService: service,
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        const label = 'Workspace switcher: alpha/repo, Hosted, Needs sign-in';
+        final trigger = find.byKey(
+          const ValueKey('workspace-switcher-trigger'),
+        );
+        final explicitButtonSemantics = find.descendant(
+          of: trigger,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is Semantics &&
+                widget.properties.label == label &&
+                widget.properties.button == true,
+            description:
+                'explicit button semantics for the desktop workspace switcher trigger',
+          ),
+        );
+
+        expect(
+          explicitButtonSemantics,
+          findsOneWidget,
+          reason:
+              'The desktop workspace switcher trigger should export a single explicit '
+              'button semantics node so Flutter web exposes one keyboard-focusable '
+              'control instead of an inert outer wrapper.',
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'workspace switcher keeps state badges readable and the compact trigger keyboard reachable',
     (tester) async {
       final semantics = tester.ensureSemantics();

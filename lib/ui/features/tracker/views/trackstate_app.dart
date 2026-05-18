@@ -3450,31 +3450,25 @@ class _TopBar extends StatelessWidget {
                           key: workspaceSwitcherTriggerKey,
                           child: KeyedSubtree(
                             key: const ValueKey('workspace-switcher-trigger'),
-                            child: Semantics(
-                              container: true,
-                              button: true,
-                              enabled: openWorkspaceSwitcher != null,
-                              label: workspaceSummary.semanticLabel,
-                              child: ExcludeSemantics(
-                                child: condensedDesktop
-                                    ? _WorkspaceSwitcherTriggerButton(
-                                        summary: workspaceSummary,
-                                        compact: false,
-                                        condensed: true,
-                                        onPressed: openWorkspaceSwitcher,
-                                        focusNode:
-                                            workspaceSwitcherTriggerFocusNode,
-                                      )
-                                    : _PrimaryButton(
-                                        label: workspaceSummary.textLabel,
-                                        icon: workspaceSummary.icon,
-                                        onPressed: openWorkspaceSwitcher,
-                                        height: _desktopTopBarControlHeight,
-                                        focusNode:
-                                            workspaceSwitcherTriggerFocusNode,
-                                      ),
-                              ),
-                            ),
+                            child: condensedDesktop
+                                ? _WorkspaceSwitcherTriggerButton(
+                                    summary: workspaceSummary,
+                                    compact: false,
+                                    condensed: true,
+                                    onPressed: openWorkspaceSwitcher,
+                                    focusNode:
+                                        workspaceSwitcherTriggerFocusNode,
+                                  )
+                                : _PrimaryButton(
+                                    label: workspaceSummary.textLabel,
+                                    semanticLabel:
+                                        workspaceSummary.semanticLabel,
+                                    icon: workspaceSummary.icon,
+                                    onPressed: openWorkspaceSwitcher,
+                                    height: _desktopTopBarControlHeight,
+                                    focusNode:
+                                        workspaceSwitcherTriggerFocusNode,
+                                  ),
                           ),
                         ),
                       ),
@@ -3594,20 +3588,12 @@ class _TopBar extends StatelessWidget {
                       groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
                       child: KeyedSubtree(
                         key: const ValueKey('workspace-switcher-trigger'),
-                        child: Semantics(
-                          container: true,
-                          button: true,
-                          enabled: openWorkspaceSwitcher != null,
-                          label: workspaceSummary.semanticLabel,
-                          child: ExcludeSemantics(
-                            child: _WorkspaceSwitcherTriggerButton(
-                              summary: workspaceSummary,
-                              compact: true,
-                              condensed: false,
-                              onPressed: openWorkspaceSwitcher,
-                              focusNode: workspaceSwitcherTriggerFocusNode,
-                            ),
-                          ),
+                        child: _WorkspaceSwitcherTriggerButton(
+                          summary: workspaceSummary,
+                          compact: true,
+                          condensed: false,
+                          onPressed: openWorkspaceSwitcher,
+                          focusNode: workspaceSwitcherTriggerFocusNode,
                         ),
                       ),
                     ),
@@ -10304,6 +10290,7 @@ class _PrimaryButton extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     this.height,
+    this.semanticLabel,
     this.focusNode,
   });
 
@@ -10312,6 +10299,7 @@ class _PrimaryButton extends StatelessWidget {
   final TrackStateIconGlyph icon;
   final VoidCallback? onPressed;
   final double? height;
+  final String? semanticLabel;
   final FocusNode? focusNode;
 
   @override
@@ -10322,7 +10310,7 @@ class _PrimaryButton extends StatelessWidget {
       container: true,
       button: true,
       enabled: onPressed != null,
-      label: label,
+      label: semanticLabel ?? label,
       child: ExcludeSemantics(
         child: SizedBox(
           height: height,
