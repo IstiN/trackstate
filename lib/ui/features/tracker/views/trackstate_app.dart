@@ -20,6 +20,10 @@ import '../../../../../l10n/generated/app_localizations.dart';
 import '../../../core/trackstate_icons.dart';
 import '../../../core/trackstate_theme.dart';
 import '../services/attachment_picker.dart';
+import '../services/browser_workspace_switcher_focus_monitor_stub.dart'
+    if (dart.library.js_interop)
+        '../services/browser_workspace_switcher_focus_monitor_web.dart'
+    as browser_workspace_switcher_focus_monitor;
 import '../services/workspace_directory_picker.dart';
 import '../view_models/tracker_view_model.dart';
 
@@ -131,6 +135,9 @@ class _TrackStateAppState extends State<TrackStateApp>
   final FocusScopeNode _desktopWorkspaceSwitcherFocusScopeNode = FocusScopeNode(
     debugLabel: 'desktop-workspace-switcher',
   );
+  browser_workspace_switcher_focus_monitor
+      .BrowserWorkspaceSwitcherFocusMonitorSubscription?
+  _desktopWorkspaceSwitcherBrowserFocusMonitor;
   _WorkspaceRestoreFailure? _pendingWorkspaceRestoreFailure;
 
   @override
@@ -164,6 +171,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _stopDesktopWorkspaceSwitcherBrowserFocusMonitor();
     _workspaceSwitcherTriggerFocusNode.dispose();
     _desktopWorkspaceSwitcherFocusScopeNode.dispose();
     viewModel.dispose();
@@ -1049,6 +1057,9 @@ class _TrackStateAppState extends State<TrackStateApp>
       _closeDesktopWorkspaceSwitcher();
       return;
     }
+    _startDesktopWorkspaceSwitcherBrowserFocusMonitor(
+      savedWorkspacesLabel: AppLocalizations.of(context)!.savedWorkspaces,
+    );
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = true;
     });
@@ -1060,13 +1071,49 @@ class _TrackStateAppState extends State<TrackStateApp>
     });
   }
 
-  void _closeDesktopWorkspaceSwitcher() {
+  void _startDesktopWorkspaceSwitcherBrowserFocusMonitor({
+    required String savedWorkspacesLabel,
+  }) {
+    _stopDesktopWorkspaceSwitcherBrowserFocusMonitor();
+    if (!kIsWeb) {
+      return;
+    }
+    _desktopWorkspaceSwitcherBrowserFocusMonitor =
+        browser_workspace_switcher_focus_monitor
+            .createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {
+                scheduleMicrotask(() {
+                  if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+                    return;
+                  }
+                  if (browser_workspace_switcher_focus_monitor
+                      .isBrowserFocusWithinWorkspaceSwitcher(
+                        savedWorkspacesLabel: savedWorkspacesLabel,
+                      )) {
+                    return;
+                  }
+                  _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
+                });
+              },
+            );
+  }
+
+  void _stopDesktopWorkspaceSwitcherBrowserFocusMonitor() {
+    _desktopWorkspaceSwitcherBrowserFocusMonitor?.cancel();
+    _desktopWorkspaceSwitcherBrowserFocusMonitor = null;
+  }
+
+  void _closeDesktopWorkspaceSwitcher({bool restoreTriggerFocus = true}) {
     if (!_isDesktopWorkspaceSwitcherVisible) {
       return;
     }
+    _stopDesktopWorkspaceSwitcherBrowserFocusMonitor();
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = false;
     });
+    if (!restoreTriggerFocus) {
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -1168,29 +1215,35 @@ class _TrackStateAppState extends State<TrackStateApp>
         final closeSwitcher = compact
             ? () => Navigator.of(sheetContext, rootNavigator: true).pop()
             : _closeDesktopWorkspaceSwitcher;
-        return _WorkspaceSwitcherSheet(
-          viewModel: viewModel,
-          workspaces: _workspaceState,
-          authenticatedWorkspaceIds: _authenticatedWorkspaceIds,
-          hostedWorkspaceAccessModes: _hostedWorkspaceAccessModes,
-          localWorkspaceAvailability: _localWorkspaceAvailability,
-          onSelectWorkspace: (workspace) {
-            closeSwitcher();
-            unawaited(_switchToWorkspace(workspace));
-          },
-          onDeleteWorkspace: (workspace) {
-            unawaited(
-              _confirmAndDeleteWorkspaceFromSwitcher(
-                sheetContext,
-                workspace,
-                closeSwitcher: closeSwitcher,
-              ),
-            );
-          },
-          onAddWorkspace: (input) async {
-            closeSwitcher();
-            await _addWorkspaceProfile(input);
-          },
+        return Semantics(
+          container: true,
+          onDidLoseAccessibilityFocus: compact
+              ? null
+              : () => _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false),
+          child: _WorkspaceSwitcherSheet(
+            viewModel: viewModel,
+            workspaces: _workspaceState,
+            authenticatedWorkspaceIds: _authenticatedWorkspaceIds,
+            hostedWorkspaceAccessModes: _hostedWorkspaceAccessModes,
+            localWorkspaceAvailability: _localWorkspaceAvailability,
+            onSelectWorkspace: (workspace) {
+              closeSwitcher();
+              unawaited(_switchToWorkspace(workspace));
+            },
+            onDeleteWorkspace: (workspace) {
+              unawaited(
+                _confirmAndDeleteWorkspaceFromSwitcher(
+                  sheetContext,
+                  workspace,
+                  closeSwitcher: closeSwitcher,
+                ),
+              );
+            },
+            onAddWorkspace: (input) async {
+              closeSwitcher();
+              await _addWorkspaceProfile(input);
+            },
+          ),
         );
       },
     );
