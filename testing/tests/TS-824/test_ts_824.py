@@ -720,6 +720,10 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Status:** {status}",
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
+        "## Rework summary",
+        "- Fixed the post-Escape validation so TS-824 now checks that the active element is the workspace switcher trigger before any Enter-based reopen check.",
+        "- Fixed `outputs/bug_description.md` so it now derives the bug title, reproduction path, and missing-capability details from the first failed step.",
+        "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token.",
         "- Opened the desktop workspace switcher from Dashboard.",
@@ -768,6 +772,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
+        "- Fixed the post-Escape assertion so TS-824 now requires focus to be restored to the workspace switcher trigger before the Enter-based reopen check.",
+        "- Fixed the failure artifact generation so `outputs/bug_description.md` now follows the first failed step and captures the trigger-focusability evidence when the flow stops early.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -1009,17 +1015,39 @@ def _first_failed_step_number(result: dict[str, object]) -> int | None:
 def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
     failed_step = _first_failed_step_number(result)
     if failed_step == 2:
+        focusability = result.get("trigger_focusability_observation")
+        keyboard_focusable = False
+        tabindex: object = None
+        if isinstance(focusability, dict):
+            keyboard_focusable = bool(focusability.get("keyboard_focusable"))
+            tabindex = focusability.get("tabindex")
         return (
-            f"{TICKET_KEY} - Workspace switcher trigger is not keyboard-focusable in desktop web",
+            (
+                f"{TICKET_KEY} - Workspace switcher trigger is skipped by sequential keyboard navigation in desktop web"
+                if keyboard_focusable
+                else f"{TICKET_KEY} - Workspace switcher trigger is not keyboard-focusable in desktop web"
+            ),
             [
                 "1. Launch the application on a desktop browser.",
                 "2. Navigate to Dashboard in the desktop web app.",
                 "3. Move keyboard focus to the visible top-bar search field.",
                 "4. Press `Tab` repeatedly to reach the visible workspace switcher trigger.",
-                "5. Observe that focus cycles other controls and never lands on the workspace switcher trigger.",
+                (
+                    "5. Observe that focus cycles other controls and never lands on the workspace switcher trigger, even though the visible trigger advertises keyboard focusability."
+                    if keyboard_focusable
+                    else "5. Observe that focus cycles other controls and never lands on the workspace switcher trigger."
+                ),
             ],
             (
-                "The production desktop web UI does not expose the visible workspace "
+                "The production desktop web UI exposes a visible workspace switcher "
+                "trigger with role `button` and "
+                f"`tabindex={tabindex!r}`, but real sequential Tab navigation from the "
+                "search field still skips it and cycles other controls instead. Because "
+                "the trigger cannot be reached through the production keyboard tab order, "
+                "the required `trigger -> internal panel element -> Escape` flow cannot "
+                "be exercised from the live UI."
+                if keyboard_focusable
+                else "The production desktop web UI does not expose the visible workspace "
                 "switcher trigger as a keyboard-focusable control. In the failing run the "
                 "visible trigger was rendered with role `button` but `tabindex=None`, and "
                 "real Tab navigation from the search field never reached it. Because the "
