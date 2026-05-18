@@ -10316,10 +10316,12 @@ class _PrimaryButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.ts;
     final onPrimary = Theme.of(context).colorScheme.onPrimary;
+    final enabled = onPressed != null;
     return Semantics(
       container: true,
       button: true,
-      enabled: onPressed != null,
+      enabled: enabled,
+      focusable: enabled,
       label: semanticLabel ?? label,
       child: ExcludeSemantics(
         child: SizedBox(
@@ -10393,6 +10395,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
       container: true,
       button: true,
       enabled: enabled,
+      focusable: enabled,
       label: summary.semanticLabel,
       child: ExcludeSemantics(
         child: ConstrainedBox(

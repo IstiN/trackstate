@@ -422,7 +422,6 @@ def _assert_internal_panel_focus(observation: WorkspaceSwitcherInternalFocusObse
             + f"Observed after HTML: {observation.after_outer_html}",
         )
 
-
 def _focus_trigger_for_ts831(
     *,
     page: LiveWorkspaceSwitcherPage,
@@ -486,8 +485,6 @@ def _focus_trigger_for_ts831(
         + f"keyboard_focusable={trigger_focusability.keyboard_focusable}\n"
         + f"Observed trigger HTML: {trigger_focusability.outer_html}"
     )
-
-
 def _record_step(
     result: dict[str, object],
     *,

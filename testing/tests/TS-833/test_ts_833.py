@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     LiveWorkspaceSwitcherPage,
+    WorkspaceSwitcherFocusOwnershipObservation,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherPanelObservation,
     WorkspaceSwitcherSavedWorkspaceRowObservation,
@@ -31,39 +32,42 @@ from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E
     StoredWorkspaceProfilesRuntime,
 )
 
-TICKET_KEY = "TS-825"
-TEST_CASE_TITLE = "Press non-Escape navigation keys — workspace switcher panel remains open"
-RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-825/test_ts_825.py"
-TEST_FILE_PATH = "testing/tests/TS-825/test_ts_825.py"
+TICKET_KEY = "TS-833"
+TEST_CASE_TITLE = (
+    "Press Arrow Down in workspace switcher — active selection moves to next workspace"
+)
+RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-833/test_ts_833.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
 KEY_STABILITY_MS = 1_000
-START_FIELD_LABEL = "Repository"
-EXPECTED_TAB_TARGET_LABELS = ("Branch", "Hosted", "Local", "Save and switch")
 DEFAULT_BRANCH = "main"
 ACTIVE_WORKSPACE_DISPLAY_NAME = "Hosted main workspace"
 SECONDARY_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
-SECONDARY_WRITE_BRANCH = "ts-825-alt"
-
-REQUEST_STEPS = [
-    "Launch the application on a desktop browser.",
-    "Click the workspace switcher trigger to open the panel.",
-    "Press the 'Arrow Down' key to navigate between workspaces.",
-    "Press the 'Shift' key.",
-    "Press the 'Tab' key to move focus within the panel.",
+SECONDARY_WRITE_BRANCH = "ts-833-alt"
+TEST_CASE_STEPS = [
+    "Observe the list of workspaces and note which one is currently highlighted/selected (e.g., 'Hosted main workspace').",
+    "Press the 'Arrow Down' key.",
+]
+AUTOMATION_STEPS = [
+    TEST_CASE_STEPS[0],
+    "Click the active saved-workspace row and confirm the open saved-workspace list interaction target is engaged before pressing Arrow Down.",
+    TEST_CASE_STEPS[1],
 ]
 EXPECTED_RESULT = (
-    "The workspace switcher panel remains open and does not dismiss on any of "
-    "these navigation keystrokes."
+    "The active selection indicator moves from the current workspace to the next "
+    "saved workspace in the list (e.g., 'Hosted alt workspace'), while the panel remains open."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+INPUTS_DIR = REPO_ROOT / "input" / TICKET_KEY
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
-SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts825_success.png"
-FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts825_failure.png"
+DISCUSSIONS_RAW_PATH = INPUTS_DIR / "pr_discussions_raw.json"
+SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts833_success.png"
+FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts833_failure.png"
 
 
 def main() -> None:
@@ -76,7 +80,7 @@ def main() -> None:
     token = service.token
     if not token:
         raise RuntimeError(
-            "TS-825 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
+            "TS-833 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
         )
     user = service.fetch_authenticated_user()
     workspace_state = _workspace_state(service.repository)
@@ -93,8 +97,7 @@ def main() -> None:
         "expected_result": EXPECTED_RESULT,
         "desktop_viewport": DESKTOP_VIEWPORT,
         "key_stability_ms": KEY_STABILITY_MS,
-        "start_field_label": START_FIELD_LABEL,
-        "expected_tab_target_labels": EXPECTED_TAB_TARGET_LABELS,
+        "linked_bugs": ["TS-827"],
         "preloaded_workspace_state": workspace_state,
         "user_login": user.login,
         "steps": [],
@@ -120,7 +123,7 @@ def main() -> None:
                     if runtime.kind != "ready":
                         raise AssertionError(
                             "Step 1 failed: the deployed app did not reach an interactive "
-                            "desktop state before the non-Escape key scenario began.\n"
+                            "desktop state before the Arrow Down scenario began.\n"
                             f"Observed runtime state: {runtime.kind}\n"
                             f"Observed body text:\n{runtime.body_text}",
                         )
@@ -129,44 +132,6 @@ def main() -> None:
                     page.navigate_to_section("Dashboard")
                     page.set_viewport(**DESKTOP_VIEWPORT)
                     trigger = page.observe_trigger()
-                    result["trigger_observation"] = _trigger_payload(trigger)
-                except AssertionError as error:
-                    _record_step(
-                        result,
-                        step=1,
-                        status="failed",
-                        action=REQUEST_STEPS[0],
-                        observed=str(error),
-                    )
-                    raise
-                _record_step(
-                    result,
-                    step=1,
-                    status="passed",
-                    action=REQUEST_STEPS[0],
-                    observed=(
-                        f"Opened {config.app_url} in Chromium at "
-                        f"{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}; "
-                        "preloaded two saved hosted workspaces for keyboard "
-                        "navigation coverage; "
-                        f"trigger_label={trigger.semantic_label!r}; "
-                        f"trigger_text={trigger.visible_text!r}"
-                    ),
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Viewed the desktop app shell before opening the panel and "
-                        "confirmed Dashboard plus the visible workspace switcher trigger "
-                        "for the preloaded active workspace were rendered."
-                    ),
-                    observed=(
-                        f"trigger_text={trigger.visible_text!r}; "
-                        f"top_buttons={list(trigger.top_button_labels)!r}"
-                    ),
-                )
-
-                try:
                     switcher = page.open_and_observe()
                     panel = page.observe_open_panel(
                         expected_container_kinds=("anchored-panel", "surface"),
@@ -180,19 +145,87 @@ def main() -> None:
                     active_workspace = _assert_saved_workspace_navigation_ready(
                         saved_workspace_rows,
                     )
-                    page.click_saved_workspace_row_surface(ACTIVE_WORKSPACE_DISPLAY_NAME)
+                    result["trigger_observation"] = _trigger_payload(trigger)
                     result["open_switcher_observation"] = _switcher_payload(switcher)
                     result["open_panel_observation"] = asdict(panel)
                     result["saved_workspace_rows_before_arrow"] = _saved_workspace_rows_payload(
                         saved_workspace_rows,
                     )
                     result["active_workspace_before_arrow"] = active_workspace.display_name
-                except Exception as error:
+                except AssertionError as error:
+                    _record_step(
+                        result,
+                        step=1,
+                        status="failed",
+                        action=AUTOMATION_STEPS[0],
+                        observed=str(error),
+                    )
+                    raise
+                _record_step(
+                    result,
+                    step=1,
+                    status="passed",
+                    action=AUTOMATION_STEPS[0],
+                    observed=(
+                        f"Opened {config.app_url} in Chromium at "
+                        f"{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}; "
+                        f"trigger_text={trigger.visible_text!r}; "
+                        f"container_kind={panel.container_kind}; "
+                        f"saved_workspace_row_count={len(saved_workspace_rows)}; "
+                        f"active_workspace={active_workspace.display_name!r}"
+                    ),
+                )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Opened the desktop workspace switcher and visually checked that "
+                        "the Workspace switcher title plus the saved workspace list were visible "
+                        "and that Hosted main workspace was marked active before pressing Arrow Down."
+                    ),
+                    observed=(
+                        "title='Workspace switcher'; "
+                        f"saved_workspace_row_count={len(saved_workspace_rows)}; "
+                        f"active_workspace={active_workspace.display_name!r}; "
+                        f"text_excerpt={_snippet(switcher.switcher_text)!r}"
+                    ),
+                )
+
+                try:
+                    click_x, click_y = _saved_workspace_click_point(active_workspace)
+                    page.click_saved_workspace_row_surface(ACTIVE_WORKSPACE_DISPLAY_NAME)
+                    page.wait_for_surface_to_remain_open(
+                        stability_ms=KEY_STABILITY_MS,
+                        timeout_ms=4_000,
+                    )
+                    saved_workspace_rows_after_click = page.observe_saved_workspace_rows(
+                        timeout_ms=4_000,
+                    )
+                    focus_precondition = page.observe_focus_ownership(panel=panel)
+                    result["focus_precondition"] = _focus_ownership_payload(
+                        focus_precondition,
+                    )
+                    result["saved_workspace_rows_after_click"] = _saved_workspace_rows_payload(
+                        saved_workspace_rows_after_click,
+                    )
+                    _assert_arrow_down_interaction_precondition(
+                        observation=focus_precondition,
+                        clicked_x=click_x,
+                        clicked_y=click_y,
+                        expected_workspace_name=active_workspace.display_name,
+                        saved_workspace_rows=saved_workspace_rows_after_click,
+                    )
+                except AssertionError as error:
+                    result["product_gap"] = (
+                        "Clicking the active saved-workspace row does not transfer keyboard "
+                        "focus to a switcher-owned target inside the open panel, so the "
+                        "saved-workspace list cannot be exercised from a validated Arrow Down "
+                        "keyboard state."
+                    )
                     _record_step(
                         result,
                         step=2,
                         status="failed",
-                        action=REQUEST_STEPS[1],
+                        action=AUTOMATION_STEPS[1],
                         observed=str(error),
                     )
                     raise
@@ -200,34 +233,37 @@ def main() -> None:
                     result,
                     step=2,
                     status="passed",
-                    action=REQUEST_STEPS[1],
+                    action=AUTOMATION_STEPS[1],
                     observed=(
-                        f"container_kind={panel.container_kind}; "
-                        f"saved_workspace_row_count={len(saved_workspace_rows)}; "
-                        f"title_visible={'Workspace switcher' in switcher.switcher_text}; "
-                        f"active_workspace={active_workspace.display_name!r}"
+                        f"click_point=({click_x:.1f}, {click_y:.1f}); "
+                        f"active_workspace_after_click={_selected_saved_workspace(saved_workspace_rows_after_click).display_name if _selected_saved_workspace(saved_workspace_rows_after_click) is not None else None!r}; "
+                        f"focus_owned_by_switcher={focus_precondition.focus_owned_by_switcher}; "
+                        f"active_within_switcher={focus_precondition.active_within_switcher}; "
+                        f"active_on_trigger={focus_precondition.active_on_trigger}; "
+                        f"focus_label={focus_precondition.active_label!r}; "
+                        f"focus_role={focus_precondition.active_role!r}; "
+                        f"focus_tag={focus_precondition.active_tag_name!r}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Opened the visible desktop workspace switcher and confirmed the "
-                        "title plus at least two saved workspace rows were visible before "
-                        "trying Arrow Down navigation."
+                        "Clicked the active saved-workspace row and confirmed the visible "
+                        "saved-workspace list stayed on that row as the last user-targeted "
+                        "interaction point before pressing Arrow Down."
                     ),
                     observed=(
-                        "title='Workspace switcher'; "
-                        f"saved_workspace_row_count={len(saved_workspace_rows)}; "
-                        f"active_workspace={active_workspace.display_name!r}; "
-                        f"text_excerpt={_snippet(switcher.switcher_text)}"
+                        f"click_point=({click_x:.1f}, {click_y:.1f}); "
+                        f"active_workspace_after_click={_selected_saved_workspace(saved_workspace_rows_after_click).display_name if _selected_saved_workspace(saved_workspace_rows_after_click) is not None else None!r}; "
+                        f"focus_label={focus_precondition.active_label!r}; "
+                        f"focus_role={focus_precondition.active_role!r}; "
+                        f"focus_within_switcher={focus_precondition.active_within_switcher}; "
+                        f"focus_owned_by_switcher={focus_precondition.focus_owned_by_switcher}; "
+                        f"focus_on_trigger={focus_precondition.active_on_trigger}"
                     ),
                 )
 
-                arrow_down = _press_key_and_observe(
-                    page=page,
-                    key="ArrowDown",
-                    expected_active_workspace=SECONDARY_WORKSPACE_DISPLAY_NAME,
-                )
+                arrow_down = _press_key_and_observe(page=page, key="ArrowDown")
                 result["arrow_down_observation"] = arrow_down
                 try:
                     _assert_arrow_down_navigated_between_workspaces(
@@ -237,16 +273,14 @@ def main() -> None:
                     )
                 except Exception as error:
                     result["product_gap"] = (
-                        "The desktop workspace switcher exposes only button-based row "
-                        "actions (`Open`/`Delete`) for saved workspaces and does not "
-                        "change the active saved workspace when Arrow Down is pressed "
-                        "from the visible saved-workspace surface."
+                        "Pressing Arrow Down after clicking the active saved-workspace row "
+                        "did not move the active saved workspace to the next visible row."
                     )
                     _record_step(
                         result,
                         step=3,
                         status="failed",
-                        action=REQUEST_STEPS[2],
+                        action=AUTOMATION_STEPS[2],
                         observed=str(error),
                     )
                     raise
@@ -254,119 +288,27 @@ def main() -> None:
                     result,
                     step=3,
                     status="passed",
-                    action=REQUEST_STEPS[2],
+                    action=AUTOMATION_STEPS[2],
                     observed=(
                         f"panel_kind={arrow_down['panel']['container_kind']}; "
                         f"saved_workspace_row_count={len(arrow_down['saved_workspace_rows'])}; "
+                        f"active_workspace_before={active_workspace.display_name!r}; "
                         f"active_workspace_after={arrow_down['active_workspace_name']!r}; "
-                        f"monitor_hidden_after_visible="
-                        f"{arrow_down['monitor']['ever_hidden_after_visible']}"
-                    ),
-                )
-
-                shift = _press_key_and_observe(
-                    page=page,
-                    key="Shift",
-                )
-                result["shift_observation"] = shift
-                try:
-                    _assert_key_kept_panel_open(
-                        key="Shift",
-                        observation=shift,
-                        expected_focus_label="Saved workspaces",
-                        allow_focus_change=True,
-                    )
-                except Exception as error:
-                    _record_step(
-                        result,
-                        step=4,
-                        status="failed",
-                        action=REQUEST_STEPS[3],
-                        observed=str(error),
-                    )
-                    raise
-                _record_step(
-                    result,
-                    step=4,
-                    status="passed",
-                    action=REQUEST_STEPS[3],
-                    observed=(
-                        f"panel_kind={shift['panel']['container_kind']}; "
-                        f"saved_workspace_row_count={len(shift['saved_workspace_rows'])}; "
-                        f"focus_after={shift['active']['accessible_name']!r}; "
-                        f"monitor_hidden_after_visible="
-                        f"{shift['monitor']['ever_hidden_after_visible']}"
-                    ),
-                )
-
-                focused_field = page.focus_switcher_text_field(START_FIELD_LABEL)
-                _assert_focused_field(
-                    focused_field,
-                    expected_label=START_FIELD_LABEL,
-                    step=5,
-                )
-                before_tab = page.active_element()
-                result["before_tab_focus"] = _focused_element_payload(before_tab)
-                tab = _press_key_and_observe(
-                    page=page,
-                    key="Tab",
-                )
-                result["tab_observation"] = tab
-                try:
-                    _assert_tab_kept_focus_within_panel(
-                        before=before_tab,
-                        observation=tab,
-                    )
-                except Exception as error:
-                    _record_step(
-                        result,
-                        step=5,
-                        status="failed",
-                        action=REQUEST_STEPS[4],
-                        observed=str(error),
-                    )
-                    raise
-                _record_step(
-                    result,
-                    step=5,
-                    status="passed",
-                    action=REQUEST_STEPS[4],
-                    observed=(
-                        f"panel_kind={tab['panel']['container_kind']}; "
-                        f"saved_workspace_row_count={len(tab['saved_workspace_rows'])}; "
-                        f"focus_before={before_tab.accessible_name!r}; "
-                        f"focus_after={tab['active']['accessible_name']!r}; "
-                        f"monitor_hidden_after_visible="
-                        f"{tab['monitor']['ever_hidden_after_visible']}"
+                        f"monitor_hidden_after_visible={arrow_down['monitor']['ever_hidden_after_visible']}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Started from the visible saved-workspace list surface, pressed "
-                        "Arrow Down, and watched whether the active row changed while the "
-                        "panel stayed on screen."
+                        "Pressed Arrow Down in the open workspace switcher and "
+                        "watched the active selection change the way a desktop user would."
                     ),
                     observed=(
                         f"active_before_arrow={active_workspace.display_name!r}; "
                         f"active_after_arrow={arrow_down['active_workspace_name']!r}; "
-                        f"shift_focus={shift['active']['accessible_name']!r}; "
-                        f"arrow_down_hidden={arrow_down['monitor']['ever_hidden_after_visible']}; "
-                        f"shift_hidden={shift['monitor']['ever_hidden_after_visible']}"
-                    ),
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Pressed Tab from the visible Repository field and confirmed the "
-                        "keyboard focus moved to another visible control inside the panel "
-                        "while the panel title and workspace content stayed visible."
-                    ),
-                    observed=(
-                        f"focus_before={before_tab.accessible_name!r}; "
-                        f"focus_after={tab['active']['accessible_name']!r}; "
-                        f"allowed_targets={list(EXPECTED_TAB_TARGET_LABELS)!r}; "
-                        f"text_excerpt={_snippet(tab['switcher']['switcher_text'])}"
+                        f"focus_after={arrow_down['active']['accessible_name']!r}; "
+                        f"panel_hidden_after_arrow={arrow_down['monitor']['ever_hidden_after_visible']}; "
+                        f"text_excerpt={_snippet(str(arrow_down['switcher']['switcher_text']))!r}"
                     ),
                 )
             except Exception:
@@ -399,7 +341,6 @@ def _press_key_and_observe(
     *,
     page: LiveWorkspaceSwitcherPage,
     key: str,
-    expected_active_workspace: str | None = None,
 ) -> dict[str, object]:
     page.start_transition_monitor()
     page.press_key(key)
@@ -407,11 +348,6 @@ def _press_key_and_observe(
         stability_ms=KEY_STABILITY_MS,
         timeout_ms=4_000,
     )
-    if expected_active_workspace is not None:
-        page.wait_for_active_saved_workspace(
-            expected_active_workspace,
-            timeout_ms=10_000,
-        )
     switcher = page.observe_open_switcher(timeout_ms=4_000)
     panel = page.observe_open_panel(
         expected_container_kinds=("anchored-panel", "surface"),
@@ -442,13 +378,13 @@ def _assert_desktop_panel_open(
 ) -> None:
     if "Workspace switcher" not in switcher.switcher_text:
         raise AssertionError(
-            "Step 2 failed: opening the workspace switcher did not expose the visible "
+            "Step 1 failed: opening the workspace switcher did not expose the visible "
             "Workspace switcher title.\n"
             f"Observed switcher text:\n{switcher.switcher_text}",
         )
     if panel.container_kind not in {"anchored-panel", "surface"}:
         raise AssertionError(
-            "Step 2 failed: clicking the workspace switcher trigger did not open the "
+            "Step 1 failed: clicking the workspace switcher trigger did not open the "
             "expected desktop panel-style surface.\n"
             f"Observed container kind: {panel.container_kind}\n"
             f"Observed bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
@@ -456,7 +392,7 @@ def _assert_desktop_panel_open(
         )
     if panel.width <= 0 or panel.height <= 0:
         raise AssertionError(
-            "Step 2 failed: clicking the workspace switcher trigger did not expose a "
+            "Step 1 failed: clicking the workspace switcher trigger did not expose a "
             "readable desktop panel surface.\n"
             f"Observed panel bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
             f"width={panel.width:.1f}, height={panel.height:.1f}\n"
@@ -470,20 +406,20 @@ def _assert_saved_workspace_navigation_ready(
 ) -> WorkspaceSwitcherSavedWorkspaceRowObservation:
     if len(rows) < 2:
         raise AssertionError(
-            "Step 2 failed: the visible workspace switcher did not expose at least "
+            "Step 1 failed: the visible workspace switcher did not expose at least "
             "two saved workspace rows needed to exercise Arrow Down navigation.\n"
             f"Observed rows: {json.dumps(_saved_workspace_rows_payload(rows), indent=2)}",
         )
     active_workspace = _selected_saved_workspace(rows)
     if active_workspace is None:
         raise AssertionError(
-            "Step 2 failed: none of the visible saved workspace rows was marked "
+            "Step 1 failed: none of the visible saved workspace rows was marked "
             "active before pressing Arrow Down.\n"
             f"Observed rows: {json.dumps(_saved_workspace_rows_payload(rows), indent=2)}",
         )
     if active_workspace.display_name != ACTIVE_WORKSPACE_DISPLAY_NAME:
         raise AssertionError(
-            "Step 2 failed: the preloaded active saved workspace was not the expected "
+            "Step 1 failed: the preloaded active saved workspace was not the expected "
             "Arrow Down starting point.\n"
             f"Observed active workspace: {active_workspace.display_name!r}\n"
             f"Observed rows: {json.dumps(_saved_workspace_rows_payload(rows), indent=2)}",
@@ -491,21 +427,73 @@ def _assert_saved_workspace_navigation_ready(
     return active_workspace
 
 
-def _assert_focused_field(
-    observation: FocusedElementObservation,
+def _assert_arrow_down_interaction_precondition(
     *,
-    expected_label: str,
-    step: int,
+    observation: WorkspaceSwitcherFocusOwnershipObservation,
+    clicked_x: float,
+    clicked_y: float,
+    expected_workspace_name: str,
+    saved_workspace_rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...],
 ) -> None:
-    if observation.accessible_name == expected_label:
-        return
-    raise AssertionError(
-        f"Step {step} failed: the keyboard setup did not focus the expected "
-        f'"{expected_label}" field inside the open workspace switcher.\n'
-        f"Observed focus label: {observation.accessible_name!r}\n"
-        f"Observed focus role: {observation.role!r}\n"
-        f"Observed focus tag: {observation.tag_name!r}",
+    active_workspace = _selected_saved_workspace(saved_workspace_rows)
+    failures: list[str] = []
+    if not observation.focus_owned_by_switcher:
+        failures.append(
+            "keyboard focus was not owned by the open workspace switcher after clicking the active row",
+        )
+    if not observation.active_within_switcher:
+        failures.append(
+            "the focused element remained outside the open workspace switcher after clicking the active row",
+        )
+    if observation.active_on_trigger:
+        failures.append(
+            "keyboard focus remained on the workspace-switcher trigger after clicking the active row",
+        )
+    if len(saved_workspace_rows) < 2:
+        failures.append("fewer than two saved workspace rows remained visible after clicking the active row")
+    if active_workspace is None:
+        failures.append("no saved workspace row remained active after clicking the active row")
+    elif active_workspace.display_name != expected_workspace_name:
+        failures.append(
+            f"the active saved workspace changed to {active_workspace.display_name!r} before Arrow Down instead of remaining on {expected_workspace_name!r}",
+        )
+    active_row = next(
+        (
+            row
+            for row in saved_workspace_rows
+            if row.display_name == expected_workspace_name
+        ),
+        None,
     )
+    if active_row is None:
+        failures.append(
+            f"the clicked saved workspace row {expected_workspace_name!r} was not visible after the precondition click",
+        )
+    else:
+        right = active_row.left + active_row.width
+        bottom = active_row.top + active_row.height
+        if not (
+            active_row.left <= clicked_x <= right
+            and active_row.top <= clicked_y <= bottom
+        ):
+            failures.append(
+                "the saved-workspace precondition click did not land within the visible active-row bounds",
+            )
+
+    if failures:
+        raise AssertionError(
+            "Step 2 failed: clicking the active saved workspace row did not establish a "
+            "valid saved-workspace interaction precondition before pressing Arrow Down.\n"
+            + "\n".join(f"- {item}" for item in failures)
+            + "\n"
+            + f"Expected active workspace row: {expected_workspace_name!r}\n"
+            + f"Clicked point: ({clicked_x:.1f}, {clicked_y:.1f})\n"
+            + f"Observed focus label: {observation.active_label!r}\n"
+            + f"Observed focus role: {observation.active_role!r}\n"
+            + f"Observed focus tag: {observation.active_tag_name!r}\n"
+            + f"Observed focus HTML: {observation.active_outer_html}\n"
+            + f"Observed rows after click: {json.dumps(_saved_workspace_rows_payload(saved_workspace_rows), indent=2)}"
+        )
 
 
 def _assert_arrow_down_navigated_between_workspaces(
@@ -514,12 +502,7 @@ def _assert_arrow_down_navigated_between_workspaces(
     before_active_workspace: str,
     expected_active_workspace: str,
 ) -> None:
-    _assert_key_kept_panel_open(
-        key="Arrow Down",
-        observation=observation,
-        expected_focus_label="Saved workspaces",
-        allow_focus_change=True,
-    )
+    _assert_key_kept_panel_open(key="Arrow Down", observation=observation)
     saved_workspace_rows = observation["saved_workspace_rows"]
     active_workspace_name = observation["active_workspace_name"]
     assert isinstance(saved_workspace_rows, list)
@@ -539,7 +522,7 @@ def _assert_arrow_down_navigated_between_workspaces(
     if failures:
         raise AssertionError(
             "Step 3 failed: pressing Arrow Down from the visible saved-workspace "
-            "surface did not navigate to another workspace while the panel remained "
+            "switcher did not navigate to another workspace while the panel remained "
             "open.\n"
             f"Active workspace before Arrow Down: {before_active_workspace!r}\n"
             f"Active workspace after Arrow Down: {active_workspace_name!r}\n"
@@ -552,17 +535,13 @@ def _assert_key_kept_panel_open(
     *,
     key: str,
     observation: dict[str, object],
-    expected_focus_label: str,
-    allow_focus_change: bool,
 ) -> None:
     switcher = observation["switcher"]
     panel = observation["panel"]
-    active = observation["active"]
     monitor = observation["monitor"]
     saved_workspace_rows = observation.get("saved_workspace_rows", [])
     assert isinstance(switcher, dict)
     assert isinstance(panel, dict)
-    assert isinstance(active, dict)
     assert isinstance(monitor, dict)
     assert isinstance(saved_workspace_rows, list)
 
@@ -580,77 +559,16 @@ def _assert_key_kept_panel_open(
         )
     if bool(monitor.get("ever_hidden_after_visible")):
         failures.append(
-            "the transition monitor observed the panel become hidden after the key press",
+            f"the transition monitor observed the panel become hidden after pressing {key}",
         )
     if int(monitor.get("visible_sample_count", 0)) <= 0:
         failures.append(
-            "the transition monitor did not capture any visible switcher samples after the key press",
-        )
-    if not allow_focus_change and active.get("accessible_name") != expected_focus_label:
-        failures.append(
-            f"focus moved away from {expected_focus_label!r} to "
-            f"{active.get('accessible_name')!r}",
+            f"the transition monitor did not capture any visible switcher samples after pressing {key}",
         )
 
     if failures:
         raise AssertionError(
-            f"Step {'3' if key == 'Arrow Down' else '4'} failed: pressing {key} did not "
-            "leave the workspace switcher visibly open.\n"
-            + "\n".join(f"- {item}" for item in failures)
-        )
-
-
-def _assert_tab_kept_focus_within_panel(
-    *,
-    before: FocusedElementObservation,
-    observation: dict[str, object],
-) -> None:
-    switcher = observation["switcher"]
-    panel = observation["panel"]
-    active = observation["active"]
-    monitor = observation["monitor"]
-    assert isinstance(switcher, dict)
-    assert isinstance(panel, dict)
-    assert isinstance(active, dict)
-    assert isinstance(monitor, dict)
-    saved_workspace_rows = observation.get("saved_workspace_rows", [])
-    assert isinstance(saved_workspace_rows, list)
-
-    failures: list[str] = []
-    if saved_workspace_rows:
-        if len(saved_workspace_rows) <= 0:
-            failures.append("no visible saved workspace rows remained in the open switcher")
-    elif int(switcher.get("row_count", 0)) <= 0:
-        failures.append("no visible workspace rows remained in the open switcher")
-    if "Workspace switcher" not in str(switcher.get("switcher_text", "")):
-        failures.append("the visible Workspace switcher title was not present")
-    if str(panel.get("container_kind")) not in {"anchored-panel", "surface"}:
-        failures.append(
-            f"the visible container kind became {panel.get('container_kind')!r}",
-        )
-    if bool(monitor.get("ever_hidden_after_visible")):
-        failures.append(
-            "the transition monitor observed the panel become hidden after pressing Tab",
-        )
-    if int(monitor.get("visible_sample_count", 0)) <= 0:
-        failures.append(
-            "the transition monitor did not capture any visible switcher samples after Tab",
-        )
-    after_label = active.get("accessible_name")
-    if after_label == before.accessible_name:
-        failures.append(
-            f"focus did not move away from {before.accessible_name!r}",
-        )
-    if after_label not in EXPECTED_TAB_TARGET_LABELS:
-        failures.append(
-            f"focus moved to {after_label!r} instead of another known visible in-panel "
-            f"control {list(EXPECTED_TAB_TARGET_LABELS)!r}",
-        )
-
-    if failures:
-        raise AssertionError(
-            "Step 5 failed: pressing Tab from the open workspace switcher did not keep "
-            "focus within the visible panel.\n"
+            f"Step 3 failed: pressing {key} did not leave the workspace switcher visibly open.\n"
             + "\n".join(f"- {item}" for item in failures)
         )
 
@@ -697,17 +615,18 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
                 "skipped": 0,
                 "summary": "1 passed, 0 failed",
             },
-        )
+    )
         + "\n",
         encoding="utf-8",
     )
+    _write_review_replies(result, passed=True)
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
-    error = str(result.get("error", "AssertionError: TS-825 failed"))
+    error = str(result.get("error", "AssertionError: TS-833 failed"))
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -718,10 +637,11 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
                 "summary": "0 passed, 1 failed",
                 "error": error,
             },
-        )
+    )
         + "\n",
         encoding="utf-8",
     )
+    _write_review_replies(result, passed=False)
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
@@ -739,16 +659,9 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was tested",
         "* Opened the deployed TrackState app in Chromium with a stored hosted token and two preloaded saved hosted workspaces.",
         "* Opened the desktop workspace switcher from Dashboard.",
-        (
-            "* Started Arrow Down from the visible saved-workspace surface so the "
-            "keyboard path targeted the actual workspace list rather than the add-workspace form."
-        ),
-        (
-            "* Pressed Arrow Down and checked whether the active saved workspace moved to another row while the panel stayed open."
-        ),
-        (
-            f"* For the in-panel focus traversal step, moved focus to {{{START_FIELD_LABEL}}} and used Tab to confirm focus stayed inside the panel."
-        ),
+        "* Observed the currently selected saved workspace in the open desktop workspace switcher.",
+        "* Clicked the active saved-workspace row and confirmed the list interaction target stayed on that row before sending Arrow Down.",
+        "* Pressed Arrow Down and checked whether the active saved workspace moved to the next row while the panel stayed open.",
         "",
         "h4. Result",
         (
@@ -768,16 +681,6 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "h4. Human-style verification",
         *_human_lines(result, jira=True),
-        "",
-        "h4. Test file",
-        "{code}",
-        TEST_FILE_PATH,
-        "{code}",
-        "",
-        "h4. Run command",
-        "{code:bash}",
-        RUN_COMMAND,
-        "{code}",
     ]
     if not passed:
         lines.extend(
@@ -804,13 +707,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token and two preloaded saved hosted workspaces.",
         "- Opened the desktop workspace switcher from Dashboard.",
-        (
-            "- Started Arrow Down from the visible saved-workspace surface so the key path targeted the actual workspace list."
-        ),
-        "- Pressed Arrow Down, Shift, and Tab while the panel was visible.",
-        (
-            f"- Used `{START_FIELD_LABEL}` only for the separate Tab focus-traversal step after the workspace-row Arrow Down check."
-        ),
+        "- Observed the currently selected saved workspace in the open desktop workspace switcher.",
+        "- Clicked the active saved-workspace row and confirmed the list interaction target stayed on that row before sending Arrow Down.",
+        "- Pressed Arrow Down and checked whether the active saved workspace moved to the next row while the panel stayed visible.",
         "",
         "## Result",
         (
@@ -855,10 +754,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        (
-            "- Added TS-825 live desktop coverage for non-Escape keyboard handling in "
-            "the workspace switcher."
-        ),
+        "- Added TS-833 live desktop coverage for Arrow Down workspace-switcher navigation.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -870,7 +766,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         (
             f"- Outcome: {_failed_step_summary(result)}"
             if not passed
-            else "- Outcome: Arrow Down moved the active saved workspace to another visible row without dismissing the panel, Shift kept the panel open, and Tab moved focus from Repository to another visible in-panel control."
+            else "- Outcome: Arrow Down moved the active saved workspace from Hosted main workspace to Hosted alt workspace while the panel remained visibly open."
         ),
     ]
     lines.extend(_artifact_lines(result, jira=False))
@@ -890,17 +786,15 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 def _bug_description(result: dict[str, object]) -> str:
     return "\n".join(
         [
-            f"# {TICKET_KEY} - Workspace switcher does not support Arrow Down navigation between saved workspaces",
+            f"# {TICKET_KEY} - Arrow Down does not move the active saved workspace in the workspace switcher",
             "",
             "## Steps to reproduce",
-            *[f"{index}. {step}" for index, step in enumerate(REQUEST_STEPS, start=1)],
+            *[f"{index}. {step}" for index, step in enumerate(TEST_CASE_STEPS, start=1)],
             "",
-            "## Exact steps from the test case with observations",
-            _annotated_step_line(result, 1, REQUEST_STEPS[0]),
-            _annotated_step_line(result, 2, REQUEST_STEPS[1]),
-            _annotated_step_line(result, 3, REQUEST_STEPS[2]),
-            _annotated_step_line(result, 4, REQUEST_STEPS[3]),
-            _annotated_step_line(result, 5, REQUEST_STEPS[4]),
+            "## Exact steps from the automated run with observations",
+            _annotated_step_line(result, 1, AUTOMATION_STEPS[0]),
+            _annotated_step_line(result, 2, AUTOMATION_STEPS[1]),
+            _annotated_step_line(result, 3, AUTOMATION_STEPS[2]),
             "",
             "## Exact error message or assertion failure",
             "```text",
@@ -915,7 +809,7 @@ def _bug_description(result: dict[str, object]) -> str:
             (
                 f"- {result.get('product_gap')}"
                 if result.get("product_gap")
-                else "- The desktop workspace switcher does not expose a production-visible Arrow Down navigation path between saved workspace rows."
+                else "- Pressing Arrow Down in the open workspace switcher does not move the active selection to the next saved workspace."
             ),
             "",
             "## Environment details",
@@ -940,13 +834,7 @@ def _annotated_step_line(
     step_number: int,
     action: str,
 ) -> str:
-    status = _step_status(result, step_number)
-    if status == "passed":
-        marker = "✅"
-    elif status == "failed":
-        marker = "❌"
-    else:
-        marker = "⏭️"
+    marker = "✅" if _step_status(result, step_number) == "passed" else "❌"
     return (
         f"{step_number}. {marker} {action}\n"
         f"   Actual: {_step_observation(result, step_number)}"
@@ -993,6 +881,54 @@ def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     return [f"{prefix} Screenshot: `{screenshot}`"]
 
 
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(passed=passed, result=result),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
+    rerun_summary = (
+        "Re-ran "
+        f"`{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else "Re-ran "
+        f"`{RUN_COMMAND}`: failed at {_failed_step_summary(result)}"
+    )
+    return (
+        "Fixed: Step 2 now asserts the saved-row focus-ownership probe after the click, "
+        "requiring visible switcher-owned focus inside the open panel and off the trigger "
+        "before `ArrowDown`. "
+        + rerun_summary
+    )
+
+
 def _failed_step_summary(result: dict[str, object]) -> str:
     steps = result.get("steps", [])
     if isinstance(steps, list):
@@ -1008,33 +944,20 @@ def _failed_step_summary(result: dict[str, object]) -> str:
 def _step_status(result: dict[str, object], step_number: int) -> str:
     steps = result.get("steps", [])
     if not isinstance(steps, list):
-        return "not_run"
+        return "failed"
     for step in steps:
         if isinstance(step, dict) and step.get("step") == step_number:
             return str(step.get("status", "failed"))
-    return "not_run"
+    return "failed"
 
 
 def _step_observation(result: dict[str, object], step_number: int) -> str:
     steps = result.get("steps", [])
     if not isinstance(steps, list):
-        return "Not reached because an earlier test step failed."
+        return "<no observation recorded>"
     for step in steps:
         if isinstance(step, dict) and step.get("step") == step_number:
             return str(step.get("observed", "<no observation recorded>"))
-    first_failed = next(
-        (
-            step
-            for step in steps
-            if isinstance(step, dict) and step.get("status") == "failed"
-        ),
-        None,
-    )
-    if isinstance(first_failed, dict):
-        return (
-            f"Not reached because Step {first_failed.get('step')} failed: "
-            f"{first_failed.get('action')}"
-        )
     return "<no observation recorded>"
 
 
@@ -1093,6 +1016,32 @@ def _saved_workspace_rows_payload(
             },
         )
     return payload
+
+
+def _saved_workspace_click_point(
+    row: WorkspaceSwitcherSavedWorkspaceRowObservation,
+) -> tuple[float, float]:
+    return (
+        row.left + min(40.0, row.width * 0.15),
+        row.top + min(28.0, row.height * 0.25),
+    )
+
+
+def _focus_ownership_payload(
+    observation: WorkspaceSwitcherFocusOwnershipObservation,
+) -> dict[str, object]:
+    return {
+        "active_label": observation.active_label,
+        "active_role": observation.active_role,
+        "active_tag_name": observation.active_tag_name,
+        "active_outer_html": observation.active_outer_html,
+        "active_visible": observation.active_visible,
+        "active_in_viewport": observation.active_in_viewport,
+        "switcher_focus_within": observation.switcher_focus_within,
+        "active_within_switcher": observation.active_within_switcher,
+        "active_on_trigger": observation.active_on_trigger,
+        "focus_owned_by_switcher": observation.focus_owned_by_switcher,
+    }
 
 
 def _selected_saved_workspace(
