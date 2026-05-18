@@ -14,6 +14,8 @@ if str(REPO_ROOT) not in sys.path:
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     BackgroundScrollObservation,
     LiveWorkspaceSwitcherPage,
+    WorkspaceSwitcherFocusTargetObservation,
+    WorkspaceSwitcherInternalFocusObservation,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherPanelObservation,
     WorkspaceSwitcherSavedWorkspaceRowObservation,
@@ -154,7 +156,10 @@ def main() -> None:
                         f"scroll_before_arrow={baseline_scroll.scroll_y:.1f}px; "
                         f"max_scroll={baseline_scroll.max_scroll_y:.1f}px; "
                         f"viewport_height={baseline_scroll.viewport_height:.1f}px; "
-                        f"active_workspace={result['active_workspace_before_arrow']!r}"
+                        f"active_workspace={result['active_workspace_before_arrow']!r}; "
+                        f"focus_before_arrow={result['focus_before_arrow']['active_label']!r}; "
+                        "focus_owned_by_switcher="
+                        f"{result['focus_before_arrow']['focus_owned_by_switcher']}"
                     ),
                 )
                 _record_human_verification(
@@ -162,10 +167,12 @@ def main() -> None:
                     check=(
                         "Viewed the live desktop page in a visibly scrolled state and "
                         "confirmed the workspace switcher stayed open on top of the "
-                        "Settings content before pressing Arrow Down."
+                        "Settings content with keyboard focus on a real in-panel button "
+                        "before pressing Arrow Down."
                     ),
                     observed=(
                         f"scroll_before_arrow={baseline_scroll.scroll_y:.1f}px; "
+                        f"focus_before_arrow={result['focus_before_arrow']['active_label']!r}; "
                         f"title='Workspace switcher'; "
                         f"text_excerpt={_snippet(str(result.get('switcher_text_before_arrow', '')))}"
                     ),
@@ -173,17 +180,21 @@ def main() -> None:
 
                 arrow_down = _press_arrow_down_and_observe(
                     page=page,
+                    panel=WorkspaceSwitcherPanelObservation(
+                        **result["open_panel_observation"],  # type: ignore[arg-type]
+                    ),
                     before_scroll=baseline_scroll,
                 )
                 result["arrow_down_observation"] = arrow_down
                 _record_human_verification(
                     result,
                     check=(
-                        "Pressed Arrow Down from the visible saved-workspace surface and "
-                        "watched for both the active-row change and any jump in the "
-                        "background page position."
+                        "Pressed Arrow Down from the verified switcher-owned in-panel "
+                        "button and watched for both the active-row change and any jump "
+                        "in the background page position."
                     ),
                     observed=(
+                        f"focus_before_arrow={arrow_down['before_key_focus']['active_label']!r}; "
                         f"active_before={result['active_workspace_before_arrow']!r}; "
                         f"active_after={arrow_down['active_workspace_name']!r}; "
                         f"scroll_before={arrow_down['before_scroll']['scroll_y']:.1f}px; "
@@ -204,7 +215,9 @@ def main() -> None:
                     result["product_gap"] = (
                         "On the scrollable Settings surface, pressing Arrow Down inside "
                         "the desktop workspace switcher leaves the active saved "
-                        f"workspace on {result['active_workspace_before_arrow']!r} "
+                        "workspace selection unchanged even when the key is driven from "
+                        "a verified in-panel button inside the switcher. "
+                        f"The active workspace stays on {result['active_workspace_before_arrow']!r} "
                         f"instead of moving to {SECONDARY_WORKSPACE_DISPLAY_NAME!r}, "
                         "even though the background scroll position stays fixed."
                     )
@@ -294,7 +307,10 @@ def _prepare_scrollable_open_switcher(
         panel=panel,
     )
     active_workspace = _assert_saved_workspace_navigation_ready(saved_workspace_rows)
-    page.click_saved_workspace_row_surface(ACTIVE_WORKSPACE_DISPLAY_NAME)
+    focus_before_arrow = _focus_saved_workspace_action_button(
+        page=page,
+        panel=panel,
+    )
     baseline_scroll = page.observe_background_scroll()
 
     result["switcher_text_before_arrow"] = switcher.switcher_text
@@ -304,15 +320,46 @@ def _prepare_scrollable_open_switcher(
         saved_workspace_rows,
     )
     result["active_workspace_before_arrow"] = active_workspace.display_name
+    result["focus_before_arrow"] = focus_before_arrow
     result["scroll_before_arrow"] = _background_scroll_payload(baseline_scroll)
     return baseline_scroll
+
+
+def _focus_saved_workspace_action_button(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    panel: WorkspaceSwitcherPanelObservation,
+    max_tabs: int = 12,
+) -> dict[str, object]:
+    page.focus_workspace_trigger(panel=panel)
+    focus_steps: list[dict[str, object]] = []
+    for tab_index in range(1, max_tabs + 1):
+        observation = page.observe_internal_focus_after_tab(panel=panel)
+        payload = _internal_focus_payload(observation, tab_index=tab_index)
+        focus_steps.append(payload)
+        active_label = str(payload.get("active_label") or "")
+        if (
+            bool(payload.get("focus_owned_by_switcher"))
+            and bool(payload.get("active_within_switcher"))
+            and not bool(payload.get("active_on_trigger"))
+            and payload.get("active_role") == "button"
+        ):
+            payload["focus_steps"] = focus_steps
+            return payload
+    raise AssertionError(
+        "Step 1 failed: keyboard Tab navigation did not reach any in-panel button "
+        "before Arrow Down.\n"
+        f"Observed focus steps: {json.dumps(focus_steps, indent=2)}",
+    )
 
 
 def _press_arrow_down_and_observe(
     *,
     page: LiveWorkspaceSwitcherPage,
+    panel: WorkspaceSwitcherPanelObservation,
     before_scroll: BackgroundScrollObservation,
 ) -> dict[str, object]:
+    before_key_focus = page.observe_switcher_focus_target(panel=panel)
     page.start_transition_monitor()
     page.press_key("ArrowDown")
     switcher = page.observe_open_switcher(timeout_ms=4_000)
@@ -326,6 +373,7 @@ def _press_arrow_down_and_observe(
     after_scroll = page.observe_background_scroll()
     return {
         "key": "ArrowDown",
+        "before_key_focus": _switcher_focus_payload(before_key_focus),
         "switcher": _switcher_payload(switcher),
         "panel": asdict(panel),
         "saved_workspace_rows": _saved_workspace_rows_payload(saved_workspace_rows),
@@ -398,6 +446,7 @@ def _assert_arrow_down_navigated_without_background_scroll(
     monitor = observation["monitor"]
     saved_workspace_rows = observation["saved_workspace_rows"]
     active_workspace_name = observation["active_workspace_name"]
+    before_key_focus = observation["before_key_focus"]
     before_scroll = observation["before_scroll"]
     after_scroll = observation["after_scroll"]
     scroll_delta = float(observation["scroll_delta"])
@@ -405,10 +454,15 @@ def _assert_arrow_down_navigated_without_background_scroll(
     assert isinstance(panel, dict)
     assert isinstance(monitor, dict)
     assert isinstance(saved_workspace_rows, list)
+    assert isinstance(before_key_focus, dict)
     assert isinstance(before_scroll, dict)
     assert isinstance(after_scroll, dict)
 
     failures: list[str] = []
+    if not bool(before_key_focus.get("focus_owned_by_switcher")):
+        failures.append("keyboard focus was not owned by the open workspace switcher before Arrow Down")
+    if not bool(before_key_focus.get("active_within_switcher")):
+        failures.append("keyboard focus was not inside the visible switcher panel before Arrow Down")
     if "Workspace switcher" not in str(switcher.get("switcher_text", "")):
         failures.append("the visible Workspace switcher title was not present after Arrow Down")
     if str(panel.get("container_kind")) not in {"anchored-panel", "surface"}:
@@ -441,6 +495,7 @@ def _assert_arrow_down_navigated_without_background_scroll(
         raise AssertionError(
             "Step 2 failed: pressing Arrow Down did not deliver the expected in-panel "
             "workspace navigation outcome on the scrollable background surface.\n"
+            f"Focus before Arrow Down: {json.dumps(before_key_focus, indent=2)}\n"
             f"Active workspace before Arrow Down: {before_active_workspace!r}\n"
             f"Active workspace after Arrow Down: {active_workspace_name!r}\n"
             f"Background scroll before Arrow Down: {before_scroll.get('scroll_y')!r}\n"
@@ -537,7 +592,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was tested",
         "* Opened the deployed TrackState app in Chromium with a stored hosted token and two preloaded saved hosted workspaces.",
         "* Resized the browser to a desktop viewport and scrolled the live Settings background surface to a non-zero position.",
-        "* Opened the workspace switcher from Settings and started Arrow Down from the visible saved-workspace surface.",
+        "* Opened the workspace switcher from Settings, tabbed to a real in-panel button, and asserted switcher-owned keyboard focus before Arrow Down.",
         "* Verified the active saved workspace changed to the next row while the background page scroll position remained unchanged.",
         "",
         "h4. Result",
@@ -587,7 +642,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token and two preloaded saved hosted workspaces.",
         "- Resized to a desktop viewport where the Settings background surface is scrollable and moved it to a non-zero scroll position.",
-        "- Opened the workspace switcher from Settings and started Arrow Down from the visible saved-workspace surface.",
+        "- Opened the workspace switcher from Settings, tabbed to a real in-panel button, and asserted switcher-owned keyboard focus before Arrow Down.",
         "- Verified that Arrow Down changed the active saved workspace and did not change the background page scroll position.",
         "",
         "## Result",
@@ -846,6 +901,42 @@ def _saved_workspace_rows_payload(
             },
         )
     return payload
+
+
+def _switcher_focus_payload(
+    observation: WorkspaceSwitcherFocusTargetObservation,
+) -> dict[str, object]:
+    return {
+        "active_label": observation.active_label,
+        "active_role": observation.active_role,
+        "active_tag_name": observation.active_tag_name,
+        "active_outer_html": observation.active_outer_html,
+        "active_visible": observation.active_visible,
+        "active_in_viewport": observation.active_in_viewport,
+        "active_within_switcher": observation.active_within_switcher,
+        "active_on_trigger": observation.active_on_trigger,
+        "focus_owned_by_switcher": observation.focus_owned_by_switcher,
+    }
+
+
+def _internal_focus_payload(
+    observation: WorkspaceSwitcherInternalFocusObservation,
+    *,
+    tab_index: int,
+) -> dict[str, object]:
+    return {
+        "tab_index": tab_index,
+        "active_label": observation.after_label,
+        "active_role": observation.after_role,
+        "active_tag_name": observation.after_tag_name,
+        "active_outer_html": observation.after_outer_html,
+        "active_visible": observation.after_visible,
+        "active_in_viewport": observation.after_in_viewport,
+        "active_within_switcher": observation.after_within_switcher,
+        "active_on_trigger": observation.after_on_trigger,
+        "focus_owned_by_switcher": observation.after_owned_by_switcher,
+        "after_different_from_before": observation.after_different_from_before,
+    }
 
 
 def _selected_saved_workspace(
