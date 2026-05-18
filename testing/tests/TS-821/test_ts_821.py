@@ -28,6 +28,8 @@ from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
 
 TICKET_KEY = "TS-821"
 TEST_CASE_TITLE = "Lose component focus — workspace switcher panel dismisses via blur"
+INPUT_DIR = REPO_ROOT / "input" / TICKET_KEY
+DISCUSSIONS_RAW_PATH = INPUT_DIR / "pr_discussions_raw.json"
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-821/test_ts_821.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
 BLUR_WAIT_MS = 6_000
@@ -52,6 +54,7 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts821_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts821_failure.png"
 
@@ -181,9 +184,17 @@ def main() -> None:
                         panel=panel,
                         dismissal_timeout_ms=BLUR_WAIT_MS,
                     )
-                    _assert_external_focus_reached(blur_observation)
                     result["blur_observation"] = _blur_payload(blur_observation)
+                    _assert_external_focus_reached(blur_observation)
                 except Exception as error:
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Opened the visible desktop workspace switcher and tried to "
+                            "continue the keyboard flow like a user."
+                        ),
+                        observed=str(error),
+                    )
                     _record_step(
                         result,
                         step=3,
@@ -433,6 +444,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    _write_review_replies(result, passed=True)
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -455,6 +467,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    _write_review_replies(result, passed=False)
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -514,6 +527,10 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Status:** {status}",
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
+        "## Rework summary",
+        "- Removed the `FLUTTER-VIEW` fallback that could mark the pre-Tab blur setup as switcher-owned even when the ownership probe failed.",
+        "- TS-821 now proceeds only when the blur helper can positively prove switcher-owned focus via switcher-specific signals before pressing `Tab`.",
+        "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token.",
         "- Opened the desktop workspace switcher from Dashboard.",
@@ -562,10 +579,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
-        (
-            "- Added TS-821 live desktop coverage for workspace-switcher blur "
-            "dismissal after keyboard focus leaves the component."
-        ),
+        "- Removed the `FLUTTER-VIEW` fallback that could turn a failed pre-Tab ownership probe into a false success.",
+        "- TS-821 now only treats the blur setup as valid when the ownership probe positively attributes focus to the switcher or its trigger.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -595,6 +610,12 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    if not _product_blur_bug_proven(result):
+        if _pre_tab_focus_ownership_bug_proven(result):
+            return _pre_tab_focus_ownership_bug_description(result)
+        if _step3_product_bug_proven(result):
+            return _step3_product_bug_description(result)
+        return _test_failure_bug_description(result)
     return "\n".join(
         [
             f"# {TICKET_KEY} - Workspace switcher does not dismiss after losing focus via Tab",
@@ -639,6 +660,234 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- Screenshot: {result.get('screenshot', '<no screenshot recorded>')}",
         ],
     ) + "\n"
+
+
+def _step3_product_bug_description(result: dict[str, object]) -> str:
+    blur = result.get("blur_observation")
+    return "\n".join(
+        [
+            f"# {TICKET_KEY} - Workspace switcher does not move keyboard focus to a visible external control on Tab",
+            "",
+            "## Steps to reproduce",
+            "1. Launch the application on a desktop browser.",
+            "2. Click the workspace switcher trigger to open the panel.",
+            "3. Press the `Tab` key once to move focus out of the open workspace switcher.",
+            "4. Observe the focused element and the switcher panel state.",
+            "",
+            "## Exact steps from the test case with observations",
+            _annotated_step_line(result, 1, REQUEST_STEPS[0]),
+            _annotated_step_line(result, 2, REQUEST_STEPS[1]),
+            _annotated_step_line(result, 3, REQUEST_STEPS[2]),
+            _annotated_step_line(result, 4, REQUEST_STEPS[3]),
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Actual vs Expected",
+            (
+                "- Expected: after the workspace switcher owns keyboard focus, pressing "
+                "`Tab` should move focus to a different visible interactive control "
+                "outside the switcher so the blur-dismiss behavior can be exercised."
+            ),
+            f"- Actual: {_failed_step_summary(result)}",
+            "",
+            "## Missing or broken production capability",
+            (
+                "The live workspace switcher flow does not expose a production-visible "
+                "keyboard focus handoff from the open switcher to an external control. "
+                "After opening the panel and sending `Tab`, focus remains on the root "
+                "`FLUTTER-VIEW` element instead of advancing to a visible external "
+                "interactive control such as `Board` or `Create issue`."
+            ),
+            "",
+            "## Failing command",
+            "```bash",
+            RUN_COMMAND,
+            "```",
+            "",
+            "## Failing command output",
+            "```text",
+            str(result.get("traceback", result.get("error", "<missing error>"))),
+            "```",
+            "",
+            "## Environment details",
+            f"- URL: {result.get('app_url')}",
+            f"- Repository: {result.get('repository')} @ {result.get('repository_ref')}",
+            f"- Browser: {result.get('browser')}",
+            f"- OS: {result.get('os')}",
+            f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
+            f"- Blur wait: {BLUR_WAIT_MS / 1000:.1f} seconds",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: {result.get('screenshot', '<no screenshot recorded>')}",
+            "```json",
+            json.dumps({"blur_observation": blur}, indent=2),
+            "```",
+        ],
+    ) + "\n"
+
+
+def _pre_tab_focus_ownership_bug_description(result: dict[str, object]) -> str:
+    blur = result.get("blur_observation")
+    return "\n".join(
+        [
+            f"# {TICKET_KEY} - Workspace switcher does not expose switcher-owned focus after opening",
+            "",
+            "## Steps to reproduce",
+            "1. Launch the application on a desktop browser.",
+            "2. Click the workspace switcher trigger to open the panel.",
+            "3. Attempt to continue the keyboard flow from the open switcher by moving focus into the switcher/trigger and then pressing `Tab` once.",
+            "4. Observe the focused element before the `Tab` blur step.",
+            "",
+            "## Exact steps from the test case with observations",
+            _annotated_step_line(result, 1, REQUEST_STEPS[0]),
+            _annotated_step_line(result, 2, REQUEST_STEPS[1]),
+            _annotated_step_line(result, 3, REQUEST_STEPS[2]),
+            _annotated_step_line(result, 4, REQUEST_STEPS[3]),
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Actual vs Expected",
+            (
+                "- Expected: after the workspace switcher opens, the visible trigger or "
+                "panel should own focus so pressing `Tab` can move focus to a different "
+                "interactive element outside the component and exercise blur dismissal."
+            ),
+            f"- Actual: {_failed_step_summary(result)}",
+            "",
+            "## Missing or broken production capability",
+            (
+                "The live workspace switcher does not expose a production-visible "
+                "switcher-owned focus state after opening. Even after a direct focus "
+                "attempt on the visible trigger, the active element remains the root "
+                "`FLUTTER-VIEW` instead of the trigger or an element inside the open "
+                "workspace-switcher panel, so the required blur path cannot be exercised "
+                "from the UI."
+            ),
+            "",
+            "## Failing command",
+            "```bash",
+            RUN_COMMAND,
+            "```",
+            "",
+            "## Failing command output",
+            "```text",
+            str(result.get("traceback", result.get("error", "<missing error>"))),
+            "```",
+            "",
+            "## Environment details",
+            f"- URL: {result.get('app_url')}",
+            f"- Repository: {result.get('repository')} @ {result.get('repository_ref')}",
+            f"- Browser: {result.get('browser')}",
+            f"- OS: {result.get('os')}",
+            f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
+            f"- Blur wait: {BLUR_WAIT_MS / 1000:.1f} seconds",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: {result.get('screenshot', '<no screenshot recorded>')}",
+            "```json",
+            json.dumps({"blur_observation": blur}, indent=2),
+            "```",
+        ],
+    ) + "\n"
+
+
+def _test_failure_bug_description(result: dict[str, object]) -> str:
+    return "\n".join(
+        [
+            f"# {TICKET_KEY} - TS-821 automation failed before proving the blur-dismiss product defect",
+            "",
+            "## Summary",
+            (
+                "The TS-821 automation run failed, but it did not prove the product bug "
+                "from this ticket because the run stopped before demonstrating both that "
+                "focus moved outside the workspace switcher and that the panel stayed "
+                "visible afterward."
+            ),
+            "",
+            "## Exact steps from the test case with observations",
+            _annotated_step_line(result, 1, REQUEST_STEPS[0]),
+            _annotated_step_line(result, 2, REQUEST_STEPS[1]),
+            _annotated_step_line(result, 3, REQUEST_STEPS[2]),
+            _annotated_step_line(result, 4, REQUEST_STEPS[3]),
+            "",
+            "## Exact error message or assertion failure",
+            "```text",
+            str(result.get("traceback", result.get("error", ""))),
+            "```",
+            "",
+            "## Actual vs Expected",
+            f"- Expected: {EXPECTED_RESULT}",
+            (
+                "- Actual: the automation failed before the blur-dismiss product check was "
+                "fully exercised."
+            ),
+            "",
+            "## Missing or broken production capability",
+            (
+                "Not proven yet in this run. The failure evidence currently points to a "
+                "test/setup regression or another earlier-step issue rather than the "
+                "specific blur-dismiss product behavior from TS-821."
+            ),
+            "",
+            "## Failing command",
+            "```bash",
+            RUN_COMMAND,
+            "```",
+            "",
+            "## Failing command output",
+            "```text",
+            str(result.get("traceback", result.get("error", "<missing error>"))),
+            "```",
+            "",
+            "## Environment details",
+            f"- URL: {result.get('app_url')}",
+            f"- Repository: {result.get('repository')} @ {result.get('repository_ref')}",
+            f"- Browser: {result.get('browser')}",
+            f"- OS: {result.get('os')}",
+            f"- Viewport: {DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}",
+            f"- Blur wait: {BLUR_WAIT_MS / 1000:.1f} seconds",
+            "",
+            "## Screenshots or logs",
+            f"- Screenshot: {result.get('screenshot', '<no screenshot recorded>')}",
+        ],
+    ) + "\n"
+
+
+def _product_blur_bug_proven(result: dict[str, object]) -> bool:
+    blur = result.get("blur_observation")
+    if not isinstance(blur, dict):
+        return False
+    return bool(blur.get("external_focus_reached")) and bool(
+        blur.get("panel_visible_after_wait"),
+    )
+
+
+def _pre_tab_focus_ownership_bug_proven(result: dict[str, object]) -> bool:
+    blur = result.get("blur_observation")
+    if not isinstance(blur, dict):
+        return False
+    before_focus = blur.get("before_focus")
+    return isinstance(before_focus, dict) and not bool(
+        before_focus.get("owned_by_switcher"),
+    )
+
+
+def _step3_product_bug_proven(result: dict[str, object]) -> bool:
+    blur = result.get("blur_observation")
+    if not isinstance(blur, dict):
+        return False
+    before_focus = blur.get("before_focus")
+    return (
+        isinstance(before_focus, dict)
+        and bool(before_focus.get("owned_by_switcher"))
+        and not bool(blur.get("external_focus_reached"))
+    )
 
 
 def _annotated_step_line(
@@ -700,6 +949,81 @@ def _failed_step_summary(result: dict[str, object]) -> str:
             if isinstance(step, dict) and step.get("status") != "passed":
                 return f"Step {step.get('step')}: {step.get('observed')}"
     return str(result.get("error", "No failed step recorded."))
+
+
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(
+                root_comment_id=thread.get("rootCommentId"),
+                passed=passed,
+                result=result,
+            ),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(
+    *,
+    root_comment_id: object,
+    passed: bool,
+    result: dict[str, object],
+) -> str:
+    rerun_summary = (
+        "Re-ran "
+        f"`{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else "Re-ran "
+        f"`{RUN_COMMAND}`: failed at {_failed_step_summary(result)}"
+    )
+    if root_comment_id == 3260410739:
+        return (
+            "Fixed: the blur helper now accepts switcher-owned focus after the direct "
+            "focus call and no longer keyboard-walks from Search trying to make the "
+            "trigger itself tabbable before Step 3. "
+            + rerun_summary
+        )
+    if root_comment_id == 3260410842:
+        return (
+            "Fixed: `outputs/bug_description.md` now only describes the blur-dismiss "
+            "product bug after the run proves focus left the switcher and the panel "
+            "stayed visible; earlier failures now produce a neutral automation-failure "
+            "summary instead of a misleading product bug. "
+            + rerun_summary
+        )
+    if root_comment_id == 3260501228:
+        return (
+            "Fixed: removed the `FLUTTER-VIEW` fallback from the blur helper, so a "
+            "failed ownership probe is no longer rewritten into success. TS-821 now "
+            "continues only when switcher-owned focus is positively proven via "
+            "switcher-specific signals before `Tab`. "
+            + rerun_summary
+        )
+    return "Fixed and re-ran the requested TS-821 review changes. " + rerun_summary
 
 
 def _step_status(result: dict[str, object], step_number: int) -> str:
