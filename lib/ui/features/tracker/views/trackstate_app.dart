@@ -319,6 +319,8 @@ class _TrackStateAppState extends State<TrackStateApp>
         workspace,
         previousViewModel: previousViewModel,
         showFailureMessage: false,
+        preserveActiveLocalSelectionOnUnsupportedAccess:
+            workspace.id == activeWorkspaceId && workspace.isLocal,
       );
       if (prepared == null) {
         lastFailure = _WorkspaceRestoreFailure(
@@ -356,6 +358,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
     required bool showFailureMessage,
+    bool preserveActiveLocalSelectionOnUnsupportedAccess = false,
   }) async {
     try {
       final repository = workspace.isLocal
@@ -399,6 +402,18 @@ class _TrackStateAppState extends State<TrackStateApp>
       }
       return null;
     } on Object catch (error) {
+      if (preserveActiveLocalSelectionOnUnsupportedAccess &&
+          error is UnsupportedError) {
+        if (previousViewModel.snapshot == null) {
+          await previousViewModel.load();
+        }
+        _workspaceValidationFailures.remove(workspace.id);
+        return _PreparedWorkspaceSwitch(
+          viewModel: previousViewModel,
+          workspace: workspace,
+          localConfigurationKey: null,
+        );
+      }
       final reason = _normalizeWorkspaceFailureReason(error);
       _rememberWorkspaceValidationFailure(workspace, reason);
       if (showFailureMessage) {
@@ -3513,7 +3528,11 @@ _WorkspaceDisplaySummary _activeWorkspaceSummary(
   final typeLabel = isLocal
       ? l10n.workspaceTargetTypeLocal
       : l10n.workspaceTargetTypeHosted;
-  final stateLabel = _activeWorkspaceStateLabel(l10n, viewModel);
+  final stateLabel = _activeWorkspaceStateLabel(
+    l10n,
+    viewModel,
+    activeWorkspace: activeWorkspace,
+  );
   return _WorkspaceDisplaySummary(
     displayName: displayName,
     detailLabel: '$typeLabel · $stateLabel',
@@ -3526,9 +3545,10 @@ _WorkspaceDisplaySummary _activeWorkspaceSummary(
 
 String _activeWorkspaceStateLabel(
   AppLocalizations l10n,
-  TrackerViewModel viewModel,
-) {
-  if (viewModel.usesLocalPersistence) {
+  TrackerViewModel viewModel, {
+  WorkspaceProfile? activeWorkspace,
+}) {
+  if (activeWorkspace?.isLocal ?? viewModel.usesLocalPersistence) {
     return l10n.workspaceStateLocalGit;
   }
   return switch (viewModel.hostedRepositoryAccessMode) {
@@ -6001,7 +6021,11 @@ String _workspaceStateLabel(
   required Map<String, bool> localWorkspaceAvailability,
 }) {
   if (workspace.id == activeWorkspaceId) {
-    return _activeWorkspaceStateLabel(l10n, viewModel);
+    return _activeWorkspaceStateLabel(
+      l10n,
+      viewModel,
+      activeWorkspace: workspace,
+    );
   }
   if (workspace.isLocal) {
     return localWorkspaceAvailability[workspace.id] == false
