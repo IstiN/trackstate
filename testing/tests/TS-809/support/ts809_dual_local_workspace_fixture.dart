@@ -3,8 +3,8 @@ import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 
+import '../../../components/services/demo_local_workspace_repository.dart';
 import '../../../core/utils/local_git_test_repository.dart';
-import '../../TS-724/support/ts724_workspace_switch_validation_fixture.dart';
 
 class Ts809DualLocalWorkspaceFixture {
   Ts809DualLocalWorkspaceFixture._({
@@ -75,9 +75,7 @@ class Ts809DualLocalWorkspaceFixture {
   }) async {
     if (repositoryPath == activeLocalRepositoryPath ||
         repositoryPath == inactiveLocalRepositoryPath) {
-      return createTs724LocalWorkspaceRepository(
-        repositoryPath: repositoryPath,
-      );
+      return createDemoLocalWorkspaceRepository(repositoryPath: repositoryPath);
     }
     throw StateError('TS-809 does not know how to open "$repositoryPath".');
   }
