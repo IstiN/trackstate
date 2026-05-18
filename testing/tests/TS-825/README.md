@@ -5,15 +5,14 @@ user presses non-Escape navigation keys inside the panel.
 
 The automation:
 1. opens the deployed TrackState web app in Chromium with a stored hosted token
+   and two preloaded saved hosted workspaces
 2. opens the desktop workspace switcher from Dashboard
-3. focuses the visible `Repository` field inside the panel to exercise in-panel
-   keyboard handling instead of the blur-to-dismiss path already covered by
-   TS-821
-4. presses `ArrowDown` and `Shift` while the panel is open and confirms the
-   visible panel does not dismiss
-5. presses `Tab` from the `Repository` field, confirms focus moves to another
-   visible control inside the panel, and confirms the panel still does not
-   dismiss
+3. starts `ArrowDown` from the visible saved-workspace surface so the key path
+   targets the actual workspace list instead of the add-workspace form
+4. checks whether `ArrowDown` moves the active saved workspace to another row
+   while the panel remains open
+5. exercises `Shift` and `Tab` while the panel is open, using the `Repository`
+   field only for the separate in-panel Tab focus traversal
 
 ## Install dependencies
 
@@ -40,9 +39,10 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-825/test_ts_825.py
 
 ```text
 Pass: on desktop, the workspace switcher remains visibly open after ArrowDown,
-Shift, and Tab, and Tab keeps keyboard focus inside the panel instead of
-dismissing it.
+Shift, and Tab; ArrowDown moves the active saved workspace to another visible
+row; and Tab keeps keyboard focus inside the panel instead of dismissing it.
 
 Fail: any of those keys dismisses the panel, the panel visibly flashes closed,
-or Tab leaves the panel instead of moving to another visible in-panel control.
+ArrowDown does not move the active saved workspace to another visible row, or
+Tab leaves the panel instead of moving to another visible in-panel control.
 ```

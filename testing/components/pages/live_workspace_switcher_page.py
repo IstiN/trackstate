@@ -30,6 +30,20 @@ class WorkspaceSwitcherRowObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceSwitcherSavedWorkspaceRowObservation:
+    display_name: str
+    target_type_label: str | None
+    state_label: str | None
+    detail_text: str
+    selected: bool
+    action_labels: tuple[str, ...]
+    left: float
+    top: float
+    width: float
+    height: float
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherObservation:
     body_text: str
     switcher_text: str
@@ -428,28 +442,25 @@ class LiveWorkspaceSwitcherPage:
                       && style.visibility !== 'hidden'
                       && style.display !== 'none';
                   };
-                  const visibleText = (element) =>
-                    normalize(element.innerText || element.textContent || '');
-                  const isWorkspaceRow = (text) =>
-                    text.includes('Branch:')
-                    && text.includes('Delete')
-                    && (text.includes('Hosted') || text.includes('Local'))
-                    && (text.includes('Open') || text.includes('Active'));
-                  const surfaceVisible = Array.from(document.querySelectorAll('*'))
+                  const visibleText = (element) => normalize(element.innerText || element.textContent || '');
+                  const panelCandidates = Array.from(document.querySelectorAll('*'))
                     .filter(isVisible)
-                    .some((element) => {
-                      const text = visibleText(element);
-                      const aria = normalize(element.getAttribute?.('aria-label') || '');
-                      return text.includes(heading)
-                        && (
-                          text.includes('Saved workspaces')
-                          || text.includes('Save and switch')
-                          || text.includes('Add workspace')
-                          || text.includes('Hosted Local')
-                          || isWorkspaceRow(text)
-                        )
-                        || aria.startsWith('Workspace switcher:');
-                    });
+                    .map((element) => {
+                      const rect = element.getBoundingClientRect();
+                      return {
+                        element,
+                        text: visibleText(element),
+                        area: rect.width * rect.height,
+                      };
+                    })
+                    .filter((candidate) =>
+                      candidate.text.includes(heading)
+                      && candidate.text.includes('Saved workspaces')
+                      && candidate.text.includes('Add workspace')
+                      && candidate.text.includes('Save and switch'),
+                    )
+                    .sort((left, right) => left.area - right.area);
+                  const surfaceVisible = panelCandidates.length > 0;
                   const stabilityState = window.__tsWorkspaceSwitcherOpenStability;
                   if (!surfaceVisible) {
                     stabilityState.visibleSinceMs = null;
@@ -479,6 +490,109 @@ class LiveWorkspaceSwitcherPage:
                 f"required {stability_ms} ms stability window.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
+
+    def observe_saved_workspace_rows(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...]:
+        body_text = self.current_body_text()
+        if "Saved workspaces" not in body_text or "Add workspace" not in body_text:
+            raise AssertionError(
+                "The open workspace switcher did not expose any readable saved workspace rows.\n"
+                f"Observed body text:\n{body_text}",
+            )
+        panel_text = body_text.split("Saved workspaces", 1)[1].split("Add workspace", 1)[0]
+        row_pattern = re.compile(
+            r"(?P<display>[^\n]+)\n"
+            r"(?P<detail>[^\n]*Branch:[^\n]+)\n"
+            r"(?P<type>Hosted|Local)\n"
+            r"(?P<state>[^\n]+)\n"
+            r"(?P<action>Active|Open: [^\n]+)\n"
+            r"(?P<delete>Delete: [^\n]+)",
+            re.MULTILINE,
+        )
+        matches = list(row_pattern.finditer(panel_text))
+        if not matches:
+            raise AssertionError(
+                "The open workspace switcher did not expose any readable saved workspace rows.\n"
+                f"Observed body text:\n{body_text}",
+            )
+        rows: list[WorkspaceSwitcherSavedWorkspaceRowObservation] = []
+        for match in matches:
+            display_name = match.group("display").strip()
+            bounds = self._session.evaluate(
+                """
+                ({ text }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const candidate = Array.from(document.querySelectorAll('*'))
+                    .filter((element) => isVisible(element))
+                    .find((element) => normalize(element.innerText || element.textContent || '') === text);
+                  if (!candidate) {
+                    return null;
+                  }
+                  const rect = candidate.getBoundingClientRect();
+                  return {
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                  };
+                }
+                """,
+                arg={"text": display_name},
+            )
+            if not isinstance(bounds, dict):
+                raise AssertionError(
+                    f'The open workspace switcher exposed saved workspace text for "{display_name}", '
+                    "but its visible label could not be located for interaction.\n"
+                    f"Observed body text:\n{body_text}",
+                )
+            action_labels = (match.group("action").strip(), match.group("delete").strip())
+            rows.append(
+                WorkspaceSwitcherSavedWorkspaceRowObservation(
+                    display_name=display_name,
+                    target_type_label=match.group("type").strip(),
+                    state_label=match.group("state").strip(),
+                    detail_text=match.group("detail").strip(),
+                    selected=match.group("action").strip() == "Active",
+                    action_labels=action_labels,
+                    left=float(bounds.get("left", 0.0)),
+                    top=float(bounds.get("top", 0.0)),
+                    width=float(bounds.get("width", 0.0)),
+                    height=float(bounds.get("height", 0.0)),
+                ),
+            )
+        return tuple(rows)
+
+    def click_saved_workspace_row_surface(
+        self,
+        display_name: str,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> None:
+        rows = self.observe_saved_workspace_rows(timeout_ms=timeout_ms)
+        row = next((candidate for candidate in rows if candidate.display_name == display_name), None)
+        if row is None:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a saved workspace row for "{display_name}".\n'
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        self._session.mouse_click(
+            row.left + min(40.0, row.width * 0.15),
+            row.top + min(28.0, row.height * 0.25),
+        )
 
     def workspace_trigger_reached(
         self,
