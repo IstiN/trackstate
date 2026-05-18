@@ -776,6 +776,14 @@ class LiveWorkspaceSwitcherPage:
         self._session.press_key("Enter", timeout_ms=timeout_ms)
         self._wait_for_surface(timeout_ms=timeout_ms)
 
+    def press_space_on_active_element_and_wait_for_surface(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> None:
+        self._session.press_key("Space", timeout_ms=timeout_ms)
+        self._wait_for_surface(timeout_ms=timeout_ms)
+
     def open_surface_with_click(self, *, timeout_ms: int = 30_000) -> None:
         self._session.click(
             self._top_bar_button_selector,
