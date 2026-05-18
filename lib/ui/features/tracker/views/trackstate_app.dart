@@ -54,6 +54,8 @@ typedef LocalRepositoryConfigurationApplier =
       required String writeBranch,
     });
 
+const _desktopWorkspaceSwitcherTapRegionGroupId = 'desktop-workspace-switcher';
+
 @visibleForTesting
 bool shouldOpenProjectSettingsForStartupWithoutSavedWorkspaces({
   required bool isWeb,
@@ -2967,6 +2969,7 @@ class _TrackerMainPane extends StatelessWidget {
               desktopWorkspaceSwitcherContent != null)
             _DesktopWorkspaceSwitcherOverlay(
               panelRect: desktopWorkspaceSwitcherPanelRect,
+              onDismiss: onCloseDesktopWorkspaceSwitcher,
               child: desktopWorkspaceSwitcherContent!,
             ),
           if (isCreateIssueVisible)
@@ -2991,10 +2994,12 @@ class _TrackerMainPane extends StatelessWidget {
 class _DesktopWorkspaceSwitcherOverlay extends StatelessWidget {
   const _DesktopWorkspaceSwitcherOverlay({
     required this.panelRect,
+    required this.onDismiss,
     required this.child,
   });
 
   final Rect? panelRect;
+  final VoidCallback onDismiss;
   final Widget child;
 
   @override
@@ -3012,18 +3017,22 @@ class _DesktopWorkspaceSwitcherOverlay extends StatelessWidget {
       left: resolvedPanelRect.left,
       top: resolvedPanelRect.top,
       width: resolvedPanelRect.width,
-      child: Material(
-        color: colors.surface,
-        elevation: 16,
-        shadowColor: colors.shadow,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: colors.border),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: maxHeight),
-          child: SizedBox(width: resolvedPanelRect.width, child: child),
+      child: TapRegion(
+        groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
+        onTapOutside: (_) => onDismiss(),
+        child: Material(
+          color: colors.surface,
+          elevation: 16,
+          shadowColor: colors.shadow,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: colors.border),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: SizedBox(width: resolvedPanelRect.width, child: child),
+          ),
         ),
       ),
     );
@@ -3240,29 +3249,32 @@ class _TopBar extends StatelessWidget {
                     const SizedBox(width: 8),
                     orderedControl(
                       workspaceSwitcherOrder,
-                      SizedBox(
-                        key: workspaceSwitcherTriggerKey,
-                        child: KeyedSubtree(
-                          key: const ValueKey('workspace-switcher-trigger'),
-                          child: Semantics(
-                            container: true,
-                            button: true,
-                            enabled: openWorkspaceSwitcher != null,
-                            label: workspaceSummary.semanticLabel,
-                            child: ExcludeSemantics(
-                              child: condensedDesktop
-                                  ? _WorkspaceSwitcherTriggerButton(
-                                      summary: workspaceSummary,
-                                      compact: false,
-                                      condensed: true,
-                                      onPressed: openWorkspaceSwitcher,
-                                    )
-                                  : _PrimaryButton(
-                                      label: workspaceSummary.textLabel,
-                                      icon: workspaceSummary.icon,
-                                      onPressed: openWorkspaceSwitcher,
-                                      height: _desktopTopBarControlHeight,
-                                    ),
+                      TapRegion(
+                        groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
+                        child: SizedBox(
+                          key: workspaceSwitcherTriggerKey,
+                          child: KeyedSubtree(
+                            key: const ValueKey('workspace-switcher-trigger'),
+                            child: Semantics(
+                              container: true,
+                              button: true,
+                              enabled: openWorkspaceSwitcher != null,
+                              label: workspaceSummary.semanticLabel,
+                              child: ExcludeSemantics(
+                                child: condensedDesktop
+                                    ? _WorkspaceSwitcherTriggerButton(
+                                        summary: workspaceSummary,
+                                        compact: false,
+                                        condensed: true,
+                                        onPressed: openWorkspaceSwitcher,
+                                      )
+                                    : _PrimaryButton(
+                                        label: workspaceSummary.textLabel,
+                                        icon: workspaceSummary.icon,
+                                        onPressed: openWorkspaceSwitcher,
+                                        height: _desktopTopBarControlHeight,
+                                      ),
+                              ),
                             ),
                           ),
                         ),
@@ -3379,19 +3391,22 @@ class _TopBar extends StatelessWidget {
                   const SizedBox(height: 8),
                   orderedControl(
                     workspaceSwitcherOrder,
-                    KeyedSubtree(
-                      key: const ValueKey('workspace-switcher-trigger'),
-                      child: Semantics(
-                        container: true,
-                        button: true,
-                        enabled: openWorkspaceSwitcher != null,
-                        label: workspaceSummary.semanticLabel,
-                        child: ExcludeSemantics(
-                          child: _WorkspaceSwitcherTriggerButton(
-                            summary: workspaceSummary,
-                            compact: true,
-                            condensed: false,
-                            onPressed: openWorkspaceSwitcher,
+                    TapRegion(
+                      groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
+                      child: KeyedSubtree(
+                        key: const ValueKey('workspace-switcher-trigger'),
+                        child: Semantics(
+                          container: true,
+                          button: true,
+                          enabled: openWorkspaceSwitcher != null,
+                          label: workspaceSummary.semanticLabel,
+                          child: ExcludeSemantics(
+                            child: _WorkspaceSwitcherTriggerButton(
+                              summary: workspaceSummary,
+                              compact: true,
+                              condensed: false,
+                              onPressed: openWorkspaceSwitcher,
+                            ),
                           ),
                         ),
                       ),
