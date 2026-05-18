@@ -1,39 +1,37 @@
-# TS-818 test automation
+# TS-818
 
-Verifies that the live desktop TrackState workspace switcher does not expose an
-incorrect workspace state during startup hydration when an active local
-workspace is already configured.
+Verifies that startup hydration keeps the workspace switcher behind a loading
+guard while the saved active local workspace is being validated, then restores
+that workspace as the visible active `Local Git` selection.
 
-## Install dependencies
-
-```bash
-python3 -m pip install playwright
-python3 -m playwright install chromium
-```
+The automation:
+1. seeds the production workspace-profile store with an active local workspace
+   plus one inactive hosted workspace
+2. launches the production tracker in the supported Flutter widget runtime
+3. injects a delayed dedicated local-workspace runtime so the hydration window
+   is observable on the supported widget surface
+4. confirms the initialization guard blocks workspace-switcher interaction and
+   hides incorrect transient state text during hydration
+5. verifies that, once hydration finishes, the trigger and active row settle to
+   the saved local workspace in the `Local Git` state
 
 ## Run this test
 
 ```bash
-mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-818/test_ts_818.py
+mkdir -p outputs && flutter test testing/tests/TS-818/test_ts_818.dart --reporter expanded
 ```
 
 ## Required environment and config
 
-- Python 3.12+
-- Playwright for Python with Chromium installed
-- `GH_TOKEN` or `GITHUB_TOKEN` set to a token that can open
-  `IstiN/trackstate-setup`
-- Defaults come from `testing/core/config/live_setup_test_config.py`
+- Flutter SDK available on `PATH`
+- Linux widget-test environment
 
 ## Expected result
 
 ```text
-Pass: after reloading the deployed app and attempting to open Workspace
-switcher immediately, the user never sees an incorrect hydration state such as
-Hosted / Needs sign-in or Local Unavailable, and the flow settles to the active
-local workspace in the Local Git state.
-
-Fail: the user can see an incorrect workspace state during hydration, or the
-flow never settles to the active local Local Git state within the observation
-window.
+Pass: while the saved local workspace is still being validated, the user sees
+the initialization/loading guard instead of an interactive workspace switcher,
+and no incorrect transient state such as Hosted / Needs sign-in or Local
+Unavailable is exposed. After hydration completes, the trigger and active row
+settle to the saved local workspace in the Local Git state.
 ```
