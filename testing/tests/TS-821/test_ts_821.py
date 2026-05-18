@@ -198,7 +198,9 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[2],
                     observed=(
-                        "Pressing Tab moved focus away from the switcher to "
+                        "Pressing Tab moved focus away from the switcher from a "
+                        f"switcher-owned pre-Tab state={blur_observation.before_focus_owned_by_switcher} "
+                        "to "
                         f"{blur_observation.after_focus_label!r} "
                         f"(role={blur_observation.after_focus_role!r}, "
                         f"tag={blur_observation.after_focus_tag_name!r}, "
@@ -215,6 +217,13 @@ def main() -> None:
                         "and watched which real control received focus next."
                     ),
                     observed=(
+                        f"before_focus={blur_observation.before_focus_label!r}; "
+                        f"before_role={blur_observation.before_focus_role!r}; "
+                        f"before_visible={blur_observation.before_focus_visible}; "
+                        f"before_in_viewport={blur_observation.before_focus_in_viewport}; "
+                        f"before_within_switcher={blur_observation.before_focus_within_switcher}; "
+                        f"before_on_trigger={blur_observation.before_focus_on_trigger}; "
+                        f"before_owned_by_switcher={blur_observation.before_focus_owned_by_switcher}; "
                         f"focus_target={blur_observation.after_focus_label!r}; "
                         f"role={blur_observation.after_focus_role!r}; "
                         f"tag={blur_observation.after_focus_tag_name!r}; "
@@ -317,6 +326,19 @@ def _assert_desktop_panel_open(
 def _assert_external_focus_reached(
     observation: WorkspaceSwitcherBlurDismissObservation,
 ) -> None:
+    if not observation.before_focus_owned_by_switcher:
+        raise AssertionError(
+            "Step 3 failed: before pressing Tab, focus was not owned by the workspace "
+            "switcher component or its trigger, so the blur-dismissal scenario was not "
+            "validly exercised.\n"
+            f"Observed focus before Tab: label={observation.before_focus_label!r}, "
+            f"role={observation.before_focus_role!r}, tag={observation.before_focus_tag_name!r}\n"
+            f"Focused element visible before Tab: {observation.before_focus_visible}\n"
+            f"Focused element in viewport before Tab: {observation.before_focus_in_viewport}\n"
+            f"Focused element within switcher before Tab: "
+            f"{observation.before_focus_within_switcher}\n"
+            f"Focused element on trigger before Tab: {observation.before_focus_on_trigger}",
+        )
     if observation.external_focus_reached:
         return
     raise AssertionError(
@@ -749,6 +771,11 @@ def _blur_payload(
             "role": observation.before_focus_role,
             "tag_name": observation.before_focus_tag_name,
             "outer_html": observation.before_focus_outer_html,
+            "visible": observation.before_focus_visible,
+            "in_viewport": observation.before_focus_in_viewport,
+            "within_switcher": observation.before_focus_within_switcher,
+            "on_trigger": observation.before_focus_on_trigger,
+            "owned_by_switcher": observation.before_focus_owned_by_switcher,
         },
         "after_focus": {
             "label": observation.after_focus_label,
