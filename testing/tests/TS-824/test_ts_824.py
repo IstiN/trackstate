@@ -17,6 +17,7 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     WorkspaceSwitcherInternalFocusObservation,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherPanelObservation,
+    WorkspaceTriggerFocusabilityObservation,
     WorkspaceSwitcherTransitionMonitorObservation,
     WorkspaceSwitcherTriggerObservation,
 )
@@ -41,7 +42,7 @@ ESCAPE_DISMISS_TIMEOUT_MS = 4_000
 
 REQUEST_STEPS = [
     "Launch the application on a desktop browser.",
-    "Click the workspace switcher trigger to open the panel.",
+    "Move keyboard focus to the workspace switcher trigger and open the panel.",
     "Press the 'Tab' key to move keyboard focus to an item within the workspace switcher panel.",
     "Press the 'Escape' key on the keyboard.",
     "Observe the state of the workspace switcher panel.",
@@ -150,14 +151,48 @@ def main() -> None:
                 )
 
                 try:
-                    switcher = page.open_and_observe()
+                    trigger_focusability = page.observe_trigger_focusability()
+                    result["trigger_focusability_observation"] = (
+                        _trigger_focusability_payload(trigger_focusability)
+                    )
+                    try:
+                        trigger_focus_steps = page.focus_trigger_via_keyboard(max_tabs=24)
+                    except AssertionError as error:
+                        raise AssertionError(
+                            f"{error}\n"
+                            "Observed trigger focusability: "
+                            f"label={trigger_focusability.label!r}, "
+                            f"role={trigger_focusability.role!r}, "
+                            f"tag={trigger_focusability.tag_name!r}, "
+                            f"tabindex={trigger_focusability.tabindex!r}, "
+                            f"keyboard_focusable={trigger_focusability.keyboard_focusable}\n"
+                            f"Observed trigger HTML: {trigger_focusability.outer_html}"
+                        ) from error
+                    focused_trigger = page.active_element()
+                    _assert_workspace_trigger_focused(
+                        focused=focused_trigger,
+                        focus_steps=trigger_focus_steps,
+                    )
+                    page.press_enter_on_active_element_and_wait_for_surface(
+                        timeout_ms=TAB_FOCUS_TIMEOUT_MS,
+                    )
+                    switcher = page.observe_open_switcher(
+                        timeout_ms=TAB_FOCUS_TIMEOUT_MS,
+                    )
                     panel = page.observe_open_panel(
                         expected_container_kinds=("anchored-panel", "surface"),
+                        timeout_ms=TAB_FOCUS_TIMEOUT_MS,
                     )
                     _assert_desktop_panel_open(
                         trigger=trigger_before,
                         switcher=switcher,
                         panel=panel,
+                    )
+                    result["trigger_focus_sequence"] = [
+                        asdict(step) for step in trigger_focus_steps
+                    ]
+                    result["focused_trigger_before_open"] = _focused_element_payload(
+                        focused_trigger,
                     )
                     result["open_switcher_observation"] = _switcher_payload(switcher)
                     result["open_panel_observation"] = asdict(panel)
@@ -176,6 +211,8 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[1],
                     observed=(
+                        f"tab_steps_to_trigger={len(trigger_focus_steps)}; "
+                        f"focused_trigger={focused_trigger.accessible_name!r}; "
                         f"container_kind={panel.container_kind}; "
                         f"anchored_to_trigger={panel.anchored_to_trigger}; "
                         f"row_count={switcher.row_count}; "
@@ -185,10 +222,14 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Opened the visible desktop workspace switcher and confirmed the "
-                        "panel title and saved workspace rows were shown before pressing Tab."
+                        "Reached the workspace switcher trigger through real keyboard Tab "
+                        "navigation, opened the visible desktop panel from that focused "
+                        "trigger, and confirmed the panel title plus saved workspace rows "
+                        "were shown before pressing Tab again."
                     ),
                     observed=(
+                        f"tab_steps_to_trigger={len(trigger_focus_steps)}; "
+                        f"focused_trigger={focused_trigger.accessible_name!r}; "
                         "title='Workspace switcher'; "
                         f"row_count={switcher.row_count}; "
                         f"text_excerpt={switcher.switcher_text!r}"
@@ -384,7 +425,7 @@ def _assert_desktop_panel_open(
         )
     if panel.container_kind not in {"anchored-panel", "surface"}:
         raise AssertionError(
-            "Step 2 failed: clicking the workspace switcher trigger did not open the "
+            "Step 2 failed: opening the workspace switcher trigger did not open the "
             "expected desktop panel-style surface.\n"
             f"Observed container kind: {panel.container_kind}\n"
             f"Observed bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
@@ -392,7 +433,7 @@ def _assert_desktop_panel_open(
         )
     if panel.width <= 0 or panel.height <= 0:
         raise AssertionError(
-            "Step 2 failed: clicking the workspace switcher trigger did not expose a "
+            "Step 2 failed: opening the workspace switcher trigger did not expose a "
             "readable desktop panel surface.\n"
             f"Observed panel bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
             f"width={panel.width:.1f}, height={panel.height:.1f}\n"
@@ -404,6 +445,10 @@ def _assert_desktop_panel_open(
 def _assert_internal_panel_focus(observation: WorkspaceSwitcherInternalFocusObservation) -> None:
     failures: list[str] = []
 
+    if not (observation.before_label or "").startswith("Workspace switcher:"):
+        failures.append(
+            "pre-Tab focus was not on the workspace switcher trigger before moving inside the panel"
+        )
     if not observation.after_visible:
         failures.append("the focused element after Tab was not visible")
     if not observation.after_in_viewport:
@@ -429,6 +474,26 @@ def _assert_internal_panel_focus(observation: WorkspaceSwitcherInternalFocusObse
             + f"role={observation.after_role!r}, tag={observation.after_tag_name!r}\n"
             + f"Observed after HTML: {observation.after_outer_html}",
         )
+
+
+def _assert_workspace_trigger_focused(
+    *,
+    focused: FocusedElementObservation,
+    focus_steps: tuple[object, ...],
+) -> None:
+    if (focused.accessible_name or "").startswith("Workspace switcher:"):
+        return
+    sequence = " -> ".join(
+        str(getattr(step, "after_label", None) or f"<{getattr(step, 'after_tag_name', 'unknown')}>")
+        for step in focus_steps
+    )
+    raise AssertionError(
+        "Step 2 failed: keyboard navigation did not land on the workspace switcher "
+        "trigger before opening the panel.\n"
+        f"Observed focused element: label={focused.accessible_name!r}, "
+        f"role={focused.role!r}, tag={focused.tag_name!r}\n"
+        f"Observed focus sequence: {sequence}"
+    )
 
 
 def _assert_escape_surface_dismissal(
@@ -872,6 +937,19 @@ def _trigger_payload(trigger: WorkspaceSwitcherTriggerObservation) -> dict[str, 
             "height": trigger.height,
         },
         "top_button_labels": list(trigger.top_button_labels),
+    }
+
+
+def _trigger_focusability_payload(
+    observation: WorkspaceTriggerFocusabilityObservation,
+) -> dict[str, object]:
+    return {
+        "label": observation.label,
+        "role": observation.role,
+        "tag_name": observation.tag_name,
+        "tabindex": observation.tabindex,
+        "keyboard_focusable": observation.keyboard_focusable,
+        "outer_html": observation.outer_html,
     }
 
 

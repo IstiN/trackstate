@@ -56,6 +56,16 @@ class WorkspaceSwitcherTriggerObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceTriggerFocusabilityObservation:
+    label: str
+    role: str | None
+    tag_name: str
+    tabindex: str | None
+    keyboard_focusable: bool
+    outer_html: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherPanelObservation:
     viewport_width: float
     viewport_height: float
@@ -397,6 +407,69 @@ class LiveWorkspaceSwitcherPage:
         sequence: tuple[FocusNavigationStep, ...],
     ) -> bool:
         return any(self._is_workspace_trigger_label(step.after_label) for step in sequence)
+
+    def observe_trigger_focusability(
+        self,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceTriggerFocusabilityObservation:
+        payload = self._session.wait_for_function(
+            """
+            ({ triggerLabelPrefix }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const labelFor = (element) =>
+                normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+              const trigger = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+              )
+                .filter(isVisible)
+                .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+              if (!trigger) {
+                return null;
+              }
+              const tabindex = trigger.getAttribute('tabindex');
+              return {
+                label: labelFor(trigger),
+                role: trigger.getAttribute('role'),
+                tagName: trigger.tagName,
+                tabindex,
+                keyboardFocusable: tabindex !== null && tabindex !== '-1',
+                outerHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+              };
+            }
+            """,
+            arg={"triggerLabelPrefix": self._trigger_label_prefix},
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose a visible workspace switcher trigger for "
+                "keyboard-focus inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceTriggerFocusabilityObservation(
+            label=str(payload.get("label", "")),
+            role=str(payload.get("role")) if payload.get("role") is not None else None,
+            tag_name=str(payload.get("tagName", "")),
+            tabindex=(
+                str(payload.get("tabindex"))
+                if payload.get("tabindex") is not None
+                else None
+            ),
+            keyboard_focusable=bool(payload.get("keyboardFocusable")),
+            outer_html=str(payload.get("outerHtml", "")),
+        )
 
     def focus_trigger_via_keyboard(
         self,
