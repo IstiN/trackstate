@@ -119,6 +119,12 @@ class WorkspaceSwitcherBlurDismissObservation:
     waited_ms: int
 
 
+class WorkspaceSwitcherEscapeDismissObservation:
+    body_text: str
+    dashboard_visible: bool
+    trigger_visible: bool
+
+
 @dataclass(frozen=True)
 class WorkspaceSwitcherTransitionMonitorObservation:
     sample_count: int
@@ -844,6 +850,214 @@ class LiveWorkspaceSwitcherPage:
         self._click_trigger(timeout_ms=timeout_ms)
         return self.observe_open_switcher(timeout_ms=timeout_ms)
 
+    def switch_to_workspace(
+        self,
+        *,
+        display_name: str,
+        target_type_label: str,
+        detail_contains: str | None = None,
+        expected_state_label: str | None = None,
+        timeout_ms: int = 60_000,
+    ) -> WorkspaceSwitcherTriggerObservation:
+        try:
+            switcher = self.observe_open_switcher(timeout_ms=min(timeout_ms, 5_000))
+        except AssertionError:
+            switcher = self.open_and_observe(timeout_ms=timeout_ms)
+        open_labels = (
+            f"Open: {display_name}",
+            f"Open workspace: {display_name}",
+        )
+        clicked_open_label = self._session.evaluate(
+            """
+            ({ openLabels, displayName, targetTypeLabel, detailContains }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const labelFor = (element) =>
+                normalize(
+                  element.getAttribute?.('aria-label')
+                  || element.innerText
+                  || element.textContent
+                  || '',
+                );
+              const matchesRow = (element) => {
+                let current = element;
+                while (current && current !== document.body) {
+                  const text = normalize(current.innerText || current.textContent || '');
+                  if (
+                    text.includes(displayName)
+                    && text.includes(targetTypeLabel)
+                    && (!detailContains || text.includes(detailContains))
+                  ) {
+                    return true;
+                  }
+                  current = current.parentElement;
+                }
+                return false;
+              };
+              const candidates = Array.from(document.querySelectorAll('*'))
+                .filter(isVisible)
+                .map((element) => ({
+                  element,
+                  label: labelFor(element),
+                }))
+                .filter((candidate) => openLabels.includes(candidate.label));
+              const match =
+                candidates.find((candidate) => matchesRow(candidate.element))
+                ?? candidates[0]
+                ?? null;
+              if (!match) {
+                return null;
+              }
+              match.element.click();
+              return match.label;
+            }
+            """,
+            arg={
+                "openLabels": open_labels,
+                "displayName": display_name,
+                "targetTypeLabel": target_type_label,
+                "detailContains": detail_contains,
+            },
+        )
+        if clicked_open_label is None:
+            raise AssertionError(
+                f'The workspace switcher did not expose a selectable "{display_name}" '
+                f'{target_type_label} workspace row.\n'
+                f"Observed switcher text:\n{switcher.switcher_text}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        try:
+            self._session.wait_for_function(
+                """
+                () => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  return Array.from(document.querySelectorAll('*'))
+                    .filter(isVisible)
+                    .some((candidate) =>
+                      normalize(candidate.innerText || candidate.textContent || '')
+                        === 'Save and switch'
+                    );
+                }
+                """,
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'Selecting workspace "{display_name}" exposed `{clicked_open_label}`, '
+                "but the follow-up `Save and switch` control never became visible.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        clicked_save = self._session.evaluate(
+            """
+            () => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const save = Array.from(document.querySelectorAll('*'))
+                .filter((candidate) => isVisible(candidate))
+                .find((candidate) =>
+                  normalize(candidate.innerText || candidate.textContent || '') === 'Save and switch'
+                );
+              if (!save) {
+                return false;
+              }
+              save.click();
+              return true;
+            }
+            """,
+        )
+        if clicked_save is not True:
+            raise AssertionError(
+                f'Selecting workspace "{display_name}" exposed `{clicked_open_label}`, '
+                "but the follow-up `Save and switch` control did not appear or could not "
+                "be activated.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        try:
+            self._session.wait_for_function(
+                """
+                ({ displayName, targetTypeLabel, expectedStateLabel }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) =>
+                      normalize(element.getAttribute('aria-label') || element.innerText || '')
+                        .startsWith('Workspace switcher:'),
+                    );
+                  if (!trigger) {
+                    return null;
+                  }
+                  const label = normalize(
+                    trigger.getAttribute('aria-label') || trigger.innerText || '',
+                  );
+                  if (!label.includes(`Workspace switcher: ${displayName}, ${targetTypeLabel},`)) {
+                    return null;
+                  }
+                  if (expectedStateLabel && !label.endsWith(expectedStateLabel)) {
+                    return null;
+                  }
+                  return label;
+                }
+                """,
+                arg={
+                    "displayName": display_name,
+                    "targetTypeLabel": target_type_label,
+                    "expectedStateLabel": expected_state_label,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'Switching to workspace "{display_name}" did not update the workspace '
+                "switcher trigger to the expected active state.\n"
+                f"Observed open action: {clicked_open_label!r}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        return self.observe_trigger(timeout_ms=timeout_ms)
+
     def observe_open_switcher(
         self,
         *,
@@ -1083,37 +1297,25 @@ class LiveWorkspaceSwitcherPage:
             rows=rows,
         )
 
-    def close(self, *, timeout_ms: int = 15_000) -> None:
-        if self._session.count('flt-semantics[role="dialog"],[role="dialog"]') == 0:
-            return
+    def close(
+        self,
+        *,
+        timeout_ms: int = 15_000,
+    ) -> WorkspaceSwitcherEscapeDismissObservation:
         self._session.press_key("Escape")
         try:
-            self._session.wait_for_function(
-                """
-                () => {
-                  const isVisible = (element) => {
-                    if (!element) {
-                      return false;
-                    }
-                    const rect = element.getBoundingClientRect();
-                    const style = window.getComputedStyle(element);
-                    return rect.width > 0
-                      && rect.height > 0
-                      && style.visibility !== 'hidden'
-                      && style.display !== 'none';
-                  };
-                  return !Array.from(
-                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
-                  ).some((candidate) => isVisible(candidate));
-                }
-                """,
-                timeout_ms=timeout_ms,
-            )
+            payload = self._wait_for_switcher_surface_hidden(timeout_ms=timeout_ms)
         except WebAppTimeoutError as error:
             raise AssertionError(
-                "Closing the Workspace switcher did not dismiss the dialog.\n"
+                "Closing the visible Workspace switcher surface with Escape did not "
+                "dismiss the panel.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
+        return WorkspaceSwitcherEscapeDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+        )
 
     def observe_trigger(self, *, timeout_ms: int = 30_000) -> WorkspaceSwitcherTriggerObservation:
         payload = self._session.wait_for_function(
@@ -2215,68 +2417,7 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 4_000,
     ) -> WorkspaceSwitcherOutsideDismissObservation:
         try:
-            payload = self._session.wait_for_function(
-                """
-                ({ heading }) => {
-                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-                  const isVisible = (element) => {
-                    if (!element) {
-                      return false;
-                    }
-                    const rect = element.getBoundingClientRect();
-                    const style = window.getComputedStyle(element);
-                    return rect.width > 0
-                      && rect.height > 0
-                      && style.visibility !== 'hidden'
-                      && style.display !== 'none';
-                  };
-                  const visibleText = (element) =>
-                    normalize(element.innerText || element.textContent || '');
-                  const isWorkspaceRow = (text) =>
-                    text.includes('Branch:')
-                    && text.includes('Delete')
-                    && (text.includes('Hosted') || text.includes('Local'))
-                    && (text.includes('Open') || text.includes('Active'));
-                  const surfaceStillVisible = Array.from(document.querySelectorAll('*'))
-                    .filter(isVisible)
-                    .some((element) => {
-                      const text = visibleText(element);
-                      return text.includes(heading)
-                        && (
-                          text.includes('Saved workspaces')
-                          || text.includes('Save and switch')
-                          || text.includes('Add workspace')
-                          || text.includes('Hosted Local')
-                          || isWorkspaceRow(text)
-                        );
-                    });
-                  if (surfaceStillVisible) {
-                    return null;
-                  }
-                  const bodyText = document.body?.innerText ?? '';
-                  const triggerVisible = Array.from(
-                    document.querySelectorAll('flt-semantics[role="button"]'),
-                  )
-                    .filter(isVisible)
-                    .some((element) =>
-                      normalize(element.getAttribute('aria-label') || element.innerText || '')
-                        .startsWith('Workspace switcher:'),
-                    );
-                  const dashboardVisible = Array.from(
-                    document.querySelectorAll('flt-semantics[role="button"]'),
-                  )
-                    .filter(isVisible)
-                    .some((element) => normalize(element.innerText || '') === 'Dashboard');
-                  return {
-                    bodyText,
-                    triggerVisible,
-                    dashboardVisible,
-                  };
-                }
-                """,
-                arg={"heading": self._switcher_heading},
-                timeout_ms=timeout_ms,
-            )
+            payload = self._wait_for_switcher_surface_hidden(timeout_ms=timeout_ms)
         except WebAppTimeoutError as error:
             raise AssertionError(
                 "Step 4 failed: clicking a neutral area outside the workspace switcher "
@@ -2592,6 +2733,13 @@ class LiveWorkspaceSwitcherPage:
             waited_ms=dismissal_timeout_ms,
         )
 
+    def wait_for_escape_dismissal(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+    ) -> WorkspaceSwitcherEscapeDismissObservation:
+        return self.close(timeout_ms=timeout_ms)
+
     def observe_mobile_trigger_focus(
         self,
         *,
@@ -2649,6 +2797,79 @@ class LiveWorkspaceSwitcherPage:
 
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
+
+    def _wait_for_switcher_surface_hidden(
+        self,
+        *,
+        timeout_ms: int,
+    ) -> dict[str, object]:
+        payload = self._session.wait_for_function(
+            """
+            ({ heading }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const visibleText = (element) =>
+                normalize(element.innerText || element.textContent || '');
+              const isWorkspaceRow = (text) =>
+                text.includes('Branch:')
+                && text.includes('Delete')
+                && (text.includes('Hosted') || text.includes('Local'))
+                && (text.includes('Open') || text.includes('Active'));
+              const surfaceStillVisible = Array.from(document.querySelectorAll('*'))
+                .filter(isVisible)
+                .some((element) => {
+                  const text = visibleText(element);
+                  return text.includes(heading)
+                    && (
+                      text.includes('Saved workspaces')
+                      || text.includes('Save and switch')
+                      || text.includes('Add workspace')
+                      || text.includes('Hosted Local')
+                      || isWorkspaceRow(text)
+                    );
+                });
+              if (surfaceStillVisible) {
+                return null;
+              }
+              const bodyText = document.body?.innerText ?? '';
+              const triggerVisible = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .filter(isVisible)
+                .some((element) =>
+                  normalize(element.getAttribute('aria-label') || element.innerText || '')
+                    .startsWith('Workspace switcher:'),
+                );
+              const dashboardVisible = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .filter(isVisible)
+                .some((element) => normalize(element.innerText || '') === 'Dashboard');
+              return {
+                bodyText,
+                triggerVisible,
+                dashboardVisible,
+              };
+            }
+            """,
+            arg={"heading": self._switcher_heading},
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher dismissal probe did not return an observation."
+            )
+        return payload
 
     def _mobile_trigger_snapshot(
         self,
