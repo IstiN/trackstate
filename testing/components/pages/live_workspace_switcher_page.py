@@ -374,6 +374,112 @@ class LiveWorkspaceSwitcherPage:
     def active_element(self) -> FocusedElementObservation:
         return self._session.active_element()
 
+    def focus_switcher_text_field(
+        self,
+        label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> FocusedElementObservation:
+        try:
+            self._session.focus(
+                f'input[aria-label="{label}"]',
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a focusable "{label}" text '
+                "field.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        return self._session.active_element()
+
+    def press_key(self, key: str, *, timeout_ms: int = 30_000) -> None:
+        self._session.press_key(key, timeout_ms=timeout_ms)
+
+    def wait_for_surface_to_remain_open(
+        self,
+        *,
+        stability_ms: int = 1_000,
+        timeout_ms: int = 4_000,
+    ) -> None:
+        self._session.evaluate(
+            """
+            () => {
+              window.__tsWorkspaceSwitcherOpenStability = {
+                visibleSinceMs: null,
+              };
+              return true;
+            }
+            """,
+        )
+        try:
+            self._session.wait_for_function(
+                """
+                ({ heading, stabilityMs }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const visibleText = (element) =>
+                    normalize(element.innerText || element.textContent || '');
+                  const isWorkspaceRow = (text) =>
+                    text.includes('Branch:')
+                    && text.includes('Delete')
+                    && (text.includes('Hosted') || text.includes('Local'))
+                    && (text.includes('Open') || text.includes('Active'));
+                  const surfaceVisible = Array.from(document.querySelectorAll('*'))
+                    .filter(isVisible)
+                    .some((element) => {
+                      const text = visibleText(element);
+                      const aria = normalize(element.getAttribute?.('aria-label') || '');
+                      return text.includes(heading)
+                        && (
+                          text.includes('Saved workspaces')
+                          || text.includes('Save and switch')
+                          || text.includes('Add workspace')
+                          || text.includes('Hosted Local')
+                          || isWorkspaceRow(text)
+                        )
+                        || aria.startsWith('Workspace switcher:');
+                    });
+                  const stabilityState = window.__tsWorkspaceSwitcherOpenStability;
+                  if (!surfaceVisible) {
+                    stabilityState.visibleSinceMs = null;
+                    return null;
+                  }
+                  if (typeof stabilityState.visibleSinceMs !== 'number') {
+                    stabilityState.visibleSinceMs = window.performance.now();
+                    return null;
+                  }
+                  const visibleForMs = window.performance.now() - stabilityState.visibleSinceMs;
+                  return visibleForMs >= stabilityMs
+                    ? {
+                        visibleForMs,
+                      }
+                    : null;
+                }
+                """,
+                arg={
+                    "heading": self._switcher_heading,
+                    "stabilityMs": stability_ms,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The workspace switcher surface did not remain visibly open for the "
+                f"required {stability_ms} ms stability window.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+
     def workspace_trigger_reached(
         self,
         sequence: tuple[FocusNavigationStep, ...],

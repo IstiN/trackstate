@@ -1,0 +1,11 @@
+test_id: TS-825
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored hosted token.
+  - Focuses the visible Repository field inside the open desktop workspace switcher to exercise in-panel keyboard navigation.
+  - Verifies Arrow Down, Shift, and Tab do not dismiss the panel, and Tab keeps focus within the panel by moving to another visible control.
