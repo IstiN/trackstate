@@ -88,9 +88,17 @@ class WorkspaceSwitcherInternalClickObservation:
     target_text: str
 
 
+@dataclass(frozen=True)
 class WorkspaceSwitcherOutsideDismissObservation:
     click_x: float
     click_y: float
+    body_text: str
+    dashboard_visible: bool
+    trigger_visible: bool
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherEscapeDismissObservation:
     body_text: str
     dashboard_visible: bool
     trigger_visible: bool
@@ -1060,37 +1068,25 @@ class LiveWorkspaceSwitcherPage:
             rows=rows,
         )
 
-    def close(self, *, timeout_ms: int = 15_000) -> None:
-        if self._session.count('flt-semantics[role="dialog"],[role="dialog"]') == 0:
-            return
+    def close(
+        self,
+        *,
+        timeout_ms: int = 15_000,
+    ) -> WorkspaceSwitcherEscapeDismissObservation:
         self._session.press_key("Escape")
         try:
-            self._session.wait_for_function(
-                """
-                () => {
-                  const isVisible = (element) => {
-                    if (!element) {
-                      return false;
-                    }
-                    const rect = element.getBoundingClientRect();
-                    const style = window.getComputedStyle(element);
-                    return rect.width > 0
-                      && rect.height > 0
-                      && style.visibility !== 'hidden'
-                      && style.display !== 'none';
-                  };
-                  return !Array.from(
-                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
-                  ).some((candidate) => isVisible(candidate));
-                }
-                """,
-                timeout_ms=timeout_ms,
-            )
+            payload = self._wait_for_switcher_surface_hidden(timeout_ms=timeout_ms)
         except WebAppTimeoutError as error:
             raise AssertionError(
-                "Closing the Workspace switcher did not dismiss the dialog.\n"
+                "Closing the visible Workspace switcher surface with Escape did not "
+                "dismiss the panel.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
+        return WorkspaceSwitcherEscapeDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+        )
 
     def observe_trigger(self, *, timeout_ms: int = 30_000) -> WorkspaceSwitcherTriggerObservation:
         payload = self._session.wait_for_function(
@@ -2192,68 +2188,7 @@ class LiveWorkspaceSwitcherPage:
         timeout_ms: int = 4_000,
     ) -> WorkspaceSwitcherOutsideDismissObservation:
         try:
-            payload = self._session.wait_for_function(
-                """
-                ({ heading }) => {
-                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-                  const isVisible = (element) => {
-                    if (!element) {
-                      return false;
-                    }
-                    const rect = element.getBoundingClientRect();
-                    const style = window.getComputedStyle(element);
-                    return rect.width > 0
-                      && rect.height > 0
-                      && style.visibility !== 'hidden'
-                      && style.display !== 'none';
-                  };
-                  const visibleText = (element) =>
-                    normalize(element.innerText || element.textContent || '');
-                  const isWorkspaceRow = (text) =>
-                    text.includes('Branch:')
-                    && text.includes('Delete')
-                    && (text.includes('Hosted') || text.includes('Local'))
-                    && (text.includes('Open') || text.includes('Active'));
-                  const surfaceStillVisible = Array.from(document.querySelectorAll('*'))
-                    .filter(isVisible)
-                    .some((element) => {
-                      const text = visibleText(element);
-                      return text.includes(heading)
-                        && (
-                          text.includes('Saved workspaces')
-                          || text.includes('Save and switch')
-                          || text.includes('Add workspace')
-                          || text.includes('Hosted Local')
-                          || isWorkspaceRow(text)
-                        );
-                    });
-                  if (surfaceStillVisible) {
-                    return null;
-                  }
-                  const bodyText = document.body?.innerText ?? '';
-                  const triggerVisible = Array.from(
-                    document.querySelectorAll('flt-semantics[role="button"]'),
-                  )
-                    .filter(isVisible)
-                    .some((element) =>
-                      normalize(element.getAttribute('aria-label') || element.innerText || '')
-                        .startsWith('Workspace switcher:'),
-                    );
-                  const dashboardVisible = Array.from(
-                    document.querySelectorAll('flt-semantics[role="button"]'),
-                  )
-                    .filter(isVisible)
-                    .some((element) => normalize(element.innerText || '') === 'Dashboard');
-                  return {
-                    bodyText,
-                    triggerVisible,
-                    dashboardVisible,
-                  };
-                }
-                """,
-                arg={"heading": self._switcher_heading},
-                timeout_ms=timeout_ms,
-            )
+            payload = self._wait_for_switcher_surface_hidden(timeout_ms=timeout_ms)
         except WebAppTimeoutError as error:
             raise AssertionError(
                 "Step 4 failed: clicking a neutral area outside the workspace switcher "
@@ -2268,6 +2203,25 @@ class LiveWorkspaceSwitcherPage:
         return WorkspaceSwitcherOutsideDismissObservation(
             click_x=click_target.x,
             click_y=click_target.y,
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+        )
+
+    def wait_for_escape_dismissal(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+    ) -> WorkspaceSwitcherEscapeDismissObservation:
+        try:
+            payload = self._wait_for_switcher_surface_hidden(timeout_ms=timeout_ms)
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 3 failed: pressing Escape did not dismiss the visible workspace "
+                "switcher surface.\n"
+                f"Observed body text after Escape:\n{self.current_body_text()}",
+            ) from error
+        return WorkspaceSwitcherEscapeDismissObservation(
             body_text=str(payload.get("bodyText", "")),
             dashboard_visible=bool(payload.get("dashboardVisible")),
             trigger_visible=bool(payload.get("triggerVisible")),
@@ -2330,6 +2284,79 @@ class LiveWorkspaceSwitcherPage:
 
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()
+
+    def _wait_for_switcher_surface_hidden(
+        self,
+        *,
+        timeout_ms: int,
+    ) -> dict[str, object]:
+        payload = self._session.wait_for_function(
+            """
+            ({ heading }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const visibleText = (element) =>
+                normalize(element.innerText || element.textContent || '');
+              const isWorkspaceRow = (text) =>
+                text.includes('Branch:')
+                && text.includes('Delete')
+                && (text.includes('Hosted') || text.includes('Local'))
+                && (text.includes('Open') || text.includes('Active'));
+              const surfaceStillVisible = Array.from(document.querySelectorAll('*'))
+                .filter(isVisible)
+                .some((element) => {
+                  const text = visibleText(element);
+                  return text.includes(heading)
+                    && (
+                      text.includes('Saved workspaces')
+                      || text.includes('Save and switch')
+                      || text.includes('Add workspace')
+                      || text.includes('Hosted Local')
+                      || isWorkspaceRow(text)
+                    );
+                });
+              if (surfaceStillVisible) {
+                return null;
+              }
+              const bodyText = document.body?.innerText ?? '';
+              const triggerVisible = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .filter(isVisible)
+                .some((element) =>
+                  normalize(element.getAttribute('aria-label') || element.innerText || '')
+                    .startsWith('Workspace switcher:'),
+                );
+              const dashboardVisible = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .filter(isVisible)
+                .some((element) => normalize(element.innerText || '') === 'Dashboard');
+              return {
+                bodyText,
+                triggerVisible,
+                dashboardVisible,
+              };
+            }
+            """,
+            arg={"heading": self._switcher_heading},
+            timeout_ms=timeout_ms,
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher dismissal probe did not return an observation."
+            )
+        return payload
 
     def _mobile_trigger_snapshot(
         self,

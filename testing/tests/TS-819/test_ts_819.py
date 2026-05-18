@@ -12,15 +12,16 @@ if str(REPO_ROOT) not in sys.path:
 
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     LiveWorkspaceSwitcherPage,
+    WorkspaceSwitcherEscapeDismissObservation,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherPanelObservation,
+    WorkspaceSwitcherTransitionMonitorObservation,
     WorkspaceSwitcherTriggerObservation,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
-from testing.core.interfaces.web_app_session import FocusedElementObservation  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
     create_live_tracker_app_with_stored_token,
 )
@@ -188,7 +189,19 @@ def main() -> None:
                 )
 
                 try:
-                    page.close(timeout_ms=ESCAPE_DISMISS_TIMEOUT_MS)
+                    page.start_transition_monitor()
+                    dismissal = page.close(timeout_ms=ESCAPE_DISMISS_TIMEOUT_MS)
+                    escape_monitor = page.read_transition_monitor(clear=True)
+                    result["escape_dismissal_observation"] = _escape_dismissal_payload(
+                        dismissal,
+                    )
+                    result["escape_transition_monitor"] = _transition_monitor_payload(
+                        escape_monitor,
+                    )
+                    _assert_escape_surface_dismissal(
+                        dismissal=dismissal,
+                        monitor=escape_monitor,
+                    )
                 except Exception as error:
                     _record_step(
                         result,
@@ -204,26 +217,49 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[2],
                     observed=(
-                        "Pressed Escape while the workspace switcher panel was visible and "
-                        f"the panel dismissed within {ESCAPE_DISMISS_TIMEOUT_MS} ms."
+                        "Pressed Escape while the visible workspace switcher surface was "
+                        "open and the transition monitor observed the panel disappear "
+                        f"within {ESCAPE_DISMISS_TIMEOUT_MS} ms."
                     ),
                 )
 
                 try:
                     trigger_after = page.observe_trigger()
-                    focused_after = page.active_element()
-                    body_text_after = page.current_body_text()
-                    visible_panel_markers = _visible_switcher_markers(body_text_after)
                     result["trigger_after"] = _trigger_payload(trigger_after)
-                    result["focused_after"] = _focused_payload(focused_after)
-                    result["body_text_after_escape"] = body_text_after
-                    result["visible_panel_markers_after_escape"] = visible_panel_markers
-                    _assert_escape_dismissal(
+                    page.press_enter_on_active_element_and_wait_for_surface(
+                        timeout_ms=ESCAPE_DISMISS_TIMEOUT_MS,
+                    )
+                    keyboard_reopen_switcher = page.observe_open_switcher(
+                        timeout_ms=ESCAPE_DISMISS_TIMEOUT_MS,
+                    )
+                    keyboard_reopen_panel = page.observe_open_panel(
+                        expected_container_kinds=("anchored-panel", "surface"),
+                        timeout_ms=ESCAPE_DISMISS_TIMEOUT_MS,
+                    )
+                    result["keyboard_reopen_switcher_observation"] = _switcher_payload(
+                        keyboard_reopen_switcher,
+                    )
+                    result["keyboard_reopen_panel_observation"] = {
+                        "title_text": keyboard_reopen_panel.title_text,
+                        "container_kind": keyboard_reopen_panel.container_kind,
+                        "container_role": keyboard_reopen_panel.container_role,
+                        "container_text": keyboard_reopen_panel.container_text,
+                        "anchored_to_trigger": keyboard_reopen_panel.anchored_to_trigger,
+                        "bottom_aligned": keyboard_reopen_panel.bottom_aligned,
+                        "full_screen_like": keyboard_reopen_panel.full_screen_like,
+                        "background_dimmed": keyboard_reopen_panel.background_dimmed,
+                        "bounds": {
+                            "left": keyboard_reopen_panel.left,
+                            "top": keyboard_reopen_panel.top,
+                            "width": keyboard_reopen_panel.width,
+                            "height": keyboard_reopen_panel.height,
+                        },
+                    }
+                    _assert_escape_focus_return(
                         trigger_before=trigger_before,
                         trigger_after=trigger_after,
-                        focused_after=focused_after,
-                        body_text_after=body_text_after,
-                        visible_panel_markers=visible_panel_markers,
+                        keyboard_reopen_switcher=keyboard_reopen_switcher,
+                        keyboard_reopen_panel=keyboard_reopen_panel,
                     )
                 except Exception as error:
                     _record_step(
@@ -240,22 +276,22 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[3],
                     observed=(
-                        "The workspace switcher panel was no longer visible, Dashboard "
-                        "remained visible, and keyboard focus returned to the workspace "
-                        f"switcher trigger ({trigger_after.semantic_label!r})."
+                        "The workspace switcher surface disappeared, the trigger still "
+                        "showed the same active workspace, and pressing Enter without "
+                        "clicking reopened the switcher from the restored trigger focus."
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
                         "Opened the desktop workspace switcher, pressed Escape, and "
-                        "checked the visible UI exactly as a user would after closing a "
-                        "popover."
+                        "used the keyboard again without clicking to confirm the trigger "
+                        "remained the active user-visible control."
                     ),
                     observed=(
                         f"trigger_after={trigger_after.semantic_label!r}; "
-                        f"focused_label={(focused_after.accessible_name or focused_after.text)!r}; "
-                        f"focused_role={focused_after.role!r}"
+                        f"keyboard_reopen_kind={keyboard_reopen_panel.container_kind!r}; "
+                        f"keyboard_reopen_rows={keyboard_reopen_switcher.row_count}"
                     ),
                 )
             except Exception:
@@ -316,13 +352,50 @@ def _assert_desktop_panel_open(
         )
 
 
-def _assert_escape_dismissal(
+def _assert_escape_surface_dismissal(
+    *,
+    dismissal: WorkspaceSwitcherEscapeDismissObservation,
+    monitor: WorkspaceSwitcherTransitionMonitorObservation,
+) -> None:
+    failures: list[str] = []
+
+    if not dismissal.dashboard_visible:
+        failures.append(
+            "the main Dashboard shell was not visibly present after Escape",
+        )
+    if not dismissal.trigger_visible:
+        failures.append(
+            "the workspace switcher trigger was not visible after Escape",
+        )
+    if monitor.sample_count <= 0 or monitor.visible_sample_count <= 0:
+        failures.append(
+            "the transition monitor did not capture the visible workspace switcher "
+            "surface before Escape",
+        )
+    if not monitor.ever_hidden_after_visible:
+        failures.append(
+            "the transition monitor never observed the visible workspace switcher "
+            "surface disappear after Escape",
+        )
+
+    if failures:
+        raise AssertionError(
+            "Step 3 failed: pressing Escape did not dismiss the user-visible workspace "
+            "switcher surface reliably.\n"
+            + "\n".join(f"- {item}" for item in failures)
+            + "\n"
+            + f"Observed monitor kinds: {list(monitor.observed_container_kinds)!r}\n"
+            + f"Observed monitor row counts: {list(monitor.observed_row_counts)!r}\n"
+            + f"Observed body text:\n{dismissal.body_text}",
+        )
+
+
+def _assert_escape_focus_return(
     *,
     trigger_before: WorkspaceSwitcherTriggerObservation,
     trigger_after: WorkspaceSwitcherTriggerObservation,
-    focused_after: FocusedElementObservation,
-    body_text_after: str,
-    visible_panel_markers: list[str],
+    keyboard_reopen_switcher: WorkspaceSwitcherObservation,
+    keyboard_reopen_panel: WorkspaceSwitcherPanelObservation,
 ) -> None:
     failures: list[str] = []
 
@@ -332,51 +405,24 @@ def _assert_escape_dismissal(
             f"workspace state (before={trigger_before.semantic_label!r}, "
             f"after={trigger_after.semantic_label!r})",
         )
-    if "Dashboard" not in body_text_after:
-        failures.append(
-            "the main Dashboard shell was not visibly present after Escape",
+    try:
+        _assert_desktop_panel_open(
+            trigger=trigger_after,
+            switcher=keyboard_reopen_switcher,
+            panel=keyboard_reopen_panel,
         )
-    if visible_panel_markers:
+    except AssertionError as error:
         failures.append(
-            "workspace switcher panel text was still visible after Escape "
-            f"(markers={visible_panel_markers!r})",
-        )
-
-    focused_label = (focused_after.accessible_name or focused_after.text or "").strip()
-    if focused_label != trigger_after.semantic_label:
-        failures.append(
-            "keyboard focus did not return to the workspace switcher trigger "
-            f"(expected={trigger_after.semantic_label!r}, observed={focused_label!r})",
-        )
-    if focused_after.role not in {"button", None}:
-        failures.append(
-            "the focused element after Escape was not a button-like workspace "
-            f"switcher trigger (role={focused_after.role!r})",
+            "pressing Enter immediately after Escape did not reopen the visible "
+            f"workspace switcher from the restored trigger focus ({error})",
         )
 
     if failures:
         raise AssertionError(
-            "Step 4 failed: pressing Escape did not fully dismiss the workspace "
-            "switcher with correct post-dismiss focus.\n"
+            "Step 4 failed: after Escape, the workspace switcher trigger was not left "
+            "in the expected keyboard-usable state.\n"
             + "\n".join(f"- {item}" for item in failures)
-            + "\n"
-            + f"Observed focused tag: {focused_after.tag_name!r}\n"
-            + f"Observed focused HTML: {focused_after.outer_html}\n"
-            + f"Observed body text:\n{body_text_after}",
         )
-
-
-def _visible_switcher_markers(body_text: str) -> list[str]:
-    normalized = " ".join(body_text.split())
-    return [
-        marker
-        for marker in (
-            "Saved workspaces",
-            "Save and switch",
-            "Add workspace",
-        )
-        if marker in normalized
-    ]
 
 
 def _record_step(
@@ -740,14 +786,13 @@ def _trigger_payload(trigger: WorkspaceSwitcherTriggerObservation) -> dict[str, 
     }
 
 
-def _focused_payload(observation: FocusedElementObservation) -> dict[str, object]:
+def _escape_dismissal_payload(
+    observation: WorkspaceSwitcherEscapeDismissObservation,
+) -> dict[str, object]:
     return {
-        "tag_name": observation.tag_name,
-        "role": observation.role,
-        "accessible_name": observation.accessible_name,
-        "text": observation.text,
-        "tabindex": observation.tabindex,
-        "outer_html": observation.outer_html,
+        "body_text": observation.body_text,
+        "dashboard_visible": observation.dashboard_visible,
+        "trigger_visible": observation.trigger_visible,
     }
 
 
@@ -768,6 +813,27 @@ def _switcher_payload(switcher: WorkspaceSwitcherObservation) -> dict[str, objec
             }
             for row in switcher.rows
         ],
+    }
+
+
+def _transition_monitor_payload(
+    monitor: WorkspaceSwitcherTransitionMonitorObservation,
+) -> dict[str, object]:
+    return {
+        "sample_count": monitor.sample_count,
+        "visible_sample_count": monitor.visible_sample_count,
+        "hidden_sample_count": monitor.hidden_sample_count,
+        "ever_hidden_after_visible": monitor.ever_hidden_after_visible,
+        "observed_container_kinds": list(monitor.observed_container_kinds),
+        "observed_row_counts": list(monitor.observed_row_counts),
+        "observed_active_workspace_names": list(
+            monitor.observed_active_workspace_names,
+        ),
+        "latest_visible_container_kind": monitor.latest_visible_container_kind,
+        "latest_visible_row_count": monitor.latest_visible_row_count,
+        "latest_visible_active_workspace_name": (
+            monitor.latest_visible_active_workspace_name
+        ),
     }
 
 
