@@ -24,6 +24,7 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
     StoredWorkspaceProfilesRuntime,
@@ -39,6 +40,7 @@ DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-demo"
 LOCAL_DISPLAY_NAME = "Active local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
+TRIGGER_WAIT_SECONDS = 90
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -91,6 +93,7 @@ def main() -> None:
         "user_login": user.login,
         "preloaded_workspace_state": workspace_state,
         "prepared_local_workspace": prepared_local_workspace,
+        "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
         "steps": [],
         "human_verification": [],
     }
@@ -425,37 +428,6 @@ def _ensure_active_local_precondition(
     result: dict[str, object],
 ) -> WorkspaceSwitcherTriggerObservation:
     trigger = initial_trigger
-    if not _trigger_matches_active_local_precondition(trigger):
-        switcher = page.open_and_observe()
-        result["precondition_switcher_before_switch"] = _switcher_payload(switcher)
-        local_row = _find_named_local_row(switcher)
-        result["precondition_local_row_before_switch"] = (
-            _row_payload(local_row)
-            if local_row is not None
-            else {
-                "matched_display_name": LOCAL_DISPLAY_NAME,
-                "matched_target": LOCAL_TARGET,
-                "available_rows": [_row_payload(row) for row in switcher.rows],
-                "switcher_text": switcher.switcher_text,
-            }
-        )
-        try:
-            trigger = page.switch_to_workspace(
-                display_name=LOCAL_DISPLAY_NAME,
-                target_type_label="Local",
-                detail_contains=LOCAL_TARGET,
-                expected_state_label="Local Git",
-            )
-        except AssertionError as error:
-            raise AssertionError(
-                "Precondition failed before step 1: the app could not activate the "
-                "prepared local workspace before the TS-808 checks began.\n"
-                f"Observed trigger label: {trigger.semantic_label!r}\n"
-                f"Observed switcher text:\n{switcher.switcher_text}\n"
-                f"{error}"
-            ) from error
-        result["precondition_trigger_after_switch"] = _trigger_payload(trigger)
-
     current_body_text = page.current_body_text()
     if "Connect GitHub" in current_body_text:
         connection_body_text = settings_page.ensure_connected(
@@ -468,25 +440,72 @@ def _ensure_active_local_precondition(
         trigger = page.observe_trigger()
         result["precondition_trigger_after_connect"] = _trigger_payload(trigger)
 
+    restored, trigger = poll_until(
+        probe=lambda: page.observe_trigger(timeout_ms=10_000),
+        is_satisfied=_trigger_matches_active_local_precondition,
+        timeout_seconds=TRIGGER_WAIT_SECONDS,
+        interval_seconds=5,
+    )
+    result["precondition_trigger_after_wait"] = _trigger_payload(trigger)
+    result["precondition_restored_within_wait"] = restored
     if _trigger_matches_active_local_precondition(trigger):
         return trigger
 
     switcher = page.open_and_observe()
-    result["precondition_switcher_observation"] = _switcher_payload(switcher)
+    result["precondition_switcher_before_switch"] = _switcher_payload(switcher)
     local_row = _find_named_local_row(switcher)
     local_row_summary = (
         _row_payload(local_row)
         if local_row is not None
         else {
-            "matched_display_name": LOCAL_DISPLAY_NAME,
-            "matched_target": LOCAL_TARGET,
-            "available_rows": [_row_payload(row) for row in switcher.rows],
-        }
+                "matched_display_name": LOCAL_DISPLAY_NAME,
+                "matched_target": LOCAL_TARGET,
+                "available_rows": [_row_payload(row) for row in switcher.rows],
+                "switcher_text": switcher.switcher_text,
+            }
     )
+    result["precondition_local_row_before_switch"] = local_row_summary
+    if local_row is not None and local_row.state_label == "Local Git":
+        try:
+            trigger = page.switch_to_workspace(
+                display_name=LOCAL_DISPLAY_NAME,
+                target_type_label="Local",
+                detail_contains=LOCAL_TARGET,
+                expected_state_label="Local Git",
+            )
+        except AssertionError as error:
+            raise AssertionError(
+                "Precondition failed before step 1: startup did not restore the prepared "
+                f"active local workspace within {TRIGGER_WAIT_SECONDS} seconds, and the "
+                "app could not activate the local workspace manually before the TS-808 "
+                "checks began.\n"
+                f"Observed trigger label after wait: {trigger.semantic_label!r}\n"
+                f"Observed local row: {json.dumps(local_row_summary, indent=2)}\n"
+                f"Observed switcher text:\n{switcher.switcher_text}\n"
+                f"{error}"
+            ) from error
+        result["precondition_trigger_after_switch"] = _trigger_payload(trigger)
+        if "Connect GitHub" in page.current_body_text():
+            connection_body_text = settings_page.ensure_connected(
+                token=token,
+                repository=repository,
+                user_login=user_login,
+            )
+            result["precondition_connection_body_text_after_switch"] = (
+                connection_body_text
+            )
+            page.dismiss_connection_banner()
+            trigger = page.observe_trigger()
+            result["precondition_trigger_after_connect"] = _trigger_payload(trigger)
+        if _trigger_matches_active_local_precondition(trigger):
+            return trigger
+
     raise AssertionError(
-        "Precondition failed before step 1: the app could not reach the prepared "
-        "signed-in active local workspace state required for TS-808.\n"
-        f"Observed trigger label: {trigger.semantic_label!r}\n"
+        "Precondition failed before step 1: after waiting "
+        f"{TRIGGER_WAIT_SECONDS} seconds for startup restoration, the app still could "
+        "not reach the prepared signed-in active local workspace state required for "
+        "TS-808.\n"
+        f"Observed trigger label after wait: {trigger.semantic_label!r}\n"
         f"Observed local row: {json.dumps(local_row_summary, indent=2)}\n"
         f"Observed switcher text:\n{switcher.switcher_text}"
     )
@@ -915,8 +934,8 @@ def _bug_title(result: dict[str, object]) -> str:
         )
     if "Precondition failed before step 1" in error:
         return (
-            f"{TICKET_KEY} - Could not reach the signed-in active local workspace "
-            "before verification"
+            f"{TICKET_KEY} - Startup did not restore the signed-in active local "
+            "workspace before verification"
         )
     return (
         f"{TICKET_KEY} - Active local workspace did not meet the signed-in Local Git "
@@ -941,10 +960,10 @@ def _bug_capability_gap(result: dict[str, object]) -> str:
         )
     if "Precondition failed before step 1" in error:
         return (
-            "The app could not reach the signed-in active local workspace state needed "
-            "for the TS-808 row-level visibility check. After the automation selected "
-            "`Open: Active local workspace` and `Save and switch`, the trigger still "
-            "showed the hosted workspace and the local row remained `Local Unavailable`."
+            "After waiting for startup restoration, the app still could not reach the "
+            "signed-in active local workspace state needed for the TS-808 row-level "
+            "visibility check. The trigger remained on the hosted workspace and the "
+            "prepared local row did not become the active `Local Git` workspace."
         )
     return (
         "The TS-808 scenario could not reach the expected signed-in active local "
