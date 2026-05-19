@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 import json
 import platform
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -22,6 +23,10 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
 )
+from testing.components.services.live_workspace_switcher_visual_probe import (  # noqa: E402
+    LiveWorkspaceSwitcherVisualProbe,
+    WorkspaceSwitcherTriggerVisualObservation,
+)
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.core.interfaces.web_app_session import FocusedElementObservation  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
@@ -33,6 +38,7 @@ TEST_CASE_TITLE = (
     "Condensed workspace switcher trigger activation - surface opens using Space key in mobile layout"
 )
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-846/test_ts_846.py"
+DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
 MOBILE_VIEWPORT = {"width": 375, "height": 812}
 TRIGGER_FOCUS_TIMEOUT_MS = 6_000
 SURFACE_OPEN_TIMEOUT_MS = 6_000
@@ -76,6 +82,7 @@ def main() -> None:
 
     config = load_live_setup_test_config()
     service = LiveSetupRepositoryService(config=config)
+    visual_probe = LiveWorkspaceSwitcherVisualProbe()
     token = service.token
     if not token:
         raise RuntimeError(
@@ -93,6 +100,7 @@ def main() -> None:
         "os": platform.platform(),
         "run_command": RUN_COMMAND,
         "expected_result": EXPECTED_RESULT,
+        "desktop_viewport": DESKTOP_VIEWPORT,
         "mobile_viewport": MOBILE_VIEWPORT,
         "trigger_focus_timeout_ms": TRIGGER_FOCUS_TIMEOUT_MS,
         "surface_open_timeout_ms": SURFACE_OPEN_TIMEOUT_MS,
@@ -108,7 +116,10 @@ def main() -> None:
         with create_live_tracker_app_with_stored_token(config, token=token) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
+                desktop_trigger: WorkspaceSwitcherTriggerObservation | None = None
+                desktop_trigger_visual: WorkspaceSwitcherTriggerVisualObservation | None = None
                 trigger: WorkspaceSwitcherTriggerObservation | None = None
+                trigger_visual: WorkspaceSwitcherTriggerVisualObservation | None = None
                 try:
                     runtime = tracker_page.open()
                     result["runtime_state"] = runtime.kind
@@ -123,10 +134,34 @@ def main() -> None:
 
                     page.dismiss_connection_banner()
                     page.navigate_to_section("Dashboard")
+                    page.set_viewport(**DESKTOP_VIEWPORT)
+                    desktop_trigger = page.observe_trigger()
+                    desktop_trigger_visual = _observe_trigger_visual(
+                        page=page,
+                        visual_probe=visual_probe,
+                        trigger=desktop_trigger,
+                    )
+                    result["desktop_trigger_observation"] = {
+                        **_trigger_payload(desktop_trigger),
+                        "visual_observation": asdict(desktop_trigger_visual),
+                    }
                     page.set_viewport(**MOBILE_VIEWPORT)
                     trigger = page.observe_trigger()
-                    result["trigger_observation"] = _trigger_payload(trigger)
-                    _assert_mobile_trigger(trigger)
+                    trigger_visual = _observe_trigger_visual(
+                        page=page,
+                        visual_probe=visual_probe,
+                        trigger=trigger,
+                    )
+                    result["trigger_observation"] = {
+                        **_trigger_payload(trigger),
+                        "visual_observation": asdict(trigger_visual),
+                    }
+                    _assert_mobile_trigger(
+                        trigger,
+                        desktop_trigger=desktop_trigger,
+                        desktop_trigger_visual=desktop_trigger_visual,
+                        trigger_visual=trigger_visual,
+                    )
                 except AssertionError as error:
                     _record_step(
                         result,
@@ -143,24 +178,31 @@ def main() -> None:
                     action=REQUEST_STEPS[0],
                     observed=(
                         f"Opened {config.app_url} in Chromium at "
+                        f"{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']} then "
                         f"{MOBILE_VIEWPORT['width']}x{MOBILE_VIEWPORT['height']}; "
                         f"trigger_label={trigger.semantic_label!r}; "
                         f"trigger_text={trigger.visible_text!r}; "
                         f"trigger_bounds=({trigger.left:.1f}, {trigger.top:.1f}, "
-                        f"{trigger.width:.1f}, {trigger.height:.1f})"
+                        f"{trigger.width:.1f}, {trigger.height:.1f}); "
+                        f"desktop_height={desktop_trigger.height:.1f}; "
+                        f"mobile_visual_icon_visible={trigger_visual.icon_visible}; "
+                        f"mobile_text_band_count={trigger_visual.text_band_count}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
                         "Viewed the compact/mobile app shell and confirmed the condensed "
-                        "workspace switcher trigger was visibly present before starting "
+                        "icon-led workspace switcher trigger was visibly present before starting "
                         "keyboard navigation."
                     ),
                     observed=(
                         f"trigger_text={trigger.visible_text!r}; "
                         f"raw_text_lines={list(trigger.raw_text_lines)!r}; "
                         f"icon_count={trigger.icon_count}; "
+                        f"visual_icon_visible={trigger_visual.icon_visible}; "
+                        f"text_band_count={trigger_visual.text_band_count}; "
+                        f"desktop_text_band_count={desktop_trigger_visual.text_band_count}; "
                         f"top_buttons={list(trigger.top_button_labels)!r}"
                     ),
                 )
@@ -326,7 +368,13 @@ def main() -> None:
     print(f"{TICKET_KEY} passed")
 
 
-def _assert_mobile_trigger(trigger: WorkspaceSwitcherTriggerObservation) -> None:
+def _assert_mobile_trigger(
+    trigger: WorkspaceSwitcherTriggerObservation,
+    *,
+    desktop_trigger: WorkspaceSwitcherTriggerObservation,
+    desktop_trigger_visual: WorkspaceSwitcherTriggerVisualObservation,
+    trigger_visual: WorkspaceSwitcherTriggerVisualObservation,
+) -> None:
     if not trigger.semantic_label.startswith("Workspace switcher:"):
         raise AssertionError(
             "Step 1 failed: the compact layout did not expose a visible workspace "
@@ -351,6 +399,34 @@ def _assert_mobile_trigger(trigger: WorkspaceSwitcherTriggerObservation) -> None
         raise AssertionError(
             "Step 1 failed: the trigger did not appear in the stacked mobile header area.\n"
             f"Observed top offset: {trigger.top}",
+        )
+    if trigger.height <= desktop_trigger.height:
+        raise AssertionError(
+            "Step 1 failed: the compact workspace switcher did not visibly change from "
+            "the desktop trigger height.\n"
+            f"Desktop height: {desktop_trigger.height}\n"
+            f"Compact height: {trigger.height}",
+        )
+    if trigger.icon_count <= 0 and not trigger_visual.icon_visible:
+        raise AssertionError(
+            "Step 1 failed: the compact workspace switcher did not keep a visible "
+            "leading icon for the required icon-led mobile presentation.\n"
+            f"Observed semantic icon_count: {trigger.icon_count}\n"
+            f"Observed visual icon: {trigger_visual.icon_visible}",
+        )
+    if trigger_visual.text_band_count < 2:
+        raise AssertionError(
+            "Step 1 failed: the compact workspace switcher did not render the expected "
+            "stacked mobile text treatment.\n"
+            f"Observed text bands: {trigger_visual.text_band_count}\n"
+            f"Observed band boxes: {list(trigger_visual.text_band_boxes)!r}",
+        )
+    if trigger_visual.text_band_count <= desktop_trigger_visual.text_band_count:
+        raise AssertionError(
+            "Step 1 failed: the compact workspace switcher did not visibly condense "
+            "the text structure relative to desktop.\n"
+            f"Desktop text bands: {desktop_trigger_visual.text_band_count}\n"
+            f"Compact text bands: {trigger_visual.text_band_count}",
         )
     if any(label in DESKTOP_SECTION_LABELS for label in trigger.top_button_labels):
         raise AssertionError(
@@ -490,9 +566,13 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. Linked bug context",
         "* TS-843 is marked *Done*; this test verifies the deployed Space-key fix also works for the condensed/mobile trigger variation.",
         "",
+        "h4. Rework changes",
+        "* Added compact-trigger proof that compares desktop and mobile presentations before the Space-key action.",
+        "* Added visual icon detection and condensed text-band checks so TS-846 only passes on the icon-led mobile trigger variant.",
+        "",
         "h4. What was tested",
         "* Opened the deployed TrackState app in Chromium with a stored hosted token.",
-        "* Resized the live app to a compact mobile viewport and confirmed the condensed workspace switcher trigger was visible.",
+        "* Compared the desktop and mobile trigger presentations, then confirmed the compact trigger stayed icon-led and visually condensed.",
         "* Reached the condensed trigger through real keyboard Tab navigation.",
         "* Pressed the Space key on the focused trigger.",
         "* Verified that the visible mobile switcher surface opened with its title and workspace content.",
@@ -544,9 +624,13 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Linked bug context",
         "- TS-843 is already marked **Done**; this automation verifies the same Space-key fix on the condensed/mobile trigger path.",
         "",
+        "## Rework changes",
+        "- Added desktop-vs-mobile trigger comparison before the keyboard flow.",
+        "- Added visual icon detection and condensed text-band assertions so the test only passes on the icon-led mobile trigger variation.",
+        "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token.",
-        "- Resized to a compact mobile viewport and verified the condensed workspace switcher trigger was visible.",
+        "- Compared the desktop and compact trigger presentations and verified the compact trigger remained icon-led and visually condensed.",
         "- Reached the trigger through a real keyboard Tab path.",
         "- Pressed `Space` on the focused trigger.",
         "- Verified the visible mobile switcher surface opened with the expected title and workspace content.",
@@ -595,8 +679,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Test Automation Summary",
         "",
         (
-            "- Added TS-846 live mobile coverage for keyboard Space activation of the "
-            "condensed workspace switcher trigger."
+            "- Strengthened TS-846 so it proves the condensed/icon-led mobile trigger "
+            "before exercising Space-key activation."
         ),
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
@@ -678,6 +762,7 @@ def _bug_description(result: dict[str, object]) -> str:
             "```json",
             json.dumps(
                 {
+                    "desktop_trigger_observation": result.get("desktop_trigger_observation"),
                     "trigger_observation": result.get("trigger_observation"),
                     "trigger_focus_reach_observation": result.get(
                         "trigger_focus_reach_observation",
@@ -708,7 +793,8 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
             ],
             (
                 "The production compact/mobile layout does not expose the expected "
-                "condensed workspace switcher trigger presentation needed for the Space-key scenario."
+                "condensed/icon-led workspace switcher trigger presentation needed for "
+                "the Space-key scenario."
             ),
         )
     if failed_step == 2:
@@ -917,6 +1003,29 @@ def _switcher_payload(observation: WorkspaceSwitcherObservation) -> dict[str, ob
         "row_count": observation.row_count,
         "rows": [asdict(row) for row in observation.rows],
     }
+
+
+def _observe_trigger_visual(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    visual_probe: LiveWorkspaceSwitcherVisualProbe,
+    trigger: WorkspaceSwitcherTriggerObservation,
+) -> WorkspaceSwitcherTriggerVisualObservation:
+    with tempfile.NamedTemporaryFile(
+        dir=OUTPUTS_DIR,
+        prefix="ts846_trigger_",
+        suffix=".png",
+        delete=False,
+    ) as handle:
+        screenshot_path = Path(handle.name)
+    try:
+        page.screenshot(str(screenshot_path))
+        return visual_probe.observe_trigger(
+            screenshot_path=screenshot_path,
+            trigger=trigger,
+        )
+    finally:
+        screenshot_path.unlink(missing_ok=True)
 
 
 def _focus_sequence_summary(sequence: tuple[FocusNavigationStep, ...]) -> str:
