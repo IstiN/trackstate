@@ -17,6 +17,7 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     WorkspaceSwitcherSurfaceReferenceObservation,
     WorkspaceSwitcherTriggerObservation,
     WorkspaceTriggerAriaControlsObservation,
+    WorkspaceTriggerAriaControlsTargetObservation,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
@@ -44,12 +45,14 @@ REQUEST_STEPS = [
     "Open the application and locate the workspace switcher trigger element.",
     "Inspect the DOM attributes of the trigger element without clicking it.",
     "Retrieve the value of the 'aria-controls' attribute.",
-    "Open the workspace switcher surface and read the visible surface id.",
-    "Verify that the initial aria-controls value matches the workspace switcher surface id.",
+    "Before any click, verify that the initial aria-controls value already references an existing DOM element.",
+    "Open the workspace switcher surface and read its visible surface id.",
+    "Verify that the initial aria-controls value matches the visible workspace switcher surface id.",
 ]
 EXPECTED_RESULT = (
-    "The 'aria-controls' attribute is present on the trigger by default, and its initial "
-    "value matches the id of the workspace switcher surface when the surface is opened."
+    "The 'aria-controls' attribute is present on the trigger by default, its initial value "
+    "already references an existing DOM element before interaction, and that same value "
+    "matches the id of the workspace switcher surface when the surface is opened."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -64,21 +67,13 @@ FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts860_failure.png"
 
 REVIEW_THREAD_REPLIES: tuple[dict[str, object], ...] = (
     {
-        "inReplyToId": 3266368930,
-        "threadId": "PRRT_kwDOSU6Gf86DJ2HX",
+        "inReplyToId": 3266448094,
+        "threadId": "PRRT_kwDOSU6Gf86DKEHz",
         "reply": (
-            "Fixed: the test now records the trigger's initial `aria-controls` value, "
-            "opens the workspace switcher surface, and asserts that the initial value "
-            "matches the actual visible switcher surface id instead of only checking "
-            "for any same-id DOM node."
-        ),
-    },
-    {
-        "inReplyToId": None,
-        "threadId": None,
-        "reply": (
-            "Fixed: tightened the verification to the real workspace switcher surface id "
-            "and added the missing `testing/tests/TS-860/README.md`."
+            "Fixed: added a pre-click assertion with "
+            "`observe_trigger_aria_controls_target()` so the test now proves the initial "
+            "`aria-controls` target already exists in the DOM before opening the switcher, "
+            "then keeps the opened-surface id comparison as the second half of the check."
         ),
     },
 )
@@ -125,6 +120,7 @@ def main() -> None:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             trigger: WorkspaceSwitcherTriggerObservation | None = None
             trigger_aria: WorkspaceTriggerAriaControlsObservation | None = None
+            trigger_target: WorkspaceTriggerAriaControlsTargetObservation | None = None
             surface: WorkspaceSwitcherSurfaceObservation | None = None
             surface_reference: WorkspaceSwitcherSurfaceReferenceObservation | None = None
 
@@ -242,6 +238,63 @@ def main() -> None:
                 )
 
             try:
+                trigger_target = page.observe_trigger_aria_controls_target(
+                    timeout_ms=TRIGGER_ATTRIBUTE_TIMEOUT_MS,
+                )
+                result["trigger_aria_controls_target_observation"] = (
+                    _trigger_aria_target_payload(trigger_target)
+                )
+                _assert_trigger_aria_controls_target_exists(
+                    trigger=trigger_aria,
+                    target=trigger_target,
+                )
+            except AssertionError as error:
+                failures.append(str(error))
+                _record_step(
+                    result,
+                    step=4,
+                    status="failed",
+                    action=REQUEST_STEPS[3],
+                    observed=str(error),
+                )
+            except Exception as error:
+                _record_step(
+                    result,
+                    step=4,
+                    status="failed",
+                    action=REQUEST_STEPS[3],
+                    observed=str(error),
+                )
+                _capture_failure_screenshot(page, result)
+                raise
+            else:
+                _record_step(
+                    result,
+                    step=4,
+                    status="passed",
+                    action=REQUEST_STEPS[3],
+                    observed=(
+                        f"trigger_aria_controls={trigger_target.trigger_aria_controls!r}; "
+                        f"controlled_element_found={trigger_target.controlled_element_found!r}; "
+                        f"controlled_element_id={trigger_target.controlled_element_id!r}; "
+                        f"controlled_element_role={trigger_target.controlled_element_role!r}; "
+                        f"controlled_element_tag={trigger_target.controlled_element_tag_name!r}"
+                    ),
+                )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Verified before any click that the trigger's initial "
+                        "accessibility relationship already pointed at a real DOM node."
+                    ),
+                    observed=(
+                        f"aria_controls={trigger_target.trigger_aria_controls!r}; "
+                        f"controlled_element_id={trigger_target.controlled_element_id!r}; "
+                        f"controlled_element_visible={trigger_target.controlled_element_visible!r}"
+                    ),
+                )
+
+            try:
                 page.open_surface_with_click(timeout_ms=SURFACE_OPEN_TIMEOUT_MS)
                 surface = page.observe_surface(timeout_ms=SURFACE_OPEN_TIMEOUT_MS)
                 surface_reference = page.observe_surface_reference(
@@ -255,18 +308,18 @@ def main() -> None:
             except Exception as error:
                 _record_step(
                     result,
-                    step=4,
+                    step=5,
                     status="failed",
-                    action=REQUEST_STEPS[3],
+                    action=REQUEST_STEPS[4],
                     observed=str(error),
                 )
                 _capture_failure_screenshot(page, result)
                 raise
             _record_step(
                 result,
-                step=4,
+                step=5,
                 status="passed",
-                action=REQUEST_STEPS[3],
+                action=REQUEST_STEPS[4],
                 observed=(
                     f"heading={surface.heading_text!r}; "
                     f"visible_surface_id={surface_reference.visible_surface_id!r}; "
@@ -296,17 +349,17 @@ def main() -> None:
                 failures.append(str(error))
                 _record_step(
                     result,
-                    step=5,
+                    step=6,
                     status="failed",
-                    action=REQUEST_STEPS[4],
+                    action=REQUEST_STEPS[5],
                     observed=str(error),
                 )
             else:
                 _record_step(
                     result,
-                    step=5,
+                    step=6,
                     status="passed",
-                    action=REQUEST_STEPS[4],
+                    action=REQUEST_STEPS[5],
                     observed=(
                         f"initial_aria_controls={trigger_aria.aria_controls!r}; "
                         f"surface_id={surface_reference.visible_surface_id!r}"
@@ -374,6 +427,55 @@ def _assert_trigger_aria_controls_present(
         f"Observed aria-controls: {observation.aria_controls!r}\n"
         f"Observed trigger HTML: {observation.outer_html}",
     )
+
+
+def _assert_trigger_aria_controls_target_exists(
+    *,
+    trigger: WorkspaceTriggerAriaControlsObservation,
+    target: WorkspaceTriggerAriaControlsTargetObservation,
+) -> None:
+    failures: list[str] = []
+    if not trigger.aria_controls:
+        failures.append("the trigger aria-controls attribute was missing")
+    if trigger.aria_controls != target.trigger_aria_controls:
+        failures.append(
+            "the recorded trigger aria-controls value changed between the attribute read "
+            "and the pre-click DOM target inspection "
+            f"({trigger.aria_controls!r} != {target.trigger_aria_controls!r})",
+        )
+    if not target.controlled_element_found:
+        failures.append(
+            "no DOM element with the trigger's initial aria-controls value existed before "
+            "the workspace switcher was opened",
+        )
+    if trigger.aria_controls and not target.controlled_element_id:
+        failures.append(
+            f"the pre-click DOM lookup for aria-controls={trigger.aria_controls!r} did not "
+            "return an element id",
+        )
+    if (
+        trigger.aria_controls
+        and target.controlled_element_id
+        and trigger.aria_controls != target.controlled_element_id
+    ):
+        failures.append(
+            "the pre-click DOM element id did not match the trigger aria-controls value "
+            f"({trigger.aria_controls!r} != {target.controlled_element_id!r})",
+        )
+    if failures:
+        raise AssertionError(
+            "Step 4 failed: before any interaction, the workspace switcher trigger "
+            "aria-controls value did not already reference an existing DOM node.\n"
+            + "\n".join(f"- {item}" for item in failures)
+            + "\n"
+            + f"Observed trigger aria-controls: {trigger.aria_controls!r}\n"
+            + f"Observed target aria-controls: {target.trigger_aria_controls!r}\n"
+            + f"Observed controlled element id/role/tag: {target.controlled_element_id!r} / "
+            + f"{target.controlled_element_role!r} / {target.controlled_element_tag_name!r}\n"
+            + f"Observed controlled element visible: {target.controlled_element_visible!r}\n"
+            + f"Observed trigger HTML: {target.trigger_outer_html}\n"
+            + f"Observed controlled element HTML: {target.controlled_element_outer_html}",
+        )
 
 
 def _assert_surface_opened(surface: WorkspaceSwitcherSurfaceObservation) -> None:
@@ -519,6 +621,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "* Located the visible workspace switcher trigger on Dashboard before any interaction.",
         "* Inspected the trigger DOM attributes without clicking the trigger.",
         "* Read the trigger's aria-controls value on initial page load.",
+        "* Verified before any click that the initial aria-controls value already referenced a DOM node.",
         "* Opened the workspace switcher surface and compared the initial aria-controls value with the visible surface id.",
         "",
         "h4. Result",
@@ -569,6 +672,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "- Located the visible workspace switcher trigger on Dashboard before any interaction.",
         "- Inspected the trigger DOM attributes without clicking the trigger.",
         "- Read the trigger `aria-controls` value on initial page load.",
+        "- Verified before any click that the initial `aria-controls` value already referenced a DOM node.",
         "- Opened the workspace switcher surface and compared the initial `aria-controls` value with the visible surface `id`.",
         "",
         "## Result",
@@ -614,9 +718,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Test Automation Summary",
         "",
         (
-            "- Updated TS-860 to validate the trigger's initial `aria-controls` value "
-            "against the actual workspace switcher surface id and added the required "
-            "`README.md`."
+            "- Updated TS-860 to assert the pre-click `aria-controls` DOM target and keep "
+            "the opened-surface id comparison."
         ),
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
@@ -627,8 +730,9 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             f"`{result['repository_ref']}`."
         ),
         (
-            "- Outcome: the visible workspace switcher trigger exposed aria-controls and "
-            "that initial value matched the opened switcher surface id."
+            "- Outcome: the visible workspace switcher trigger exposed aria-controls, that "
+            "initial value already pointed at a DOM node before any click, and it matched "
+            "the opened switcher surface id."
             if passed
             else f"- Outcome: {_failed_step_summary(result)}"
         ),
@@ -656,8 +760,9 @@ def _bug_description(result: dict[str, object]) -> str:
             "1. Open the deployed TrackState app on a desktop browser and navigate to Dashboard.",
             "2. Locate the visible workspace switcher trigger in the header without clicking it.",
             "3. Inspect the trigger element attributes and read the aria-controls value.",
-            "4. Open the workspace switcher surface.",
-            "5. Compare the trigger aria-controls value captured before interaction with the visible surface id.",
+            "4. Before any click, verify that a DOM element already exists with the captured aria-controls id.",
+            "5. Open the workspace switcher surface and read its visible surface id.",
+            "6. Compare the trigger aria-controls value captured before interaction with the visible surface id.",
             "",
             "## Exact steps from the test case with observations",
             _annotated_step_line(result, 1, REQUEST_STEPS[0]),
@@ -665,6 +770,7 @@ def _bug_description(result: dict[str, object]) -> str:
             _annotated_step_line(result, 3, REQUEST_STEPS[2]),
             _annotated_step_line(result, 4, REQUEST_STEPS[3]),
             _annotated_step_line(result, 5, REQUEST_STEPS[4]),
+            _annotated_step_line(result, 6, REQUEST_STEPS[5]),
             "",
             "## Exact error message or assertion failure",
             "```text",
@@ -685,6 +791,7 @@ def _bug_description(result: dict[str, object]) -> str:
             "",
             "## Missing or broken production capability",
             "- The production UI must initialize the workspace switcher trigger's `aria-controls` value to the same surface `id` that becomes visible when the switcher is opened.",
+            "- The production UI must also ensure that this referenced node already exists in the DOM before the user opens the workspace switcher.",
             f"- Current behavior from the failed run: {_failed_step_summary(result)}",
             "",
             "## Failing command",
@@ -705,6 +812,9 @@ def _bug_description(result: dict[str, object]) -> str:
                     "trigger_observation": result.get("trigger_observation"),
                     "trigger_aria_controls_observation": result.get(
                         "trigger_aria_controls_observation",
+                    ),
+                    "trigger_aria_controls_target_observation": result.get(
+                        "trigger_aria_controls_target_observation",
                     ),
                     "surface_observation": result.get("surface_observation"),
                     "surface_reference_observation": result.get(
@@ -928,6 +1038,23 @@ def _surface_reference_payload(
         "visible_surface_text": observation.visible_surface_text,
         "trigger_outer_html": observation.trigger_outer_html,
         "visible_surface_outer_html": observation.visible_surface_outer_html,
+    }
+
+
+def _trigger_aria_target_payload(
+    observation: WorkspaceTriggerAriaControlsTargetObservation,
+) -> dict[str, object]:
+    return {
+        "trigger_label": observation.trigger_label,
+        "trigger_aria_controls": observation.trigger_aria_controls,
+        "controlled_element_found": observation.controlled_element_found,
+        "controlled_element_visible": observation.controlled_element_visible,
+        "controlled_element_id": observation.controlled_element_id,
+        "controlled_element_role": observation.controlled_element_role,
+        "controlled_element_tag_name": observation.controlled_element_tag_name,
+        "controlled_element_text": observation.controlled_element_text,
+        "trigger_outer_html": observation.trigger_outer_html,
+        "controlled_element_outer_html": observation.controlled_element_outer_html,
     }
 
 
