@@ -51,6 +51,13 @@ REQUEST_STEPS = [
         "and whether the trigger shows a visible focus indicator."
     ),
 ]
+TICKET_REQUEST_STEPS = [
+    (
+        "Use the 'Tab' key to navigate to the interactive element immediately "
+        "following the workspace switcher trigger (e.g., the 'Search' field)."
+    ),
+    "Press 'Shift + Tab' on the keyboard.",
+]
 EXPECTED_RESULT = (
     "Keyboard focus moves backward from the subsequent element to the workspace "
     "switcher trigger, which displays a visible focus indicator."
@@ -551,6 +558,9 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. Step results",
         *_step_lines(result, jira=True),
         "",
+        "h4. Ticket step verification",
+        *_ticket_step_lines(result, jira=True),
+        "",
         "h4. Human-style verification",
         *_human_lines(result, jira=True),
     ]
@@ -597,6 +607,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## Step results",
         *_step_lines(result, jira=False),
+        "",
+        "## Ticket step verification",
+        *_ticket_step_lines(result, jira=False),
         "",
         "## Human-style verification",
         *_human_lines(result, jira=False),
@@ -664,6 +677,9 @@ def _bug_description(result: dict[str, object]) -> str:
             *reproduction_steps,
             "",
             "## Exact steps from the test case with observations",
+            *_ticket_bug_step_lines(result),
+            "",
+            "## Detailed automation step results",
             _annotated_step_line(result, 1, REQUEST_STEPS[0]),
             _annotated_step_line(result, 2, REQUEST_STEPS[1]),
             _annotated_step_line(result, 3, REQUEST_STEPS[2]),
@@ -725,15 +741,11 @@ def _bug_description(result: dict[str, object]) -> str:
 
 def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
     failed_step = _first_failed_step_number(result)
+    reproduction_steps = [f"{index}. {step}" for index, step in enumerate(TICKET_REQUEST_STEPS, start=1)]
     if failed_step == 2:
         return (
             f"{TICKET_KEY} - Workspace switcher trigger is missing from desktop keyboard tab order",
-            [
-                "1. Launch the application on a desktop browser.",
-                "2. Navigate to Dashboard in the desktop web app.",
-                "3. Use real keyboard Tab navigation from the visible desktop shell.",
-                "4. Observe that focus does not land on the visible workspace switcher trigger.",
-            ],
+            reproduction_steps,
             (
                 "The production desktop UI does not expose the workspace switcher trigger "
                 "as a reachable keyboard focus target, so the reverse Shift+Tab scenario "
@@ -743,12 +755,7 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
     if failed_step == 3:
         return (
             f"{TICKET_KEY} - Tab from workspace switcher trigger does not reach the next visible control",
-            [
-                "1. Launch the application on a desktop browser.",
-                "2. Reach the workspace switcher trigger by keyboard.",
-                "3. Press `Tab` once from the focused trigger.",
-                "4. Observe the active element after that keypress.",
-            ],
+            reproduction_steps,
             (
                 "After the workspace switcher trigger receives real keyboard focus, the "
                 "next Tab press does not move focus to the following visible interactive "
@@ -758,13 +765,7 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
     if failed_step == 4:
         return (
             f"{TICKET_KEY} - Shift+Tab from the next control does not return focus to the workspace switcher trigger",
-            [
-                "1. Launch the application on a desktop browser.",
-                "2. Reach the workspace switcher trigger by keyboard.",
-                "3. Press `Tab` once to focus the next visible interactive element.",
-                "4. Press `Shift+Tab`.",
-                "5. Observe the active element after reverse navigation.",
-            ],
+            reproduction_steps,
             (
                 "Reverse sequential keyboard navigation does not return focus from the "
                 "subsequent desktop control back to the workspace switcher trigger."
@@ -773,13 +774,7 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
     if failed_step == 5:
         return (
             f"{TICKET_KEY} - Workspace switcher trigger regains focus without a visible focus indicator",
-            [
-                "1. Launch the application on a desktop browser.",
-                "2. Reach the workspace switcher trigger by keyboard.",
-                "3. Press `Tab` once to focus the next visible interactive element.",
-                "4. Press `Shift+Tab` to move focus back to the trigger.",
-                "5. Observe the trigger styling after focus is restored.",
-            ],
+            reproduction_steps,
             (
                 "The workspace switcher trigger regains focus, but the production desktop "
                 "UI does not expose a visible keyboard focus indicator for that restored "
@@ -788,11 +783,7 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
         )
     return (
         f"{TICKET_KEY} - Reverse keyboard navigation around the workspace switcher is broken",
-        [
-            "1. Launch the application on a desktop browser.",
-            "2. Attempt the TS-832 reverse keyboard navigation scenario.",
-            "3. Observe the first failing boundary.",
-        ],
+        reproduction_steps,
         (
             "The production desktop workspace switcher does not satisfy the TS-832 "
             "reverse keyboard navigation requirement."
@@ -871,6 +862,79 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
             continue
         lines.append(f"{prefix} {check.get('check')}: {check.get('observed')}")
     return lines or [f"{prefix} <no human-style verification recorded>"]
+
+
+def _ticket_bug_step_lines(result: dict[str, object]) -> list[str]:
+    return [
+        _annotated_ticket_step_line(result, 1, TICKET_REQUEST_STEPS[0]),
+        _annotated_ticket_step_line(result, 2, TICKET_REQUEST_STEPS[1]),
+    ]
+
+
+def _ticket_step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    prefix = "*" if jira else "-"
+    return [
+        f"{prefix} {_annotated_ticket_step_line(result, 1, TICKET_REQUEST_STEPS[0])}",
+        f"{prefix} {_annotated_ticket_step_line(result, 2, TICKET_REQUEST_STEPS[1])}",
+    ]
+
+
+def _annotated_ticket_step_line(
+    result: dict[str, object],
+    step_number: int,
+    action: str,
+) -> str:
+    marker = "✅" if _ticket_step_status(result, step_number) == "passed" else "❌"
+    return (
+        f"{step_number}. {marker} {action}\n"
+        f"   Actual: {_ticket_step_observation(result, step_number)}"
+    )
+
+
+def _ticket_step_status(result: dict[str, object], step_number: int) -> str:
+    if step_number == 1:
+        return "passed" if _step_status(result, 3) == "passed" else "failed"
+    if step_number == 2:
+        return (
+            "passed"
+            if _step_status(result, 4) == "passed" and _step_status(result, 5) == "passed"
+            else "failed"
+        )
+    return "failed"
+
+
+def _ticket_step_observation(result: dict[str, object], step_number: int) -> str:
+    if step_number == 1:
+        if _step_status(result, 1) != "passed":
+            return _step_observation(result, 1)
+        if _step_status(result, 2) != "passed":
+            return (
+                "The desktop app opened, but the scenario could not reach the workspace "
+                f"switcher trigger by keyboard. {_step_observation(result, 2)}"
+            )
+        if _step_status(result, 3) == "passed":
+            return (
+                "Real keyboard navigation reached the workspace switcher trigger, and "
+                f"pressing Tab moved focus to the next visible interactive control. "
+                f"{_step_observation(result, 3)}"
+            )
+        return (
+            "Real keyboard navigation reached the workspace switcher trigger, but "
+            f"pressing Tab from the focused trigger failed. {_step_observation(result, 3)}"
+        )
+    if _step_status(result, 3) != "passed":
+        return "Not reached because request step 1 failed."
+    if _step_status(result, 4) != "passed":
+        return _step_observation(result, 4)
+    if _step_status(result, 5) != "passed":
+        return (
+            "Shift+Tab restored focus to the workspace switcher trigger, but the "
+            f"visible focus-indicator check failed. {_step_observation(result, 5)}"
+        )
+    return (
+        "Shift+Tab returned focus to the workspace switcher trigger, and the trigger "
+        "showed a visible keyboard focus indicator."
+    )
 
 
 def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
