@@ -11,6 +11,7 @@ import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
+import 'package:trackstate/ui/features/tracker/services/browser_workspace_switcher_focus_matcher.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
@@ -1058,6 +1059,93 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pumpAndSettle();
       expect(switcherSheet, findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'desktop workspace switcher rows export stable semantics identifiers for browser focus handoff',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:main/repo@main',
+              displayName: 'Hosted main workspace',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'main/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:alt/repo@main',
+              displayName: 'Hosted alt workspace',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alt/repo',
+              defaultBranch: 'main',
+              writeBranch: 'ts-825-alt',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:main/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            workspaceProfileService: service,
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
+        );
+        await tester.pumpAndSettle();
+
+        Finder rowSemanticsWithIdentifier(String identifier) =>
+            find.byWidgetPredicate(
+              (widget) =>
+                  widget is Semantics &&
+                  widget.properties.identifier == identifier &&
+                  widget.properties.button == true,
+            );
+
+        expect(
+          rowSemanticsWithIdentifier(
+            browserWorkspaceSwitcherRowSemanticsIdentifier(
+              'hosted:main/repo@main',
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          rowSemanticsWithIdentifier(
+            browserWorkspaceSwitcherRowSemanticsIdentifier(
+              'hosted:alt/repo@main',
+            ),
+          ),
+          findsOneWidget,
+        );
+      } finally {
+        semantics.dispose();
+      }
     },
   );
 

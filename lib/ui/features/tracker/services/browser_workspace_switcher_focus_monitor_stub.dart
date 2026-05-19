@@ -4,9 +4,19 @@ class BrowserWorkspaceSwitcherFocusMonitorSubscription {
   void cancel() {}
 }
 
+class BrowserWorkspaceSwitcherFocusRequest {
+  void cancel() {}
+}
+
 BrowserWorkspaceSwitcherFocusMonitorSubscription
 createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserTab,
+  required VoidCallback onBrowserArrowDown,
+  required VoidCallback onBrowserArrowUp,
 }) => BrowserWorkspaceSwitcherFocusMonitorSubscription();
 
 bool isBrowserFocusWithinWorkspaceSwitcher() => false;
+
+BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
+  required String semanticsIdentifier,
+}) => BrowserWorkspaceSwitcherFocusRequest();
