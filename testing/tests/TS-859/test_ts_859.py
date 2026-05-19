@@ -53,7 +53,6 @@ ACTIVE_WORKSPACE_DISPLAY_NAME = "Hosted main workspace"
 SECONDARY_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
 SECONDARY_WORKSPACE_WRITE_BRANCH = "ts-859-alt"
 BRANCH_FIELD_LABEL = "Branch"
-BRANCH_FIELD_SELECTOR = f'input[aria-label="{BRANCH_FIELD_LABEL}"]'
 
 PRECONDITIONS = [
     "The workspace switcher trigger is reachable with real desktop keyboard navigation.",
@@ -1411,7 +1410,10 @@ def _saved_workspace_rows_payload(
 
 
 def _read_switcher_field_value(page: LiveWorkspaceSwitcherPage) -> str:
-    return page._session.read_value(BRANCH_FIELD_SELECTOR, timeout_ms=INTERNAL_FOCUS_TIMEOUT_MS)
+    return page.read_switcher_text_field_value(
+        BRANCH_FIELD_LABEL,
+        timeout_ms=INTERNAL_FOCUS_TIMEOUT_MS,
+    )
 
 
 def _internal_focus_payload(
