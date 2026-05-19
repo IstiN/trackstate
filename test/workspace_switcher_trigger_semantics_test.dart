@@ -10,23 +10,23 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  testWidgets(
-    'desktop workspace switcher exports focusable button semantics',
-    (tester) async {
-      final semantics = tester.ensureSemantics();
-      try {
-        tester.view.physicalSize = const Size(1440, 960);
-        tester.view.devicePixelRatio = 1;
+  testWidgets('desktop workspace switcher exports focusable button semantics', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
 
-        await tester.pumpWidget(
-          const TrackStateApp(repository: DemoTrackStateRepository()),
-        );
-        await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        const TrackStateApp(repository: DemoTrackStateRepository()),
+      );
+      await tester.pumpAndSettle();
 
-        final triggerNode = tester.getSemantics(
-          find.bySemanticsLabel(RegExp('^Workspace switcher:')).last,
-        );
-        final triggerSemantics = triggerNode.getSemanticsData();
+      final triggerNode = tester.getSemantics(
+        find.bySemanticsLabel(RegExp('^Workspace switcher:')).last,
+      );
+      final triggerSemantics = triggerNode.getSemanticsData();
 
       expect(triggerSemantics.flagsCollection.isButton, isTrue);
       expect(
@@ -34,15 +34,14 @@ void main() {
         isTrue,
         reason:
             'The exported workspace switcher semantics node must be keyboard focusable '
-              'so Flutter web can map it to a tabbable browser control.',
-        );
-      } finally {
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
-        semantics.dispose();
-      }
-    },
-  );
+            'so Flutter web can map it to a tabbable browser control.',
+      );
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      semantics.dispose();
+    }
+  });
 
   testWidgets(
     'desktop workspace switcher trigger exposes expandable semantics as visibility changes',
@@ -50,7 +49,7 @@ void main() {
       final semantics = tester.ensureSemantics();
       try {
         final layouts = <({String name, Size size})>[
-          (name: 'wide', size: const Size(1440, 960)),
+          (name: 'wide', size: const Size(1600, 960)),
           (name: 'condensed', size: const Size(1280, 960)),
         ];
 
@@ -63,13 +62,16 @@ void main() {
           );
           await tester.pumpAndSettle();
 
-          final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+          final trigger = find.byKey(
+            const ValueKey('workspace-switcher-trigger'),
+          );
           expect(trigger, findsOneWidget);
 
           await _focusByTabUntil(
             tester,
             isFocused: () => _focusWithinFinder(tester, trigger),
-            reason: 'Failed to focus the ${layout.name} workspace switcher trigger.',
+            reason:
+                'Failed to focus the ${layout.name} workspace switcher trigger.',
           );
 
           _expectExpandedState(
