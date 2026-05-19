@@ -91,6 +91,35 @@ class WorkspaceTriggerAriaExpandedObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceTriggerAriaControlsObservation:
+    label: str
+    role: str | None
+    tag_name: str
+    tabindex: str | None
+    keyboard_focusable: bool
+    aria_controls: str | None
+    outer_html: str
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherSurfaceReferenceObservation:
+    trigger_label: str
+    trigger_aria_controls: str | None
+    controlled_surface_found: bool
+    controlled_surface_visible: bool
+    controlled_surface_id: str | None
+    controlled_surface_role: str | None
+    controlled_surface_tag_name: str | None
+    controlled_surface_text: str
+    visible_surface_id: str | None
+    visible_surface_role: str | None
+    visible_surface_tag_name: str | None
+    visible_surface_text: str
+    trigger_outer_html: str
+    visible_surface_outer_html: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherPanelObservation:
     viewport_width: float
     viewport_height: float
@@ -447,6 +476,9 @@ class LiveWorkspaceSwitcherPage:
         self._tracker_page = tracker_page
         self._session = tracker_page.session
         self._project_settings_page = self._settings_page(tracker_page)
+
+    def _switcher_text_field_selector(self, label: str) -> str:
+        return f'input[aria-label="{label}"]'
 
     def dismiss_connection_banner(self) -> None:
         self._project_settings_page.dismiss_connection_banner()
@@ -1156,7 +1188,7 @@ class LiveWorkspaceSwitcherPage:
     ) -> FocusedElementObservation:
         try:
             self._session.focus(
-                f'input[aria-label="{label}"]',
+                self._switcher_text_field_selector(label),
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -1166,6 +1198,24 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
         return self._session.active_element()
+
+    def read_switcher_text_field_value(
+        self,
+        label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            return self._session.read_value(
+                self._switcher_text_field_selector(label),
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a readable "{label}" text '
+                "field value.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
 
     def press_key(self, key: str, *, timeout_ms: int = 30_000) -> None:
         self._session.press_key(key, timeout_ms=timeout_ms)
@@ -2009,6 +2059,258 @@ class LiveWorkspaceSwitcherPage:
             outer_html=str(payload.get("outerHtml", "")),
         )
 
+    def observe_trigger_aria_controls(
+        self,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceTriggerAriaControlsObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+                  const tabindex = trigger.getAttribute('tabindex');
+                  return {
+                    label: labelFor(trigger),
+                    role: trigger.getAttribute('role'),
+                    tagName: trigger.tagName,
+                    tabindex,
+                    keyboardFocusable: tabindex !== null && tabindex !== '-1',
+                    ariaControls: trigger.getAttribute('aria-controls'),
+                    outerHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The live app did not expose a visible workspace switcher trigger for "
+                "aria-controls inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose a readable workspace switcher trigger for "
+                "aria-controls inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceTriggerAriaControlsObservation(
+            label=str(payload.get("label", "")),
+            role=str(payload.get("role")) if payload.get("role") is not None else None,
+            tag_name=str(payload.get("tagName", "")),
+            tabindex=(
+                str(payload.get("tabindex"))
+                if payload.get("tabindex") is not None
+                else None
+            ),
+            keyboard_focusable=bool(payload.get("keyboardFocusable")),
+            aria_controls=(
+                str(payload.get("ariaControls"))
+                if payload.get("ariaControls") is not None
+                else None
+            ),
+            outer_html=str(payload.get("outerHtml", "")),
+        )
+
+    def observe_surface_reference(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceSwitcherSurfaceReferenceObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+
+                  const visibleDialogs = Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  ).filter(isVisible);
+                  let switcher = visibleDialogs.find((candidate) =>
+                    normalize(candidate.innerText || candidate.textContent).includes('Workspace switcher'),
+                  );
+                  if (!switcher) {
+                    const headings = Array.from(document.querySelectorAll('*'))
+                      .filter(isVisible)
+                      .map((element) => ({
+                        element,
+                        label: normalize(element.getAttribute?.('aria-label') || ''),
+                        text: normalize(element.innerText || element.textContent || ''),
+                        area: (() => {
+                          const rect = element.getBoundingClientRect();
+                          return rect.width * rect.height;
+                        })(),
+                      }))
+                      .filter((candidate) =>
+                        candidate.label === 'Workspace switcher'
+                        || candidate.text === 'Workspace switcher'
+                        || (
+                          candidate.text.includes('Workspace switcher')
+                          && (
+                            candidate.text.includes('Saved workspaces')
+                            || candidate.text.includes('Save and switch')
+                            || candidate.text.includes('Hosted Local')
+                            || candidate.text.includes('Add workspace')
+                          )
+                        )
+                      )
+                      .sort((left, right) => left.area - right.area);
+                    for (const headingCandidate of headings) {
+                      let current = headingCandidate.element;
+                      while (current && current !== document.body) {
+                        const text = normalize(current.innerText || current.textContent || '');
+                        if (
+                          text.includes('Workspace switcher')
+                          && (
+                            text.includes('Saved workspaces')
+                            || text.includes('Save and switch')
+                            || text.includes('Hosted Local')
+                            || text.includes('Add workspace')
+                          )
+                        ) {
+                          switcher = current;
+                          break;
+                        }
+                        current = current.parentElement;
+                      }
+                      if (switcher) {
+                        break;
+                      }
+                    }
+                  }
+                  if (!switcher) {
+                    return null;
+                  }
+
+                  const triggerAriaControls = trigger.getAttribute('aria-controls');
+                  const controlledSurface = triggerAriaControls
+                    ? document.getElementById(triggerAriaControls)
+                    : null;
+                  const controlledVisible = Boolean(controlledSurface) && isVisible(controlledSurface);
+                  return {
+                    triggerLabel: labelFor(trigger),
+                    triggerAriaControls,
+                    controlledSurfaceFound: Boolean(controlledSurface),
+                    controlledSurfaceVisible: controlledVisible,
+                    controlledSurfaceId: controlledSurface?.id || null,
+                    controlledSurfaceRole: controlledSurface?.getAttribute?.('role') || null,
+                    controlledSurfaceTagName: controlledSurface?.tagName || null,
+                    controlledSurfaceText: normalize(
+                      controlledSurface?.innerText || controlledSurface?.textContent || '',
+                    ),
+                    visibleSurfaceId: switcher.id || null,
+                    visibleSurfaceRole: switcher.getAttribute?.('role') || null,
+                    visibleSurfaceTagName: switcher.tagName || null,
+                    visibleSurfaceText: normalize(switcher.innerText || switcher.textContent || ''),
+                    triggerOuterHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                    visibleSurfaceOuterHtml: switcher.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The deployed app did not expose a readable visible workspace switcher "
+                "surface for aria-controls linkage inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The deployed app did not expose a readable workspace switcher trigger "
+                "and surface reference for aria-controls linkage inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherSurfaceReferenceObservation(
+            trigger_label=str(payload.get("triggerLabel", "")),
+            trigger_aria_controls=(
+                str(payload.get("triggerAriaControls"))
+                if payload.get("triggerAriaControls") is not None
+                else None
+            ),
+            controlled_surface_found=bool(payload.get("controlledSurfaceFound")),
+            controlled_surface_visible=bool(payload.get("controlledSurfaceVisible")),
+            controlled_surface_id=(
+                str(payload.get("controlledSurfaceId"))
+                if payload.get("controlledSurfaceId") is not None
+                else None
+            ),
+            controlled_surface_role=(
+                str(payload.get("controlledSurfaceRole"))
+                if payload.get("controlledSurfaceRole") is not None
+                else None
+            ),
+            controlled_surface_tag_name=(
+                str(payload.get("controlledSurfaceTagName"))
+                if payload.get("controlledSurfaceTagName") is not None
+                else None
+            ),
+            controlled_surface_text=str(payload.get("controlledSurfaceText", "")),
+            visible_surface_id=(
+                str(payload.get("visibleSurfaceId"))
+                if payload.get("visibleSurfaceId") is not None
+                else None
+            ),
+            visible_surface_role=(
+                str(payload.get("visibleSurfaceRole"))
+                if payload.get("visibleSurfaceRole") is not None
+                else None
+            ),
+            visible_surface_tag_name=(
+                str(payload.get("visibleSurfaceTagName"))
+                if payload.get("visibleSurfaceTagName") is not None
+                else None
+            ),
+            visible_surface_text=str(payload.get("visibleSurfaceText", "")),
+            trigger_outer_html=str(payload.get("triggerOuterHtml", "")),
+            visible_surface_outer_html=str(payload.get("visibleSurfaceOuterHtml", "")),
+        )
+
     def focus_trigger_via_keyboard(
         self,
         *,
@@ -2134,6 +2436,44 @@ class LiveWorkspaceSwitcherPage:
             ),
         )
 
+    def press_enter_on_active_element_and_wait_for_dismissal(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        self._session.press_key("Enter", timeout_ms=timeout_ms)
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            active = self._session.active_element()
+            raise AssertionError(
+                "Pressing Enter on the active element did not dismiss the workspace "
+                "switcher surface.\n"
+                f"Observed active element label: {active.accessible_name!r}\n"
+                f"Observed active element role: {active.role!r}\n"
+                f"Observed active element HTML: {active.outer_html}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Enter-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
     def wait_for_dismissal_after_trigger_space(
         self,
         *,
@@ -2154,6 +2494,39 @@ class LiveWorkspaceSwitcherPage:
         if not isinstance(payload, dict):
             raise AssertionError(
                 "The workspace switcher Space-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
+    def wait_for_dismissal_after_trigger_enter(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 6 failed: pressing Enter on the already-open workspace switcher "
+                "trigger did not dismiss the surface.\n"
+                f"Observed body text after pressing Enter again:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Enter-key dismissal did not return a readable "
                 "observation."
             )
         return WorkspaceSwitcherTriggerDismissObservation(

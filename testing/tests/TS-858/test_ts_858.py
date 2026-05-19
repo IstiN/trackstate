@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import json
 import platform
 import sys
@@ -14,10 +14,12 @@ if str(REPO_ROOT) not in sys.path:
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     FocusNavigationStep,
     LiveWorkspaceSwitcherPage,
+    WorkspaceSwitcherObservation,
+    WorkspaceSwitcherPanelObservation,
+    WorkspaceSwitcherSurfaceObservation,
+    WorkspaceSwitcherTriggerDismissObservation,
     WorkspaceSwitcherTriggerObservation,
-    WorkspaceTriggerForwardFocusObservation,
     WorkspaceTriggerFocusabilityObservation,
-    WorkspaceTriggerReverseFocusObservation,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
@@ -28,39 +30,31 @@ from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
     create_live_tracker_app_with_stored_token,
 )
 
-TICKET_KEY = "TS-832"
-TEST_CASE_TITLE = (
-    "Reverse keyboard navigation (Shift+Tab) — focus returns to workspace "
-    "switcher trigger"
-)
-RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-832/test_ts_832.py"
+TICKET_KEY = "TS-858"
+TEST_CASE_TITLE = "Workspace switcher trigger keyboard activation — Enter key toggles surface to collapsed state"
+RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-858/test_ts_858.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
 TRIGGER_FOCUS_TIMEOUT_MS = 4_000
-REVERSE_FOCUS_TIMEOUT_MS = 4_000
+SURFACE_OPEN_TIMEOUT_MS = 4_000
+SURFACE_OPEN_STABILITY_MS = 600
+SURFACE_CLOSE_TIMEOUT_MS = 4_000
+SURFACE_CLOSE_STABILITY_MS = 400
 
+PRECONDITIONS = [
+    "The workspace switcher surface is currently open.",
+    "Keyboard focus is on the workspace switcher trigger.",
+]
 REQUEST_STEPS = [
     "Launch the application on a desktop browser.",
-    "Use keyboard Tab navigation to move focus to the workspace switcher trigger.",
-    (
-        "Use the 'Tab' key to navigate to the interactive element immediately "
-        "following the workspace switcher trigger."
-    ),
-    "Press 'Shift + Tab' on the keyboard.",
-    (
-        "Observe whether keyboard focus returns to the workspace switcher trigger "
-        "and whether the trigger shows a visible focus indicator."
-    ),
-]
-TICKET_REQUEST_STEPS = [
-    (
-        "Use the 'Tab' key to navigate to the interactive element immediately "
-        "following the workspace switcher trigger (e.g., the 'Search' field)."
-    ),
-    "Press 'Shift + Tab' on the keyboard.",
+    "Use real keyboard navigation to move focus to the workspace switcher trigger.",
+    "Press the 'Enter' key on the focused workspace switcher trigger to open the workspace switcher surface.",
+    "With the surface open, confirm the workspace switcher trigger still owns keyboard focus.",
+    "Press the 'Enter' key again on the keyboard.",
+    "Observe whether the workspace switcher surface closes immediately and the trigger returns to its collapsed state.",
 ]
 EXPECTED_RESULT = (
-    "Keyboard focus moves backward from the subsequent element to the workspace "
-    "switcher trigger, which displays a visible focus indicator."
+    "The workspace switcher surface closes immediately, returning the trigger to its "
+    "collapsed state."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -69,8 +63,15 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
-SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts832_success.png"
-FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts832_failure.png"
+SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts858_success.png"
+FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts858_failure.png"
+
+
+@dataclass(frozen=True)
+class TriggerKeyboardReachObservation:
+    method: str
+    focus_sequence: tuple[FocusNavigationStep, ...]
+    forward_error: str | None = None
 
 
 def main() -> None:
@@ -83,7 +84,7 @@ def main() -> None:
     token = service.token
     if not token:
         raise RuntimeError(
-            "TS-832 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
+            "TS-858 requires GH_TOKEN or GITHUB_TOKEN to open the deployed app.",
         )
     user = service.fetch_authenticated_user()
 
@@ -99,7 +100,12 @@ def main() -> None:
         "expected_result": EXPECTED_RESULT,
         "desktop_viewport": DESKTOP_VIEWPORT,
         "trigger_focus_timeout_ms": TRIGGER_FOCUS_TIMEOUT_MS,
-        "reverse_focus_timeout_ms": REVERSE_FOCUS_TIMEOUT_MS,
+        "surface_open_timeout_ms": SURFACE_OPEN_TIMEOUT_MS,
+        "surface_open_stability_ms": SURFACE_OPEN_STABILITY_MS,
+        "surface_close_timeout_ms": SURFACE_CLOSE_TIMEOUT_MS,
+        "surface_close_stability_ms": SURFACE_CLOSE_STABILITY_MS,
+        "preconditions": PRECONDITIONS,
+        "linked_bugs": ["TS-848"],
         "user_login": user.login,
         "steps": [],
         "human_verification": [],
@@ -110,6 +116,7 @@ def main() -> None:
         with create_live_tracker_app_with_stored_token(config, token=token) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
+                trigger: WorkspaceSwitcherTriggerObservation | None = None
                 try:
                     runtime = tracker_page.open()
                     result["runtime_state"] = runtime.kind
@@ -117,8 +124,7 @@ def main() -> None:
                     if runtime.kind != "ready":
                         raise AssertionError(
                             "Step 1 failed: the deployed app did not reach an interactive "
-                            "desktop state before the reverse keyboard navigation scenario "
-                            "began.\n"
+                            "desktop state before the Enter-key toggle scenario began.\n"
                             f"Observed runtime state: {runtime.kind}\n"
                             f"Observed body text:\n{runtime.body_text}",
                         )
@@ -152,33 +158,40 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the desktop app shell before the keyboard scenario and "
-                        "confirmed Dashboard plus the visible workspace switcher trigger "
-                        "were rendered."
+                        "Viewed the desktop app shell before any key presses and confirmed "
+                        "Dashboard plus the visible workspace switcher trigger were rendered."
                     ),
                     observed=(
                         f"trigger_text={trigger.visible_text!r}; "
+                        f"display_name={trigger.display_name!r}; "
                         f"top_buttons={list(trigger.top_button_labels)!r}"
                     ),
                 )
 
                 trigger_focusability: WorkspaceTriggerFocusabilityObservation | None = None
+                focus_reach: TriggerKeyboardReachObservation | None = None
+                focus_steps: tuple[FocusNavigationStep, ...] = ()
+                focused_trigger: FocusedElementObservation | None = None
                 try:
                     trigger_focusability = page.observe_trigger_focusability()
                     result["trigger_focusability_observation"] = _trigger_focusability_payload(
                         trigger_focusability,
                     )
-                    trigger_focus_steps = page.focus_trigger_via_keyboard(max_tabs=24)
-                    focused_trigger = page.active_element()
-                    result["trigger_focus_sequence"] = [
-                        asdict(step) for step in trigger_focus_steps
-                    ]
-                    result["focused_trigger_before_reverse"] = _focused_element_payload(
-                        focused_trigger,
+                    focus_reach = _reach_workspace_trigger_via_keyboard(
+                        page=page,
+                        timeout_ms=TRIGGER_FOCUS_TIMEOUT_MS,
                     )
+                    focus_steps = focus_reach.focus_sequence
+                    focused_trigger = page.active_element()
+                    result["trigger_focus_reach_observation"] = {
+                        "method": focus_reach.method,
+                        "forward_error": focus_reach.forward_error,
+                    }
+                    result["trigger_focus_sequence"] = [asdict(step) for step in focus_steps]
+                    result["focused_trigger"] = _focused_element_payload(focused_trigger)
                     _assert_workspace_trigger_focused(
                         focused=focused_trigger,
-                        focus_steps=trigger_focus_steps,
+                        focus_steps=focus_steps,
                     )
                 except Exception as error:
                     observed = str(error)
@@ -207,7 +220,8 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[1],
                     observed=(
-                        f"tab_steps_to_trigger={len(trigger_focus_steps)}; "
+                        f"reach_method={focus_reach.method}; "
+                        f"tab_steps_to_trigger={len(focus_steps)}; "
                         f"focused_trigger={focused_trigger.accessible_name!r}; "
                         f"keyboard_focusable={trigger_focusability.keyboard_focusable}; "
                         f"tabindex={trigger_focusability.tabindex!r}"
@@ -216,22 +230,34 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Reached the workspace switcher trigger using real keyboard Tab "
-                        "navigation instead of script-forcing focus."
+                        "Reached the workspace switcher trigger using a real keyboard "
+                        "navigation path and confirmed the trigger, not a scripted fallback, "
+                        "owned keyboard focus before pressing Enter."
                     ),
                     observed=(
-                        f"focus_sequence={_focus_sequence_summary(trigger_focus_steps)}; "
-                        f"focused_trigger={focused_trigger.accessible_name!r}"
+                        f"reach_method={focus_reach.method}; "
+                        f"focus_sequence={_focus_sequence_summary(focus_steps)}; "
+                        f"focused_trigger={focused_trigger.accessible_name!r}; "
+                        f"focused_role={focused_trigger.role!r}"
                     ),
                 )
 
-                forward_focus: WorkspaceTriggerForwardFocusObservation | None = None
+                switcher: WorkspaceSwitcherObservation | None = None
+                panel: WorkspaceSwitcherPanelObservation | None = None
+                surface: WorkspaceSwitcherSurfaceObservation | None = None
                 try:
-                    forward_focus = page.observe_forward_focus_from_trigger(
-                        timeout_ms=REVERSE_FOCUS_TIMEOUT_MS,
+                    page.press_enter_on_active_element_and_wait_for_surface(
+                        timeout_ms=SURFACE_OPEN_TIMEOUT_MS,
                     )
-                    result["forward_focus_observation"] = _forward_focus_payload(forward_focus)
-                    _assert_forward_focus_target(forward_focus)
+                    switcher = page.observe_open_switcher(timeout_ms=SURFACE_OPEN_TIMEOUT_MS)
+                    panel = page.observe_open_panel(
+                        expected_container_kinds=("anchored-panel", "surface"),
+                        timeout_ms=SURFACE_OPEN_TIMEOUT_MS,
+                    )
+                    surface = page.observe_surface(timeout_ms=SURFACE_OPEN_TIMEOUT_MS)
+                    result["open_switcher_observation"] = _switcher_payload(switcher)
+                    result["open_panel_observation"] = asdict(panel)
+                    result["surface_observation"] = asdict(surface)
                 except Exception as error:
                     _record_step(
                         result,
@@ -247,34 +273,27 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[2],
                     observed=(
-                        "Pressed Tab once from the focused workspace switcher trigger and "
-                        f"moved focus to {forward_focus.next_focus_label!r} "
-                        f"(role={forward_focus.next_focus_role!r}, "
-                        f"tag={forward_focus.next_focus_tag_name!r})."
-                    ),
-                )
-                _record_human_verification(
-                    result,
-                    check=(
-                        "Used Tab from the real focused trigger and watched which visible "
-                        "control received focus next."
-                    ),
-                    observed=(
-                        f"next_focus={forward_focus.next_focus_label!r}; "
-                        f"role={forward_focus.next_focus_role!r}; "
-                        f"tag={forward_focus.next_focus_tag_name!r}; "
-                        f"visible={forward_focus.next_focus_visible}; "
-                        f"in_viewport={forward_focus.next_focus_in_viewport}"
+                        "Pressed Enter from the focused workspace switcher trigger and "
+                        "the surface became visible within the expected wait window."
                     ),
                 )
 
-                reverse_focus: WorkspaceTriggerReverseFocusObservation | None = None
+                focused_trigger_after_open: FocusedElementObservation | None = None
                 try:
-                    reverse_focus = page.observe_reverse_focus_return_to_trigger(
-                        timeout_ms=REVERSE_FOCUS_TIMEOUT_MS,
+                    page.wait_for_surface_to_remain_open(
+                        stability_ms=SURFACE_OPEN_STABILITY_MS,
+                        timeout_ms=SURFACE_OPEN_TIMEOUT_MS,
                     )
-                    result["reverse_focus_observation"] = _reverse_focus_payload(reverse_focus)
-                    _assert_reverse_focus_returned_to_trigger(reverse_focus)
+                    focused_trigger_after_open = page.active_element()
+                    result["focused_trigger_after_open"] = _focused_element_payload(
+                        focused_trigger_after_open,
+                    )
+                    _assert_surface_open_with_trigger_focus(
+                        switcher=switcher,
+                        panel=panel,
+                        surface=surface,
+                        focused=focused_trigger_after_open,
+                    )
                 except Exception as error:
                     _record_step(
                         result,
@@ -290,19 +309,37 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[3],
                     observed=(
-                        "Pressed Shift+Tab from the subsequent focused element and "
-                        f"restored focus to {reverse_focus.restored_focus_label!r}."
+                        f"heading={surface.heading_text!r}; "
+                        f"dialog_visible={surface.dialog_visible}; "
+                        f"panel_kind={panel.container_kind!r}; "
+                        f"focused_element={focused_trigger_after_open.accessible_name!r}"
+                    ),
+                )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Opened the workspace switcher with Enter and visually confirmed "
+                        "the user-visible surface stayed open on screen while keyboard focus "
+                        "remained on the workspace switcher trigger."
+                    ),
+                    observed=(
+                        f"heading={surface.heading_text!r}; "
+                        f"row_count={switcher.row_count}; "
+                        f"focus_after_open={focused_trigger_after_open.accessible_name!r}; "
+                        f"switcher_text_excerpt={_snippet(switcher.switcher_text)!r}"
                     ),
                 )
 
+                dismissal: WorkspaceSwitcherTriggerDismissObservation | None = None
+                focused_trigger_after_close: FocusedElementObservation | None = None
                 try:
-                    _assert_visible_focus_indicator(reverse_focus)
+                    page.press_key("Enter", timeout_ms=SURFACE_CLOSE_TIMEOUT_MS)
                 except Exception as error:
                     _record_step(
                         result,
-                        step=5,
+                        step=6,
                         status="failed",
-                        action=REQUEST_STEPS[4],
+                        action=REQUEST_STEPS[5],
                         observed=str(error),
                     )
                     raise
@@ -312,23 +349,68 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[4],
                     observed=(
-                        "The workspace switcher trigger regained keyboard focus and exposed "
-                        "a visible focus indicator after Shift+Tab."
+                        "Pressed Enter again from the still-focused workspace switcher "
+                        "trigger while the surface was open."
+                    ),
+                )
+
+                try:
+                    dismissal = page.wait_for_dismissal_after_trigger_enter(
+                        timeout_ms=SURFACE_CLOSE_TIMEOUT_MS,
+                        stability_window_ms=SURFACE_CLOSE_STABILITY_MS,
+                    )
+                    focused_trigger_after_close = page.active_element()
+                    result["dismissal_observation"] = asdict(dismissal)
+                    result["focused_trigger_after_close"] = _focused_element_payload(
+                        focused_trigger_after_close,
+                    )
+                except Exception as error:
+                    _record_step(
+                        result,
+                        step=6,
+                        status="failed",
+                        action=REQUEST_STEPS[5],
+                        observed=str(error),
+                    )
+                    raise
+
+                try:
+                    _assert_trigger_enter_toggle_dismissal(
+                        dismissal=dismissal,
+                        focused_after_close=focused_trigger_after_close,
+                    )
+                except Exception as error:
+                    _record_step(
+                        result,
+                        step=6,
+                        status="failed",
+                        action=REQUEST_STEPS[5],
+                        observed=str(error),
+                    )
+                    raise
+                _record_step(
+                    result,
+                    step=6,
+                    status="passed",
+                    action=REQUEST_STEPS[5],
+                    observed=(
+                        "The workspace switcher surface was no longer visible after the "
+                        "second Enter keypress, Dashboard remained visible, and keyboard "
+                        "focus stayed on the workspace switcher trigger."
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Pressed Shift+Tab like a keyboard user and confirmed the visible "
-                        "focus ring returned to the workspace switcher trigger rather than "
-                        "landing somewhere else."
+                        "Pressed Enter a second time like a keyboard user and confirmed the "
+                        "workspace switcher surface disappeared from the visible UI while "
+                        "the Dashboard shell and trigger remained on screen."
                     ),
                     observed=(
-                        f"restored_focus={reverse_focus.restored_focus_label!r}; "
-                        f"focus_visible={reverse_focus.after_reverse_focus_visible}; "
-                        f"outline={reverse_focus.after_reverse_outline!r}; "
-                        f"outline_width={reverse_focus.after_reverse_outline_width!r}; "
-                        f"box_shadow={reverse_focus.after_reverse_box_shadow!r}"
+                        f"dashboard_visible_after={dismissal.dashboard_visible}; "
+                        f"trigger_visible_after={dismissal.trigger_visible}; "
+                        f"focus_after_close={focused_trigger_after_close.accessible_name!r}; "
+                        f"trigger_label_after={dismissal.trigger_label!r}"
                     ),
                 )
             except Exception:
@@ -367,123 +449,162 @@ def _assert_workspace_trigger_focused(
         return
     raise AssertionError(
         "Step 2 failed: keyboard navigation did not land on the workspace switcher "
-        "trigger before the reverse navigation scenario.\n"
+        "trigger before the Enter-key toggle scenario.\n"
         f"Observed focused element: label={focused.accessible_name!r}, "
         f"role={focused.role!r}, tag={focused.tag_name!r}, text={focused.text!r}\n"
         f"Observed focus sequence: {_focus_sequence_summary(focus_steps)}",
     )
 
 
-def _assert_forward_focus_target(observation: WorkspaceTriggerForwardFocusObservation) -> None:
+def _reach_workspace_trigger_via_keyboard(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    timeout_ms: int,
+) -> TriggerKeyboardReachObservation:
+    try:
+        return TriggerKeyboardReachObservation(
+            method="forward-tab",
+            focus_sequence=page.focus_trigger_via_keyboard(
+                max_tabs=24,
+                timeout_ms=timeout_ms,
+            ),
+        )
+    except AssertionError as forward_error:
+        candidate_summaries: list[str] = []
+        for seed_tabs in range(1, 25):
+            page.focus_search_field(timeout_ms=timeout_ms)
+            steps: list[FocusNavigationStep] = []
+            for step_index in range(1, seed_tabs + 1):
+                before = page.active_element()
+                page.press_key("Tab", timeout_ms=timeout_ms)
+                after = page.active_element()
+                steps.append(
+                    FocusNavigationStep(
+                        step=step_index,
+                        before_label=before.accessible_name,
+                        before_role=before.role,
+                        after_label=after.accessible_name,
+                        after_role=after.role,
+                        after_tag_name=after.tag_name,
+                        after_outer_html=after.outer_html,
+                    ),
+                )
+                if _is_workspace_trigger_focus(
+                    after.accessible_name,
+                    fallback_text=after.text,
+                ):
+                    return TriggerKeyboardReachObservation(
+                        method=f"{seed_tabs}x-tab",
+                        focus_sequence=tuple(steps),
+                        forward_error=str(forward_error),
+                    )
+            for reverse_index in range(1, 19):
+                before = page.active_element()
+                page.press_key("Shift+Tab", timeout_ms=timeout_ms)
+                after = page.active_element()
+                steps.append(
+                    FocusNavigationStep(
+                        step=seed_tabs + reverse_index,
+                        before_label=before.accessible_name,
+                        before_role=before.role,
+                        after_label=after.accessible_name,
+                        after_role=after.role,
+                        after_tag_name=after.tag_name,
+                        after_outer_html=after.outer_html,
+                    ),
+                )
+                if _is_workspace_trigger_focus(
+                    after.accessible_name,
+                    fallback_text=after.text,
+                ):
+                    return TriggerKeyboardReachObservation(
+                        method=f"{seed_tabs}x-tab-then-{reverse_index}x-shift-tab",
+                        focus_sequence=tuple(steps),
+                        forward_error=str(forward_error),
+                    )
+            candidate_summaries.append(
+                f"{seed_tabs} tab(s): {_focus_sequence_summary(tuple(steps[-8:]))}",
+            )
+        raise AssertionError(
+            "Keyboard navigation never reached the workspace switcher trigger.\n"
+            f"Forward navigation failure: {forward_error}\n"
+            "Observed fallback focus attempts:\n"
+            + "\n".join(candidate_summaries),
+        ) from forward_error
+
+
+def _assert_surface_open_with_trigger_focus(
+    *,
+    switcher: WorkspaceSwitcherObservation,
+    panel: WorkspaceSwitcherPanelObservation,
+    surface: WorkspaceSwitcherSurfaceObservation,
+    focused: FocusedElementObservation,
+) -> None:
     failures: list[str] = []
-    if not _is_workspace_trigger_focus(
-        observation.starting_focus_label,
-        fallback_text=observation.trigger_text,
-    ):
-        failures.append("the scenario did not start from a trigger-focused state")
-    if not observation.next_focus_visible:
-        failures.append("the next focused element after Tab was not visible")
-    if not observation.next_focus_in_viewport:
-        failures.append("the next focused element after Tab was outside the viewport")
-    if _is_workspace_trigger_focus(
-        observation.next_focus_label,
-        fallback_text=observation.next_focus_outer_html,
-    ):
-        failures.append("focus did not move away from the workspace switcher trigger")
-    if observation.next_focus_tag_name in {"BODY", "HTML", "FLUTTER-VIEW"}:
+    if "Workspace switcher" not in switcher.switcher_text:
+        failures.append("the visible switcher text did not include the 'Workspace switcher' title")
+    if panel.container_kind not in {"anchored-panel", "surface"}:
+        failures.append(f"the opened container kind was {panel.container_kind!r}")
+    if panel.width <= 0 or panel.height <= 0:
         failures.append(
-            "focus landed on a non-interactive root element instead of the next user-visible control"
+            f"the opened panel bounds were width={panel.width:.1f}, height={panel.height:.1f}",
+        )
+    if not surface.dialog_visible:
+        failures.append("the opened switcher surface was not reported as visible")
+    if surface.heading_text.strip() != "Workspace switcher":
+        failures.append(
+            f"the visible heading was {surface.heading_text!r} instead of 'Workspace switcher'",
+        )
+    if switcher.row_count <= 0:
+        failures.append("the opened surface did not expose any visible workspace rows")
+    if not _is_workspace_trigger_focus(
+        focused.accessible_name,
+        fallback_text=focused.text,
+    ):
+        failures.append(
+            "keyboard focus moved away from the workspace switcher trigger while the "
+            "surface was open"
         )
     if failures:
         raise AssertionError(
-            "Step 3 failed: pressing Tab from the workspace switcher trigger did not "
-            "move focus to the next visible interactive element.\n"
+            "Step 4 failed: the precondition for the close-toggle scenario was not "
+            "fully established after the first Enter keypress.\n"
             + "\n".join(f"- {item}" for item in failures)
             + "\n"
-            + f"Observed next focus: label={observation.next_focus_label!r}, "
-            + f"role={observation.next_focus_role!r}, tag={observation.next_focus_tag_name!r}\n"
-            + f"Observed next focus HTML: {observation.next_focus_outer_html}",
+            + f"Observed focused element: label={focused.accessible_name!r}, "
+            + f"role={focused.role!r}, tag={focused.tag_name!r}, text={focused.text!r}\n"
+            + f"Observed switcher text:\n{switcher.switcher_text}\n"
+            + f"Observed panel bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
+            + f"width={panel.width:.1f}, height={panel.height:.1f}",
         )
 
 
-def _assert_reverse_focus_returned_to_trigger(
-    observation: WorkspaceTriggerReverseFocusObservation,
+def _assert_trigger_enter_toggle_dismissal(
+    *,
+    dismissal: WorkspaceSwitcherTriggerDismissObservation,
+    focused_after_close: FocusedElementObservation,
 ) -> None:
     failures: list[str] = []
-    if not observation.after_reverse_trigger_focused:
-        failures.append("the trigger was not the active keyboard-focused control after Shift+Tab")
+    if not dismissal.trigger_visible:
+        failures.append("the workspace switcher trigger was not visible after the second Enter keypress")
+    if not dismissal.dashboard_visible:
+        failures.append("the Dashboard shell was not visibly present after the second Enter keypress")
     if not _is_workspace_trigger_focus(
-        observation.restored_focus_label,
-        fallback_text=observation.trigger_text,
+        focused_after_close.accessible_name,
+        fallback_text=focused_after_close.text,
     ):
-        failures.append("the active element after Shift+Tab was not labelled as the workspace switcher trigger")
+        failures.append("keyboard focus did not return to the workspace switcher trigger after dismissal")
     if failures:
         raise AssertionError(
-            "Step 4 failed: pressing Shift+Tab from the subsequent element did not "
-            "return keyboard focus to the workspace switcher trigger.\n"
+            "Step 6 failed: pressing Enter on the already-open workspace switcher "
+            "trigger did not return the UI to the expected collapsed state.\n"
             + "\n".join(f"- {item}" for item in failures)
             + "\n"
-            + f"Observed restored focus: label={observation.restored_focus_label!r}, "
-            + f"role={observation.restored_focus_role!r}, tag={observation.restored_focus_tag_name!r}\n"
-            + f"Observed restored focus HTML: {observation.restored_focus_outer_html}",
+            + f"Observed active element after close: label={focused_after_close.accessible_name!r}, "
+            + f"role={focused_after_close.role!r}, tag={focused_after_close.tag_name!r}, "
+            + f"text={focused_after_close.text!r}\n"
+            + f"Observed body text after dismissal:\n{dismissal.body_text}",
         )
-
-
-def _assert_visible_focus_indicator(
-    observation: WorkspaceTriggerReverseFocusObservation,
-) -> None:
-    indicator_changed = any(
-        before != after
-        for before, after in (
-            (observation.before_reverse_outline, observation.after_reverse_outline),
-            (
-                observation.before_reverse_outline_color,
-                observation.after_reverse_outline_color,
-            ),
-            (
-                observation.before_reverse_outline_width,
-                observation.after_reverse_outline_width,
-            ),
-            (
-                observation.before_reverse_box_shadow,
-                observation.after_reverse_box_shadow,
-            ),
-        )
-    )
-    has_outline = _has_nonzero_outline(
-        observation.after_reverse_outline,
-        observation.after_reverse_outline_width,
-    )
-    has_box_shadow = _has_box_shadow(observation.after_reverse_box_shadow)
-    if observation.after_reverse_focus_visible and (indicator_changed or has_outline or has_box_shadow):
-        return
-    raise AssertionError(
-        "Step 5 failed: the workspace switcher trigger did not expose a visible "
-        "keyboard focus indicator after Shift+Tab restored focus.\n"
-        f"Observed before-reverse outline={observation.before_reverse_outline!r}, "
-        f"outline_width={observation.before_reverse_outline_width!r}, "
-        f"box_shadow={observation.before_reverse_box_shadow!r}, "
-        f"focus_visible={observation.before_reverse_focus_visible}\n"
-        f"Observed after-reverse outline={observation.after_reverse_outline!r}, "
-        f"outline_width={observation.after_reverse_outline_width!r}, "
-        f"box_shadow={observation.after_reverse_box_shadow!r}, "
-        f"focus_visible={observation.after_reverse_focus_visible}",
-    )
-
-
-def _has_nonzero_outline(outline: str, outline_width: str) -> bool:
-    outline_normalized = outline.strip().lower()
-    if not outline_normalized or outline_normalized == "none":
-        return False
-    width_normalized = outline_width.strip().lower()
-    if width_normalized in {"0", "0px", "0px none rgb(0, 0, 0)"}:
-        return False
-    return "0px" not in width_normalized
-
-
-def _has_box_shadow(box_shadow: str) -> bool:
-    normalized = box_shadow.strip().lower()
-    return bool(normalized) and normalized != "none"
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -507,7 +628,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
-    error = str(result.get("error", "AssertionError: TS-832 failed"))
+    error = str(result.get("error", "AssertionError: TS-858 failed"))
     RESULT_PATH.write_text(
         json.dumps(
             {
@@ -536,12 +657,15 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         f"*Status:* {status}",
         f"*Test Case:* {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
+        "h4. Preconditions checked",
+        *[f"* {item}" for item in PRECONDITIONS],
+        "",
         "h4. What was tested",
         "* Opened the deployed TrackState app in Chromium with a stored hosted token.",
-        "* Reached the desktop workspace switcher trigger through real keyboard Tab navigation.",
-        "* Pressed Tab once from the focused trigger and captured the next visible focused control.",
-        "* Pressed Shift + Tab and verified whether focus returned to the workspace switcher trigger.",
-        "* Checked whether the restored trigger showed a visible keyboard focus indicator.",
+        "* Reached the desktop workspace switcher trigger through a real keyboard navigation path.",
+        "* Pressed the Enter key once to open the visible workspace switcher surface.",
+        "* Verified the surface stayed open while the focused trigger still owned keyboard focus.",
+        "* Pressed Enter again on the same focused trigger and verified the visible surface closed.",
         "",
         "h4. Result",
         (
@@ -549,6 +673,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             if passed
             else f"* Did not match the expected result. {_failed_step_summary(result)}"
         ),
+        f"* Expected result: {EXPECTED_RESULT}",
         (
             f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
             f"{{{{{result['repository']}}}}} @ {{{{{result['repository_ref']}}}}}, "
@@ -557,9 +682,6 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "",
         "h4. Step results",
         *_step_lines(result, jira=True),
-        "",
-        "h4. Ticket step verification",
-        *_ticket_step_lines(result, jira=True),
         "",
         "h4. Human-style verification",
         *_human_lines(result, jira=True),
@@ -586,12 +708,15 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Status:** {status}",
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
+        "## Preconditions checked",
+        *[f"- {item}" for item in PRECONDITIONS],
+        "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token.",
-        "- Reached the desktop workspace switcher trigger through real keyboard Tab navigation.",
-        "- Pressed Tab once to move to the subsequent visible interactive element.",
-        "- Pressed Shift+Tab and checked that focus returned to the workspace switcher trigger.",
-        "- Verified that the restored trigger exposed a visible keyboard focus indicator.",
+        "- Reached the desktop workspace switcher trigger through a real keyboard navigation path.",
+        "- Pressed `Enter` once to open the workspace switcher surface.",
+        "- Verified the open surface stayed visible while focus remained on the workspace switcher trigger.",
+        "- Pressed `Enter` again on the same focused trigger and verified the surface closed.",
         "",
         "## Result",
         (
@@ -599,6 +724,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
             if passed
             else f"- Did not match the expected result. {_failed_step_summary(result)}"
         ),
+        f"- Expected result: {EXPECTED_RESULT}",
         (
             f"- Environment: URL `{result['app_url']}`, repository "
             f"`{result['repository']}` @ `{result['repository_ref']}`, browser "
@@ -607,9 +733,6 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "## Step results",
         *_step_lines(result, jira=False),
-        "",
-        "## Ticket step verification",
-        *_ticket_step_lines(result, jira=False),
         "",
         "## Human-style verification",
         *_human_lines(result, jira=False),
@@ -638,6 +761,10 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         "## Test Automation Summary",
         "",
+        (
+            "- Added TS-858 live desktop coverage for workspace-switcher Enter-key "
+            "toggle dismissal."
+        ),
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
         f"- Command: `{RUN_COMMAND}`",
@@ -647,8 +774,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             f"`{result['repository_ref']}`."
         ),
         (
-            "- Outcome: Shift+Tab returned focus from the next visible control to the "
-            "workspace switcher trigger, and the trigger showed a visible focus indicator."
+            "- Outcome: the open desktop workspace switcher closed after a second Enter "
+            "keypress on the still-focused trigger."
             if passed
             else f"- Outcome: {_failed_step_summary(result)}"
         ),
@@ -677,14 +804,10 @@ def _bug_description(result: dict[str, object]) -> str:
             *reproduction_steps,
             "",
             "## Exact steps from the test case with observations",
-            *_ticket_bug_step_lines(result),
-            "",
-            "## Detailed automation step results",
-            _annotated_step_line(result, 1, REQUEST_STEPS[0]),
-            _annotated_step_line(result, 2, REQUEST_STEPS[1]),
-            _annotated_step_line(result, 3, REQUEST_STEPS[2]),
-            _annotated_step_line(result, 4, REQUEST_STEPS[3]),
-            _annotated_step_line(result, 5, REQUEST_STEPS[4]),
+            *[
+                _annotated_step_line(result, index, step)
+                for index, step in enumerate(REQUEST_STEPS, start=1)
+            ],
             "",
             "## Exact error message or assertion failure",
             "```text",
@@ -726,11 +849,13 @@ def _bug_description(result: dict[str, object]) -> str:
                         "trigger_focusability_observation",
                     ),
                     "trigger_focus_sequence": result.get("trigger_focus_sequence"),
-                    "focused_trigger_before_reverse": result.get(
-                        "focused_trigger_before_reverse",
-                    ),
-                    "forward_focus_observation": result.get("forward_focus_observation"),
-                    "reverse_focus_observation": result.get("reverse_focus_observation"),
+                    "focused_trigger": result.get("focused_trigger"),
+                    "open_switcher_observation": result.get("open_switcher_observation"),
+                    "open_panel_observation": result.get("open_panel_observation"),
+                    "surface_observation": result.get("surface_observation"),
+                    "focused_trigger_after_open": result.get("focused_trigger_after_open"),
+                    "dismissal_observation": result.get("dismissal_observation"),
+                    "focused_trigger_after_close": result.get("focused_trigger_after_close"),
                 },
                 indent=2,
             ),
@@ -743,75 +868,62 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
     failed_step = _first_failed_step_number(result)
     if failed_step == 2:
         return (
-            f"{TICKET_KEY} - Workspace switcher trigger is missing from desktop keyboard tab order",
+            f"{TICKET_KEY} - Workspace switcher trigger is not reachable by desktop keyboard focus",
             [
                 "1. Launch the application on a desktop browser.",
                 "2. Navigate to Dashboard in the desktop web app.",
-                "3. Use real keyboard Tab navigation from the visible desktop shell.",
-                "4. Observe that focus does not land on the visible workspace switcher trigger.",
+                "3. Use real keyboard Tab navigation through the visible shell controls.",
+                "4. Observe whether focus lands on the workspace switcher trigger.",
             ],
             (
                 "The production desktop UI does not expose the workspace switcher trigger "
-                "as a reachable keyboard focus target, so the reverse Shift+Tab scenario "
-                "cannot start from a real trigger-focused state."
+                "as a reachable keyboard focus target, so the Enter-key toggle scenario "
+                "cannot begin from a real focused-trigger state."
             ),
         )
-    if failed_step == 3:
+    if failed_step in {3, 4}:
         return (
-            f"{TICKET_KEY} - Tab from workspace switcher trigger does not reach the next visible control",
+            f"{TICKET_KEY} - Workspace switcher cannot be prepared for Enter-key close toggle",
             [
                 "1. Launch the application on a desktop browser.",
                 "2. Reach the workspace switcher trigger by keyboard.",
-                "3. Press `Tab` once from the focused trigger.",
-                "4. Observe the active element after that keypress.",
+                "3. Press `Enter` once to open the workspace switcher surface.",
+                "4. Observe whether the surface opens and the trigger still owns focus.",
             ],
             (
                 "After the workspace switcher trigger receives real keyboard focus, the "
-                "next Tab press does not move focus to the following visible interactive "
-                "control in the desktop shell."
+                "production desktop UI does not keep the expected open-surface state with "
+                "focus still on the trigger, so the Enter-key close toggle cannot be "
+                "verified from the required user-visible precondition."
             ),
         )
-    if failed_step == 4:
+    if failed_step in {5, 6}:
         return (
-            f"{TICKET_KEY} - Shift+Tab from the next control does not return focus to the workspace switcher trigger",
+            f"{TICKET_KEY} - Pressing Enter on the open workspace switcher trigger does not close the surface",
             [
                 "1. Launch the application on a desktop browser.",
                 "2. Reach the workspace switcher trigger by keyboard.",
-                "3. Press `Tab` once to focus the next visible interactive element.",
-                "4. Press `Shift+Tab`.",
-                "5. Observe the active element after reverse navigation.",
+                "3. Press `Enter` to open the workspace switcher surface.",
+                "4. Keep focus on the still-visible workspace switcher trigger.",
+                "5. Press `Enter` again.",
+                "6. Observe whether the surface closes and the trigger returns to its collapsed state.",
             ],
             (
-                "Reverse sequential keyboard navigation does not return focus from the "
-                "subsequent desktop control back to the workspace switcher trigger."
-            ),
-        )
-    if failed_step == 5:
-        return (
-            f"{TICKET_KEY} - Workspace switcher trigger regains focus without a visible focus indicator",
-            [
-                "1. Launch the application on a desktop browser.",
-                "2. Reach the workspace switcher trigger by keyboard.",
-                "3. Press `Tab` once to focus the next visible interactive element.",
-                "4. Press `Shift+Tab` to move focus back to the trigger.",
-                "5. Observe the trigger styling after focus is restored.",
-            ],
-            (
-                "The workspace switcher trigger regains focus, but the production desktop "
-                "UI does not expose a visible keyboard focus indicator for that restored "
-                "state."
+                "When the workspace switcher surface is already open and the trigger still "
+                "has keyboard focus, the production desktop UI does not collapse the "
+                "surface in response to a second Enter keypress."
             ),
         )
     return (
-        f"{TICKET_KEY} - Reverse keyboard navigation around the workspace switcher is broken",
+        f"{TICKET_KEY} - Workspace switcher Enter-key close toggle is broken",
         [
             "1. Launch the application on a desktop browser.",
-            "2. Attempt the TS-832 reverse keyboard navigation scenario.",
+            "2. Attempt the TS-858 Enter-key close-toggle scenario.",
             "3. Observe the first failing boundary.",
         ],
         (
-            "The production desktop workspace switcher does not satisfy the TS-832 "
-            "reverse keyboard navigation requirement."
+            "The production desktop workspace switcher does not satisfy the TS-858 "
+            "keyboard close-toggle requirement."
         ),
     )
 
@@ -889,79 +1001,6 @@ def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     return lines or [f"{prefix} <no human-style verification recorded>"]
 
 
-def _ticket_bug_step_lines(result: dict[str, object]) -> list[str]:
-    return [
-        _annotated_ticket_step_line(result, 1, TICKET_REQUEST_STEPS[0]),
-        _annotated_ticket_step_line(result, 2, TICKET_REQUEST_STEPS[1]),
-    ]
-
-
-def _ticket_step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
-    prefix = "*" if jira else "-"
-    return [
-        f"{prefix} {_annotated_ticket_step_line(result, 1, TICKET_REQUEST_STEPS[0])}",
-        f"{prefix} {_annotated_ticket_step_line(result, 2, TICKET_REQUEST_STEPS[1])}",
-    ]
-
-
-def _annotated_ticket_step_line(
-    result: dict[str, object],
-    step_number: int,
-    action: str,
-) -> str:
-    marker = "✅" if _ticket_step_status(result, step_number) == "passed" else "❌"
-    return (
-        f"{step_number}. {marker} {action}\n"
-        f"   Actual: {_ticket_step_observation(result, step_number)}"
-    )
-
-
-def _ticket_step_status(result: dict[str, object], step_number: int) -> str:
-    if step_number == 1:
-        return "passed" if _step_status(result, 3) == "passed" else "failed"
-    if step_number == 2:
-        return (
-            "passed"
-            if _step_status(result, 4) == "passed" and _step_status(result, 5) == "passed"
-            else "failed"
-        )
-    return "failed"
-
-
-def _ticket_step_observation(result: dict[str, object], step_number: int) -> str:
-    if step_number == 1:
-        if _step_status(result, 1) != "passed":
-            return _step_observation(result, 1)
-        if _step_status(result, 2) != "passed":
-            return (
-                "The desktop app opened, but the scenario could not reach the workspace "
-                f"switcher trigger by keyboard. {_step_observation(result, 2)}"
-            )
-        if _step_status(result, 3) == "passed":
-            return (
-                "Real keyboard navigation reached the workspace switcher trigger, and "
-                f"pressing Tab moved focus to the next visible interactive control. "
-                f"{_step_observation(result, 3)}"
-            )
-        return (
-            "Real keyboard navigation reached the workspace switcher trigger, but "
-            f"pressing Tab from the focused trigger failed. {_step_observation(result, 3)}"
-        )
-    if _step_status(result, 3) != "passed":
-        return "Not reached because request step 1 failed."
-    if _step_status(result, 4) != "passed":
-        return _step_observation(result, 4)
-    if _step_status(result, 5) != "passed":
-        return (
-            "Shift+Tab restored focus to the workspace switcher trigger, but the "
-            f"visible focus-indicator check failed. {_step_observation(result, 5)}"
-        )
-    return (
-        "Shift+Tab returned focus to the workspace switcher trigger, and the trigger "
-        "showed a visible keyboard focus indicator."
-    )
-
-
 def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     prefix = "*" if jira else "-"
     screenshot = result.get("screenshot")
@@ -1005,41 +1044,31 @@ def _step_observation(result: dict[str, object], step_number: int) -> str:
     steps = result.get("steps", [])
     if not isinstance(steps, list):
         return "<no observation recorded>"
-    last_failed_step: int | None = None
     for step in steps:
-        if not isinstance(step, dict):
-            continue
-        current_step = int(step.get("step", -1))
-        if current_step == step_number:
+        if isinstance(step, dict) and int(step.get("step", -1)) == step_number:
             return str(step.get("observed", "<no observation recorded>"))
-        if step.get("status") != "passed":
-            last_failed_step = current_step
-    if last_failed_step is not None and step_number > last_failed_step:
-        return f"Not reached because step {last_failed_step} failed."
+    first_failed = _first_failed_step_number(result)
+    if first_failed is not None and step_number > first_failed:
+        return f"Not reached because Step {first_failed} failed."
     return "<no observation recorded>"
 
 
-def _focus_sequence_summary(steps: tuple[FocusNavigationStep, ...]) -> str:
-    return " -> ".join(
-        str(step.after_label or f"<{step.after_tag_name}>")
-        for step in steps
-    )
-
-
-def _trigger_payload(trigger: WorkspaceSwitcherTriggerObservation) -> dict[str, object]:
+def _trigger_payload(observation: WorkspaceSwitcherTriggerObservation) -> dict[str, object]:
     return {
-        "semantic_label": trigger.semantic_label,
-        "visible_text": trigger.visible_text,
-        "raw_text_lines": list(trigger.raw_text_lines),
-        "display_name": trigger.display_name,
-        "workspace_type": trigger.workspace_type,
-        "state_label": trigger.state_label,
-        "icon_count": trigger.icon_count,
-        "left": trigger.left,
-        "top": trigger.top,
-        "width": trigger.width,
-        "height": trigger.height,
-        "top_button_labels": list(trigger.top_button_labels),
+        "viewport_width": observation.viewport_width,
+        "viewport_height": observation.viewport_height,
+        "semantic_label": observation.semantic_label,
+        "visible_text": observation.visible_text,
+        "raw_text_lines": list(observation.raw_text_lines),
+        "display_name": observation.display_name,
+        "workspace_type": observation.workspace_type,
+        "state_label": observation.state_label,
+        "icon_count": observation.icon_count,
+        "left": observation.left,
+        "top": observation.top,
+        "width": observation.width,
+        "height": observation.height,
+        "top_button_labels": list(observation.top_button_labels),
     }
 
 
@@ -1056,71 +1085,56 @@ def _trigger_focusability_payload(
     }
 
 
-def _focused_element_payload(focused: FocusedElementObservation) -> dict[str, object]:
+def _focused_element_payload(observation: FocusedElementObservation) -> dict[str, object]:
     return {
-        "accessible_name": focused.accessible_name,
-        "role": focused.role,
-        "tag_name": focused.tag_name,
-        "text": focused.text,
-        "tabindex": focused.tabindex,
-        "outer_html": focused.outer_html,
+        "tag_name": observation.tag_name,
+        "role": observation.role,
+        "accessible_name": observation.accessible_name,
+        "text": observation.text,
+        "tabindex": observation.tabindex,
+        "outer_html": observation.outer_html,
     }
 
 
-def _forward_focus_payload(
-    observation: WorkspaceTriggerForwardFocusObservation,
-) -> dict[str, object]:
+def _switcher_payload(observation: WorkspaceSwitcherObservation) -> dict[str, object]:
     return {
-        "trigger_label": observation.trigger_label,
-        "trigger_text": observation.trigger_text,
-        "starting_focus_label": observation.starting_focus_label,
-        "starting_focus_role": observation.starting_focus_role,
-        "starting_focus_tag_name": observation.starting_focus_tag_name,
-        "next_focus_label": observation.next_focus_label,
-        "next_focus_role": observation.next_focus_role,
-        "next_focus_tag_name": observation.next_focus_tag_name,
-        "next_focus_outer_html": observation.next_focus_outer_html,
-        "next_focus_visible": observation.next_focus_visible,
-        "next_focus_in_viewport": observation.next_focus_in_viewport,
+        "body_text": observation.body_text,
+        "switcher_text": observation.switcher_text,
+        "row_count": observation.row_count,
+        "rows": [asdict(row) for row in observation.rows],
     }
 
 
-def _reverse_focus_payload(
-    observation: WorkspaceTriggerReverseFocusObservation,
-) -> dict[str, object]:
-    return {
-        "trigger_label": observation.trigger_label,
-        "trigger_text": observation.trigger_text,
-        "starting_focus_label": observation.starting_focus_label,
-        "starting_focus_role": observation.starting_focus_role,
-        "starting_focus_tag_name": observation.starting_focus_tag_name,
-        "starting_focus_outer_html": observation.starting_focus_outer_html,
-        "before_reverse_outline": observation.before_reverse_outline,
-        "before_reverse_outline_color": observation.before_reverse_outline_color,
-        "before_reverse_outline_width": observation.before_reverse_outline_width,
-        "before_reverse_box_shadow": observation.before_reverse_box_shadow,
-        "before_reverse_focus_visible": observation.before_reverse_focus_visible,
-        "before_reverse_trigger_focused": observation.before_reverse_trigger_focused,
-        "after_reverse_outline": observation.after_reverse_outline,
-        "after_reverse_outline_color": observation.after_reverse_outline_color,
-        "after_reverse_outline_width": observation.after_reverse_outline_width,
-        "after_reverse_box_shadow": observation.after_reverse_box_shadow,
-        "after_reverse_focus_visible": observation.after_reverse_focus_visible,
-        "after_reverse_trigger_focused": observation.after_reverse_trigger_focused,
-        "restored_focus_label": observation.restored_focus_label,
-        "restored_focus_role": observation.restored_focus_role,
-        "restored_focus_tag_name": observation.restored_focus_tag_name,
-        "restored_focus_outer_html": observation.restored_focus_outer_html,
-    }
+def _focus_sequence_summary(sequence: tuple[FocusNavigationStep, ...]) -> str:
+    if not sequence:
+        return "<no focus steps recorded>"
+    return " -> ".join(
+        _describe_focus_target(step.after_label, step.after_tag_name) for step in sequence
+    )
 
 
-def _is_workspace_trigger_focus(
-    accessible_name: str | None,
-    *,
-    fallback_text: str | None = None,
-) -> bool:
-    candidates = (accessible_name or "", fallback_text or "")
-    return any(candidate.startswith("Workspace switcher:") for candidate in candidates)
+def _describe_focus_target(label: str | None, tag_name: str | None) -> str:
+    normalized = " ".join((label or "").split())
+    if not normalized:
+        return f"<{tag_name or 'unknown'}>"
+    if len(normalized) > 96:
+        return normalized[:93] + "..."
+    return normalized
+
+
+def _is_workspace_trigger_focus(label: str | None, *, fallback_text: str | None = None) -> bool:
+    for candidate in (label, fallback_text):
+        normalized = " ".join((candidate or "").split()).lower()
+        if normalized.startswith("workspace switcher:"):
+            return True
+    return False
+
+
+def _snippet(text: str, *, max_length: int = 160) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= max_length:
+        return normalized
+    return normalized[: max_length - 3] + "..."
 
 
 if __name__ == "__main__":

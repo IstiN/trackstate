@@ -350,9 +350,9 @@ def main() -> None:
                 except Exception as error:
                     _record_step(
                         result,
-                        step=6,
+                        step=5,
                         status="failed",
-                        action=REQUEST_STEPS[5],
+                        action=REQUEST_STEPS[4],
                         observed=str(error),
                     )
                     raise
