@@ -477,6 +477,9 @@ class LiveWorkspaceSwitcherPage:
         self._session = tracker_page.session
         self._project_settings_page = self._settings_page(tracker_page)
 
+    def _switcher_text_field_selector(self, label: str) -> str:
+        return f'input[aria-label="{label}"]'
+
     def dismiss_connection_banner(self) -> None:
         self._project_settings_page.dismiss_connection_banner()
 
@@ -1185,7 +1188,7 @@ class LiveWorkspaceSwitcherPage:
     ) -> FocusedElementObservation:
         try:
             self._session.focus(
-                f'input[aria-label="{label}"]',
+                self._switcher_text_field_selector(label),
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -1195,6 +1198,24 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
         return self._session.active_element()
+
+    def read_switcher_text_field_value(
+        self,
+        label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            return self._session.read_value(
+                self._switcher_text_field_selector(label),
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a readable "{label}" text '
+                "field value.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
 
     def press_key(self, key: str, *, timeout_ms: int = 30_000) -> None:
         self._session.press_key(key, timeout_ms=timeout_ms)
