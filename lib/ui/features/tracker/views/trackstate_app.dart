@@ -1320,10 +1320,8 @@ class _TrackStateAppState extends State<TrackStateApp>
         ? 0
         : profiles.indexWhere((profile) => profile.id == activeWorkspaceId);
     final safeCurrentIndex = currentIndex < 0 ? 0 : currentIndex;
-    final nextIndex = (safeCurrentIndex + step).clamp(0, profiles.length - 1);
-    if (nextIndex == safeCurrentIndex) {
-      return;
-    }
+    final nextIndex =
+        (safeCurrentIndex + step + profiles.length) % profiles.length;
     await _switchToWorkspace(profiles[nextIndex]);
   }
 
@@ -3484,8 +3482,7 @@ class _TopBar extends StatelessWidget {
                                     summary: workspaceSummary,
                                     compact: false,
                                     condensed: true,
-                                    expanded:
-                                        isDesktopWorkspaceSwitcherVisible,
+                                    expanded: isDesktopWorkspaceSwitcherVisible,
                                     onPressed: openWorkspaceSwitcher,
                                     semanticsSortOrder: workspaceSwitcherOrder,
                                     focusNode:
@@ -3496,8 +3493,7 @@ class _TopBar extends StatelessWidget {
                                     semanticLabel:
                                         workspaceSummary.semanticLabel,
                                     icon: workspaceSummary.icon,
-                                    expanded:
-                                        isDesktopWorkspaceSwitcherVisible,
+                                    expanded: isDesktopWorkspaceSwitcherVisible,
                                     onPressed: openWorkspaceSwitcher,
                                     height: _desktopTopBarControlHeight,
                                     semanticsSortOrder: workspaceSwitcherOrder,
