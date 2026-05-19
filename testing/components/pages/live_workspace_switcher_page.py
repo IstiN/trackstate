@@ -80,6 +80,17 @@ class WorkspaceTriggerFocusabilityObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceTriggerAriaExpandedObservation:
+    label: str
+    role: str | None
+    tag_name: str
+    tabindex: str | None
+    keyboard_focusable: bool
+    aria_expanded: str | None
+    outer_html: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherPanelObservation:
     viewport_width: float
     viewport_height: float
@@ -1911,6 +1922,93 @@ class LiveWorkspaceSwitcherPage:
             outer_html=str(payload.get("outerHtml", "")),
         )
 
+    def observe_trigger_aria_expanded(
+        self,
+        *,
+        expected_value: str | None = None,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceTriggerAriaExpandedObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix, expectedValue }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+                  const ariaExpanded = trigger.getAttribute('aria-expanded');
+                  if (expectedValue !== null && ariaExpanded !== expectedValue) {
+                    return null;
+                  }
+                  const tabindex = trigger.getAttribute('tabindex');
+                  return {
+                    label: labelFor(trigger),
+                    role: trigger.getAttribute('role'),
+                    tagName: trigger.tagName,
+                    tabindex,
+                    keyboardFocusable: tabindex !== null && tabindex !== '-1',
+                    ariaExpanded,
+                    outerHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={
+                    "triggerLabelPrefix": self._trigger_label_prefix,
+                    "expectedValue": expected_value,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            expected_description = (
+                f" with aria-expanded={expected_value!r}" if expected_value is not None else ""
+            )
+            raise AssertionError(
+                "The live app did not expose a visible workspace switcher trigger"
+                f"{expected_description} for ARIA inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose a readable workspace switcher trigger for "
+                "ARIA inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceTriggerAriaExpandedObservation(
+            label=str(payload.get("label", "")),
+            role=str(payload.get("role")) if payload.get("role") is not None else None,
+            tag_name=str(payload.get("tagName", "")),
+            tabindex=(
+                str(payload.get("tabindex"))
+                if payload.get("tabindex") is not None
+                else None
+            ),
+            keyboard_focusable=bool(payload.get("keyboardFocusable")),
+            aria_expanded=(
+                str(payload.get("ariaExpanded"))
+                if payload.get("ariaExpanded") is not None
+                else None
+            ),
+            outer_html=str(payload.get("outerHtml", "")),
+        )
+
     def focus_trigger_via_keyboard(
         self,
         *,
@@ -1998,6 +2096,44 @@ class LiveWorkspaceSwitcherPage:
         self._session.press_key("Space", timeout_ms=timeout_ms)
         self._wait_for_surface(timeout_ms=timeout_ms)
 
+    def press_space_on_active_element_and_wait_for_dismissal(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        self._session.press_key("Space", timeout_ms=timeout_ms)
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            active = self._session.active_element()
+            raise AssertionError(
+                "Pressing Space on the active element did not dismiss the workspace "
+                "switcher surface.\n"
+                f"Observed active element label: {active.accessible_name!r}\n"
+                f"Observed active element role: {active.role!r}\n"
+                f"Observed active element HTML: {active.outer_html}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Space-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
     def wait_for_dismissal_after_trigger_space(
         self,
         *,
@@ -2015,6 +2151,11 @@ class LiveWorkspaceSwitcherPage:
                 "trigger did not dismiss the surface.\n"
                 f"Observed body text after pressing Space again:\n{self.current_body_text()}",
             ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Space-key dismissal did not return a readable "
+                "observation."
+            )
         return WorkspaceSwitcherTriggerDismissObservation(
             body_text=str(payload.get("bodyText", "")),
             dashboard_visible=bool(payload.get("dashboardVisible")),
