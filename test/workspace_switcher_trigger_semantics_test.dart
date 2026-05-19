@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/ui/features/tracker/services/browser_workspace_switcher_focus_matcher.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 void main() {
@@ -42,6 +43,49 @@ void main() {
       semantics.dispose();
     }
   });
+
+  testWidgets(
+    'desktop workspace switcher trigger keeps a stable controls relationship while collapsed',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        tester.view.physicalSize = const Size(1440, 960);
+        tester.view.devicePixelRatio = 1;
+
+        await tester.pumpWidget(
+          const TrackStateApp(repository: DemoTrackStateRepository()),
+        );
+        await tester.pumpAndSettle();
+
+        final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+        final triggerSemantics = tester.getSemantics(trigger).getSemanticsData();
+
+        expect(
+          triggerSemantics.controlsNodes,
+          contains(browserWorkspaceSwitcherSemanticsIdentifier),
+        );
+        expect(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is Semantics &&
+                widget.properties.identifier ==
+                    browserWorkspaceSwitcherSemanticsIdentifier,
+            description:
+                'workspace switcher sheet semantics anchor with a stable identifier',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('workspace-switcher-sheet')),
+          findsNothing,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
 
   testWidgets(
     'desktop workspace switcher trigger exposes expandable semantics as visibility changes',
