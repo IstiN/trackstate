@@ -1,0 +1,13 @@
+test_id: TS-853
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored hosted token and two preloaded saved hosted workspaces.
+  - Opens the desktop workspace switcher from Dashboard.
+  - Confirms the first saved workspace row starts as the active/highlighted row.
+  - Verifies that clicking the first active saved-workspace row moves keyboard focus onto that row before Arrow Up is pressed.
+  - Verifies that Arrow Up wraps the active selection from the first saved workspace to the last saved workspace while the panel remains open.
