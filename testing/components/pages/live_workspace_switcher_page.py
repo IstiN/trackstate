@@ -91,6 +91,35 @@ class WorkspaceTriggerAriaExpandedObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceTriggerAriaControlsObservation:
+    label: str
+    role: str | None
+    tag_name: str
+    tabindex: str | None
+    keyboard_focusable: bool
+    aria_controls: str | None
+    outer_html: str
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherSurfaceReferenceObservation:
+    trigger_label: str
+    trigger_aria_controls: str | None
+    controlled_surface_found: bool
+    controlled_surface_visible: bool
+    controlled_surface_id: str | None
+    controlled_surface_role: str | None
+    controlled_surface_tag_name: str | None
+    controlled_surface_text: str
+    visible_surface_id: str | None
+    visible_surface_role: str | None
+    visible_surface_tag_name: str | None
+    visible_surface_text: str
+    trigger_outer_html: str
+    visible_surface_outer_html: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherPanelObservation:
     viewport_width: float
     viewport_height: float
@@ -2007,6 +2036,258 @@ class LiveWorkspaceSwitcherPage:
                 else None
             ),
             outer_html=str(payload.get("outerHtml", "")),
+        )
+
+    def observe_trigger_aria_controls(
+        self,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceTriggerAriaControlsObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+                  const tabindex = trigger.getAttribute('tabindex');
+                  return {
+                    label: labelFor(trigger),
+                    role: trigger.getAttribute('role'),
+                    tagName: trigger.tagName,
+                    tabindex,
+                    keyboardFocusable: tabindex !== null && tabindex !== '-1',
+                    ariaControls: trigger.getAttribute('aria-controls'),
+                    outerHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The live app did not expose a visible workspace switcher trigger for "
+                "aria-controls inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose a readable workspace switcher trigger for "
+                "aria-controls inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceTriggerAriaControlsObservation(
+            label=str(payload.get("label", "")),
+            role=str(payload.get("role")) if payload.get("role") is not None else None,
+            tag_name=str(payload.get("tagName", "")),
+            tabindex=(
+                str(payload.get("tabindex"))
+                if payload.get("tabindex") is not None
+                else None
+            ),
+            keyboard_focusable=bool(payload.get("keyboardFocusable")),
+            aria_controls=(
+                str(payload.get("ariaControls"))
+                if payload.get("ariaControls") is not None
+                else None
+            ),
+            outer_html=str(payload.get("outerHtml", "")),
+        )
+
+    def observe_surface_reference(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceSwitcherSurfaceReferenceObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+
+                  const visibleDialogs = Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  ).filter(isVisible);
+                  let switcher = visibleDialogs.find((candidate) =>
+                    normalize(candidate.innerText || candidate.textContent).includes('Workspace switcher'),
+                  );
+                  if (!switcher) {
+                    const headings = Array.from(document.querySelectorAll('*'))
+                      .filter(isVisible)
+                      .map((element) => ({
+                        element,
+                        label: normalize(element.getAttribute?.('aria-label') || ''),
+                        text: normalize(element.innerText || element.textContent || ''),
+                        area: (() => {
+                          const rect = element.getBoundingClientRect();
+                          return rect.width * rect.height;
+                        })(),
+                      }))
+                      .filter((candidate) =>
+                        candidate.label === 'Workspace switcher'
+                        || candidate.text === 'Workspace switcher'
+                        || (
+                          candidate.text.includes('Workspace switcher')
+                          && (
+                            candidate.text.includes('Saved workspaces')
+                            || candidate.text.includes('Save and switch')
+                            || candidate.text.includes('Hosted Local')
+                            || candidate.text.includes('Add workspace')
+                          )
+                        )
+                      )
+                      .sort((left, right) => left.area - right.area);
+                    for (const headingCandidate of headings) {
+                      let current = headingCandidate.element;
+                      while (current && current !== document.body) {
+                        const text = normalize(current.innerText || current.textContent || '');
+                        if (
+                          text.includes('Workspace switcher')
+                          && (
+                            text.includes('Saved workspaces')
+                            || text.includes('Save and switch')
+                            || text.includes('Hosted Local')
+                            || text.includes('Add workspace')
+                          )
+                        ) {
+                          switcher = current;
+                          break;
+                        }
+                        current = current.parentElement;
+                      }
+                      if (switcher) {
+                        break;
+                      }
+                    }
+                  }
+                  if (!switcher) {
+                    return null;
+                  }
+
+                  const triggerAriaControls = trigger.getAttribute('aria-controls');
+                  const controlledSurface = triggerAriaControls
+                    ? document.getElementById(triggerAriaControls)
+                    : null;
+                  const controlledVisible = Boolean(controlledSurface) && isVisible(controlledSurface);
+                  return {
+                    triggerLabel: labelFor(trigger),
+                    triggerAriaControls,
+                    controlledSurfaceFound: Boolean(controlledSurface),
+                    controlledSurfaceVisible: controlledVisible,
+                    controlledSurfaceId: controlledSurface?.id || null,
+                    controlledSurfaceRole: controlledSurface?.getAttribute?.('role') || null,
+                    controlledSurfaceTagName: controlledSurface?.tagName || null,
+                    controlledSurfaceText: normalize(
+                      controlledSurface?.innerText || controlledSurface?.textContent || '',
+                    ),
+                    visibleSurfaceId: switcher.id || null,
+                    visibleSurfaceRole: switcher.getAttribute?.('role') || null,
+                    visibleSurfaceTagName: switcher.tagName || null,
+                    visibleSurfaceText: normalize(switcher.innerText || switcher.textContent || ''),
+                    triggerOuterHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                    visibleSurfaceOuterHtml: switcher.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The deployed app did not expose a readable visible workspace switcher "
+                "surface for aria-controls linkage inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The deployed app did not expose a readable workspace switcher trigger "
+                "and surface reference for aria-controls linkage inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherSurfaceReferenceObservation(
+            trigger_label=str(payload.get("triggerLabel", "")),
+            trigger_aria_controls=(
+                str(payload.get("triggerAriaControls"))
+                if payload.get("triggerAriaControls") is not None
+                else None
+            ),
+            controlled_surface_found=bool(payload.get("controlledSurfaceFound")),
+            controlled_surface_visible=bool(payload.get("controlledSurfaceVisible")),
+            controlled_surface_id=(
+                str(payload.get("controlledSurfaceId"))
+                if payload.get("controlledSurfaceId") is not None
+                else None
+            ),
+            controlled_surface_role=(
+                str(payload.get("controlledSurfaceRole"))
+                if payload.get("controlledSurfaceRole") is not None
+                else None
+            ),
+            controlled_surface_tag_name=(
+                str(payload.get("controlledSurfaceTagName"))
+                if payload.get("controlledSurfaceTagName") is not None
+                else None
+            ),
+            controlled_surface_text=str(payload.get("controlledSurfaceText", "")),
+            visible_surface_id=(
+                str(payload.get("visibleSurfaceId"))
+                if payload.get("visibleSurfaceId") is not None
+                else None
+            ),
+            visible_surface_role=(
+                str(payload.get("visibleSurfaceRole"))
+                if payload.get("visibleSurfaceRole") is not None
+                else None
+            ),
+            visible_surface_tag_name=(
+                str(payload.get("visibleSurfaceTagName"))
+                if payload.get("visibleSurfaceTagName") is not None
+                else None
+            ),
+            visible_surface_text=str(payload.get("visibleSurfaceText", "")),
+            trigger_outer_html=str(payload.get("triggerOuterHtml", "")),
+            visible_surface_outer_html=str(payload.get("visibleSurfaceOuterHtml", "")),
         )
 
     def focus_trigger_via_keyboard(
