@@ -1561,7 +1561,9 @@ void main() {
         );
         await _pumpUntilVisible(tester, find.byType(TextField));
 
-        final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+        final trigger = find.byKey(
+          const ValueKey('workspace-switcher-trigger'),
+        );
         expect(
           find.descendant(
             of: trigger,
@@ -1586,7 +1588,7 @@ void main() {
       final semantics = tester.ensureSemantics();
       const label = 'Workspace switcher: alpha/repo, Hosted, Needs sign-in';
       final layouts = <({String name, Size size})>[
-        (name: 'wide', size: const Size(1440, 960)),
+        (name: 'wide', size: const Size(1600, 960)),
         (name: 'condensed', size: const Size(1180, 900)),
         (name: 'compact', size: const Size(390, 844)),
       ];
