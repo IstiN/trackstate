@@ -102,6 +102,20 @@ class WorkspaceTriggerAriaControlsObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceTriggerAriaControlsTargetObservation:
+    trigger_label: str
+    trigger_aria_controls: str | None
+    controlled_element_found: bool
+    controlled_element_visible: bool
+    controlled_element_id: str | None
+    controlled_element_role: str | None
+    controlled_element_tag_name: str | None
+    controlled_element_text: str
+    trigger_outer_html: str
+    controlled_element_outer_html: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherSurfaceReferenceObservation:
     trigger_label: str
     trigger_aria_controls: str | None
@@ -2133,6 +2147,102 @@ class LiveWorkspaceSwitcherPage:
                 else None
             ),
             outer_html=str(payload.get("outerHtml", "")),
+        )
+
+    def observe_trigger_aria_controls_target(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceTriggerAriaControlsTargetObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+
+                  const triggerAriaControls = trigger.getAttribute('aria-controls');
+                  const controlledElement = triggerAriaControls
+                    ? document.getElementById(triggerAriaControls)
+                    : null;
+                  return {
+                    triggerLabel: labelFor(trigger),
+                    triggerAriaControls,
+                    controlledElementFound: Boolean(controlledElement),
+                    controlledElementVisible: Boolean(controlledElement) && isVisible(controlledElement),
+                    controlledElementId: controlledElement?.id || null,
+                    controlledElementRole: controlledElement?.getAttribute?.('role') || null,
+                    controlledElementTagName: controlledElement?.tagName || null,
+                    controlledElementText: normalize(
+                      controlledElement?.innerText || controlledElement?.textContent || '',
+                    ),
+                    triggerOuterHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                    controlledElementOuterHtml: controlledElement?.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The live app did not expose a visible workspace switcher trigger for "
+                "aria-controls target inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose a readable workspace switcher trigger for "
+                "aria-controls target inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceTriggerAriaControlsTargetObservation(
+            trigger_label=str(payload.get("triggerLabel", "")),
+            trigger_aria_controls=(
+                str(payload.get("triggerAriaControls"))
+                if payload.get("triggerAriaControls") is not None
+                else None
+            ),
+            controlled_element_found=bool(payload.get("controlledElementFound")),
+            controlled_element_visible=bool(payload.get("controlledElementVisible")),
+            controlled_element_id=(
+                str(payload.get("controlledElementId"))
+                if payload.get("controlledElementId") is not None
+                else None
+            ),
+            controlled_element_role=(
+                str(payload.get("controlledElementRole"))
+                if payload.get("controlledElementRole") is not None
+                else None
+            ),
+            controlled_element_tag_name=(
+                str(payload.get("controlledElementTagName"))
+                if payload.get("controlledElementTagName") is not None
+                else None
+            ),
+            controlled_element_text=str(payload.get("controlledElementText", "")),
+            trigger_outer_html=str(payload.get("triggerOuterHtml", "")),
+            controlled_element_outer_html=str(payload.get("controlledElementOuterHtml", "")),
         )
 
     def observe_surface_reference(
