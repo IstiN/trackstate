@@ -1705,6 +1705,34 @@ class LiveWorkspaceSwitcherPage:
         self._session.press_key("Space", timeout_ms=timeout_ms)
         self._wait_for_surface(timeout_ms=timeout_ms)
 
+    def wait_for_dismissal_after_trigger_space(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 6 failed: pressing Space on the already-open workspace switcher "
+                "trigger did not dismiss the surface.\n"
+                f"Observed body text after pressing Space again:\n{self.current_body_text()}",
+            ) from error
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
     def open_surface_with_click(self, *, timeout_ms: int = 30_000) -> None:
         self._session.click(
             self._top_bar_button_selector,
