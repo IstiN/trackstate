@@ -9,10 +9,12 @@ The automation:
    and two preloaded saved hosted workspaces
 2. opens the desktop workspace switcher from Dashboard
 3. confirms the first saved workspace row is already the active/highlighted row
-4. clicks the active first saved-workspace row and confirms the focused element
-   is the clicked row button inside the open switcher
-5. presses `ArrowDown` and waits for the active saved workspace to move to the
-   next visible row while the panel stays open
+4. records the original keyboard focus target without clicking any saved
+   workspace row
+5. presses `ArrowDown` from that original state and waits for the active saved
+   workspace to move to the next visible row while the panel stays open
+6. asserts that the focused element after `ArrowDown` is the next row button
+   itself rather than a nested control inside that row
 
 ## Install dependencies
 
@@ -38,11 +40,12 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-856/test_ts_856.py
 ## Expected result
 
 ```text
-Pass: the first saved workspace row starts active, clicking it focuses that row
-inside the open workspace switcher, and ArrowDown moves the active selection to
-Hosted alt workspace while the panel remains visible and focus stays on that row.
+Pass: the first saved workspace row starts active, ArrowDown is sent without any
+extra row click, and the active selection moves to Hosted alt workspace while
+the panel remains visible and focus lands on the Hosted alt workspace row
+button itself.
 
-Fail: the first row is not active at the start, clicking the row leaves focus on
-the global view or trigger, or ArrowDown does not move the active selection and
-keyboard focus to the next visible saved workspace row.
+Fail: the first row is not active at the start, the original switcher state
+cannot be observed reliably, or ArrowDown does not move the active selection and
+keyboard focus to the next visible saved workspace row button.
 ```

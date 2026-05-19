@@ -9,5 +9,6 @@ notes:
   - Opens the deployed TrackState web app with a stored hosted token and two preloaded saved hosted workspaces.
   - Opens the desktop workspace switcher from Dashboard.
   - Confirms the first saved workspace row starts as the active/highlighted row.
-  - Verifies that clicking the first active saved-workspace row moves keyboard focus onto that row before Arrow Down is pressed.
+  - Records the original keyboard focus target in the open switcher without clicking any saved workspace row.
   - Verifies that Arrow Down moves the active selection and keyboard focus from the first saved workspace row to the next saved workspace row while the panel remains open.
+  - Verifies that the post-Arrow Down focused element is the next saved-workspace row button itself, not a nested control inside that row.
