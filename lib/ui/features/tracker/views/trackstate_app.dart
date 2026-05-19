@@ -3140,6 +3140,8 @@ class _TrackerMainPane extends StatelessWidget {
                 viewModel: viewModel,
                 workspaces: workspaces,
                 compact: compact,
+                isDesktopWorkspaceSwitcherVisible:
+                    isDesktopWorkspaceSwitcherVisible,
                 workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
                 workspaceSwitcherTriggerFocusNode:
                     workspaceSwitcherTriggerFocusNode,
@@ -3336,6 +3338,7 @@ class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.viewModel,
     required this.workspaces,
+    required this.isDesktopWorkspaceSwitcherVisible,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
     required this.onOpenCreateIssue,
@@ -3347,6 +3350,7 @@ class _TopBar extends StatelessWidget {
 
   final TrackerViewModel viewModel;
   final WorkspaceProfilesState workspaces;
+  final bool isDesktopWorkspaceSwitcherVisible;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
   final _CreateIssueLauncher onOpenCreateIssue;
@@ -3467,6 +3471,8 @@ class _TopBar extends StatelessWidget {
                                     summary: workspaceSummary,
                                     compact: false,
                                     condensed: true,
+                                    expanded:
+                                        isDesktopWorkspaceSwitcherVisible,
                                     onPressed: openWorkspaceSwitcher,
                                     semanticsSortOrder: workspaceSwitcherOrder,
                                     focusNode:
@@ -3477,6 +3483,8 @@ class _TopBar extends StatelessWidget {
                                     semanticLabel:
                                         workspaceSummary.semanticLabel,
                                     icon: workspaceSummary.icon,
+                                    expanded:
+                                        isDesktopWorkspaceSwitcherVisible,
                                     onPressed: openWorkspaceSwitcher,
                                     height: _desktopTopBarControlHeight,
                                     semanticsSortOrder: workspaceSwitcherOrder,
@@ -10367,6 +10375,7 @@ class _PrimaryButton extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onPressed,
+    this.expanded,
     this.height,
     this.semanticLabel,
     this.focusNode,
@@ -10377,6 +10386,7 @@ class _PrimaryButton extends StatelessWidget {
   final String label;
   final TrackStateIconGlyph icon;
   final VoidCallback? onPressed;
+  final bool? expanded;
   final double? height;
   final String? semanticLabel;
   final FocusNode? focusNode;
@@ -10391,6 +10401,7 @@ class _PrimaryButton extends StatelessWidget {
       button: true,
       enabled: enabled,
       focusable: enabled,
+      expanded: expanded,
       label: semanticLabel ?? label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
       onTap: enabled ? onPressed : null,
@@ -10429,6 +10440,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
     required this.compact,
     required this.condensed,
     required this.onPressed,
+    this.expanded,
     this.focusNode,
     this.semanticsSortOrder,
   });
@@ -10437,6 +10449,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
   final bool compact;
   final bool condensed;
   final VoidCallback? onPressed;
+  final bool? expanded;
   final FocusNode? focusNode;
   final double? semanticsSortOrder;
 
@@ -10469,6 +10482,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
         button: true,
         enabled: enabled,
         focusable: enabled,
+        expanded: expanded,
         label: summary.semanticLabel,
         sortKey: _semanticsSortKey(semanticsSortOrder),
         onTap: enabled ? onPressed : null,

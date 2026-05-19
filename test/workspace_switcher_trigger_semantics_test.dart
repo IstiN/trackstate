@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -41,5 +42,141 @@ void main() {
         semantics.dispose();
       }
     },
+  );
+
+  testWidgets(
+    'desktop workspace switcher trigger exposes expandable semantics as visibility changes',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        final layouts = <({String name, Size size})>[
+          (name: 'wide', size: const Size(1440, 960)),
+          (name: 'condensed', size: const Size(1280, 960)),
+        ];
+
+        for (final layout in layouts) {
+          tester.view.physicalSize = layout.size;
+          tester.view.devicePixelRatio = 1;
+
+          await tester.pumpWidget(
+            const TrackStateApp(repository: DemoTrackStateRepository()),
+          );
+          await tester.pumpAndSettle();
+
+          final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+          expect(trigger, findsOneWidget);
+
+          await _focusByTabUntil(
+            tester,
+            isFocused: () => _focusWithinFinder(tester, trigger),
+            reason: 'Failed to focus the ${layout.name} workspace switcher trigger.',
+          );
+
+          _expectExpandedState(
+            tester,
+            trigger: trigger,
+            context: '${layout.name} collapsed',
+            hasExpandedState: true,
+            isExpanded: false,
+          );
+
+          await tester.sendKeyEvent(LogicalKeyboardKey.space);
+          await tester.pumpAndSettle();
+
+          expect(
+            find.byKey(const ValueKey('workspace-switcher-sheet')),
+            findsOneWidget,
+          );
+          _expectExpandedState(
+            tester,
+            trigger: trigger,
+            context: '${layout.name} opened',
+            hasExpandedState: true,
+            isExpanded: true,
+          );
+
+          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+          await tester.pumpAndSettle();
+
+          expect(
+            find.byKey(const ValueKey('workspace-switcher-sheet')),
+            findsNothing,
+          );
+          _expectExpandedState(
+            tester,
+            trigger: trigger,
+            context: '${layout.name} closed',
+            hasExpandedState: true,
+            isExpanded: false,
+          );
+        }
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+}
+
+Future<void> _focusByTabUntil(
+  WidgetTester tester, {
+  required bool Function() isFocused,
+  required String reason,
+  int maxTabs = 24,
+}) async {
+  for (var index = 0; index < maxTabs; index += 1) {
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    if (isFocused()) {
+      return;
+    }
+  }
+
+  throw TestFailure(reason);
+}
+
+bool _focusWithinFinder(WidgetTester tester, Finder ancestorFinder) {
+  final focusContext = FocusManager.instance.primaryFocus?.context;
+  if (focusContext == null) {
+    return false;
+  }
+  final targetElements = ancestorFinder.evaluate().toSet();
+  if (targetElements.contains(focusContext)) {
+    return true;
+  }
+  var found = false;
+  focusContext.visitAncestorElements((element) {
+    if (targetElements.contains(element)) {
+      found = true;
+      return false;
+    }
+    return true;
+  });
+  return found;
+}
+
+void _expectExpandedState(
+  WidgetTester tester, {
+  required Finder trigger,
+  required String context,
+  required bool hasExpandedState,
+  required bool isExpanded,
+}) {
+  final semantics = tester.getSemantics(trigger).getSemanticsData();
+
+  expect(
+    semantics.flagsCollection.hasExpandedState,
+    hasExpandedState,
+    reason:
+        '$context should expose hasExpandedState=$hasExpandedState, '
+        'but was ${semantics.flagsCollection.hasExpandedState}.',
+  );
+  expect(
+    semantics.flagsCollection.isExpanded,
+    isExpanded,
+    reason:
+        '$context should expose isExpanded=$isExpanded, '
+        'but was ${semantics.flagsCollection.isExpanded}.',
   );
 }
