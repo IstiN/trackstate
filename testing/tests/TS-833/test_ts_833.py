@@ -97,7 +97,7 @@ def main() -> None:
         "expected_result": EXPECTED_RESULT,
         "desktop_viewport": DESKTOP_VIEWPORT,
         "key_stability_ms": KEY_STABILITY_MS,
-        "linked_bugs": ["TS-827"],
+        "linked_bugs": ["TS-827", "TS-836"],
         "preloaded_workspace_state": workspace_state,
         "user_login": user.login,
         "steps": [],
