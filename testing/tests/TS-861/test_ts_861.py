@@ -61,9 +61,11 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts861_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts861_failure.png"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 
 def main() -> None:
@@ -113,6 +115,7 @@ def main() -> None:
             dismissal: WorkspaceSwitcherTriggerDismissObservation | None = None
             post_close_trigger_aria: WorkspaceTriggerAriaControlsObservation | None = None
             reopened_surface: WorkspaceSwitcherSurfaceObservation | None = None
+            reopened_trigger_aria: WorkspaceTriggerAriaControlsObservation | None = None
             reopened_reference: WorkspaceSwitcherSurfaceReferenceObservation | None = None
 
             try:
@@ -332,8 +335,20 @@ def main() -> None:
             try:
                 page.open_surface_with_click(timeout_ms=SURFACE_TIMEOUT_MS)
                 reopened_surface = page.observe_surface(timeout_ms=SURFACE_TIMEOUT_MS)
+                reopened_trigger_aria = page.observe_trigger_aria_controls(
+                    timeout_ms=TRIGGER_ATTRIBUTE_TIMEOUT_MS,
+                )
+                _assert_trigger_aria_controls_present(reopened_trigger_aria, step=6)
                 reopened_reference = page.observe_surface_reference(timeout_ms=SURFACE_TIMEOUT_MS)
+                _assert_trigger_aria_controls_persist(
+                    initial=initial_trigger_aria,
+                    current=reopened_trigger_aria,
+                    step=6,
+                )
                 _assert_surface_opened(reopened_surface, step=6)
+                result["reopened_trigger_aria_controls_observation"] = _trigger_aria_controls_payload(
+                    reopened_trigger_aria,
+                )
                 result["reopened_surface_observation"] = _surface_payload(reopened_surface)
                 result["reopened_surface_reference_observation"] = _surface_reference_payload(
                     reopened_reference,
@@ -355,6 +370,7 @@ def main() -> None:
                 action=REQUEST_STEPS[5],
                 observed=(
                     f"Re-opened surface heading={reopened_surface.heading_text!r}; "
+                    f"reopened_aria_controls={reopened_trigger_aria.aria_controls!r}; "
                     f"visible_surface_id={reopened_reference.visible_surface_id!r}"
                 ),
             )
@@ -362,7 +378,7 @@ def main() -> None:
             try:
                 _assert_surface_matches_initial_aria(
                     initial_trigger=initial_trigger_aria,
-                    current_trigger=post_close_trigger_aria,
+                    current_trigger=reopened_trigger_aria,
                     reference=reopened_reference,
                     step=7,
                 )
@@ -388,7 +404,8 @@ def main() -> None:
                 action=REQUEST_STEPS[6],
                 observed=(
                     f"initial_aria_controls={initial_trigger_aria.aria_controls!r}; "
-                    f"aria_controls_after_close={post_close_trigger_aria.aria_controls!r}; "
+                    f"reopened_aria_controls={reopened_trigger_aria.aria_controls!r}; "
+                    f"reopened_reference_trigger_aria_controls={reopened_reference.trigger_aria_controls!r}; "
                     f"first_surface_id={first_reference.visible_surface_id!r}; "
                     f"reopened_surface_id={reopened_reference.visible_surface_id!r}"
                 ),
@@ -402,6 +419,7 @@ def main() -> None:
                 ),
                 observed=(
                     f"reopened_heading={reopened_surface.heading_text!r}; "
+                    f"reopened_aria_controls={reopened_trigger_aria.aria_controls!r}; "
                     f"reopened_surface_id={reopened_reference.visible_surface_id!r}; "
                     f"surface_text_excerpt={_snippet(reopened_reference.visible_surface_text)!r}"
                 ),
@@ -485,6 +503,19 @@ def _assert_surface_matches_initial_aria(
         failures.append(
             f"the trigger aria-controls value changed ({current_aria!r} != {initial_aria!r})",
         )
+    if not reference.trigger_aria_controls:
+        failures.append(
+            "the reopened switcher reference did not report the trigger aria-controls value",
+        )
+    if (
+        current_aria
+        and reference.trigger_aria_controls
+        and reference.trigger_aria_controls != current_aria
+    ):
+        failures.append(
+            "the reopened switcher reference did not match the live trigger aria-controls "
+            f"value ({reference.trigger_aria_controls!r} != {current_aria!r})",
+        )
     if not reference.visible_surface_id:
         failures.append("the visible workspace switcher surface did not expose an id attribute")
     if initial_aria and not reference.controlled_surface_found:
@@ -512,6 +543,7 @@ def _assert_surface_matches_initial_aria(
             + "\n"
             + f"Observed initial aria-controls: {initial_aria!r}\n"
             + f"Observed current aria-controls: {current_aria!r}\n"
+            + f"Observed reference trigger aria-controls: {reference.trigger_aria_controls!r}\n"
             + f"Observed visible surface id: {reference.visible_surface_id!r}\n"
             + f"Observed visible surface role/tag: {reference.visible_surface_role!r} / "
             + f"{reference.visible_surface_tag_name!r}\n"
@@ -590,6 +622,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=True),
+        encoding="utf-8",
+    )
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -611,6 +647,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=False),
+        encoding="utf-8",
+    )
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
@@ -837,6 +877,9 @@ def _bug_description(result: dict[str, object]) -> str:
                     "post_close_trigger_aria_controls_observation": result.get(
                         "post_close_trigger_aria_controls_observation",
                     ),
+                    "reopened_trigger_aria_controls_observation": result.get(
+                        "reopened_trigger_aria_controls_observation",
+                    ),
                     "reopened_surface_reference_observation": result.get(
                         "reopened_surface_reference_observation",
                     ),
@@ -929,6 +972,52 @@ def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     if jira:
         return [f"{prefix} Screenshot: {{{{{screenshot}}}}}"]
     return [f"{prefix} Screenshot: `{screenshot}`"]
+
+
+def _review_replies_payload(result: dict[str, object], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(passed=passed, result=result),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else (
+            "Re-ran "
+            f"`{RUN_COMMAND}`: still failing. Current failure: {_failed_step_summary(result)}"
+        )
+    )
+    return (
+        "Fixed: step 6 now re-observes the live workspace switcher trigger "
+        "`aria-controls` value after reopening, records it in the test artifacts, and "
+        "step 7 compares that live reopened value plus the reopened surface reference "
+        f"against the initial observation. {rerun_summary}"
+    )
 
 
 def _failed_step_summary(result: dict[str, object]) -> str:
