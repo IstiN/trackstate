@@ -1264,6 +1264,21 @@ class LiveWorkspaceSwitcherPage:
         rows: list[WorkspaceSwitcherSavedWorkspaceRowObservation] = []
         switcher = self.observe_open_switcher(timeout_ms=timeout_ms)
         body_text = self.current_body_text()
+        state_labels = (
+            "Attachments limited",
+            "Saved hosted workspace",
+            "Needs sign-in",
+            "Read-only",
+            "Connected",
+            "Unavailable",
+            "Local Git",
+        )
+        summary_line_pattern = re.compile(
+            rf"^(?P<display>.+?), "
+            rf"(?P<target_type>Hosted|Local), "
+            rf"(?P<state>{'|'.join(re.escape(label) for label in state_labels)}), "
+            rf"(?P<detail>.+Branch:.+)$",
+        )
         panel_lines = [
             " ".join(line.split()).strip()
             for line in switcher.body_text.splitlines()
@@ -1276,11 +1291,39 @@ class LiveWorkspaceSwitcherPage:
         heading_indexes = [
             index for index, line in enumerate(deduped_lines) if line == self._switcher_heading
         ]
-        parsed_rows: list[tuple[str, str, str | None, str | None, tuple[str, ...], bool]] = []
+        parsed_rows: list[
+            tuple[str, str, str | None, str | None, tuple[str, ...], bool, str]
+        ] = []
         if heading_indexes:
             candidate_lines = deduped_lines[heading_indexes[-1] + 1 :]
             index = 0
-            while index + 5 < len(candidate_lines):
+            while index < len(candidate_lines):
+                if index + 2 < len(candidate_lines):
+                    summary_line = candidate_lines[index]
+                    action_label = candidate_lines[index + 1]
+                    delete_label = candidate_lines[index + 2]
+                    summary_match = summary_line_pattern.match(summary_line)
+                    if (
+                        summary_match is not None
+                        and (action_label == "Active" or action_label.startswith("Open: "))
+                        and delete_label.startswith("Delete: ")
+                    ):
+                        parsed_rows.append(
+                            (
+                                summary_match.group("display").strip(),
+                                summary_match.group("detail").strip(),
+                                summary_match.group("target_type").strip(),
+                                summary_match.group("state").strip(),
+                                (action_label, delete_label),
+                                action_label == "Active",
+                                summary_line,
+                            ),
+                        )
+                        index += 3
+                        continue
+                if index + 5 >= len(candidate_lines):
+                    index += 1
+                    continue
                 display_name = candidate_lines[index]
                 detail_text = candidate_lines[index + 1]
                 target_type_label = candidate_lines[index + 2]
@@ -1301,6 +1344,7 @@ class LiveWorkspaceSwitcherPage:
                             state_label,
                             (action_label, delete_label),
                             action_label == "Active",
+                            display_name,
                         ),
                     )
                     index += 6
@@ -1342,6 +1386,7 @@ class LiveWorkspaceSwitcherPage:
                             state_label,
                             (action_label, delete_label),
                             action_label == "Active",
+                            header,
                         ),
                     )
                     index += 3
@@ -1359,6 +1404,7 @@ class LiveWorkspaceSwitcherPage:
                         row.state_label,
                         row.action_labels,
                         row.selected,
+                        display_name,
                     ),
                 )
         for (
@@ -1368,10 +1414,11 @@ class LiveWorkspaceSwitcherPage:
             state_label,
             action_labels,
             selected,
+            locator_text,
         ) in parsed_rows:
             bounds = self._session.evaluate(
                 """
-                ({ displayName, detailText, actionLabels, deleteLabel }) => {
+                ({ displayName, locatorText, detailText, actionLabels, deleteLabel }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                   const isVisible = (element) => {
                     if (!element) {
@@ -1389,10 +1436,31 @@ class LiveWorkspaceSwitcherPage:
                     const rect = element.getBoundingClientRect();
                     return rect.width * rect.height;
                   };
+                  const rectFor = (element) => element.getBoundingClientRect();
+                  const unionRect = (elements) => {
+                    if (!elements.length) {
+                      return null;
+                    }
+                    const rects = elements.map((element) => rectFor(element));
+                    const left = Math.min(...rects.map((rect) => rect.left));
+                    const top = Math.min(...rects.map((rect) => rect.top));
+                    const right = Math.max(...rects.map((rect) => rect.right));
+                    const bottom = Math.max(...rects.map((rect) => rect.bottom));
+                    return {
+                      left,
+                      top,
+                      width: Math.max(0, right - left),
+                      height: Math.max(0, bottom - top),
+                    };
+                  };
+                  const countMatches = (text, fragment) =>
+                    !fragment ? 0 : text.split(fragment).length - 1;
                   const matchesRow = (element) => {
                     const text = textFor(element);
                     return text.includes(displayName)
+                      && (!locatorText || text.includes(locatorText))
                       && text.includes(detailText)
+                      && actionLabels.every((label) => !label || text.includes(label))
                       && (!deleteLabel || text.includes(deleteLabel));
                   };
                   const anchors = Array.from(document.querySelectorAll('*'))
@@ -1400,14 +1468,47 @@ class LiveWorkspaceSwitcherPage:
                     .filter((element) => {
                       const text = textFor(element);
                       const ariaLabel = normalize(element.getAttribute('aria-label') || '');
-                      return text === deleteLabel || ariaLabel === deleteLabel;
+                      return (
+                        text === locatorText
+                        || text === displayName
+                        || text === deleteLabel
+                        || ariaLabel === deleteLabel
+                        || actionLabels.includes(text)
+                        || actionLabels.includes(ariaLabel)
+                      );
                     })
                     .sort((left, right) => areaFor(left) - areaFor(right));
+                  const displayAnchor = anchors.find((element) => {
+                    const text = textFor(element);
+                    return text === locatorText || text === displayName;
+                  }) || null;
+                  const actionAnchor = anchors.find((element) => {
+                    const text = textFor(element);
+                    const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                    return actionLabels.includes(text) || actionLabels.includes(ariaLabel);
+                  }) || null;
+                  const deleteAnchor = anchors.find((element) => {
+                    const text = textFor(element);
+                    const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                    return text === deleteLabel || ariaLabel === deleteLabel;
+                  }) || null;
+                  const anchorBounds = unionRect(
+                    [displayAnchor, actionAnchor, deleteAnchor].filter(Boolean),
+                  );
+                  if (anchorBounds && anchorBounds.width > 0 && anchorBounds.height > 0) {
+                    return anchorBounds;
+                  }
                   let candidate = null;
                   for (const anchor of anchors) {
                     let current = anchor;
                     while (current && current !== document.body) {
-                      if (isVisible(current) && matchesRow(current)) {
+                      const text = textFor(current);
+                      if (
+                        isVisible(current)
+                        && matchesRow(current)
+                        && countMatches(text, 'Branch:') <= 1
+                        && countMatches(text, 'Delete:') <= 1
+                      ) {
                         candidate = current;
                         break;
                       }
@@ -1425,7 +1526,7 @@ class LiveWorkspaceSwitcherPage:
                   if (!candidate) {
                     return null;
                   }
-                  const rect = candidate.getBoundingClientRect();
+                  const rect = rectFor(candidate);
                   return {
                     left: rect.left,
                     top: rect.top,
@@ -1436,6 +1537,7 @@ class LiveWorkspaceSwitcherPage:
                 """,
                 arg={
                     "displayName": display_name,
+                    "locatorText": locator_text,
                     "detailText": detail_text,
                     "actionLabels": list(action_labels),
                     "deleteLabel": action_labels[-1] if action_labels else "",
@@ -1496,10 +1598,30 @@ class LiveWorkspaceSwitcherPage:
                         const rect = element.getBoundingClientRect();
                         return rect.width * rect.height;
                       };
+                      const rectFor = (element) => element.getBoundingClientRect();
+                      const unionRect = (elements) => {
+                        if (!elements.length) {
+                          return null;
+                        }
+                        const rects = elements.map((element) => rectFor(element));
+                        const left = Math.min(...rects.map((rect) => rect.left));
+                        const top = Math.min(...rects.map((rect) => rect.top));
+                        const right = Math.max(...rects.map((rect) => rect.right));
+                        const bottom = Math.max(...rects.map((rect) => rect.bottom));
+                        return {
+                          left,
+                          top,
+                          width: Math.max(0, right - left),
+                          height: Math.max(0, bottom - top),
+                        };
+                      };
+                      const countMatches = (text, fragment) =>
+                        !fragment ? 0 : text.split(fragment).length - 1;
                       const matchesRow = (element) => {
                         const text = textFor(element);
                         return text.includes(displayName)
                           && text.includes(detailText)
+                          && actionLabels.every((label) => !label || text.includes(label))
                           && (!deleteLabel || text.includes(deleteLabel));
                       };
                       const anchors = Array.from(document.querySelectorAll('*'))
@@ -1510,11 +1632,36 @@ class LiveWorkspaceSwitcherPage:
                           return text === deleteLabel || ariaLabel === deleteLabel;
                         })
                         .sort((left, right) => areaFor(left) - areaFor(right));
+                      const displayAnchor = Array.from(document.querySelectorAll('*'))
+                        .filter((element) => isVisible(element) && textFor(element) === displayName)
+                        .sort((left, right) => areaFor(left) - areaFor(right))[0] || null;
+                      const actionAnchor = anchors.find((element) => {
+                        const text = textFor(element);
+                        const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                        return actionLabels.includes(text) || actionLabels.includes(ariaLabel);
+                      }) || null;
+                      const deleteAnchor = anchors.find((element) => {
+                        const text = textFor(element);
+                        const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                        return text === deleteLabel || ariaLabel === deleteLabel;
+                      }) || null;
+                      const anchorBounds = unionRect(
+                        [displayAnchor, actionAnchor, deleteAnchor].filter(Boolean),
+                      );
+                      if (anchorBounds && anchorBounds.width > 0 && anchorBounds.height > 0) {
+                        return anchorBounds;
+                      }
                       let candidate = null;
                       for (const anchor of anchors) {
                         let current = anchor;
                         while (current && current !== document.body) {
-                          if (isVisible(current) && matchesRow(current)) {
+                          const text = textFor(current);
+                          if (
+                            isVisible(current)
+                            && matchesRow(current)
+                            && countMatches(text, 'Branch:') <= 1
+                            && countMatches(text, 'Delete:') <= 1
+                          ) {
                             candidate = current;
                             break;
                           }
@@ -1532,7 +1679,7 @@ class LiveWorkspaceSwitcherPage:
                       if (!candidate) {
                         return null;
                       }
-                      const rect = candidate.getBoundingClientRect();
+                      const rect = rectFor(candidate);
                       return {
                         left: rect.left,
                         top: rect.top,
@@ -1663,45 +1810,16 @@ class LiveWorkspaceSwitcherPage:
                 """
                 ({ displayName }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-                  const isVisible = (element) => {
-                    if (!element) {
-                      return false;
-                    }
-                    const rect = element.getBoundingClientRect();
-                    const style = window.getComputedStyle(element);
-                    return rect.width > 0
-                      && rect.height > 0
-                      && style.visibility !== 'hidden'
-                      && style.display !== 'none';
-                  };
-                  const activeButton = Array.from(document.querySelectorAll('*'))
-                    .filter(isVisible)
-                    .find((element) =>
-                      normalize(element.innerText || element.textContent || '') === 'Active',
-                    );
-                  if (!activeButton) {
+                  const bodyText = normalize(document.body?.innerText || document.body?.textContent || '');
+                  const activeMarker = `Active Delete: ${displayName}`;
+                  const activeIndex = bodyText.indexOf(activeMarker);
+                  if (activeIndex < 0) {
                     return null;
                   }
-                  let current = activeButton;
-                  while (current && current !== document.body) {
-                    const text = normalize(current.innerText || current.textContent || '');
-                    if (
-                      text.includes('Branch:')
-                      && text.includes('Delete:')
-                      && (text.includes('Hosted') || text.includes('Local'))
-                      && text.includes(displayName)
-                    ) {
-                      return text;
-                    }
-                    if (
-                      text.includes('Branch:')
-                      && text.includes('Delete:')
-                    ) {
-                      return null;
-                    }
-                    current = current.parentElement;
-                  }
-                  return null;
+                  const displayIndex = bodyText.lastIndexOf(displayName, activeIndex);
+                  return displayIndex >= 0
+                    ? bodyText.slice(displayIndex, activeIndex + activeMarker.length)
+                    : activeMarker;
                 }
                 """,
                 arg={
@@ -5678,7 +5796,6 @@ def _rows_from_switcher_text(switcher_text: str) -> tuple[WorkspaceSwitcherRowOb
         if trailer in normalized:
             normalized = normalized.split(trailer, 1)[0].strip()
             break
-    chunk_pattern = re.compile(r".+? Delete(?= .+? Delete|$)")
     states = (
         "Attachments limited",
         "Saved hosted workspace",
@@ -5688,49 +5805,39 @@ def _rows_from_switcher_text(switcher_text: str) -> tuple[WorkspaceSwitcherRowOb
         "Unavailable",
         "Local Git",
     )
+    escaped_states = "|".join(re.escape(state) for state in states)
+    row_pattern = re.compile(
+        rf"(?P<display>.+?), "
+        rf"(?P<target_type>Hosted|Local), "
+        rf"(?P<state>{escaped_states}), "
+        rf"(?P<detail>.+? • Branch: \S+(?: • Write Branch: \S+)?) "
+        rf"(?P<action>Active|Open: .+?) "
+        rf"(?P<delete>Delete: .+?)"
+        rf"(?= .+?, (?:Hosted|Local), (?:{escaped_states}), |$)",
+    )
     rows: list[WorkspaceSwitcherRowObservation] = []
-    for chunk_match in chunk_pattern.finditer(normalized):
-        chunk = chunk_match.group(0).strip()
-        action = "Open workspace" if chunk.endswith("Open workspace Delete") else "Open" if chunk.endswith("Open Delete") else "Active"
-        suffix = f" {action} Delete"
-        if not chunk.endswith(suffix):
-            continue
-        chunk_without_action = chunk[: -len(suffix)].strip()
-        target_type = None
-        state_label = None
-        for candidate_state in states:
-            for candidate_type in ("Hosted", "Local"):
-                candidate_suffix = f" {candidate_type} {candidate_state}"
-                if chunk_without_action.endswith(candidate_suffix):
-                    target_type = candidate_type
-                    state_label = candidate_state
-                    chunk_without_action = chunk_without_action[: -len(candidate_suffix)].strip()
-                    break
-            if target_type is not None:
-                break
-        if target_type is None or state_label is None:
-            continue
-        detail_match = re.search(
-            r"(?P<detail>\S+\s+•\s+Branch:\s+\S+(?:\s+•\s+Write\s+Branch:\s+\S+)?)$",
-            chunk_without_action,
-        )
-        if detail_match is None:
-            continue
-        detail_text = detail_match.group("detail").strip()
-        target = detail_text.split(" • Branch:", 1)[0].strip()
-        display_name = chunk_without_action[: detail_match.start()].strip() or target
-        button_labels = ("Delete",) if action == "Active" else (action, "Delete")
+    for match in row_pattern.finditer(normalized):
+        display_name = match.group("display").strip()
+        target_type = match.group("target_type").strip()
+        state_label = match.group("state").strip()
+        detail_text = match.group("detail").strip()
+        action = match.group("action").strip()
+        delete_label = match.group("delete").strip()
+        button_labels = (delete_label,) if action == "Active" else (action, delete_label)
         rows.append(
             WorkspaceSwitcherRowObservation(
                 display_name=display_name,
                 target_type_label=target_type,
                 state_label=state_label,
                 detail_text=detail_text,
-                visible_text=f"{display_name} {detail_text} {target_type} {state_label} {action} Delete",
+                visible_text=(
+                    f"{display_name} {detail_text} {target_type} "
+                    f"{state_label} {action} {delete_label}"
+                ),
                 selected=action == "Active",
                 semantics_label=None,
                 icon_accessibility_label=None,
-                action_labels=((action,) if action == "Active" else (action,)),
+                action_labels=(action,),
                 button_labels=button_labels,
             ),
         )
