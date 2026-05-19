@@ -8,4 +8,4 @@ dependencies:
 notes:
   - Opens the deployed TrackState web app with a stored hosted token and deterministic saved workspace profiles.
   - Uses real keyboard navigation to focus the workspace switcher trigger and open the surface with Space.
-  - Tabs to the in-panel Repository field, presses Space, and verifies the trigger toggle logic does not dismiss the open surface.
+  - Tabs to the in-panel Branch field, presses Space, and verifies the field value changes while the trigger toggle logic does not dismiss the open surface.

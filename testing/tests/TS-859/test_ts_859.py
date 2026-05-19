@@ -52,6 +52,8 @@ DEFAULT_BRANCH = "main"
 ACTIVE_WORKSPACE_DISPLAY_NAME = "Hosted main workspace"
 SECONDARY_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
 SECONDARY_WORKSPACE_WRITE_BRANCH = "ts-859-alt"
+BRANCH_FIELD_LABEL = "Branch"
+BRANCH_FIELD_SELECTOR = f'input[aria-label="{BRANCH_FIELD_LABEL}"]'
 
 PRECONDITIONS = [
     "The workspace switcher trigger is reachable with real desktop keyboard navigation.",
@@ -60,18 +62,19 @@ PRECONDITIONS = [
 ]
 REQUEST_STEPS = [
     "Press the 'Space' key on the focused trigger to open the surface.",
-    "Use the keyboard to move focus to an interactive element within the surface (the Repository field in the Save and switch section).",
+    "Use the keyboard to move focus to an interactive element within the surface (the Branch field in the Save and switch section).",
     "Press the 'Space' key.",
 ]
 AUTOMATION_STEPS = [
     "Launch the deployed desktop app and reach the workspace switcher trigger through real keyboard navigation.",
     "Press Space on the focused workspace switcher trigger to open the surface.",
-    "Use keyboard Tab navigation to move focus from the open trigger to the Repository field inside the workspace switcher surface.",
-    "Press Space on the focused Repository field and verify the key press does not trigger the workspace switcher trigger's close toggle.",
+    "Use keyboard Tab navigation to move focus from the open trigger to the Branch field inside the workspace switcher surface.",
+    "Press Space on the focused Branch field and verify the field itself handles the key press without triggering the workspace switcher trigger's close toggle.",
 ]
 EXPECTED_RESULT = (
-    "The focused in-panel interactive element handles or safely absorbs the Space "
-    "keypress, and the workspace switcher surface remains open. The trigger's "
+    "The focused in-panel interactive element handles the Space keypress itself. "
+    "For the Branch field, the value changes in response to Space while the "
+    "workspace switcher remains open, focus stays in the field, and the trigger's "
     "toggle-close logic is not activated by bubbled keyboard events from inside "
     "the surface."
 )
@@ -313,23 +316,23 @@ def main() -> None:
                     ),
                 )
 
-                repository_focus: WorkspaceSwitcherInternalFocusObservation | None = None
+                branch_focus: WorkspaceSwitcherInternalFocusObservation | None = None
                 tab_attempts: tuple[InternalFocusAttempt, ...] = ()
                 try:
-                    repository_focus, tab_attempts = _focus_repository_field_with_keyboard(
+                    branch_focus, tab_attempts = _focus_branch_field_with_keyboard(
                         page=page,
                         panel=panel_before_space,
                         max_tabs=INTERNAL_FOCUS_TAB_LIMIT,
                         timeout_ms=INTERNAL_FOCUS_TIMEOUT_MS,
                     )
-                    result["repository_focus_observation"] = _internal_focus_payload(
-                        repository_focus,
+                    result["branch_focus_observation"] = _internal_focus_payload(
+                        branch_focus,
                     )
-                    result["repository_tab_attempts"] = [
+                    result["branch_tab_attempts"] = [
                         asdict(attempt) for attempt in tab_attempts
                     ]
-                    _assert_repository_field_focused(
-                        observation=repository_focus,
+                    _assert_branch_field_focused(
+                        observation=branch_focus,
                         attempts=tab_attempts,
                     )
                 except Exception as error:
@@ -348,10 +351,10 @@ def main() -> None:
                     action=AUTOMATION_STEPS[2],
                     observed=(
                         f"tabs_required={len(tab_attempts)}; "
-                        f"before_focus={repository_focus.before_label!r}; "
-                        f"after_focus={repository_focus.after_label!r}; "
-                        f"after_tag={repository_focus.after_tag_name!r}; "
-                        f"after_within_switcher={repository_focus.after_within_switcher}"
+                        f"before_focus={branch_focus.before_label!r}; "
+                        f"after_focus={branch_focus.after_label!r}; "
+                        f"after_tag={branch_focus.after_tag_name!r}; "
+                        f"after_within_switcher={branch_focus.after_within_switcher}"
                     ),
                 )
                 _record_human_verification(
@@ -359,16 +362,17 @@ def main() -> None:
                     check=(
                         "Used keyboard Tab navigation inside the open surface until a real "
                         "in-panel control received focus, then confirmed that control was the "
-                        "visible Repository field in the Save and switch section."
+                        "visible Branch field in the Save and switch section."
                     ),
                     observed=(
                         f"attempt_sequence={_attempt_summary(tab_attempts)!r}; "
-                        f"focused_label={repository_focus.after_label!r}; "
-                        f"focused_tag={repository_focus.after_tag_name!r}"
+                        f"focused_label={branch_focus.after_label!r}; "
+                        f"focused_tag={branch_focus.after_tag_name!r}"
                     ),
                 )
 
                 before_internal_space = page.active_element()
+                branch_value_before_internal_space = _read_switcher_field_value(page)
                 switcher_after_space: WorkspaceSwitcherObservation | None = None
                 panel_after_space: WorkspaceSwitcherPanelObservation | None = None
                 surface_after_space: WorkspaceSwitcherSurfaceObservation | None = None
@@ -406,6 +410,9 @@ def main() -> None:
                     result["focused_element_before_internal_space"] = (
                         _focused_element_payload(before_internal_space)
                     )
+                    result["branch_field_value_before_internal_space"] = (
+                        branch_value_before_internal_space
+                    )
                     result["focused_element_after_internal_space"] = (
                         _focused_element_payload(focused_after_internal_space)
                     )
@@ -423,9 +430,15 @@ def main() -> None:
                     result["trigger_after_internal_space"] = _trigger_payload(
                         trigger_after_internal_space,
                     )
-                    _assert_internal_space_did_not_toggle_surface(
+                    branch_value_after_internal_space = _read_switcher_field_value(page)
+                    result["branch_field_value_after_internal_space"] = (
+                        branch_value_after_internal_space
+                    )
+                    _assert_branch_field_space_behavior(
                         before_focus=before_internal_space,
+                        before_value=branch_value_before_internal_space,
                         after_focus=focused_after_internal_space,
+                        after_value=branch_value_after_internal_space,
                         focus_observation=focus_after_internal_space,
                         switcher=switcher_after_space,
                         panel=panel_after_space,
@@ -450,6 +463,8 @@ def main() -> None:
                     observed=(
                         f"focus_before_space={before_internal_space.accessible_name!r}; "
                         f"focus_after_space={focused_after_internal_space.accessible_name!r}; "
+                        f"branch_value_before_space={branch_value_before_internal_space!r}; "
+                        f"branch_value_after_space={branch_value_after_internal_space!r}; "
                         f"panel_kind={panel_after_space.container_kind!r}; "
                         f"active_workspace_after_space={_selected_saved_workspace(saved_workspace_rows_after_space).display_name if _selected_saved_workspace(saved_workspace_rows_after_space) is not None else None!r}; "
                         f"trigger_after_space={trigger_after_internal_space.display_name!r}"
@@ -458,12 +473,14 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Pressed Space while the Repository field inside the open workspace "
+                        "Pressed Space while the Branch field inside the open workspace "
                         "switcher owned focus and watched the live UI like a keyboard user."
                     ),
                     observed=(
                         f"heading_still_visible={surface_after_space.heading_text!r}; "
                         f"focus_after_space={focused_after_internal_space.accessible_name!r}; "
+                        f"branch_value_before_space={branch_value_before_internal_space!r}; "
+                        f"branch_value_after_space={branch_value_after_internal_space!r}; "
                         f"focus_within_switcher={focus_after_internal_space.active_within_switcher}; "
                         f"active_workspace_after_space={_selected_saved_workspace(saved_workspace_rows_after_space).display_name if _selected_saved_workspace(saved_workspace_rows_after_space) is not None else None!r}"
                     ),
@@ -634,7 +651,7 @@ def _assert_surface_open_with_trigger_focus(
         )
 
 
-def _focus_repository_field_with_keyboard(
+def _focus_branch_field_with_keyboard(
     *,
     page: LiveWorkspaceSwitcherPage,
     panel: WorkspaceSwitcherPanelObservation,
@@ -664,7 +681,7 @@ def _focus_repository_field_with_keyboard(
         )
         attempts.append(attempt)
         if (
-            observation.after_label == "Repository"
+            observation.after_label == BRANCH_FIELD_LABEL
             and observation.after_tag_name == "INPUT"
             and observation.after_visible
             and observation.after_in_viewport
@@ -676,39 +693,41 @@ def _focus_repository_field_with_keyboard(
 
     raise AssertionError(
         "Step 3 failed: keyboard Tab navigation inside the open workspace switcher "
-        "never reached the Repository field.\n"
+        f"never reached the {BRANCH_FIELD_LABEL} field.\n"
         f"Observed Tab attempt sequence: {_attempt_summary(tuple(attempts))}",
     )
 
 
-def _assert_repository_field_focused(
+def _assert_branch_field_focused(
     *,
     observation: WorkspaceSwitcherInternalFocusObservation,
     attempts: tuple[InternalFocusAttempt, ...],
 ) -> None:
     failures: list[str] = []
-    if observation.after_label != "Repository":
+    if observation.after_label != BRANCH_FIELD_LABEL:
         failures.append(
-            f"the focused internal control was {observation.after_label!r} instead of 'Repository'",
+            f"the focused internal control was {observation.after_label!r} instead of {BRANCH_FIELD_LABEL!r}",
         )
     if observation.after_tag_name != "INPUT":
         failures.append(
             f"the focused internal control tag was {observation.after_tag_name!r} instead of 'INPUT'",
         )
     if not observation.after_visible:
-        failures.append("the Repository field was not visibly focused")
+        failures.append(f"the {BRANCH_FIELD_LABEL} field was not visibly focused")
     if not observation.after_in_viewport:
-        failures.append("the Repository field focus target was outside the viewport")
+        failures.append(f"the {BRANCH_FIELD_LABEL} field focus target was outside the viewport")
     if not observation.after_within_switcher:
         failures.append("keyboard focus did not move inside the open workspace switcher")
     if observation.after_on_trigger:
         failures.append("keyboard focus remained on the workspace switcher trigger")
     if not observation.after_owned_by_switcher:
-        failures.append("the focused Repository field was not owned by the workspace switcher")
+        failures.append(
+            f"the focused {BRANCH_FIELD_LABEL} field was not owned by the workspace switcher",
+        )
     if failures:
         raise AssertionError(
             "Step 3 failed: keyboard navigation inside the open workspace switcher did "
-            "not reach the expected Repository field.\n"
+            f"not reach the expected {BRANCH_FIELD_LABEL} field.\n"
             + "\n".join(f"- {item}" for item in failures)
             + "\n"
             + f"Observed focus before Tab: {observation.before_label!r} "
@@ -719,10 +738,12 @@ def _assert_repository_field_focused(
         )
 
 
-def _assert_internal_space_did_not_toggle_surface(
+def _assert_branch_field_space_behavior(
     *,
     before_focus: FocusedElementObservation,
+    before_value: str,
     after_focus: FocusedElementObservation,
+    after_value: str,
     focus_observation: WorkspaceSwitcherFocusTargetObservation,
     switcher: WorkspaceSwitcherObservation,
     panel: WorkspaceSwitcherPanelObservation,
@@ -744,17 +765,26 @@ def _assert_internal_space_did_not_toggle_surface(
         )
     if switcher.row_count <= 0:
         failures.append("the visible workspace rows were no longer present after pressing Space")
-    if before_focus.accessible_name != "Repository":
+    if before_focus.accessible_name != BRANCH_FIELD_LABEL:
         failures.append(
-            f"the pre-Space focused element was {before_focus.accessible_name!r} instead of 'Repository'",
+            f"the pre-Space focused element was {before_focus.accessible_name!r} instead of {BRANCH_FIELD_LABEL!r}",
         )
-    if after_focus.accessible_name != "Repository":
+    if after_focus.accessible_name != BRANCH_FIELD_LABEL:
         failures.append(
-            f"the post-Space focused element was {after_focus.accessible_name!r} instead of 'Repository'",
+            f"the post-Space focused element was {after_focus.accessible_name!r} instead of {BRANCH_FIELD_LABEL!r}",
         )
     if after_focus.tag_name != "INPUT":
         failures.append(
             f"the post-Space focused tag was {after_focus.tag_name!r} instead of 'INPUT'",
+        )
+    if before_value == after_value:
+        failures.append(
+            f"the {BRANCH_FIELD_LABEL} field value did not change after pressing Space "
+            f"(before={before_value!r}, after={after_value!r})",
+        )
+    if " " not in after_value:
+        failures.append(
+            f"the {BRANCH_FIELD_LABEL} field value {after_value!r} did not expose a literal space character after pressing Space",
         )
     if not focus_observation.active_within_switcher:
         failures.append("keyboard focus was no longer inside the workspace switcher after pressing Space")
@@ -774,15 +804,16 @@ def _assert_internal_space_did_not_toggle_surface(
         )
     if failures:
         raise AssertionError(
-            "Step 4 failed: pressing Space on the focused Repository field inside the "
-            "workspace switcher activated the wrong behavior instead of remaining scoped "
-            "to the in-panel control.\n"
+            f"Step 4 failed: pressing Space on the focused {BRANCH_FIELD_LABEL} field "
+            "inside the workspace switcher did not stay scoped to the in-panel control.\n"
             + "\n".join(f"- {item}" for item in failures)
             + "\n"
             + f"Observed focus before Space: label={before_focus.accessible_name!r}, "
             + f"role={before_focus.role!r}, tag={before_focus.tag_name!r}\n"
             + f"Observed focus after Space: label={after_focus.accessible_name!r}, "
             + f"role={after_focus.role!r}, tag={after_focus.tag_name!r}\n"
+            + f"Observed field value before Space: {before_value!r}\n"
+            + f"Observed field value after Space: {after_value!r}\n"
             + f"Observed switcher focus payload: {json.dumps(_switcher_focus_payload(focus_observation), indent=2)}\n"
             + f"Observed selected rows: {json.dumps(_saved_workspace_rows_payload(rows), indent=2)}\n"
             + f"Observed switcher text:\n{switcher.switcher_text}",
@@ -845,9 +876,9 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was tested",
         "* Opened the deployed TrackState app in Chromium with a stored hosted token and deterministic saved workspace profiles.",
         "* Reached the workspace switcher trigger through a real keyboard navigation path and opened the surface with Space.",
-        "* Used keyboard Tab navigation to move focus to the Repository field inside the open Workspace switcher surface.",
+        "* Used keyboard Tab navigation to move focus to the Branch field inside the open Workspace switcher surface.",
         "* Pressed Space on that focused in-panel control.",
-        "* Verified the visible Workspace switcher surface stayed open, the Repository field retained focus, and the selected workspace did not change.",
+        "* Verified the visible Workspace switcher surface stayed open, the Branch field retained focus, the Branch field value changed to reflect the Space keypress, and the selected workspace did not change.",
         "",
         "h4. Result",
         (
@@ -896,9 +927,9 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored hosted token and deterministic saved workspace profiles.",
         "- Reached the workspace switcher trigger through a real keyboard path and opened the surface with `Space`.",
-        "- Used keyboard `Tab` navigation to move focus to the in-panel `Repository` field.",
+        "- Used keyboard `Tab` navigation to move focus to the in-panel `Branch` field.",
         "- Pressed `Space` on that focused in-panel control.",
-        "- Verified the visible Workspace switcher surface stayed open, the `Repository` field retained focus, and the selected workspace stayed unchanged.",
+        "- Verified the visible Workspace switcher surface stayed open, the `Branch` field retained focus, the `Branch` field value changed after `Space`, and the selected workspace stayed unchanged.",
         "",
         "## Result",
         (
@@ -956,8 +987,9 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             f"`{result['repository_ref']}`."
         ),
         (
-            "- Outcome: pressing Space on the focused Repository field kept the visible "
-            "workspace switcher open and did not trigger the trigger-toggle dismissal."
+            "- Outcome: pressing Space on the focused Branch field changed the field "
+            "value, kept the visible workspace switcher open, and did not trigger the "
+            "trigger-toggle dismissal."
             if passed
             else f"- Outcome: {_failed_step_summary(result)}"
         ),
@@ -1032,8 +1064,14 @@ def _bug_description(result: dict[str, object]) -> str:
                     "open_switcher_observation": result.get("open_switcher_observation"),
                     "open_panel_observation": result.get("open_panel_observation"),
                     "surface_observation": result.get("surface_observation"),
-                    "repository_tab_attempts": result.get("repository_tab_attempts"),
-                    "repository_focus_observation": result.get("repository_focus_observation"),
+                    "branch_tab_attempts": result.get("branch_tab_attempts"),
+                    "branch_focus_observation": result.get("branch_focus_observation"),
+                    "branch_field_value_before_internal_space": result.get(
+                        "branch_field_value_before_internal_space",
+                    ),
+                    "branch_field_value_after_internal_space": result.get(
+                        "branch_field_value_after_internal_space",
+                    ),
                     "focused_element_before_internal_space": result.get(
                         "focused_element_before_internal_space",
                     ),
@@ -1085,15 +1123,15 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
         )
     if failed_step == 3:
         return (
-            f"{TICKET_KEY} - Keyboard navigation inside the open workspace switcher cannot reach the Repository field",
+            f"{TICKET_KEY} - Keyboard navigation inside the open workspace switcher cannot reach the Branch field",
             [
                 "1. Open the workspace switcher from the focused trigger with `Space`.",
                 "2. Press `Tab` repeatedly inside the open surface.",
-                "3. Observe whether focus reaches the in-panel Repository field.",
+                f"3. Observe whether focus reaches the in-panel {BRANCH_FIELD_LABEL} field.",
             ],
             (
                 "The production desktop workspace switcher does not expose the expected "
-                "in-panel Repository field as a reachable keyboard target, so internal "
+                f"in-panel {BRANCH_FIELD_LABEL} field as a reachable keyboard target, so internal "
                 "Space-key interaction cannot be verified through the live UI."
             ),
         )
@@ -1101,15 +1139,15 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
         f"{TICKET_KEY} - Pressing Space on a focused in-panel workspace switcher control triggers the wrong behavior",
         [
             "1. Open the workspace switcher from the focused trigger with `Space`.",
-            "2. Use keyboard Tab navigation to focus the Repository field inside the open surface.",
-            "3. Press `Space` while the Repository field is focused.",
-            "4. Observe whether the surface stays open and the Repository field keeps focus.",
+            f"2. Use keyboard Tab navigation to focus the {BRANCH_FIELD_LABEL} field inside the open surface.",
+            f"3. Press `Space` while the {BRANCH_FIELD_LABEL} field is focused.",
+            f"4. Observe whether the surface stays open, the {BRANCH_FIELD_LABEL} field keeps focus, and the field value changes in response to the keypress.",
         ],
         (
             "The production desktop workspace switcher does not keep the Space-key "
             "interaction scoped to the focused in-panel control. Instead of leaving the "
-            "Workspace switcher open with the Repository field still focused, the UI "
-            "activates an unintended behavior."
+            f"Workspace switcher open with the {BRANCH_FIELD_LABEL} field still focused "
+            "and updated by the keypress, the UI activates an unintended behavior."
         ),
     )
 
@@ -1370,6 +1408,10 @@ def _saved_workspace_rows_payload(
             },
         )
     return payload
+
+
+def _read_switcher_field_value(page: LiveWorkspaceSwitcherPage) -> str:
+    return page._session.read_value(BRANCH_FIELD_SELECTOR, timeout_ms=INTERNAL_FOCUS_TIMEOUT_MS)
 
 
 def _internal_focus_payload(
