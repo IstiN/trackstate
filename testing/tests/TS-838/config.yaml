@@ -1,0 +1,16 @@
+test_id: TS-838
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app in Chromium with a stored hosted token.
+  - Preloads two saved hosted workspace profiles so the production workspace switcher trigger is visible in the desktop shell.
+  - Clicks the visible workspace switcher trigger with the mouse and verifies that the workspace switcher surface opens with visible content.
+runtime_inputs:
+  app_url: https://istin.github.io/trackstate-setup/
+  active_workspace_kind: hosted
+  expected_trigger_action: mouse click opens workspace switcher surface
+  run_command: mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-838/test_ts_838.py
