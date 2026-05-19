@@ -8,4 +8,4 @@ dependencies:
 notes:
   - Opens the deployed TrackState web app with a stored hosted token.
   - Uses real keyboard navigation to reach the desktop workspace switcher trigger.
-  - Opens the workspace switcher with Space, verifies the trigger keeps focus while open, then presses Space again to verify the surface closes.
+  - Opens the workspace switcher with Space, verifies the trigger keeps focus while open with aria-expanded=true, then presses Space again to verify the surface closes with aria-expanded=false.

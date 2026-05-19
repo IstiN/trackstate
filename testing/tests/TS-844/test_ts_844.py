@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     FocusNavigationStep,
     LiveWorkspaceSwitcherPage,
+    WorkspaceTriggerAriaExpandedObservation,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherPanelObservation,
     WorkspaceSwitcherSurfaceObservation,
@@ -105,7 +106,7 @@ def main() -> None:
         "surface_close_timeout_ms": SURFACE_CLOSE_TIMEOUT_MS,
         "surface_close_stability_ms": SURFACE_CLOSE_STABILITY_MS,
         "preconditions": PRECONDITIONS,
-        "linked_bugs": ["TS-843"],
+        "linked_bugs": ["TS-843", "TS-847", "TS-848"],
         "user_login": user.login,
         "steps": [],
         "human_verification": [],
@@ -245,6 +246,7 @@ def main() -> None:
                 switcher: WorkspaceSwitcherObservation | None = None
                 panel: WorkspaceSwitcherPanelObservation | None = None
                 surface: WorkspaceSwitcherSurfaceObservation | None = None
+                trigger_aria_after_open: WorkspaceTriggerAriaExpandedObservation | None = None
                 try:
                     page.press_space_on_active_element_and_wait_for_surface(
                         timeout_ms=SURFACE_OPEN_TIMEOUT_MS,
@@ -255,9 +257,16 @@ def main() -> None:
                         timeout_ms=SURFACE_OPEN_TIMEOUT_MS,
                     )
                     surface = page.observe_surface(timeout_ms=SURFACE_OPEN_TIMEOUT_MS)
+                    trigger_aria_after_open = page.observe_trigger_aria_expanded(
+                        expected_value="true",
+                        timeout_ms=SURFACE_OPEN_TIMEOUT_MS,
+                    )
                     result["open_switcher_observation"] = _switcher_payload(switcher)
                     result["open_panel_observation"] = asdict(panel)
                     result["surface_observation"] = asdict(surface)
+                    result["trigger_aria_after_open"] = _trigger_aria_payload(
+                        trigger_aria_after_open,
+                    )
                 except Exception as error:
                     _record_step(
                         result,
@@ -292,6 +301,7 @@ def main() -> None:
                         switcher=switcher,
                         panel=panel,
                         surface=surface,
+                        trigger_aria_after_open=trigger_aria_after_open,
                         focused=focused_trigger_after_open,
                     )
                 except Exception as error:
@@ -312,7 +322,8 @@ def main() -> None:
                         f"heading={surface.heading_text!r}; "
                         f"dialog_visible={surface.dialog_visible}; "
                         f"panel_kind={panel.container_kind!r}; "
-                        f"focused_element={focused_trigger_after_open.accessible_name!r}"
+                        f"focused_element={focused_trigger_after_open.accessible_name!r}; "
+                        f"aria-expanded={trigger_aria_after_open.aria_expanded!r}"
                     ),
                 )
                 _record_human_verification(
@@ -326,20 +337,22 @@ def main() -> None:
                         f"heading={surface.heading_text!r}; "
                         f"row_count={switcher.row_count}; "
                         f"focus_after_open={focused_trigger_after_open.accessible_name!r}; "
-                        f"switcher_text_excerpt={_snippet(switcher.switcher_text)!r}"
+                        f"switcher_text_excerpt={_snippet(switcher.switcher_text)!r}; "
+                        f"aria-expanded={trigger_aria_after_open.aria_expanded!r}"
                     ),
                 )
 
                 dismissal: WorkspaceSwitcherTriggerDismissObservation | None = None
                 focused_trigger_after_close: FocusedElementObservation | None = None
+                trigger_aria_after_close: WorkspaceTriggerAriaExpandedObservation | None = None
                 try:
                     page.press_key("Space", timeout_ms=SURFACE_CLOSE_TIMEOUT_MS)
                 except Exception as error:
                     _record_step(
                         result,
-                        step=6,
+                        step=5,
                         status="failed",
-                        action=REQUEST_STEPS[5],
+                        action=REQUEST_STEPS[4],
                         observed=str(error),
                     )
                     raise
@@ -364,6 +377,13 @@ def main() -> None:
                     result["focused_trigger_after_close"] = _focused_element_payload(
                         focused_trigger_after_close,
                     )
+                    trigger_aria_after_close = page.observe_trigger_aria_expanded(
+                        expected_value="false",
+                        timeout_ms=SURFACE_CLOSE_TIMEOUT_MS,
+                    )
+                    result["trigger_aria_after_close"] = _trigger_aria_payload(
+                        trigger_aria_after_close,
+                    )
                 except Exception as error:
                     _record_step(
                         result,
@@ -378,6 +398,7 @@ def main() -> None:
                     _assert_trigger_space_toggle_dismissal(
                         dismissal=dismissal,
                         focused_after_close=focused_trigger_after_close,
+                        trigger_aria_after_close=trigger_aria_after_close,
                     )
                 except Exception as error:
                     _record_step(
@@ -396,7 +417,8 @@ def main() -> None:
                     observed=(
                         "The workspace switcher surface was no longer visible after the "
                         "second Space keypress, Dashboard remained visible, and keyboard "
-                        "focus stayed on the workspace switcher trigger."
+                        "focus stayed on the workspace switcher trigger with "
+                        "aria-expanded returned to 'false'."
                     ),
                 )
                 _record_human_verification(
@@ -410,7 +432,8 @@ def main() -> None:
                         f"dashboard_visible_after={dismissal.dashboard_visible}; "
                         f"trigger_visible_after={dismissal.trigger_visible}; "
                         f"focus_after_close={focused_trigger_after_close.accessible_name!r}; "
-                        f"trigger_label_after={dismissal.trigger_label!r}"
+                        f"trigger_label_after={dismissal.trigger_label!r}; "
+                        f"aria-expanded={trigger_aria_after_close.aria_expanded!r}"
                     ),
                 )
             except Exception:
@@ -538,6 +561,7 @@ def _assert_surface_open_with_trigger_focus(
     switcher: WorkspaceSwitcherObservation,
     panel: WorkspaceSwitcherPanelObservation,
     surface: WorkspaceSwitcherSurfaceObservation,
+    trigger_aria_after_open: WorkspaceTriggerAriaExpandedObservation,
     focused: FocusedElementObservation,
 ) -> None:
     failures: list[str] = []
@@ -557,6 +581,11 @@ def _assert_surface_open_with_trigger_focus(
         )
     if switcher.row_count <= 0:
         failures.append("the opened surface did not expose any visible workspace rows")
+    if trigger_aria_after_open.aria_expanded != "true":
+        failures.append(
+            "the focused trigger did not expose aria-expanded='true' while the surface "
+            "was open"
+        )
     if not _is_workspace_trigger_focus(
         focused.accessible_name,
         fallback_text=focused.text,
@@ -573,6 +602,8 @@ def _assert_surface_open_with_trigger_focus(
             + "\n"
             + f"Observed focused element: label={focused.accessible_name!r}, "
             + f"role={focused.role!r}, tag={focused.tag_name!r}, text={focused.text!r}\n"
+            + f"Observed trigger aria-expanded while open: "
+            + f"{trigger_aria_after_open.aria_expanded!r}\n"
             + f"Observed switcher text:\n{switcher.switcher_text}\n"
             + f"Observed panel bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
             + f"width={panel.width:.1f}, height={panel.height:.1f}",
@@ -583,12 +614,15 @@ def _assert_trigger_space_toggle_dismissal(
     *,
     dismissal: WorkspaceSwitcherTriggerDismissObservation,
     focused_after_close: FocusedElementObservation,
+    trigger_aria_after_close: WorkspaceTriggerAriaExpandedObservation,
 ) -> None:
     failures: list[str] = []
     if not dismissal.trigger_visible:
         failures.append("the workspace switcher trigger was not visible after the second Space keypress")
     if not dismissal.dashboard_visible:
         failures.append("the Dashboard shell was not visibly present after the second Space keypress")
+    if trigger_aria_after_close.aria_expanded != "false":
+        failures.append("the workspace switcher trigger did not expose aria-expanded='false' after dismissal")
     if not _is_workspace_trigger_focus(
         focused_after_close.accessible_name,
         fallback_text=focused_after_close.text,
@@ -603,6 +637,8 @@ def _assert_trigger_space_toggle_dismissal(
             + f"Observed active element after close: label={focused_after_close.accessible_name!r}, "
             + f"role={focused_after_close.role!r}, tag={focused_after_close.tag_name!r}, "
             + f"text={focused_after_close.text!r}\n"
+            + f"Observed trigger aria-expanded after close: "
+            + f"{trigger_aria_after_close.aria_expanded!r}\n"
             + f"Observed body text after dismissal:\n{dismissal.body_text}",
         )
 
@@ -664,8 +700,8 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "* Opened the deployed TrackState app in Chromium with a stored hosted token.",
         "* Reached the desktop workspace switcher trigger through a real keyboard navigation path.",
         "* Pressed the Space key once to open the visible workspace switcher surface.",
-        "* Verified the surface stayed open while the focused trigger still owned keyboard focus.",
-        "* Pressed Space again on the same focused trigger and verified the visible surface closed.",
+        "* Verified the surface stayed open while the focused trigger still owned keyboard focus and exposed aria-expanded=true.",
+        "* Pressed Space again on the same focused trigger and verified the visible surface closed with aria-expanded=false.",
         "",
         "h4. Result",
         (
@@ -715,8 +751,8 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "- Opened the deployed TrackState app in Chromium with a stored hosted token.",
         "- Reached the desktop workspace switcher trigger through a real keyboard navigation path.",
         "- Pressed `Space` once to open the workspace switcher surface.",
-        "- Verified the open surface stayed visible while focus remained on the workspace switcher trigger.",
-        "- Pressed `Space` again on the same focused trigger and verified the surface closed.",
+        "- Verified the open surface stayed visible while focus remained on the workspace switcher trigger and `aria-expanded` switched to `\"true\"`.",
+        "- Pressed `Space` again on the same focused trigger and verified the surface closed with `aria-expanded=\"false\"`.",
         "",
         "## Result",
         (
@@ -775,7 +811,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         ),
         (
             "- Outcome: the open desktop workspace switcher closed after a second Space "
-            "keypress on the still-focused trigger."
+            "keypress on the still-focused trigger and the trigger returned to "
+            "`aria-expanded=\"false\"`."
             if passed
             else f"- Outcome: {_failed_step_summary(result)}"
         ),
@@ -1092,6 +1129,20 @@ def _focused_element_payload(observation: FocusedElementObservation) -> dict[str
         "accessible_name": observation.accessible_name,
         "text": observation.text,
         "tabindex": observation.tabindex,
+        "outer_html": observation.outer_html,
+    }
+
+
+def _trigger_aria_payload(
+    observation: WorkspaceTriggerAriaExpandedObservation,
+) -> dict[str, object]:
+    return {
+        "label": observation.label,
+        "role": observation.role,
+        "tag_name": observation.tag_name,
+        "tabindex": observation.tabindex,
+        "keyboard_focusable": observation.keyboard_focusable,
+        "aria_expanded": observation.aria_expanded,
         "outer_html": observation.outer_html,
     }
 
