@@ -1250,25 +1250,23 @@ class _TrackStateAppState extends State<TrackStateApp>
           container: true,
           identifier: browserWorkspaceSwitcherSemanticsIdentifier,
           label: AppLocalizations.of(sheetContext)!.workspaceSwitcher,
-          onDidLoseAccessibilityFocus:
-              compact
-                  ? null
-                  : () {
-                      if (!desktopVisible) {
-                        return;
-                      }
-                      _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
-                    },
+          onDidLoseAccessibilityFocus: compact
+              ? null
+              : () {
+                  if (!desktopVisible) {
+                    return;
+                  }
+                  _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
+                },
           child: SizedBox(
             width: desktopVisible || compact ? null : 1,
             height: desktopVisible || compact ? null : 1,
             child: Offstage(
               offstage: !desktopVisible && !compact,
               child: _WorkspaceSwitcherSheet(
-                sheetKey:
-                    desktopVisible || compact
-                        ? const ValueKey('workspace-switcher-sheet')
-                        : null,
+                sheetKey: desktopVisible || compact
+                    ? const ValueKey('workspace-switcher-sheet')
+                    : null,
                 exposeActiveSummarySemantics: true,
                 viewModel: viewModel,
                 workspaces: _workspaceState,
@@ -1305,17 +1303,16 @@ class _TrackStateAppState extends State<TrackStateApp>
       return content;
     }
     return CallbackShortcuts(
-      bindings:
-          desktopVisible
-              ? <ShortcutActivator, VoidCallback>{
-                  const SingleActivator(LogicalKeyboardKey.escape):
-                      _closeDesktopWorkspaceSwitcher,
-                  const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
-                      unawaited(_switchToAdjacentWorkspace(step: 1)),
-                  const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
-                      unawaited(_switchToAdjacentWorkspace(step: -1)),
-                }
-              : const <ShortcutActivator, VoidCallback>{},
+      bindings: desktopVisible
+          ? <ShortcutActivator, VoidCallback>{
+              const SingleActivator(LogicalKeyboardKey.escape):
+                  _closeDesktopWorkspaceSwitcher,
+              const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+                  unawaited(_switchToAdjacentWorkspace(step: 1)),
+              const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+                  unawaited(_switchToAdjacentWorkspace(step: -1)),
+            }
+          : const <ShortcutActivator, VoidCallback>{},
       child: FocusScope(
         node: _desktopWorkspaceSwitcherFocusScopeNode,
         autofocus: desktopVisible,
@@ -1332,7 +1329,10 @@ class _TrackStateAppState extends State<TrackStateApp>
           if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
             return KeyEventResult.ignored;
           }
-          if (event.logicalKey != LogicalKeyboardKey.space) {
+          final logicalKey = event.logicalKey;
+          if (logicalKey != LogicalKeyboardKey.space &&
+              logicalKey != LogicalKeyboardKey.enter &&
+              logicalKey != LogicalKeyboardKey.numpadEnter) {
             return KeyEventResult.ignored;
           }
           _closeDesktopWorkspaceSwitcher();
@@ -1484,10 +1484,11 @@ class _TrackStateAppState extends State<TrackStateApp>
                       _isDesktopWorkspaceSwitcherVisible,
                   desktopWorkspaceSwitcherPanelRect:
                       _desktopWorkspaceSwitcherPanelRect(),
-                  desktopWorkspaceSwitcherContent: _buildWorkspaceSwitcherContent(
-                    compact: false,
-                    desktopVisible: _isDesktopWorkspaceSwitcherVisible,
-                  ),
+                  desktopWorkspaceSwitcherContent:
+                      _buildWorkspaceSwitcherContent(
+                        compact: false,
+                        desktopVisible: _isDesktopWorkspaceSwitcherVisible,
+                      ),
                   onOpenCreateIssue: _openCreateIssue,
                   onOpenWorkspaceSwitcher: _openWorkspaceSwitcher,
                   onCloseDesktopWorkspaceSwitcher:
@@ -5981,10 +5982,9 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                   TrackStateIcon(
                     activeSummary.icon,
                     color: colors.primary,
-                    semanticLabel:
-                        widget.exposeActiveSummarySemantics
-                            ? activeSummary.semanticLabel
-                            : null,
+                    semanticLabel: widget.exposeActiveSummarySemantics
+                        ? activeSummary.semanticLabel
+                        : null,
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -6046,7 +6046,9 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                               primaryActionLabel:
                                   workspace.isLocal &&
                                       widget.viewModel.usesLocalPersistence
-                                  ? (widget.viewModel.hasLocalHostedAccessSession
+                                  ? (widget
+                                            .viewModel
+                                            .hasLocalHostedAccessSession
                                         ? l10n.manageGitHubAccess
                                         : l10n.connectGitHub)
                                   : null,
@@ -6059,11 +6061,11 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                                       allowLocalGitHubConnection: true,
                                     )
                                   : null,
-                              onSelect:
-                                  workspaceId == activeWorkspaceId
+                              onSelect: workspaceId == activeWorkspaceId
                                   ? null
                                   : () => widget.onSelectWorkspace(workspace),
-                              onDelete: () => widget.onDeleteWorkspace(workspace),
+                              onDelete: () =>
+                                  widget.onDeleteWorkspace(workspace),
                               onSummaryFocusRequesterChanged: (requestFocus) {
                                 if (requestFocus == null) {
                                   _workspaceRowFocusRequesters.remove(
