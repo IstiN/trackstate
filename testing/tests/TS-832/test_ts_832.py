@@ -741,11 +741,15 @@ def _bug_description(result: dict[str, object]) -> str:
 
 def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
     failed_step = _first_failed_step_number(result)
-    reproduction_steps = [f"{index}. {step}" for index, step in enumerate(TICKET_REQUEST_STEPS, start=1)]
     if failed_step == 2:
         return (
             f"{TICKET_KEY} - Workspace switcher trigger is missing from desktop keyboard tab order",
-            reproduction_steps,
+            [
+                "1. Launch the application on a desktop browser.",
+                "2. Navigate to Dashboard in the desktop web app.",
+                "3. Use real keyboard Tab navigation from the visible desktop shell.",
+                "4. Observe that focus does not land on the visible workspace switcher trigger.",
+            ],
             (
                 "The production desktop UI does not expose the workspace switcher trigger "
                 "as a reachable keyboard focus target, so the reverse Shift+Tab scenario "
@@ -755,7 +759,12 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
     if failed_step == 3:
         return (
             f"{TICKET_KEY} - Tab from workspace switcher trigger does not reach the next visible control",
-            reproduction_steps,
+            [
+                "1. Launch the application on a desktop browser.",
+                "2. Reach the workspace switcher trigger by keyboard.",
+                "3. Press `Tab` once from the focused trigger.",
+                "4. Observe the active element after that keypress.",
+            ],
             (
                 "After the workspace switcher trigger receives real keyboard focus, the "
                 "next Tab press does not move focus to the following visible interactive "
@@ -765,7 +774,13 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
     if failed_step == 4:
         return (
             f"{TICKET_KEY} - Shift+Tab from the next control does not return focus to the workspace switcher trigger",
-            reproduction_steps,
+            [
+                "1. Launch the application on a desktop browser.",
+                "2. Reach the workspace switcher trigger by keyboard.",
+                "3. Press `Tab` once to focus the next visible interactive element.",
+                "4. Press `Shift+Tab`.",
+                "5. Observe the active element after reverse navigation.",
+            ],
             (
                 "Reverse sequential keyboard navigation does not return focus from the "
                 "subsequent desktop control back to the workspace switcher trigger."
@@ -774,7 +789,13 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
     if failed_step == 5:
         return (
             f"{TICKET_KEY} - Workspace switcher trigger regains focus without a visible focus indicator",
-            reproduction_steps,
+            [
+                "1. Launch the application on a desktop browser.",
+                "2. Reach the workspace switcher trigger by keyboard.",
+                "3. Press `Tab` once to focus the next visible interactive element.",
+                "4. Press `Shift+Tab` to move focus back to the trigger.",
+                "5. Observe the trigger styling after focus is restored.",
+            ],
             (
                 "The workspace switcher trigger regains focus, but the production desktop "
                 "UI does not expose a visible keyboard focus indicator for that restored "
@@ -783,7 +804,11 @@ def _bug_context(result: dict[str, object]) -> tuple[str, list[str], str]:
         )
     return (
         f"{TICKET_KEY} - Reverse keyboard navigation around the workspace switcher is broken",
-        reproduction_steps,
+        [
+            "1. Launch the application on a desktop browser.",
+            "2. Attempt the TS-832 reverse keyboard navigation scenario.",
+            "3. Observe the first failing boundary.",
+        ],
         (
             "The production desktop workspace switcher does not satisfy the TS-832 "
             "reverse keyboard navigation requirement."
@@ -935,6 +960,8 @@ def _ticket_step_observation(result: dict[str, object], step_number: int) -> str
         "Shift+Tab returned focus to the workspace switcher trigger, and the trigger "
         "showed a visible keyboard focus indicator."
     )
+
+
 def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     prefix = "*" if jira else "-"
     screenshot = result.get("screenshot")
