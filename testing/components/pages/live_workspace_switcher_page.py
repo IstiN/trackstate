@@ -2415,6 +2415,44 @@ class LiveWorkspaceSwitcherPage:
             ),
         )
 
+    def press_enter_on_active_element_and_wait_for_dismissal(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        self._session.press_key("Enter", timeout_ms=timeout_ms)
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            active = self._session.active_element()
+            raise AssertionError(
+                "Pressing Enter on the active element did not dismiss the workspace "
+                "switcher surface.\n"
+                f"Observed active element label: {active.accessible_name!r}\n"
+                f"Observed active element role: {active.role!r}\n"
+                f"Observed active element HTML: {active.outer_html}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Enter-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
     def wait_for_dismissal_after_trigger_space(
         self,
         *,
@@ -2435,6 +2473,39 @@ class LiveWorkspaceSwitcherPage:
         if not isinstance(payload, dict):
             raise AssertionError(
                 "The workspace switcher Space-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
+    def wait_for_dismissal_after_trigger_enter(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 6 failed: pressing Enter on the already-open workspace switcher "
+                "trigger did not dismiss the surface.\n"
+                f"Observed body text after pressing Enter again:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Enter-key dismissal did not return a readable "
                 "observation."
             )
         return WorkspaceSwitcherTriggerDismissObservation(
