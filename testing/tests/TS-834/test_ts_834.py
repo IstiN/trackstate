@@ -70,26 +70,7 @@ BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts834_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts834_failure.png"
 
-REVIEW_THREAD_REPLIES = (
-    {
-        "inReplyToId": 3261386533,
-        "threadId": "PRRT_kwDOSU6Gf86C8KTI",
-        "reply": (
-            "Fixed: the test no longer drives `ArrowDown` from a synthetic saved-row "
-            "body click. It now tabs to a real visible in-panel button owned by the "
-            "open workspace switcher before sending the key."
-        ),
-    },
-    {
-        "inReplyToId": 3261386680,
-        "threadId": "PRRT_kwDOSU6Gf86C8KUw",
-        "reply": (
-            "Fixed: the test records and asserts a switcher-owned focus target before "
-            "sending `ArrowDown`. The rerun result determines whether the scenario is "
-            "green or a real product gap rather than a harness artifact."
-        ),
-    },
-)
+REVIEW_THREAD_REPLIES: tuple[dict[str, object], ...] = ()
 
 
 def main() -> None:

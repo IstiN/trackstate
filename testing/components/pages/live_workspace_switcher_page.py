@@ -1247,6 +1247,45 @@ class LiveWorkspaceSwitcherPage:
                         display_name,
                     ),
                 )
+        if not parsed_rows:
+            body_lines = [
+                re.sub(r"^(.+)\s+\1$", r"\1", " ".join(line.split()).strip())
+                for line in body_text.splitlines()
+                if line.strip()
+            ]
+            body_heading_indexes = [
+                index for index, line in enumerate(body_lines) if line == self._switcher_heading
+            ]
+            if body_heading_indexes:
+                candidate_lines = body_lines[body_heading_indexes[-1] + 1 :]
+                index = 0
+                while index + 2 < len(candidate_lines):
+                    summary_line = candidate_lines[index]
+                    action_label = candidate_lines[index + 1]
+                    delete_label = candidate_lines[index + 2]
+                    if (
+                        "Branch:" in summary_line
+                        and (action_label == "Active" or action_label.startswith("Open: "))
+                        and delete_label.startswith("Delete: ")
+                    ):
+                        summary_parts = [
+                            part.strip() for part in summary_line.split(",") if part.strip()
+                        ]
+                        if len(summary_parts) >= 4:
+                            parsed_rows.append(
+                                (
+                                    summary_parts[0],
+                                    ", ".join(summary_parts[3:]),
+                                    summary_parts[1],
+                                    summary_parts[2],
+                                    (action_label, delete_label),
+                                    action_label == "Active",
+                                    summary_line,
+                                ),
+                            )
+                            index += 3
+                            continue
+                    index += 1
         rows: list[WorkspaceSwitcherSavedWorkspaceRowObservation] = []
         for (
             display_name,
@@ -1259,7 +1298,7 @@ class LiveWorkspaceSwitcherPage:
         ) in parsed_rows:
             bounds = self._session.evaluate(
                 """
-                ({ displayName, locatorText, detailText }) => {
+                ({ displayName, locatorText, detailText, actionLabels, targetTypeLabel }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                   const isVisible = (element) => {
                     if (!element) {
@@ -1272,7 +1311,11 @@ class LiveWorkspaceSwitcherPage:
                       && style.visibility !== 'hidden'
                       && style.display !== 'none';
                   };
-                  const candidate = Array.from(document.querySelectorAll('*'))
+                  const normalizedActions = (actionLabels || [])
+                    .map((label) => normalize(label))
+                    .filter((label) => label.length > 0)
+                    .map((label) => label.split(':')[0]);
+                  const visibleCandidates = Array.from(document.querySelectorAll('*'))
                     .filter((element) => isVisible(element))
                     .map((element) => {
                       const text = normalize(element.innerText || element.textContent || '');
@@ -1284,40 +1327,26 @@ class LiveWorkspaceSwitcherPage:
                         ariaLabel,
                         area: rect.width * rect.height,
                       };
-                    })
+                     });
+                  const candidate = visibleCandidates
                     .find((item) => item.text === locatorText || item.ariaLabel === locatorText)
-                    ?? Array.from(document.querySelectorAll('*'))
-                      .filter((element) => isVisible(element))
-                      .map((element) => {
-                        const text = normalize(element.innerText || element.textContent || '');
-                        const ariaLabel = normalize(element.getAttribute?.('aria-label') || '');
-                        const rect = element.getBoundingClientRect();
-                        return {
-                          element,
-                          text,
-                          ariaLabel,
-                          area: rect.width * rect.height,
-                        };
-                      })
+                    ?? visibleCandidates
                       .find((item) => item.text === displayName || item.ariaLabel === displayName)
-                    ?? Array.from(document.querySelectorAll('*'))
-                      .filter((element) => isVisible(element))
-                      .map((element) => {
-                        const text = normalize(element.innerText || element.textContent || '');
-                        const ariaLabel = normalize(element.getAttribute?.('aria-label') || '');
-                        const rect = element.getBoundingClientRect();
-                        return {
-                          element,
-                          text,
-                          ariaLabel,
-                          area: rect.width * rect.height,
-                        };
-                      })
+                    ?? visibleCandidates
                       .filter((item) =>
                         (item.text.includes(displayName) || item.ariaLabel.includes(displayName))
                         && (item.text.includes(detailText) || item.ariaLabel.includes(detailText))
                       )
-                      .sort((left, right) => left.area - right.area)[0];
+                      .sort((left, right) => left.area - right.area)[0]
+                    ?? visibleCandidates
+                      .filter((item) =>
+                        item.text.includes(displayName)
+                        && item.text.includes(detailText)
+                        && (!targetTypeLabel || item.text.includes(targetTypeLabel))
+                        && normalizedActions.every((label) => item.text.includes(label))
+                      )
+                      .sort((left, right) => left.area - right.area)[0]
+                    ?? null;
                   if (!candidate) {
                     return null;
                   }
@@ -1334,6 +1363,8 @@ class LiveWorkspaceSwitcherPage:
                     "displayName": display_name,
                     "locatorText": locator_text,
                     "detailText": detail_text,
+                    "actionLabels": action_labels,
+                    "targetTypeLabel": target_type_label,
                 },
             )
             if not isinstance(bounds, dict):
@@ -5625,165 +5656,7 @@ def _rows_from_switcher_text(switcher_text: str) -> tuple[WorkspaceSwitcherRowOb
         )
     if rows:
         return tuple(rows)
-
-    normalized = " ".join(switcher_text.split())
-    if not normalized:
-        return ()
-    normalized = normalized.replace("Workspace switcher Workspace switcher ", "", 1)
-    for trailer in (" Hosted Local Save and switch", " Save and switch"):
-        if trailer in normalized:
-            normalized = normalized.split(trailer, 1)[0].strip()
-            break
-    states = (
-        "Attachments limited",
-        "Saved hosted workspace",
-        "Needs sign-in",
-        "Read-only",
-        "Connected",
-        "Unavailable",
-        "Local Git",
-    )
-    escaped_states = "|".join(re.escape(state) for state in states)
-    row_pattern = re.compile(
-        rf"(?P<display>.+?), "
-        rf"(?P<target_type>Hosted|Local), "
-        rf"(?P<state>{escaped_states}), "
-        rf"(?P<detail>.+? • Branch: \S+(?: • Write Branch: \S+)?) "
-        rf"(?P<action>Active|Open: .+?) "
-        rf"(?P<delete>Delete: .+?)"
-        rf"(?= .+?, (?:Hosted|Local), (?:{escaped_states}), |$)",
-    )
-    rows = []
-    for match in row_pattern.finditer(normalized):
-        display_name = match.group("display").strip()
-        target_type = match.group("target_type").strip()
-        state_label = match.group("state").strip()
-        detail_text = match.group("detail").strip()
-        action = match.group("action").strip()
-        delete_label = match.group("delete").strip()
-        button_labels = (delete_label,) if action == "Active" else (action, delete_label)
-        rows.append(
-            WorkspaceSwitcherRowObservation(
-                display_name=display_name,
-                target_type_label=target_type,
-                state_label=state_label,
-                detail_text=detail_text,
-                visible_text=(
-                    f"{display_name} {detail_text} {target_type} "
-                    f"{state_label} {action} {delete_label}"
-                ),
-                selected=action == "Active",
-                semantics_label=None,
-                icon_accessibility_label=None,
-                action_labels=(action,),
-                button_labels=button_labels,
-            ),
-        )
-    if rows:
-        return tuple(rows)
-
-    fallback_pattern = re.compile(
-        rf"(?P<display>.+?) "
-        rf"(?P<detail>\S+\s+•\s+Branch:\s+\S+(?:\s+•\s+Write\s+Branch:\s+\S+)?) "
-        rf"(?P<target_type>Hosted|Local) "
-        rf"(?P<state>{escaped_states}) "
-        rf"(?P<action>Active|Open(?:\s+workspace)?) "
-        rf"Delete"
-        rf"(?= .+? \S+\s+•\s+Branch:\s+\S+(?:\s+•\s+Write\s+Branch:\s+\S+)? "
-        rf"(?:Hosted|Local) (?:{escaped_states}) (?:Active|Open(?:\s+workspace)?) Delete|$)",
-    )
-    rows = []
-    for match in fallback_pattern.finditer(normalized):
-        display_name = match.group("display").strip()
-        target_type = match.group("target_type").strip()
-        state_label = match.group("state").strip()
-        detail_text = match.group("detail").strip()
-        action = match.group("action").strip()
-        button_labels = ("Delete",) if action == "Active" else (action, "Delete")
-        rows.append(
-            WorkspaceSwitcherRowObservation(
-                display_name=display_name,
-                target_type_label=target_type,
-                state_label=state_label,
-                detail_text=detail_text,
-                visible_text=(
-                    f"{display_name} {detail_text} {target_type} "
-                    f"{state_label} {action} Delete"
-                ),
-                selected=action == "Active",
-                semantics_label=None,
-                icon_accessibility_label=None,
-                action_labels=(action,),
-                button_labels=button_labels,
-            ),
-        )
-    return tuple(rows)
-
-
-def _saved_workspace_rows_from_body_text(
-    body_text: str,
-) -> tuple[WorkspaceSwitcherRowObservation, ...]:
-    lines = [
-        " ".join(line.split()).strip()
-        for line in body_text.splitlines()
-        if " ".join(line.split()).strip()
-    ]
-    rows: list[WorkspaceSwitcherRowObservation] = []
-    line_index = 0
-    while line_index < len(lines):
-        line = lines[line_index]
-        if line.startswith("Workspace switcher Workspace switcher "):
-            line = line.replace("Workspace switcher Workspace switcher ", "", 1)
-        summary_match = re.match(
-            r"^(?P<display>.+?),\s+(?P<type>Hosted|Local),\s+"
-            r"(?P<state>[^,]+),\s+(?P<detail>.+Branch:.+)$",
-            line,
-        )
-        if summary_match is None:
-            line_index += 1
-            continue
-        action_labels: list[str] = []
-        button_labels: list[str] = []
-        look_ahead = line_index + 1
-        while look_ahead < len(lines):
-            candidate = lines[look_ahead]
-            if candidate.startswith("Workspace switcher Workspace switcher "):
-                candidate = candidate.replace("Workspace switcher Workspace switcher ", "", 1)
-            if re.match(
-                r"^.+?,\s+(Hosted|Local),\s+[^,]+,\s+.+Branch:.+$",
-                candidate,
-            ):
-                break
-            if candidate in {"Hosted", "Local", "Save and switch", "Workspace switcher", "Saved workspaces"}:
-                break
-            if candidate == "Active" or candidate.startswith("Open: "):
-                action_labels.append(candidate)
-                button_labels.append(candidate)
-            elif candidate.startswith("Delete: "):
-                button_labels.append(candidate)
-            look_ahead += 1
-        rows.append(
-            WorkspaceSwitcherRowObservation(
-                display_name=summary_match.group("display").strip(),
-                target_type_label=summary_match.group("type").strip(),
-                state_label=summary_match.group("state").strip(),
-                detail_text=summary_match.group("detail").strip(),
-                visible_text=" ".join(
-                    [
-                        line,
-                        *action_labels,
-                        *[label for label in button_labels if label not in action_labels],
-                    ],
-                ).strip(),
-                selected="Active" in action_labels,
-                semantics_label=None,
-                icon_accessibility_label=None,
-                action_labels=tuple(action_labels),
-                button_labels=tuple(button_labels),
-            ),
-        )
-        line_index = look_ahead
-    return tuple(rows)
+    return ()
 
 
 def _saved_workspace_rows_from_body_text(
