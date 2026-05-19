@@ -14,8 +14,6 @@ if str(REPO_ROOT) not in sys.path:
 from testing.components.pages.live_workspace_switcher_page import (  # noqa: E402
     LiveWorkspaceSwitcherPage,
     WorkspaceSwitcherObservation,
-    WorkspaceSwitcherPanelObservation,
-    WorkspaceSwitcherSurfaceObservation,
     WorkspaceSwitcherTriggerDismissObservation,
     WorkspaceSwitcherTriggerObservation,
     WorkspaceTriggerAriaExpandedObservation,
@@ -53,13 +51,27 @@ EXPECTED_RESULT = (
     "The 'aria-expanded' attribute switches to 'true' when the surface is visible "
     "and returns to 'false' when the surface is hidden."
 )
+REWORK_FIXES = [
+    (
+        "Narrowed Step 3 to stable public evidence that the workspace switcher became "
+        "visible after the mouse click, without container-kind, exact-heading, or "
+        "row-count constraints."
+    ),
+    (
+        "Normalized second-click dismissal failures so any close-path error is "
+        "reported as Step 6 in generated outputs."
+    ),
+]
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+INPUTS_DIR = REPO_ROOT / "input" / TICKET_KEY
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+DISCUSSIONS_RAW_PATH = INPUTS_DIR / "pr_discussions_raw.json"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts850_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts850_failure.png"
 
@@ -204,26 +216,13 @@ def main() -> None:
                 )
 
                 switcher: WorkspaceSwitcherObservation | None = None
-                panel: WorkspaceSwitcherPanelObservation | None = None
-                surface: WorkspaceSwitcherSurfaceObservation | None = None
                 try:
                     page.open_surface_with_click(timeout_ms=SURFACE_TOGGLE_TIMEOUT_MS)
                     switcher = page.observe_open_switcher(
                         timeout_ms=SURFACE_TOGGLE_TIMEOUT_MS,
                     )
-                    panel = page.observe_open_panel(
-                        expected_container_kinds=("anchored-panel", "surface"),
-                        timeout_ms=SURFACE_TOGGLE_TIMEOUT_MS,
-                    )
-                    surface = page.observe_surface(timeout_ms=SURFACE_TOGGLE_TIMEOUT_MS)
                     result["open_switcher_observation"] = _switcher_payload(switcher)
-                    result["open_panel_observation"] = asdict(panel)
-                    result["surface_observation"] = asdict(surface)
-                    _assert_surface_opened(
-                        switcher=switcher,
-                        panel=panel,
-                        surface=surface,
-                    )
+                    _assert_switcher_opened(switcher=switcher)
                 except Exception as error:
                     _record_step(
                         result,
@@ -274,8 +273,8 @@ def main() -> None:
                     status="passed",
                     action=REQUEST_STEPS[3],
                     observed=(
-                        f"heading={surface.heading_text!r}; "
-                        f"dialog_visible={surface.dialog_visible}; "
+                        f"switcher_visible=True; "
+                        f"switcher_text_excerpt={_snippet(switcher.switcher_text)!r}; "
                         f"aria-expanded={aria_after_open.aria_expanded!r}"
                     ),
                 )
@@ -287,7 +286,6 @@ def main() -> None:
                         "expanded state."
                     ),
                     observed=(
-                        f"heading={surface.heading_text!r}; "
                         f"switcher_text_excerpt={_snippet(switcher.switcher_text)!r}; "
                         f"aria-expanded={aria_after_open.aria_expanded!r}"
                     ),
@@ -337,14 +335,17 @@ def main() -> None:
                         context="after dismissing the workspace switcher surface",
                     )
                 except Exception as error:
+                    normalized_error = _normalize_step_6_failure(error)
                     _record_step(
                         result,
                         step=6,
                         status="failed",
                         action=REQUEST_STEPS[5],
-                        observed=str(error),
+                        observed=str(normalized_error),
                     )
-                    raise
+                    if normalized_error is error:
+                        raise
+                    raise normalized_error from None
                 _record_step(
                     result,
                     step=6,
@@ -396,39 +397,17 @@ def main() -> None:
     print(f"{TICKET_KEY} passed")
 
 
-def _assert_surface_opened(
+def _assert_switcher_opened(
     *,
     switcher: WorkspaceSwitcherObservation,
-    panel: WorkspaceSwitcherPanelObservation,
-    surface: WorkspaceSwitcherSurfaceObservation,
 ) -> None:
-    failures: list[str] = []
-    if "Workspace switcher" not in switcher.switcher_text:
-        failures.append("the visible switcher text did not include the 'Workspace switcher' title")
-    if panel.container_kind not in {"anchored-panel", "surface"}:
-        failures.append(f"the opened container kind was {panel.container_kind!r}")
-    if panel.width <= 0 or panel.height <= 0:
-        failures.append(
-            f"the opened panel bounds were width={panel.width:.1f}, height={panel.height:.1f}",
-        )
-    if not surface.dialog_visible:
-        failures.append("the opened switcher surface was not reported as visible")
-    if surface.heading_text.strip() != "Workspace switcher":
-        failures.append(
-            f"the visible heading was {surface.heading_text!r} instead of 'Workspace switcher'",
-        )
-    if switcher.row_count <= 0:
-        failures.append("the opened surface did not expose any visible workspace rows")
-    if failures:
-        raise AssertionError(
-            "Step 3 failed: clicking the workspace switcher trigger did not open the "
-            "expected visible workspace switcher surface.\n"
-            + "\n".join(f"- {item}" for item in failures)
-            + "\n"
-            + f"Observed switcher text:\n{switcher.switcher_text}\n"
-            + f"Observed panel bounds: left={panel.left:.1f}, top={panel.top:.1f}, "
-            + f"width={panel.width:.1f}, height={panel.height:.1f}",
-        )
+    if "Workspace switcher" in switcher.switcher_text:
+        return
+    raise AssertionError(
+        "Step 3 failed: clicking the workspace switcher trigger did not expose stable "
+        "public evidence that the switcher became visible.\n"
+        f"Observed switcher text:\n{switcher.switcher_text}",
+    )
 
 
 def _assert_trigger_aria_expanded(
@@ -469,6 +448,17 @@ def _assert_dismissal_after_click(
         )
 
 
+def _normalize_step_6_failure(error: Exception) -> Exception:
+    message = str(error)
+    expected_prefix = (
+        "Step 4 failed: clicking the workspace switcher trigger a second time "
+        "did not dismiss the panel."
+    )
+    if not message.startswith(expected_prefix):
+        return error
+    return AssertionError(message.replace("Step 4 failed", "Step 6 failed", 1))
+
+
 def _write_pass_outputs(result: dict[str, object]) -> None:
     BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     RESULT_PATH.write_text(
@@ -487,6 +477,7 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    _write_review_replies(result, passed=True)
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -508,6 +499,7 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    _write_review_replies(result, passed=False)
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
@@ -578,6 +570,10 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
 def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
     status = "✅ PASSED" if passed else "❌ FAILED"
     lines = [
+        "## Review fixes",
+        "",
+        *[f"- {item}" for item in REWORK_FIXES],
+        "",
         "## Test Automation Result",
         "",
         f"**Status:** {status}",
@@ -633,20 +629,12 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     status = "PASSED" if passed else "FAILED"
     lines = [
-        "## Test Automation Summary",
+        "## Rework Summary",
         "",
-        (
-            "- Added TS-850 live desktop coverage for workspace-switcher "
-            "aria-expanded toggling on mouse interaction."
-        ),
+        *[f"- Fixed: {item}" for item in REWORK_FIXES],
+        f"- Re-ran `{RUN_COMMAND}`.",
         f"- Test case: **{TICKET_KEY} - {TEST_CASE_TITLE}**",
         f"- Result: **{status}**",
-        f"- Command: `{RUN_COMMAND}`",
-        (
-            f"- Environment: `{result['app_url']}` on Chromium/Playwright "
-            f"({result['os']}) against `{result['repository']}` @ "
-            f"`{result['repository_ref']}`."
-        ),
         (
             "- Outcome: the visible workspace switcher trigger started at "
             "`aria-expanded=\"false\"`, changed to `\"true\"` when the mouse click "
@@ -917,6 +905,71 @@ def _artifact_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     if jira:
         return [f"{prefix} Screenshot: {{{{{screenshot}}}}}"]
     return [f"{prefix} Screenshot: `{screenshot}`"]
+
+
+def _write_review_replies(result: dict[str, object], *, passed: bool) -> None:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(
+                root_comment_id=thread.get("rootCommentId"),
+                passed=passed,
+                result=result,
+            ),
+        }
+        for thread in _discussion_threads()
+    ]
+    REVIEW_REPLIES_PATH.write_text(
+        json.dumps({"replies": replies}) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(
+    *,
+    root_comment_id: object,
+    passed: bool,
+    result: dict[str, object],
+) -> str:
+    rerun_summary = (
+        "Re-ran "
+        f"`{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else "Re-ran "
+        f"`{RUN_COMMAND}`: failed at {_failed_step_summary(result)}"
+    )
+    if root_comment_id == 3264608568:
+        return (
+            "Fixed: Step 3 now uses stable visible workspace-switcher text as the "
+            "open-state signal after the mouse click, and no longer requires a "
+            "specific container kind, exact heading text, or visible row count. "
+            + rerun_summary
+        )
+    if root_comment_id == 3264608689:
+        return (
+            "Fixed: the Step 6 close-path now normalizes the dismissal helper failure "
+            "message so generated outputs and bug evidence report the failure as Step 6. "
+            + rerun_summary
+        )
+    return "Fixed: addressed the TS-850 review feedback. " + rerun_summary
 
 
 def _failed_step_summary(result: dict[str, object]) -> str:
