@@ -1273,6 +1273,19 @@ class _TrackStateAppState extends State<TrackStateApp>
       child: FocusScope(
         node: _desktopWorkspaceSwitcherFocusScopeNode,
         autofocus: true,
+        onKeyEvent: (node, event) {
+          if (!node.hasPrimaryFocus) {
+            return KeyEventResult.ignored;
+          }
+          if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+            return KeyEventResult.ignored;
+          }
+          if (event.logicalKey != LogicalKeyboardKey.space) {
+            return KeyEventResult.ignored;
+          }
+          _closeDesktopWorkspaceSwitcher();
+          return KeyEventResult.handled;
+        },
         child: content,
       ),
     );

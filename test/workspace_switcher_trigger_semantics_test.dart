@@ -119,6 +119,52 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'desktop workspace switcher trigger closes the expanded surface on a second Space key press',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        tester.view.physicalSize = const Size(1440, 960);
+        tester.view.devicePixelRatio = 1;
+
+        await tester.pumpWidget(
+          const TrackStateApp(repository: DemoTrackStateRepository()),
+        );
+        await tester.pumpAndSettle();
+
+        final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+        expect(trigger, findsOneWidget);
+
+        await _focusByTabUntil(
+          tester,
+          isFocused: () => _focusWithinFinder(tester, trigger),
+          reason: 'Failed to focus the workspace switcher trigger.',
+        );
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const ValueKey('workspace-switcher-sheet')),
+          findsOneWidget,
+        );
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const ValueKey('workspace-switcher-sheet')),
+          findsNothing,
+        );
+        expect(_focusWithinFinder(tester, trigger), isTrue);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
 }
 
 Future<void> _focusByTabUntil(
