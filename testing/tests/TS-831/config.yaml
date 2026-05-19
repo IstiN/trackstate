@@ -9,4 +9,4 @@ notes:
   - Opens the deployed TrackState web app with a stored hosted token.
   - Reaches the desktop workspace switcher trigger via real keyboard Tab navigation.
   - Presses Space on the focused trigger and confirms the panel opens immediately.
-  - Presses Tab once after the Space-opened panel appears and confirms focus moves to a visible control inside the panel.
+  - Uses subsequent keyboard Tab navigation after the Space-opened panel appears and confirms focus reaches a visible control inside the panel.

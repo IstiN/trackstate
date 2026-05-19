@@ -1,0 +1,11 @@
+test_id: TS-849
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app on Dashboard in a desktop viewport.
+  - Verifies the visible workspace switcher trigger exposes aria-controls.
+  - Opens the workspace switcher and confirms the trigger aria-controls value matches the visible surface id.

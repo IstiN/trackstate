@@ -80,6 +80,60 @@ class WorkspaceTriggerFocusabilityObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceTriggerAriaExpandedObservation:
+    label: str
+    role: str | None
+    tag_name: str
+    tabindex: str | None
+    keyboard_focusable: bool
+    aria_expanded: str | None
+    outer_html: str
+
+
+@dataclass(frozen=True)
+class WorkspaceTriggerAriaControlsObservation:
+    label: str
+    role: str | None
+    tag_name: str
+    tabindex: str | None
+    keyboard_focusable: bool
+    aria_controls: str | None
+    outer_html: str
+
+
+@dataclass(frozen=True)
+class WorkspaceTriggerAriaControlsTargetObservation:
+    trigger_label: str
+    trigger_aria_controls: str | None
+    controlled_element_found: bool
+    controlled_element_visible: bool
+    controlled_element_id: str | None
+    controlled_element_role: str | None
+    controlled_element_tag_name: str | None
+    controlled_element_text: str
+    trigger_outer_html: str
+    controlled_element_outer_html: str
+
+
+@dataclass(frozen=True)
+class WorkspaceSwitcherSurfaceReferenceObservation:
+    trigger_label: str
+    trigger_aria_controls: str | None
+    controlled_surface_found: bool
+    controlled_surface_visible: bool
+    controlled_surface_id: str | None
+    controlled_surface_role: str | None
+    controlled_surface_tag_name: str | None
+    controlled_surface_text: str
+    visible_surface_id: str | None
+    visible_surface_role: str | None
+    visible_surface_tag_name: str | None
+    visible_surface_text: str
+    trigger_outer_html: str
+    visible_surface_outer_html: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherPanelObservation:
     viewport_width: float
     viewport_height: float
@@ -258,6 +312,22 @@ class WorkspaceSwitcherFocusTargetObservation:
 
 
 @dataclass(frozen=True)
+class WorkspaceSwitcherRowFocusObservation:
+    active_label: str | None
+    active_role: str | None
+    active_tag_name: str
+    active_outer_html: str
+    active_visible: bool
+    active_in_viewport: bool
+    active_within_switcher: bool
+    active_on_trigger: bool
+    focus_owned_by_switcher: bool
+    row_found: bool
+    row_contains_active: bool
+    row_text: str
+
+
+@dataclass(frozen=True)
 class WorkspaceSwitcherSemanticsObservation:
     label: str
     role: str | None
@@ -420,6 +490,9 @@ class LiveWorkspaceSwitcherPage:
         self._tracker_page = tracker_page
         self._session = tracker_page.session
         self._project_settings_page = self._settings_page(tracker_page)
+
+    def _switcher_text_field_selector(self, label: str) -> str:
+        return f'input[aria-label="{label}"]'
 
     def dismiss_connection_banner(self) -> None:
         self._project_settings_page.dismiss_connection_banner()
@@ -904,6 +977,109 @@ class LiveWorkspaceSwitcherPage:
             focus_owned_by_switcher=bool(payload.get("focusOwnedBySwitcher")),
         )
 
+    def observe_saved_workspace_row_focus(
+        self,
+        *,
+        display_name: str,
+        panel: WorkspaceSwitcherPanelObservation,
+    ) -> WorkspaceSwitcherRowFocusObservation:
+        active = self._session.active_element()
+        focus_payload = self._probe_blur_focus_state(panel)
+        if not isinstance(focus_payload, dict):
+            raise AssertionError(
+                "The workspace switcher focus probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        row_payload = self._session.evaluate(
+            """
+            ({ displayName, panelLeft, panelTop, panelRight, panelBottom }) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const isInsidePanel = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const centerX = rect.left + (rect.width / 2);
+                const centerY = rect.top + (rect.height / 2);
+                return centerX >= panelLeft - 1
+                  && centerX <= panelRight + 1
+                  && centerY >= panelTop - 1
+                  && centerY <= panelBottom + 1;
+              };
+              const matchesRow = (element) => {
+                const text = normalize(element?.innerText || element?.textContent || '');
+                return text.includes(displayName)
+                  && text.includes('Branch:')
+                  && text.includes('Delete:');
+              };
+
+              const active = document.activeElement instanceof Element
+                ? document.activeElement
+                : null;
+              let focusedRow = null;
+              let current = active;
+              while (current && current !== document.body) {
+                if (isVisible(current) && isInsidePanel(current) && matchesRow(current)) {
+                  focusedRow = current;
+                  break;
+                }
+                current = current.parentElement;
+              }
+
+              const visibleRow = Array.from(document.querySelectorAll('*'))
+                .filter((element) => isVisible(element) && isInsidePanel(element) && matchesRow(element))
+                .sort((left, right) => {
+                  const leftRect = left.getBoundingClientRect();
+                  const rightRect = right.getBoundingClientRect();
+                  return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                })[0] || null;
+              const targetRow = focusedRow || visibleRow;
+              return {
+                rowFound: Boolean(targetRow),
+                rowContainsActive: Boolean(focusedRow),
+                rowText: normalize(targetRow?.innerText || targetRow?.textContent || ''),
+              };
+            }
+            """,
+            arg={
+                "displayName": display_name,
+                "panelLeft": panel.left,
+                "panelTop": panel.top,
+                "panelRight": panel.left + panel.width,
+                "panelBottom": panel.top + panel.height,
+            },
+        )
+        if not isinstance(row_payload, dict):
+            raise AssertionError(
+                "The workspace switcher row-focus probe did not return an observation.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherRowFocusObservation(
+            active_label=active.accessible_name,
+            active_role=active.role,
+            active_tag_name=active.tag_name,
+            active_outer_html=active.outer_html,
+            active_visible=bool(focus_payload.get("activeVisible")),
+            active_in_viewport=bool(focus_payload.get("activeInViewport")),
+            active_within_switcher=bool(focus_payload.get("activeWithinSwitcher")),
+            active_on_trigger=bool(focus_payload.get("activeOnTrigger")),
+            focus_owned_by_switcher=bool(focus_payload.get("focusOwnedBySwitcher")),
+            row_found=bool(row_payload.get("rowFound")),
+            row_contains_active=bool(row_payload.get("rowContainsActive")),
+            row_text=str(row_payload.get("rowText", "")),
+        )
+
     def focus_switcher_button(
         self,
         label: str,
@@ -1026,7 +1202,7 @@ class LiveWorkspaceSwitcherPage:
     ) -> FocusedElementObservation:
         try:
             self._session.focus(
-                f'input[aria-label="{label}"]',
+                self._switcher_text_field_selector(label),
                 timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
@@ -1036,6 +1212,24 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
         return self._session.active_element()
+
+    def read_switcher_text_field_value(
+        self,
+        label: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            return self._session.read_value(
+                self._switcher_text_field_selector(label),
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f'The open workspace switcher did not expose a readable "{label}" text '
+                "field value.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
 
     def press_key(self, key: str, *, timeout_ms: int = 30_000) -> None:
         self._session.press_key(key, timeout_ms=timeout_ms)
@@ -1231,6 +1425,46 @@ class LiveWorkspaceSwitcherPage:
                     index += 6
                     continue
                 index += 1
+            if not parsed_rows:
+                index = 0
+                while index + 2 < len(candidate_lines):
+                    header = candidate_lines[index]
+                    action_label = candidate_lines[index + 1]
+                    delete_label = candidate_lines[index + 2]
+                    if "Branch:" not in header or not delete_label.startswith("Delete: "):
+                        index += 1
+                        continue
+
+                    display_name: str | None = None
+                    target_type_label: str | None = None
+                    state_label: str | None = None
+                    detail_text = header
+                    header_parts = [part.strip() for part in header.split(", ", 3)]
+                    if len(header_parts) >= 4:
+                        display_name = header_parts[0] or None
+                        target_type_label = header_parts[1] or None
+                        state_label = header_parts[2] or None
+                        detail_text = header_parts[3]
+                    elif len(header_parts) >= 2:
+                        display_name = header_parts[0] or None
+                        target_type_label = header_parts[1] or None
+                        detail_text = ", ".join(header_parts[2:]) or header
+                    if not display_name:
+                        index += 1
+                        continue
+
+                    parsed_rows.append(
+                        (
+                            display_name,
+                            detail_text,
+                            target_type_label,
+                            state_label,
+                            (action_label, delete_label),
+                            action_label == "Active",
+                            header,
+                        ),
+                    )
+                    index += 3
         if not parsed_rows:
             for row in switcher.rows:
                 display_name = row.display_name
@@ -1259,7 +1493,7 @@ class LiveWorkspaceSwitcherPage:
         ) in parsed_rows:
             bounds = self._session.evaluate(
                 """
-                ({ displayName, locatorText, detailText }) => {
+                ({ displayName, locatorText, detailText, actionLabels, deleteLabel }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                   const isVisible = (element) => {
                     if (!element) {
@@ -1272,49 +1506,102 @@ class LiveWorkspaceSwitcherPage:
                       && style.visibility !== 'hidden'
                       && style.display !== 'none';
                   };
-                  const candidate = Array.from(document.querySelectorAll('*'))
+                  const textFor = (element) => normalize(element.innerText || element.textContent || '');
+                  const areaFor = (element) => {
+                    const rect = element.getBoundingClientRect();
+                    return rect.width * rect.height;
+                  };
+                  const rectFor = (element) => element.getBoundingClientRect();
+                  const unionRect = (elements) => {
+                    if (!elements.length) {
+                      return null;
+                    }
+                    const rects = elements.map((element) => rectFor(element));
+                    const left = Math.min(...rects.map((rect) => rect.left));
+                    const top = Math.min(...rects.map((rect) => rect.top));
+                    const right = Math.max(...rects.map((rect) => rect.right));
+                    const bottom = Math.max(...rects.map((rect) => rect.bottom));
+                    return {
+                      left,
+                      top,
+                      width: Math.max(0, right - left),
+                      height: Math.max(0, bottom - top),
+                    };
+                  };
+                  const countMatches = (text, fragment) =>
+                    !fragment ? 0 : text.split(fragment).length - 1;
+                  const matchesRow = (element) => {
+                    const text = textFor(element);
+                    return text.includes(displayName)
+                      && (!locatorText || text.includes(locatorText))
+                      && text.includes(detailText)
+                      && actionLabels.every((label) => !label || text.includes(label))
+                      && (!deleteLabel || text.includes(deleteLabel));
+                  };
+                  const anchors = Array.from(document.querySelectorAll('*'))
                     .filter((element) => isVisible(element))
-                    .map((element) => {
-                      const text = normalize(element.innerText || element.textContent || '');
-                      const rect = element.getBoundingClientRect();
-                      return {
-                        element,
-                        text,
-                        area: rect.width * rect.height,
-                      };
+                    .filter((element) => {
+                      const text = textFor(element);
+                      const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                      return (
+                        text === locatorText
+                        || text === displayName
+                        || text === deleteLabel
+                        || ariaLabel === deleteLabel
+                        || actionLabels.includes(text)
+                        || actionLabels.includes(ariaLabel)
+                      );
                     })
-                    .find((item) => item.text === locatorText)
-                    ?? Array.from(document.querySelectorAll('*'))
-                      .filter((element) => isVisible(element))
-                      .map((element) => {
-                        const text = normalize(element.innerText || element.textContent || '');
-                        const rect = element.getBoundingClientRect();
-                        return {
-                          element,
-                          text,
-                          area: rect.width * rect.height,
-                        };
-                      })
-                      .find((item) => item.text === displayName)
-                    ?? Array.from(document.querySelectorAll('*'))
-                      .filter((element) => isVisible(element))
-                      .map((element) => {
-                        const text = normalize(element.innerText || element.textContent || '');
-                        const rect = element.getBoundingClientRect();
-                        return {
-                          element,
-                          text,
-                          area: rect.width * rect.height,
-                        };
-                      })
-                      .filter((item) =>
-                        item.text.includes(displayName) && item.text.includes(detailText)
-                      )
-                      .sort((left, right) => left.area - right.area)[0];
+                    .sort((left, right) => areaFor(left) - areaFor(right));
+                  const displayAnchor = anchors.find((element) => {
+                    const text = textFor(element);
+                    return text === locatorText || text === displayName;
+                  }) || null;
+                  const actionAnchor = anchors.find((element) => {
+                    const text = textFor(element);
+                    const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                    return actionLabels.includes(text) || actionLabels.includes(ariaLabel);
+                  }) || null;
+                  const deleteAnchor = anchors.find((element) => {
+                    const text = textFor(element);
+                    const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                    return text === deleteLabel || ariaLabel === deleteLabel;
+                  }) || null;
+                  const anchorBounds = unionRect(
+                    [displayAnchor, actionAnchor, deleteAnchor].filter(Boolean),
+                  );
+                  if (anchorBounds && anchorBounds.width > 0 && anchorBounds.height > 0) {
+                    return anchorBounds;
+                  }
+                  let candidate = null;
+                  for (const anchor of anchors) {
+                    let current = anchor;
+                    while (current && current !== document.body) {
+                      const text = textFor(current);
+                      if (
+                        isVisible(current)
+                        && matchesRow(current)
+                        && countMatches(text, 'Branch:') <= 1
+                        && countMatches(text, 'Delete:') <= 1
+                      ) {
+                        candidate = current;
+                        break;
+                      }
+                      current = current.parentElement;
+                    }
+                    if (candidate) {
+                      break;
+                    }
+                  }
+                  if (!candidate) {
+                    candidate = Array.from(document.querySelectorAll('*'))
+                      .filter((element) => isVisible(element) && matchesRow(element))
+                      .sort((left, right) => areaFor(left) - areaFor(right))[0];
+                  }
                   if (!candidate) {
                     return null;
                   }
-                  const rect = candidate.element.getBoundingClientRect();
+                  const rect = rectFor(candidate);
                   return {
                     left: rect.left,
                     top: rect.top,
@@ -1327,6 +1614,8 @@ class LiveWorkspaceSwitcherPage:
                     "displayName": display_name,
                     "locatorText": locator_text,
                     "detailText": detail_text,
+                    "actionLabels": list(action_labels),
+                    "deleteLabel": action_labels[-1] if action_labels else "",
                 },
             )
             if not isinstance(bounds, dict):
@@ -1366,7 +1655,7 @@ class LiveWorkspaceSwitcherPage:
                 )
                 bounds = self._session.evaluate(
                     """
-                    ({ text }) => {
+                    ({ displayName, detailText, actionLabels, deleteLabel }) => {
                       const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                       const isVisible = (element) => {
                         if (!element) {
@@ -1379,13 +1668,93 @@ class LiveWorkspaceSwitcherPage:
                           && style.visibility !== 'hidden'
                           && style.display !== 'none';
                       };
-                      const candidate = Array.from(document.querySelectorAll('*'))
+                      const textFor = (element) => normalize(element.innerText || element.textContent || '');
+                      const areaFor = (element) => {
+                        const rect = element.getBoundingClientRect();
+                        return rect.width * rect.height;
+                      };
+                      const rectFor = (element) => element.getBoundingClientRect();
+                      const unionRect = (elements) => {
+                        if (!elements.length) {
+                          return null;
+                        }
+                        const rects = elements.map((element) => rectFor(element));
+                        const left = Math.min(...rects.map((rect) => rect.left));
+                        const top = Math.min(...rects.map((rect) => rect.top));
+                        const right = Math.max(...rects.map((rect) => rect.right));
+                        const bottom = Math.max(...rects.map((rect) => rect.bottom));
+                        return {
+                          left,
+                          top,
+                          width: Math.max(0, right - left),
+                          height: Math.max(0, bottom - top),
+                        };
+                      };
+                      const countMatches = (text, fragment) =>
+                        !fragment ? 0 : text.split(fragment).length - 1;
+                      const matchesRow = (element) => {
+                        const text = textFor(element);
+                        return text.includes(displayName)
+                          && text.includes(detailText)
+                          && actionLabels.every((label) => !label || text.includes(label))
+                          && (!deleteLabel || text.includes(deleteLabel));
+                      };
+                      const anchors = Array.from(document.querySelectorAll('*'))
                         .filter((element) => isVisible(element))
-                        .find((element) => normalize(element.innerText || element.textContent || '') === text);
+                        .filter((element) => {
+                          const text = textFor(element);
+                          const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                          return text === deleteLabel || ariaLabel === deleteLabel;
+                        })
+                        .sort((left, right) => areaFor(left) - areaFor(right));
+                      const displayAnchor = Array.from(document.querySelectorAll('*'))
+                        .filter((element) => isVisible(element) && textFor(element) === displayName)
+                        .sort((left, right) => areaFor(left) - areaFor(right))[0] || null;
+                      const actionAnchor = anchors.find((element) => {
+                        const text = textFor(element);
+                        const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                        return actionLabels.includes(text) || actionLabels.includes(ariaLabel);
+                      }) || null;
+                      const deleteAnchor = anchors.find((element) => {
+                        const text = textFor(element);
+                        const ariaLabel = normalize(element.getAttribute('aria-label') || '');
+                        return text === deleteLabel || ariaLabel === deleteLabel;
+                      }) || null;
+                      const anchorBounds = unionRect(
+                        [displayAnchor, actionAnchor, deleteAnchor].filter(Boolean),
+                      );
+                      if (anchorBounds && anchorBounds.width > 0 && anchorBounds.height > 0) {
+                        return anchorBounds;
+                      }
+                      let candidate = null;
+                      for (const anchor of anchors) {
+                        let current = anchor;
+                        while (current && current !== document.body) {
+                          const text = textFor(current);
+                          if (
+                            isVisible(current)
+                            && matchesRow(current)
+                            && countMatches(text, 'Branch:') <= 1
+                            && countMatches(text, 'Delete:') <= 1
+                          ) {
+                            candidate = current;
+                            break;
+                          }
+                          current = current.parentElement;
+                        }
+                        if (candidate) {
+                          break;
+                        }
+                      }
+                      if (!candidate) {
+                        candidate = Array.from(document.querySelectorAll('*'))
+                          .filter((element) => isVisible(element) && matchesRow(element))
+                          .sort((left, right) => areaFor(left) - areaFor(right))[0];
+                      }
                       if (!candidate) {
                         return null;
                       }
-                      const rect = candidate.getBoundingClientRect();
+                      const rect = rectFor(candidate);
                       return {
                         left: rect.left,
                         top: rect.top,
@@ -1394,7 +1763,12 @@ class LiveWorkspaceSwitcherPage:
                       };
                     }
                     """,
-                    arg={"text": display_name},
+                    arg={
+                        "displayName": display_name,
+                        "detailText": detail_text,
+                        "actionLabels": list(action_labels),
+                        "deleteLabel": action_labels[-1] if action_labels else "",
+                    },
                 )
                 if not isinstance(bounds, dict):
                     continue
@@ -1511,45 +1885,16 @@ class LiveWorkspaceSwitcherPage:
                 """
                 ({ displayName }) => {
                   const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-                  const isVisible = (element) => {
-                    if (!element) {
-                      return false;
-                    }
-                    const rect = element.getBoundingClientRect();
-                    const style = window.getComputedStyle(element);
-                    return rect.width > 0
-                      && rect.height > 0
-                      && style.visibility !== 'hidden'
-                      && style.display !== 'none';
-                  };
-                  const activeButton = Array.from(document.querySelectorAll('*'))
-                    .filter(isVisible)
-                    .find((element) =>
-                      normalize(element.innerText || element.textContent || '') === 'Active',
-                    );
-                  if (!activeButton) {
+                  const bodyText = normalize(document.body?.innerText || document.body?.textContent || '');
+                  const activeMarker = `Active Delete: ${displayName}`;
+                  const activeIndex = bodyText.indexOf(activeMarker);
+                  if (activeIndex < 0) {
                     return null;
                   }
-                  let current = activeButton;
-                  while (current && current !== document.body) {
-                    const text = normalize(current.innerText || current.textContent || '');
-                    if (
-                      text.includes('Branch:')
-                      && text.includes('Delete:')
-                      && (text.includes('Hosted') || text.includes('Local'))
-                      && text.includes(displayName)
-                    ) {
-                      return text;
-                    }
-                    if (
-                      text.includes('Branch:')
-                      && text.includes('Delete:')
-                    ) {
-                      return null;
-                    }
-                    current = current.parentElement;
-                  }
-                  return null;
+                  const displayIndex = bodyText.lastIndexOf(displayName, activeIndex);
+                  return displayIndex >= 0
+                    ? bodyText.slice(displayIndex, activeIndex + activeMarker.length)
+                    : activeMarker;
                 }
                 """,
                 arg={
@@ -1641,6 +1986,441 @@ class LiveWorkspaceSwitcherPage:
             outer_html=str(payload.get("outerHtml", "")),
         )
 
+    def observe_trigger_aria_expanded(
+        self,
+        *,
+        expected_value: str | None = None,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceTriggerAriaExpandedObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix, expectedValue }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+                  const ariaExpanded = trigger.getAttribute('aria-expanded');
+                  if (expectedValue !== null && ariaExpanded !== expectedValue) {
+                    return null;
+                  }
+                  const tabindex = trigger.getAttribute('tabindex');
+                  return {
+                    label: labelFor(trigger),
+                    role: trigger.getAttribute('role'),
+                    tagName: trigger.tagName,
+                    tabindex,
+                    keyboardFocusable: tabindex !== null && tabindex !== '-1',
+                    ariaExpanded,
+                    outerHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={
+                    "triggerLabelPrefix": self._trigger_label_prefix,
+                    "expectedValue": expected_value,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            expected_description = (
+                f" with aria-expanded={expected_value!r}" if expected_value is not None else ""
+            )
+            raise AssertionError(
+                "The live app did not expose a visible workspace switcher trigger"
+                f"{expected_description} for ARIA inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose a readable workspace switcher trigger for "
+                "ARIA inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceTriggerAriaExpandedObservation(
+            label=str(payload.get("label", "")),
+            role=str(payload.get("role")) if payload.get("role") is not None else None,
+            tag_name=str(payload.get("tagName", "")),
+            tabindex=(
+                str(payload.get("tabindex"))
+                if payload.get("tabindex") is not None
+                else None
+            ),
+            keyboard_focusable=bool(payload.get("keyboardFocusable")),
+            aria_expanded=(
+                str(payload.get("ariaExpanded"))
+                if payload.get("ariaExpanded") is not None
+                else None
+            ),
+            outer_html=str(payload.get("outerHtml", "")),
+        )
+
+    def observe_trigger_aria_controls(
+        self,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> WorkspaceTriggerAriaControlsObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+                  const tabindex = trigger.getAttribute('tabindex');
+                  return {
+                    label: labelFor(trigger),
+                    role: trigger.getAttribute('role'),
+                    tagName: trigger.tagName,
+                    tabindex,
+                    keyboardFocusable: tabindex !== null && tabindex !== '-1',
+                    ariaControls: trigger.getAttribute('aria-controls'),
+                    outerHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The live app did not expose a visible workspace switcher trigger for "
+                "aria-controls inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose a readable workspace switcher trigger for "
+                "aria-controls inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceTriggerAriaControlsObservation(
+            label=str(payload.get("label", "")),
+            role=str(payload.get("role")) if payload.get("role") is not None else None,
+            tag_name=str(payload.get("tagName", "")),
+            tabindex=(
+                str(payload.get("tabindex"))
+                if payload.get("tabindex") is not None
+                else None
+            ),
+            keyboard_focusable=bool(payload.get("keyboardFocusable")),
+            aria_controls=(
+                str(payload.get("ariaControls"))
+                if payload.get("ariaControls") is not None
+                else None
+            ),
+            outer_html=str(payload.get("outerHtml", "")),
+        )
+
+    def observe_trigger_aria_controls_target(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceTriggerAriaControlsTargetObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+
+                  const triggerAriaControls = trigger.getAttribute('aria-controls');
+                  const controlledElement = triggerAriaControls
+                    ? document.getElementById(triggerAriaControls)
+                    : null;
+                  return {
+                    triggerLabel: labelFor(trigger),
+                    triggerAriaControls,
+                    controlledElementFound: Boolean(controlledElement),
+                    controlledElementVisible: Boolean(controlledElement) && isVisible(controlledElement),
+                    controlledElementId: controlledElement?.id || null,
+                    controlledElementRole: controlledElement?.getAttribute?.('role') || null,
+                    controlledElementTagName: controlledElement?.tagName || null,
+                    controlledElementText: normalize(
+                      controlledElement?.innerText || controlledElement?.textContent || '',
+                    ),
+                    triggerOuterHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                    controlledElementOuterHtml: controlledElement?.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The live app did not expose a visible workspace switcher trigger for "
+                "aria-controls target inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The live app did not expose a readable workspace switcher trigger for "
+                "aria-controls target inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceTriggerAriaControlsTargetObservation(
+            trigger_label=str(payload.get("triggerLabel", "")),
+            trigger_aria_controls=(
+                str(payload.get("triggerAriaControls"))
+                if payload.get("triggerAriaControls") is not None
+                else None
+            ),
+            controlled_element_found=bool(payload.get("controlledElementFound")),
+            controlled_element_visible=bool(payload.get("controlledElementVisible")),
+            controlled_element_id=(
+                str(payload.get("controlledElementId"))
+                if payload.get("controlledElementId") is not None
+                else None
+            ),
+            controlled_element_role=(
+                str(payload.get("controlledElementRole"))
+                if payload.get("controlledElementRole") is not None
+                else None
+            ),
+            controlled_element_tag_name=(
+                str(payload.get("controlledElementTagName"))
+                if payload.get("controlledElementTagName") is not None
+                else None
+            ),
+            controlled_element_text=str(payload.get("controlledElementText", "")),
+            trigger_outer_html=str(payload.get("triggerOuterHtml", "")),
+            controlled_element_outer_html=str(payload.get("controlledElementOuterHtml", "")),
+        )
+
+    def observe_surface_reference(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceSwitcherSurfaceReferenceObservation:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ triggerLabelPrefix }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  };
+                  const labelFor = (element) =>
+                    normalize(element?.getAttribute?.('aria-label') || element?.innerText || '');
+                  const trigger = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"],[role="button"]'),
+                  )
+                    .filter(isVisible)
+                    .find((element) => labelFor(element).startsWith(triggerLabelPrefix));
+                  if (!trigger) {
+                    return null;
+                  }
+
+                  const visibleDialogs = Array.from(
+                    document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
+                  ).filter(isVisible);
+                  let switcher = visibleDialogs.find((candidate) =>
+                    normalize(candidate.innerText || candidate.textContent).includes('Workspace switcher'),
+                  );
+                  if (!switcher) {
+                    const headings = Array.from(document.querySelectorAll('*'))
+                      .filter(isVisible)
+                      .map((element) => ({
+                        element,
+                        label: normalize(element.getAttribute?.('aria-label') || ''),
+                        text: normalize(element.innerText || element.textContent || ''),
+                        area: (() => {
+                          const rect = element.getBoundingClientRect();
+                          return rect.width * rect.height;
+                        })(),
+                      }))
+                      .filter((candidate) =>
+                        candidate.label === 'Workspace switcher'
+                        || candidate.text === 'Workspace switcher'
+                        || (
+                          candidate.text.includes('Workspace switcher')
+                          && (
+                            candidate.text.includes('Saved workspaces')
+                            || candidate.text.includes('Save and switch')
+                            || candidate.text.includes('Hosted Local')
+                            || candidate.text.includes('Add workspace')
+                          )
+                        )
+                      )
+                      .sort((left, right) => left.area - right.area);
+                    for (const headingCandidate of headings) {
+                      let current = headingCandidate.element;
+                      while (current && current !== document.body) {
+                        const text = normalize(current.innerText || current.textContent || '');
+                        if (
+                          text.includes('Workspace switcher')
+                          && (
+                            text.includes('Saved workspaces')
+                            || text.includes('Save and switch')
+                            || text.includes('Hosted Local')
+                            || text.includes('Add workspace')
+                          )
+                        ) {
+                          switcher = current;
+                          break;
+                        }
+                        current = current.parentElement;
+                      }
+                      if (switcher) {
+                        break;
+                      }
+                    }
+                  }
+                  if (!switcher) {
+                    return null;
+                  }
+
+                  const triggerAriaControls = trigger.getAttribute('aria-controls');
+                  const controlledSurface = triggerAriaControls
+                    ? document.getElementById(triggerAriaControls)
+                    : null;
+                  const controlledVisible = Boolean(controlledSurface) && isVisible(controlledSurface);
+                  return {
+                    triggerLabel: labelFor(trigger),
+                    triggerAriaControls,
+                    controlledSurfaceFound: Boolean(controlledSurface),
+                    controlledSurfaceVisible: controlledVisible,
+                    controlledSurfaceId: controlledSurface?.id || null,
+                    controlledSurfaceRole: controlledSurface?.getAttribute?.('role') || null,
+                    controlledSurfaceTagName: controlledSurface?.tagName || null,
+                    controlledSurfaceText: normalize(
+                      controlledSurface?.innerText || controlledSurface?.textContent || '',
+                    ),
+                    visibleSurfaceId: switcher.id || null,
+                    visibleSurfaceRole: switcher.getAttribute?.('role') || null,
+                    visibleSurfaceTagName: switcher.tagName || null,
+                    visibleSurfaceText: normalize(switcher.innerText || switcher.textContent || ''),
+                    triggerOuterHtml: trigger.outerHTML?.slice?.(0, 400) || '',
+                    visibleSurfaceOuterHtml: switcher.outerHTML?.slice?.(0, 400) || '',
+                  };
+                }
+                """,
+                arg={"triggerLabelPrefix": self._trigger_label_prefix},
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "The deployed app did not expose a readable visible workspace switcher "
+                "surface for aria-controls linkage inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The deployed app did not expose a readable workspace switcher trigger "
+                "and surface reference for aria-controls linkage inspection.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return WorkspaceSwitcherSurfaceReferenceObservation(
+            trigger_label=str(payload.get("triggerLabel", "")),
+            trigger_aria_controls=(
+                str(payload.get("triggerAriaControls"))
+                if payload.get("triggerAriaControls") is not None
+                else None
+            ),
+            controlled_surface_found=bool(payload.get("controlledSurfaceFound")),
+            controlled_surface_visible=bool(payload.get("controlledSurfaceVisible")),
+            controlled_surface_id=(
+                str(payload.get("controlledSurfaceId"))
+                if payload.get("controlledSurfaceId") is not None
+                else None
+            ),
+            controlled_surface_role=(
+                str(payload.get("controlledSurfaceRole"))
+                if payload.get("controlledSurfaceRole") is not None
+                else None
+            ),
+            controlled_surface_tag_name=(
+                str(payload.get("controlledSurfaceTagName"))
+                if payload.get("controlledSurfaceTagName") is not None
+                else None
+            ),
+            controlled_surface_text=str(payload.get("controlledSurfaceText", "")),
+            visible_surface_id=(
+                str(payload.get("visibleSurfaceId"))
+                if payload.get("visibleSurfaceId") is not None
+                else None
+            ),
+            visible_surface_role=(
+                str(payload.get("visibleSurfaceRole"))
+                if payload.get("visibleSurfaceRole") is not None
+                else None
+            ),
+            visible_surface_tag_name=(
+                str(payload.get("visibleSurfaceTagName"))
+                if payload.get("visibleSurfaceTagName") is not None
+                else None
+            ),
+            visible_surface_text=str(payload.get("visibleSurfaceText", "")),
+            trigger_outer_html=str(payload.get("triggerOuterHtml", "")),
+            visible_surface_outer_html=str(payload.get("visibleSurfaceOuterHtml", "")),
+        )
+
     def focus_trigger_via_keyboard(
         self,
         *,
@@ -1727,6 +2507,148 @@ class LiveWorkspaceSwitcherPage:
     ) -> None:
         self._session.press_key("Space", timeout_ms=timeout_ms)
         self._wait_for_surface(timeout_ms=timeout_ms)
+
+    def press_space_on_active_element_and_wait_for_dismissal(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        self._session.press_key("Space", timeout_ms=timeout_ms)
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            active = self._session.active_element()
+            raise AssertionError(
+                "Pressing Space on the active element did not dismiss the workspace "
+                "switcher surface.\n"
+                f"Observed active element label: {active.accessible_name!r}\n"
+                f"Observed active element role: {active.role!r}\n"
+                f"Observed active element HTML: {active.outer_html}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Space-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
+    def press_enter_on_active_element_and_wait_for_dismissal(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        self._session.press_key("Enter", timeout_ms=timeout_ms)
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            active = self._session.active_element()
+            raise AssertionError(
+                "Pressing Enter on the active element did not dismiss the workspace "
+                "switcher surface.\n"
+                f"Observed active element label: {active.accessible_name!r}\n"
+                f"Observed active element role: {active.role!r}\n"
+                f"Observed active element HTML: {active.outer_html}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Enter-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
+    def wait_for_dismissal_after_trigger_space(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 6 failed: pressing Space on the already-open workspace switcher "
+                "trigger did not dismiss the surface.\n"
+                f"Observed body text after pressing Space again:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Space-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
+
+    def wait_for_dismissal_after_trigger_enter(
+        self,
+        *,
+        timeout_ms: int = 4_000,
+        stability_window_ms: int = 400,
+    ) -> WorkspaceSwitcherTriggerDismissObservation:
+        try:
+            payload = self._wait_for_dismissal_payload(
+                timeout_ms=timeout_ms,
+                stability_window_ms=stability_window_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 6 failed: pressing Enter on the already-open workspace switcher "
+                "trigger did not dismiss the surface.\n"
+                f"Observed body text after pressing Enter again:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The workspace switcher Enter-key dismissal did not return a readable "
+                "observation."
+            )
+        return WorkspaceSwitcherTriggerDismissObservation(
+            body_text=str(payload.get("bodyText", "")),
+            dashboard_visible=bool(payload.get("dashboardVisible")),
+            trigger_visible=bool(payload.get("triggerVisible")),
+            trigger_label=(
+                str(payload.get("triggerLabel"))
+                if payload.get("triggerLabel") is not None
+                else None
+            ),
+        )
 
     def open_surface_with_click(self, *, timeout_ms: int = 30_000) -> None:
         self._session.click(

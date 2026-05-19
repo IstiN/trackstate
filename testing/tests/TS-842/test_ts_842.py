@@ -216,7 +216,6 @@ def main() -> None:
                     panel=panel,
                     saved_workspace_rows=page.observe_saved_workspace_rows(timeout_ms=4_000),
                 )
-
                 if trial == 1:
                     _record_step(
                         result,
@@ -873,7 +872,7 @@ def _bug_description(result: dict[str, object]) -> str:
             (
                 f"   Actual: boundary trial {failing_trial} switched the visible active row "
                 f"to {(_extract_boundary_trial(result) or {}).get('active_workspace_name')!r} "
-                "while keyboard focus escaped to `FLUTTER-VIEW` outside the open switcher."
+                f"while keyboard focus escaped to `{((_extract_boundary_trial(result) or {}).get('focus') or {}).get('active_tag_name', '<unknown>')}` outside the open switcher."
             ),
             f"   Assertion: {_failed_step_summary(result)}",
             "",
@@ -887,7 +886,7 @@ def _bug_description(result: dict[str, object]) -> str:
             (
                 "- Actual: the workspace switcher stayed open and the visible selection "
                 f"wrapped to {(_extract_boundary_trial(result) or {}).get('active_workspace_name')!r}, "
-                "but keyboard focus escaped the switcher and landed on `FLUTTER-VIEW` "
+                f"but keyboard focus escaped the switcher and landed on `{((_extract_boundary_trial(result) or {}).get('focus') or {}).get('active_tag_name', '<unknown>')}` "
                 "instead of remaining on a switcher-owned element."
             ),
             "",
