@@ -55,9 +55,22 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts849_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts849_failure.png"
+
+REVIEW_THREAD_REPLIES: tuple[dict[str, object], ...] = (
+    {
+        "inReplyToId": 3264691896,
+        "threadId": "PRRT_kwDOSU6Gf86DFK0N",
+        "reply": (
+            "Fixed: `_bug_description()` now derives the missing or broken production "
+            "capability text from the actual failed step details instead of hardcoding "
+            "the missing-attribute case."
+        ),
+    },
+)
 
 
 def main() -> None:
@@ -432,6 +445,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=True),
+        encoding="utf-8",
+    )
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -453,6 +470,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=False),
+        encoding="utf-8",
+    )
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
@@ -615,6 +636,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
+    missing_capability_lines = _missing_capability_lines(result)
     return "\n".join(
         [
             f"# {TICKET_KEY} - Workspace switcher trigger does not expose a valid aria-controls link to the opened surface",
@@ -651,13 +673,7 @@ def _bug_description(result: dict[str, object]) -> str:
             f"- Run command: {RUN_COMMAND}",
             "",
             "## Missing or broken production capability",
-            (
-                "The production desktop workspace switcher trigger does not expose the "
-                "aria-controls attribute required to link the trigger to the opened "
-                "workspace switcher surface. During this run the opened visible surface "
-                f"exposed id={_quoted_surface_id(result)}, but the trigger aria-controls "
-                "value was missing."
-            ),
+            *missing_capability_lines,
             "",
             "## Failing command",
             "```bash",
@@ -688,6 +704,25 @@ def _bug_description(result: dict[str, object]) -> str:
             "```",
         ],
     ) + "\n"
+
+
+def _review_replies_payload(result: dict[str, object], *, passed: bool) -> str:
+    status_reply = (
+        "Re-run passed."
+        if passed
+        else (
+            "Re-run still fails against the live product, but the generated bug report now "
+            f"reflects the actual failure: {_failed_step_summary(result)}"
+        )
+    )
+    replies = [
+        {
+            **item,
+            "reply": f"{item['reply']} {status_reply}",
+        }
+        for item in REVIEW_THREAD_REPLIES
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
 
 
 def _record_step(
@@ -780,6 +815,61 @@ def _failed_step_summary(result: dict[str, object]) -> str:
             if isinstance(step, dict) and step.get("status") != "passed":
                 return f"Step {step.get('step')}: {step.get('observed')}"
     return str(result.get("error", "No failed step recorded."))
+
+
+def _missing_capability_lines(result: dict[str, object]) -> list[str]:
+    failed_step = _first_failed_step_number(result)
+    failure_detail = _failed_step_detail(result)
+    reasons = _failure_reasons(failure_detail)
+    if failed_step == 3:
+        return [
+            "The production desktop workspace switcher trigger does not expose the required "
+            "`aria-controls` attribute before the switcher surface is opened."
+        ]
+    if failed_step == 4:
+        intro = (
+            "The production desktop workspace switcher does not expose the expected visible "
+            "switcher surface after the trigger is activated:"
+        )
+        return [intro, *[f"- {reason}" for reason in reasons]] if reasons else [intro]
+    if failed_step == 5:
+        intro = (
+            "The production desktop workspace switcher does not preserve a valid "
+            "`aria-controls` link between the trigger and the opened surface:"
+        )
+        return [intro, *[f"- {reason}" for reason in reasons]] if reasons else [intro]
+    primary_detail = _primary_failure_detail(failure_detail)
+    return [
+        "The production desktop workspace switcher does not satisfy the TS-849 ARIA "
+        f"contract in this run: {primary_detail}"
+    ]
+
+
+def _failed_step_detail(result: dict[str, object]) -> str:
+    failed_step = _first_failed_step_number(result)
+    if failed_step is None:
+        return str(result.get("error", "No failed step recorded."))
+    return _step_observation(result, failed_step)
+
+
+def _failure_reasons(detail: str) -> list[str]:
+    reasons: list[str] = []
+    for line in detail.splitlines()[1:]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("Observed "):
+            break
+        if stripped.startswith("- "):
+            reasons.append(stripped[2:])
+    return reasons
+
+
+def _primary_failure_detail(detail: str) -> str:
+    first_line = detail.splitlines()[0].strip() if detail else "Unknown failure."
+    if ": " in first_line:
+        return first_line.split(": ", 1)[1]
+    return first_line
 
 
 def _step_status(result: dict[str, object], step_number: int) -> str:
