@@ -608,9 +608,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         return;
       }
       final delay = retryDelays[math.min(attempt, retryDelays.length - 1)];
-      await Future<void>.delayed(
-        remaining < delay ? remaining : delay,
-      );
+      await Future<void>.delayed(remaining < delay ? remaining : delay);
       if (!mounted) {
         return;
       }
@@ -3414,6 +3412,7 @@ class _TopBar extends StatelessWidget {
                         label: l10n.createIssue,
                         glyph: TrackStateIconGlyph.plus,
                         onPressed: openCreateIssue,
+                        semanticsSortOrder: createIssueOrder,
                         size: compact ? null : _desktopTopBarControlHeight,
                       ),
                     )
@@ -3425,6 +3424,7 @@ class _TopBar extends StatelessWidget {
                         icon: TrackStateIconGlyph.plus,
                         onPressed: openCreateIssue,
                         height: _desktopTopBarControlHeight,
+                        semanticsSortOrder: createIssueOrder,
                       ),
                     ),
                   if (canOpenWorkspaceOnboarding) ...[
@@ -3436,6 +3436,7 @@ class _TopBar extends StatelessWidget {
                           label: l10n.addWorkspace,
                           glyph: TrackStateIconGlyph.repository,
                           onPressed: openWorkspaceOnboarding,
+                          semanticsSortOrder: addWorkspaceOrder,
                           size: compact ? null : _desktopTopBarControlHeight,
                         ),
                       )
@@ -3447,6 +3448,7 @@ class _TopBar extends StatelessWidget {
                           icon: TrackStateIconGlyph.repository,
                           onPressed: openWorkspaceOnboarding,
                           height: _desktopTopBarControlHeight,
+                          semanticsSortOrder: addWorkspaceOrder,
                         ),
                       ),
                   ],
@@ -3466,6 +3468,7 @@ class _TopBar extends StatelessWidget {
                                     compact: false,
                                     condensed: true,
                                     onPressed: openWorkspaceSwitcher,
+                                    semanticsSortOrder: workspaceSwitcherOrder,
                                     focusNode:
                                         workspaceSwitcherTriggerFocusNode,
                                   )
@@ -3476,6 +3479,7 @@ class _TopBar extends StatelessWidget {
                                     icon: workspaceSummary.icon,
                                     onPressed: openWorkspaceSwitcher,
                                     height: _desktopTopBarControlHeight,
+                                    semanticsSortOrder: workspaceSwitcherOrder,
                                     focusNode:
                                         workspaceSwitcherTriggerFocusNode,
                                   ),
@@ -3495,6 +3499,7 @@ class _TopBar extends StatelessWidget {
                           ? TrackStateIconGlyph.sun
                           : TrackStateIconGlyph.moon,
                       onPressed: viewModel.toggleTheme,
+                      semanticsSortOrder: themeToggleOrder,
                       size: compact ? null : _desktopTopBarControlHeight,
                     ),
                   ),
@@ -3585,6 +3590,7 @@ class _TopBar extends StatelessWidget {
                           glyph: TrackStateIconGlyph.sync,
                           onPressed: () =>
                               viewModel.selectSection(TrackerSection.settings),
+                          semanticsSortOrder: 1,
                           size: _desktopTopBarControlHeight,
                         ),
                       ),
@@ -3620,6 +3626,7 @@ class _TopBar extends StatelessWidget {
                     label: _workspaceSyncLabel(l10n, viewModel),
                     tone: _workspaceSyncTone(viewModel),
                     height: _desktopTopBarControlHeight,
+                    semanticsSortOrder: 1,
                     onPressed: () =>
                         viewModel.selectSection(TrackerSection.settings),
                   ),
@@ -3632,6 +3639,7 @@ class _TopBar extends StatelessWidget {
                       2,
                       Semantics(
                         label: l10n.searchIssues,
+                        sortKey: const OrdinalSortKey(2),
                         textField: true,
                         child: TextField(
                           controller: TextEditingController(
@@ -6026,7 +6034,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   }
 }
 
-class _WorkspaceSwitcherRow extends StatelessWidget {
+class _WorkspaceSwitcherRow extends StatefulWidget {
   const _WorkspaceSwitcherRow({
     super.key,
     required this.workspace,
@@ -6049,9 +6057,38 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
   final VoidCallback? onSelect;
 
   @override
+  State<_WorkspaceSwitcherRow> createState() => _WorkspaceSwitcherRowState();
+}
+
+class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
+  late final FocusNode _summaryFocusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _summaryFocusNode = FocusNode(
+      debugLabel: 'workspace-switcher-row-summary-${widget.workspace.id}',
+    );
+  }
+
+  @override
+  void dispose() {
+    _summaryFocusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final colors = context.ts;
+    final workspace = widget.workspace;
+    final isActive = widget.isActive;
+    final stateLabel = widget.stateLabel;
+    final focusOrderBase = widget.focusOrderBase;
+    final onSelect = widget.onSelect;
+    final onDelete = widget.onDelete;
+    final primaryActionLabel = widget.primaryActionLabel;
+    final onPrimaryAction = widget.onPrimaryAction;
     final typeLabel = workspace.isHosted
         ? l10n.workspaceTargetTypeHosted
         : l10n.workspaceTargetTypeLocal;
@@ -6068,39 +6105,70 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              TrackStateIcon(
-                workspace.isHosted
-                    ? TrackStateIconGlyph.repository
-                    : TrackStateIconGlyph.folder,
-                color: isActive ? colors.primary : colors.muted,
-                semanticLabel: workspace.isHosted ? 'repository' : 'folder',
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      workspace.displayName,
-                      style: Theme.of(context).textTheme.titleSmall,
+          Semantics(
+            container: true,
+            button: true,
+            enabled: true,
+            focusable: true,
+            label:
+                '${workspace.displayName}, $typeLabel, $stateLabel, $detailText',
+            child: ExcludeSemantics(
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  focusNode: _summaryFocusNode,
+                  onPressed: () {
+                    _summaryFocusNode.requestFocus();
+                    onSelect?.call();
+                  },
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.all(4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    side: BorderSide.none,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      detailText,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodySmall?.copyWith(color: colors.muted),
-                    ),
-                  ],
+                    foregroundColor: colors.text,
+                  ),
+                  child: Row(
+                    children: [
+                      TrackStateIcon(
+                        workspace.isHosted
+                            ? TrackStateIconGlyph.repository
+                            : TrackStateIconGlyph.folder,
+                        color: isActive ? colors.primary : colors.muted,
+                        semanticLabel: workspace.isHosted
+                            ? 'repository'
+                            : 'folder',
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              workspace.displayName,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              detailText,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: colors.muted),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      _WorkspaceStateBadge(label: typeLabel, active: isActive),
+                      const SizedBox(width: 8),
+                      _WorkspaceStateBadge(label: stateLabel, active: isActive),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(width: 12),
-              _WorkspaceStateBadge(label: typeLabel, active: isActive),
-              const SizedBox(width: 8),
-              _WorkspaceStateBadge(label: stateLabel, active: isActive),
-            ],
+            ),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -6141,7 +6209,7 @@ class _WorkspaceSwitcherRow extends StatelessWidget {
                           'workspace-primary-action-${workspace.id}',
                         ),
                         onPressed: onPrimaryAction,
-                        child: Text(primaryActionLabel!),
+                        child: Text(primaryActionLabel),
                       ),
                     ),
                   ),
@@ -10302,6 +10370,7 @@ class _PrimaryButton extends StatelessWidget {
     this.height,
     this.semanticLabel,
     this.focusNode,
+    this.semanticsSortOrder,
   });
 
   final Key? buttonKey;
@@ -10311,6 +10380,7 @@ class _PrimaryButton extends StatelessWidget {
   final double? height;
   final String? semanticLabel;
   final FocusNode? focusNode;
+  final double? semanticsSortOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -10318,11 +10388,12 @@ class _PrimaryButton extends StatelessWidget {
     final onPrimary = Theme.of(context).colorScheme.onPrimary;
     final enabled = onPressed != null;
     return Semantics(
-      container: true,
       button: true,
       enabled: enabled,
       focusable: enabled,
       label: semanticLabel ?? label,
+      sortKey: _semanticsSortKey(semanticsSortOrder),
+      onTap: enabled ? onPressed : null,
       child: ExcludeSemantics(
         child: SizedBox(
           height: height,
@@ -10359,6 +10430,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
     required this.condensed,
     required this.onPressed,
     this.focusNode,
+    this.semanticsSortOrder,
   });
 
   final _WorkspaceDisplaySummary summary;
@@ -10366,6 +10438,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
   final bool condensed;
   final VoidCallback? onPressed;
   final FocusNode? focusNode;
+  final double? semanticsSortOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -10391,13 +10464,14 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
       height: 1,
     );
 
-    return Semantics(
-      container: true,
-      button: true,
-      enabled: enabled,
-      focusable: enabled,
-      label: summary.semanticLabel,
-      child: ExcludeSemantics(
+    return MergeSemantics(
+      child: Semantics(
+        button: true,
+        enabled: enabled,
+        focusable: enabled,
+        label: summary.semanticLabel,
+        sortKey: _semanticsSortKey(semanticsSortOrder),
+        onTap: enabled ? onPressed : null,
         child: ConstrainedBox(
           constraints: BoxConstraints(
             minHeight: compact ? 44 : _desktopTopBarControlHeight,
@@ -10448,44 +10522,48 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
                 return BorderSide(color: colors.primary);
               }),
             ),
-            child: Row(
-              mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
-              children: [
-                TrackStateIcon(
-                  summary.icon,
-                  color: onPrimary,
-                  size: compact ? 18 : _desktopTopBarIconSize,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: compact
-                      ? Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              summary.displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: nameStyle,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              summary.detailLabel,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: detailStyle,
-                            ),
-                          ],
-                        )
-                      : Text(
-                          summary.textLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: nameStyle,
-                        ),
-                ),
-              ],
+            child: Semantics(
+              label: summary.semanticLabel,
+              excludeSemantics: true,
+              child: Row(
+                mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
+                children: [
+                  TrackStateIcon(
+                    summary.icon,
+                    color: onPrimary,
+                    size: compact ? 18 : _desktopTopBarIconSize,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: compact
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                summary.displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: nameStyle,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                summary.detailLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: detailStyle,
+                              ),
+                            ],
+                          )
+                        : Text(
+                            summary.textLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: nameStyle,
+                          ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -10501,6 +10579,7 @@ class _SecondaryButton extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     this.height,
+    this.semanticsSortOrder,
   });
 
   final Key? buttonKey;
@@ -10508,6 +10587,7 @@ class _SecondaryButton extends StatelessWidget {
   final TrackStateIconGlyph icon;
   final VoidCallback? onPressed;
   final double? height;
+  final double? semanticsSortOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -10515,6 +10595,7 @@ class _SecondaryButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
+      sortKey: _semanticsSortKey(semanticsSortOrder),
       child: OutlinedButton.icon(
         key: buttonKey,
         onPressed: onPressed,
@@ -10536,12 +10617,14 @@ class _IconButtonSurface extends StatelessWidget {
     required this.glyph,
     required this.onPressed,
     this.size,
+    this.semanticsSortOrder,
   });
 
   final String label;
   final TrackStateIconGlyph glyph;
   final VoidCallback? onPressed;
   final double? size;
+  final double? semanticsSortOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -10551,6 +10634,7 @@ class _IconButtonSurface extends StatelessWidget {
       button: true,
       enabled: enabled,
       label: label,
+      sortKey: _semanticsSortKey(semanticsSortOrder),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: onPressed,
@@ -10612,6 +10696,10 @@ class _CompactActionIconButton extends StatelessWidget {
       ),
     );
   }
+}
+
+SemanticsSortKey? _semanticsSortKey(double? sortOrder) {
+  return sortOrder == null ? null : OrdinalSortKey(sortOrder);
 }
 
 class _DropdownCreateField extends StatelessWidget {
@@ -12210,12 +12298,14 @@ class _SyncPill extends StatelessWidget {
     required this.tone,
     this.height,
     this.onPressed,
+    this.semanticsSortOrder,
   });
 
   final String label;
   final _SyncPillTone tone;
   final double? height;
   final VoidCallback? onPressed;
+  final double? semanticsSortOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -12236,6 +12326,7 @@ class _SyncPill extends StatelessWidget {
       button: onPressed != null,
       container: true,
       label: label,
+      sortKey: _semanticsSortKey(semanticsSortOrder),
       child: ExcludeSemantics(
         child: Material(
           color: Colors.transparent,
