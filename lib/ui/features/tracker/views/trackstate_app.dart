@@ -123,6 +123,8 @@ class _TrackStateAppState extends State<TrackStateApp>
       const <String, HostedWorkspaceAccessMode>{};
   Map<String, bool> _localWorkspaceAvailability = const <String, bool>{};
   final Map<String, String> _workspaceValidationFailures = <String, String>{};
+  String? _requestedWorkspaceSwitcherRowFocusId;
+  int _workspaceSwitcherRowFocusRequestVersion = 0;
   final GlobalKey _workspaceSwitcherTriggerAnchorKey = GlobalKey(
     debugLabel: 'workspace-switcher-trigger-anchor',
   );
@@ -164,6 +166,8 @@ class _TrackStateAppState extends State<TrackStateApp>
     _workspaceState = const WorkspaceProfilesState();
     _hostedWorkspaceAccessModes = const <String, HostedWorkspaceAccessMode>{};
     _isDesktopWorkspaceSwitcherVisible = false;
+    _requestedWorkspaceSwitcherRowFocusId = null;
+    _workspaceSwitcherRowFocusRequestVersion = 0;
     unawaited(_initializeWorkspaceProfiles());
   }
 
@@ -820,7 +824,10 @@ class _TrackStateAppState extends State<TrackStateApp>
     );
   }
 
-  Future<void> _switchToWorkspace(WorkspaceProfile workspace) async {
+  Future<void> _switchToWorkspace(
+    WorkspaceProfile workspace, {
+    String? workspaceSwitcherFocusWorkspaceId,
+  }) async {
     final previousViewModel = viewModel;
     final prepared = await _prepareWorkspaceSwitch(
       workspace,
@@ -837,6 +844,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       prepared,
       previousViewModel: previousViewModel,
       workspaceState: selectedState,
+      workspaceSwitcherFocusWorkspaceId: workspaceSwitcherFocusWorkspaceId,
     );
   }
 
@@ -844,6 +852,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     _PreparedWorkspaceSwitch prepared, {
     required TrackerViewModel previousViewModel,
     WorkspaceProfilesState? workspaceState,
+    String? workspaceSwitcherFocusWorkspaceId,
   }) async {
     if (!mounted) {
       prepared.viewModel.dispose();
@@ -864,12 +873,20 @@ class _TrackStateAppState extends State<TrackStateApp>
           activeWorkspaceId: prepared.workspace!.id,
         );
       }
+      if (workspaceSwitcherFocusWorkspaceId != null) {
+        _requestedWorkspaceSwitcherRowFocusId =
+            workspaceSwitcherFocusWorkspaceId;
+        _workspaceSwitcherRowFocusRequestVersion += 1;
+      } else {
+        _requestedWorkspaceSwitcherRowFocusId = null;
+      }
     });
     if (!identical(previousViewModel, prepared.viewModel)) {
       previousViewModel.dispose();
     }
     await _refreshWorkspaceSwitcherState(workspaceState ?? _workspaceState);
-    if (_isDesktopWorkspaceSwitcherVisible) {
+    if (_isDesktopWorkspaceSwitcherVisible &&
+        workspaceSwitcherFocusWorkspaceId == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
           return;
@@ -1075,6 +1092,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     _startDesktopWorkspaceSwitcherBrowserFocusMonitor();
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = true;
+      _requestedWorkspaceSwitcherRowFocusId = null;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
@@ -1119,6 +1137,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     _stopDesktopWorkspaceSwitcherBrowserFocusMonitor();
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = false;
+      _requestedWorkspaceSwitcherRowFocusId = null;
     });
     if (!restoreTriggerFocus) {
       return;
@@ -1237,6 +1256,8 @@ class _TrackStateAppState extends State<TrackStateApp>
             authenticatedWorkspaceIds: _authenticatedWorkspaceIds,
             hostedWorkspaceAccessModes: _hostedWorkspaceAccessModes,
             localWorkspaceAvailability: _localWorkspaceAvailability,
+            requestedFocusedWorkspaceId: _requestedWorkspaceSwitcherRowFocusId,
+            focusRequestVersion: _workspaceSwitcherRowFocusRequestVersion,
             onSelectWorkspace: (workspace) {
               closeSwitcher();
               unawaited(_switchToWorkspace(workspace));
@@ -1322,7 +1343,10 @@ class _TrackStateAppState extends State<TrackStateApp>
     final safeCurrentIndex = currentIndex < 0 ? 0 : currentIndex;
     final nextIndex =
         (safeCurrentIndex + step + profiles.length) % profiles.length;
-    await _switchToWorkspace(profiles[nextIndex]);
+    await _switchToWorkspace(
+      profiles[nextIndex],
+      workspaceSwitcherFocusWorkspaceId: profiles[nextIndex].id,
+    );
   }
 
   void _openCreateIssue([_CreateIssuePrefill? prefill]) {
@@ -5790,6 +5814,8 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
     required this.authenticatedWorkspaceIds,
     required this.hostedWorkspaceAccessModes,
     required this.localWorkspaceAvailability,
+    required this.requestedFocusedWorkspaceId,
+    required this.focusRequestVersion,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.onAddWorkspace,
@@ -5800,6 +5826,8 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
   final Set<String> authenticatedWorkspaceIds;
   final Map<String, HostedWorkspaceAccessMode> hostedWorkspaceAccessModes;
   final Map<String, bool> localWorkspaceAvailability;
+  final String? requestedFocusedWorkspaceId;
+  final int focusRequestVersion;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final WorkspaceProfileCreator onAddWorkspace;
@@ -5813,6 +5841,8 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
   WorkspaceProfileTargetType _targetType = WorkspaceProfileTargetType.hosted;
   late final TextEditingController _targetController;
   late final TextEditingController _branchController;
+  final Map<String, VoidCallback> _workspaceRowFocusRequesters =
+      <String, VoidCallback>{};
 
   @override
   void initState() {
@@ -5826,6 +5856,22 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
     _targetController.dispose();
     _branchController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _WorkspaceSwitcherSheet oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final requestedFocusedWorkspaceId = widget.requestedFocusedWorkspaceId;
+    if (requestedFocusedWorkspaceId == null ||
+        widget.focusRequestVersion == oldWidget.focusRequestVersion) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _workspaceRowFocusRequesters[requestedFocusedWorkspaceId]?.call();
+    });
   }
 
   void _saveWorkspace() {
@@ -5970,6 +6016,16 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                           onDelete: () => widget.onDeleteWorkspace(
                             widget.workspaces.profiles[index],
                           ),
+                          onSummaryFocusRequesterChanged: (requestFocus) {
+                            final workspaceId =
+                                widget.workspaces.profiles[index].id;
+                            if (requestFocus == null) {
+                              _workspaceRowFocusRequesters.remove(workspaceId);
+                              return;
+                            }
+                            _workspaceRowFocusRequesters[workspaceId] =
+                                requestFocus;
+                          },
                         ),
                         if (index != widget.workspaces.profiles.length - 1)
                           const SizedBox(height: 8),
@@ -6059,6 +6115,7 @@ class _WorkspaceSwitcherRow extends StatefulWidget {
     required this.stateLabel,
     required this.focusOrderBase,
     required this.onDelete,
+    required this.onSummaryFocusRequesterChanged,
     this.primaryActionLabel,
     this.onPrimaryAction,
     this.onSelect,
@@ -6069,6 +6126,7 @@ class _WorkspaceSwitcherRow extends StatefulWidget {
   final String stateLabel;
   final double focusOrderBase;
   final VoidCallback onDelete;
+  final ValueChanged<VoidCallback?> onSummaryFocusRequesterChanged;
   final String? primaryActionLabel;
   final VoidCallback? onPrimaryAction;
   final VoidCallback? onSelect;
@@ -6086,10 +6144,31 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     _summaryFocusNode = FocusNode(
       debugLabel: 'workspace-switcher-row-summary-${widget.workspace.id}',
     );
+    widget.onSummaryFocusRequesterChanged(_requestSummaryFocus);
+  }
+
+  @override
+  void didUpdateWidget(covariant _WorkspaceSwitcherRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(
+      oldWidget.onSummaryFocusRequesterChanged,
+      widget.onSummaryFocusRequesterChanged,
+    )) {
+      oldWidget.onSummaryFocusRequesterChanged(null);
+      widget.onSummaryFocusRequesterChanged(_requestSummaryFocus);
+    }
+  }
+
+  void _requestSummaryFocus() {
+    if (!mounted) {
+      return;
+    }
+    _summaryFocusNode.requestFocus();
   }
 
   @override
   void dispose() {
+    widget.onSummaryFocusRequesterChanged(null);
     _summaryFocusNode.dispose();
     super.dispose();
   }
