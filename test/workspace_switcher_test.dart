@@ -253,7 +253,7 @@ void main() {
       expect(localOpenAttempts, greaterThan(1));
       expect(service.state.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
-        find.bySemanticsLabel(
+        _findExplicitWorkspaceSwitcherSemantics(
           'Workspace switcher: Active local workspace, Local, Local Git',
         ),
         findsOneWidget,
@@ -367,7 +367,7 @@ void main() {
       expect(localOpenAttempts, greaterThan(4));
       expect(service.state.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
-        find.bySemanticsLabel(
+        _findExplicitWorkspaceSwitcherSemantics(
           'Workspace switcher: Active local workspace, Local, Local Git',
         ),
         findsOneWidget,
@@ -379,7 +379,9 @@ void main() {
         findsNothing,
       );
 
-      await tester.tap(find.byKey(const ValueKey('workspace-switcher-trigger')));
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
       await tester.pumpAndSettle();
 
       final activeRow = find.byKey(
@@ -1060,6 +1062,133 @@ void main() {
   );
 
   testWidgets(
+    'desktop workspace switcher row click keeps keyboard focus inside the active row before Arrow Down navigation',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:main/repo@main',
+              displayName: 'Hosted main workspace',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'main/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:alt/repo@main',
+              displayName: 'Hosted alt workspace',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alt/repo',
+              defaultBranch: 'main',
+              writeBranch: 'ts-825-alt',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:main/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            workspaceProfileService: service,
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
+        );
+        await tester.pumpAndSettle();
+
+        final switcherSheet = find.byKey(
+          const ValueKey('workspace-switcher-sheet'),
+        );
+        final mainRow = find.byKey(
+          const ValueKey('workspace-hosted:main/repo@main'),
+        );
+        final altRow = find.byKey(
+          const ValueKey('workspace-hosted:alt/repo@main'),
+        );
+
+        expect(switcherSheet, findsOneWidget);
+        expect(mainRow, findsOneWidget);
+        expect(altRow, findsOneWidget);
+        final semanticsLabels = tester
+            .widgetList<Semantics>(find.byType(Semantics))
+            .map((widget) => widget.properties.label ?? '')
+            .where((label) => label.isNotEmpty)
+            .toList();
+
+        expect(
+          semanticsLabels.any(
+            (label) => label.startsWith('Hosted main workspace, Hosted, '),
+          ),
+          isTrue,
+        );
+        expect(
+          semanticsLabels.any(
+            (label) => label.startsWith('Hosted alt workspace, Hosted, '),
+          ),
+          isTrue,
+        );
+        expect(
+          semanticsLabels.any(
+            (label) =>
+                label.contains("Instance of 'WorkspaceProfile'.displayName"),
+          ),
+          isFalse,
+        );
+
+        final mainRowRect = tester.getRect(mainRow);
+        await tester.tapAt(mainRowRect.topLeft + const Offset(40, 28));
+        await tester.pumpAndSettle();
+
+        expect(
+          _focusWithinFinder(tester, mainRow),
+          isTrue,
+          reason:
+              'Clicking the active saved-workspace row should move keyboard focus '
+              'to a focusable target inside that row.',
+        );
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+
+        expect(switcherSheet, findsOneWidget);
+        expect(service.state.activeWorkspaceId, 'hosted:alt/repo@main');
+        expect(
+          find.descendant(of: mainRow, matching: find.text('Active')),
+          findsNothing,
+        );
+        expect(
+          find.descendant(of: altRow, matching: find.text('Active')),
+          findsOneWidget,
+        );
+      } finally {
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'desktop workspace switcher keeps visible header controls interactive while open',
     (tester) async {
       final service = _MemoryWorkspaceProfileService(
@@ -1313,6 +1442,145 @@ void main() {
   );
 
   testWidgets(
+    'desktop header exports browser semantics sort keys through the workspace switcher trigger',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            workspaceProfileService: service,
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                ),
+          ),
+        );
+        await _pumpUntilVisible(tester, find.byType(TextField));
+
+        expect(
+          _findSemanticsWithSortOrder(
+            label: 'Search issues',
+            sortOrder: 2,
+            textField: true,
+          ),
+          findsOneWidget,
+        );
+        expect(
+          _findSemanticsWithSortOrder(label: 'Create issue', sortOrder: 3),
+          findsOneWidget,
+        );
+        expect(
+          _findSemanticsWithSortOrder(label: 'Add workspace', sortOrder: 4),
+          findsOneWidget,
+        );
+
+        final trigger = find.byKey(
+          const ValueKey('workspace-switcher-trigger'),
+        );
+        expect(
+          find.descendant(
+            of: trigger,
+            matching: _findSemanticsWithSortOrder(
+              label: 'Workspace switcher: alpha/repo, Hosted, Needs sign-in',
+              sortOrder: 5,
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          _findSemanticsWithSortOrder(label: 'Dark theme', sortOrder: 6),
+          findsOneWidget,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'desktop workspace switcher trigger exports an actionable semantics node for browser keyboard flow',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:alpha/repo@main',
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:alpha/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            workspaceProfileService: service,
+            openHostedRepository:
+                ({
+                  required String repository,
+                  required String defaultBranch,
+                  required String writeBranch,
+                }) async => DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repository),
+                ),
+          ),
+        );
+        await _pumpUntilVisible(tester, find.byType(TextField));
+
+        final trigger = find.byKey(const ValueKey('workspace-switcher-trigger'));
+        expect(
+          find.descendant(
+            of: trigger,
+            matching: _findActionableSemanticsWithSortOrder(
+              label: 'Workspace switcher: alpha/repo, Hosted, Needs sign-in',
+              sortOrder: 5,
+            ),
+          ),
+          findsOneWidget,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
     'desktop workspace switcher exports a single explicit button semantics node across desktop layouts',
     (tester) async {
       final semantics = tester.ensureSemantics();
@@ -1383,11 +1651,11 @@ void main() {
                 'keyboard-focusable control instead of an inert outer wrapper.',
           );
           expect(
-            find.bySemanticsLabel(RegExp('^${RegExp.escape(label)}\$')),
+            _findExplicitWorkspaceSwitcherSemantics(label),
             findsOneWidget,
             reason:
-                'The ${layout.name} workspace switcher trigger should expose only '
-                'one labeled semantics node.',
+                'The ${layout.name} workspace switcher trigger should expose one '
+                'explicit labeled button semantics node.',
           );
 
           await tester.pumpWidget(const SizedBox.shrink());
@@ -1775,6 +2043,49 @@ Future<bool> _focusByTabUntil(
     }
   }
   return false;
+}
+
+Finder _findSemanticsWithSortOrder({
+  required String label,
+  required double sortOrder,
+  bool? textField,
+}) {
+  return find.byWidgetPredicate(
+    (widget) =>
+        widget is Semantics &&
+        widget.properties.label == label &&
+        widget.properties.sortKey is OrdinalSortKey &&
+        (widget.properties.sortKey as OrdinalSortKey).order == sortOrder &&
+        (textField == null || widget.properties.textField == textField),
+    description:
+        'Semantics(label: $label, sortKey: OrdinalSortKey($sortOrder))',
+  );
+}
+
+Finder _findActionableSemanticsWithSortOrder({
+  required String label,
+  required double sortOrder,
+}) {
+  return find.byWidgetPredicate(
+    (widget) =>
+        widget is Semantics &&
+        widget.properties.label == label &&
+        widget.properties.sortKey is OrdinalSortKey &&
+        (widget.properties.sortKey as OrdinalSortKey).order == sortOrder &&
+        widget.properties.onTap != null,
+    description:
+        'Semantics(label: $label, sortKey: OrdinalSortKey($sortOrder), onTap: set)',
+  );
+}
+
+Finder _findExplicitWorkspaceSwitcherSemantics(String label) {
+  return find.byWidgetPredicate(
+    (widget) =>
+        widget is Semantics &&
+        widget.properties.label == label &&
+        widget.properties.button == true,
+    description: 'explicit workspace switcher semantics for $label',
+  );
 }
 
 Future<void> _pumpUntilVisible(
