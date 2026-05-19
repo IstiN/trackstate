@@ -11,8 +11,6 @@ class BrowserWorkspaceSwitcherFocusRequest {
 BrowserWorkspaceSwitcherFocusMonitorSubscription
 createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserTab,
-  required VoidCallback onBrowserArrowDown,
-  required VoidCallback onBrowserArrowUp,
 }) => BrowserWorkspaceSwitcherFocusMonitorSubscription();
 
 bool isBrowserFocusWithinWorkspaceSwitcher() => false;

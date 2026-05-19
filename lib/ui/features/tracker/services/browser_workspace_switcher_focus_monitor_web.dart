@@ -29,19 +29,9 @@ class BrowserWorkspaceSwitcherFocusRequest {
 BrowserWorkspaceSwitcherFocusMonitorSubscription
 createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserTab,
-  required VoidCallback onBrowserArrowDown,
-  required VoidCallback onBrowserArrowUp,
 }) {
   final subscription = web.window.onKeyDown.listen((event) {
     if (event.key != 'Tab') {
-      if (event.key == 'ArrowDown' && isBrowserFocusWithinWorkspaceSwitcher()) {
-        event.preventDefault();
-        onBrowserArrowDown();
-      } else if (event.key == 'ArrowUp' &&
-          isBrowserFocusWithinWorkspaceSwitcher()) {
-        event.preventDefault();
-        onBrowserArrowUp();
-      }
       return;
     }
     onBrowserTab();

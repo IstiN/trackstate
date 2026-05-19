@@ -11,7 +11,6 @@ import 'package:trackstate/data/services/workspace_profile_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/domain/models/workspace_profile_models.dart';
 import 'package:trackstate/ui/core/trackstate_theme.dart';
-import 'package:trackstate/ui/features/tracker/services/browser_workspace_switcher_focus_matcher.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
@@ -1063,9 +1062,8 @@ void main() {
   );
 
   testWidgets(
-    'desktop workspace switcher rows export stable semantics identifiers for browser focus handoff',
+    'desktop workspace switcher Arrow Down moves focus to the next row and switches once',
     (tester) async {
-      final semantics = tester.ensureSemantics();
       final service = _MemoryWorkspaceProfileService(
         WorkspaceProfilesState(
           profiles: const [
@@ -1090,6 +1088,7 @@ void main() {
           migrationComplete: true,
         ),
       );
+      final hostedRepositoryLoads = <String>[];
 
       tester.view.physicalSize = const Size(1440, 960);
       tester.view.devicePixelRatio = 1;
@@ -1098,54 +1097,75 @@ void main() {
         tester.view.resetDevicePixelRatio();
       });
 
-      try {
-        await tester.pumpWidget(
-          TrackStateApp(
-            workspaceProfileService: service,
-            openHostedRepository:
-                ({
-                  required String repository,
-                  required String defaultBranch,
-                  required String writeBranch,
-                }) async => DemoTrackStateRepository(
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                hostedRepositoryLoads.add(repository);
+                return DemoTrackStateRepository(
                   snapshot: await _snapshotForRepository(repository),
-                ),
-          ),
-        );
-        await tester.pumpAndSettle();
+                );
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
 
-        await tester.tap(
-          find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
-        );
-        await tester.pumpAndSettle();
+      final switcherTrigger = find.byKey(
+        const ValueKey('workspace-switcher-trigger'),
+      );
+      final switcherSheet = find.byKey(
+        const ValueKey('workspace-switcher-sheet'),
+      );
+      final mainRow = find.byKey(
+        const ValueKey('workspace-hosted:main/repo@main'),
+      );
+      final altRow = find.byKey(
+        const ValueKey('workspace-hosted:alt/repo@main'),
+      );
 
-        Finder rowSemanticsWithIdentifier(String identifier) =>
-            find.byWidgetPredicate(
-              (widget) =>
-                  widget is Semantics &&
-                  widget.properties.identifier == identifier &&
-                  widget.properties.button == true,
-            );
+      expect(hostedRepositoryLoads, ['main/repo']);
 
-        expect(
-          rowSemanticsWithIdentifier(
-            browserWorkspaceSwitcherRowSemanticsIdentifier(
-              'hosted:main/repo@main',
-            ),
-          ),
-          findsOneWidget,
-        );
-        expect(
-          rowSemanticsWithIdentifier(
-            browserWorkspaceSwitcherRowSemanticsIdentifier(
-              'hosted:alt/repo@main',
-            ),
-          ),
-          findsOneWidget,
-        );
-      } finally {
-        semantics.dispose();
-      }
+      await tester.tap(find.bySemanticsLabel(RegExp('Workspace switcher:')).last);
+      await tester.pumpAndSettle();
+
+      expect(switcherSheet, findsOneWidget);
+      expect(_focusWithinFinder(tester, switcherTrigger), isFalse);
+      expect(
+        FocusManager.instance.primaryFocus?.debugLabel,
+        'desktop-workspace-switcher',
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+
+      expect(service.state.activeWorkspaceId, 'hosted:alt/repo@main');
+      expect(
+        service.selectedProfileIds
+            .where((workspaceId) => workspaceId == 'hosted:alt/repo@main')
+            .length,
+        1,
+      );
+      expect(hostedRepositoryLoads, ['main/repo', 'alt/repo']);
+      expect(switcherSheet, findsOneWidget);
+      expect(_focusWithinFinder(tester, switcherTrigger), isFalse);
+      expect(
+        FocusManager.instance.primaryFocus?.debugLabel,
+        'workspace-switcher-row-summary-hosted:alt/repo@main',
+      );
+      expect(_focusWithinFinder(tester, altRow), isTrue);
+      expect(
+        find.descendant(of: mainRow, matching: find.text('Active')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: altRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
     },
   );
 
@@ -2241,6 +2261,7 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
   _MemoryWorkspaceProfileService(this.state);
 
   WorkspaceProfilesState state;
+  final List<String> selectedProfileIds = <String>[];
 
   @override
   Future<WorkspaceProfile> createProfile(
@@ -2302,6 +2323,7 @@ class _MemoryWorkspaceProfileService implements WorkspaceProfileService {
 
   @override
   Future<WorkspaceProfilesState> selectProfile(String workspaceId) async {
+    selectedProfileIds.add(workspaceId);
     state = state.copyWith(activeWorkspaceId: workspaceId);
     return state;
   }

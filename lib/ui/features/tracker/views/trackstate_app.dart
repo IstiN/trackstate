@@ -1148,12 +1148,6 @@ class _TrackStateAppState extends State<TrackStateApp>
                   _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
                 });
               },
-              onBrowserArrowDown: () {
-                unawaited(_switchToAdjacentWorkspace(step: 1));
-              },
-              onBrowserArrowUp: () {
-                unawaited(_switchToAdjacentWorkspace(step: -1));
-              },
             );
   }
 
