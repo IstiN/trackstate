@@ -1062,6 +1062,102 @@ void main() {
   );
 
   testWidgets(
+    'desktop workspace switcher Arrow Up moves focus to the previous saved workspace row',
+    (tester) async {
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'local:/tmp/first@main',
+              displayName: 'First local workspace',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/first',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'local:/tmp/second@main',
+              displayName: 'Second local workspace',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/second',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'local:/tmp/second@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repositoryPath),
+              ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
+      );
+      await tester.pumpAndSettle();
+
+      final switcherSheet = find.byKey(
+        const ValueKey('workspace-switcher-sheet'),
+      );
+      final firstRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/first@main'),
+      );
+      final secondRow = find.byKey(
+        const ValueKey('workspace-local:/tmp/second@main'),
+      );
+
+      expect(switcherSheet, findsOneWidget);
+      expect(
+        find.descendant(of: secondRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: firstRow, matching: find.text('Active')),
+        findsNothing,
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+
+      expect(switcherSheet, findsOneWidget);
+      expect(service.state.activeWorkspaceId, 'local:/tmp/first@main');
+      expect(
+        find.descendant(of: firstRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: secondRow, matching: find.text('Active')),
+        findsNothing,
+      );
+      expect(
+        FocusManager.instance.primaryFocus?.debugLabel,
+        'workspace-switcher-row-summary-local:/tmp/first@main',
+      );
+      expect(_focusWithinFinder(tester, firstRow), isTrue);
+    },
+  );
+
+  testWidgets(
     'desktop workspace switcher row click keeps keyboard focus inside the active row before Arrow Down navigation',
     (tester) async {
       final semantics = tester.ensureSemantics();
