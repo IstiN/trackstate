@@ -1189,6 +1189,115 @@ void main() {
   );
 
   testWidgets(
+    'desktop workspace switcher wraps Arrow Down from the last saved workspace row and keeps focus inside the sheet',
+    (tester) async {
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:main/repo@main',
+              displayName: 'Hosted main workspace',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'main/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:alt/repo@main',
+              displayName: 'Hosted alt workspace',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alt/repo',
+              defaultBranch: 'main',
+              writeBranch: 'ts-851-alt',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:main/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
+      );
+      await tester.pumpAndSettle();
+
+      final switcherSheet = find.byKey(
+        const ValueKey('workspace-switcher-sheet'),
+      );
+      final mainRow = find.byKey(
+        const ValueKey('workspace-hosted:main/repo@main'),
+      );
+      final altRow = find.byKey(
+        const ValueKey('workspace-hosted:alt/repo@main'),
+      );
+
+      expect(switcherSheet, findsOneWidget);
+      expect(mainRow, findsOneWidget);
+      expect(altRow, findsOneWidget);
+
+      final mainRowRect = tester.getRect(mainRow);
+      await tester.tapAt(mainRowRect.topLeft + const Offset(40, 28));
+      await tester.pumpAndSettle();
+
+      expect(_focusWithinFinder(tester, mainRow), isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+
+      expect(service.state.activeWorkspaceId, 'hosted:alt/repo@main');
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+
+      expect(switcherSheet, findsOneWidget);
+      expect(
+        service.state.activeWorkspaceId,
+        'hosted:main/repo@main',
+        reason:
+            'Arrow Down on the last saved workspace row should wrap the active '
+            'selection back to the first saved workspace.',
+      );
+      expect(
+        _focusWithinFinder(tester, switcherSheet),
+        isTrue,
+        reason:
+            'Boundary Arrow Down navigation should keep keyboard focus inside '
+            'the open desktop workspace switcher.',
+      );
+      expect(
+        find.descendant(of: mainRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: altRow, matching: find.text('Active')),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
     'desktop workspace switcher keeps visible header controls interactive while open',
     (tester) async {
       final service = _MemoryWorkspaceProfileService(

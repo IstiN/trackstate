@@ -277,6 +277,10 @@ def main() -> None:
                         ),
                     )
 
+                if trial == BOUNDARY_TRIAL_COUNT:
+                    page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
+                    result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
+
         _record_step(
             result,
             step=4,
@@ -300,9 +304,6 @@ def main() -> None:
                 "did not return focus to the global page."
             ),
         )
-        if page is not None:
-            page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
-            result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
         _write_pass_outputs(result)
         print(f"{TICKET_KEY} passed")
     except AssertionError as error:
