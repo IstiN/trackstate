@@ -29,12 +29,55 @@ void main() {
       expect(
         browserFocusWithinWorkspaceSwitcher(
           ancestors: const [
-            BrowserWorkspaceSwitcherFocusAncestorSnapshot(
-              textContent: 'Board',
-            ),
+            BrowserWorkspaceSwitcherFocusAncestorSnapshot(textContent: 'Board'),
             BrowserWorkspaceSwitcherFocusAncestorSnapshot(
               textContent:
                   'TrackState.AI Dashboard Board JQL Search Hierarchy Settings Saved workspaces Repository Branch Save and switch',
+            ),
+          ],
+        ),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'browser row matcher recognizes descendants of the saved-workspace semantics row',
+    () {
+      expect(
+        browserFocusWithinWorkspaceSwitcherRow(
+          ancestors: const [
+            BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+              textContent: 'Hosted alt workspace',
+            ),
+            BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+              semanticsIdentifier:
+                  'trackstate-workspace-switcher-row-hosted:alt/repo@main',
+              textContent:
+                  'Hosted alt workspace Hosted Active alt/repo Branch: main',
+            ),
+            BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+              semanticsIdentifier: browserWorkspaceSwitcherSemanticsIdentifier,
+              textContent: 'Workspace switcher',
+            ),
+          ],
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test(
+    'browser row matcher ignores switcher text fields outside the saved-workspace rows',
+    () {
+      expect(
+        browserFocusWithinWorkspaceSwitcherRow(
+          ancestors: const [
+            BrowserWorkspaceSwitcherFocusAncestorSnapshot(textContent: 'main'),
+            BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+              semanticsIdentifier: browserWorkspaceSwitcherSemanticsIdentifier,
+              textContent:
+                  'Workspace switcher Saved workspaces Repository Branch Save and switch',
             ),
           ],
         ),

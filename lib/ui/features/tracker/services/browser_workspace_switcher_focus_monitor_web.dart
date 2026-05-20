@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:js_interop';
 
 import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:web/web.dart' as web;
@@ -6,12 +7,12 @@ import 'package:web/web.dart' as web;
 import 'browser_workspace_switcher_focus_matcher.dart';
 
 class BrowserWorkspaceSwitcherFocusMonitorSubscription {
-  BrowserWorkspaceSwitcherFocusMonitorSubscription(this._subscription);
+  BrowserWorkspaceSwitcherFocusMonitorSubscription(this._cancel);
 
-  final StreamSubscription<web.KeyboardEvent> _subscription;
+  final void Function() _cancel;
 
   void cancel() {
-    unawaited(_subscription.cancel());
+    _cancel();
   }
 }
 
@@ -29,29 +30,39 @@ class BrowserWorkspaceSwitcherFocusRequest {
 BrowserWorkspaceSwitcherFocusMonitorSubscription
 createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserTab,
+  required void Function(String key) onBrowserBoundaryKey,
 }) {
-  final subscription = web.window.onKeyDown.listen((event) {
-    if (event.key != 'Tab') {
+  final listener = ((web.Event event) {
+    final keyboardEvent = event as web.KeyboardEvent;
+    if (keyboardEvent.key == 'Tab') {
+      onBrowserTab();
       return;
     }
-    onBrowserTab();
-  });
-  return BrowserWorkspaceSwitcherFocusMonitorSubscription(subscription);
+
+    if (keyboardEvent.key != 'Home' && keyboardEvent.key != 'End') {
+      return;
+    }
+
+    if (!browserFocusWithinWorkspaceSwitcherRow(
+      ancestors: _activeBrowserFocusAncestors(),
+    )) {
+      return;
+    }
+
+    keyboardEvent.preventDefault();
+    onBrowserBoundaryKey(keyboardEvent.key);
+  }).toJS;
+
+  web.window.addEventListener('keydown', listener, true.toJS);
+  return BrowserWorkspaceSwitcherFocusMonitorSubscription(
+    () => web.window.removeEventListener('keydown', listener, true.toJS),
+  );
 }
 
 bool isBrowserFocusWithinWorkspaceSwitcher() {
-  final ancestors = <BrowserWorkspaceSwitcherFocusAncestorSnapshot>[];
-  web.Element? element = web.document.activeElement;
-  while (element != null) {
-    ancestors.add(
-      BrowserWorkspaceSwitcherFocusAncestorSnapshot(
-        semanticsIdentifier: element.getAttribute('flt-semantics-identifier'),
-        textContent: element.textContent,
-      ),
-    );
-    element = element.parentElement;
-  }
-  return browserFocusWithinWorkspaceSwitcher(ancestors: ancestors);
+  return browserFocusWithinWorkspaceSwitcher(
+    ancestors: _activeBrowserFocusAncestors(),
+  );
 }
 
 BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
@@ -91,11 +102,31 @@ bool _focusSemanticsElement(String semanticsIdentifier) {
         semanticsIdentifier) {
       continue;
     }
-    (candidate as web.HTMLElement).focus();
+    if (candidate case final web.HTMLElement htmlElement) {
+      htmlElement.focus();
+    }
     final activeElement = web.document.activeElement;
-    return activeElement == candidate || candidate.contains(activeElement);
+    if (activeElement == candidate || candidate.contains(activeElement)) {
+      return true;
+    }
   }
   return false;
+}
+
+List<BrowserWorkspaceSwitcherFocusAncestorSnapshot>
+_activeBrowserFocusAncestors() {
+  final ancestors = <BrowserWorkspaceSwitcherFocusAncestorSnapshot>[];
+  web.Element? element = web.document.activeElement;
+  while (element != null) {
+    ancestors.add(
+      BrowserWorkspaceSwitcherFocusAncestorSnapshot(
+        semanticsIdentifier: element.getAttribute('flt-semantics-identifier'),
+        textContent: element.textContent,
+      ),
+    );
+    element = element.parentElement;
+  }
+  return ancestors;
 }
 
 void syncBrowserWorkspaceSwitcherRowTabIndices({
