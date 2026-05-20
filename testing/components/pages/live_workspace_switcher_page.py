@@ -490,6 +490,18 @@ class WorkspaceTriggerKeyboardFocusObservation:
     focus_sequence: tuple[FocusNavigationStep, ...]
 
 
+@dataclass(frozen=True)
+class WorkspaceTriggerFocusStateObservation:
+    trigger_label: str
+    trigger_text: str
+    outline: str
+    outline_color: str
+    outline_width: str
+    box_shadow: str
+    focus_visible: bool
+    is_focused: bool
+
+
 class LiveWorkspaceSwitcherPage:
     _settings_page = LiveProjectSettingsPage
     _search_input_selector = 'input[aria-label="Search issues"]'
@@ -5578,6 +5590,23 @@ class LiveWorkspaceSwitcherPage:
             active_tag_name_after_focus=active.tag_name,
             active_outer_html_after_focus=active.outer_html,
             focus_sequence=tuple(steps),
+        )
+
+    def observe_desktop_trigger_focus_state(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> WorkspaceTriggerFocusStateObservation:
+        snapshot = self._desktop_trigger_snapshot(timeout_ms=timeout_ms)
+        return WorkspaceTriggerFocusStateObservation(
+            trigger_label=str(snapshot.get("triggerLabel", "")),
+            trigger_text=str(snapshot.get("triggerText", "")),
+            outline=str(snapshot.get("outline", "")),
+            outline_color=str(snapshot.get("outlineColor", "")),
+            outline_width=str(snapshot.get("outlineWidth", "")),
+            box_shadow=str(snapshot.get("boxShadow", "")),
+            focus_visible=bool(snapshot.get("focusVisible")),
+            is_focused=bool(snapshot.get("isFocused")),
         )
 
     def observe_forward_focus_from_trigger(
