@@ -10,9 +10,9 @@ The automation:
 3. uses a real keyboard navigation path until the workspace switcher trigger owns
    keyboard focus
 4. presses `Space` once to open the workspace switcher surface while the trigger
-   keeps focus
+   keeps focus and exposes `aria-expanded="true"`
 5. presses `Space` again on the same focused trigger and checks whether the
-   visible surface dismisses immediately
+   visible surface dismisses immediately with `aria-expanded="false"`
 
 ## Run this test
 
@@ -31,7 +31,7 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-844/test_ts_844.py
 ```text
 Pass: after the workspace switcher surface is open and the trigger still owns
 keyboard focus, pressing Space again closes the visible surface and returns the
-trigger to its collapsed state.
+trigger to its collapsed state with `aria-expanded="false"`.
 
 Fail: the surface stays visible, focus leaves the trigger unexpectedly, or the
 toggle interaction does not collapse the open switcher.
