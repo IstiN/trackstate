@@ -416,6 +416,19 @@ class LiveWorkspaceSwitcherPage:
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
 
+    def clear_focus(self) -> None:
+        self._session.evaluate(
+            """
+            () => {
+              const active = document.activeElement;
+              if (active instanceof HTMLElement) {
+                active.blur();
+              }
+              return true;
+            }
+            """,
+        )
+
     def focus_search_field(self, *, timeout_ms: int = 30_000) -> None:
         self._session.focus(self._search_input_selector, timeout_ms=timeout_ms)
 

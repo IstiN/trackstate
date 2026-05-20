@@ -19,7 +19,7 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-830/test_ts_830.py
 ## Expected result
 
 ```text
-Pass: keyboard Tab navigation reaches the workspace switcher trigger in logical
-desktop order after Settings and before Search issues, and the focused trigger
-shows a visible focus indicator.
+Pass: keyboard Tab navigation reaches the workspace switcher trigger in the
+live desktop shell sequence without skipping it, and the focused trigger shows
+a visible focus indicator.
 ```
