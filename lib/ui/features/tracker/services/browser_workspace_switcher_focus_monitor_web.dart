@@ -128,3 +128,27 @@ _activeBrowserFocusAncestors() {
   }
   return ancestors;
 }
+
+void syncBrowserWorkspaceSwitcherRowTabIndices({
+  required String activeWorkspaceId,
+}) {
+  final prefix = browserWorkspaceSwitcherRowSemanticsIdentifierPrefix;
+  final activeIdentifier =
+      browserWorkspaceSwitcherRowSemanticsIdentifier(activeWorkspaceId);
+  final elements = web.document.querySelectorAll(
+    '[flt-semantics-identifier^="$prefix"]',
+  );
+  for (var index = 0; index < elements.length; index++) {
+    final node = elements.item(index);
+    if (node == null) {
+      continue;
+    }
+    final element = node as web.HTMLElement;
+    final identifier = element.getAttribute('flt-semantics-identifier');
+    if (identifier == activeIdentifier) {
+      element.tabIndex = 0;
+    } else {
+      element.tabIndex = -1;
+    }
+  }
+}

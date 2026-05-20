@@ -25,3 +25,7 @@ BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
 }) => BrowserWorkspaceSwitcherFocusRequest();
 
 void _keep(Object? _) {}
+
+void syncBrowserWorkspaceSwitcherRowTabIndices({
+  required String activeWorkspaceId,
+}) {}
