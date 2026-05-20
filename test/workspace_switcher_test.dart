@@ -2336,6 +2336,169 @@ void main() {
       expect(find.textContaining('new/repo'), findsWidgets);
     },
   );
+
+  testWidgets(
+    'roving tabindex: only the active workspace row exports focusable semantics',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: 'hosted:main/repo@main',
+              displayName: 'Hosted main workspace',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'main/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:alt/repo@main',
+              displayName: 'Hosted alt workspace',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alt/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: 'hosted:third/repo@main',
+              displayName: 'Hosted third workspace',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'third/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: 'hosted:main/repo@main',
+          migrationComplete: true,
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.bySemanticsLabel(RegExp('Workspace switcher:')).last,
+      );
+      await tester.pumpAndSettle();
+
+      // Initially, only the active (first) row should be focusable.
+      final mainRowSemanticsNode = find.semantics.byPredicate(
+        (node) =>
+            node.label.contains('Hosted main workspace') &&
+            node.getSemanticsData().identifier ==
+                'trackstate-workspace-switcher-row-hosted:main/repo@main',
+      );
+      final altRowSemanticsNode = find.semantics.byPredicate(
+        (node) =>
+            node.label.contains('Hosted alt workspace') &&
+            node.getSemanticsData().identifier ==
+                'trackstate-workspace-switcher-row-hosted:alt/repo@main',
+      );
+      final thirdRowSemanticsNode = find.semantics.byPredicate(
+        (node) =>
+            node.label.contains('Hosted third workspace') &&
+            node.getSemanticsData().identifier ==
+                'trackstate-workspace-switcher-row-hosted:third/repo@main',
+      );
+
+      expect(mainRowSemanticsNode, findsOne);
+      expect(altRowSemanticsNode, findsOne);
+      expect(thirdRowSemanticsNode, findsOne);
+
+      final mainSem = mainRowSemanticsNode.evaluate().single;
+      final altSem = altRowSemanticsNode.evaluate().single;
+      final thirdSem = thirdRowSemanticsNode.evaluate().single;
+
+      expect(
+        mainSem.hasFlag(SemanticsFlag.isFocusable),
+        isTrue,
+        reason: 'Active workspace row should be focusable.',
+      );
+      expect(
+        altSem.hasFlag(SemanticsFlag.isFocusable),
+        isFalse,
+        reason: 'Inactive workspace row should NOT be focusable.',
+      );
+      expect(
+        thirdSem.hasFlag(SemanticsFlag.isFocusable),
+        isFalse,
+        reason: 'Inactive workspace row should NOT be focusable.',
+      );
+
+      // Press ArrowDown to move selection to the second workspace.
+      final mainRow = find.byKey(
+        const ValueKey('workspace-hosted:main/repo@main'),
+      );
+      final mainRowRect = tester.getRect(mainRow);
+      await tester.tapAt(mainRowRect.topLeft + const Offset(40, 28));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+
+      expect(service.state.activeWorkspaceId, 'hosted:alt/repo@main');
+
+      // After ArrowDown, only the newly active row should be focusable.
+      final mainRowSemanticsNodeAfter = find.semantics.byPredicate(
+        (node) =>
+            node.getSemanticsData().identifier ==
+            'trackstate-workspace-switcher-row-hosted:main/repo@main',
+      );
+      final altRowSemanticsNodeAfter = find.semantics.byPredicate(
+        (node) =>
+            node.getSemanticsData().identifier ==
+            'trackstate-workspace-switcher-row-hosted:alt/repo@main',
+      );
+      final thirdRowSemanticsNodeAfter = find.semantics.byPredicate(
+        (node) =>
+            node.getSemanticsData().identifier ==
+            'trackstate-workspace-switcher-row-hosted:third/repo@main',
+      );
+
+      final mainSemAfter = mainRowSemanticsNodeAfter.evaluate().single;
+      final altSemAfter = altRowSemanticsNodeAfter.evaluate().single;
+      final thirdSemAfter = thirdRowSemanticsNodeAfter.evaluate().single;
+
+      expect(
+        mainSemAfter.hasFlag(SemanticsFlag.isFocusable),
+        isFalse,
+        reason:
+            'Previously active row should lose focusable after selection moves.',
+      );
+      expect(
+        altSemAfter.hasFlag(SemanticsFlag.isFocusable),
+        isTrue,
+        reason: 'Newly active workspace row should be focusable.',
+      );
+      expect(
+        thirdSemAfter.hasFlag(SemanticsFlag.isFocusable),
+        isFalse,
+        reason:
+            'Inactive workspace row should remain not focusable after selection changes.',
+      );
+
+      semantics.dispose();
+    },
+  );
 }
 
 Future<TrackerSnapshot> _snapshotForRepository(String repository) async {
