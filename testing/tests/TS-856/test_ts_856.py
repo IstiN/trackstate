@@ -44,7 +44,7 @@ DEFAULT_BRANCH = "main"
 FIRST_WORKSPACE_DISPLAY_NAME = "Hosted main workspace"
 SECOND_WORKSPACE_DISPLAY_NAME = "Hosted alt workspace"
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-856-alt"
-LINKED_BUGS = ["TS-863", "TS-852"]
+LINKED_BUGS = ["TS-866", "TS-865", "TS-863", "TS-852"]
 
 PRECONDITIONS = [
     "At least two workspaces are saved in the account.",
@@ -770,30 +770,40 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         f"# {TICKET_KEY} {status}",
         "",
-        "## Summary",
-        (
-            "- Verified the live desktop workspace switcher handles ArrowDown from the original open state and moves the active selection and focused row button from the first saved workspace row to the next one."
-            if passed
-            else f"- Re-run failed: {_failed_step_summary(result)}"
-        ),
-        "",
-        "## Files Modified",
-        "- `testing/tests/TS-856/config.yaml`",
-        "- `testing/tests/TS-856/README.md`",
-        "- `testing/tests/TS-856/test_ts_856.py`",
-        "",
-        "## Coverage",
-        f"- Test case: `{TICKET_KEY} - {TEST_CASE_TITLE}`",
-        f"- Result: `{status}`",
-        f"- Command: `{RUN_COMMAND}`",
-        f"- Screenshot: `{screenshot_path}`",
-        (
-            f"- Environment: `{result['app_url']}` on Chromium/Playwright "
-            f"({result['os']}) against `{result['repository']}` @ "
-            f"`{result['repository_ref']}`."
-        ),
-        f"- Step results: {', '.join(_step_status_summary(result))}",
     ]
+    if not passed:
+        lines.extend(
+            [
+                "## Issues/Notes",
+                f"- Re-run failed: {_failed_step_summary(result)}",
+                "",
+            ],
+        )
+    lines.extend(
+        [
+            "## Approach",
+            (
+                "- Verified the live desktop workspace switcher handles ArrowDown from the original open state and moves the active selection and focused row button from the first saved workspace row to the next one."
+                if passed
+                else "- Re-ran the live desktop workspace-switcher flow from the original open state and captured the exact failing focus behavior after ArrowDown."
+            ),
+            "",
+            "## Files Modified",
+            "- `testing/tests/TS-856/test_ts_856.py`",
+            "",
+            "## Test Coverage",
+            f"- Test case: `{TICKET_KEY} - {TEST_CASE_TITLE}`",
+            f"- Result: `{status}`",
+            f"- Command: `{RUN_COMMAND}`",
+            f"- Screenshot: `{screenshot_path}`",
+            (
+                f"- Environment: `{result['app_url']}` on Chromium/Playwright "
+                f"({result['os']}) against `{result['repository']}` @ "
+                f"`{result['repository_ref']}`."
+            ),
+            f"- Step results: {', '.join(_step_status_summary(result))}",
+        ],
+    )
     if not passed:
         lines.extend(
             [

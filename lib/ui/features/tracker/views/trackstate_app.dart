@@ -123,6 +123,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       const <String, HostedWorkspaceAccessMode>{};
   Map<String, bool> _localWorkspaceAvailability = const <String, bool>{};
   final Map<String, String> _workspaceValidationFailures = <String, String>{};
+  List<String>? _desktopWorkspaceSwitcherProfileOrder;
   String? _requestedWorkspaceSwitcherRowFocusId;
   int _workspaceSwitcherRowFocusRequestVersion = 0;
   final GlobalKey _workspaceSwitcherTriggerAnchorKey = GlobalKey(
@@ -894,6 +895,10 @@ class _TrackStateAppState extends State<TrackStateApp>
         if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
           return;
         }
+        browser_workspace_switcher_focus_monitor
+            .syncBrowserWorkspaceSwitcherRowTabIndices(
+              activeWorkspaceId: workspaceSwitcherFocusWorkspaceId,
+            );
         _requestDesktopWorkspaceSwitcherBrowserFocus(
           browserWorkspaceSwitcherRowSemanticsIdentifier(
             workspaceSwitcherFocusWorkspaceId,
@@ -1109,6 +1114,9 @@ class _TrackStateAppState extends State<TrackStateApp>
     _cancelDesktopWorkspaceSwitcherBrowserFocusRequest();
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = true;
+      _desktopWorkspaceSwitcherProfileOrder = [
+        for (final profile in _workspaceState.profiles) profile.id,
+      ];
       _requestedWorkspaceSwitcherRowFocusId = activeWorkspaceId;
       if (activeWorkspaceId != null) {
         _workspaceSwitcherRowFocusRequestVersion += 1;
@@ -1117,6 +1125,12 @@ class _TrackStateAppState extends State<TrackStateApp>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
         return;
+      }
+      if (activeWorkspaceId != null) {
+        browser_workspace_switcher_focus_monitor
+            .syncBrowserWorkspaceSwitcherRowTabIndices(
+              activeWorkspaceId: activeWorkspaceId,
+            );
       }
       _desktopWorkspaceSwitcherFocusScopeNode.requestFocus();
     });
@@ -1141,6 +1155,17 @@ class _TrackStateAppState extends State<TrackStateApp>
                   }
                   _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
                 });
+              },
+              onBrowserBoundaryKey: (key) {
+                if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
+                  return;
+                }
+                switch (key) {
+                  case 'Home':
+                    unawaited(_switchToBoundaryWorkspace(selectFirst: true));
+                  case 'End':
+                    unawaited(_switchToBoundaryWorkspace(selectFirst: false));
+                }
               },
             );
   }
@@ -1174,6 +1199,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     _cancelDesktopWorkspaceSwitcherBrowserFocusRequest();
     setState(() {
       _isDesktopWorkspaceSwitcherVisible = false;
+      _desktopWorkspaceSwitcherProfileOrder = null;
       _requestedWorkspaceSwitcherRowFocusId = null;
     });
     if (!restoreTriggerFocus) {
@@ -1280,6 +1306,9 @@ class _TrackStateAppState extends State<TrackStateApp>
   }) {
     final content = Builder(
       builder: (sheetContext) {
+        final workspaceSwitcherState = _workspaceState.copyWith(
+          profiles: _desktopWorkspaceSwitcherProfiles(),
+        );
         final closeSwitcher = compact
             ? () => Navigator.of(sheetContext, rootNavigator: true).pop()
             : _closeDesktopWorkspaceSwitcher;
@@ -1306,7 +1335,7 @@ class _TrackStateAppState extends State<TrackStateApp>
                     : null,
                 exposeActiveSummarySemantics: true,
                 viewModel: viewModel,
-                workspaces: _workspaceState,
+                workspaces: workspaceSwitcherState,
                 authenticatedWorkspaceIds: _authenticatedWorkspaceIds,
                 hostedWorkspaceAccessModes: _hostedWorkspaceAccessModes,
                 localWorkspaceAvailability: _localWorkspaceAvailability,
@@ -1332,6 +1361,10 @@ class _TrackStateAppState extends State<TrackStateApp>
                 },
                 onMoveWorkspaceSelection: (step) =>
                     unawaited(_switchToAdjacentWorkspace(step: step)),
+                onSelectFirstWorkspace: () =>
+                    unawaited(_switchToBoundaryWorkspace(selectFirst: true)),
+                onSelectLastWorkspace: () =>
+                    unawaited(_switchToBoundaryWorkspace(selectFirst: false)),
               ),
             ),
           ),
@@ -1350,6 +1383,10 @@ class _TrackStateAppState extends State<TrackStateApp>
                   unawaited(_switchToAdjacentWorkspace(step: 1)),
               const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
                   unawaited(_switchToAdjacentWorkspace(step: -1)),
+              const SingleActivator(LogicalKeyboardKey.home): () =>
+                  unawaited(_switchToBoundaryWorkspace(selectFirst: true)),
+              const SingleActivator(LogicalKeyboardKey.end): () =>
+                  unawaited(_switchToBoundaryWorkspace(selectFirst: false)),
             }
           : const <ShortcutActivator, VoidCallback>{},
       child: FocusScope(
@@ -1402,7 +1439,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   }
 
   Future<void> _switchToAdjacentWorkspace({required int step}) async {
-    final profiles = _workspaceState.profiles;
+    final profiles = _desktopWorkspaceSwitcherProfiles();
     if (!_isDesktopWorkspaceSwitcherVisible || profiles.length < 2) {
       return;
     }
@@ -1417,6 +1454,37 @@ class _TrackStateAppState extends State<TrackStateApp>
       profiles[nextIndex],
       workspaceSwitcherFocusWorkspaceId: profiles[nextIndex].id,
     );
+  }
+
+  Future<void> _switchToBoundaryWorkspace({required bool selectFirst}) async {
+    final profiles = _desktopWorkspaceSwitcherProfiles();
+    if (!_isDesktopWorkspaceSwitcherVisible || profiles.isEmpty) {
+      return;
+    }
+    final workspace = selectFirst ? profiles.first : profiles.last;
+    await _switchToWorkspace(
+      workspace,
+      workspaceSwitcherFocusWorkspaceId: workspace.id,
+    );
+  }
+
+  List<WorkspaceProfile> _desktopWorkspaceSwitcherProfiles() {
+    final storedOrder = _desktopWorkspaceSwitcherProfileOrder;
+    if (!_isDesktopWorkspaceSwitcherVisible ||
+        storedOrder == null ||
+        storedOrder.isEmpty) {
+      return _workspaceState.profiles;
+    }
+    final profilesById = <String, WorkspaceProfile>{
+      for (final profile in _workspaceState.profiles) profile.id: profile,
+    };
+    final orderedProfiles = <WorkspaceProfile>[
+      for (final workspaceId in storedOrder)
+        if (profilesById.containsKey(workspaceId))
+          profilesById.remove(workspaceId)!,
+    ];
+    orderedProfiles.addAll(profilesById.values);
+    return orderedProfiles;
   }
 
   void _openCreateIssue([_CreateIssuePrefill? prefill]) {
@@ -5962,6 +6030,8 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
     required this.onDeleteWorkspace,
     required this.onAddWorkspace,
     required this.onMoveWorkspaceSelection,
+    required this.onSelectFirstWorkspace,
+    required this.onSelectLastWorkspace,
   });
 
   final Key? sheetKey;
@@ -5977,6 +6047,8 @@ class _WorkspaceSwitcherSheet extends StatefulWidget {
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final WorkspaceProfileCreator onAddWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onSelectFirstWorkspace;
+  final VoidCallback onSelectLastWorkspace;
 
   @override
   State<_WorkspaceSwitcherSheet> createState() =>
@@ -6170,6 +6242,10 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                                   widget.onDeleteWorkspace(workspace),
                               onMoveWorkspaceSelection:
                                   widget.onMoveWorkspaceSelection,
+                              onSelectFirstWorkspace:
+                                  widget.onSelectFirstWorkspace,
+                              onSelectLastWorkspace:
+                                  widget.onSelectLastWorkspace,
                               onSummaryFocusRequesterChanged: (requestFocus) {
                                 if (requestFocus == null) {
                                   _workspaceRowFocusRequesters.remove(
@@ -6272,6 +6348,8 @@ class _WorkspaceSwitcherRow extends StatefulWidget {
     required this.focusOrderBase,
     required this.onDelete,
     required this.onMoveWorkspaceSelection,
+    required this.onSelectFirstWorkspace,
+    required this.onSelectLastWorkspace,
     required this.onSummaryFocusRequesterChanged,
     this.primaryActionLabel,
     this.onPrimaryAction,
@@ -6284,6 +6362,8 @@ class _WorkspaceSwitcherRow extends StatefulWidget {
   final double focusOrderBase;
   final VoidCallback onDelete;
   final ValueChanged<int> onMoveWorkspaceSelection;
+  final VoidCallback onSelectFirstWorkspace;
+  final VoidCallback onSelectLastWorkspace;
   final ValueChanged<VoidCallback?> onSummaryFocusRequesterChanged;
   final String? primaryActionLabel;
   final VoidCallback? onPrimaryAction;
@@ -6301,6 +6381,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     super.initState();
     _summaryFocusNode = FocusNode(
       debugLabel: 'workspace-switcher-row-summary-${widget.workspace.id}',
+      skipTraversal: !widget.isActive,
     );
     widget.onSummaryFocusRequesterChanged(_requestSummaryFocus);
   }
@@ -6308,6 +6389,9 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
   @override
   void didUpdateWidget(covariant _WorkspaceSwitcherRow oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.isActive != oldWidget.isActive) {
+      _summaryFocusNode.skipTraversal = !widget.isActive;
+    }
     if (!identical(
       oldWidget.onSummaryFocusRequesterChanged,
       widget.onSummaryFocusRequesterChanged,
@@ -6363,7 +6447,9 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
             container: true,
             button: true,
             enabled: true,
-            focusable: true,
+            focusable: isActive,
+            focused: isActive,
+            selected: isActive,
             identifier: browserWorkspaceSwitcherRowSemanticsIdentifier(
               workspace.id,
             ),
@@ -6378,6 +6464,10 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                         widget.onMoveWorkspaceSelection(1),
                     const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
                         widget.onMoveWorkspaceSelection(-1),
+                    const SingleActivator(LogicalKeyboardKey.home):
+                        widget.onSelectFirstWorkspace,
+                    const SingleActivator(LogicalKeyboardKey.end):
+                        widget.onSelectLastWorkspace,
                   },
                   child: OutlinedButton(
                     focusNode: _summaryFocusNode,
