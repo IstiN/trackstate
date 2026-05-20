@@ -18,3 +18,7 @@ bool isBrowserFocusWithinWorkspaceSwitcher() => false;
 BrowserWorkspaceSwitcherFocusRequest requestBrowserWorkspaceSwitcherFocus({
   required String semanticsIdentifier,
 }) => BrowserWorkspaceSwitcherFocusRequest();
+
+void syncBrowserWorkspaceSwitcherRowTabIndices({
+  required String activeWorkspaceId,
+}) {}

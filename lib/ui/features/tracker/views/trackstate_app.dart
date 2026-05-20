@@ -894,6 +894,10 @@ class _TrackStateAppState extends State<TrackStateApp>
         if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
           return;
         }
+        browser_workspace_switcher_focus_monitor
+            .syncBrowserWorkspaceSwitcherRowTabIndices(
+              activeWorkspaceId: workspaceSwitcherFocusWorkspaceId,
+            );
         _requestDesktopWorkspaceSwitcherBrowserFocus(
           browserWorkspaceSwitcherRowSemanticsIdentifier(
             workspaceSwitcherFocusWorkspaceId,
@@ -1117,6 +1121,12 @@ class _TrackStateAppState extends State<TrackStateApp>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
         return;
+      }
+      if (activeWorkspaceId != null) {
+        browser_workspace_switcher_focus_monitor
+            .syncBrowserWorkspaceSwitcherRowTabIndices(
+              activeWorkspaceId: activeWorkspaceId,
+            );
       }
       _desktopWorkspaceSwitcherFocusScopeNode.requestFocus();
     });
@@ -6301,6 +6311,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     super.initState();
     _summaryFocusNode = FocusNode(
       debugLabel: 'workspace-switcher-row-summary-${widget.workspace.id}',
+      skipTraversal: !widget.isActive,
     );
     widget.onSummaryFocusRequesterChanged(_requestSummaryFocus);
   }
@@ -6308,6 +6319,9 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
   @override
   void didUpdateWidget(covariant _WorkspaceSwitcherRow oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.isActive != oldWidget.isActive) {
+      _summaryFocusNode.skipTraversal = !widget.isActive;
+    }
     if (!identical(
       oldWidget.onSummaryFocusRequesterChanged,
       widget.onSummaryFocusRequesterChanged,
@@ -6363,7 +6377,9 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
             container: true,
             button: true,
             enabled: true,
-            focusable: true,
+            focusable: isActive,
+            focused: isActive,
+            selected: isActive,
             identifier: browserWorkspaceSwitcherRowSemanticsIdentifier(
               workspace.id,
             ),
