@@ -63,7 +63,8 @@ REQUEST_STEPS = [
 ]
 AUTOMATION_STEPS = [
     "Open the deployed desktop workspace switcher and confirm three saved workspace rows are visible with the first row selected.",
-    "Press Arrow Down once to establish the ticket precondition: the second saved workspace row is selected, focused, and the only row left in the sequential Tab order.",
+    "Explicitly move keyboard focus onto the active first saved workspace row and verify the row-list focus precondition is met before Arrow Down is used.",
+    "Press Arrow Down once to move selection and keyboard focus from the first saved workspace row to the second row, leaving only the second row in the sequential Tab order.",
     "Press Tab from the selected second row and verify focus leaves the workspace row list without landing on the first or third saved workspace row while the second row remains the only focusable row.",
     "Press Shift+Tab and verify focus returns directly to the selected second saved workspace row, not to the first or third row, while the roving tabindex state stays intact.",
     "Press Tab again while the second row remains selected and verify sequential keyboard navigation still bypasses the inactive first and third rows.",
@@ -79,9 +80,11 @@ JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 RESPONSE_PATH = OUTPUTS_DIR / "response.md"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts867_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts867_failure.png"
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 WORKSPACE_NAMES = (
     FIRST_WORKSPACE_DISPLAY_NAME,
@@ -187,16 +190,59 @@ def main() -> None:
 
                 current_step = 2
                 current_action = AUTOMATION_STEPS[1]
+                focused_active_row_state = _focus_active_workspace_row_and_capture(
+                    page=page,
+                    expected_selected=FIRST_WORKSPACE_DISPLAY_NAME,
+                )
+                result["focused_active_row_state"] = focused_active_row_state
+                _assert_row_focus_precondition(
+                    state=focused_active_row_state,
+                    expected_selected=FIRST_WORKSPACE_DISPLAY_NAME,
+                    inactive_names=(
+                        SECOND_WORKSPACE_DISPLAY_NAME,
+                        THIRD_WORKSPACE_DISPLAY_NAME,
+                    ),
+                    step_prefix="Step 2 failed",
+                )
+                _record_step(
+                    result,
+                    step=2,
+                    status="passed",
+                    action=AUTOMATION_STEPS[1],
+                    observed=(
+                        f"focused_label={_active_from_state(focused_active_row_state).get('accessible_name')!r}; "
+                        f"first_row_contains_active={_row_focus_from_state(focused_active_row_state, FIRST_WORKSPACE_DISPLAY_NAME).get('row_contains_active')}; "
+                        f"first_tabindex={_button_from_state(focused_active_row_state, FIRST_WORKSPACE_DISPLAY_NAME).get('tabindex')!r}; "
+                        f"second_tabindex={_button_from_state(focused_active_row_state, SECOND_WORKSPACE_DISPLAY_NAME).get('tabindex')!r}; "
+                        f"third_tabindex={_button_from_state(focused_active_row_state, THIRD_WORKSPACE_DISPLAY_NAME).get('tabindex')!r}"
+                    ),
+                )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Moved focus into the saved-workspace row list before Arrow Down "
+                        "and confirmed the first active row owned keyboard focus."
+                    ),
+                    observed=(
+                        f"focused_label={_active_from_state(focused_active_row_state).get('accessible_name')!r}; "
+                        f"row_focus_first={_row_focus_from_state(focused_active_row_state, FIRST_WORKSPACE_DISPLAY_NAME).get('row_contains_active')}; "
+                        f"focus_on_trigger={_focus_from_state(focused_active_row_state).get('active_on_trigger')}"
+                    ),
+                )
+
+                current_step = 3
+                current_action = AUTOMATION_STEPS[2]
                 arrow_state = _press_key_and_capture(
                     page=page,
                     key="ArrowDown",
                     stability_ms=KEY_STABILITY_MS,
+                    expected_active_workspace=SECOND_WORKSPACE_DISPLAY_NAME,
                 )
                 result["arrow_down_state"] = arrow_state
                 _assert_panel_open_after_key(
                     key="Arrow Down",
                     state=arrow_state,
-                    step_prefix="Step 2 failed",
+                    step_prefix="Step 3 failed",
                 )
                 _assert_selected_row_roving_state(
                     state=arrow_state,
@@ -205,14 +251,14 @@ def main() -> None:
                         FIRST_WORKSPACE_DISPLAY_NAME,
                         THIRD_WORKSPACE_DISPLAY_NAME,
                     ),
-                    step_prefix="Step 2 failed",
+                    step_prefix="Step 3 failed",
                     require_row_focus=True,
                 )
                 _record_step(
                     result,
-                    step=2,
+                    step=3,
                     status="passed",
-                    action=AUTOMATION_STEPS[1],
+                    action=AUTOMATION_STEPS[2],
                     observed=(
                         f"active_workspace={arrow_state['active_workspace_name']!r}; "
                         f"focused_label={_active_from_state(arrow_state).get('accessible_name')!r}; "
@@ -234,8 +280,8 @@ def main() -> None:
                     ),
                 )
 
-                current_step = 3
-                current_action = AUTOMATION_STEPS[2]
+                current_step = 4
+                current_action = AUTOMATION_STEPS[3]
                 tab_out_state = _press_key_and_capture(
                     page=page,
                     key="Tab",
@@ -245,7 +291,7 @@ def main() -> None:
                 _assert_panel_open_after_key(
                     key="Tab",
                     state=tab_out_state,
-                    step_prefix="Step 3 failed",
+                    step_prefix="Step 4 failed",
                 )
                 _assert_tab_left_workspace_rows(
                     state=tab_out_state,
@@ -254,13 +300,13 @@ def main() -> None:
                         FIRST_WORKSPACE_DISPLAY_NAME,
                         THIRD_WORKSPACE_DISPLAY_NAME,
                     ),
-                    step_prefix="Step 3 failed",
+                    step_prefix="Step 4 failed",
                 )
                 _record_step(
                     result,
-                    step=3,
+                    step=4,
                     status="passed",
-                    action=AUTOMATION_STEPS[2],
+                    action=AUTOMATION_STEPS[3],
                     observed=(
                         f"focused_after_tab={_active_from_state(tab_out_state).get('accessible_name')!r}; "
                         f"focused_role_after_tab={_active_from_state(tab_out_state).get('role')!r}; "
@@ -284,8 +330,8 @@ def main() -> None:
                     ),
                 )
 
-                current_step = 4
-                current_action = AUTOMATION_STEPS[3]
+                current_step = 5
+                current_action = AUTOMATION_STEPS[4]
                 shift_tab_state = _press_key_and_capture(
                     page=page,
                     key="Shift+Tab",
@@ -295,7 +341,7 @@ def main() -> None:
                 _assert_panel_open_after_key(
                     key="Shift+Tab",
                     state=shift_tab_state,
-                    step_prefix="Step 4 failed",
+                    step_prefix="Step 5 failed",
                 )
                 _assert_selected_row_roving_state(
                     state=shift_tab_state,
@@ -304,14 +350,14 @@ def main() -> None:
                         FIRST_WORKSPACE_DISPLAY_NAME,
                         THIRD_WORKSPACE_DISPLAY_NAME,
                     ),
-                    step_prefix="Step 4 failed",
+                    step_prefix="Step 5 failed",
                     require_row_focus=True,
                 )
                 _record_step(
                     result,
-                    step=4,
+                    step=5,
                     status="passed",
-                    action=AUTOMATION_STEPS[3],
+                    action=AUTOMATION_STEPS[4],
                     observed=(
                         f"focused_after_shift_tab={_active_from_state(shift_tab_state).get('accessible_name')!r}; "
                         f"second_row_contains_active={_row_focus_from_state(shift_tab_state, SECOND_WORKSPACE_DISPLAY_NAME).get('row_contains_active')}; "
@@ -331,8 +377,8 @@ def main() -> None:
                     ),
                 )
 
-                current_step = 5
-                current_action = AUTOMATION_STEPS[4]
+                current_step = 6
+                current_action = AUTOMATION_STEPS[5]
                 second_tab_out_state = _press_key_and_capture(
                     page=page,
                     key="Tab",
@@ -342,7 +388,7 @@ def main() -> None:
                 _assert_panel_open_after_key(
                     key="Tab",
                     state=second_tab_out_state,
-                    step_prefix="Step 5 failed",
+                    step_prefix="Step 6 failed",
                 )
                 _assert_tab_left_workspace_rows(
                     state=second_tab_out_state,
@@ -351,13 +397,13 @@ def main() -> None:
                         FIRST_WORKSPACE_DISPLAY_NAME,
                         THIRD_WORKSPACE_DISPLAY_NAME,
                     ),
-                    step_prefix="Step 5 failed",
+                    step_prefix="Step 6 failed",
                 )
                 _record_step(
                     result,
-                    step=5,
+                    step=6,
                     status="passed",
-                    action=AUTOMATION_STEPS[4],
+                    action=AUTOMATION_STEPS[5],
                     observed=(
                         f"focused_after_second_tab={_active_from_state(second_tab_out_state).get('accessible_name')!r}; "
                         f"focused_role_after_second_tab={_active_from_state(second_tab_out_state).get('role')!r}; "
@@ -439,16 +485,37 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
     )
 
 
-def _press_key_and_capture(
+def _focus_active_workspace_row_and_capture(
     *,
     page: LiveWorkspaceSwitcherPage,
-    key: str,
-    stability_ms: int,
+    expected_selected: str,
 ) -> dict[str, object]:
-    page.start_transition_monitor()
-    page.press_key(key)
+    panel = page.observe_open_panel(
+        expected_container_kinds=("anchored-panel", "surface"),
+        timeout_ms=4_000,
+    )
+    rows = page.observe_saved_workspace_rows(timeout_ms=4_000)
+    active_workspace = _selected_saved_workspace(rows)
+    if active_workspace is None:
+        raise AssertionError(
+            "Step 2 failed: the open workspace switcher did not expose any selected "
+            "saved workspace row before Arrow Down.\n"
+            f"Observed rows: {json.dumps(_saved_workspace_rows_payload(rows), indent=2)}",
+        )
+    if active_workspace.display_name != expected_selected:
+        raise AssertionError(
+            "Step 2 failed: the initial saved workspace selection changed before the "
+            "row-list focus precondition was established.\n"
+            f"Observed active workspace: {active_workspace.display_name!r}\n"
+            f"Observed rows: {json.dumps(_saved_workspace_rows_payload(rows), indent=2)}",
+        )
+    page.focus_switcher_button(
+        _saved_workspace_row_focus_label(active_workspace),
+        panel=panel,
+        timeout_ms=4_000,
+    )
     page.wait_for_surface_to_remain_open(
-        stability_ms=stability_ms,
+        stability_ms=KEY_STABILITY_MS,
         timeout_ms=4_000,
     )
     panel = page.observe_open_panel(
@@ -477,6 +544,71 @@ def _press_key_and_capture(
         for name in WORKSPACE_NAMES
         if name in row_labels
     }
+    for name, button in row_buttons.items():
+        if name in row_focus:
+            row_focus[name]["row_contains_active"] = bool(button.get("active_within"))
+    state = _state_payload(
+        trigger=None,
+        switcher=switcher,
+        panel=panel,
+        active=active,
+        focus=focus,
+        saved_workspace_rows=rows,
+        row_focus=row_focus,
+        row_buttons=row_buttons,
+        monitor=None,
+    )
+    state["row_labels"] = row_labels
+    return state
+
+
+def _press_key_and_capture(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    key: str,
+    stability_ms: int,
+    expected_active_workspace: str | None = None,
+) -> dict[str, object]:
+    page.start_transition_monitor()
+    page.press_key(key)
+    page.wait_for_surface_to_remain_open(
+        stability_ms=stability_ms,
+        timeout_ms=4_000,
+    )
+    if expected_active_workspace is not None:
+        page.wait_for_active_saved_workspace(
+            expected_active_workspace,
+            timeout_ms=10_000,
+        )
+    panel = page.observe_open_panel(
+        expected_container_kinds=("anchored-panel", "surface"),
+        timeout_ms=4_000,
+    )
+    switcher = page.observe_open_switcher(timeout_ms=4_000)
+    rows = page.observe_saved_workspace_rows(timeout_ms=4_000)
+    active = page.active_element()
+    focus = page.observe_focus_ownership(panel=panel)
+    row_labels = {
+        row.display_name: _saved_workspace_row_focus_label(row)
+        for row in rows
+        if row.display_name in WORKSPACE_NAMES
+    }
+    row_focus = {
+        name: _row_focus_payload(
+            page.observe_saved_workspace_row_focus(display_name=name, panel=panel),
+        )
+        for name in WORKSPACE_NAMES
+    }
+    row_buttons = {
+        name: _button_focusability_payload(
+            page.observe_switcher_button_focusability(row_labels[name], timeout_ms=4_000),
+        )
+        for name in WORKSPACE_NAMES
+        if name in row_labels
+    }
+    for name, button in row_buttons.items():
+        if name in row_focus:
+            row_focus[name]["row_contains_active"] = bool(button.get("active_within"))
     monitor = page.read_transition_monitor(clear=True)
     state = _state_payload(
         trigger=None,
@@ -581,10 +713,10 @@ def _assert_selected_row_roving_state(
         failures.append("the active element was not inside the open workspace switcher")
     if bool(focus.get("active_on_trigger")):
         failures.append("keyboard focus fell back to the workspace-switcher trigger")
-    if require_row_focus and not bool(row_focus[expected_selected].get("row_contains_active")):
+    if require_row_focus and not _row_contains_active(state, expected_selected):
         failures.append(f"the selected row {expected_selected!r} did not contain the active element")
     for inactive_name in inactive_names:
-        if bool(row_focus[inactive_name].get("row_contains_active")):
+        if _row_contains_active(state, inactive_name):
             failures.append(f"the inactive row {inactive_name!r} contained the active element")
     if str(active.get("role")) != "button":
         failures.append(
@@ -599,7 +731,53 @@ def _assert_selected_row_roving_state(
     if failures:
         raise AssertionError(
             f"{step_prefix}: the workspace switcher did not expose a valid roving-tabindex "
-            "state for the selected second row.\n"
+            "state for the selected row.\n"
+            + "\n".join(f"- {item}" for item in failures)
+            + "\n"
+            + f"Observed active element: {json.dumps(active, indent=2)}\n"
+            + f"Observed focus ownership: {json.dumps(focus, indent=2)}\n"
+            + f"Observed row focus: {json.dumps(row_focus, indent=2)}\n"
+            + f"Observed row button focusability: {json.dumps(row_buttons, indent=2)}\n"
+            + f"Observed rows: {json.dumps(rows, indent=2)}"
+        )
+
+
+def _assert_row_focus_precondition(
+    *,
+    state: dict[str, object],
+    expected_selected: str,
+    inactive_names: tuple[str, str],
+    step_prefix: str,
+) -> None:
+    rows = _saved_workspace_rows_from_state(state)
+    focus = _focus_from_state(state)
+    active = _active_from_state(state)
+    row_focus = {name: _row_focus_from_state(state, name) for name in WORKSPACE_NAMES}
+    row_buttons = {name: _button_from_state(state, name) for name in WORKSPACE_NAMES}
+
+    failures: list[str] = []
+    if _active_workspace_name_from_state(state) != expected_selected:
+        failures.append(
+            f"the active saved workspace was {_active_workspace_name_from_state(state)!r} instead of {expected_selected!r}",
+        )
+    if not bool(focus.get("focus_owned_by_switcher")):
+        failures.append("keyboard focus was not owned by the workspace switcher")
+    if not bool(focus.get("active_within_switcher")):
+        failures.append("the active element was not inside the open workspace switcher")
+    if bool(focus.get("active_on_trigger")):
+        failures.append("keyboard focus fell back to the workspace-switcher trigger")
+    if not _row_contains_active(state, expected_selected):
+        failures.append(f"the selected row {expected_selected!r} did not contain the active element")
+    for inactive_name in inactive_names:
+        if _row_contains_active(state, inactive_name):
+            failures.append(f"the inactive row {inactive_name!r} contained the active element")
+    if str(active.get("role")) != "button":
+        failures.append(
+            f"the active element role was {active.get('role')!r} instead of 'button'",
+        )
+    if failures:
+        raise AssertionError(
+            f"{step_prefix}: keyboard focus was not on the selected saved-workspace row before Arrow Down.\n"
             + "\n".join(f"- {item}" for item in failures)
             + "\n"
             + f"Observed active element: {json.dumps(active, indent=2)}\n"
@@ -635,7 +813,7 @@ def _assert_tab_left_workspace_rows(
             f"focus landed on a non-interactive root element ({active.get('tag_name')!r}) instead of a visible subsequent control",
         )
     for name in WORKSPACE_NAMES:
-        if bool(row_focus[name].get("row_contains_active")):
+        if _row_contains_active(state, name):
             failures.append(f"focus remained inside saved workspace row {name!r} after pressing Tab")
     _extend_roving_tabindex_failures(
         failures=failures,
@@ -735,6 +913,10 @@ def _write_pass_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
     PR_BODY_PATH.write_text(_markdown_summary(result, passed=True), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=True),
+        encoding="utf-8",
+    )
 
 
 def _write_failure_outputs(result: dict[str, object]) -> None:
@@ -758,6 +940,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     JIRA_COMMENT_PATH.write_text(jira_comment, encoding="utf-8")
     PR_BODY_PATH.write_text(markdown_summary, encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    REVIEW_REPLIES_PATH.write_text(
+        _review_replies_payload(result, passed=False),
+        encoding="utf-8",
+    )
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
 
 
@@ -929,7 +1115,7 @@ def _annotated_request_steps(result: dict[str, object]) -> str:
             _request_step_outcome(
                 result=result,
                 state=tab_out_state,
-                success_step=3,
+                success_step=4,
                 success_observation=(
                     f"focus moved to {_active_label_for_summary(tab_out_state)!r}, outside the saved-workspace rows; "
                     f"row1_active={_row_focus_value(tab_out_state, FIRST_WORKSPACE_DISPLAY_NAME, 'row_contains_active')}; "
@@ -943,7 +1129,7 @@ def _annotated_request_steps(result: dict[str, object]) -> str:
             _request_step_outcome(
                 result=result,
                 state=shift_tab_state,
-                success_step=4,
+                success_step=5,
                 success_observation=(
                     f"Shift+Tab restored focus to {_active_label_for_summary(shift_tab_state)!r}; "
                     f"second_row_contains_active={_row_focus_value(shift_tab_state, SECOND_WORKSPACE_DISPLAY_NAME, 'row_contains_active')}"
@@ -955,7 +1141,7 @@ def _annotated_request_steps(result: dict[str, object]) -> str:
             _request_step_outcome(
                 result=result,
                 state=shift_tab_state,
-                success_step=4,
+                success_step=5,
                 success_observation=(
                     f"focus returned to the selected second row {_active_label_for_summary(shift_tab_state)!r}, "
                     f"not to the first or third row"
@@ -967,7 +1153,7 @@ def _annotated_request_steps(result: dict[str, object]) -> str:
             _request_step_outcome(
                 result=result,
                 state=second_tab_out_state,
-                success_step=5,
+                success_step=6,
                 success_observation=(
                     f"pressing Tab again moved focus to {_active_label_for_summary(second_tab_out_state)!r}; "
                     f"row1_active={_row_focus_value(second_tab_out_state, FIRST_WORKSPACE_DISPLAY_NAME, 'row_contains_active')}; "
@@ -1022,6 +1208,62 @@ def _failed_step_label(result: dict[str, object]) -> str:
     if failed is None:
         return "No failed automation step recorded"
     return f"Step {failed['step']} — {failed['action']}"
+
+
+def _review_replies_payload(result: dict[str, object], *, passed: bool) -> str:
+    replies = [
+        {
+            "inReplyToId": thread.get("rootCommentId"),
+            "threadId": thread.get("threadId"),
+            "reply": _review_reply_text(passed=passed, result=result),
+        }
+        for thread in _discussion_threads()
+    ]
+    return json.dumps({"replies": replies}, indent=2) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, object]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
+
+
+def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
+    rerun_summary = (
+        f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
+        if passed
+        else (
+            "Re-ran "
+            f"`{RUN_COMMAND}`: still failing. Current failure: {_failed_step_summary(result)}"
+        )
+    )
+    return (
+        "Fixed: the test now adds an explicit row-list focus precondition before "
+        "sending `ArrowDown`, asserts that the active first saved-workspace row owns "
+        "keyboard focus before continuing, waits for the second row to become active "
+        "after `ArrowDown`, and includes the missing `testing/tests/TS-867/README.md`. "
+        f"{rerun_summary}"
+    )
+
+
+def _failed_step_summary(result: dict[str, object]) -> str:
+    steps = result.get("steps", [])
+    if isinstance(steps, list):
+        for step in steps:
+            if isinstance(step, dict) and step.get("status") != "passed":
+                return f"Step {step.get('step')}: {step.get('observed')}"
+    return str(result.get("error", "No failed step recorded."))
 
 
 def _record_step(
@@ -1321,6 +1563,13 @@ def _button_from_state(state: dict[str, object], display_name: str) -> dict[str,
         return {}
     candidate = row_buttons.get(display_name, {})
     return candidate if isinstance(candidate, dict) else {}
+
+
+def _row_contains_active(state: dict[str, object], display_name: str) -> bool:
+    button = _button_from_state(state, display_name)
+    if "active_within" in button:
+        return bool(button.get("active_within"))
+    return bool(_row_focus_from_state(state, display_name).get("row_contains_active"))
 
 
 def _monitor_from_state(state: dict[str, object]) -> dict[str, object]:
