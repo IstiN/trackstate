@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, listEquals, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -135,6 +136,12 @@ class _TrackStateAppState extends State<TrackStateApp>
   final FocusNode _workspaceSwitcherTriggerFocusNode = FocusNode(
     debugLabel: 'workspace-switcher-trigger',
   );
+  final FocusNode _desktopSearchFocusNode = FocusNode(
+    debugLabel: 'desktop-search',
+  );
+  final FocusNode _desktopSettingsFocusNode = FocusNode(
+    debugLabel: 'desktop-settings',
+  );
   final FocusScopeNode _desktopWorkspaceSwitcherFocusScopeNode = FocusScopeNode(
     debugLabel: 'desktop-workspace-switcher',
   );
@@ -180,6 +187,8 @@ class _TrackStateAppState extends State<TrackStateApp>
     _stopDesktopWorkspaceSwitcherBrowserFocusMonitor();
     _cancelDesktopWorkspaceSwitcherBrowserFocusRequest();
     _workspaceSwitcherTriggerFocusNode.dispose();
+    _desktopSearchFocusNode.dispose();
+    _desktopSettingsFocusNode.dispose();
     _desktopWorkspaceSwitcherFocusScopeNode.dispose();
     viewModel.dispose();
     super.dispose();
@@ -1584,6 +1593,8 @@ class _TrackStateAppState extends State<TrackStateApp>
                       _workspaceSwitcherTriggerAnchorKey,
                   workspaceSwitcherTriggerFocusNode:
                       _workspaceSwitcherTriggerFocusNode,
+                  desktopSearchFocusNode: _desktopSearchFocusNode,
+                  desktopSettingsFocusNode: _desktopSettingsFocusNode,
                   workspaceSwitcherOverlayHostKey:
                       _workspaceSwitcherOverlayHostKey,
                   isCreateIssueVisible: _isCreateIssueVisible,
@@ -1626,6 +1637,8 @@ class _TrackerHome extends StatelessWidget {
     required this.workspaces,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
+    required this.desktopSearchFocusNode,
+    required this.desktopSettingsFocusNode,
     required this.workspaceSwitcherOverlayHostKey,
     required this.isCreateIssueVisible,
     required this.isDesktopWorkspaceSwitcherVisible,
@@ -1651,6 +1664,8 @@ class _TrackerHome extends StatelessWidget {
   final WorkspaceProfilesState workspaces;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
+  final FocusNode desktopSearchFocusNode;
+  final FocusNode desktopSettingsFocusNode;
   final GlobalKey workspaceSwitcherOverlayHostKey;
   final bool isCreateIssueVisible;
   final bool isDesktopWorkspaceSwitcherVisible;
@@ -1748,6 +1763,8 @@ class _TrackerHome extends StatelessWidget {
                               workspaceSwitcherTriggerKey,
                           workspaceSwitcherTriggerFocusNode:
                               workspaceSwitcherTriggerFocusNode,
+                          desktopSearchFocusNode: desktopSearchFocusNode,
+                          desktopSettingsFocusNode: desktopSettingsFocusNode,
                           workspaceSwitcherOverlayHostKey:
                               workspaceSwitcherOverlayHostKey,
                           isCreateIssueVisible: isCreateIssueVisible,
@@ -1775,39 +1792,83 @@ class _TrackerHome extends StatelessWidget {
                           onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                           attachmentPicker: attachmentPicker,
                         )
-                      : _DesktopShell(
-                          viewModel: viewModel,
-                          workspaces: workspaces,
-                          workspaceSwitcherTriggerKey:
-                              workspaceSwitcherTriggerKey,
-                          workspaceSwitcherTriggerFocusNode:
-                              workspaceSwitcherTriggerFocusNode,
-                          workspaceSwitcherOverlayHostKey:
-                              workspaceSwitcherOverlayHostKey,
-                          isCreateIssueVisible: isCreateIssueVisible,
-                          isDesktopWorkspaceSwitcherVisible:
-                              isDesktopWorkspaceSwitcherVisible,
-                          desktopWorkspaceSwitcherPanelRect:
-                              desktopWorkspaceSwitcherPanelRect,
-                          desktopWorkspaceSwitcherContent:
-                              desktopWorkspaceSwitcherContent,
-                          onOpenCreateIssue: onOpenCreateIssue,
-                          onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
-                          onCloseDesktopWorkspaceSwitcher:
-                              onCloseDesktopWorkspaceSwitcher,
-                          onCloseCreateIssue: onCloseCreateIssue,
-                          createIssuePrefill: createIssuePrefill,
-                          onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
-                          canOpenWorkspaceOnboarding:
-                              canOpenWorkspaceOnboarding,
-                          onApplyLocalGitConfiguration:
-                              onApplyLocalGitConfiguration,
-                          onSelectWorkspace: onSelectWorkspace,
-                          onDeleteWorkspace: onDeleteWorkspace,
-                          onMoveWorkspaceSelection: onMoveWorkspaceSelection,
-                          workspaceRestoreFailure: workspaceRestoreFailure,
-                          onRetryWorkspaceRestore: onRetryWorkspaceRestore,
-                          attachmentPicker: attachmentPicker,
+                      : _BrowserDesktopPrimaryNavigationTabOrderBinder(
+                          orderedTargets: [
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                              l10n.createIssue,
+                            ),
+                            if (canOpenWorkspaceOnboarding)
+                              browser_workspace_switcher_focus_monitor
+                                  .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                                l10n.addWorkspace,
+                              ),
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                              l10n.dashboard,
+                            ),
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                              l10n.board,
+                            ),
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                              l10n.jqlSearch,
+                            ),
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                              l10n.hierarchy,
+                            ),
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                              l10n.settings,
+                            ),
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabelPrefix(
+                              '${l10n.workspaceSwitcher}:',
+                            ),
+                            browser_workspace_switcher_focus_monitor
+                                .BrowserDesktopPrimaryNavigationTabOrderTarget.inputLabel(
+                              l10n.searchIssues,
+                            ),
+                          ],
+                          child: _DesktopShell(
+                            viewModel: viewModel,
+                            workspaces: workspaces,
+                            workspaceSwitcherTriggerKey:
+                                workspaceSwitcherTriggerKey,
+                            workspaceSwitcherTriggerFocusNode:
+                                workspaceSwitcherTriggerFocusNode,
+                            desktopSearchFocusNode: desktopSearchFocusNode,
+                            desktopSettingsFocusNode: desktopSettingsFocusNode,
+                            workspaceSwitcherOverlayHostKey:
+                                workspaceSwitcherOverlayHostKey,
+                            isCreateIssueVisible: isCreateIssueVisible,
+                            isDesktopWorkspaceSwitcherVisible:
+                                isDesktopWorkspaceSwitcherVisible,
+                            desktopWorkspaceSwitcherPanelRect:
+                                desktopWorkspaceSwitcherPanelRect,
+                            desktopWorkspaceSwitcherContent:
+                                desktopWorkspaceSwitcherContent,
+                            onOpenCreateIssue: onOpenCreateIssue,
+                            onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
+                            onCloseDesktopWorkspaceSwitcher:
+                                onCloseDesktopWorkspaceSwitcher,
+                            onCloseCreateIssue: onCloseCreateIssue,
+                            createIssuePrefill: createIssuePrefill,
+                            onOpenWorkspaceOnboarding:
+                                onOpenWorkspaceOnboarding,
+                            canOpenWorkspaceOnboarding:
+                                canOpenWorkspaceOnboarding,
+                            onApplyLocalGitConfiguration:
+                                onApplyLocalGitConfiguration,
+                            onSelectWorkspace: onSelectWorkspace,
+                            onDeleteWorkspace: onDeleteWorkspace,
+                            onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+                            workspaceRestoreFailure: workspaceRestoreFailure,
+                            onRetryWorkspaceRestore: onRetryWorkspaceRestore,
+                            attachmentPicker: attachmentPicker,
+                          ),
                         ),
                 ),
                 bottomNavigationBar: isCompact && !isCreateIssueVisible
@@ -3081,12 +3142,75 @@ class _SelectSectionIntent extends Intent {
   final TrackerSection section;
 }
 
+class _BrowserDesktopPrimaryNavigationTabOrderBinder extends StatefulWidget {
+  const _BrowserDesktopPrimaryNavigationTabOrderBinder({
+    required this.child,
+    required this.orderedTargets,
+  });
+
+  final Widget child;
+  final List<
+    browser_workspace_switcher_focus_monitor.BrowserDesktopPrimaryNavigationTabOrderTarget
+  >
+  orderedTargets;
+
+  @override
+  State<_BrowserDesktopPrimaryNavigationTabOrderBinder> createState() =>
+      _BrowserDesktopPrimaryNavigationTabOrderBinderState();
+}
+
+class _BrowserDesktopPrimaryNavigationTabOrderBinderState
+    extends State<_BrowserDesktopPrimaryNavigationTabOrderBinder> {
+  browser_workspace_switcher_focus_monitor.BrowserDesktopPrimaryNavigationTabOrderSubscription?
+  _subscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _restartSubscription();
+  }
+
+  @override
+  void didUpdateWidget(
+    covariant _BrowserDesktopPrimaryNavigationTabOrderBinder oldWidget,
+  ) {
+    super.didUpdateWidget(oldWidget);
+    if (listEquals(oldWidget.orderedTargets, widget.orderedTargets)) {
+      return;
+    }
+    _restartSubscription();
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
+  }
+
+  void _restartSubscription() {
+    _subscription?.cancel();
+    if (!kIsWeb) {
+      _subscription = null;
+      return;
+    }
+    _subscription = browser_workspace_switcher_focus_monitor
+        .createBrowserDesktopPrimaryNavigationTabOrderSubscription(
+          orderedTargets: widget.orderedTargets,
+        );
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 class _DesktopShell extends StatelessWidget {
   const _DesktopShell({
     required this.viewModel,
     required this.workspaces,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
+    required this.desktopSearchFocusNode,
+    required this.desktopSettingsFocusNode,
     required this.workspaceSwitcherOverlayHostKey,
     required this.isCreateIssueVisible,
     required this.isDesktopWorkspaceSwitcherVisible,
@@ -3112,6 +3236,8 @@ class _DesktopShell extends StatelessWidget {
   final WorkspaceProfilesState workspaces;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
+  final FocusNode desktopSearchFocusNode;
+  final FocusNode desktopSettingsFocusNode;
   final GlobalKey workspaceSwitcherOverlayHostKey;
   final bool isCreateIssueVisible;
   final bool isDesktopWorkspaceSwitcherVisible;
@@ -3137,13 +3263,23 @@ class _DesktopShell extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        SizedBox(width: 268, child: _Sidebar(viewModel: viewModel)),
+        SizedBox(
+          width: 268,
+          child: _Sidebar(
+            viewModel: viewModel,
+            desktopSettingsFocusNode: desktopSettingsFocusNode,
+            onAdvanceFromSettings:
+                workspaceSwitcherTriggerFocusNode.requestFocus,
+          ),
+        ),
         Expanded(
           child: _TrackerMainPane(
             viewModel: viewModel,
             workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
             workspaceSwitcherTriggerFocusNode:
                 workspaceSwitcherTriggerFocusNode,
+            desktopSearchFocusNode: desktopSearchFocusNode,
+            desktopSettingsFocusNode: desktopSettingsFocusNode,
             workspaceSwitcherOverlayHostKey: workspaceSwitcherOverlayHostKey,
             isCreateIssueVisible: isCreateIssueVisible,
             isDesktopWorkspaceSwitcherVisible:
@@ -3179,6 +3315,8 @@ class _MobileShell extends StatelessWidget {
     required this.workspaces,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
+    required this.desktopSearchFocusNode,
+    required this.desktopSettingsFocusNode,
     required this.workspaceSwitcherOverlayHostKey,
     required this.isCreateIssueVisible,
     required this.isDesktopWorkspaceSwitcherVisible,
@@ -3204,6 +3342,8 @@ class _MobileShell extends StatelessWidget {
   final WorkspaceProfilesState workspaces;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
+  final FocusNode desktopSearchFocusNode;
+  final FocusNode desktopSettingsFocusNode;
   final GlobalKey workspaceSwitcherOverlayHostKey;
   final bool isCreateIssueVisible;
   final bool isDesktopWorkspaceSwitcherVisible;
@@ -3231,6 +3371,8 @@ class _MobileShell extends StatelessWidget {
       viewModel: viewModel,
       workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
       workspaceSwitcherTriggerFocusNode: workspaceSwitcherTriggerFocusNode,
+      desktopSearchFocusNode: desktopSearchFocusNode,
+      desktopSettingsFocusNode: desktopSettingsFocusNode,
       workspaceSwitcherOverlayHostKey: workspaceSwitcherOverlayHostKey,
       compact: true,
       isCreateIssueVisible: isCreateIssueVisible,
@@ -3261,6 +3403,8 @@ class _TrackerMainPane extends StatelessWidget {
     required this.viewModel,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
+    required this.desktopSearchFocusNode,
+    required this.desktopSettingsFocusNode,
     required this.workspaceSwitcherOverlayHostKey,
     required this.isCreateIssueVisible,
     required this.isDesktopWorkspaceSwitcherVisible,
@@ -3287,6 +3431,8 @@ class _TrackerMainPane extends StatelessWidget {
   final TrackerViewModel viewModel;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
+  final FocusNode desktopSearchFocusNode;
+  final FocusNode desktopSettingsFocusNode;
   final GlobalKey workspaceSwitcherOverlayHostKey;
   final bool compact;
   final bool isCreateIssueVisible;
@@ -3333,6 +3479,8 @@ class _TrackerMainPane extends StatelessWidget {
                 workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
                 workspaceSwitcherTriggerFocusNode:
                     workspaceSwitcherTriggerFocusNode,
+                desktopSearchFocusNode: desktopSearchFocusNode,
+                desktopSettingsFocusNode: desktopSettingsFocusNode,
                 onOpenCreateIssue: onOpenCreateIssue,
                 onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
                 onMoveWorkspaceSelection: onMoveWorkspaceSelection,
@@ -3441,9 +3589,15 @@ class _DesktopWorkspaceSwitcherOverlay extends StatelessWidget {
 }
 
 class _Sidebar extends StatelessWidget {
-  const _Sidebar({required this.viewModel});
+  const _Sidebar({
+    required this.viewModel,
+    this.desktopSettingsFocusNode,
+    this.onAdvanceFromSettings,
+  });
 
   final TrackerViewModel viewModel;
+  final FocusNode? desktopSettingsFocusNode;
+  final VoidCallback? onAdvanceFromSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -3501,6 +3655,17 @@ class _Sidebar extends StatelessWidget {
                     child: _NavButton(
                       item: item,
                       selected: viewModel.section == item.section,
+                      semanticsSortOrder: _desktopPrimaryNavigationOrder(
+                        item.section,
+                      ),
+                      semanticsIdentifier: item.semanticsIdentifier,
+                      focusNode: item.section == TrackerSection.settings
+                          ? desktopSettingsFocusNode
+                          : null,
+                      onTabForward:
+                          !kIsWeb && item.section == TrackerSection.settings
+                          ? onAdvanceFromSettings
+                          : null,
                       onPressed: () => viewModel.selectSection(item.section),
                     ),
                   ),
@@ -3544,6 +3709,8 @@ class _TopBar extends StatelessWidget {
     required this.isDesktopWorkspaceSwitcherVisible,
     required this.workspaceSwitcherTriggerKey,
     required this.workspaceSwitcherTriggerFocusNode,
+    required this.desktopSearchFocusNode,
+    required this.desktopSettingsFocusNode,
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
     required this.onMoveWorkspaceSelection,
@@ -3557,6 +3724,8 @@ class _TopBar extends StatelessWidget {
   final bool isDesktopWorkspaceSwitcherVisible;
   final GlobalKey workspaceSwitcherTriggerKey;
   final FocusNode workspaceSwitcherTriggerFocusNode;
+  final FocusNode desktopSearchFocusNode;
+  final FocusNode desktopSettingsFocusNode;
   final _CreateIssueLauncher onOpenCreateIssue;
   final Future<void> Function(BuildContext context, {required bool compact})
   onOpenWorkspaceSwitcher;
@@ -3608,7 +3777,28 @@ class _TopBar extends StatelessWidget {
           final searchOrder = compact ? 2.0 : 8.0;
           final themeToggleOrder = compact ? null : 9.0;
           final syncPillOrder = compact ? null : 10.0;
-          Widget buildHeaderActions() {
+          final desktopWorkspaceSwitcherBindings =
+              <ShortcutActivator, VoidCallback>{
+                if (!kIsWeb)
+                  const SingleActivator(LogicalKeyboardKey.tab): () =>
+                      desktopSearchFocusNode.requestFocus(),
+                if (!kIsWeb)
+                  const SingleActivator(
+                    LogicalKeyboardKey.tab,
+                    shift: true,
+                  ): () =>
+                      desktopSettingsFocusNode.requestFocus(),
+              };
+          if (isDesktopWorkspaceSwitcherVisible) {
+            desktopWorkspaceSwitcherBindings
+                .addAll(<ShortcutActivator, VoidCallback>{
+                  const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+                      onMoveWorkspaceSelection(1),
+                  const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+                      onMoveWorkspaceSelection(-1),
+                });
+          }
+          Widget buildPrimaryHeaderActions() {
             return Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -3621,6 +3811,8 @@ class _TopBar extends StatelessWidget {
                       glyph: TrackStateIconGlyph.plus,
                       onPressed: openCreateIssue,
                       semanticsSortOrder: createIssueOrder,
+                      semanticsIdentifier:
+                          browserDesktopCreateIssueSemanticsIdentifier,
                       size: compact ? null : _desktopTopBarControlHeight,
                     ),
                   )
@@ -3633,6 +3825,8 @@ class _TopBar extends StatelessWidget {
                       onPressed: openCreateIssue,
                       height: _desktopTopBarControlHeight,
                       semanticsSortOrder: createIssueOrder,
+                      semanticsIdentifier:
+                          browserDesktopCreateIssueSemanticsIdentifier,
                     ),
                   ),
                 if (canOpenWorkspaceOnboarding) ...[
@@ -3645,6 +3839,8 @@ class _TopBar extends StatelessWidget {
                         glyph: TrackStateIconGlyph.repository,
                         onPressed: openWorkspaceOnboarding,
                         semanticsSortOrder: addWorkspaceOrder,
+                        semanticsIdentifier:
+                            browserDesktopAddWorkspaceSemanticsIdentifier,
                         size: compact ? null : _desktopTopBarControlHeight,
                       ),
                     )
@@ -3657,6 +3853,8 @@ class _TopBar extends StatelessWidget {
                         onPressed: openWorkspaceOnboarding,
                         height: _desktopTopBarControlHeight,
                         semanticsSortOrder: addWorkspaceOrder,
+                        semanticsIdentifier:
+                            browserDesktopAddWorkspaceSemanticsIdentifier,
                       ),
                     ),
                 ],
@@ -3669,18 +3867,7 @@ class _TopBar extends StatelessWidget {
                       child: SizedBox(
                         key: workspaceSwitcherTriggerKey,
                         child: CallbackShortcuts(
-                          bindings: isDesktopWorkspaceSwitcherVisible
-                              ? <ShortcutActivator, VoidCallback>{
-                                  const SingleActivator(
-                                    LogicalKeyboardKey.arrowDown,
-                                  ): () =>
-                                      onMoveWorkspaceSelection(1),
-                                  const SingleActivator(
-                                    LogicalKeyboardKey.arrowUp,
-                                  ): () =>
-                                      onMoveWorkspaceSelection(-1),
-                                }
-                              : const <ShortcutActivator, VoidCallback>{},
+                          bindings: desktopWorkspaceSwitcherBindings,
                           child: KeyedSubtree(
                             key: const ValueKey('workspace-switcher-trigger'),
                             child: condensedDesktop
@@ -3691,6 +3878,8 @@ class _TopBar extends StatelessWidget {
                                     expanded: isDesktopWorkspaceSwitcherVisible,
                                     onPressed: openWorkspaceSwitcher,
                                     semanticsSortOrder: workspaceSwitcherOrder,
+                                    semanticsIdentifier:
+                                        browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
                                     controlsNodes: const {
                                       browserWorkspaceSwitcherSemanticsIdentifier,
                                     },
@@ -3706,6 +3895,8 @@ class _TopBar extends StatelessWidget {
                                     onPressed: openWorkspaceSwitcher,
                                     height: _desktopTopBarControlHeight,
                                     semanticsSortOrder: workspaceSwitcherOrder,
+                                    semanticsIdentifier:
+                                        browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
                                     controlsNodes: const {
                                       browserWorkspaceSwitcherSemanticsIdentifier,
                                     },
@@ -3718,6 +3909,14 @@ class _TopBar extends StatelessWidget {
                     ),
                   ),
                 ],
+              ],
+            );
+          }
+
+          Widget buildTrailingHeaderActions() {
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 const SizedBox(width: 8),
                 orderedControl(
                   themeToggleOrder ?? searchOrder + 1,
@@ -3822,7 +4021,8 @@ class _TopBar extends StatelessWidget {
                           viewModel.selectSection(TrackerSection.settings),
                       size: _desktopTopBarControlHeight,
                     ),
-                    buildHeaderActions(),
+                    buildPrimaryHeaderActions(),
+                    buildTrailingHeaderActions(),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -3837,6 +4037,8 @@ class _TopBar extends StatelessWidget {
                         compact: true,
                         condensed: false,
                         onPressed: openWorkspaceSwitcher,
+                        semanticsIdentifier:
+                            browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
                         focusNode: workspaceSwitcherTriggerFocusNode,
                       ),
                     ),
@@ -3860,54 +4062,86 @@ class _TopBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
+              buildPrimaryHeaderActions(),
+              const SizedBox(width: 8),
               Expanded(
                 child: SizedBox(
                   height: _desktopTopBarControlHeight,
                   child: orderedControl(
                     searchOrder,
-                    Semantics(
-                      label: l10n.searchIssues,
-                      sortKey: OrdinalSortKey(searchOrder),
-                      textField: true,
-                      child: TextField(
-                        controller: TextEditingController(text: viewModel.jql),
-                        onSubmitted: viewModel.updateQuery,
-                        maxLines: 1,
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodyMedium?.copyWith(height: 1),
-                        textAlignVertical: TextAlignVertical.center,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          isCollapsed: true,
-                          constraints: const BoxConstraints.tightFor(
-                            height: _desktopTopBarControlHeight,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 8,
-                          ),
-                          prefixIcon: Padding(
-                            padding: const EdgeInsets.all(8),
-                            child: TrackStateIcon(
-                              TrackStateIconGlyph.search,
-                              color: colors.muted,
-                              size: _desktopTopBarIconSize,
-                              semanticLabel: l10n.searchIssues,
+                    CallbackShortcuts(
+                      bindings: !kIsWeb
+                          ? <ShortcutActivator, VoidCallback>{
+                              const SingleActivator(
+                                LogicalKeyboardKey.tab,
+                                shift: true,
+                              ): () => workspaceSwitcherTriggerFocusNode
+                                  .requestFocus(),
+                            }
+                          : const <ShortcutActivator, VoidCallback>{},
+                      child: Builder(
+                        builder: (context) {
+                          final desktopSearchField = TextField(
+                            focusNode: desktopSearchFocusNode,
+                            controller: TextEditingController(
+                              text: viewModel.jql,
                             ),
-                          ),
-                          prefixIconConstraints: const BoxConstraints.tightFor(
-                            width: _desktopTopBarControlHeight,
-                            height: _desktopTopBarControlHeight,
-                          ),
-                          hintText: l10n.jqlPlaceholder,
-                        ),
+                            onSubmitted: viewModel.updateQuery,
+                            maxLines: 1,
+                            style: Theme.of(
+                              context,
+                            ).textTheme.bodyMedium?.copyWith(height: 1),
+                            textAlignVertical: TextAlignVertical.center,
+                            decoration: InputDecoration(
+                              isDense: true,
+                              isCollapsed: true,
+                              constraints: const BoxConstraints.tightFor(
+                                height: _desktopTopBarControlHeight,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              prefixIcon: Padding(
+                                padding: const EdgeInsets.all(8),
+                                child: TrackStateIcon(
+                                  TrackStateIconGlyph.search,
+                                  color: colors.muted,
+                                  size: _desktopTopBarIconSize,
+                                  semanticLabel: l10n.searchIssues,
+                                ),
+                              ),
+                              prefixIconConstraints:
+                                  const BoxConstraints.tightFor(
+                                    width: _desktopTopBarControlHeight,
+                                    height: _desktopTopBarControlHeight,
+                                  ),
+                              hintText: l10n.jqlPlaceholder,
+                            ),
+                          );
+                          if (kIsWeb) {
+                            return Semantics(
+                              label: l10n.searchIssues,
+                              textField: true,
+                              child: desktopSearchField,
+                            );
+                          }
+                          return Semantics(
+                            focusable: true,
+                            identifier:
+                                browserDesktopSearchInputSemanticsIdentifier,
+                            label: l10n.searchIssues,
+                            sortKey: OrdinalSortKey(searchOrder),
+                            textField: true,
+                            child: desktopSearchField,
+                          );
+                        },
                       ),
                     ),
                   ),
                 ),
               ),
-              buildHeaderActions(),
+              buildTrailingHeaderActions(),
             ],
           );
         },
@@ -10737,6 +10971,7 @@ class _PrimaryButton extends StatelessWidget {
     this.semanticLabel,
     this.focusNode,
     this.semanticsSortOrder,
+    this.semanticsIdentifier,
     this.controlsNodes,
   });
 
@@ -10749,6 +10984,7 @@ class _PrimaryButton extends StatelessWidget {
   final String? semanticLabel;
   final FocusNode? focusNode;
   final double? semanticsSortOrder;
+  final String? semanticsIdentifier;
   final Set<String>? controlsNodes;
 
   @override
@@ -10761,6 +10997,7 @@ class _PrimaryButton extends StatelessWidget {
       enabled: enabled,
       focusable: enabled,
       expanded: expanded,
+      identifier: semanticsIdentifier,
       label: semanticLabel ?? label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
       controlsNodes: controlsNodes,
@@ -10803,6 +11040,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
     this.expanded,
     this.focusNode,
     this.semanticsSortOrder,
+    this.semanticsIdentifier,
     this.controlsNodes,
   });
 
@@ -10813,6 +11051,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
   final bool? expanded;
   final FocusNode? focusNode;
   final double? semanticsSortOrder;
+  final String? semanticsIdentifier;
   final Set<String>? controlsNodes;
 
   @override
@@ -10845,6 +11084,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
         enabled: enabled,
         focusable: enabled,
         expanded: expanded,
+        identifier: semanticsIdentifier,
         label: summary.semanticLabel,
         sortKey: _semanticsSortKey(semanticsSortOrder),
         controlsNodes: controlsNodes,
@@ -10953,6 +11193,7 @@ class _SecondaryButton extends StatelessWidget {
     required this.onPressed,
     this.height,
     this.semanticsSortOrder,
+    this.semanticsIdentifier,
   });
 
   final Key? buttonKey;
@@ -10961,12 +11202,14 @@ class _SecondaryButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final double? height;
   final double? semanticsSortOrder;
+  final String? semanticsIdentifier;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
     return Semantics(
       button: true,
+      identifier: semanticsIdentifier,
       label: label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
       child: OutlinedButton.icon(
@@ -10991,6 +11234,7 @@ class _IconButtonSurface extends StatelessWidget {
     required this.onPressed,
     this.size,
     this.semanticsSortOrder,
+    this.semanticsIdentifier,
   });
 
   final String label;
@@ -10998,6 +11242,7 @@ class _IconButtonSurface extends StatelessWidget {
   final VoidCallback? onPressed;
   final double? size;
   final double? semanticsSortOrder;
+  final String? semanticsIdentifier;
 
   @override
   Widget build(BuildContext context) {
@@ -11006,6 +11251,7 @@ class _IconButtonSurface extends StatelessWidget {
     return Semantics(
       button: true,
       enabled: enabled,
+      identifier: semanticsIdentifier,
       label: label,
       sortKey: _semanticsSortKey(semanticsSortOrder),
       child: InkWell(
@@ -12557,11 +12803,19 @@ class _NavButton extends StatelessWidget {
   const _NavButton({
     required this.item,
     required this.selected,
+    this.semanticsSortOrder,
+    this.semanticsIdentifier,
+    this.focusNode,
+    this.onTabForward,
     required this.onPressed,
   });
 
   final _NavItem item;
   final bool selected;
+  final double? semanticsSortOrder;
+  final String? semanticsIdentifier;
+  final FocusNode? focusNode;
+  final VoidCallback? onTabForward;
   final VoidCallback onPressed;
 
   @override
@@ -12572,35 +12826,50 @@ class _NavButton extends StatelessWidget {
       child: Semantics(
         button: true,
         selected: selected,
+        identifier: semanticsIdentifier,
         label: item.label,
-        child: InkWell(
-          canRequestFocus: !selected,
-          borderRadius: BorderRadius.circular(10),
-          excludeFromSemantics: true,
-          onTap: onPressed,
-          child: ExcludeSemantics(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-              decoration: BoxDecoration(
-                color: selected ? colors.secondary : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  TrackStateIcon(
-                    item.glyph,
-                    color: selected ? colors.page : colors.muted,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    item.label,
-                    style: TextStyle(
-                      color: selected ? colors.page : colors.text,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+        sortKey: _semanticsSortKey(semanticsSortOrder),
+        child: CallbackShortcuts(
+          bindings: onTabForward == null
+              ? const <ShortcutActivator, VoidCallback>{}
+              : <ShortcutActivator, VoidCallback>{
+                  const SingleActivator(LogicalKeyboardKey.tab): onTabForward!,
+                },
+          child: InkWell(
+            focusNode: focusNode,
+            canRequestFocus: !selected,
+            borderRadius: BorderRadius.circular(10),
+            excludeFromSemantics: true,
+            onTap: onPressed,
+            child: ExcludeSemantics(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 11,
+                ),
+                decoration: BoxDecoration(
+                  color: selected ? colors.secondary : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    TrackStateIcon(
+                      item.glyph,
+                      color: selected ? colors.page : colors.muted,
+                      size: 18,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 10),
+                    Text(
+                      item.label,
+                      style: TextStyle(
+                        color: selected ? colors.page : colors.text,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -13805,25 +14074,44 @@ List<_NavItem> _navItems(AppLocalizations l10n) => [
     l10n.dashboard,
     TrackerSection.dashboard,
     TrackStateIconGlyph.dashboard,
+    semanticsIdentifier: browserDesktopDashboardSemanticsIdentifier,
   ),
-  _NavItem(l10n.board, TrackerSection.board, TrackStateIconGlyph.board),
-  _NavItem(l10n.jqlSearch, TrackerSection.search, TrackStateIconGlyph.search),
+  _NavItem(
+    l10n.board,
+    TrackerSection.board,
+    TrackStateIconGlyph.board,
+    semanticsIdentifier: browserDesktopBoardSemanticsIdentifier,
+  ),
+  _NavItem(
+    l10n.jqlSearch,
+    TrackerSection.search,
+    TrackStateIconGlyph.search,
+    semanticsIdentifier: browserDesktopSearchSectionSemanticsIdentifier,
+  ),
   _NavItem(
     l10n.hierarchy,
     TrackerSection.hierarchy,
     TrackStateIconGlyph.hierarchy,
+    semanticsIdentifier: browserDesktopHierarchySemanticsIdentifier,
   ),
   _NavItem(
     l10n.settings,
     TrackerSection.settings,
     TrackStateIconGlyph.settings,
+    semanticsIdentifier: browserDesktopSettingsSemanticsIdentifier,
   ),
 ];
 
 class _NavItem {
-  const _NavItem(this.label, this.section, this.glyph);
+  const _NavItem(
+    this.label,
+    this.section,
+    this.glyph, {
+    this.semanticsIdentifier,
+  });
 
   final String label;
   final TrackerSection section;
   final TrackStateIconGlyph glyph;
+  final String? semanticsIdentifier;
 }
