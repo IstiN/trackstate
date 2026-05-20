@@ -7,5 +7,5 @@ dependencies:
   - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
 notes:
   - Opens the deployed TrackState web app with a stored hosted token.
-  - Verifies sequential desktop keyboard navigation reaches the workspace switcher trigger after Settings and before Search issues.
+  - Verifies sequential desktop keyboard navigation reaches the workspace switcher trigger after Settings and immediately before the Search control.
   - Verifies the focused trigger shows a visible keyboard focus indicator.
