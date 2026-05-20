@@ -1118,12 +1118,6 @@ class _TrackStateAppState extends State<TrackStateApp>
       if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
         return;
       }
-      if (activeWorkspaceId != null) {
-        _requestDesktopWorkspaceSwitcherBrowserFocus(
-          browserWorkspaceSwitcherRowSemanticsIdentifier(activeWorkspaceId),
-        );
-        return;
-      }
       _desktopWorkspaceSwitcherFocusScopeNode.requestFocus();
     });
   }
@@ -1546,6 +1540,8 @@ class _TrackStateAppState extends State<TrackStateApp>
                   onApplyLocalGitConfiguration: _switchToLocalRepository,
                   onSelectWorkspace: _selectWorkspaceProfile,
                   onDeleteWorkspace: _deleteWorkspaceProfile,
+                  onMoveWorkspaceSelection: (step) =>
+                      unawaited(_switchToAdjacentWorkspace(step: step)),
                   workspaceRestoreFailure: _pendingWorkspaceRestoreFailure,
                   onRetryWorkspaceRestore: _retryWorkspaceRestore,
                   attachmentPicker: widget.attachmentPicker,
@@ -1577,6 +1573,7 @@ class _TrackerHome extends StatelessWidget {
     required this.onApplyLocalGitConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.onMoveWorkspaceSelection,
     required this.workspaceRestoreFailure,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
@@ -1602,6 +1599,7 @@ class _TrackerHome extends StatelessWidget {
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final ValueChanged<int> onMoveWorkspaceSelection;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
@@ -1704,6 +1702,7 @@ class _TrackerHome extends StatelessWidget {
                               onApplyLocalGitConfiguration,
                           onSelectWorkspace: onSelectWorkspace,
                           onDeleteWorkspace: onDeleteWorkspace,
+                          onMoveWorkspaceSelection: onMoveWorkspaceSelection,
                           workspaceRestoreFailure: workspaceRestoreFailure,
                           onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                           attachmentPicker: attachmentPicker,
@@ -1737,6 +1736,7 @@ class _TrackerHome extends StatelessWidget {
                               onApplyLocalGitConfiguration,
                           onSelectWorkspace: onSelectWorkspace,
                           onDeleteWorkspace: onDeleteWorkspace,
+                          onMoveWorkspaceSelection: onMoveWorkspaceSelection,
                           workspaceRestoreFailure: workspaceRestoreFailure,
                           onRetryWorkspaceRestore: onRetryWorkspaceRestore,
                           attachmentPicker: attachmentPicker,
@@ -3034,6 +3034,7 @@ class _DesktopShell extends StatelessWidget {
     required this.onApplyLocalGitConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.onMoveWorkspaceSelection,
     required this.workspaceRestoreFailure,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
@@ -3059,6 +3060,7 @@ class _DesktopShell extends StatelessWidget {
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final ValueChanged<int> onMoveWorkspaceSelection;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
@@ -3092,6 +3094,7 @@ class _DesktopShell extends StatelessWidget {
             workspaces: workspaces,
             onSelectWorkspace: onSelectWorkspace,
             onDeleteWorkspace: onDeleteWorkspace,
+            onMoveWorkspaceSelection: onMoveWorkspaceSelection,
             workspaceRestoreFailure: workspaceRestoreFailure,
             onRetryWorkspaceRestore: onRetryWorkspaceRestore,
             attachmentPicker: attachmentPicker,
@@ -3123,6 +3126,7 @@ class _MobileShell extends StatelessWidget {
     required this.onApplyLocalGitConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.onMoveWorkspaceSelection,
     required this.workspaceRestoreFailure,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
@@ -3148,6 +3152,7 @@ class _MobileShell extends StatelessWidget {
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final ValueChanged<int> onMoveWorkspaceSelection;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
@@ -3175,6 +3180,7 @@ class _MobileShell extends StatelessWidget {
       workspaces: workspaces,
       onSelectWorkspace: onSelectWorkspace,
       onDeleteWorkspace: onDeleteWorkspace,
+      onMoveWorkspaceSelection: onMoveWorkspaceSelection,
       workspaceRestoreFailure: workspaceRestoreFailure,
       onRetryWorkspaceRestore: onRetryWorkspaceRestore,
       attachmentPicker: attachmentPicker,
@@ -3203,6 +3209,7 @@ class _TrackerMainPane extends StatelessWidget {
     required this.workspaces,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
+    required this.onMoveWorkspaceSelection,
     required this.workspaceRestoreFailure,
     required this.onRetryWorkspaceRestore,
     required this.attachmentPicker,
@@ -3230,6 +3237,7 @@ class _TrackerMainPane extends StatelessWidget {
   final WorkspaceProfilesState workspaces;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
+  final ValueChanged<int> onMoveWorkspaceSelection;
   final _WorkspaceRestoreFailure? workspaceRestoreFailure;
   final VoidCallback onRetryWorkspaceRestore;
   final AttachmentPicker attachmentPicker;
@@ -3259,6 +3267,7 @@ class _TrackerMainPane extends StatelessWidget {
                     workspaceSwitcherTriggerFocusNode,
                 onOpenCreateIssue: onOpenCreateIssue,
                 onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
+                onMoveWorkspaceSelection: onMoveWorkspaceSelection,
                 onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
                 canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
               ),
@@ -3469,6 +3478,7 @@ class _TopBar extends StatelessWidget {
     required this.workspaceSwitcherTriggerFocusNode,
     required this.onOpenCreateIssue,
     required this.onOpenWorkspaceSwitcher,
+    required this.onMoveWorkspaceSelection,
     required this.onOpenWorkspaceOnboarding,
     required this.canOpenWorkspaceOnboarding,
     this.compact = false,
@@ -3482,6 +3492,7 @@ class _TopBar extends StatelessWidget {
   final _CreateIssueLauncher onOpenCreateIssue;
   final Future<void> Function(BuildContext context, {required bool compact})
   onOpenWorkspaceSwitcher;
+  final ValueChanged<int> onMoveWorkspaceSelection;
   final VoidCallback onOpenWorkspaceOnboarding;
   final bool canOpenWorkspaceOnboarding;
   final bool compact;
@@ -3589,34 +3600,51 @@ class _TopBar extends StatelessWidget {
                       groupId: _desktopWorkspaceSwitcherTapRegionGroupId,
                       child: SizedBox(
                         key: workspaceSwitcherTriggerKey,
-                        child: KeyedSubtree(
-                          key: const ValueKey('workspace-switcher-trigger'),
-                          child: condensedDesktop
-                              ? _WorkspaceSwitcherTriggerButton(
-                                  summary: workspaceSummary,
-                                  compact: false,
-                                  condensed: true,
-                                  expanded: isDesktopWorkspaceSwitcherVisible,
-                                  onPressed: openWorkspaceSwitcher,
-                                  semanticsSortOrder: workspaceSwitcherOrder,
-                                  controlsNodes: const {
-                                    browserWorkspaceSwitcherSemanticsIdentifier,
-                                  },
-                                  focusNode: workspaceSwitcherTriggerFocusNode,
-                                )
-                              : _PrimaryButton(
-                                  label: workspaceSummary.textLabel,
-                                  semanticLabel: workspaceSummary.semanticLabel,
-                                  icon: workspaceSummary.icon,
-                                  expanded: isDesktopWorkspaceSwitcherVisible,
-                                  onPressed: openWorkspaceSwitcher,
-                                  height: _desktopTopBarControlHeight,
-                                  semanticsSortOrder: workspaceSwitcherOrder,
-                                  controlsNodes: const {
-                                    browserWorkspaceSwitcherSemanticsIdentifier,
-                                  },
-                                  focusNode: workspaceSwitcherTriggerFocusNode,
-                                ),
+                        child: CallbackShortcuts(
+                          bindings: isDesktopWorkspaceSwitcherVisible
+                              ? <ShortcutActivator, VoidCallback>{
+                                  const SingleActivator(
+                                    LogicalKeyboardKey.arrowDown,
+                                  ): () =>
+                                      onMoveWorkspaceSelection(1),
+                                  const SingleActivator(
+                                    LogicalKeyboardKey.arrowUp,
+                                  ): () =>
+                                      onMoveWorkspaceSelection(-1),
+                                }
+                              : const <ShortcutActivator, VoidCallback>{},
+                          child: KeyedSubtree(
+                            key: const ValueKey('workspace-switcher-trigger'),
+                            child: condensedDesktop
+                                ? _WorkspaceSwitcherTriggerButton(
+                                    summary: workspaceSummary,
+                                    compact: false,
+                                    condensed: true,
+                                    expanded: isDesktopWorkspaceSwitcherVisible,
+                                    onPressed: openWorkspaceSwitcher,
+                                    semanticsSortOrder: workspaceSwitcherOrder,
+                                    controlsNodes: const {
+                                      browserWorkspaceSwitcherSemanticsIdentifier,
+                                    },
+                                    focusNode:
+                                        workspaceSwitcherTriggerFocusNode,
+                                  )
+                                : _PrimaryButton(
+                                    label: workspaceSummary.textLabel,
+                                    semanticLabel:
+                                        workspaceSummary.semanticLabel,
+                                    icon: workspaceSummary.icon,
+                                    expanded: isDesktopWorkspaceSwitcherVisible,
+                                    onPressed: openWorkspaceSwitcher,
+                                    height: _desktopTopBarControlHeight,
+                                    semanticsSortOrder: workspaceSwitcherOrder,
+                                    controlsNodes: const {
+                                      browserWorkspaceSwitcherSemanticsIdentifier,
+                                    },
+                                    focusNode:
+                                        workspaceSwitcherTriggerFocusNode,
+                                  ),
+                          ),
                         ),
                       ),
                     ),
@@ -4699,32 +4727,32 @@ class _AccessCallout extends StatelessWidget {
                 (secondaryActionLabel != null &&
                     onSecondaryAction != null)) ...[
               const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    if (primaryActionLabel != null && onPrimaryAction != null)
-                      _OrderedFocusAction(
-                        order: actionTraversalOrderBase,
-                        child: OutlinedButton(
-                          onPressed: onPrimaryAction,
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: colors.text,
-                            side: BorderSide(color: accentColor),
-                          ),
-                          child: Text(primaryActionLabel!),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (primaryActionLabel != null && onPrimaryAction != null)
+                    _OrderedFocusAction(
+                      order: actionTraversalOrderBase,
+                      child: OutlinedButton(
+                        onPressed: onPrimaryAction,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: colors.text,
+                          side: BorderSide(color: accentColor),
                         ),
+                        child: Text(primaryActionLabel!),
                       ),
-                    if (secondaryActionLabel != null && onSecondaryAction != null)
-                      _OrderedFocusAction(
-                        order: actionTraversalOrderBase == null
-                            ? null
-                            : actionTraversalOrderBase! + 1,
-                        child: FilledButton(
-                          onPressed: onSecondaryAction,
-                          child: Text(secondaryActionLabel!),
-                        ),
+                    ),
+                  if (secondaryActionLabel != null && onSecondaryAction != null)
+                    _OrderedFocusAction(
+                      order: actionTraversalOrderBase == null
+                          ? null
+                          : actionTraversalOrderBase! + 1,
+                      child: FilledButton(
+                        onPressed: onSecondaryAction,
+                        child: Text(secondaryActionLabel!),
                       ),
+                    ),
                 ],
               ),
             ],
@@ -4748,10 +4776,7 @@ class _OrderedFocusAction extends StatelessWidget {
     if (order == null) {
       return child;
     }
-    return FocusTraversalOrder(
-      order: NumericFocusOrder(order!),
-      child: child,
-    );
+    return FocusTraversalOrder(order: NumericFocusOrder(order!), child: child);
   }
 }
 
